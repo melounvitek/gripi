@@ -123,6 +123,7 @@ class PiWebGateway < Sinatra::Base
     def message_article_class(message)
       classes = ["message", "message--#{message_role_key(message.role)}"]
       classes << "message--compact" if message.compact
+      classes << "message--thinking" if message.thinking
       classes << "message--tool-error" if message.error
       classes.join(" ")
     end
@@ -132,6 +133,7 @@ class PiWebGateway < Sinatra::Base
     end
 
     def render_message_body(message)
+      return h(message.text) if message.thinking
       return h(message.text) unless message.role == "assistant" && !message.compact
 
       markdown_renderer.render(message.text)

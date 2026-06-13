@@ -14,7 +14,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :cost_total, keyword_init: true)
 
   def initialize(root: File.expand_path("~/.pi/agent/sessions"))
@@ -175,7 +175,8 @@ class PiSessionStore
         error: false,
         tool_call_id: tool_call_id,
         tool_name: tool_name,
-        raw_details: compact ? compact_raw_details(parts) : nil
+        raw_details: compact ? compact_raw_details(parts) : nil,
+        thinking: parts.length == 1 && thinking_part?(parts.first)
       )
     end
   end
@@ -184,11 +185,13 @@ class PiSessionStore
     groups = []
     Array(content).each do |part|
       compact = compact_part?(part)
-      if bash_tool_call?(part)
+      if thinking_part?(part)
+        groups << [false, [part]]
+      elsif bash_tool_call?(part)
         groups << [true, [part]]
       elsif compact
         groups << [true, [part]]
-      elsif groups.last && groups.last.first == false
+      elsif groups.last && groups.last.first == false && !thinking_part?(groups.last.last.first)
         groups.last.last << part
       else
         groups << [false, [part]]
@@ -207,7 +210,11 @@ class PiSessionStore
   end
 
   def compact_part?(part)
-    part.is_a?(Hash) && ["thinking", "toolCall", "toolResult"].include?(part["type"])
+    part.is_a?(Hash) && ["toolCall", "toolResult"].include?(part["type"])
+  end
+
+  def thinking_part?(part)
+    part.is_a?(Hash) && part["type"] == "thinking"
   end
 
   def compact_message?(message)
@@ -217,7 +224,7 @@ class PiSessionStore
     return false unless message["role"] == "assistant" && content.any?
 
     content.all? do |part|
-      part.is_a?(Hash) && ["thinking", "toolCall", "toolResult"].include?(part["type"])
+      part.is_a?(Hash) && ["toolCall", "toolResult"].include?(part["type"])
     end
   end
 
@@ -250,7 +257,14 @@ class PiSessionStore
   def thinking_text(part)
     return unless part["type"] == "thinking"
 
-    part["thinking"] unless part["thinking"].to_s.empty?
+    strip_thinking_heading(part["thinking"])
+  end
+
+  def strip_thinking_heading(text)
+    text = text.to_s
+    return if text.empty?
+
+    text.sub(/\A\s*\*\*[^\n*][^\n]*\*\*\s*\n{2,}/, "")
   end
 
   def tool_text(part)

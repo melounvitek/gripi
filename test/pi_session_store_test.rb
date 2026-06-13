@@ -59,7 +59,7 @@ class PiSessionStoreTest < Minitest::Test
           message: {
             role: "assistant",
             content: [
-              { type: "thinking", thinking: "Private reasoning" },
+              { type: "thinking", thinking: "**Heading**\n\nPrivate reasoning" },
               { type: "text", text: "## Visible answer" }
             ]
           }
@@ -70,8 +70,9 @@ class PiSessionStoreTest < Minitest::Test
 
       assert_equal ["assistant", "assistant"], messages.map(&:role)
       assert_equal ["Private reasoning", "## Visible answer"], messages.map(&:text)
-      assert_equal [true, false], messages.map(&:compact)
-      assert_equal "thinking", messages.first.summary
+      assert_equal [false, false], messages.map(&:compact)
+      assert_equal [true, false], messages.map(&:thinking)
+      assert_nil messages.first.summary
     end
   end
 

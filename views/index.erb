@@ -47,6 +47,7 @@
     .message { border: 1px solid var(--border); border-radius: 0.9rem; padding: 0.9rem; margin-bottom: 0.85rem; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
     .message--user { margin-left: 10%; background: #34496f; border-color: #4d6ca3; }
     .message--assistant { margin-right: 10%; background: var(--panel-soft); }
+    .message--thinking { margin-right: 16%; background: rgba(43, 45, 49, 0.62); border-style: dashed; color: var(--muted); box-shadow: none; }
     .message--status { background: rgba(30, 31, 34, 0.72); color: var(--muted); box-shadow: none; }
     .message--tool { background: #25272c; border-style: dashed; color: #d7d9de; }
     .message--error, .message--tool-error { background: var(--danger-soft); border-color: rgba(242, 63, 66, 0.55); color: #ffb4b6; }
@@ -60,6 +61,8 @@
     .message-details summary:hover { color: var(--text); }
     .message-details[open] summary { margin-bottom: 0.5rem; }
     .compact-summary { margin-left: 0.25rem; }
+    .message-body--thinking { font-size: 0.95rem; font-style: italic; line-height: 1.45; color: var(--muted); }
+    .thinking-prefix { font-style: normal; font-weight: 700; color: var(--muted-soft); }
     .message-body--markdown { line-height: 1.6; overflow-wrap: anywhere; }
     .message-body--markdown > :first-child { margin-top: 0; }
     .message-body--markdown > :last-child { margin-bottom: 0; }
@@ -219,11 +222,13 @@
                 <% if message_metadata(message) %>
                   <div class="message-meta"><%= h message_metadata(message) %></div>
                 <% end %>
-                <% if message.role == "assistant" && !message.compact %>
+                <% if message.role == "assistant" && !message.compact && !message.thinking %>
                   <button type="button" class="copy-button" data-copy-target="message">Copy</button>
                 <% end %>
               </header>
-              <% if message.compact %>
+              <% if message.thinking %>
+                <div class="message-body message-body--thinking"><span class="thinking-prefix">Thinking:</span> <%= render_message_body(message) %></div>
+              <% elsif message.compact %>
                 <details class="message-details" <%= "open" if message.expanded %>>
                   <summary><span class="compact-summary"><%= h message.summary %></span></summary>
                   <pre class="message-body"><%= h message.text %></pre>
@@ -452,7 +457,15 @@
     }
 
     function compactContentPart(part) {
-      return part && typeof part === "object" && ["thinking", "toolCall", "toolResult"].includes(part.type);
+      return part && typeof part === "object" && ["toolCall", "toolResult"].includes(part.type);
+    }
+
+    function thinkingPart(part) {
+      return part && typeof part === "object" && part.type === "thinking";
+    }
+
+    function stripThinkingHeading(text) {
+      return String(text || "").replace(/^\s*\*\*[^\n*][^\n]*\*\*\s*\n{2,}/, "");
     }
 
     function bashCommandLine(part) {
@@ -465,7 +478,7 @@
       if (!part) return "";
       if (typeof part === "string") return part;
       if (part.text) return part.text;
-      if (part.type === "thinking" || part.thinking) return part.thinking || "";
+      if (part.type === "thinking" || part.thinking) return stripThinkingHeading(part.thinking);
       if (part.type === "toolCall") {
         if (part.name === "bash") return bashCommandLine(part);
         const args = part.arguments ? `\n${JSON.stringify(part.arguments, null, 2)}` : "";
@@ -490,7 +503,9 @@
         const compact = message.role === "toolResult" || compactContentPart(part);
         const bashCall = part && typeof part === "object" && part.type === "toolCall" && part.name === "bash";
         const lastGroup = groups[groups.length - 1];
-        if (!bashCall && !compact && lastGroup && lastGroup.compact === false) {
+        if (thinkingPart(part) && message.role !== "toolResult") {
+          groups.push({ compact: false, parts: [part], startIndex: index, endIndex: index });
+        } else if (!bashCall && !compact && lastGroup && lastGroup.compact === false && !thinkingPart(lastGroup.parts[0])) {
           lastGroup.parts.push(part);
           lastGroup.endIndex = index;
         } else {
@@ -509,6 +524,7 @@
         return {
           text,
           compact: group.compact,
+          thinking: group.parts.length === 1 && thinkingPart(group.parts[0]) && message.role !== "toolResult",
           summary: message.toolName || [...new Set(labels)].join(" + ") || "tool output",
           expanded: message.isError === true,
           startIndex: group.startIndex,
@@ -590,12 +606,12 @@
       return event?.timestamp || event?.message?.timestamp || event?.delta?.timestamp || event?.item?.timestamp;
     }
 
-    function appendMessage(roleName, text, live = true, forceScroll = false, timestamp = null) {
+    function appendMessage(roleName, text, live = true, forceScroll = false, timestamp = null, options = {}) {
       const shouldScroll = forceScroll || nearConversationBottom();
       const roleKey = messageRoleKey(roleName);
 
       const article = document.createElement("article");
-      article.className = `message message--${roleKey}${live ? " message--live" : ""}`;
+      article.className = `message message--${roleKey}${options.thinking ? " message--thinking" : ""}${live ? " message--live" : ""}`;
       article.dataset.role = roleName;
 
       const header = document.createElement("header");
@@ -606,9 +622,16 @@
       role.textContent = messageRoleLabel(roleName);
 
       const body = document.createElement(roleName === "assistant" ? "div" : "pre");
-      body.className = roleName === "assistant" ? "message-body message-body--markdown" : "message-body";
-      body.textContent = text;
-      if (roleName === "assistant") renderAssistantMarkdown(body, text).catch(() => {});
+      body.className = options.thinking ? "message-body message-body--thinking" : (roleName === "assistant" ? "message-body message-body--markdown" : "message-body");
+      if (options.thinking) {
+        const prefix = document.createElement("span");
+        prefix.className = "thinking-prefix";
+        prefix.textContent = "Thinking:";
+        body.append(prefix, " ", document.createTextNode(text));
+      } else {
+        body.textContent = text;
+        if (roleName === "assistant") renderAssistantMarkdown(body, text).catch(() => {});
+      }
 
       const meta = document.createElement("div");
       meta.className = "message-meta";
@@ -616,7 +639,7 @@
 
       header.append(role);
       if (meta.textContent) header.append(meta);
-      if (roleName === "assistant") header.append(makeCopyButton());
+      if (roleName === "assistant" && !options.thinking) header.append(makeCopyButton());
       article.append(header);
       article.append(body);
       liveOutput.append(article);
@@ -707,8 +730,15 @@
         entry.body.textContent = segment.text;
         if (entry.rawBody) entry.rawBody.textContent = segment.rawDetails || "";
       } else {
-        entry.body.textContent = segment.text;
-        if (roleName === "assistant") renderAssistantMarkdown(entry.body, segment.text).catch(() => {});
+        if (segment.thinking) {
+          const prefix = entry.body.querySelector(".thinking-prefix");
+          entry.body.textContent = "";
+          if (prefix) entry.body.append(prefix, " ");
+          entry.body.append(document.createTextNode(segment.text));
+        } else {
+          entry.body.textContent = segment.text;
+          if (roleName === "assistant") renderAssistantMarkdown(entry.body, segment.text).catch(() => {});
+        }
       }
 
       if (shouldScroll) scrollToBottom();
@@ -723,7 +753,7 @@
 
       const entry = segment.compact ?
         appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails, timestamp) :
-        appendMessage("assistant", segment.text, true, shouldScroll, timestamp);
+        appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking });
       liveAssistantSegments.set(key, entry);
       if (segment.toolName === "bash" && segment.toolCallId && !segment.isToolResult) liveBashToolCalls.set(segment.toolCallId, entry);
       return entry;

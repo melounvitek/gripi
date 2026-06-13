@@ -537,7 +537,7 @@ class AppTest < Minitest::Test
           message: {
             role: "assistant",
             content: [
-              { type: "thinking", thinking: "Private reasoning" },
+              { type: "thinking", thinking: "**Heading**\n\nPrivate reasoning" },
               { type: "text", text: "## Visible answer" }
             ]
           }
@@ -552,7 +552,10 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, '<summary><span class="compact-summary">thinking</span></summary>'
+      assert_includes response.body, 'message--thinking'
+      assert_includes response.body, '<span class="thinking-prefix">Thinking:</span> Private reasoning'
+      refute_includes response.body, '<summary><span class="compact-summary">thinking</span></summary>'
+      refute_includes response.body, "**Heading**"
       assert_includes response.body, "Private reasoning"
       assert_includes response.body, 'class="message-body message-body--markdown"'
       assert_includes response.body, "<h2>Visible answer</h2>"
@@ -585,7 +588,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_renders_tool_and_thinking_messages_as_compact_details
+  def test_renders_tools_as_compact_details_and_thinking_inline
     Dir.mktmpdir do |dir|
       path = write_session_with_raw_messages(dir, [
         {
@@ -630,8 +633,9 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, 'class="message message--assistant message--compact" data-role="assistant"'
-      assert_includes response.body, '<summary><span class="compact-summary">thinking</span></summary>'
+      assert_includes response.body, 'class="message message--assistant message--thinking" data-role="assistant"'
+      assert_includes response.body, '<span class="thinking-prefix">Thinking:</span> Thinking through the problem'
+      refute_includes response.body, '<summary><span class="compact-summary">thinking</span></summary>'
       assert_includes response.body, '<summary><span class="compact-summary">$ ls</span></summary>'
       assert_includes response.body, 'class="message message--tool message--compact" data-role="toolResult"'
       assert_includes response.body, '<summary><span class="compact-summary">bash</span></summary>'
@@ -728,7 +732,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'if (roleName === "user") {'
       assert_includes response.body, "function formatTimestamp(timestamp)"
       assert_includes response.body, "function eventTimestamp(event)"
-      assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp);'
+      assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking });'
       assert_includes response.body, 'function renderAssistantMarkdown(body, text)'
       assert_includes response.body, 'fetch("/markdown", { method: "POST", body: formData })'
       assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
