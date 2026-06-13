@@ -1,8 +1,27 @@
 require "sinatra/base"
 require "erb"
 require "json"
+require "redcarpet"
+require "sanitize"
 require_relative "lib/pi_session_store"
 require_relative "lib/pi_rpc_client"
+
+class SafeMarkdownRenderer < Redcarpet::Render::HTML
+  ALLOWED_MARKDOWN_ELEMENTS = (Sanitize::Config::RELAXED[:elements] + %w[pre code]).uniq.freeze
+  ALLOWED_MARKDOWN_ATTRIBUTES = Sanitize::Config::RELAXED[:attributes].merge(
+    "a" => (Sanitize::Config::RELAXED[:attributes]["a"] + %w[target rel]).uniq,
+    "code" => ["class"]
+  ).freeze
+
+  def postprocess(full_document)
+    Sanitize.fragment(
+      full_document,
+      elements: ALLOWED_MARKDOWN_ELEMENTS,
+      attributes: ALLOWED_MARKDOWN_ATTRIBUTES,
+      protocols: Sanitize::Config::RELAXED[:protocols]
+    )
+  end
+end
 
 class PiWebGateway < Sinatra::Base
   set :root, File.dirname(__FILE__)
@@ -100,6 +119,28 @@ class PiWebGateway < Sinatra::Base
 
     def message_metadata(message)
       format_time(message.timestamp) if message.timestamp
+    end
+
+    def render_message_body(message)
+      return h(message.text) unless message.role == "assistant" && !message.compact
+
+      markdown_renderer.render(message.text)
+    end
+
+    def markdown_renderer
+      @markdown_renderer ||= Redcarpet::Markdown.new(
+        SafeMarkdownRenderer.new(
+          filter_html: true,
+          hard_wrap: true,
+          link_attributes: { rel: "nofollow noopener noreferrer", target: "_blank" }
+        ),
+        autolink: true,
+        fenced_code_blocks: true,
+        no_intra_emphasis: true,
+        space_after_headers: true,
+        strikethrough: true,
+        tables: true
+      )
     end
   end
 

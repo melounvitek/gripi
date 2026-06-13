@@ -134,14 +134,14 @@ Success check:
 
 ### 6. Markdown rendering for assistant messages
 
-- [ ] Add a markdown renderer dependency.
-- [ ] Add HTML sanitization for rendered markdown.
-- [ ] Render assistant markdown as HTML.
-- [ ] Keep user-provided content safe from raw HTML/script injection.
-- [ ] Style headings, lists, links, blockquotes, inline code, and code blocks.
-- [ ] Preserve readable plain-text fallback for unusual message parts.
-- [ ] Add tests for markdown rendering and HTML sanitization.
-- [ ] Restart server and report the test URL plus what to verify.
+- [x] Add a markdown renderer dependency.
+- [x] Add HTML sanitization for rendered markdown.
+- [x] Render assistant markdown as HTML.
+- [x] Keep user-provided content safe from raw HTML/script injection.
+- [x] Style headings, lists, links, blockquotes, inline code, and code blocks.
+- [x] Preserve readable plain-text fallback for unusual message parts.
+- [x] Add tests for markdown rendering and HTML sanitization.
+- [x] Restart server and report the test URL plus what to verify.
 
 Success check:
 

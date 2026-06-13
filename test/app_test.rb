@@ -330,6 +330,32 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_renders_assistant_markdown_and_sanitizes_html
+    Dir.mktmpdir do |dir|
+      path = write_session_with_messages(dir, [
+        { role: "assistant", text: "## Plan\n\n- One\n- `two`\n\n```ruby\nputs :ok\n```\n\n<script>alert('x')</script><a href=\"javascript:alert(1)\">bad</a>" },
+        { role: "user", text: "## Not markdown <script>alert('user')</script>" }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, 'class="message-body message-body--markdown"'
+      assert_includes response.body, "<h2>Plan</h2>"
+      assert_includes response.body, "<li>One</li>"
+      assert_includes response.body, "<code>two</code>"
+      assert_includes response.body, "<pre><code class=\"ruby\">puts :ok\n</code></pre>"
+      refute_includes response.body, "<script>alert"
+      refute_includes response.body, "javascript:alert"
+      assert_includes response.body, "## Not markdown &lt;script&gt;alert(&#39;user&#39;)&lt;/script&gt;"
+    end
+  end
+
   def test_renders_tool_and_thinking_messages_as_compact_details
     Dir.mktmpdir do |dir|
       path = write_session_with_raw_messages(dir, [
