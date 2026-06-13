@@ -585,6 +585,32 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_renders_visual_polish_affordances
+    Dir.mktmpdir do |dir|
+      path = write_session_with_messages(dir, [{ role: "assistant", text: "Copy me" }])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :active_rpc_session, path
+      PiWebGateway.set :active_rpc_client, FakeRpcClient.new([])
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "color-scheme: dark"
+      assert_includes response.body, "session-running-indicator"
+      assert_includes response.body, "copy-button"
+      assert_includes response.body, "navigator.clipboard.writeText"
+      assert_includes response.body, "window.isSecureContext"
+      assert_includes response.body, "document.execCommand(\"copy\")"
+      assert_includes response.body, "Copy failed"
+      assert_includes response.body, "empty-state"
+      assert_includes response.body, "button:hover"
+    end
+  end
+
   private
 
   class FakeRpcClient

@@ -224,14 +224,14 @@ Success check:
 
 ### 10. Visual polish pass
 
-- [ ] Improve spacing, typography, colors, borders, and hover states.
-- [ ] Consider a dark Discord-like theme as the default.
-- [ ] Add clear selected-session and active/running indicators.
-- [ ] Add copy buttons for assistant messages or code blocks if simple.
-- [ ] Improve empty, pending-session, and no-session states.
-- [ ] Avoid large framework adoption unless the plain CSS becomes painful.
-- [ ] Run the full test suite.
-- [ ] Restart server and report the test URL plus what to verify.
+- [x] Improve spacing, typography, colors, borders, and hover states.
+- [x] Consider a dark Discord-like theme as the default.
+- [x] Add clear selected-session and active/running indicators.
+- [x] Add copy buttons for assistant messages or code blocks if simple.
+- [x] Improve empty, pending-session, and no-session states.
+- [x] Avoid large framework adoption unless the plain CSS becomes painful.
+- [x] Run the full test suite.
+- [x] Restart server and report the test URL plus what to verify.
 
 Success check:
 

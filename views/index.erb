@@ -5,78 +5,97 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pi Web Gateway</title>
   <style>
+    :root { color-scheme: dark; --bg: #0f1117; --sidebar: #1e1f29; --panel: #313338; --panel-soft: #2b2d31; --panel-softer: #383a40; --border: #3f4147; --text: #f2f3f5; --muted: #b5bac1; --muted-soft: #80848e; --accent: #5865f2; --accent-hover: #4752c4; --success: #23a55a; --danger: #f23f42; --danger-soft: #3f2025; --code: #1e1f22; }
     html, body { height: 100%; }
-    body { margin: 0; font-family: system-ui, sans-serif; color: #1f2937; overflow: hidden; }
+    body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); overflow: hidden; }
     .app-shell { display: grid; grid-template-columns: 22rem minmax(0, 1fr); height: 100vh; min-height: 0; }
-    .session-sidebar { min-height: 0; border-right: 1px solid #e5e7eb; padding: 1rem; overflow-y: auto; background: #f9fafb; }
-    .conversation-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: #ffffff; }
-    .session-header { position: sticky; top: 0; z-index: 2; padding: 1rem 1.5rem 0.75rem; border-bottom: 1px solid #e5e7eb; background: #ffffff; }
+    .session-sidebar { min-height: 0; border-right: 1px solid var(--border); padding: 1rem; overflow-y: auto; background: var(--sidebar); }
+    .conversation-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: var(--panel); }
+    .session-header { position: sticky; top: 0; z-index: 2; padding: 1rem 1.5rem 0.75rem; border-bottom: 1px solid var(--border); background: rgba(49, 51, 56, 0.96); backdrop-filter: blur(8px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
     .conversation-scroll { min-height: 0; overflow-y: auto; padding: 1.5rem; scroll-behavior: smooth; }
-    .composer { position: sticky; bottom: 0; padding: 0.75rem 1.5rem 1rem; border-top: 1px solid #e5e7eb; background: #ffffff; }
+    .composer { position: sticky; bottom: 0; padding: 0.75rem 1.5rem 1rem; border-top: 1px solid var(--border); background: rgba(49, 51, 56, 0.97); box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.16); }
     .composer-inner { display: grid; gap: 0.6rem; }
-    h1 { font-size: 1.25rem; margin: 0 0 1rem; }
-    h2 { font-size: 0.85rem; margin: 1.25rem 0 0.5rem; color: #4b5563; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    h1 { font-size: 1.25rem; line-height: 1.2; margin: 0 0 1rem; letter-spacing: -0.01em; }
+    h2 { font-size: 0.78rem; margin: 1.25rem 0 0.5rem; color: var(--muted-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.04em; }
     .cwd-group { margin-bottom: 0.75rem; }
-    .cwd-toggle { display: inline-block; margin: 0.35rem 0 0.5rem; font-size: 0.8rem; color: #2563eb; text-decoration: none; }
-    .cwd-toggle:hover { text-decoration: underline; }
-    a.session { display: block; padding: 0.6rem; margin: 0.25rem 0; border-radius: 0.5rem; color: inherit; text-decoration: none; }
-    a.session:hover, a.session.selected { background: #e5e7eb; }
-    .session-title { font-weight: 600; overflow-wrap: anywhere; }
-    .session-meta { font-size: 0.8rem; color: #6b7280; margin-top: 0.2rem; }
-    .empty { color: #6b7280; }
-    .message { border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 0.9rem; margin-bottom: 0.75rem; }
-    .message--user { margin-left: 10%; background: #eff6ff; border-color: #bfdbfe; }
-    .message--assistant { margin-right: 10%; background: #ffffff; }
-    .message--status { background: #f8fafc; color: #4b5563; }
-    .message--tool { background: #f9fafb; border-style: dashed; color: #374151; }
-    .message--error, .message--tool-error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
-    .message--compact { padding: 0.75rem 0.9rem; }
-    .message--live { box-shadow: 0 0 0 1px #dbeafe inset; }
-    .message-header { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.4rem; }
-    .role { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: #4b5563; }
-    .message--error .role { color: #991b1b; }
-    .message-meta { font-size: 0.75rem; color: #6b7280; }
-    .message-details summary { cursor: pointer; font-weight: 700; color: #4b5563; }
+    .cwd-toggle { display: inline-block; margin: 0.35rem 0 0.5rem; font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+    .cwd-toggle:hover { color: var(--text); text-decoration: underline; }
+    a.session { position: relative; display: block; padding: 0.65rem 0.75rem; margin: 0.25rem 0; border-radius: 0.6rem; color: inherit; text-decoration: none; border: 1px solid transparent; transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
+    a.session:hover { background: var(--panel-soft); border-color: var(--border); transform: translateX(1px); }
+    a.session.selected { background: linear-gradient(90deg, rgba(88, 101, 242, 0.22), rgba(88, 101, 242, 0.08)); border-color: rgba(88, 101, 242, 0.55); }
+    a.session.selected::before { content: ""; position: absolute; left: -1rem; top: 0.7rem; bottom: 0.7rem; width: 4px; border-radius: 999px; background: var(--accent); }
+    .session-title { font-weight: 650; overflow-wrap: anywhere; }
+    .session-meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+    .session-running-indicator { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.4rem; color: var(--success); font-size: 0.75rem; font-weight: 700; }
+    .session-running-indicator::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 4px rgba(35, 165, 90, 0.16); }
+    .empty { color: var(--muted); background: var(--panel-soft); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem; }
+    .empty-state { max-width: 34rem; margin: 2rem auto; text-align: center; }
+    .message { border: 1px solid var(--border); border-radius: 0.9rem; padding: 0.9rem; margin-bottom: 0.85rem; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
+    .message--user { margin-left: 10%; background: #34496f; border-color: #4d6ca3; }
+    .message--assistant { margin-right: 10%; background: var(--panel-soft); }
+    .message--status { background: rgba(30, 31, 34, 0.72); color: var(--muted); box-shadow: none; }
+    .message--tool { background: #25272c; border-style: dashed; color: #d7d9de; }
+    .message--error, .message--tool-error { background: var(--danger-soft); border-color: rgba(242, 63, 66, 0.55); color: #ffb4b6; }
+    .message--compact { padding: 0.75rem 0.9rem; box-shadow: none; }
+    .message--live { box-shadow: 0 0 0 1px rgba(88, 101, 242, 0.45) inset, 0 6px 18px rgba(0, 0, 0, 0.12); }
+    .message-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .role { font-size: 0.74rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .message--error .role { color: #ffb4b6; }
+    .message-meta { font-size: 0.75rem; color: var(--muted-soft); }
+    .message-details summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+    .message-details summary:hover { color: var(--text); }
     .message-details[open] summary { margin-bottom: 0.5rem; }
     .compact-summary { margin-left: 0.25rem; }
-    .message-body--markdown { line-height: 1.55; overflow-wrap: anywhere; }
+    .message-body--markdown { line-height: 1.6; overflow-wrap: anywhere; }
     .message-body--markdown > :first-child { margin-top: 0; }
     .message-body--markdown > :last-child { margin-bottom: 0; }
-    .message-body--markdown h1, .message-body--markdown h2, .message-body--markdown h3 { margin: 1rem 0 0.4rem; color: #111827; }
+    .message-body--markdown h1, .message-body--markdown h2, .message-body--markdown h3 { margin: 1rem 0 0.4rem; color: var(--text); }
     .message-body--markdown h1 { font-size: 1.35rem; }
-    .message-body--markdown h2 { font-size: 1.15rem; white-space: normal; overflow: visible; text-overflow: clip; }
+    .message-body--markdown h2 { font-size: 1.15rem; white-space: normal; overflow: visible; text-overflow: clip; text-transform: none; letter-spacing: 0; }
     .message-body--markdown h3 { font-size: 1rem; }
     .message-body--markdown ul, .message-body--markdown ol { padding-left: 1.4rem; }
-    .message-body--markdown blockquote { margin: 0.75rem 0; padding-left: 1rem; border-left: 3px solid #d1d5db; color: #4b5563; }
-    .message-body--markdown code { padding: 0.1rem 0.25rem; border-radius: 0.25rem; background: #f3f4f6; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.92em; }
-    .message-body--markdown pre { padding: 0.75rem; border-radius: 0.5rem; background: #111827; color: #f9fafb; overflow-x: auto; white-space: pre; }
+    .message-body--markdown blockquote { margin: 0.75rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); color: var(--muted); }
+    .message-body--markdown code { padding: 0.1rem 0.25rem; border-radius: 0.25rem; background: var(--code); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.92em; }
+    .message-body--markdown pre { padding: 0.85rem; border-radius: 0.6rem; background: var(--code); color: var(--text); overflow-x: auto; white-space: pre; border: 1px solid #111214; }
     .message-body--markdown pre code { padding: 0; background: transparent; color: inherit; }
-    .message-body--markdown a { color: #2563eb; }
-    .message--tool-error .message-details summary { color: #991b1b; }
+    .message-body--markdown a { color: #8ea1e1; }
+    .message--tool-error .message-details summary { color: #ffb4b6; }
     .raw-details { margin-top: 0.75rem; }
-    .raw-details summary { font-size: 0.8rem; font-weight: 600; color: #6b7280; }
+    .raw-details summary { font-size: 0.8rem; font-weight: 600; color: var(--muted-soft); }
     .live-heading { margin-top: 1.5rem; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
     .prompt-form, .inline-form { display: grid; gap: 0.5rem; margin: 0; }
     .session-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 0.5rem; margin: 1rem 0 0; }
     .session-actions form { margin: 0; }
-    .command-list { border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 0.75rem; background: #f9fafb; }
-    .command-list summary { cursor: pointer; font-size: 0.85rem; font-weight: 700; color: #4b5563; }
-    .command-list h3 { font-size: 0.75rem; text-transform: uppercase; color: #4b5563; margin: 0.75rem 0 0.25rem; }
+    .command-list { border: 1px solid var(--border); border-radius: 0.75rem; padding: 0.75rem; background: var(--panel-soft); }
+    .command-list summary { cursor: pointer; font-size: 0.85rem; font-weight: 700; color: var(--muted); }
+    .command-list summary:hover { color: var(--text); }
+    .command-list h3 { font-size: 0.75rem; text-transform: uppercase; color: var(--muted-soft); margin: 0.75rem 0 0.25rem; }
     .command-list h3:first-child { margin-top: 0.75rem; }
     .command-filter { width: 100%; margin-top: 0.6rem; padding: 0.45rem 0.6rem; font-size: 0.9rem; }
-    .command { font-size: 0.9rem; margin: 0.25rem 0; }
-    .command code { font-weight: 700; }
+    .command { font-size: 0.9rem; margin: 0.25rem 0; padding: 0.2rem 0.25rem; border-radius: 0.35rem; cursor: pointer; }
+    .command:hover { background: var(--panel-softer); }
+    .command code { font-weight: 700; color: #c9cdfb; }
     .composer-controls { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
-    .composer-state { font-size: 0.85rem; color: #6b7280; }
-    .composer-state[data-state="running"], .composer-state[data-state="sending"] { color: #2563eb; font-weight: 600; }
+    .composer-state { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--muted); }
+    .composer-state::before { content: ""; width: 0.48rem; height: 0.48rem; border-radius: 999px; background: var(--muted-soft); }
+    .composer-state[data-state="running"], .composer-state[data-state="sending"] { color: #c9cdfb; font-weight: 700; }
+    .composer-state[data-state="running"]::before, .composer-state[data-state="sending"]::before { background: var(--success); box-shadow: 0 0 0 4px rgba(35, 165, 90, 0.15); }
+    .composer-state[data-state="error"] { color: #ffb4b6; }
+    .composer-state[data-state="error"]::before { background: var(--danger); }
     .composer-actions { display: flex; align-items: center; gap: 0.5rem; }
     .abort-form { display: none; }
-    input, textarea { box-sizing: border-box; font: inherit; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; }
+    input, textarea { box-sizing: border-box; font: inherit; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.55rem; color: var(--text); background: var(--panel-soft); outline: none; }
+    input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.2); }
     textarea { width: 100%; resize: none; min-height: 3.25rem; max-height: 12rem; line-height: 1.4; }
-    button { justify-self: end; padding: 0.5rem 0.9rem; border: 0; border-radius: 0.5rem; background: #2563eb; color: white; font-weight: 600; cursor: pointer; }
-    button.secondary { background: #4b5563; }
-    button.danger { background: #dc2626; }
+    button { justify-self: end; padding: 0.5rem 0.9rem; border: 0; border-radius: 0.55rem; background: var(--accent); color: white; font-weight: 700; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
+    button:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    button.secondary { background: #4e5058; }
+    button.secondary:hover { background: #5c5f66; }
+    button.danger { background: #b83b3e; }
+    button.danger:hover { background: var(--danger); }
+    .copy-button { margin-left: auto; padding: 0.2rem 0.5rem; font-size: 0.75rem; background: transparent; border: 1px solid var(--border); color: var(--muted); }
+    .copy-button:hover { color: var(--text); background: var(--panel-softer); transform: none; }
   </style>
 </head>
 <body>
@@ -92,7 +111,12 @@
           <h2 title="<%= h cwd %>"><%= h cwd %></h2>
           <% visible_sidebar_sessions(cwd, sessions).each do |session| %>
             <a class="session <%= "selected" if selected?(session) %>" href="/?session=<%= h Rack::Utils.escape(session.path) %>">
-              <div class="session-title"><%= h session.display_name %></div>
+              <div class="session-title">
+                <%= h session.display_name %>
+                <% if session.path == settings.active_rpc_session && settings.active_rpc_client %>
+                  <span class="session-running-indicator">active</span>
+                <% end %>
+              </div>
               <div class="session-meta">
                 <%= h session.message_count %> messages · updated <%= h format_time(session.modified_at) %>
               </div>
@@ -149,6 +173,9 @@
                 <div class="role"><%= h message_role_label(message.role) %></div>
                 <% if message_metadata(message) %>
                   <div class="message-meta"><%= h message_metadata(message) %></div>
+                <% end %>
+                <% if message.role == "assistant" && !message.compact %>
+                  <button type="button" class="copy-button" data-copy-target="message">Copy</button>
                 <% end %>
               </header>
               <% if message.compact %>
@@ -222,7 +249,7 @@
           <h1>No session selected</h1>
         </header>
         <section class="conversation-scroll" id="conversation-scroll">
-          <p class="empty">Create a Pi session first, then refresh this page.</p>
+          <p class="empty empty-state">Create a Pi session first, then refresh this page.</p>
         </section>
       <% end %>
     </main>
@@ -418,6 +445,7 @@
       if (roleName === "assistant") renderAssistantMarkdown(body, text).catch(() => {});
 
       header.append(role);
+      if (roleName === "assistant") header.append(makeCopyButton());
       article.append(header, body);
       liveOutput.append(article);
       if (shouldScroll) scrollToBottom();
@@ -469,6 +497,15 @@
       liveOutput.append(article);
       if (shouldScroll) scrollToBottom();
       return { article, body, summaryText, rawBody, compact: true };
+    }
+
+    function makeCopyButton() {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "copy-button";
+      button.dataset.copyTarget = "message";
+      button.textContent = "Copy";
+      return button;
     }
 
     function showStatus(text, forceScroll = false) {
@@ -627,6 +664,47 @@
       commandList.querySelectorAll(".command").forEach((command) => {
         command.hidden = query && !command.dataset.commandText.toLowerCase().includes(query);
       });
+    });
+
+    async function copyText(text) {
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.append(textarea);
+      textarea.select();
+
+      try {
+        return document.execCommand("copy");
+      } finally {
+        textarea.remove();
+      }
+    }
+
+    document.addEventListener("click", async (event) => {
+      const button = event.target.closest(".copy-button");
+      if (!button) return;
+
+      const article = button.closest(".message");
+      const body = article?.querySelector(".message-body");
+      const text = body?.innerText || body?.textContent;
+      if (!text) return;
+
+      const original = button.textContent;
+      try {
+        const copied = await copyText(text);
+        button.textContent = copied ? "Copied" : "Copy failed";
+      } catch (_error) {
+        button.textContent = "Copy failed";
+      }
+      setTimeout(() => { button.textContent = original; }, 1200);
     });
 
     commandList?.querySelectorAll(".command").forEach((command) => {
