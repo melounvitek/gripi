@@ -55,17 +55,6 @@
           <%= h @selected_session.path %>
         </p>
 
-        <form method="post" action="/prompt" class="prompt-form">
-          <input type="hidden" name="session" value="<%= h @selected_session.path %>">
-          <textarea name="message" rows="4" placeholder="Ask Pi…"></textarea>
-          <button type="submit">Send</button>
-        </form>
-
-        <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
-          <h2 class="live-heading">Live output</h2>
-          <p class="empty" id="live-empty">Waiting for Pi events…</p>
-        </section>
-
         <% if @messages.empty? %>
           <p class="empty">No messages in this session.</p>
         <% end %>
@@ -76,6 +65,17 @@
             <pre><%= h message.text %></pre>
           </article>
         <% end %>
+
+        <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
+          <h2 class="live-heading">Live output</h2>
+          <p class="empty" id="live-empty">Waiting for Pi events…</p>
+        </section>
+
+        <form method="post" action="/prompt" class="prompt-form">
+          <input type="hidden" name="session" value="<%= h @selected_session.path %>">
+          <textarea name="message" rows="4" placeholder="Ask Pi…"></textarea>
+          <button type="submit">Send</button>
+        </form>
       <% else %>
         <h1>No session selected</h1>
         <p class="empty">Create a Pi session first, then refresh this page.</p>
