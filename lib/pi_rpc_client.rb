@@ -1,9 +1,17 @@
 require "json"
+require "open3"
 
 class PiRpcClient
-  def initialize(stdin:, stdout:)
+  def self.start(session_path, popen: Open3.method(:popen3))
+    stdin, stdout, stderr, wait_thread = popen.call("pi", "--mode", "rpc", "--session", session_path)
+    new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
+  end
+
+  def initialize(stdin:, stdout:, stderr: nil, wait_thread: nil)
     @stdin = stdin
     @stdout = stdout
+    @stderr = stderr
+    @wait_thread = wait_thread
   end
 
   def request(type, id:, **payload)

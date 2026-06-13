@@ -72,11 +72,11 @@ Success check:
 
 ### 2. Minimal Pi RPC client
 
-- [ ] Add Ruby `PiRpcClient`.
-- [ ] Spawn `pi --mode rpc --session <session-file>`.
-- [ ] Send JSONL commands to stdin.
-- [ ] Read JSONL responses/events from stdout.
-- [ ] Implement request/response correlation by `id`.
+- [x] Add Ruby `PiRpcClient`.
+- [x] Spawn `pi --mode rpc --session <session-file>`.
+- [x] Send JSONL commands to stdin.
+- [x] Read JSONL responses/events from stdout.
+- [x] Implement request/response correlation by `id`.
 - [ ] Support:
   - [ ] `get_state`
   - [ ] `get_messages`
