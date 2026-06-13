@@ -14,7 +14,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, keyword_init: true)
 
   def initialize(root: File.expand_path("~/.pi/agent/sessions"))
     @root = root
@@ -39,6 +39,7 @@ class PiSessionStore
         if message.role == "toolResult" && message.tool_name == "bash" && pending_tool_calls[message.tool_call_id]
           call_message = pending_tool_calls.delete(message.tool_call_id)
           call_message.text = [call_message.text, message.text].reject(&:empty?).join("\n\n")
+          call_message.raw_details = [call_message.raw_details, message.raw_details].compact.reject(&:empty?).join("\n\n")
           call_message.expanded ||= message.expanded
           call_message.error ||= message.error
           next
@@ -120,7 +121,8 @@ class PiSessionStore
         expanded: message["isError"] == true,
         error: message["isError"] == true,
         tool_call_id: message["toolCallId"],
-        tool_name: message["toolName"]
+        tool_name: message["toolName"],
+        raw_details: compact_raw_details(message["content"]) || (compact_message?(message) ? JSON.pretty_generate(message) : nil)
       )]
     end
   end
@@ -143,7 +145,8 @@ class PiSessionStore
         expanded: false,
         error: false,
         tool_call_id: tool_call_id,
-        tool_name: tool_name
+        tool_name: tool_name,
+        raw_details: compact ? compact_raw_details(parts) : nil
       )
     end
   end
@@ -204,6 +207,15 @@ class PiSessionStore
       end
     end
     labels.uniq.join(" + ")
+  end
+
+  def compact_raw_details(content)
+    details = Array(content).select do |part|
+      part.is_a?(Hash) && ["toolCall", "toolResult"].include?(part["type"])
+    end
+    return nil if details.empty?
+
+    details.map { |part| JSON.pretty_generate(part) }.join("\n\n")
   end
 
   def thinking_text(part)

@@ -186,16 +186,16 @@ Observed behavior:
 - The Pi CLI/TUI renders the same interaction more cleanly as a shell command line plus output, e.g. `$ git status --short && git log --oneline -1 (timeout 30s)`, with the output shown once.
 - This makes the web transcript noisier and less consistent with the CLI, even after duplicate live updates were fixed.
 
-- [ ] Inspect historical and live message shapes for bash `toolCall` + matching `toolResult` pairs.
-- [ ] Render bash tool calls in a TUI-like compact form with the command and relevant timeout/options summarized.
-- [ ] Pair or visually group matching bash tool results with their command where practical.
-- [ ] Avoid showing placeholder `[thinking]` when no useful thinking text is present.
-- [ ] Avoid duplicate-looking standalone tool result cards when the output is already represented with its command.
-- [ ] Keep raw tool-call JSON/details available in an expandable area for debugging.
-- [ ] Preserve prominent rendering for errors and non-bash tools.
-- [ ] Apply the same behavior to live and historical rendering where practical.
-- [ ] Add focused tests for bash tool-call/result rendering.
-- [ ] Restart server and report the test URL plus what to verify.
+- [x] Inspect historical and live message shapes for bash `toolCall` + matching `toolResult` pairs.
+- [x] Render bash tool calls in a TUI-like compact form with the command and relevant timeout/options summarized.
+- [x] Pair or visually group matching bash tool results with their command where practical.
+- [x] Avoid showing placeholder `[thinking]` when no useful thinking text is present.
+- [x] Avoid duplicate-looking standalone tool result cards when the output is already represented with its command.
+- [x] Keep raw tool-call JSON/details available in an expandable area for debugging.
+- [x] Preserve prominent rendering for errors and non-bash tools.
+- [x] Apply the same behavior to live and historical rendering where practical.
+- [x] Add focused tests for bash tool-call/result rendering.
+- [x] Restart server and report the test URL plus what to verify.
 
 Success check:
 

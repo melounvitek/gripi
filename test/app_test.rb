@@ -496,6 +496,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, '<summary><span class="compact-summary">$ git status --short (timeout 30s)</span></summary>'
       assert_includes response.body, "$ git status --short (timeout 30s)"
       assert_includes response.body, " M app.rb"
+      assert_includes response.body, "Raw details"
+      assert_includes response.body, '&quot;type&quot;: &quot;toolCall&quot;'
+      assert_includes response.body, '&quot;toolCallId&quot;: &quot;call_123&quot;'
       refute_includes response.body, "[thinking]"
       refute_includes response.body, '<summary><span class="compact-summary">bash</span></summary>'
     end
@@ -515,6 +518,8 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes response.body, "function contentSegments(content, message = {})"
       assert_includes response.body, "appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded"
+      assert_includes response.body, "segment.rawDetails"
+      assert_includes response.body, "Raw details"
       assert_includes response.body, "part.type === \"toolCall\""
       assert_includes response.body, "part.type === \"thinking\""
     end

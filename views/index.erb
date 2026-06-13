@@ -52,6 +52,8 @@
     .message-body--markdown pre code { padding: 0; background: transparent; color: inherit; }
     .message-body--markdown a { color: #2563eb; }
     .message--tool-error .message-details summary { color: #991b1b; }
+    .raw-details { margin-top: 0.75rem; }
+    .raw-details summary { font-size: 0.8rem; font-weight: 600; color: #6b7280; }
     .live-heading { margin-top: 1.5rem; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
     .prompt-form, .inline-form { display: grid; gap: 0.5rem; margin: 0; }
@@ -170,6 +172,12 @@
                 <details class="message-details" <%= "open" if message.expanded %>>
                   <summary><span class="compact-summary"><%= h message.summary %></span></summary>
                   <pre class="message-body"><%= h message.text %></pre>
+                  <% if message.raw_details.to_s != "" %>
+                    <details class="raw-details">
+                      <summary>Raw details</summary>
+                      <pre><%= h message.raw_details %></pre>
+                    </details>
+                  <% end %>
                 </details>
               <% else %>
                 <% if message.role == "assistant" %>
@@ -277,6 +285,10 @@
         const text = group.parts.map(contentPartText).filter(Boolean).join("\n");
         const labels = group.parts.map(contentPartLabel).filter(Boolean);
         const toolPart = group.parts.find((part) => part && typeof part === "object" && ["toolCall", "toolResult"].includes(part.type));
+        const rawDetails = group.parts
+          .filter((part) => part && typeof part === "object" && ["toolCall", "toolResult"].includes(part.type))
+          .map((part) => JSON.stringify(part, null, 2))
+          .join("\n\n") || (message.role === "toolResult" ? JSON.stringify(message, null, 2) : "");
         return {
           text,
           compact: group.compact,
@@ -286,7 +298,8 @@
           endIndex: group.endIndex,
           toolCallId: message.toolCallId || toolPart?.id || toolPart?.toolCallId,
           toolName: message.toolName || toolPart?.name || toolPart?.toolName,
-          isToolResult: message.role === "toolResult" || toolPart?.type === "toolResult"
+          isToolResult: message.role === "toolResult" || toolPart?.type === "toolResult",
+          rawDetails
         };
       }).filter((segment) => segment.text);
     }
@@ -376,7 +389,7 @@
       return { article, body, compact: false };
     }
 
-    function appendCompactMessage(roleName, summary, text, expanded = false, live = true, forceScroll = false) {
+    function appendCompactMessage(roleName, summary, text, expanded = false, live = true, forceScroll = false, rawDetails = "") {
       removeLiveEmpty();
       const shouldScroll = forceScroll || nearConversationBottom();
       const roleKey = messageRoleKey(roleName);
@@ -405,10 +418,22 @@
       body.textContent = text;
       details.append(summaryElement, body);
 
+      let rawBody = null;
+      if (rawDetails) {
+        const rawDetailsElement = document.createElement("details");
+        rawDetailsElement.className = "raw-details";
+        const rawSummary = document.createElement("summary");
+        rawSummary.textContent = "Raw details";
+        rawBody = document.createElement("pre");
+        rawBody.textContent = rawDetails;
+        rawDetailsElement.append(rawSummary, rawBody);
+        details.append(rawDetailsElement);
+      }
+
       article.append(header, details);
       liveOutput.append(article);
       if (shouldScroll) scrollToBottom();
-      return { article, body, summaryText, compact: true };
+      return { article, body, summaryText, rawBody, compact: true };
     }
 
     function showStatus(text, forceScroll = false) {
@@ -441,6 +466,7 @@
       if (segment.compact) {
         entry.summaryText.textContent = segment.summary;
         entry.body.textContent = segment.text;
+        if (entry.rawBody) entry.rawBody.textContent = segment.rawDetails || "";
       } else {
         entry.body.textContent = segment.text;
         if (roleName === "assistant") renderAssistantMarkdown(entry.body, segment.text).catch(() => {});
@@ -457,7 +483,7 @@
       if (updated) return updated;
 
       const entry = segment.compact ?
-        appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll) :
+        appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails) :
         appendMessage("assistant", segment.text, true, shouldScroll);
       liveAssistantSegments.set(key, entry);
       if (segment.toolName === "bash" && segment.toolCallId && !segment.isToolResult) liveBashToolCalls.set(segment.toolCallId, entry);
@@ -483,10 +509,13 @@
           const bashCallEntry = segment.toolName === "bash" && segment.toolCallId && liveBashToolCalls.get(segment.toolCallId);
           if (bashCallEntry && segment.isToolResult) {
             bashCallEntry.body.textContent = [bashCallEntry.body.textContent, segment.text].filter(Boolean).join("\n\n");
+            if (bashCallEntry.rawBody) {
+              bashCallEntry.rawBody.textContent = [bashCallEntry.rawBody.textContent, segment.rawDetails].filter(Boolean).join("\n\n");
+            }
             bashCallEntry.article.classList.toggle("message--tool-error", segment.expanded);
             if (shouldScroll) scrollToBottom();
           } else if (segment.compact) {
-            appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll);
+            appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails);
           } else {
             appendMessage(roleName, segment.text, true, shouldScroll);
           }
