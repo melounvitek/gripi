@@ -297,6 +297,36 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_renders_messages_with_role_specific_structure
+    Dir.mktmpdir do |dir|
+      path = write_session_with_messages(dir, [
+        { role: "user", text: "Hello <Pi>" },
+        { role: "assistant", text: "Hi there" },
+        { role: "system", text: "System note" },
+        { role: "toolResult", text: "Tool output" },
+        { role: "error", text: "Something failed" }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, 'class="message message--user" data-role="user"'
+      assert_includes response.body, 'class="message message--assistant" data-role="assistant"'
+      assert_includes response.body, 'class="message message--status" data-role="system"'
+      assert_includes response.body, 'class="message message--tool" data-role="toolResult"'
+      assert_includes response.body, 'class="message message--error" data-role="error"'
+      assert_includes response.body, 'class="message-body"'
+      assert_includes response.body, "Hello &lt;Pi&gt;"
+      refute_includes response.body, "Hello <Pi>"
+      assert_includes response.body, "messageRoleKey"
+    end
+  end
+
   private
 
   class FakeRpcClient
@@ -373,5 +403,21 @@ class AppTest < Minitest::Test
       FileUtils.touch(path, mtime: Time.at(index))
       path
     end
+  end
+
+  def write_session_with_messages(root, messages)
+    session_dir = File.join(root, "--project--")
+    FileUtils.mkdir_p(session_dir)
+    path = File.join(session_dir, "messages.jsonl")
+    entries = [{ type: "session", id: "session-1", cwd: "/tmp/project" }]
+    entries.concat(messages.map.with_index do |message, index|
+      {
+        type: "message",
+        timestamp: "2026-06-13T10:0#{index}:00Z",
+        message: { role: message.fetch(:role), content: [{ type: "text", text: message.fetch(:text) }] }
+      }
+    end)
+    File.write(path, entries.map { |entry| JSON.generate(entry) }.join("\n") + "\n")
+    path
   end
 end

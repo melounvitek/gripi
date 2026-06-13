@@ -23,10 +23,17 @@
     .session-title { font-weight: 600; overflow-wrap: anywhere; }
     .session-meta { font-size: 0.8rem; color: #6b7280; margin-top: 0.2rem; }
     .empty { color: #6b7280; }
-    .message, .event { border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 0.9rem; margin-bottom: 0.75rem; }
-    .event { background: #f8fafc; }
-    .status { color: #6b7280; font-size: 0.85rem; margin-bottom: 0.75rem; }
-    .role { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: #4b5563; margin-bottom: 0.4rem; }
+    .message { border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 0.9rem; margin-bottom: 0.75rem; }
+    .message--user { margin-left: 10%; background: #eff6ff; border-color: #bfdbfe; }
+    .message--assistant { margin-right: 10%; background: #ffffff; }
+    .message--status { background: #f8fafc; color: #4b5563; }
+    .message--tool { background: #f9fafb; border-style: dashed; color: #374151; }
+    .message--error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+    .message--live { box-shadow: 0 0 0 1px #dbeafe inset; }
+    .message-header { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .role { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: #4b5563; }
+    .message--error .role { color: #991b1b; }
+    .message-meta { font-size: 0.75rem; color: #6b7280; }
     .live-heading { margin-top: 1.5rem; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
     .prompt-form, .inline-form { display: grid; gap: 0.5rem; margin: 0; }
@@ -131,9 +138,14 @@
           <% end %>
 
           <% @messages.each do |message| %>
-            <article class="message">
-              <div class="role"><%= h message.role %></div>
-              <pre><%= h message.text %></pre>
+            <article class="<%= h message_article_class(message) %>" data-role="<%= h message.role %>">
+              <header class="message-header">
+                <div class="role"><%= h message_role_label(message.role) %></div>
+                <% if message_metadata(message) %>
+                  <div class="message-meta"><%= h message_metadata(message) %></div>
+                <% end %>
+              </header>
+              <pre class="message-body"><%= h message.text %></pre>
             </article>
           <% end %>
 
@@ -203,36 +215,52 @@
       return "";
     }
 
-    function appendMessage(roleName, text, className = "message", forceScroll = false) {
+    function messageRoleKey(roleName) {
+      if (["assistant", "user", "error"].includes(roleName)) return roleName;
+      if (["tool", "toolResult"].includes(roleName)) return "tool";
+      return "status";
+    }
+
+    function messageRoleLabel(roleName) {
+      if (roleName === "toolResult") return "tool result";
+      return roleName || "status";
+    }
+
+    function appendMessage(roleName, text, live = true, forceScroll = false) {
       removeLiveEmpty();
       const shouldScroll = forceScroll || nearConversationBottom();
+      const roleKey = messageRoleKey(roleName);
 
       const article = document.createElement("article");
-      article.className = className;
+      article.className = `message message--${roleKey}${live ? " message--live" : ""}`;
+      article.dataset.role = roleName;
+
+      const header = document.createElement("header");
+      header.className = "message-header";
 
       const role = document.createElement("div");
       role.className = "role";
-      role.textContent = roleName;
+      role.textContent = messageRoleLabel(roleName);
 
       const body = document.createElement("pre");
+      body.className = "message-body";
       body.textContent = text;
 
-      article.append(role, body);
+      header.append(role);
+      article.append(header, body);
       liveOutput.append(article);
       if (shouldScroll) scrollToBottom();
       return { article, body };
     }
 
     function showStatus(text, forceScroll = false) {
-      removeLiveEmpty();
-      const shouldScroll = forceScroll || nearConversationBottom();
       if (!statusLine) {
-        statusLine = document.createElement("div");
-        statusLine.className = "status";
-        liveOutput.append(statusLine);
+        statusLine = appendMessage("status", text, true, forceScroll);
+      } else {
+        const shouldScroll = forceScroll || nearConversationBottom();
+        statusLine.body.textContent = text;
+        if (shouldScroll) scrollToBottom();
       }
-      statusLine.textContent = text;
-      if (shouldScroll) scrollToBottom();
     }
 
     function renderMessageEvent(event) {
@@ -242,7 +270,7 @@
 
       const shouldScroll = nearConversationBottom();
       if (!liveMessage || event.type === "message_start") {
-        liveMessage = appendMessage(message.role || "assistant", text, "event", shouldScroll);
+        liveMessage = appendMessage(message.role || "assistant", text, true, shouldScroll);
       } else {
         liveMessage.body.textContent = text;
         if (shouldScroll) scrollToBottom();
@@ -267,7 +295,7 @@
       }
 
       if (event.error) {
-        appendMessage("error", event.error, "event");
+        appendMessage("error", event.error);
       }
     }
 
@@ -291,7 +319,7 @@
       const formData = new FormData(promptForm);
       formData.set("message", message);
 
-      appendMessage("user", message, "message", true);
+      appendMessage("user", message, true, true);
       textarea.value = "";
       showStatus("Sending…", true);
 

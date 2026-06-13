@@ -86,13 +86,13 @@ Success check:
 
 ### 3. Message rendering structure
 
-- [ ] Replace the single plain `<pre>` message rendering with structured message partials/helpers.
-- [ ] Visually distinguish user, assistant, system/status, tool, and error output.
-- [ ] Keep raw text safely escaped by default in this step.
-- [ ] Add message metadata only where useful, without clutter.
-- [ ] Reconcile live message rendering with the same visual structure where practical.
-- [ ] Add tests for role-specific rendering/classes.
-- [ ] Restart server and report the test URL plus what to verify.
+- [x] Replace the single plain `<pre>` message rendering with structured message partials/helpers.
+- [x] Visually distinguish user, assistant, system/status, tool, and error output.
+- [x] Keep raw text safely escaped by default in this step.
+- [x] Add message metadata only where useful, without clutter.
+- [x] Reconcile live message rendering with the same visual structure where practical.
+- [x] Add tests for role-specific rendering/classes.
+- [x] Restart server and report the test URL plus what to verify.
 
 Success check:
 

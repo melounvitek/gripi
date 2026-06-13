@@ -62,6 +62,42 @@ class PiWebGateway < Sinatra::Base
     def format_time(time)
       time&.strftime("%Y-%m-%d %H:%M") || "unknown"
     end
+
+    def message_role_key(role)
+      case role.to_s
+      when "assistant"
+        "assistant"
+      when "user"
+        "user"
+      when "tool", "toolResult"
+        "tool"
+      when "error"
+        "error"
+      when "system", "status"
+        "status"
+      else
+        "status"
+      end
+    end
+
+    def message_role_label(role)
+      case role.to_s
+      when "toolResult"
+        "tool result"
+      when "status"
+        "status"
+      else
+        role.to_s.empty? ? "status" : role.to_s
+      end
+    end
+
+    def message_article_class(message)
+      "message message--#{message_role_key(message.role)}"
+    end
+
+    def message_metadata(message)
+      format_time(message.timestamp) if message.timestamp
+    end
   end
 
   get "/" do
