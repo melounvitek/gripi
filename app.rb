@@ -4,8 +4,10 @@ require "json"
 require "base64"
 require "redcarpet"
 require "sanitize"
+require "securerandom"
 require_relative "lib/pi_session_store"
 require_relative "lib/pi_rpc_client"
+require_relative "lib/pi_rpc_client_registry"
 
 class SafeMarkdownRenderer < Redcarpet::Render::HTML
   ALLOWED_MARKDOWN_ELEMENTS = (Sanitize::Config::RELAXED[:elements] + %w[pre code]).uniq.freeze
@@ -31,9 +33,9 @@ class PiWebGateway < Sinatra::Base
   set :root, File.dirname(__FILE__)
   set :sessions_root, ENV.fetch("PI_SESSIONS_ROOT", File.expand_path("~/.pi/agent/sessions"))
   set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
-  set :active_rpc_client, nil
-  set :active_rpc_session, nil
-  set :active_rpc_cwd, nil
+  set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd) }]
+  set :rpc_client_registry, nil
+  set :pending_rpc_cwds, {}
 
   helpers do
     def h(value)
@@ -202,7 +204,7 @@ class PiWebGateway < Sinatra::Base
     images = prompt_images_from(params["images"])
     halt 400, "Message cannot be empty" if message.strip.empty? && images.empty?
 
-    client = active_rpc_client(session_path)
+    client = rpc_client_for(session_path)
     client.prompt(message, images)
     redirect "/?session=#{Rack::Utils.escape(session_path)}"
   end
@@ -210,26 +212,24 @@ class PiWebGateway < Sinatra::Base
   post "/sessions/new" do
     session_path = params.fetch("session")
     current_session = PiSessionStore.new(root: settings.sessions_root).sessions.find { |session| session.path == session_path }
-    client = active_rpc_client(session_path)
-    response = client.new_session(session_path)
-    halt 409, "New session was cancelled" if response_cancelled?(response)
-
-    new_session_path = session_file_from(client.get_state) || newest_session_for_same_cwd(session_path)&.path || session_path
-    settings.set :active_rpc_cwd, current_session&.cwd
-    settings.set :active_rpc_session, new_session_path
+    cwd = current_session&.cwd || File.dirname(session_path)
+    client = settings.new_rpc_client_factory.first.call(cwd)
+    new_session_path = session_file_from(client.get_state) || newest_session_for_same_cwd(session_path)&.path || pending_session_path(cwd)
+    rpc_clients.register(new_session_path, client)
+    settings.pending_rpc_cwds[new_session_path] = cwd unless File.exist?(new_session_path)
     redirect "/?session=#{Rack::Utils.escape(new_session_path)}"
   end
 
   post "/abort" do
     session_path = params.fetch("session")
-    active_rpc_client(session_path).abort
+    rpc_client_for(session_path).abort
     redirect "/?session=#{Rack::Utils.escape(session_path)}"
   end
 
   post "/compact" do
     session_path = params.fetch("session")
     instructions = params["instructions"].to_s.strip
-    active_rpc_client(session_path).compact(instructions.empty? ? nil : instructions)
+    rpc_client_for(session_path).compact(instructions.empty? ? nil : instructions)
     redirect "/?session=#{Rack::Utils.escape(session_path)}"
   end
 
@@ -238,18 +238,14 @@ class PiWebGateway < Sinatra::Base
     name = params.fetch("name").to_s.strip
     halt 400, "Name cannot be empty" if name.empty?
 
-    active_rpc_client(session_path).set_session_name(name)
+    rpc_client_for(session_path).set_session_name(name)
     redirect "/?session=#{Rack::Utils.escape(session_path)}"
   end
 
   get "/events" do
     session_path = params.fetch("session")
     content_type :json
-    events = if session_path == settings.active_rpc_session && settings.active_rpc_client
-      settings.active_rpc_client.drain_events
-    else
-      []
-    end
+    events = rpc_clients.drain_events(session_path)
     JSON.generate(events: events)
   end
 
@@ -312,10 +308,10 @@ class PiWebGateway < Sinatra::Base
 
   def append_pending_active_session(groups)
     pending_path = params["session"]
-    return unless pending_path == settings.active_rpc_session
     return if pending_path.to_s.empty? || File.exist?(pending_path)
 
-    cwd = settings.active_rpc_cwd || "Pending Pi cwd"
+    cwd = settings.pending_rpc_cwds[pending_path]
+    return unless cwd
     groups[cwd] ||= []
     groups[cwd].unshift(PiSessionStore::Session.new(
       path: pending_path,
@@ -330,23 +326,25 @@ class PiWebGateway < Sinatra::Base
   end
 
   def command_session_available?(session_path)
-    File.exist?(session_path) || (settings.active_rpc_session == session_path && settings.active_rpc_client)
+    File.exist?(session_path) || rpc_clients.active?(session_path)
   end
 
   def commands_for(session_path)
-    response = active_rpc_client(session_path).get_commands
+    response = rpc_client_for(session_path).get_commands
     data = response_data(response)
     data.is_a?(Hash) && data["commands"].is_a?(Array) ? data["commands"] : []
   end
 
-  def active_rpc_client(session_path)
-    return settings.active_rpc_client if settings.active_rpc_session == session_path && settings.active_rpc_client
+  def rpc_clients
+    settings.rpc_client_registry ||= PiRpcClientRegistry.new(factory: settings.rpc_client_factory.first)
+  end
 
-    settings.active_rpc_client&.close
-    client = settings.rpc_client_factory.first.call(session_path)
-    settings.set :active_rpc_session, session_path
-    settings.set :active_rpc_client, client
-    client
+  def rpc_client_for(session_path)
+    rpc_clients.ensure_client(session_path)
+  end
+
+  def pending_session_path(cwd)
+    File.join(settings.sessions_root, "pending-#{SecureRandom.uuid}.jsonl")
   end
 
   def response_data(response)

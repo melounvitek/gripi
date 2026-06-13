@@ -137,7 +137,7 @@
             <a class="session <%= "selected" if selected?(session) %>" href="/?session=<%= h Rack::Utils.escape(session.path) %>">
               <div class="session-title">
                 <%= h session.display_name %>
-                <% if session.path == settings.active_rpc_session && settings.active_rpc_client %>
+                <% if rpc_clients.active?(session.path) %>
                   <span class="session-running-indicator">active</span>
                 <% end %>
               </div>

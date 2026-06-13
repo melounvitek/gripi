@@ -8,6 +8,11 @@ class PiRpcClient
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
   end
 
+  def self.start_in_cwd(cwd, popen: Open3.method(:popen3))
+    stdin, stdout, stderr, wait_thread = popen.call("pi", "--mode", "rpc", chdir: cwd)
+    new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
+  end
+
   def initialize(stdin:, stdout:, stderr: nil, wait_thread: nil)
     @stdin = stdin
     @stdout = stdout
