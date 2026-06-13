@@ -15,6 +15,14 @@ Target experience:
 
 > Run the web gateway on a machine where Pi is configured, open localhost, see Pi sessions grouped by working directory, switch/create sessions, and talk to Pi in the browser.
 
+## Step delivery check
+
+After each implementation step, verify the current app on:
+
+> http://100.103.198.74:4567/
+
+Then report the exact link to open and briefly describe what to test there.
+
 ## Key Pi facts to preserve
 
 - Native sessions are JSONL files under `~/.pi/agent/sessions/--encoded-cwd--/*.jsonl`.
