@@ -70,6 +70,7 @@
     .message-body--thinking { font-size: 0.95rem; font-style: italic; line-height: 1.45; color: var(--muted); }
     .thinking-prefix { font-style: normal; font-weight: 700; color: var(--muted-soft); }
     .message-body--markdown { line-height: 1.6; overflow-wrap: anywhere; }
+    .message-body--markdown[data-rendering="pending"]:empty::before { content: "…"; color: var(--muted); }
     .message-body--markdown > :first-child { margin-top: 0; }
     .message-body--markdown > :last-child { margin-bottom: 0; }
     .message-body--markdown h1, .message-body--markdown h2, .message-body--markdown h3 { margin: 1rem 0 0.4rem; color: var(--text); }
@@ -610,15 +611,25 @@
       return event.message || event.text || event.type || "Status update";
     }
 
-    async function renderAssistantMarkdown(body, text) {
+    function renderAssistantMarkdown(body, text, delay = 120) {
       body.dataset.plainText = text;
-      const formData = new FormData();
-      formData.set("text", text);
-      const response = await fetch("/markdown", { method: "POST", body: formData });
-      if (!response.ok || body.dataset.plainText !== text) return;
+      body.dataset.rendering = "pending";
+      clearTimeout(body.markdownRenderTimeout);
+      body.markdownRenderTimeout = setTimeout(async () => {
+        try {
+          const formData = new FormData();
+          formData.set("text", text);
+          const response = await fetch("/markdown", { method: "POST", body: formData });
+          if (!response.ok || body.dataset.plainText !== text) return;
 
-      const payload = await response.json();
-      if (body.dataset.plainText === text) body.innerHTML = payload.html;
+          const payload = await response.json();
+          if (body.dataset.plainText === text) {
+            body.innerHTML = payload.html;
+            delete body.dataset.rendering;
+          }
+        } catch (_error) {
+        }
+      }, delay);
     }
 
     function formatTimestamp(timestamp) {
@@ -654,9 +665,10 @@
         prefix.className = "thinking-prefix";
         prefix.textContent = "Thinking:";
         body.append(prefix, " ", document.createTextNode(text));
+      } else if (roleName === "assistant") {
+        renderAssistantMarkdown(body, text);
       } else {
         body.textContent = text;
-        if (roleName === "assistant") renderAssistantMarkdown(body, text).catch(() => {});
       }
 
       const meta = document.createElement("div");
@@ -787,9 +799,10 @@
           entry.body.textContent = "";
           if (prefix) entry.body.append(prefix, " ");
           entry.body.append(document.createTextNode(segment.text));
+        } else if (roleName === "assistant") {
+          renderAssistantMarkdown(entry.body, segment.text);
         } else {
           entry.body.textContent = segment.text;
-          if (roleName === "assistant") renderAssistantMarkdown(entry.body, segment.text).catch(() => {});
         }
       }
 

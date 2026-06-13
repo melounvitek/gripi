@@ -795,7 +795,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function formatTimestamp(timestamp)"
       assert_includes response.body, "function eventTimestamp(event)"
       assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking });'
-      assert_includes response.body, 'function renderAssistantMarkdown(body, text)'
+      assert_includes response.body, 'function renderAssistantMarkdown(body, text, delay = 120)'
+      assert_includes response.body, 'body.dataset.rendering = "pending";'
+      assert_includes response.body, 'clearTimeout(body.markdownRenderTimeout);'
       assert_includes response.body, 'fetch("/markdown", { method: "POST", body: formData })'
       assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
       assert_includes response.body, "function showStatus(_text, _forceScroll = false) {}"
