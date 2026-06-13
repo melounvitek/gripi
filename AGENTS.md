@@ -4,7 +4,7 @@
 
 The dev server usually runs as Puma on `100.103.198.74:4567`, logging to `/tmp/pi-web-gateway.log`.
 
-Safe background restart pattern, especially when the user is connected through the web gateway:
+Safe background restart pattern, especially when the user is connected through the web gateway. Always use this detached script; do not manually `kill` the server and then start it in the same foreground tool call, because killing the gateway can disconnect the active user before the replacement process is verified:
 
 ```bash
 cat > /tmp/restart-pi-web-gateway.sh <<'SH'
@@ -52,7 +52,7 @@ chmod +x /tmp/restart-pi-web-gateway.sh
 nohup /tmp/restart-pi-web-gateway.sh >/tmp/pi-web-gateway-restart-dispatch.log 2>&1 &
 ```
 
-After dispatching, verify with:
+After dispatching, verify with a separate tool call. If the first verification fails, inspect `/tmp/pi-web-gateway-restart.log` and `/tmp/pi-web-gateway.log`; do not assume the server came back:
 
 ```bash
 ps -ef | rg 'puma .*pi-web-gateway|rackup|config.ru' | rg -v rg
