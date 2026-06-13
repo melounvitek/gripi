@@ -149,9 +149,9 @@ Success check:
 
 Success check:
 
-- [ ] Installed user commands/skills appear in browser suggestions.
-- [ ] Running an extension/prompt/skill command works.
-- [ ] Built-in limitations are understood and documented.
+- [x] Installed user commands/skills appear in browser suggestions.
+- [x] Running an extension/prompt/skill command works.
+- [x] Built-in limitations are understood and documented.
 
 ## Non-goals for this PoC
 
