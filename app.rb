@@ -32,6 +32,7 @@ class PiWebGateway < Sinatra::Base
     append_pending_active_session(@groups)
     @selected_session = find_selected_session(@groups.values.flatten)
     @messages = @selected_session && File.exist?(@selected_session.path) ? @store.messages(@selected_session.path) : []
+    @commands = @selected_session && command_session_available?(@selected_session.path) ? commands_for(@selected_session.path) : []
 
     erb :index
   end
@@ -57,6 +58,28 @@ class PiWebGateway < Sinatra::Base
     settings.set :active_rpc_cwd, current_session&.cwd
     settings.set :active_rpc_session, new_session_path
     redirect "/?session=#{Rack::Utils.escape(new_session_path)}"
+  end
+
+  post "/abort" do
+    session_path = params.fetch("session")
+    active_rpc_client(session_path).abort
+    redirect "/?session=#{Rack::Utils.escape(session_path)}"
+  end
+
+  post "/compact" do
+    session_path = params.fetch("session")
+    instructions = params["instructions"].to_s.strip
+    active_rpc_client(session_path).compact(instructions.empty? ? nil : instructions)
+    redirect "/?session=#{Rack::Utils.escape(session_path)}"
+  end
+
+  post "/rename" do
+    session_path = params.fetch("session")
+    name = params.fetch("name").to_s.strip
+    halt 400, "Name cannot be empty" if name.empty?
+
+    active_rpc_client(session_path).set_session_name(name)
+    redirect "/?session=#{Rack::Utils.escape(session_path)}"
   end
 
   get "/events" do
@@ -96,6 +119,16 @@ class PiWebGateway < Sinatra::Base
       created_at: nil,
       modified_at: Time.now
     ))
+  end
+
+  def command_session_available?(session_path)
+    File.exist?(session_path) || (settings.active_rpc_session == session_path && settings.active_rpc_client)
+  end
+
+  def commands_for(session_path)
+    response = active_rpc_client(session_path).get_commands
+    data = response_data(response)
+    data.is_a?(Hash) && data["commands"].is_a?(Array) ? data["commands"] : []
   end
 
   def active_rpc_client(session_path)

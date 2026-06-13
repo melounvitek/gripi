@@ -135,17 +135,17 @@ Success check:
 
 ### 5. Slash command discovery
 
-- [ ] On session open, call RPC `get_commands`.
-- [ ] Show command suggestions for:
-  - [ ] extension commands
-  - [ ] prompt templates
-  - [ ] skills
-- [ ] Submitting `/command` sends it via RPC `prompt`.
-- [ ] Add simple RPC-backed buttons for built-ins:
-  - [ ] new session
-  - [ ] abort
-  - [ ] compact
-  - [ ] rename
+- [x] On session open, call RPC `get_commands`.
+- [x] Show command suggestions for:
+  - [x] extension commands
+  - [x] prompt templates
+  - [x] skills
+- [x] Submitting `/command` sends it via RPC `prompt`.
+- [x] Add simple RPC-backed buttons for built-ins:
+  - [x] new session
+  - [x] abort
+  - [x] compact
+  - [x] rename
 
 Success check:
 

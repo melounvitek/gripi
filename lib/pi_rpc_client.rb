@@ -48,6 +48,19 @@ class PiRpcClient
     request("switch_session", id: next_id("switch_session"), sessionPath: session_path)
   end
 
+  def get_commands
+    request("get_commands", id: next_id("get_commands"))
+  end
+
+  def compact(custom_instructions = nil)
+    payload = custom_instructions.to_s.empty? ? {} : { customInstructions: custom_instructions }
+    request("compact", id: next_id("compact"), **payload)
+  end
+
+  def set_session_name(name)
+    request("set_session_name", id: next_id("set_session_name"), name: name)
+  end
+
   def drain_events
     ensure_reader
     @mutex.synchronize do

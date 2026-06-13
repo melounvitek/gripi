@@ -109,6 +109,96 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_renders_commands_for_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :active_rpc_client, nil
+      PiWebGateway.set :active_rpc_session, nil
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, [{ "name" => "review", "source" => "skill", "description" => "Review code" }])
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "/review"
+      assert_includes response.body, "Review code"
+      assert_equal [[ :start, path ], [ :get_commands ]], calls
+    end
+  end
+
+  def test_aborts_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :active_rpc_client, nil
+      PiWebGateway.set :active_rpc_session, nil
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/abort",
+        params: { "session" => path }
+      )
+
+      assert_equal 303, response.status
+      assert_equal [[ :start, path ], [ :abort ]], calls
+    end
+  end
+
+  def test_compacts_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :active_rpc_client, nil
+      PiWebGateway.set :active_rpc_session, nil
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/compact",
+        params: { "session" => path, "instructions" => "recent work" }
+      )
+
+      assert_equal 303, response.status
+      assert_equal [[ :start, path ], [ :compact, "recent work" ]], calls
+    end
+  end
+
+  def test_renames_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :active_rpc_client, nil
+      PiWebGateway.set :active_rpc_session, nil
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/rename",
+        params: { "session" => path, "name" => "Useful name" }
+      )
+
+      assert_equal 303, response.status
+      assert_equal [[ :start, path ], [ :set_session_name, "Useful name" ]], calls
+    end
+  end
+
   def test_renders_pending_new_session_before_pi_persists_the_file
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -131,9 +221,10 @@ class AppTest < Minitest::Test
   private
 
   class FakeRpcClient
-    def initialize(calls, events = [], session_file = nil)
+    def initialize(calls, events_or_commands = [], session_file = nil)
       @calls = calls
-      @events = events
+      @events = events_or_commands
+      @commands = events_or_commands
       @session_file = session_file
     end
 
@@ -153,6 +244,23 @@ class AppTest < Minitest::Test
     def get_state
       @calls << [:get_state]
       { "type" => "response", "command" => "get_state", "success" => true, "data" => { "sessionFile" => @session_file } }
+    end
+
+    def get_commands
+      @calls << [:get_commands]
+      { "type" => "response", "command" => "get_commands", "success" => true, "data" => { "commands" => @commands } }
+    end
+
+    def abort
+      @calls << [:abort]
+    end
+
+    def compact(instructions = nil)
+      @calls << [:compact, instructions]
+    end
+
+    def set_session_name(name)
+      @calls << [:set_session_name, name]
     end
 
     def drain_events

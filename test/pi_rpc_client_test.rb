@@ -51,7 +51,10 @@ class PiRpcClientTest < Minitest::Test
       JSON.generate({ id: "prompt-3", type: "accepted" }),
       JSON.generate({ id: "abort-4", type: "aborted" }),
       JSON.generate({ id: "new_session-5", type: "response", command: "new_session", success: true, data: { cancelled: false } }),
-      JSON.generate({ id: "switch_session-6", type: "response", command: "switch_session", success: true, data: { cancelled: false } })
+      JSON.generate({ id: "switch_session-6", type: "response", command: "switch_session", success: true, data: { cancelled: false } }),
+      JSON.generate({ id: "get_commands-7", type: "response", command: "get_commands", success: true, data: { commands: [] } }),
+      JSON.generate({ id: "compact-8", type: "response", command: "compact", success: true, data: {} }),
+      JSON.generate({ id: "set_session_name-9", type: "response", command: "set_session_name", success: true })
     ].join("\n") + "\n")
     client = PiRpcClient.new(stdin: input, stdout: output)
 
@@ -61,6 +64,9 @@ class PiRpcClientTest < Minitest::Test
     client.abort
     client.new_session("/tmp/session.jsonl")
     client.switch_session("/tmp/other-session.jsonl")
+    client.get_commands
+    client.compact("Focus summary")
+    client.set_session_name("Useful name")
 
     assert_equal [
       { "id" => "get_state-1", "type" => "get_state" },
@@ -68,7 +74,10 @@ class PiRpcClientTest < Minitest::Test
       { "id" => "prompt-3", "type" => "prompt", "message" => "Hello" },
       { "id" => "abort-4", "type" => "abort" },
       { "id" => "new_session-5", "type" => "new_session", "parentSession" => "/tmp/session.jsonl" },
-      { "id" => "switch_session-6", "type" => "switch_session", "sessionPath" => "/tmp/other-session.jsonl" }
+      { "id" => "switch_session-6", "type" => "switch_session", "sessionPath" => "/tmp/other-session.jsonl" },
+      { "id" => "get_commands-7", "type" => "get_commands" },
+      { "id" => "compact-8", "type" => "compact", "customInstructions" => "Focus summary" },
+      { "id" => "set_session_name-9", "type" => "set_session_name", "name" => "Useful name" }
     ], input.string.lines.map { |line| JSON.parse(line) }
   end
 end

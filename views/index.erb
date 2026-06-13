@@ -22,10 +22,19 @@
     .role { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: #4b5563; margin-bottom: 0.4rem; }
     .live-heading { margin-top: 1.5rem; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
-    .prompt-form { display: grid; gap: 0.5rem; margin: 1rem 0; }
-    .session-actions { margin: 1rem 0; }
-    textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; }
+    .prompt-form, .inline-form { display: grid; gap: 0.5rem; margin: 1rem 0; }
+    .session-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 0.5rem; margin: 1rem 0; }
+    .session-actions form { margin: 0; }
+    .command-list { border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 0.75rem; margin: 1rem 0; }
+    .command-list h3 { font-size: 0.8rem; text-transform: uppercase; color: #4b5563; margin: 0.75rem 0 0.25rem; }
+    .command-list h3:first-child { margin-top: 0; }
+    .command { font-size: 0.9rem; margin: 0.25rem 0; }
+    .command code { font-weight: 700; }
+    input, textarea { box-sizing: border-box; font: inherit; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; }
+    textarea { width: 100%; }
     button { justify-self: end; padding: 0.5rem 0.9rem; border: 0; border-radius: 0.5rem; background: #2563eb; color: white; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #4b5563; }
+    button.danger { background: #dc2626; }
   </style>
 </head>
 <body>
@@ -57,10 +66,47 @@
           <%= h @selected_session.path %>
         </p>
 
-        <form method="post" action="/sessions/new" class="session-actions">
-          <input type="hidden" name="session" value="<%= h @selected_session.path %>">
-          <button type="submit">New session in this cwd</button>
-        </form>
+        <div class="session-actions">
+          <form method="post" action="/sessions/new">
+            <input type="hidden" name="session" value="<%= h @selected_session.path %>">
+            <button type="submit">New session in this cwd</button>
+          </form>
+
+          <form method="post" action="/abort">
+            <input type="hidden" name="session" value="<%= h @selected_session.path %>">
+            <button type="submit" class="danger">Abort</button>
+          </form>
+
+          <form method="post" action="/compact">
+            <input type="hidden" name="session" value="<%= h @selected_session.path %>">
+            <input type="text" name="instructions" placeholder="Optional compact instructions">
+            <button type="submit" class="secondary">Compact</button>
+          </form>
+
+          <form method="post" action="/rename">
+            <input type="hidden" name="session" value="<%= h @selected_session.path %>">
+            <input type="text" name="name" placeholder="Session name">
+            <button type="submit" class="secondary">Rename</button>
+          </form>
+        </div>
+
+        <% commands_by_source = @commands.group_by { |command| command["source"] || "other" } %>
+        <% if @commands.any? %>
+          <section class="command-list">
+            <% ["extension", "prompt", "skill", "other"].each do |source| %>
+              <% next unless commands_by_source[source]&.any? %>
+              <h3><%= h source %> commands</h3>
+              <% commands_by_source[source].each do |command| %>
+                <div class="command">
+                  <code>/<%= h command["name"] %></code>
+                  <% if command["description"].to_s != "" %>
+                    — <%= h command["description"] %>
+                  <% end %>
+                </div>
+              <% end %>
+            <% end %>
+          </section>
+        <% end %>
 
         <% if @messages.empty? %>
           <p class="empty">No messages in this session.</p>
@@ -80,7 +126,7 @@
 
         <form method="post" action="/prompt" class="prompt-form">
           <input type="hidden" name="session" value="<%= h @selected_session.path %>">
-          <textarea name="message" rows="4" placeholder="Ask Pi…"></textarea>
+          <textarea name="message" rows="4" placeholder="Ask Pi… use /command for extension commands, prompt templates, and skills"></textarea>
           <button type="submit">Send</button>
         </form>
       <% else %>
