@@ -92,7 +92,10 @@ class PiWebGateway < Sinatra::Base
     end
 
     def message_article_class(message)
-      "message message--#{message_role_key(message.role)}"
+      classes = ["message", "message--#{message_role_key(message.role)}"]
+      classes << "message--compact" if message.compact
+      classes << "message--tool-error" if message.error
+      classes.join(" ")
     end
 
     def message_metadata(message)

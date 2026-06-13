@@ -14,7 +14,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, keyword_init: true)
 
   def initialize(root: File.expand_path("~/.pi/agent/sessions"))
     @root = root
@@ -39,7 +39,15 @@ class PiSessionStore
       text = content_text(message["content"])
       next if role.nil? || text.empty?
 
-      Message.new(role: role, text: text, timestamp: parse_time(entry["timestamp"]))
+      Message.new(
+        role: role,
+        text: text,
+        timestamp: parse_time(entry["timestamp"]),
+        compact: compact_message?(message),
+        summary: compact_summary(message),
+        expanded: message["isError"] == true,
+        error: message["isError"] == true
+      )
     end
   end
 
@@ -98,15 +106,46 @@ class PiSessionStore
       next part if part.is_a?(String)
       next unless part.is_a?(Hash)
 
-      part["text"] || part["thinking"] || tool_summary(part)
+      part["text"] || part["thinking"] || tool_text(part)
     end.join("\n")
   end
 
-  def tool_summary(part)
-    return unless part["type"] == "toolCall"
+  def compact_message?(message)
+    return true if message["role"] == "toolResult"
 
-    name = part["name"] || "tool"
-    "[tool: #{name}]"
+    content = Array(message["content"])
+    return false unless message["role"] == "assistant" && content.any?
+
+    content.all? do |part|
+      part.is_a?(Hash) && ["thinking", "toolCall", "toolResult"].include?(part["type"])
+    end
+  end
+
+  def compact_summary(message)
+    return message["toolName"] || "tool result" if message["role"] == "toolResult"
+
+    labels = Array(message["content"]).filter_map do |part|
+      next unless part.is_a?(Hash)
+
+      case part["type"]
+      when "thinking"
+        "thinking"
+      when "toolCall", "toolResult"
+        part["name"] || part["toolName"] || "tool"
+      end
+    end
+    labels.uniq.join(" + ")
+  end
+
+  def tool_text(part)
+    case part["type"]
+    when "toolCall"
+      name = part["name"] || "tool"
+      arguments = part["arguments"]
+      arguments && !arguments.empty? ? "[tool: #{name}]\n#{JSON.pretty_generate(arguments)}" : "[tool: #{name}]"
+    when "toolResult"
+      part["output"] || part["result"] || "[tool result]"
+    end
   end
 
   def parse_time(value)

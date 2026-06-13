@@ -320,12 +320,88 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'class="message message--assistant" data-role="assistant"'
       assert_includes response.body, 'class="message message--status" data-role="system"'
       assert_includes response.body, 'class="message message--status" data-role="custom"'
-      assert_includes response.body, 'class="message message--tool" data-role="toolResult"'
+      assert_includes response.body, 'message--tool'
+      assert_includes response.body, 'data-role="toolResult"'
       assert_includes response.body, 'class="message message--error" data-role="error"'
       assert_includes response.body, 'class="message-body"'
       assert_includes response.body, "Hello &lt;Pi&gt;"
       refute_includes response.body, "Hello <Pi>"
       assert_includes response.body, "messageRoleKey"
+    end
+  end
+
+  def test_renders_tool_and_thinking_messages_as_compact_details
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "Thinking through the problem" },
+              { type: "toolCall", name: "bash", arguments: { command: "ls" } }
+            ],
+            stopReason: "toolUse"
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:01:00Z",
+          message: {
+            role: "toolResult",
+            toolName: "bash",
+            content: [{ type: "text", text: "file list" }],
+            isError: false
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:02:00Z",
+          message: {
+            role: "toolResult",
+            toolName: "edit",
+            content: [{ type: "text", text: "No match" }],
+            isError: true
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, 'class="message message--assistant message--compact" data-role="assistant"'
+      assert_includes response.body, '<summary><span class="compact-summary">thinking + bash</span></summary>'
+      assert_includes response.body, 'class="message message--tool message--compact" data-role="toolResult"'
+      assert_includes response.body, '<summary><span class="compact-summary">bash</span></summary>'
+      assert_includes response.body, 'class="message message--tool message--compact message--tool-error" data-role="toolResult"'
+      assert_includes response.body, '<details class="message-details" open>'
+      assert_includes response.body, "Thinking through the problem"
+      assert_includes response.body, "file list"
+    end
+  end
+
+  def test_live_event_script_supports_compact_tool_rendering
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "function contentInfo(content, message = {})"
+      assert_includes response.body, "appendCompactMessage(roleName, info.summary, info.text, info.expanded"
+      assert_includes response.body, "part.type === \"toolCall\""
+      assert_includes response.body, "part.type === \"thinking\""
     end
   end
 
@@ -344,7 +420,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "let liveAssistantMessage = null;"
       assert_includes response.body, "let liveAssistantSeen = false;"
       assert_includes response.body, 'if (roleName === "user") {'
-      assert_includes response.body, 'liveAssistantMessage = appendMessage("assistant", text, true, shouldScroll);'
+      assert_includes response.body, 'appendMessage("assistant", text, true, shouldScroll);'
       assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
       assert_includes response.body, "showStatus(eventStatusText(event));"
       assert_includes response.body, 'if (liveAssistantSeen) showStatus("Done");'
@@ -431,17 +507,21 @@ class AppTest < Minitest::Test
   end
 
   def write_session_with_messages(root, messages)
-    session_dir = File.join(root, "--project--")
-    FileUtils.mkdir_p(session_dir)
-    path = File.join(session_dir, "messages.jsonl")
-    entries = [{ type: "session", id: "session-1", cwd: "/tmp/project" }]
-    entries.concat(messages.map.with_index do |message, index|
+    entries = messages.map.with_index do |message, index|
       {
         type: "message",
         timestamp: "2026-06-13T10:0#{index}:00Z",
         message: { role: message.fetch(:role), content: [{ type: "text", text: message.fetch(:text) }] }
       }
-    end)
+    end
+    write_session_with_raw_messages(root, entries)
+  end
+
+  def write_session_with_raw_messages(root, messages)
+    session_dir = File.join(root, "--project--")
+    FileUtils.mkdir_p(session_dir)
+    path = File.join(session_dir, "messages.jsonl")
+    entries = [{ type: "session", id: "session-1", cwd: "/tmp/project" }] + messages
     File.write(path, entries.map { |entry| JSON.generate(entry) }.join("\n") + "\n")
     path
   end

@@ -28,12 +28,17 @@
     .message--assistant { margin-right: 10%; background: #ffffff; }
     .message--status { background: #f8fafc; color: #4b5563; }
     .message--tool { background: #f9fafb; border-style: dashed; color: #374151; }
-    .message--error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+    .message--error, .message--tool-error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+    .message--compact { padding: 0.75rem 0.9rem; }
     .message--live { box-shadow: 0 0 0 1px #dbeafe inset; }
     .message-header { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.4rem; }
     .role { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: #4b5563; }
     .message--error .role { color: #991b1b; }
     .message-meta { font-size: 0.75rem; color: #6b7280; }
+    .message-details summary { cursor: pointer; font-weight: 700; color: #4b5563; }
+    .message-details[open] summary { margin-bottom: 0.5rem; }
+    .compact-summary { margin-left: 0.25rem; }
+    .message--tool-error .message-details summary { color: #991b1b; }
     .live-heading { margin-top: 1.5rem; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
     .prompt-form, .inline-form { display: grid; gap: 0.5rem; margin: 0; }
@@ -148,7 +153,14 @@
                   <div class="message-meta"><%= h message_metadata(message) %></div>
                 <% end %>
               </header>
-              <pre class="message-body"><%= h message.text %></pre>
+              <% if message.compact %>
+                <details class="message-details" <%= "open" if message.expanded %>>
+                  <summary><span class="compact-summary"><%= h message.summary %></span></summary>
+                  <pre class="message-body"><%= h message.text %></pre>
+                </details>
+              <% else %>
+                <pre class="message-body"><%= h message.text %></pre>
+              <% end %>
             </article>
           <% end %>
 
@@ -195,16 +207,34 @@
       liveEmpty?.remove();
     }
 
-    function contentText(content) {
-      return (Array.isArray(content) ? content : [content]).map((part) => {
+    function contentInfo(content, message = {}) {
+      const parts = Array.isArray(content) ? content : [content];
+      const labels = [];
+      const text = parts.map((part) => {
         if (!part) return "";
         if (typeof part === "string") return part;
         if (part.text) return part.text;
-        if (part.thinking) return part.thinking;
-        if (part.type === "toolCall") return `[tool: ${part.name || "tool"}]`;
-        if (part.type === "toolResult") return part.output || part.result || "[tool result]";
+        if (part.type === "thinking" || part.thinking) {
+          labels.push("thinking");
+          return part.thinking || "[thinking]";
+        }
+        if (part.type === "toolCall") {
+          labels.push(part.name || "tool");
+          const args = part.arguments ? `\n${JSON.stringify(part.arguments, null, 2)}` : "";
+          return `[tool: ${part.name || "tool"}]${args}`;
+        }
+        if (part.type === "toolResult") {
+          labels.push(part.name || part.toolName || "tool result");
+          return part.output || part.result || "[tool result]";
+        }
         return "";
       }).filter(Boolean).join("\n");
+
+      const compact = message.role === "toolResult" || (message.role === "assistant" && parts.length > 0 && parts.every((part) => {
+        return part && typeof part === "object" && ["thinking", "toolCall", "toolResult"].includes(part.type);
+      }));
+      const summary = message.toolName || [...new Set(labels)].join(" + ") || "tool output";
+      return { text, compact, summary, expanded: message.isError === true };
     }
 
     function eventMessage(event) {
@@ -215,7 +245,7 @@
       if (!message) return "";
       if (typeof message === "string") return message;
       if (message.text) return message.text;
-      if (message.content) return contentText(message.content);
+      if (message.content) return contentInfo(message.content, message).text;
       return "";
     }
 
@@ -280,6 +310,41 @@
       return { article, body };
     }
 
+    function appendCompactMessage(roleName, summary, text, expanded = false, live = true, forceScroll = false) {
+      removeLiveEmpty();
+      const shouldScroll = forceScroll || nearConversationBottom();
+      const roleKey = messageRoleKey(roleName);
+
+      const article = document.createElement("article");
+      article.className = `message message--${roleKey} message--compact${expanded ? " message--tool-error" : ""}${live ? " message--live" : ""}`;
+      article.dataset.role = roleName;
+
+      const header = document.createElement("header");
+      header.className = "message-header";
+      const role = document.createElement("div");
+      role.className = "role";
+      role.textContent = messageRoleLabel(roleName);
+      header.append(role);
+
+      const details = document.createElement("details");
+      details.className = "message-details";
+      details.open = expanded;
+      const summaryElement = document.createElement("summary");
+      const summaryText = document.createElement("span");
+      summaryText.className = "compact-summary";
+      summaryText.textContent = summary;
+      summaryElement.append(summaryText);
+      const body = document.createElement("pre");
+      body.className = "message-body";
+      body.textContent = text;
+      details.append(summaryElement, body);
+
+      article.append(header, details);
+      liveOutput.append(article);
+      if (shouldScroll) scrollToBottom();
+      return { article, body };
+    }
+
     function showStatus(text, forceScroll = false) {
       if (!statusLine) {
         statusLine = appendMessage("status", text, true, forceScroll);
@@ -292,7 +357,8 @@
 
     function renderMessageEvent(event) {
       const message = eventMessage(event);
-      const text = messageText(message);
+      const info = message?.content ? contentInfo(message.content, message) : { text: messageText(message), compact: false, summary: "" };
+      const text = info.text;
       if (!text) return;
 
       const roleName = liveEventRole(event, message);
@@ -303,13 +369,19 @@
       }
 
       if (roleName !== "assistant") {
-        appendMessage(roleName, text, true, shouldScroll);
+        if (info.compact) {
+          appendCompactMessage(roleName, info.summary, info.text, info.expanded, true, shouldScroll);
+        } else {
+          appendMessage(roleName, text, true, shouldScroll);
+        }
         return;
       }
 
       liveAssistantSeen = true;
       if (!liveAssistantMessage || event.type === "message_start") {
-        liveAssistantMessage = appendMessage("assistant", text, true, shouldScroll);
+        liveAssistantMessage = info.compact ?
+          appendCompactMessage(roleName, info.summary, info.text, info.expanded, true, shouldScroll) :
+          appendMessage("assistant", text, true, shouldScroll);
       } else {
         liveAssistantMessage.body.textContent = text;
         if (shouldScroll) scrollToBottom();

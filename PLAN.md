@@ -117,14 +117,14 @@ Success check:
 
 ### 5. Compact expandable Pi/tool output
 
-- [ ] Detect Pi tool/thinking/status content in historical messages where possible.
-- [ ] Render noisy Pi output as compact cards by default.
-- [ ] Use expandable details for full tool inputs/results/output.
-- [ ] Show concise summaries such as `bash`, `read`, `edit`, or `thinking`.
-- [ ] Apply similar compact rendering to live RPC events.
-- [ ] Keep errors prominent and expanded enough to notice.
-- [ ] Add tests for collapsed tool/thinking rendering.
-- [ ] Restart server and report the test URL plus what to verify.
+- [x] Detect Pi tool/thinking/status content in historical messages where possible.
+- [x] Render noisy Pi output as compact cards by default.
+- [x] Use expandable details for full tool inputs/results/output.
+- [x] Show concise summaries such as `bash`, `read`, `edit`, or `thinking`.
+- [x] Apply similar compact rendering to live RPC events.
+- [x] Keep errors prominent and expanded enough to notice.
+- [x] Add tests for collapsed tool/thinking rendering.
+- [x] Restart server and report the test URL plus what to verify.
 
 Success check:
 
