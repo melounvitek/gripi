@@ -36,6 +36,7 @@ class PiWebGateway < Sinatra::Base
   set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd) }]
   set :rpc_client_registry, nil
   set :pending_rpc_cwds, {}
+  set :pending_rpc_cwds_mutex, Mutex.new
   set :rpc_idle_timeout_seconds, ENV.fetch("PI_RPC_IDLE_TIMEOUT_SECONDS", "1800").to_i
 
   helpers do
@@ -220,7 +221,7 @@ class PiWebGateway < Sinatra::Base
     client = settings.new_rpc_client_factory.first.call(cwd)
     new_session_path = session_file_from(client.get_state) || pending_session_path(cwd)
     rpc_clients.register(new_session_path, client)
-    settings.pending_rpc_cwds[new_session_path] = cwd unless File.exist?(new_session_path)
+    remember_pending_rpc_cwd(new_session_path, cwd) unless File.exist?(new_session_path)
     redirect "/?session=#{Rack::Utils.escape(new_session_path)}"
   end
 
@@ -315,7 +316,7 @@ class PiWebGateway < Sinatra::Base
     pending_path = params["session"]
     return if pending_path.to_s.empty? || File.exist?(pending_path)
 
-    cwd = settings.pending_rpc_cwds[pending_path]
+    cwd = pending_rpc_cwd(pending_path)
     return unless cwd
     groups[cwd] ||= []
     groups[cwd].unshift(PiSessionStore::Session.new(
@@ -350,7 +351,7 @@ class PiWebGateway < Sinatra::Base
 
     rpc_clients.close_idle_clients(
       idle_timeout: timeout,
-      except: settings.pending_rpc_cwds.keys
+      except: pending_rpc_cwd_paths
     )
   end
 
@@ -366,16 +367,46 @@ class PiWebGateway < Sinatra::Base
     return unless pending_path
 
     rpc_clients.move(pending_path, session_path)
-    settings.pending_rpc_cwds.delete(pending_path)
+    forget_pending_rpc_cwd(pending_path)
   end
 
   def matching_pending_rpc_path(session_path)
-    settings.pending_rpc_cwds.find do |pending_path, cwd|
+    pending_rpc_cwd_entries.find do |pending_path, cwd|
       next unless rpc_clients.active?(pending_path)
       next unless session_cwd(session_path) == cwd
 
       session_file_from(rpc_clients.client_for(pending_path).get_state) == session_path
     end&.first
+  end
+
+  def remember_pending_rpc_cwd(session_path, cwd)
+    settings.pending_rpc_cwds_mutex.synchronize do
+      settings.pending_rpc_cwds[session_path] = cwd
+    end
+  end
+
+  def pending_rpc_cwd(session_path)
+    settings.pending_rpc_cwds_mutex.synchronize do
+      settings.pending_rpc_cwds[session_path]
+    end
+  end
+
+  def pending_rpc_cwd_paths
+    settings.pending_rpc_cwds_mutex.synchronize do
+      settings.pending_rpc_cwds.keys
+    end
+  end
+
+  def pending_rpc_cwd_entries
+    settings.pending_rpc_cwds_mutex.synchronize do
+      settings.pending_rpc_cwds.to_a
+    end
+  end
+
+  def forget_pending_rpc_cwd(session_path)
+    settings.pending_rpc_cwds_mutex.synchronize do
+      settings.pending_rpc_cwds.delete(session_path)
+    end
   end
 
   def session_cwd(session_path)
