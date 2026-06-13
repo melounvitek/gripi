@@ -52,15 +52,15 @@ The completed PoC already has:
 
 ### 1. Discord-like app shell and scrolling
 
-- [ ] Split the page into a viewport-height app shell.
-- [ ] Make the left sidebar scroll independently.
-- [ ] Make the conversation/message area scroll independently.
-- [ ] Keep the session header visible while reading.
-- [ ] Keep the prompt composer fixed/sticky at the bottom of the conversation panel.
-- [ ] Ensure opening a selected conversation scrolls to the bottom.
-- [ ] Ensure live output keeps the view at the bottom when the user is already near the bottom.
-- [ ] Add or update tests where practical for expected structure/classes.
-- [ ] Restart server and report the test URL plus what to verify.
+- [x] Split the page into a viewport-height app shell.
+- [x] Make the left sidebar scroll independently.
+- [x] Make the conversation/message area scroll independently.
+- [x] Keep the session header visible while reading.
+- [x] Keep the prompt composer fixed/sticky at the bottom of the conversation panel.
+- [x] Ensure opening a selected conversation scrolls to the bottom.
+- [x] Ensure live output keeps the view at the bottom when the user is already near the bottom.
+- [x] Add or update tests where practical for expected structure/classes.
+- [x] Restart server and report the test URL plus what to verify.
 
 Success check:
 
