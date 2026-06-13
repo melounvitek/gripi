@@ -22,8 +22,10 @@
     .attachment button { padding: 0.1rem 0.35rem; background: transparent; border: 1px solid var(--border); color: var(--muted); }
     .attachment button:hover { color: var(--text); background: var(--panel-soft); transform: none; }
     h1 { font-size: 1.25rem; line-height: 1.2; margin: 0 0 1rem; letter-spacing: -0.01em; }
-    h2 { font-size: 0.78rem; margin: 1.25rem 0 0.5rem; color: var(--muted-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.04em; }
+    h2 { font-size: 0.78rem; margin: 0; color: var(--muted-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.04em; }
     .cwd-group { margin-bottom: 0.75rem; }
+    .cwd-header { display: flex; align-items: center; gap: 0.4rem; margin: 1.25rem 0 0.5rem; }
+    .cwd-header h2 { flex: 1; min-width: 0; }
     .cwd-toggle { display: inline-block; margin: 0.35rem 0 0.5rem; font-size: 0.8rem; color: var(--muted); text-decoration: none; }
     .cwd-toggle:hover { color: var(--text); text-decoration: underline; }
     a.session { position: relative; display: block; padding: 0.65rem 0.75rem; margin: 0.25rem 0; border-radius: 0.6rem; color: inherit; text-decoration: none; border: 1px solid transparent; transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
@@ -32,6 +34,11 @@
     a.session.selected::before { content: ""; position: absolute; left: -1rem; top: 0.7rem; bottom: 0.7rem; width: 4px; border-radius: 999px; background: var(--accent); }
     .session-title { font-weight: 650; overflow-wrap: anywhere; }
     .session-meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+    .sidebar-icon-button { flex: 0 0 auto; width: 1.65rem; height: 1.65rem; padding: 0; border-radius: 999px; line-height: 1; }
+    .session-rename { display: none; gap: 0.35rem; grid-template-columns: minmax(0, 1fr) auto; margin: 0.3rem 0 0.55rem; }
+    a.session.selected + .session-rename { display: grid; }
+    .session-rename input { min-width: 0; padding: 0.45rem 0.55rem; font-size: 0.82rem; }
+    .session-rename button { padding: 0.45rem 0.6rem; font-size: 0.82rem; }
     .session-running-indicator { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.4rem; color: var(--success); font-size: 0.75rem; font-weight: 700; }
     .session-running-indicator::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 4px rgba(35, 165, 90, 0.16); }
     .empty { color: var(--muted); background: var(--panel-soft); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem; }
@@ -68,12 +75,10 @@
     .message--tool-error .message-details summary { color: #ffb4b6; }
     .raw-details { margin-top: 0.75rem; }
     .raw-details summary { font-size: 0.8rem; font-weight: 600; color: var(--muted-soft); }
-    .live-heading { margin-top: 1.5rem; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
     .prompt-form, .inline-form { display: grid; gap: 0.5rem; margin: 0; }
-    .session-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 0.5rem; margin: 1rem 0 0; }
-    .session-actions form { margin: 0; }
-    .command-list { border: 1px solid var(--border); border-radius: 0.75rem; padding: 0.75rem; background: var(--panel-soft); }
+    .command-list { display: none; border: 1px solid var(--border); border-radius: 0.75rem; padding: 0.75rem; background: var(--panel-soft); }
+    .command-list.is-visible { display: block; }
     .command-list summary { cursor: pointer; font-size: 0.85rem; font-weight: 700; color: var(--muted); }
     .command-list summary:hover { color: var(--text); }
     .command-list h3 { font-size: 0.75rem; text-transform: uppercase; color: var(--muted-soft); margin: 0.75rem 0 0.25rem; }
@@ -90,16 +95,21 @@
     .composer-state[data-state="error"] { color: #ffb4b6; }
     .composer-state[data-state="error"]::before { background: var(--danger); }
     .composer-actions { display: flex; align-items: center; gap: 0.5rem; }
-    .abort-form { display: none; }
+    .compact-controls { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+    .compact-controls input { width: min(22rem, 36vw); padding: 0.5rem 0.65rem; font-size: 0.9rem; }
+    .abort-form, .compact-form { display: none; }
     input, textarea { box-sizing: border-box; font: inherit; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.55rem; color: var(--text); background: var(--panel-soft); outline: none; }
     input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.2); }
     textarea { width: 100%; resize: none; min-height: 3.25rem; max-height: 12rem; line-height: 1.4; }
     button { justify-self: end; padding: 0.5rem 0.9rem; border: 0; border-radius: 0.55rem; background: var(--accent); color: white; font-weight: 700; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
     button:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    button:disabled { opacity: 0.48; cursor: not-allowed; transform: none; }
+    button:disabled:hover { background: var(--accent); transform: none; }
     button.secondary { background: #4e5058; }
     button.secondary:hover { background: #5c5f66; }
     button.danger { background: #b83b3e; }
     button.danger:hover { background: var(--danger); }
+    button.danger:disabled:hover { background: #b83b3e; }
     .copy-button { margin-left: auto; padding: 0.2rem 0.5rem; font-size: 0.75rem; background: transparent; border: 1px solid var(--border); color: var(--muted); }
     .copy-button:hover { color: var(--text); background: var(--panel-softer); transform: none; }
   </style>
@@ -114,7 +124,13 @@
 
       <% @groups.each do |cwd, sessions| %>
         <section class="cwd-group">
-          <h2 title="<%= h cwd %>"><%= h cwd %></h2>
+          <div class="cwd-header">
+            <h2 title="<%= h cwd %>"><%= h File.basename(cwd) %></h2>
+            <form method="post" action="/sessions/new">
+              <input type="hidden" name="session" value="<%= h sessions.first.path %>">
+              <button type="submit" class="sidebar-icon-button" title="New session in this directory" aria-label="New session in this directory">+</button>
+            </form>
+          </div>
           <% visible_sidebar_sessions(cwd, sessions).each do |session| %>
             <a class="session <%= "selected" if selected?(session) %>" href="/?session=<%= h Rack::Utils.escape(session.path) %>">
               <div class="session-title">
@@ -127,6 +143,14 @@
                 <%= h session.message_count %> messages · updated <%= h format_time(session.modified_at) %>
               </div>
             </a>
+            <%# Rename UI placeholder: hidden for now until the sidebar interaction is polished. %>
+            <% if false && selected?(session) %>
+              <form method="post" action="/rename" class="session-rename">
+                <input type="hidden" name="session" value="<%= h session.path %>">
+                <input type="text" name="name" value="<%= h session.display_name %>" aria-label="Session name">
+                <button type="submit" class="secondary">Rename</button>
+              </form>
+            <% end %>
           <% end %>
 
           <% if sidebar_group_overflow?(cwd, sessions) %>
@@ -142,29 +166,6 @@
       <% if @selected_session %>
         <header class="session-header">
           <h1><%= h @selected_session.display_name %></h1>
-          <p class="session-meta">
-            <%= h @selected_session.cwd %><br>
-            <%= h @selected_session.path %>
-          </p>
-
-          <div class="session-actions">
-            <form method="post" action="/sessions/new">
-              <input type="hidden" name="session" value="<%= h @selected_session.path %>">
-              <button type="submit">New session in this cwd</button>
-            </form>
-
-            <form method="post" action="/compact">
-              <input type="hidden" name="session" value="<%= h @selected_session.path %>">
-              <input type="text" name="instructions" placeholder="Optional compact instructions">
-              <button type="submit" class="secondary">Compact</button>
-            </form>
-
-            <form method="post" action="/rename">
-              <input type="hidden" name="session" value="<%= h @selected_session.path %>">
-              <input type="text" name="name" placeholder="Session name">
-              <button type="submit" class="secondary">Rename</button>
-            </form>
-          </div>
 
         </header>
 
@@ -205,10 +206,7 @@
             </article>
           <% end %>
 
-          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
-            <h2 class="live-heading">Live output</h2>
-            <p class="empty" id="live-empty">Waiting for Pi events…</p>
-          </section>
+          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>"></section>
         </section>
 
         <div class="composer">
@@ -237,6 +235,10 @@
               <input type="hidden" name="session" value="<%= h @selected_session.path %>">
             </form>
 
+            <form method="post" action="/compact" class="compact-form" id="compact-form">
+              <input type="hidden" name="session" value="<%= h @selected_session.path %>">
+            </form>
+
             <form method="post" action="/prompt" class="prompt-form" enctype="multipart/form-data">
               <input type="hidden" name="session" value="<%= h @selected_session.path %>">
               <div class="attachment-tray" aria-live="polite"></div>
@@ -244,8 +246,11 @@
               <div class="composer-controls">
                 <span class="composer-state" data-state="idle">Ready</span>
                 <div class="composer-actions">
-                  <button type="submit" class="danger" form="abort-form">Abort running Pi</button>
-                  <button type="submit" class="send-button">Send</button>
+                  <div class="compact-controls">
+                    <input type="text" name="instructions" form="compact-form" placeholder="Optional compact instructions" aria-label="Optional compact instructions">
+                    <button type="submit" class="secondary" form="compact-form">Compact</button>
+                  </div>
+                  <button type="submit" class="danger abort-button" form="abort-form" disabled>Abort running Pi</button>
                 </div>
               </div>
             </form>
@@ -263,12 +268,12 @@
   </div>
   <script>
     const liveOutput = document.getElementById("live-output");
-    const liveEmpty = document.getElementById("live-empty");
     const promptForm = document.querySelector(".prompt-form");
     const promptTextarea = promptForm?.querySelector("textarea");
     const sendButton = promptForm?.querySelector(".send-button");
     const attachmentTray = promptForm?.querySelector(".attachment-tray");
     const composerState = document.querySelector(".composer-state");
+    const abortButton = document.querySelector(".abort-button");
     const commandList = document.getElementById("command-list");
     const commandFilter = commandList?.querySelector(".command-filter");
     const conversationScroll = document.getElementById("conversation-scroll");
@@ -276,7 +281,6 @@
     let liveAssistantSegments = new Map();
     let liveAssistantSeen = false;
     let liveBashToolCalls = new Map();
-    let statusLine = null;
     let pendingImages = [];
 
     function nearConversationBottom() {
@@ -288,14 +292,11 @@
       conversationScroll?.scrollTo({ top: conversationScroll.scrollHeight, behavior });
     }
 
-    function removeLiveEmpty() {
-      liveEmpty?.remove();
-    }
-
     function setComposerState(state, label) {
       if (!composerState) return;
       composerState.dataset.state = state;
       composerState.textContent = label;
+      if (abortButton) abortButton.disabled = !["running", "sending"].includes(state);
       if (sendButton) sendButton.textContent = state === "sending" ? "Sending…" : "Send";
     }
 
@@ -484,7 +485,6 @@
     }
 
     function appendMessage(roleName, text, live = true, forceScroll = false) {
-      removeLiveEmpty();
       const shouldScroll = forceScroll || nearConversationBottom();
       const roleKey = messageRoleKey(roleName);
 
@@ -513,7 +513,6 @@
     }
 
     function appendCompactMessage(roleName, summary, text, expanded = false, live = true, forceScroll = false, rawDetails = "") {
-      removeLiveEmpty();
       const shouldScroll = forceScroll || nearConversationBottom();
       const roleKey = messageRoleKey(roleName);
 
@@ -568,15 +567,7 @@
       return button;
     }
 
-    function showStatus(text, forceScroll = false) {
-      if (!statusLine) {
-        statusLine = appendMessage("status", text, true, forceScroll);
-      } else {
-        const shouldScroll = forceScroll || nearConversationBottom();
-        statusLine.body.textContent = text;
-        if (shouldScroll) scrollToBottom();
-      }
-    }
+    function showStatus(_text, _forceScroll = false) {}
 
     function resetLiveAssistantTracking() {
       liveAssistantMessage = null;
@@ -728,9 +719,11 @@
       resizePromptTextarea();
       if (!commandList) return;
 
-      if (promptTextarea.value.trimStart().startsWith("/")) {
+      if (promptTextarea.value.startsWith("/")) {
+        commandList.classList.add("is-visible");
         commandList.setAttribute("open", "");
       } else {
+        commandList.classList.remove("is-visible");
         commandList.removeAttribute("open");
       }
     });
@@ -806,6 +799,7 @@
       appendMessage("user", [message, pendingImages.length > 0 ? `[${imageAttachmentLabel(pendingImages.length)}]` : ""].filter(Boolean).join("\n"), true, true);
       promptTextarea.value = "";
       clearAttachments();
+      commandList?.classList.remove("is-visible");
       commandList?.removeAttribute("open");
       if (commandFilter) commandFilter.value = "";
       commandList?.querySelectorAll(".command").forEach((command) => { command.hidden = false; });

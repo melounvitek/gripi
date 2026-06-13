@@ -581,8 +581,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'function renderAssistantMarkdown(body, text)'
       assert_includes response.body, 'fetch("/markdown", { method: "POST", body: formData })'
       assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
+      assert_includes response.body, "function showStatus(_text, _forceScroll = false) {}"
       assert_includes response.body, "showStatus(eventStatusText(event));"
-      assert_includes response.body, 'if (liveAssistantSeen) showStatus("Done");'
       assert_includes response.body, "resetLiveAssistantTracking();\n      appendMessage(\"user\", [message, pendingImages.length > 0"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"
