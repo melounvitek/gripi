@@ -342,10 +342,13 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "let liveAssistantMessage = null;"
+      assert_includes response.body, "let liveAssistantSeen = false;"
+      assert_includes response.body, 'if (roleName === "user") {'
       assert_includes response.body, 'liveAssistantMessage = appendMessage("assistant", text, true, shouldScroll);'
       assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
       assert_includes response.body, "showStatus(eventStatusText(event));"
-      assert_includes response.body, "liveAssistantMessage = null;\n      appendMessage(\"user\", message, true, true);"
+      assert_includes response.body, 'if (liveAssistantSeen) showStatus("Done");'
+      assert_includes response.body, "liveAssistantMessage = null;\n      liveAssistantSeen = false;\n      appendMessage(\"user\", message, true, true);"
     end
   end
 

@@ -179,6 +179,7 @@
     const promptForm = document.querySelector(".prompt-form");
     const conversationScroll = document.getElementById("conversation-scroll");
     let liveAssistantMessage = null;
+    let liveAssistantSeen = false;
     let statusLine = null;
 
     function nearConversationBottom() {
@@ -297,11 +298,16 @@
       const roleName = liveEventRole(event, message);
       const shouldScroll = nearConversationBottom();
 
+      if (roleName === "user") {
+        return;
+      }
+
       if (roleName !== "assistant") {
         appendMessage(roleName, text, true, shouldScroll);
         return;
       }
 
+      liveAssistantSeen = true;
       if (!liveAssistantMessage || event.type === "message_start") {
         liveAssistantMessage = appendMessage("assistant", text, true, shouldScroll);
       } else {
@@ -327,8 +333,9 @@
       }
 
       if (["turn_end", "agent_end"].includes(event.type)) {
-        showStatus("Done");
+        if (liveAssistantSeen) showStatus("Done");
         liveAssistantMessage = null;
+        liveAssistantSeen = false;
         return;
       }
 
@@ -358,6 +365,7 @@
       formData.set("message", message);
 
       liveAssistantMessage = null;
+      liveAssistantSeen = false;
       appendMessage("user", message, true, true);
       textarea.value = "";
       showStatus("Sending…", true);
