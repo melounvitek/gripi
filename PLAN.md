@@ -149,7 +149,36 @@ Success check:
 - Unsafe HTML is not executed or emitted unsanitized.
 - Existing plain sessions still render cleanly.
 
-### 7. Composer and command UX polish
+### 7. Fix live compact message update duplication regression
+
+Regression noticed after splitting mixed assistant thinking/tool content from visible assistant replies and adding live markdown rendering.
+
+Observed behavior:
+
+- During live streaming, compact `thinking` and tool cards can be appended repeatedly for each incremental `message_update`.
+- This produces many near-duplicate cards such as `I find`, `I find it`, `I find it interesting`, etc.
+- The duplication can also affect the visible assistant reply itself, not only compact/internal messages.
+- Historical session JSONL does not appear to contain those duplicates; the duplication is produced by browser-side live rendering.
+- The likely cause is that live rendering does not have a robust per-live-message/segment identity and can append instead of update when event shapes change, including for normal assistant text after the recent mixed-segment/live-markdown changes.
+
+- [ ] Reproduce with a live prompt that emits thinking/tool updates.
+- [ ] Inspect actual live RPC event shapes for `message_start`, `message_update`, and `message_end` with compact segments.
+- [ ] Track all live assistant segments, including normal visible reply text and compact assistant/tool segments, by stable message/segment identity where available.
+- [ ] Update existing compact thinking/tool cards and visible assistant reply bubbles in place on incremental `message_update` instead of appending duplicates.
+- [ ] Start a new compact card or assistant reply bubble only for a real new segment/message identity or `message_start` boundary.
+- [ ] Reset live segment tracking on `turn_end`, `agent_end`, new prompt submit, and session switch/page load.
+- [ ] Preserve mixed-message behavior: compact thinking/tool card plus separate visible markdown assistant reply.
+- [ ] Add focused tests for live compact update behavior where practical.
+- [ ] Restart server and report the test URL plus what to verify.
+
+Success check:
+
+- Live thinking/tool content updates in place while streaming.
+- A single thinking/tool operation does not create many incremental duplicate cards.
+- The visible assistant reply itself also updates in place and does not duplicate during streaming.
+- Final assistant reply remains visible as markdown and is not hidden inside the compact thinking block.
+
+### 8. Composer and command UX polish
 
 Note: the command discovery block is temporarily hidden in the UI so it does not block testing the chat experience; restore/redesign it in this step.
 
@@ -168,7 +197,7 @@ Success check:
 - Commands are discoverable but not visually noisy.
 - The running/abort state is clear.
 
-### 8. Visual polish pass
+### 9. Visual polish pass
 
 - [ ] Improve spacing, typography, colors, borders, and hover states.
 - [ ] Consider a dark Discord-like theme as the default.
