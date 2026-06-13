@@ -27,6 +27,8 @@ class PiRpcClientTest < Minitest::Test
     response = client.request("get_state", id: "state-1")
 
     assert_equal({ "id" => "state-1", "type" => "state", "cwd" => "/tmp/project" }, response)
+    assert_equal [{ "type" => "event", "name" => "queued" }], client.drain_events
+    assert_empty client.drain_events
     written = JSON.parse(input.string.lines.first)
     assert_equal({ "id" => "state-1", "type" => "get_state" }, written)
   end

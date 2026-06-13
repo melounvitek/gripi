@@ -11,6 +11,8 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       calls = []
       PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :active_rpc_client, nil
+      PiWebGateway.set :active_rpc_session, nil
       PiWebGateway.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
@@ -22,16 +24,41 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 303, response.status
-      assert_equal [[ :start, path ], [ :prompt, "Hello Pi" ], [ :get_messages ], [ :close ]], calls
+      assert_equal [[ :start, path ], [ :prompt, "Hello Pi" ]], calls
       assert_includes response["Location"], Rack::Utils.escape(path)
+    end
+  end
+
+  def test_returns_buffered_rpc_events_for_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :active_rpc_client, nil
+      PiWebGateway.set :active_rpc_session, nil
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, [{ "type" => "assistant_delta", "text" => "Hi" }])
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/events",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_equal "application/json", response.content_type
+      assert_equal({ "events" => [{ "type" => "assistant_delta", "text" => "Hi" }] }, JSON.parse(response.body))
+      assert_equal [[ :start, path ], [ :drain_events ]], calls
     end
   end
 
   private
 
   class FakeRpcClient
-    def initialize(calls)
+    def initialize(calls, events = [])
       @calls = calls
+      @events = events
     end
 
     def prompt(message)
@@ -40,6 +67,11 @@ class AppTest < Minitest::Test
 
     def get_messages
       @calls << [:get_messages]
+    end
+
+    def drain_events
+      @calls << [:drain_events]
+      @events
     end
 
     def close

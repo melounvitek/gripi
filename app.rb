@@ -1,5 +1,6 @@
 require "sinatra/base"
 require "erb"
+require "json"
 require_relative "lib/pi_session_store"
 require_relative "lib/pi_rpc_client"
 
@@ -7,6 +8,8 @@ class PiWebGateway < Sinatra::Base
   set :root, File.dirname(__FILE__)
   set :sessions_root, ENV.fetch("PI_SESSIONS_ROOT", File.expand_path("~/.pi/agent/sessions"))
   set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
+  set :active_rpc_client, nil
+  set :active_rpc_session, nil
 
   helpers do
     def h(value)
@@ -36,12 +39,15 @@ class PiWebGateway < Sinatra::Base
     message = params.fetch("message").to_s
     halt 400, "Message cannot be empty" if message.strip.empty?
 
-    client = settings.rpc_client_factory.first.call(session_path)
+    client = active_rpc_client(session_path)
     client.prompt(message)
-    client.get_messages
     redirect "/?session=#{Rack::Utils.escape(session_path)}"
-  ensure
-    client&.close
+  end
+
+  get "/events" do
+    session_path = params.fetch("session")
+    content_type :json
+    JSON.generate(events: active_rpc_client(session_path).drain_events)
   end
 
   private
@@ -51,5 +57,15 @@ class PiWebGateway < Sinatra::Base
     return sessions.first if selected_path.to_s.empty?
 
     sessions.find { |session| session.path == selected_path } || sessions.first
+  end
+
+  def active_rpc_client(session_path)
+    return settings.active_rpc_client if settings.active_rpc_session == session_path && settings.active_rpc_client
+
+    settings.active_rpc_client&.close
+    client = settings.rpc_client_factory.first.call(session_path)
+    settings.set :active_rpc_session, session_path
+    settings.set :active_rpc_client, client
+    client
   end
 end

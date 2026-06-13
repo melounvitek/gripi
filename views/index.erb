@@ -16,8 +16,10 @@
     .session-title { font-weight: 600; overflow-wrap: anywhere; }
     .session-meta { font-size: 0.8rem; color: #6b7280; margin-top: 0.2rem; }
     .empty { color: #6b7280; }
-    .message { border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 0.9rem; margin-bottom: 0.75rem; }
+    .message, .event { border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 0.9rem; margin-bottom: 0.75rem; }
+    .event { background: #f8fafc; }
     .role { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: #4b5563; margin-bottom: 0.4rem; }
+    .live-heading { margin-top: 1.5rem; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
     .prompt-form { display: grid; gap: 0.5rem; margin: 1rem 0; }
     textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; }
@@ -59,6 +61,11 @@
           <button type="submit">Send</button>
         </form>
 
+        <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
+          <h2 class="live-heading">Live output</h2>
+          <p class="empty" id="live-empty">Waiting for Pi events…</p>
+        </section>
+
         <% if @messages.empty? %>
           <p class="empty">No messages in this session.</p>
         <% end %>
@@ -75,5 +82,48 @@
       <% end %>
     </main>
   </div>
+  <script>
+    const liveOutput = document.getElementById("live-output");
+    const liveEmpty = document.getElementById("live-empty");
+
+    function eventText(event) {
+      return event.text || event.delta || event.message || event.error || JSON.stringify(event, null, 2);
+    }
+
+    function eventTitle(event) {
+      return event.name || event.type || "event";
+    }
+
+    function appendEvent(event) {
+      if (liveEmpty) liveEmpty.remove();
+
+      const article = document.createElement("article");
+      article.className = "event";
+
+      const role = document.createElement("div");
+      role.className = "role";
+      role.textContent = eventTitle(event);
+
+      const body = document.createElement("pre");
+      body.textContent = eventText(event);
+
+      article.append(role, body);
+      liveOutput.append(article);
+    }
+
+    async function pollEvents() {
+      if (!liveOutput) return;
+
+      const response = await fetch(liveOutput.dataset.eventsUrl);
+      if (!response.ok) return;
+
+      const payload = await response.json();
+      payload.events.forEach(appendEvent);
+    }
+
+    if (liveOutput) {
+      setInterval(() => pollEvents().catch(() => {}), 1000);
+    }
+  </script>
 </body>
 </html>
