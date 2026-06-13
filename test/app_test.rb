@@ -303,6 +303,7 @@ class AppTest < Minitest::Test
         { role: "user", text: "Hello <Pi>" },
         { role: "assistant", text: "Hi there" },
         { role: "system", text: "System note" },
+        { role: "custom", text: "Session renamed" },
         { role: "toolResult", text: "Tool output" },
         { role: "error", text: "Something failed" }
       ])
@@ -318,12 +319,33 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'class="message message--user" data-role="user"'
       assert_includes response.body, 'class="message message--assistant" data-role="assistant"'
       assert_includes response.body, 'class="message message--status" data-role="system"'
+      assert_includes response.body, 'class="message message--status" data-role="custom"'
       assert_includes response.body, 'class="message message--tool" data-role="toolResult"'
       assert_includes response.body, 'class="message message--error" data-role="error"'
       assert_includes response.body, 'class="message-body"'
       assert_includes response.body, "Hello &lt;Pi&gt;"
       refute_includes response.body, "Hello <Pi>"
       assert_includes response.body, "messageRoleKey"
+    end
+  end
+
+  def test_live_event_script_keeps_assistant_and_status_roles_separate
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "let liveAssistantMessage = null;"
+      assert_includes response.body, 'liveAssistantMessage = appendMessage("assistant", text, true, shouldScroll);'
+      assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
+      assert_includes response.body, "showStatus(eventStatusText(event));"
+      assert_includes response.body, "liveAssistantMessage = null;\n      appendMessage(\"user\", message, true, true);"
     end
   end
 

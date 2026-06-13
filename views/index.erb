@@ -178,7 +178,7 @@
     const liveEmpty = document.getElementById("live-empty");
     const promptForm = document.querySelector(".prompt-form");
     const conversationScroll = document.getElementById("conversation-scroll");
-    let liveMessage = null;
+    let liveAssistantMessage = null;
     let statusLine = null;
 
     function nearConversationBottom() {
@@ -226,7 +226,30 @@
 
     function messageRoleLabel(roleName) {
       if (roleName === "toolResult") return "tool result";
+      if (["custom", "session_info"].includes(roleName)) return "status";
       return roleName || "status";
+    }
+
+    function liveEventRole(event, message) {
+      if (["custom", "custom_message", "session_info", "queue_update", "compaction_start", "compaction_end"].includes(event.type)) {
+        return "status";
+      }
+
+      const role = message?.role;
+      if (["assistant", "user", "tool", "toolResult", "error"].includes(role)) return role;
+      if (["custom", "system", "status"].includes(role)) return "status";
+      if (["message_start", "message_update", "message_end"].includes(event.type)) return "assistant";
+      return "status";
+    }
+
+    function eventStatusText(event) {
+      if (event.type === "session_info" && event.name) return `Session renamed to “${event.name}”`;
+      if (event.type === "custom_message" && event.content) return event.content;
+      if (event.type === "custom" && event.customType) return `${event.customType} updated`;
+      if (event.type === "queue_update") return "Queued follow-up work updated";
+      if (event.type === "compaction_start") return "Compaction started";
+      if (event.type === "compaction_end") return event.aborted ? "Compaction aborted" : "Compaction finished";
+      return event.message || event.text || event.type || "Status update";
     }
 
     function appendMessage(roleName, text, live = true, forceScroll = false) {
@@ -271,11 +294,18 @@
       const text = messageText(message);
       if (!text) return;
 
+      const roleName = liveEventRole(event, message);
       const shouldScroll = nearConversationBottom();
-      if (!liveMessage || event.type === "message_start") {
-        liveMessage = appendMessage(message.role || "assistant", text, true, shouldScroll);
+
+      if (roleName !== "assistant") {
+        appendMessage(roleName, text, true, shouldScroll);
+        return;
+      }
+
+      if (!liveAssistantMessage || event.type === "message_start") {
+        liveAssistantMessage = appendMessage("assistant", text, true, shouldScroll);
       } else {
-        liveMessage.body.textContent = text;
+        liveAssistantMessage.body.textContent = text;
         if (shouldScroll) scrollToBottom();
       }
     }
@@ -291,9 +321,14 @@
         return;
       }
 
+      if (["custom", "custom_message", "session_info", "queue_update", "compaction_start", "compaction_end"].includes(event.type)) {
+        showStatus(eventStatusText(event));
+        return;
+      }
+
       if (["turn_end", "agent_end"].includes(event.type)) {
         showStatus("Done");
-        liveMessage = null;
+        liveAssistantMessage = null;
         return;
       }
 
@@ -322,6 +357,7 @@
       const formData = new FormData(promptForm);
       formData.set("message", message);
 
+      liveAssistantMessage = null;
       appendMessage("user", message, true, true);
       textarea.value = "";
       showStatus("Sending…", true);

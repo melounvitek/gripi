@@ -102,12 +102,12 @@ Success check:
 
 ### 4. Fix live message role rendering regression
 
-- [ ] Inspect live RPC event payloads for prompt, assistant response, status, and custom/session rename events.
-- [ ] Ensure optimistic prompt bubbles remain `user` only and are not reused for assistant output.
-- [ ] Render assistant live response text as `assistant`, not `user`.
-- [ ] Render `custom`/session-status events as status/system-style messages, not chat user messages.
-- [ ] Add focused tests or fixtures for live event role mapping where practical.
-- [ ] Restart server and report the test URL plus what to verify.
+- [x] Inspect live RPC event payloads for prompt, assistant response, status, and custom/session rename events.
+- [x] Ensure optimistic prompt bubbles remain `user` only and are not reused for assistant output.
+- [x] Render assistant live response text as `assistant`, not `user`.
+- [x] Render `custom`/session-status events as status/system-style messages, not chat user messages.
+- [x] Add focused tests or fixtures for live event role mapping where practical.
+- [x] Restart server and report the test URL plus what to verify.
 
 Success check:
 
