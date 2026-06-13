@@ -1,5 +1,6 @@
 require "json"
 require "time"
+require "erb"
 
 class PiSessionStore
   Session = Struct.new(
@@ -14,7 +15,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :cost_total, keyword_init: true)
 
   def initialize(root: File.expand_path("~/.pi/agent/sessions"))
@@ -37,9 +38,9 @@ class PiSessionStore
       next unless entry["type"] == "message"
 
       messages_from_entry(entry).each do |message|
-        if message.role == "toolResult" && message.tool_name == "bash" && pending_tool_calls[message.tool_call_id]
+        if message.role == "toolResult" && pending_tool_calls[message.tool_call_id]
           call_message = pending_tool_calls.delete(message.tool_call_id)
-          call_message.text = [call_message.text, message.text].reject(&:empty?).join("\n\n")
+          call_message.text = paired_tool_text(call_message, message)
           call_message.raw_details = [call_message.raw_details, message.raw_details].compact.reject(&:empty?).join("\n\n")
           call_message.expanded ||= message.expanded
           call_message.error ||= message.error
@@ -47,7 +48,7 @@ class PiSessionStore
         end
 
         rendered_messages << message
-        pending_tool_calls[message.tool_call_id] = message if message.tool_name == "bash" && message.tool_call_id
+        pending_tool_calls[message.tool_call_id] = message if message.tool_call_id && pair_tool_result?(message.tool_name)
       end
     end
   end
@@ -138,7 +139,7 @@ class PiSessionStore
     if role == "assistant"
       assistant_messages_from_entry(message, parse_time(entry["timestamp"]))
     else
-      text = content_text(message["content"])
+      text = tool_result_text(message)
       return [] if text.empty?
 
       [Message.new(
@@ -176,9 +177,57 @@ class PiSessionStore
         tool_call_id: tool_call_id,
         tool_name: tool_name,
         raw_details: compact ? compact_raw_details(parts) : nil,
-        thinking: parts.length == 1 && thinking_part?(parts.first)
+        thinking: parts.length == 1 && thinking_part?(parts.first),
+        tool_summary_html: tool_summary_html(tool_call),
+        tool_transcript: transcript_tool?(tool_name)
       )
     end
+  end
+
+  def tool_result_text(message)
+    return message.dig("details", "diff") if message["toolName"] == "edit" && message.dig("details", "diff").to_s != ""
+
+    content_text(message["content"])
+  end
+
+  def paired_tool_text(call_message, result_message)
+    return result_message.text if transcript_tool?(call_message.tool_name)
+
+    [call_message.text, result_message.text].reject(&:empty?).join("\n\n")
+  end
+
+  def pair_tool_result?(tool_name)
+    ["bash", "read", "edit"].include?(tool_name)
+  end
+
+  def transcript_tool?(tool_name)
+    ["read", "edit"].include?(tool_name)
+  end
+
+  def tool_summary_html(tool_call)
+    return unless tool_call.is_a?(Hash) && transcript_tool?(tool_call["name"])
+
+    arguments = tool_call["arguments"].is_a?(Hash) ? tool_call["arguments"] : {}
+    h_tool_summary(tool_call["name"], arguments["path"], read_range(arguments))
+  end
+
+  def h_tool_summary(name, path, range)
+    html = %(<span class="tool-command">#{escape_html(name)}</span>)
+    html += %( <span class="tool-path">#{escape_html(path)}</span>) unless path.to_s.empty?
+    html += %(<span class="tool-range">:#{escape_html(range)}</span>) unless range.to_s.empty?
+    html
+  end
+
+  def read_range(arguments)
+    offset = arguments["offset"]
+    limit = arguments["limit"]
+    return unless offset && limit
+
+    "#{offset}-#{offset.to_i + limit.to_i - 1}"
+  end
+
+  def escape_html(value)
+    ERB::Util.html_escape(value.to_s)
   end
 
   def content_groups(content)

@@ -124,6 +124,7 @@ class PiWebGateway < Sinatra::Base
       classes = ["message", "message--#{message_role_key(message.role)}"]
       classes << "message--compact" if message.compact
       classes << "message--thinking" if message.thinking
+      classes << "message--tool-transcript" if message.tool_transcript
       classes << "message--tool-error" if message.error
       classes.join(" ")
     end

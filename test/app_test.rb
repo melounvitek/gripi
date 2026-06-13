@@ -646,6 +646,63 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_renders_read_and_edit_tools_as_transcripts
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "test/app_test.rb", offset: 545, limit: 110 } }]
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:01Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "read-1",
+            toolName: "read",
+            content: [{ type: "text", text: "545 assert_equal 200, response.status\n546 assert_includes response.body, 'message--thinking'" }],
+            isError: false
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:01:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "edit-1", name: "edit", arguments: { path: "test/pi_session_store_test.rb", edits: [{ oldText: "old", newText: "new" }] } }]
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:01:01Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "edit-1",
+            toolName: "edit",
+            content: [{ type: "text", text: "Successfully replaced 1 block(s) in test/pi_session_store_test.rb." }],
+            details: { diff: " 70 assert_equal [false, false], messages.map(&:compact)\n+71 assert_equal [true, false], messages.map(&:thinking)" },
+            isError: false
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, 'message--tool-transcript'
+      assert_includes response.body, '<summary><span class="compact-summary"><span class="tool-command">read</span> <span class="tool-path">test/app_test.rb</span><span class="tool-range">:545-654</span></span></summary>'
+      assert_includes response.body, '<summary><span class="compact-summary"><span class="tool-command">edit</span> <span class="tool-path">test/pi_session_store_test.rb</span></span></summary>'
+      assert_includes response.body, '+71 assert_equal [true, false], messages.map(&amp;:thinking)'
+      assert_includes response.body, '545 assert_equal 200, response.status'
+    end
+  end
+
   def test_pairs_historical_bash_tool_call_with_matching_result
     Dir.mktmpdir do |dir|
       tool_call_id = "call_123"
@@ -709,6 +766,11 @@ class AppTest < Minitest::Test
       assert_includes response.body, "appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded"
       assert_includes response.body, "segment.rawDetails"
       assert_includes response.body, "Raw details"
+      assert_includes response.body, "function renderToolSummary(container, parts, fallback)"
+      assert_includes response.body, "message--tool-transcript"
+      assert_includes response.body, "toolSummaryParts(toolName, toolPart?.arguments || {})"
+      assert_includes response.body, "segment.toolTranscript ? segment.text"
+      assert_includes response.body, '["bash", "read", "edit"].includes(segment.toolName)'
       assert_includes response.body, "part.type === \"toolCall\""
       assert_includes response.body, "part.type === \"thinking\""
     end
