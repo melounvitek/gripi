@@ -211,6 +211,11 @@ class PiWebGateway < Sinatra::Base
     JSON.generate(events: events)
   end
 
+  post "/markdown" do
+    content_type :json
+    JSON.generate(html: markdown_renderer.render(params.fetch("text").to_s))
+  end
+
   private
 
   def find_selected_session(sessions)

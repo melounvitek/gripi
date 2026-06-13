@@ -35,6 +35,19 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_renders_markdown_endpoint_with_sanitization_for_live_messages
+    response = Rack::MockRequest.new(PiWebGateway).post(
+      "/markdown",
+      params: { "text" => "## Live\n\n<script>alert('x')</script><a href=\"javascript:alert(1)\">bad</a>" }
+    )
+
+    assert_equal 200, response.status
+    payload = JSON.parse(response.body)
+    assert_includes payload["html"], "<h2>Live</h2>"
+    refute_includes payload["html"], "<script>"
+    refute_includes payload["html"], "javascript:alert"
+  end
+
   def test_returns_buffered_rpc_events_for_selected_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -478,6 +491,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "let liveAssistantSeen = false;"
       assert_includes response.body, 'if (roleName === "user") {'
       assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll);'
+      assert_includes response.body, 'function renderAssistantMarkdown(body, text)'
+      assert_includes response.body, 'fetch("/markdown", { method: "POST", body: formData })'
       assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
       assert_includes response.body, "showStatus(eventStatusText(event));"
       assert_includes response.body, 'if (liveAssistantSeen) showStatus("Done");'
