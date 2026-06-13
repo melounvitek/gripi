@@ -50,19 +50,19 @@ pi --mode rpc --session <session-file>
 
 ### 1. Native session browser
 
-- [ ] Create minimal Ruby/Sinatra app.
-- [ ] Scan `~/.pi/agent/sessions/**/*.jsonl`.
-- [ ] Parse session metadata:
-  - [ ] file path
-  - [ ] cwd
-  - [ ] session id
-  - [ ] display name from latest `session_info`
-  - [ ] first user message fallback
-  - [ ] message count
-  - [ ] created/modified timestamps
-- [ ] Render sessions grouped by cwd.
-- [ ] Let user click a session.
-- [ ] Render read-only messages from the selected JSONL file.
+- [x] Create minimal Ruby/Sinatra app.
+- [x] Scan `~/.pi/agent/sessions/**/*.jsonl`.
+- [x] Parse session metadata:
+  - [x] file path
+  - [x] cwd
+  - [x] session id
+  - [x] display name from latest `session_info`
+  - [x] first user message fallback
+  - [x] message count
+  - [x] created/modified timestamps
+- [x] Render sessions grouped by cwd.
+- [x] Let user click a session.
+- [x] Render read-only messages from the selected JSONL file.
 
 Success check:
 
