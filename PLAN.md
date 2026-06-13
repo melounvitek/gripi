@@ -66,9 +66,9 @@ pi --mode rpc --session <session-file>
 
 Success check:
 
-- [ ] Browser shows real Pi sessions grouped by directory.
-- [ ] A known session opens with recognizable history.
-- [ ] No DB or copied conversation state exists.
+- [x] Browser shows real Pi sessions grouped by directory.
+- [x] A known session opens with recognizable history.
+- [x] No DB or copied conversation state exists.
 
 ### 2. Minimal Pi RPC client
 
