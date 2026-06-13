@@ -101,21 +101,21 @@ Success check:
 
 ### 3. Live output rendering
 
-- [ ] Add SSE or polling for live updates.
-- [ ] Capture and buffer RPC events from the active process.
-- [ ] Render basic Pi-like output:
-  - [ ] user messages
-  - [ ] assistant text deltas
-  - [ ] thinking deltas, if present
-  - [ ] tool execution start/update/end
-  - [ ] errors
-  - [ ] queued/running state
+- [x] Add SSE or polling for live updates.
+- [x] Capture and buffer RPC events from the active process.
+- [x] Render basic Pi-like output:
+  - [x] user messages
+  - [x] assistant text deltas
+  - [x] thinking deltas, if present
+  - [x] tool execution start/update/end
+  - [x] errors
+  - [x] queued/running state
 
 Success check:
 
-- [ ] Ask Pi to inspect files or run a command.
-- [ ] Browser shows useful live tool/progress activity.
-- [ ] Final assistant answer appears without refreshing manually.
+- [x] Ask Pi to inspect files or run a command.
+- [x] Browser shows useful live tool/progress activity.
+- [x] Final assistant answer appears without refreshing manually.
 
 ### 4. Native session creation and switching
 
