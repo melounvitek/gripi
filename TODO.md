@@ -469,3 +469,86 @@ Provide a matching scroll-up control that helps users navigate long sessions wit
 - Keep the behavior predictable and avoid adding visual clutter.
 - Consider whether the button should appear only after the user has scrolled down far enough from the top.
 - Ensure it does not interfere with the prompt input or floating scroll-down control.
+
+---
+
+## Feature: Show current directory and branch in the status bar
+
+### Context
+
+The web gateway status bar should show the current working directory and Git branch for the active session. This should make it easier to understand where the agent is operating without asking or inspecting logs.
+
+Future sessions should inspect what session metadata is already available in the web UI and whether directory/branch data should be read from Pi session state, server-side process state, or a lightweight Git lookup.
+
+Relevant starting points likely include:
+
+- status bar/footer rendering in `views/`
+- session metadata/state code in `lib/`
+- routes or serializers in `app.rb` that provide session updates to the frontend
+- any existing code that detects or displays model/thinking/session status
+
+### Goal
+
+The status bar clearly displays the active session's current directory and Git branch when available, with graceful fallback for non-Git directories or unknown state.
+
+### Checklist
+
+- [ ] Inspect current status bar/footer rendering and available session metadata.
+- [ ] Determine the reliable source for current directory and branch.
+- [ ] Decide how to handle non-Git directories, detached HEAD, and unknown branch state.
+- [ ] Design concise status bar text that does not crowd existing controls.
+- [ ] Implement directory and branch display.
+- [ ] Verify values update correctly when switching sessions or directories.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Prefer showing shortened but unambiguous paths if space is limited.
+- Avoid expensive Git checks on every poll if cached/session metadata is available.
+
+---
+
+## Feature: Brainstorm unread session highlighting
+
+### Context
+
+The web gateway should investigate whether sessions with unread messages can be highlighted in the sidebar, and whether unread status should be propagated elsewhere in the UI. One possible design is adding an `Unread` section above the directory/session groups so sessions needing attention are visible immediately.
+
+This is a brainstorming/planning item first. Future sessions should define what counts as unread in this app, how read state should be tracked, and how to avoid noisy or confusing indicators.
+
+Potential unread events to consider:
+
+- assistant finished responding in a session that is not currently active
+- a tool call failed or needs attention in a background session
+- a session is waiting for user approval/input while not active
+- new output arrives after the user last viewed that session
+
+Relevant starting points likely include:
+
+- sidebar/session list rendering in `views/`
+- session update/polling code in frontend JavaScript
+- session state and message timestamps in `lib/`
+- routes in `app.rb` that return session lists or session metadata
+
+### Goal
+
+Determine whether unread highlighting is feasible and useful, then propose a minimal design for tracking, displaying, and clearing unread state across sessions.
+
+### Checklist
+
+- [ ] Inspect current sidebar grouping and session metadata.
+- [ ] Define what should count as an unread session event.
+- [ ] Decide when unread state should be cleared, such as opening the session or scrolling to the newest message.
+- [ ] Decide whether unread state should be persisted across page reloads/server restarts or only kept client-side.
+- [ ] Evaluate UI options: badges, row highlighting, an `Unread` section above directories, or status bar indicators.
+- [ ] Consider how unread highlighting interacts with notifications and no-reload session switching work.
+- [ ] Propose the smallest useful implementation.
+- [ ] Implement the approved unread highlighting behavior.
+- [ ] Verify unread state across active/background sessions and session switches.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Avoid duplicating sessions confusingly if an `Unread` section is added above directory groups.
+- Keep the indicator calm and readable; unread should guide attention, not create noise.
+- Be explicit about whether unread is per-browser, per-session, or globally persisted.
