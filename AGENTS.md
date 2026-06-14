@@ -10,7 +10,7 @@ When the current plan is completed, move the finished `PLAN.md` into the `plans/
 
 ## Autonomous mode wrap-up
 
-When the user explicitly approves autonomous mode for implementation work, finish the approved scope by running `/review-current` after the code changes and focused tests. Address any actionable findings, then run `/review-current` again. Repeat this review/fix loop until `/review-current` reports no more actionable issues or only issues the user should decide on remain. Report any remaining non-actionable or user-decision items clearly in the final summary.
+When the user explicitly approves autonomous mode for implementation work, finish the approved scope by running the `reviewer` subagent after code changes and focused tests. Address actionable findings and repeat until no actionable issues remain. Report any remaining user-decision items clearly in the final summary.
 
 ## Local server
 
