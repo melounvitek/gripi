@@ -579,14 +579,14 @@ Returning to an open session on mobile should reliably resume refreshing when pr
 
 ### Checklist
 
-- [ ] Reproduce or reason through the mobile close/return lifecycle that leaves a session stuck.
-- [ ] Inspect current event polling timer setup and whether it resumes after page restore.
-- [ ] Inspect whether stale in-flight polling state can block future polls after suspension.
-- [ ] Decide whether to restart polling, refresh session state, reload the page, or show a manual recovery prompt on mobile/page restore.
-- [ ] Implement the smallest safe recovery behavior, with a visible stale-session message and refresh/reconnect button if automatic recovery is not chosen.
+- [x] Reproduce or reason through the mobile close/return lifecycle that leaves a session stuck.
+- [x] Inspect current event polling timer setup and whether it resumes after page restore.
+- [x] Inspect whether stale in-flight polling state can block future polls after suspension.
+- [x] Decide whether to restart polling, refresh session state, reload the page, or show a manual recovery prompt on mobile/page restore.
+- [x] Implement the smallest safe recovery behavior, with a visible stale-session message and refresh/reconnect button if automatic recovery is not chosen.
 - [ ] Verify returning to an open session after tab close/backgrounding on mobile.
-- [ ] Verify desktop polling behavior is unchanged.
-- [ ] Note whether a gateway restart is needed.
+- [x] Verify desktop polling behavior is unchanged.
+- [x] Note whether a gateway restart is needed.
 
 ### Notes
 
@@ -594,6 +594,7 @@ Returning to an open session on mobile should reliably resume refreshing when pr
 - A manual refresh/reconnect affordance is acceptable if automatic refresh would be fragile or overly complicated.
 - Avoid creating duplicate overlapping poll loops after repeated hide/show cycles.
 - Preserve the selected session and input contents where possible.
+- Implemented automatic resume recovery by aborting stale event polls, restarting polling on mobile/browser lifecycle resume, refreshing the current session when events were missed, and showing a manual reconnect banner if polling cannot recover. Draft text and attached image files are preserved across same-session reconnects. Automated tests pass; manual mobile background/return verification remains open. Gateway restart is needed for the running web UI to pick up the frontend/template changes.
 
 ---
 

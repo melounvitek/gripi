@@ -59,6 +59,11 @@
               <input type="hidden" name="session" value="<%= h @selected_session.path %>">
             </form>
 
+            <div class="session-reconnect" role="status" aria-live="polite">
+              <span>Session may be stale.</span>
+              <button type="button" class="secondary reconnect-button">Reconnect</button>
+            </div>
+
             <form method="post" action="/prompt" class="prompt-form" enctype="multipart/form-data">
               <input type="hidden" name="session" value="<%= h @selected_session.path %>">
               <% expanded_cwds.each do |expanded_cwd| %>

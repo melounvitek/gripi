@@ -114,6 +114,9 @@
     .session-status-bar { display: flex; justify-content: flex-end; gap: 0.9rem; color: var(--muted-soft); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
     .session-status-item { display: inline-flex; gap: 0.25rem; white-space: nowrap; }
     .session-status-label { color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+    .session-reconnect { display: none; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.65rem 0.75rem; border: 1px solid rgba(255, 255, 0, 0.28); border-radius: 0.65rem; background: rgba(255, 255, 0, 0.08); color: var(--text); font-size: 0.9rem; }
+    .session-reconnect.is-visible { display: flex; }
+    .reconnect-button { flex: 0 0 auto; padding: 0.35rem 0.6rem; font-size: 0.82rem; }
     .abort-form { display: none; }
     input, textarea { box-sizing: border-box; font: inherit; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.55rem; color: var(--text); background: var(--panel-soft); outline: none; }
     input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(138, 190, 183, 0.2); }
@@ -219,6 +222,8 @@
     let conversationScroll = null;
     let jumpToLatestButton = null;
     let sessionStatusBar = null;
+    let reconnectBanner = null;
+    let reconnectButton = null;
     let liveAssistantMessage = null;
     let liveAssistantSegments = new Map();
     let liveAssistantSeen = false;
@@ -226,6 +231,10 @@
     let pendingImages = [];
     let eventPollTimer = null;
     let eventPollInFlight = false;
+    let eventPollAbortController = null;
+    let eventPollResumeTimer = null;
+    let hiddenAt = null;
+    let lastEventPollSuccessAt = Date.now();
     let lastEventSeq = 0;
     let emptyEventPollCount = 0;
     let autoScrollEnabled = true;
@@ -251,6 +260,8 @@
       conversationScroll = document.getElementById("conversation-scroll");
       jumpToLatestButton = document.querySelector(".jump-to-latest");
       sessionStatusBar = document.getElementById("session-status-bar");
+      reconnectBanner = document.querySelector(".session-reconnect");
+      reconnectButton = document.querySelector(".reconnect-button");
     }
 
     function nearConversationBottom() {
@@ -1023,22 +1034,88 @@
       eventPollTimer = setTimeout(() => pollEvents().catch(() => {}), delay);
     }
 
+    function showReconnectBanner() {
+      reconnectBanner?.classList.add("is-visible");
+    }
+
+    function hideReconnectBanner() {
+      reconnectBanner?.classList.remove("is-visible");
+    }
+
+    function abortEventPoll() {
+      if (eventPollAbortController) {
+        eventPollAbortController.piSuppressedAbort = true;
+        eventPollAbortController.abort();
+      }
+      eventPollAbortController = null;
+      eventPollInFlight = false;
+    }
+
+    function composerDraft() {
+      return {
+        session: promptSessionInput?.value || "",
+        message: promptTextarea?.value || "",
+        images: pendingImages.map((entry) => entry.file)
+      };
+    }
+
+    function restoreComposerDraft(draft) {
+      if (!draft || promptSessionInput?.value !== draft.session) return;
+      if (promptTextarea && draft.message) {
+        promptTextarea.value = draft.message;
+        resizePromptTextarea();
+      }
+      if (draft.images.length > 0) addImageFiles(draft.images);
+    }
+
+    async function refreshCurrentSessionPreservingComposer() {
+      const draft = composerDraft();
+      const refreshed = await switchSession(window.location.href, { push: false, focus: false });
+      if (refreshed) restoreComposerDraft(draft);
+      return refreshed;
+    }
+
+    async function reconnectSession() {
+      hideReconnectBanner();
+      await refreshCurrentSessionPreservingComposer();
+    }
+
+    function resumeEventPolling() {
+      if (!liveOutput) return;
+
+      const resumeStartedAt = Date.now();
+      clearTimeout(eventPollTimer);
+      clearTimeout(eventPollResumeTimer);
+      abortEventPoll();
+      resetEventPollBackoff();
+      hideReconnectBanner();
+      scheduleNextEventPoll(0);
+      eventPollResumeTimer = setTimeout(() => {
+        if (!document.hidden && lastEventPollSuccessAt < resumeStartedAt) showReconnectBanner();
+      }, 5000);
+    }
+
     async function pollEvents() {
       if (!liveOutput) return;
       if (eventPollInFlight) return;
 
       const generation = sessionViewGeneration;
+      const controller = new AbortController();
+      const pollTimeout = setTimeout(() => controller.abort(), 12000);
       eventPollInFlight = true;
+      eventPollAbortController = controller;
       try {
         const eventsUrl = new URL(liveOutput.dataset.eventsUrl, window.location.origin);
         eventsUrl.searchParams.set("after", lastEventSeq);
-        const response = await fetch(eventsUrl);
+        const response = await fetch(eventsUrl, { signal: controller.signal });
         if (!response.ok || generation !== sessionViewGeneration) return;
 
         const payload = await response.json();
         if (generation !== sessionViewGeneration) return;
+        lastEventPollSuccessAt = Date.now();
+        hideReconnectBanner();
         if (payload.missed) {
-          await switchSession(window.location.href, { push: false, focus: false });
+          await refreshCurrentSessionPreservingComposer();
           return;
         }
         if (Number.isInteger(payload.last_seq)) {
@@ -1050,7 +1127,11 @@
           renderEvent(event);
         });
         if (payload.events.length > 0) refreshSessionStatus(generation).catch(() => {});
+      } catch (_error) {
+        if (!controller.piSuppressedAbort && generation === sessionViewGeneration && !document.hidden) showReconnectBanner();
       } finally {
+        clearTimeout(pollTimeout);
+        if (eventPollAbortController === controller) eventPollAbortController = null;
         if (generation === sessionViewGeneration) {
           eventPollInFlight = false;
           scheduleNextEventPoll();
@@ -1190,6 +1271,7 @@
         updateJumpToLatest();
       }, { passive: true });
       jumpToLatestButton?.addEventListener("click", () => scrollToBottom());
+      reconnectButton?.addEventListener("click", reconnectSession);
 
       promptTextarea?.addEventListener("input", () => {
         resizePromptTextarea();
@@ -1233,14 +1315,17 @@
     function resetSessionViewState() {
       sessionViewGeneration += 1;
       clearTimeout(eventPollTimer);
+      clearTimeout(eventPollResumeTimer);
+      abortEventPoll();
       if (scheduledAutoScrollFrame) cancelAnimationFrame(scheduledAutoScrollFrame);
       eventPollTimer = null;
-      eventPollInFlight = false;
+      eventPollResumeTimer = null;
       scheduledAutoScrollFrame = null;
       resetLiveAssistantTracking();
       resetEventPollBackoff();
       lastEventSeq = 0;
       autoScrollEnabled = true;
+      hideReconnectBanner();
       clearAttachments();
     }
 
@@ -1266,15 +1351,15 @@
       resetSessionViewState();
       try {
         const response = await fetch(sessionFragmentUrl(url), { headers: { "Accept": "application/json" } });
-        if (switchGeneration !== sessionSwitchGeneration) return;
+        if (switchGeneration !== sessionSwitchGeneration) return false;
         if (!response.ok) {
           navigatingAway = true;
           window.location.href = url;
-          return;
+          return false;
         }
 
         const payload = await response.json();
-        if (switchGeneration !== sessionSwitchGeneration) return;
+        if (switchGeneration !== sessionSwitchGeneration) return false;
         resetSessionViewState();
         sessionSidebar.outerHTML = payload.sidebar_html;
         conversationPanel.outerHTML = payload.conversation_html;
@@ -1284,9 +1369,11 @@
         document.title = payload.title ? `${payload.title} · Pi Web Gateway` : "Pi Web Gateway";
         document.getElementById("mobile-session-toggle").checked = false;
         initializeSessionView({ focus });
+        return true;
       } catch (_error) {
         navigatingAway = true;
         window.location.href = url;
+        return false;
       } finally {
         if (!navigatingAway && switchGeneration === sessionSwitchGeneration) hideSessionSwitching();
       }
@@ -1374,7 +1461,23 @@
     }
 
     window.addEventListener("resize", updatePromptPlaceholder);
-    window.addEventListener("visibilitychange", () => scheduleNextEventPoll());
+    window.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+        return;
+      }
+
+      const hiddenDuration = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = null;
+      if (hiddenDuration > 5000) {
+        resumeEventPolling();
+      } else {
+        scheduleNextEventPoll(0);
+      }
+    });
+    window.addEventListener("pageshow", resumeEventPolling);
+    window.addEventListener("focus", resumeEventPolling);
+    window.addEventListener("online", resumeEventPolling);
     window.addEventListener("popstate", () => switchSession(window.location.href, { push: false, focus: false }));
 
     bindSessionDom();

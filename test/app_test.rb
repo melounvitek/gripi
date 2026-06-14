@@ -1334,7 +1334,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function switchSession(url, { push = true, focus = true } = {})"
       assert_includes response.body, "const switchGeneration = ++sessionSwitchGeneration;\n      let navigatingAway = false;\n      showSessionSwitching();\n      resetSessionViewState();"
       assert_includes response.body, "fetch(sessionFragmentUrl(url), { headers: { \"Accept\": \"application/json\" } })"
-      assert_includes response.body, "if (switchGeneration !== sessionSwitchGeneration) return;"
+      assert_includes response.body, "if (switchGeneration !== sessionSwitchGeneration) return false;"
       assert_includes response.body, "if (link.classList.contains(\"selected\")) return;"
       assert_includes response.body, "sessionSidebar.outerHTML = payload.sidebar_html;"
       assert_includes response.body, "conversationPanel.outerHTML = payload.conversation_html;"
@@ -1443,7 +1443,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "eventsUrl.searchParams.set(\"after\", lastEventSeq);"
       assert_includes response.body, "lastEventSeq = payload.last_seq;"
       assert_includes response.body, "if (payload.missed) {"
-      assert_includes response.body, "await switchSession(window.location.href, { push: false, focus: false });"
+      assert_includes response.body, "await refreshCurrentSessionPreservingComposer();"
       assert_includes response.body, "eventPollInFlight = false;"
       assert_includes response.body, "if (document.hidden) return 10000;"
       assert_includes response.body, "if (emptyEventPollCount >= 6) return 5000;"
@@ -1451,7 +1451,46 @@ class AppTest < Minitest::Test
       assert_includes response.body, "emptyEventPollCount = payload.events.length > 0 ? 0 : emptyEventPollCount + 1;"
       assert_includes response.body, "resetEventPollBackoff();"
       assert_includes response.body, "scheduleNextEventPoll(0);"
+      assert_includes response.body, "let eventPollAbortController = null;"
+      assert_includes response.body, "const pollTimeout = setTimeout(() => controller.abort(), 12000);"
+      assert_includes response.body, "signal: controller.signal"
+      assert_includes response.body, "function resumeEventPolling()"
+      assert_includes response.body, "abortEventPoll();"
+      assert_includes response.body, "window.addEventListener(\"pageshow\", resumeEventPolling);"
+      assert_includes response.body, "window.addEventListener(\"focus\", resumeEventPolling);"
+      assert_includes response.body, "window.addEventListener(\"online\", resumeEventPolling);"
       refute_includes response.body, "setInterval(() => pollEvents()"
+    end
+  end
+
+  def test_live_event_script_provides_manual_reconnect_fallback
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "class=\"session-reconnect\""
+      assert_includes response.body, "Session may be stale."
+      assert_includes response.body, "function showReconnectBanner()"
+      assert_includes response.body, "function hideReconnectBanner()"
+      assert_includes response.body, "function composerDraft()"
+      assert_includes response.body, "message: promptTextarea?.value || \"\""
+      assert_includes response.body, "images: pendingImages.map((entry) => entry.file)"
+      assert_includes response.body, "function restoreComposerDraft(draft)"
+      assert_includes response.body, "if (!draft || promptSessionInput?.value !== draft.session) return;"
+      assert_includes response.body, "if (draft.images.length > 0) addImageFiles(draft.images);"
+      assert_includes response.body, "function refreshCurrentSessionPreservingComposer()"
+      assert_includes response.body, "const refreshed = await switchSession(window.location.href, { push: false, focus: false });"
+      assert_includes response.body, "if (refreshed) restoreComposerDraft(draft);"
+      assert_includes response.body, "function reconnectSession()"
+      assert_includes response.body, "await refreshCurrentSessionPreservingComposer();"
+      assert_includes response.body, "reconnectButton?.addEventListener(\"click\", reconnectSession);"
     end
   end
 
