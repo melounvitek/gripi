@@ -7,6 +7,7 @@
   <style>
     :root { color-scheme: dark; --bg: #18181e; --sidebar: #1e1e24; --panel: #1e1e24; --panel-soft: #282832; --panel-softer: #3a3a4a; --border: #505050; --text: #d4d4d4; --muted: #808080; --muted-soft: #666666; --accent: #8abeb7; --accent-hover: #00d7ff; --success: #b5bd68; --danger: #cc6666; --danger-soft: #3c2828; --code: #18181e; --link: #81a2be; --warning: #ffff00; --button-text: #18181e; }
     html, body { height: 100%; }
+    *, *::before, *::after { box-sizing: border-box; }
     body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); overflow: hidden; }
     .app-shell { display: grid; grid-template-columns: 22rem minmax(0, 1fr); height: 100vh; min-height: 0; }
     .session-sidebar { min-height: 0; border-right: 1px solid var(--border); padding: 1rem; overflow-y: auto; scrollbar-gutter: stable; background: var(--sidebar); }
@@ -140,7 +141,8 @@
     .mobile-session-toggle, .mobile-sessions-button, .mobile-sidebar-backdrop { display: none; }
     @supports (height: 100dvh) { .app-shell { height: 100dvh; } }
     @media (max-width: 760px) {
-      .app-shell { display: block; height: 100dvh; }
+      html, body { width: 100%; max-width: 100vw; overflow-x: hidden; }
+      .app-shell { display: block; width: 100%; max-width: 100vw; height: 100dvh; overflow-x: hidden; }
       .session-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 10; display: block; width: min(21rem, calc(100vw - 3rem)); max-height: none; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); border-right: 1px solid var(--border); border-bottom: 0; transform: translateX(-105%); transition: transform 160ms ease; }
       .mobile-session-toggle:checked + .session-sidebar { transform: translateX(0); }
       .mobile-sidebar-backdrop { position: fixed; inset: 0; z-index: 9; background: rgba(0, 0, 0, 0.46); }
@@ -153,9 +155,9 @@
       .cwd-header { margin: 0.85rem 0 0.4rem; }
       a.session { padding: 0.55rem 0.65rem; }
       a.session.selected::before { left: -0.75rem; }
-      .conversation-panel { height: 100dvh; min-height: 0; }
-      .session-header { padding: 0.75rem 1rem 0.6rem; gap: 0.75rem; }
-      .session-header h1 { font-size: 1rem; }
+      .conversation-panel { width: 100%; max-width: 100vw; height: 100dvh; min-width: 0; min-height: 0; overflow-x: hidden; }
+      .session-header { width: 100%; max-width: 100vw; min-width: 0; padding: 0.75rem 1rem 0.6rem; gap: 0.75rem; overflow: hidden; }
+      .session-header h1 { flex: 1 1 0; font-size: 1rem; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       .conversation-scroll { padding: 0.75rem; }
       .message { margin-bottom: 0.65rem; padding: 0.75rem; border-radius: 0.75rem; }
@@ -166,16 +168,19 @@
       .message-body--markdown pre { font-size: 0.82rem; }
       .message, .message-body--markdown, .message--tool-transcript .message-body, pre { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
       .message--tool-transcript .message-body, pre { white-space: pre-wrap; }
-      .composer { padding: 0.65rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); }
+      .composer, .composer-inner, .prompt-form, .composer-controls { width: 100%; max-width: 100%; min-width: 0; }
+      .composer { padding: 0.65rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); overflow-x: hidden; }
       .composer-state { left: 0.75rem; }
-      .composer-input-row { grid-template-columns: 2.75rem minmax(0, 1fr) 3.25rem; gap: 0.4rem; }
+      .composer-input-row { width: 100%; max-width: 100%; min-width: 0; grid-template-columns: 2.75rem minmax(0, 1fr) 3.25rem; gap: 0.4rem; }
       .attach-button, .send-button { min-width: 0; width: 100%; min-height: 2.75rem; padding: 0; }
       .attach-button { font-size: 1.3rem; }
       .send-button { display: inline-flex; align-items: center; justify-content: center; font-size: 0; }
       .send-button::before { content: "↑"; font-size: 1.35rem; line-height: 1; }
       .command-list { max-height: 30dvh; overflow-y: auto; }
       .composer-controls { justify-content: flex-start; }
-      .session-status-bar { justify-content: flex-start; flex-wrap: wrap; gap: 0.35rem 0.7rem; font-size: 0.72rem; }
+      .session-status-bar { width: 100%; max-width: 100%; min-width: 0; justify-content: flex-start; flex-wrap: wrap; gap: 0.35rem 0.7rem; overflow: hidden; font-size: 0.72rem; }
+      .session-status-item { min-width: 0; }
+      .session-status-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       input, textarea { font-size: 16px; }
       textarea { min-height: 2.75rem; max-height: 8rem; padding: 0.65rem 0.7rem; }
       textarea::placeholder { font-size: 0.95rem; }
