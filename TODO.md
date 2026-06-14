@@ -300,3 +300,47 @@ Determine whether useful keyboard shortcuts can be added safely, then implement 
 - Avoid hijacking browser shortcuts unexpectedly.
 - Shortcut behavior should be predictable when a modal, menu, or prompt textarea is focused.
 - Prefer a small initial shortcut set over a broad shortcut framework.
+
+---
+
+## Feature: Investigate Tab focus behavior between input and session view
+
+### Context
+
+The web gateway should investigate whether `Tab` behavior can be customized for the main session view. Desired behavior:
+
+- When focus is in the input box, pressing `Tab` should move focus to the session/messages area above it.
+- Once the session/messages area is focused, arrow keys and `Page Up` / `Page Down` should immediately scroll or navigate through the messages.
+- Pressing `Tab` again should move focus back into the input box for typing.
+- In the main session flow, `Tab` should only toggle between these two places: the input box and the session/messages area.
+
+Future sessions should evaluate browser accessibility expectations and avoid breaking normal keyboard access to other interactive controls unless there is a clear alternative.
+
+Relevant starting points likely include:
+
+- input form and session message container templates in `views/`
+- frontend JavaScript keyboard/focus handling
+- CSS for focus outlines and scrollable containers
+- any existing keyboard shortcut code from the session navigation shortcut work
+
+### Goal
+
+Determine whether this two-position `Tab` focus loop is feasible and accessible, then implement it if approved so keyboard navigation between typing and reading messages feels fast and predictable.
+
+### Checklist
+
+- [ ] Inspect current focus order around the prompt input, session/messages area, footer, and other controls.
+- [ ] Determine whether the session/messages container can receive focus and handle arrow/page scrolling naturally.
+- [ ] Check accessibility tradeoffs of overriding normal `Tab` navigation.
+- [ ] Design a focus loop between the input box and session/messages area, including an escape path for other controls if needed.
+- [ ] Ensure `Tab` from the input focuses the correct message/session container.
+- [ ] Ensure arrow keys and `Page Up` / `Page Down` work immediately after focusing the session area.
+- [ ] Ensure `Tab` from the session area returns focus to the input box.
+- [ ] Verify behavior does not interfere with text entry, selection, browser shortcuts, or screen-reader expectations more than necessary.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- This is related to keyboard shortcuts, but should be considered separately because it changes fundamental focus behavior.
+- Keep a visible focus indication so the user can tell whether typing or message navigation is active.
+- Consider whether `Shift+Tab` should mirror or bypass the loop before implementing.
