@@ -1,5 +1,5 @@
 ---
-description: Wrap up repo work: commit, merge, push, clean branch, restart if needed
+description: "Wrap up repo work: commit, merge, push, clean branch, restart if needed"
 ---
 Wrap up the current work for this repo.
 
