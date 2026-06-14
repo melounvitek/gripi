@@ -89,3 +89,43 @@ The session view reliably follows new content during active updates, including b
 - Be careful not to create scroll jitter.
 - Prefer requestAnimationFrame or another DOM-settled timing mechanism if scroll calculations happen before layout is complete.
 - Future sessions should preserve the user's ability to manually scroll up and read older content.
+
+---
+
+## Feature: Support Pi CLI slash commands in the web gateway
+
+### Context
+
+The web gateway should investigate whether it can automatically support all slash commands that Pi exposes in the CLI/TUI, including commands such as `/stop`, `/new`, and any others visible in the CLI. The goal is broad compatibility with Pi's existing command surface rather than manually reimplementing only a small subset.
+
+Future sessions should inspect how Pi defines, discovers, parses, and executes slash commands, then compare that with how the web gateway currently handles user input and session control.
+
+Relevant starting points likely include:
+
+- web gateway request/input handling in `app.rb`
+- session-management code in `lib/`
+- Pi CLI/TUI documentation and source for slash command definitions and behavior
+- current web UI input handling in `views/`
+
+### Goal
+
+Determine and, if practical, implement a way for the web gateway to support the same slash commands available in Pi CLI, ideally by reusing or delegating to Pi's command handling rather than duplicating command logic.
+
+### Checklist
+
+- [ ] Inspect current web gateway handling for slash-prefixed user input.
+- [ ] Inspect Pi CLI/TUI slash command definitions, discovery, parsing, and execution paths.
+- [ ] List all Pi CLI slash commands that should be supported by the web gateway.
+- [ ] Identify which commands are simple message/session commands and which require special web behavior, such as `/stop` or `/new`.
+- [ ] Determine whether commands can be supported automatically by reusing Pi internals or whether explicit web mappings are required.
+- [ ] Propose the smallest safe implementation strategy.
+- [ ] Implement command support for the agreed scope.
+- [ ] Add or update tests for command handling where practical.
+- [ ] Verify important commands manually, especially `/stop` and `/new`.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Prefer automatic reuse of Pi's command registry/handler if available.
+- Avoid drifting behavior from the CLI; if a command cannot behave identically in the web UI, document the difference before implementing.
+- Be careful with commands that affect session lifecycle, cancellation, filesystem state, or process state.
