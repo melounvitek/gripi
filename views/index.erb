@@ -1113,7 +1113,45 @@
       scrollToBottom();
     }
 
+    function bindCommandFilter() {
+      commandFilter?.addEventListener("input", () => {
+        const query = commandFilter.value.trim().toLowerCase();
+        commandList?.querySelectorAll(".command").forEach((command) => {
+          command.hidden = query && !command.dataset.commandText.toLowerCase().includes(query);
+        });
+      });
+    }
+
+    async function ensureCommandsLoaded() {
+      const list = commandList;
+      const generation = sessionSwitchGeneration;
+      if (!list || list.dataset.loaded === "true") return;
+      const url = list.dataset.commandsUrl;
+      if (!url || list.dataset.loading === "true") return;
+
+      list.dataset.loading = "true";
+      try {
+        const response = await fetch(url);
+        if (!response.ok || commandList !== list || !list.isConnected || generation !== sessionSwitchGeneration || list.dataset.commandsUrl !== url) return;
+        const html = await response.text();
+        if (commandList !== list || !list.isConnected || generation !== sessionSwitchGeneration || list.dataset.commandsUrl !== url) return;
+        list.outerHTML = html;
+        commandList = document.getElementById("command-list");
+        commandFilter = commandList?.querySelector(".command-filter") || null;
+        bindCommandFilter();
+        if (promptTextarea?.value.startsWith("/")) {
+          commandList?.classList.add("is-visible");
+          commandList?.setAttribute("open", "");
+        }
+      } catch (_error) {
+      } finally {
+        delete list.dataset.loading;
+      }
+    }
+
     function bindSessionControls() {
+      bindCommandFilter();
+
       promptTextarea?.addEventListener("keydown", (event) => {
         if (event.key === "Enter" && !event.shiftKey && shouldAutofocusPrompt()) {
           event.preventDefault();
@@ -1153,19 +1191,13 @@
         if (!commandList) return;
 
         if (promptTextarea.value.startsWith("/")) {
-          commandList.classList.add("is-visible");
-          commandList.setAttribute("open", "");
+          ensureCommandsLoaded();
+          commandList?.classList.add("is-visible");
+          commandList?.setAttribute("open", "");
         } else {
-          commandList.classList.remove("is-visible");
-          commandList.removeAttribute("open");
+          commandList?.classList.remove("is-visible");
+          commandList?.removeAttribute("open");
         }
-      });
-
-      commandFilter?.addEventListener("input", () => {
-        const query = commandFilter.value.trim().toLowerCase();
-        commandList.querySelectorAll(".command").forEach((command) => {
-          command.hidden = query && !command.dataset.commandText.toLowerCase().includes(query);
-        });
       });
 
       promptForm?.addEventListener("submit", submitPrompt);

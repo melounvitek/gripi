@@ -324,6 +324,14 @@ class PiWebGateway < Sinatra::Base
     )
   end
 
+  get "/commands" do
+    session_path = params.fetch("session")
+    halt 404 unless command_session_available?(session_path)
+
+    @commands = commands_for(session_path)
+    erb :_commands, layout: false
+  end
+
   post "/markdown" do
     content_type :json
     JSON.generate(html: markdown_renderer.render(params.fetch("text").to_s))
@@ -342,7 +350,6 @@ class PiWebGateway < Sinatra::Base
     @selected_session = find_selected_session(@groups.values.flatten)
     @messages = @selected_session && File.exist?(@selected_session.path) ? @store.messages(@selected_session.path) : []
     @session_status = @selected_session && File.exist?(@selected_session.path) ? @store.status(@selected_session.path) : nil
-    @commands = @selected_session && command_session_available?(@selected_session.path) ? commands_for(@selected_session.path) : []
   end
 
   def session_view_url
@@ -423,7 +430,11 @@ class PiWebGateway < Sinatra::Base
   end
 
   def command_session_available?(session_path)
-    File.exist?(session_path) || rpc_clients.active?(session_path)
+    rpc_clients.active?(session_path) || known_session_path?(session_path)
+  end
+
+  def known_session_path?(session_path)
+    PiSessionStore.new(root: settings.sessions_root).sessions.any? { |session| session.path == session_path }
   end
 
   def commands_for(session_path)

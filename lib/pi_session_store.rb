@@ -18,6 +18,24 @@ class PiSessionStore
   Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :cost_total, keyword_init: true)
 
+  @session_cache = {}
+  @session_cache_mutex = Mutex.new
+
+  class << self
+    def cached_session(path, signature)
+      @session_cache_mutex.synchronize do
+        cached = @session_cache[path]
+        cached[:session] if cached && cached[:signature] == signature
+      end
+    end
+
+    def cache_session(path, signature, session)
+      @session_cache_mutex.synchronize do
+        @session_cache[path] = { signature: signature, session: session }
+      end
+    end
+  end
+
   def initialize(root: File.expand_path("~/.pi/agent/sessions"), delete_missing_cwds: false)
     @root = root
     @delete_missing_cwds = delete_missing_cwds
@@ -85,6 +103,15 @@ class PiSessionStore
   end
 
   def parse_session(path)
+    stat = File.stat(path)
+    signature = [stat.size, stat.mtime.to_f]
+    cached_session = self.class.cached_session(path, signature)
+    if cached_session
+      return if delete_session_with_missing_cwd?(path, cached_session.cwd)
+
+      return cached_session
+    end
+
     session_entry = nil
     latest_name = nil
     first_user_message = nil
@@ -108,10 +135,9 @@ class PiSessionStore
     return unless session_entry
     return if delete_session_with_missing_cwd?(path, session_entry["cwd"])
 
-    stat = File.stat(path)
     display_name = latest_name || first_user_message || File.basename(path, ".jsonl")
 
-    Session.new(
+    session = Session.new(
       path: path,
       cwd: session_entry["cwd"] || "Unknown cwd",
       id: session_entry["id"],
@@ -121,6 +147,8 @@ class PiSessionStore
       created_at: parse_time(session_entry["timestamp"]) || stat.ctime,
       modified_at: stat.mtime
     )
+    self.class.cache_session(path, signature, session)
+    session
   end
 
   def delete_session_with_missing_cwd?(path, cwd)

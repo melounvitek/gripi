@@ -51,25 +51,9 @@
 
         <div class="composer">
           <div class="composer-inner">
-            <% commands_by_source = @commands.group_by { |command| command["source"] || "other" } %>
-            <% if @commands.any? %>
-              <details class="command-list" id="command-list">
-                <summary>Slash commands (<%= h @commands.length %>)</summary>
-                <input class="command-filter" type="search" placeholder="Filter commands…" aria-label="Filter slash commands">
-                <% ["extension", "prompt", "skill", "other"].each do |source| %>
-                  <% next unless commands_by_source[source]&.any? %>
-                  <h3><%= h source %> commands</h3>
-                  <% commands_by_source[source].each do |command| %>
-                    <div class="command" data-command-name="<%= h command["name"] %>" data-command-text="/<%= h command["name"] %> <%= h command["description"] %>">
-                      <code>/<%= h command["name"] %></code>
-                      <% if command["description"].to_s != "" %>
-                        — <%= h command["description"] %>
-                      <% end %>
-                    </div>
-                  <% end %>
-                <% end %>
-              </details>
-            <% end %>
+            <details class="command-list" id="command-list" data-loaded="false" data-commands-url="/commands?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
+              <summary>Slash commands</summary>
+            </details>
 
             <form method="post" action="/abort" class="abort-form" id="abort-form">
               <input type="hidden" name="session" value="<%= h @selected_session.path %>">

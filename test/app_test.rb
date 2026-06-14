@@ -531,7 +531,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_renders_compact_command_discovery_for_selected_session
+  def test_renders_lazy_command_discovery_placeholder_for_selected_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
@@ -547,6 +547,26 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
+      assert_includes response.body, "Slash commands"
+      assert_includes response.body, "data-commands-url"
+      refute_includes response.body, "/review"
+      assert_empty calls
+    end
+  end
+
+  def test_loads_commands_on_demand
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, [{ "name" => "review", "source" => "skill", "description" => "Review code" }])
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
+
+      assert_equal 200, response.status
       assert_includes response.body, "Slash commands (1)"
       assert_includes response.body, "/review"
       assert_includes response.body, "Review code"
@@ -556,7 +576,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_ignores_broken_command_rpc_when_rendering_home
+  def test_ignores_broken_command_rpc_when_loading_commands
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
@@ -571,11 +591,29 @@ class AppTest < Minitest::Test
         broken_client
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      refute_includes response.body, "Slash commands"
+      assert_includes response.body, "Slash commands (0)"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
+    end
+  end
+
+  def test_commands_endpoint_rejects_unknown_existing_paths
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "not-a-session.jsonl")
+      File.write(path, "not a pi session")
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
+
+      assert_equal 404, response.status
+      assert_empty calls
     end
   end
 
@@ -1452,7 +1490,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          window.location.href = payload.redirect || window.location.href;\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"
-      assert_includes response.body, "commandList.removeAttribute(\"open\");"
+      assert_includes response.body, "commandList?.removeAttribute(\"open\");"
       assert_includes response.body, "if (commandFilter) commandFilter.value = \"\";"
       assert_includes response.body, "commandList?.querySelectorAll(\".command\").forEach((command) => { command.hidden = false; });"
       assert_includes response.body, "setComposerState(\"running\", \"Pi is running…\");"

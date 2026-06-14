@@ -1,0 +1,17 @@
+<details class="command-list" id="command-list" data-loaded="true">
+  <summary>Slash commands (<%= h @commands.length %>)</summary>
+  <input class="command-filter" type="search" placeholder="Filter commands…" aria-label="Filter slash commands">
+  <% commands_by_source = @commands.group_by { |command| command["source"] || "other" } %>
+  <% ["extension", "prompt", "skill", "other"].each do |source| %>
+    <% next unless commands_by_source[source]&.any? %>
+    <h3><%= h source %> commands</h3>
+    <% commands_by_source[source].each do |command| %>
+      <div class="command" data-command-name="<%= h command["name"] %>" data-command-text="/<%= h command["name"] %> <%= h command["description"] %>">
+        <code>/<%= h command["name"] %></code>
+        <% if command["description"].to_s != "" %>
+          — <%= h command["description"] %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+</details>
