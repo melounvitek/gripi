@@ -257,3 +257,46 @@ The footer provides a clear, low-friction way to change the active model and thi
 - Avoid making the footer visually noisy; keep the controls subtle until clicked.
 - Be clear whether changes apply immediately to the next prompt or require a new session.
 - Prefer reusing existing configuration/model lists instead of hard-coding options if possible.
+
+---
+
+## Feature: Investigate keyboard shortcuts for session navigation
+
+### Context
+
+The web gateway should investigate adding keyboard shortcuts for faster session navigation. Desired shortcuts include:
+
+- `Cmd+K` / `Ctrl+K` to open or focus recent sessions.
+- `Ctrl+1`, `Ctrl+2`, etc. to switch between sessions.
+
+Future sessions should inspect the current session list/navigation UI, how sessions are ordered, and how keyboard events are currently handled, if at all.
+
+Relevant starting points likely include:
+
+- session list/navigation rendering in `views/`
+- frontend JavaScript for global event handling
+- server routes in `app.rb` for session pages
+- any existing recent-session data or ordering logic in `lib/`
+
+### Goal
+
+Determine whether useful keyboard shortcuts can be added safely, then implement a minimal shortcut set for opening recent sessions and switching between visible/recent sessions.
+
+### Checklist
+
+- [ ] Inspect current session navigation and recent-session UI behavior.
+- [ ] Inspect whether the web app already has keyboard shortcut handling.
+- [ ] Decide what `Cmd+K` / `Ctrl+K` should open or focus.
+- [ ] Decide which session ordering `Ctrl+1`, `Ctrl+2`, etc. should use.
+- [ ] Check for conflicts with browser/system shortcuts and text input behavior.
+- [ ] Design shortcut behavior that does not trigger while typing in prompts or forms, except where intentional.
+- [ ] Implement the approved shortcut behavior.
+- [ ] Add discoverability, such as tooltip text or a small shortcuts hint, if appropriate.
+- [ ] Verify shortcuts on macOS-style `Cmd` and non-macOS `Ctrl` flows where practical.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Avoid hijacking browser shortcuts unexpectedly.
+- Shortcut behavior should be predictable when a modal, menu, or prompt textarea is focused.
+- Prefer a small initial shortcut set over a broad shortcut framework.
