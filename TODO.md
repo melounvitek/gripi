@@ -384,3 +384,45 @@ Determine whether this two-position `Tab` focus loop is feasible and accessible,
 - This is related to keyboard shortcuts, but should be considered separately because it changes fundamental focus behavior.
 - Keep a visible focus indication so the user can tell whether typing or message navigation is active.
 - Consider whether `Shift+Tab` should mirror or bypass the loop before implementing.
+
+---
+
+## Feature: Investigate session switching without full page reloads
+
+### Context
+
+Opening another session, whether an existing session or a newly created one, should ideally avoid a full page reload. The preferred direction is to consider HTMX where it makes sense, but not to use HTMX blindly if a simpler or more robust approach fits better.
+
+Future sessions should inspect how session navigation and session creation currently work, what parts of the page actually need to change, and whether the existing server-rendered views can be partially updated cleanly.
+
+Relevant starting points likely include:
+
+- session navigation links/forms in `views/`
+- routes for opening existing sessions and creating new sessions in `app.rb`
+- session list/sidebar rendering, if separate from the main session view
+- frontend JavaScript that handles current session state, polling, scrolling, input focus, and message updates
+- any existing HTMX usage or dependency setup
+
+### Goal
+
+Determine whether session open/create flows can be made smoother without full page reloads, then implement a minimal approach that updates only the necessary UI while preserving correct URL/history, session state, polling, focus, and scrolling behavior.
+
+### Checklist
+
+- [ ] Inspect current session open and new-session flows to identify what triggers full page reloads.
+- [ ] Identify which page regions must update when switching sessions or creating a new one.
+- [ ] Check whether HTMX is already available or would need to be introduced.
+- [ ] Weigh HTMX pros and cons for this app versus plain JavaScript or keeping full reloads.
+- [ ] Decide how browser history, back/forward navigation, and deep links should behave.
+- [ ] Decide how polling, auto-scroll state, input contents, and focus should reset or transfer across session switches.
+- [ ] Propose the smallest safe implementation strategy.
+- [ ] Implement the approved no-full-reload behavior for existing session switches.
+- [ ] Implement the approved no-full-reload behavior for creating/opening a new session.
+- [ ] Verify direct links, browser back/forward, refresh, and rapid session switching.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- HTMX is a preferred option to evaluate, not a requirement.
+- Avoid duplicating large amounts of rendering logic between server and client.
+- Do not sacrifice reliable session state or shareable URLs just to avoid reloads.
