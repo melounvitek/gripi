@@ -530,6 +530,10 @@
       return `${count} image${count === 1 ? "" : "s"} attached`;
     }
 
+    function sessionNameSlashCommand(message) {
+      return /^\/(?:name|rename)[ \t]+[^\r\n]+$/.test(message.trim());
+    }
+
     function renderAttachments() {
       if (!attachmentTray) return;
       attachmentTray.replaceChildren();
@@ -1191,10 +1195,13 @@
       formData.set("message", message);
       pendingImages.forEach((entry) => formData.append("images[]", entry.file, entry.file.name || "image"));
 
-      resetLiveAssistantTracking();
-      resetEventPollBackoff();
-      scheduleNextEventPoll(0);
-      appendMessage("user", [message, pendingImages.length > 0 ? `[${imageAttachmentLabel(pendingImages.length)}]` : ""].filter(Boolean).join("\n"), true, true, new Date());
+      const renameCommand = sessionNameSlashCommand(message);
+      if (!renameCommand) {
+        resetLiveAssistantTracking();
+        resetEventPollBackoff();
+        scheduleNextEventPoll(0);
+        appendMessage("user", [message, pendingImages.length > 0 ? `[${imageAttachmentLabel(pendingImages.length)}]` : ""].filter(Boolean).join("\n"), true, true, new Date());
+      }
       promptTextarea.value = "";
       clearAttachments();
       commandList?.classList.remove("is-visible");
@@ -1203,8 +1210,8 @@
       commandList?.querySelectorAll(".command").forEach((command) => { command.hidden = false; });
       resizePromptTextarea();
       if (shouldAutofocusPrompt()) promptTextarea.focus();
-      setComposerState("sending", "Sending…");
-      showStatus("Sending…", true);
+      setComposerState("sending", renameCommand ? "Renaming…" : "Sending…");
+      showStatus(renameCommand ? "Renaming session…" : "Sending…", true);
 
       const response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
       if (!response.ok && response.type !== "opaqueredirect") {
@@ -1212,6 +1219,10 @@
         showStatus("Prompt failed to send", true);
       } else if (response.ok) {
         const payload = await response.json().catch(() => null);
+        if (payload?.command === "rename") {
+          window.location.href = payload.redirect || window.location.href;
+          return;
+        }
         if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {
           window.location.href = payload.redirect || `/?session=${encodeURIComponent(payload.session)}`;
           return;

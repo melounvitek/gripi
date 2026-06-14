@@ -35,6 +35,79 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_name_slash_command_renames_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/name Useful name" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[ :start, path ], [ :set_session_name, "Useful name" ]], calls
+      payload = JSON.parse(response.body)
+      assert_equal path, payload.fetch("session")
+      assert_equal "rename", payload.fetch("command")
+    end
+  end
+
+  def test_rename_slash_command_renames_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/rename Useful name" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[ :start, path ], [ :set_session_name, "Useful name" ]], calls
+      payload = JSON.parse(response.body)
+      assert_equal path, payload.fetch("session")
+      assert_equal "rename", payload.fetch("command")
+    end
+  end
+
+  def test_multiline_rename_like_prompt_is_sent_as_prompt
+    ["/rename Useful\nname", "/rename\nUseful name"].each do |message|
+      Dir.mktmpdir do |dir|
+        path = write_session(dir)
+        calls = []
+        PiWebGateway.set :sessions_root, dir
+        PiWebGateway.set :rpc_client_registry, nil
+        PiWebGateway.set :rpc_client_factory, [->(session_path) {
+          calls << [:start, session_path]
+          FakeRpcClient.new(calls)
+        }]
+
+        response = Rack::MockRequest.new(PiWebGateway).post(
+          "/prompt",
+          params: { "session" => path, "message" => message },
+          "HTTP_ACCEPT" => "application/json"
+        )
+
+        assert_equal 200, response.status
+        assert_equal [[ :start, path ], [ :prompt, message ]], calls
+        refute JSON.parse(response.body).key?("command")
+      end
+    end
+  end
+
   def test_posts_prompt_with_uploaded_images
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -1110,8 +1183,12 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
       assert_includes response.body, "function showStatus(_text, _forceScroll = false) {}"
       assert_includes response.body, "showStatus(eventStatusText(event));"
-      assert_includes response.body, "resetLiveAssistantTracking();\n      resetEventPollBackoff();\n      scheduleNextEventPoll(0);\n      appendMessage(\"user\", [message, pendingImages.length > 0"
+      assert_includes response.body, "return /^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(message.trim());"
+      assert_includes response.body, "function sessionNameSlashCommand(message)"
+      assert_includes response.body, "const renameCommand = sessionNameSlashCommand(message);"
+      assert_includes response.body, "if (!renameCommand) {\n        resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
       assert_includes response.body, "true, true, new Date());"
+      assert_includes response.body, "if (payload?.command === \"rename\") {\n          window.location.href = payload.redirect || window.location.href;\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"
       assert_includes response.body, "commandList.removeAttribute(\"open\");"
