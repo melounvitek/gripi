@@ -1277,6 +1277,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const switchGeneration = ++sessionSwitchGeneration;\n      let navigatingAway = false;\n      showSessionSwitching();\n      resetSessionViewState();"
       assert_includes response.body, "fetch(sessionFragmentUrl(url), { headers: { \"Accept\": \"application/json\" } })"
       assert_includes response.body, "if (switchGeneration !== sessionSwitchGeneration) return;"
+      assert_includes response.body, "if (link.classList.contains(\"selected\")) return;"
       assert_includes response.body, "sessionSidebar.outerHTML = payload.sidebar_html;"
       assert_includes response.body, "conversationPanel.outerHTML = payload.conversation_html;"
       assert_includes response.body, "history.pushState({ session: payload.session }"
@@ -1333,6 +1334,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "headers: { \"Accept\": \"application/json\" }"
       assert_includes response.body, "const switchGeneration = sessionSwitchGeneration;"
       assert_includes response.body, "const viewGeneration = sessionViewGeneration;"
+      assert_includes response.body, "showSessionSwitching();"
       assert_includes response.body, "if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;"
       assert_includes response.body, "await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`"
     end

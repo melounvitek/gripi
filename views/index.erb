@@ -1249,6 +1249,8 @@
       if (!link || !normalLeftClick(event)) return;
 
       event.preventDefault();
+      if (link.classList.contains("selected")) return;
+
       await switchSession(link.href, { push: true, focus: true });
     });
 
@@ -1259,16 +1261,23 @@
       event.preventDefault();
       const switchGeneration = sessionSwitchGeneration;
       const viewGeneration = sessionViewGeneration;
-      const response = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { "Accept": "application/json" } });
-      if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;
-      if (!response.ok) {
-        form.submit();
-        return;
-      }
+      let navigatingAway = false;
+      showSessionSwitching();
+      try {
+        const response = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { "Accept": "application/json" } });
+        if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;
+        if (!response.ok) {
+          navigatingAway = true;
+          form.submit();
+          return;
+        }
 
-      const payload = await response.json();
-      if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;
-      await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
+        const payload = await response.json();
+        if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;
+        await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
+      } finally {
+        if (!navigatingAway && switchGeneration === sessionSwitchGeneration && viewGeneration === sessionViewGeneration) hideSessionSwitching();
+      }
     });
 
     document.addEventListener("click", async (event) => {
