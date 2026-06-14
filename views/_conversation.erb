@@ -45,7 +45,7 @@
             </article>
           <% end %>
 
-          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>"></section>
+          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h rpc_clients.event_sequence(@selected_session.path) %>"></section>
           <button type="button" class="jump-to-latest">lastest ↓</button>
         </section>
 

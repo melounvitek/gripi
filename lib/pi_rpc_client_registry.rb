@@ -35,6 +35,11 @@ class PiRpcClientRegistry
     !!client_for(session_path)
   end
 
+  def event_sequence(session_path)
+    client = client_for(session_path)
+    client&.respond_to?(:event_sequence) ? client.event_sequence : 0
+  end
+
   def begin_use(session_path)
     @mutex.synchronize do
       entry = @clients[session_path]

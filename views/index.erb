@@ -1008,6 +1008,10 @@
       emptyEventPollCount = 0;
     }
 
+    function resetEventCursor() {
+      lastEventSeq = Number(liveOutput?.dataset.eventsAfter || 0);
+    }
+
     function scheduleNextEventPoll(delay = eventPollDelay()) {
       if (!liveOutput) return;
       clearTimeout(eventPollTimer);
@@ -1321,6 +1325,7 @@
 
     function initializeSessionView({ focus = true } = {}) {
       if (liveOutput) {
+        resetEventCursor();
         scheduleNextEventPoll(0);
         requestAnimationFrame(() => {
           updatePromptPlaceholder();

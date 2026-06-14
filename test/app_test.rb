@@ -1361,6 +1361,28 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_live_output_starts_polling_after_current_rpc_event_cursor
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, FakeRpcClient.new(calls, [{ "type" => "old" }]))
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "data-events-after=\"1\""
+      assert_includes response.body, "function resetEventCursor()"
+      assert_includes response.body, "lastEventSeq = Number(liveOutput?.dataset.eventsAfter || 0);"
+      assert_includes response.body, "resetEventCursor();"
+    end
+  end
+
   def test_live_event_script_schedules_non_overlapping_polls
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -1531,6 +1553,10 @@ class AppTest < Minitest::Test
 
     def set_session_name(name)
       @calls << [:set_session_name, name]
+    end
+
+    def event_sequence
+      @events.length
     end
 
     def events_after(after_seq)

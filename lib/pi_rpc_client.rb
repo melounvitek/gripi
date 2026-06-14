@@ -72,6 +72,10 @@ class PiRpcClient
     request("set_session_name", id: next_id("set_session_name"), name: name)
   end
 
+  def event_sequence
+    @mutex.synchronize { @event_sequence }
+  end
+
   def events_after(after_seq)
     ensure_reader
     after_seq = after_seq.to_i
