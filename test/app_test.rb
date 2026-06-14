@@ -194,7 +194,7 @@ class AppTest < Minitest::Test
       assert_same parent_client, registry.client_for(parent_path)
       refute_includes calls, [:close]
       refute_includes calls, [:new_session, parent_path]
-      assert_equal [[:start_new, "/tmp/project"], [:get_state]], calls
+      assert_equal [[:start_new, project_cwd(dir)], [:get_state]], calls
     end
   end
 
@@ -216,7 +216,7 @@ class AppTest < Minitest::Test
 
       assert_equal 303, response.status
       assert_includes response["Location"], Rack::Utils.escape(new_path)
-      assert_equal [[ :start_new, "/tmp/project" ], [ :get_state ]], calls
+      assert_equal [[ :start_new, project_cwd(dir) ], [ :get_state ]], calls
     end
   end
 
@@ -238,7 +238,7 @@ class AppTest < Minitest::Test
       assert_equal 303, response.status
       assert_match %r{pending-[^&]+\.jsonl}, response["Location"]
       refute_includes response["Location"], Rack::Utils.escape(paths.last)
-      assert_equal [[ :start_new, "/tmp/project" ], [ :get_state ]], calls
+      assert_equal [[ :start_new, project_cwd(dir) ], [ :get_state ]], calls
     end
   end
 
@@ -251,7 +251,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [{ "type" => "from-pending" }], real_path))
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => "/tmp/project" }
+      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
 
       response = Rack::MockRequest.new(PiWebGateway).get(
         "/events",
@@ -264,6 +264,25 @@ class AppTest < Minitest::Test
       refute registry.active?(pending_path)
       refute_includes PiWebGateway.pending_rpc_cwds, pending_path
       assert_equal [[:get_state], [:drain_events]], calls
+    end
+  end
+
+  def test_deletes_sessions_whose_cwd_no_longer_exists
+    Dir.mktmpdir do |dir|
+      stale_dir = File.join(dir, "--stale--")
+      FileUtils.mkdir_p(stale_dir)
+      stale_path = File.join(stale_dir, "stale.jsonl")
+      File.write(stale_path, JSON.generate({ type: "session", id: "stale", cwd: File.join(dir, "deleted-worktree") }) + "\n")
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/")
+
+      assert_equal 200, response.status
+      refute File.exist?(stale_path)
+      assert_includes response.body, path
+      refute_includes response.body, "stale.jsonl"
     end
   end
 
@@ -288,6 +307,29 @@ class AppTest < Minitest::Test
       assert_includes response.body, "Review code"
       refute_includes response.body, "<code>/new</code>"
       assert_includes response.body, "command-filter"
+      assert_equal [[ :start, path ], [ :get_commands ]], calls
+    end
+  end
+
+  def test_ignores_broken_command_rpc_when_rendering_home
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      broken_client = Object.new
+      broken_client.define_singleton_method(:get_commands) do
+        calls << [:get_commands]
+        raise Errno::EPIPE
+      end
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        broken_client
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      refute_includes response.body, "Slash commands"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
     end
   end
@@ -398,7 +440,7 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       pending_path = File.join(File.dirname(path), "pending-session.jsonl")
       PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => "/tmp/project" }
+      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
 
       response = Rack::MockRequest.new(PiWebGateway).get(
         "/",
@@ -492,7 +534,7 @@ class AppTest < Minitest::Test
 
       response = Rack::MockRequest.new(PiWebGateway).get(
         "/",
-        params: { "session" => paths.last, "expanded_cwd" => ["/tmp/project"] }
+        params: { "session" => paths.last, "expanded_cwd" => [project_cwd(dir)] }
       )
 
       assert_equal 200, response.status
@@ -953,19 +995,21 @@ class AppTest < Minitest::Test
   def write_session(root)
     session_dir = File.join(root, "--project--")
     FileUtils.mkdir_p(session_dir)
+    FileUtils.mkdir_p(project_cwd(root))
     path = File.join(session_dir, "session.jsonl")
-    File.write(path, JSON.generate({ type: "session", id: "session-1", cwd: "/tmp/project" }) + "\n")
+    File.write(path, JSON.generate({ type: "session", id: "session-1", cwd: project_cwd(root) }) + "\n")
     path
   end
 
   def write_sessions(root, count:)
     session_dir = File.join(root, "--project--")
     FileUtils.mkdir_p(session_dir)
+    FileUtils.mkdir_p(project_cwd(root))
 
     (1..count).map do |index|
       path = File.join(session_dir, "session-#{index}.jsonl")
       File.write(path, [
-        JSON.generate({ type: "session", id: "session-#{index}", cwd: "/tmp/project" }),
+        JSON.generate({ type: "session", id: "session-#{index}", cwd: project_cwd(root) }),
         JSON.generate({ type: "session_info", name: "Session #{index}" })
       ].join("\n") + "\n")
       FileUtils.touch(path, mtime: Time.at(index))
@@ -987,9 +1031,14 @@ class AppTest < Minitest::Test
   def write_session_with_raw_messages(root, messages)
     session_dir = File.join(root, "--project--")
     FileUtils.mkdir_p(session_dir)
+    FileUtils.mkdir_p(project_cwd(root))
     path = File.join(session_dir, "messages.jsonl")
-    entries = [{ type: "session", id: "session-1", cwd: "/tmp/project" }] + messages
+    entries = [{ type: "session", id: "session-1", cwd: project_cwd(root) }] + messages
     File.write(path, entries.map { |entry| JSON.generate(entry) }.join("\n") + "\n")
     path
+  end
+
+  def project_cwd(root)
+    File.join(root, "project")
   end
 end

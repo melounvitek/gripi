@@ -18,8 +18,9 @@ class PiSessionStore
   Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :cost_total, keyword_init: true)
 
-  def initialize(root: File.expand_path("~/.pi/agent/sessions"))
+  def initialize(root: File.expand_path("~/.pi/agent/sessions"), delete_missing_cwds: false)
     @root = root
+    @delete_missing_cwds = delete_missing_cwds
   end
 
   def sessions
@@ -105,6 +106,7 @@ class PiSessionStore
     end
 
     return unless session_entry
+    return if delete_session_with_missing_cwd?(path, session_entry["cwd"])
 
     stat = File.stat(path)
     display_name = latest_name || first_user_message || File.basename(path, ".jsonl")
@@ -119,6 +121,15 @@ class PiSessionStore
       created_at: parse_time(session_entry["timestamp"]) || stat.ctime,
       modified_at: stat.mtime
     )
+  end
+
+  def delete_session_with_missing_cwd?(path, cwd)
+    return false unless @delete_missing_cwds && !cwd.to_s.empty? && !Dir.exist?(cwd)
+
+    File.delete(path)
+    true
+  rescue SystemCallError
+    false
   end
 
   def read_entries(path)

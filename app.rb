@@ -196,7 +196,7 @@ class PiWebGateway < Sinatra::Base
   end
 
   get "/" do
-    @store = PiSessionStore.new(root: settings.sessions_root)
+    @store = PiSessionStore.new(root: settings.sessions_root, delete_missing_cwds: true)
     @groups = @store.grouped_sessions
     append_pending_active_session(@groups)
     @selected_session = find_selected_session(@groups.values.flatten)
@@ -342,6 +342,8 @@ class PiWebGateway < Sinatra::Base
     response = with_rpc_client(session_path) { |client| client.get_commands }
     data = response_data(response)
     data.is_a?(Hash) && data["commands"].is_a?(Array) ? data["commands"] : []
+  rescue Errno::EPIPE, IOError
+    []
   end
 
   def rpc_clients
