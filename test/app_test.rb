@@ -1509,7 +1509,13 @@ class AppTest < Minitest::Test
       assert_includes response.body, "let liveAssistantMessage = null;"
       assert_includes response.body, "let liveAssistantSegments = new Map();"
       assert_includes response.body, "let liveAssistantSeen = false;"
-      assert_includes response.body, 'if (roleName === "user") {'
+      assert_includes response.body, "let liveUserMessages = new Map();"
+      assert_includes response.body, "function optimisticUserMessage(text)"
+      assert_includes response.body, "function upsertLiveUserSegment(event, segment, fallbackIndex, shouldScroll, timestamp)"
+      assert_includes response.body, 'if (live && roleName === "user" && !options.optimistic && optimisticUserMessageAlreadyRendered(text)) return null;'
+      assert_includes response.body, 'if (options.optimistic) {'
+      assert_includes response.body, "article.dataset.optimisticText = options.optimisticText ?? text;"
+      assert_includes response.body, 'upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);'
       assert_includes response.body, "function formatTimestamp(timestamp)"
       assert_includes response.body, "function eventTimestamp(event)"
       assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking });'
@@ -1525,7 +1531,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function sessionNameSlashCommand(message)"
       assert_includes response.body, "const renameCommand = sessionNameSlashCommand(message);"
       assert_includes response.body, "if (!renameCommand) {\n        resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
-      assert_includes response.body, "true, true, new Date());"
+      assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });"
       assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          window.location.href = payload.redirect || window.location.href;\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"

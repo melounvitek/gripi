@@ -228,6 +228,7 @@
     let liveAssistantSegments = new Map();
     let liveAssistantSeen = false;
     let liveBashToolCalls = new Map();
+    let liveUserMessages = new Map();
     let pendingImages = [];
     let eventPollTimer = null;
     let eventPollInFlight = false;
@@ -710,6 +711,15 @@
       return [...(conversationScroll?.querySelectorAll(".message:not(.message--live)[data-message-fingerprint]") || [])].some((message) => message.dataset.messageFingerprint === fingerprint);
     }
 
+    function optimisticUserMessage(text) {
+      return [...(conversationScroll?.querySelectorAll('.message--live[data-role="user"][data-optimistic="true"]') || [])]
+        .find((message) => normalizedMessageText(message.dataset.optimisticText || message.querySelector(".message-body")?.textContent) === normalizedMessageText(text));
+    }
+
+    function optimisticUserMessageAlreadyRendered(text) {
+      return !!optimisticUserMessage(text);
+    }
+
     function formatTimestamp(timestamp) {
       const date = timestamp ? new Date(timestamp) : new Date();
       if (Number.isNaN(date.getTime())) return "";
@@ -723,6 +733,7 @@
 
     function appendMessage(roleName, text, live = true, forceScroll = false, timestamp = null, options = {}) {
       const timestampKey = messageTimestampKey(timestamp);
+      if (live && roleName === "user" && !options.optimistic && optimisticUserMessageAlreadyRendered(text)) return null;
       if (live && liveMessageAlreadyRendered(roleName, text, timestampKey)) return null;
 
       const shouldScroll = followLiveOutput(forceScroll);
@@ -733,6 +744,10 @@
       article.dataset.role = roleName;
       article.dataset.messageTimestamp = timestampKey;
       article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
+      if (options.optimistic) {
+        article.dataset.optimistic = "true";
+        article.dataset.optimisticText = options.optimisticText ?? text;
+      }
 
       const header = document.createElement("header");
       header.className = "message-header";
@@ -864,6 +879,7 @@
       liveAssistantMessage = null;
       liveAssistantSegments = new Map();
       liveBashToolCalls = new Map();
+      liveUserMessages = new Map();
       liveAssistantSeen = false;
     }
 
@@ -880,6 +896,9 @@
       });
       liveBashToolCalls.forEach((storedEntry, key) => {
         if (storedEntry === entry) liveBashToolCalls.delete(key);
+      });
+      liveUserMessages.forEach((storedEntry, key) => {
+        if (storedEntry === entry) liveUserMessages.delete(key);
       });
     }
 
@@ -920,6 +939,41 @@
       return entry;
     }
 
+    function liveUserIdentity(event, segment, fallbackIndex, timestamp) {
+      const message = eventMessage(event);
+      const id = message?.id || message?.messageId || event.id || event.messageId;
+      const index = segment.startIndex ?? fallbackIndex;
+      if (id) return `${id}-${index}`;
+
+      const timestampKey = messageTimestampKey(timestamp);
+      const textHash = stableTextHash(normalizedMessageText(segment.text));
+      return `${timestampKey || "untimed"}-${textHash}-${index}`;
+    }
+
+    function optimisticUserEntry(segment, timestamp) {
+      const article = optimisticUserMessage(segment.text);
+      if (!article) return null;
+
+      delete article.dataset.optimistic;
+      delete article.dataset.optimisticText;
+      article.dataset.messageTimestamp = messageTimestampKey(timestamp);
+      article.dataset.messageFingerprint = messageFingerprint("user", segment.text, article.dataset.messageTimestamp);
+      const meta = article.querySelector(".message-meta");
+      if (meta) meta.textContent = formatTimestamp(timestamp);
+      return { article, body: article.querySelector(".message-body"), compact: false };
+    }
+
+    function upsertLiveUserSegment(event, segment, fallbackIndex, shouldScroll, timestamp) {
+      const key = liveUserIdentity(event, segment, fallbackIndex, timestamp);
+      const existing = liveUserMessages.get(key);
+      if (existing) return updateLiveSegment(existing, "user", segment, shouldScroll, timestamp);
+
+      const entry = optimisticUserEntry(segment, timestamp) || appendMessage("user", segment.text, true, shouldScroll, timestamp);
+      if (!entry) return null;
+      liveUserMessages.set(key, entry);
+      return entry;
+    }
+
     function upsertLiveAssistantSegment(event, roleName, segment, fallbackIndex, shouldScroll, timestamp) {
       const key = segmentIdentity(event, segment, fallbackIndex);
       const existing = liveAssistantSegments.get(key);
@@ -951,12 +1005,8 @@
       const shouldScroll = followLiveOutput();
       const timestamp = eventTimestamp(event);
 
-      if (roleName === "user") {
-        return;
-      }
-
       if (roleName !== "assistant") {
-        segments.forEach((segment) => {
+        segments.forEach((segment, index) => {
           const bashCallEntry = ["bash", "read", "edit", "write"].includes(segment.toolName) && segment.toolCallId && liveBashToolCalls.get(segment.toolCallId);
           if (bashCallEntry && segment.isToolResult) {
             const mergedText = segment.toolTranscript && !segment.expanded ? segment.text : [bashCallEntry.body.textContent, segment.text].filter(Boolean).join("\n\n");
@@ -968,6 +1018,8 @@
             if (segment.expanded && bashCallEntry.details) bashCallEntry.details.open = true;
             if (!markLiveEntryRendered(bashCallEntry, bashCallEntry.article.dataset.role || "assistant", mergedText)) return;
             afterLiveOutputChange(shouldScroll);
+          } else if (roleName === "user" && !segment.compact) {
+            upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);
           } else if (segment.compact) {
             appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, open: segment.expanded });
           } else {
@@ -1157,7 +1209,7 @@
         resetLiveAssistantTracking();
         resetEventPollBackoff();
         scheduleNextEventPoll(0);
-        appendMessage("user", [message, pendingImages.length > 0 ? `[${imageAttachmentLabel(pendingImages.length)}]` : ""].filter(Boolean).join("\n"), true, true, new Date());
+        appendMessage("user", [message, pendingImages.length > 0 ? `[${imageAttachmentLabel(pendingImages.length)}]` : ""].filter(Boolean).join("\n"), true, true, new Date(), { optimistic: true, optimisticText: message });
       }
       promptTextarea.value = "";
       clearAttachments();
