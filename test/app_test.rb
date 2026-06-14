@@ -1333,6 +1333,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "scheduleNextEventPoll();"
       assert_includes response.body, "resetLiveAssistantTracking();"
       assert_includes response.body, "resetEventPollBackoff();"
+      assert_includes response.body, "lastEventSeq = 0;"
       assert_includes response.body, "autoScrollEnabled = true;"
       assert_includes response.body, "clearAttachments();"
     end
@@ -1373,10 +1374,16 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "let eventPollInFlight = false;"
+      assert_includes response.body, "let lastEventSeq = 0;"
       assert_includes response.body, "let emptyEventPollCount = 0;"
       assert_includes response.body, "function scheduleNextEventPoll(delay = eventPollDelay())"
       assert_includes response.body, "if (eventPollInFlight) return;"
       assert_includes response.body, "eventPollInFlight = true;"
+      assert_includes response.body, "const eventsUrl = new URL(liveOutput.dataset.eventsUrl, window.location.origin);"
+      assert_includes response.body, "eventsUrl.searchParams.set(\"after\", lastEventSeq);"
+      assert_includes response.body, "lastEventSeq = payload.last_seq;"
+      assert_includes response.body, "if (payload.missed) {"
+      assert_includes response.body, "await switchSession(window.location.href, { push: false, focus: false });"
       assert_includes response.body, "eventPollInFlight = false;"
       assert_includes response.body, "if (document.hidden) return 10000;"
       assert_includes response.body, "if (emptyEventPollCount >= 6) return 5000;"

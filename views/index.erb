@@ -221,6 +221,7 @@
     let pendingImages = [];
     let eventPollTimer = null;
     let eventPollInFlight = false;
+    let lastEventSeq = 0;
     let emptyEventPollCount = 0;
     let autoScrollEnabled = true;
     let programmaticScroll = false;
@@ -1020,11 +1021,20 @@
       const generation = sessionViewGeneration;
       eventPollInFlight = true;
       try {
-        const response = await fetch(liveOutput.dataset.eventsUrl);
+        const eventsUrl = new URL(liveOutput.dataset.eventsUrl, window.location.origin);
+        eventsUrl.searchParams.set("after", lastEventSeq);
+        const response = await fetch(eventsUrl);
         if (!response.ok || generation !== sessionViewGeneration) return;
 
         const payload = await response.json();
         if (generation !== sessionViewGeneration) return;
+        if (payload.missed) {
+          await switchSession(window.location.href, { push: false, focus: false });
+          return;
+        }
+        if (Number.isInteger(payload.last_seq)) {
+          lastEventSeq = payload.last_seq;
+        }
         emptyEventPollCount = payload.events.length > 0 ? 0 : emptyEventPollCount + 1;
         payload.events.forEach((event) => {
           updateStatusFromEvent(event);
@@ -1188,6 +1198,7 @@
       scheduledAutoScrollFrame = null;
       resetLiveAssistantTracking();
       resetEventPollBackoff();
+      lastEventSeq = 0;
       autoScrollEnabled = true;
       clearAttachments();
     }
