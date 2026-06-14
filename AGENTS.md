@@ -8,6 +8,10 @@ This repo may also have a `PLAN.md`. If present, treat it as the active implemen
 
 When the current plan is completed, move the finished `PLAN.md` into the `plans/` folder.
 
+## Autonomous mode wrap-up
+
+When the user explicitly approves autonomous mode for implementation work, finish the approved scope by running `/review-current` after the code changes and focused tests. Address any actionable findings, then run `/review-current` again. Repeat this review/fix loop until `/review-current` reports no more actionable issues or only issues the user should decide on remain. Report any remaining non-actionable or user-decision items clearly in the final summary.
+
 ## Local server
 
 The dev server usually runs as Puma on `100.103.198.74:4567`, logging to `/tmp/pi-web-gateway.log`.
