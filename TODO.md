@@ -129,3 +129,41 @@ Determine and, if practical, implement a way for the web gateway to support the 
 - Prefer automatic reuse of Pi's command registry/handler if available.
 - Avoid drifting behavior from the CLI; if a command cannot behave identically in the web UI, document the difference before implementing.
 - Be careful with commands that affect session lifecycle, cancellation, filesystem state, or process state.
+
+---
+
+## Feature: Improve edit tool-call summaries
+
+### Context
+
+Some rendered edit tool calls do not show useful information when expanded in the web UI. In the reported example, an `edit TODO.md` tool call only shows a generic `edit TODO.md` line plus `Raw details`, which does not make the actual change understandable at a glance.
+
+The collapsed/expanded tool-call card should provide a helpful summary for edit operations, ideally including what file changed and enough of the replacement/diff context to understand the edit without opening raw JSON details.
+
+Relevant starting points likely include:
+
+- tool-call rendering templates in `views/`
+- tool-call formatting or summarization helpers in `lib/`
+- any frontend code that expands/collapses tool-call details
+- examples of rendered `edit` tool calls in session data
+
+### Goal
+
+Edit tool-call cards provide useful human-readable information when opened, so the user can quickly understand what was changed without inspecting raw details.
+
+### Checklist
+
+- [ ] Inspect how tool calls are currently rendered and summarized.
+- [ ] Inspect the stored structure for `edit` tool-call arguments/results.
+- [ ] Identify why `edit` currently shows only generic information.
+- [ ] Design a concise edit summary format, such as file path plus changed snippets or a small diff-like preview.
+- [ ] Implement the summary with safe truncation for large edits.
+- [ ] Preserve access to raw details for debugging.
+- [ ] Verify rendering for simple single-file edits and multi-edit calls.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Avoid dumping huge edit payloads into the normal card body.
+- Prefer a stable, readable preview over raw JSON.
+- Handle missing or malformed edit arguments gracefully.
