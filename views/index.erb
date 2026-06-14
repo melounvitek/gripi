@@ -531,7 +531,10 @@
     }
 
     function sessionNameSlashCommand(message) {
-      return /^\/(?:name|rename)[ \t]+[^\r\n]+$/.test(message.trim());
+      const trimmed = message.trim();
+      if (/^\/(?:name|rename)$/.test(trimmed)) return { valid: false };
+      if (/^\/(?:name|rename)[ \t]+[^\r\n]+$/.test(trimmed)) return { valid: true };
+      return null;
     }
 
     function renderAttachments() {
@@ -1220,6 +1223,11 @@
       } else if (response.ok) {
         const payload = await response.json().catch(() => null);
         if (payload?.command === "rename") {
+          if (payload.error) {
+            setComposerState("error", payload.error);
+            showStatus(payload.error, true);
+            return;
+          }
           window.location.href = payload.redirect || window.location.href;
           return;
         }

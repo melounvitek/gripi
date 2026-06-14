@@ -83,6 +83,33 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_bare_rename_slash_command_returns_usage_without_prompting
+    ["/name", "/rename"].each do |message|
+      Dir.mktmpdir do |dir|
+        path = write_session(dir)
+        calls = []
+        PiWebGateway.set :sessions_root, dir
+        PiWebGateway.set :rpc_client_factory, [->(session_path) {
+          calls << [:start, session_path]
+          FakeRpcClient.new(calls)
+        }]
+
+        response = Rack::MockRequest.new(PiWebGateway).post(
+          "/prompt",
+          params: { "session" => path, "message" => message },
+          "HTTP_ACCEPT" => "application/json"
+        )
+
+        assert_equal 200, response.status
+        assert_empty calls
+        payload = JSON.parse(response.body)
+        assert_equal path, payload.fetch("session")
+        assert_equal "rename", payload.fetch("command")
+        assert_equal "Usage: #{message} <name>", payload.fetch("error")
+      end
+    end
+  end
+
   def test_multiline_rename_like_prompt_is_sent_as_prompt
     ["/rename Useful\nname", "/rename\nUseful name"].each do |message|
       Dir.mktmpdir do |dir|
@@ -1183,12 +1210,13 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
       assert_includes response.body, "function showStatus(_text, _forceScroll = false) {}"
       assert_includes response.body, "showStatus(eventStatusText(event));"
-      assert_includes response.body, "return /^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(message.trim());"
+      assert_includes response.body, "if (/^\\/(?:name|rename)$/.test(trimmed)) return { valid: false };"
+      assert_includes response.body, "if (/^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(trimmed)) return { valid: true };"
       assert_includes response.body, "function sessionNameSlashCommand(message)"
       assert_includes response.body, "const renameCommand = sessionNameSlashCommand(message);"
       assert_includes response.body, "if (!renameCommand) {\n        resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
       assert_includes response.body, "true, true, new Date());"
-      assert_includes response.body, "if (payload?.command === \"rename\") {\n          window.location.href = payload.redirect || window.location.href;\n          return;\n        }"
+      assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          window.location.href = payload.redirect || window.location.href;\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"
       assert_includes response.body, "commandList.removeAttribute(\"open\");"

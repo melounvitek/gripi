@@ -213,8 +213,11 @@ class PiWebGateway < Sinatra::Base
     images = prompt_images_from(params["images"])
     halt 400, "Message cannot be empty" if message.strip.empty? && images.empty?
 
-    if (session_name = session_name_slash_command(message))
-      with_rpc_client(session_path) { |client| client.set_session_name(session_name) }
+    rename_command = session_name_slash_command(message)
+    if rename_command&.[](:name)
+      with_rpc_client(session_path) { |client| client.set_session_name(rename_command.fetch(:name)) }
+    elsif rename_command
+      nil
     else
       with_rpc_client(session_path) { |client| client.prompt(message, images) }
     end
@@ -222,7 +225,10 @@ class PiWebGateway < Sinatra::Base
     if json_request?
       content_type :json
       payload = { session: session_path, redirect: redirect_path }
-      payload[:command] = "rename" if session_name
+      if rename_command
+        payload[:command] = "rename"
+        payload[:error] = rename_command.fetch(:error) if rename_command[:error]
+      end
       JSON.generate(payload)
     else
       redirect redirect_path
@@ -294,8 +300,11 @@ class PiWebGateway < Sinatra::Base
   end
 
   def session_name_slash_command(message)
-    match = message.strip.match(%r{\A/(?:name|rename)[ \t]+([^\r\n]+)\z})
-    match && match[1].strip
+    match = message.strip.match(%r{\A/(name|rename)(?:[ \t]+([^\r\n]+))?\z})
+    return nil unless match
+
+    name = match[2]&.strip
+    name ? { name: name } : { error: "Usage: /#{match[1]} <name>" }
   end
 
   def session_redirect_path(session_path)
