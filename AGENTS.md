@@ -1,5 +1,13 @@
 # AGENTS.md
 
+## Planning files
+
+This repo may use `TODO.md` for tracking follow-up work, rough ideas, and deferred tasks. When useful, suggest adding items there rather than losing them in chat.
+
+This repo may also have a `PLAN.md`. If present, treat it as the active implementation plan, keep it in mind while working, and avoid drifting from it without discussion. For larger upcoming work, suggest creating or using `PLAN.md`.
+
+When the current plan is completed, move the finished `PLAN.md` into the `plans/` folder.
+
 ## Local server
 
 The dev server usually runs as Puma on `100.103.198.74:4567`, logging to `/tmp/pi-web-gateway.log`.
