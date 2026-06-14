@@ -593,3 +593,168 @@ Returning to an open session on mobile should reliably resume refreshing when pr
 - A manual refresh/reconnect affordance is acceptable if automatic refresh would be fragile or overly complicated.
 - Avoid creating duplicate overlapping poll loops after repeated hide/show cycles.
 - Preserve the selected session and input contents where possible.
+
+---
+
+## Feature: Search sessions
+
+### Context
+
+The archived usability plan lists session search as a later idea. As the number of Pi sessions grows, browsing by cwd groups alone may become too slow. The web gateway should investigate a lightweight search experience for finding sessions by directory, title, and possibly message contents.
+
+Relevant starting points likely include:
+
+- sidebar/session list rendering in `views/`
+- session discovery and metadata in `lib/`
+- routes in `app.rb` that load and filter sessions
+
+### Goal
+
+Make it quick to find an existing session without manually scanning cwd groups.
+
+### Checklist
+
+- [ ] Inspect current session metadata and sidebar filtering/grouping.
+- [ ] Decide search scope: cwd, session title, first user message, and/or full message text.
+- [ ] Decide whether search should be client-side, server-side, or hybrid.
+- [ ] Design a compact search UI that does not clutter the sidebar.
+- [ ] Implement the approved search behavior.
+- [ ] Verify search with many sessions and long cwd paths.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Prefer metadata-only search first unless full-text search is clearly needed.
+- Avoid adding a database just for search unless file scanning proves too slow.
+
+---
+
+## Feature: Pin or favorite sessions
+
+### Context
+
+The archived usability plan lists pinned/favorite sessions as a later idea. Some sessions are long-running or frequently revisited and should be easier to access than regular recency sorting allows.
+
+Relevant starting points likely include:
+
+- sidebar/session list rendering in `views/`
+- session metadata/state code in `lib/`
+- any existing persisted local gateway state, if added later
+
+### Goal
+
+Allow important sessions to stay visible and easy to reopen, even when they are older than the latest sessions in their cwd group.
+
+### Checklist
+
+- [ ] Decide what persistence mechanism should store pins/favorites.
+- [ ] Decide whether favorites are global, per-browser, or local-machine specific.
+- [ ] Design how pinned sessions appear in the sidebar.
+- [ ] Implement pin/unpin behavior.
+- [ ] Ensure pinned sessions still work with cwd grouping and selected-session visibility.
+- [ ] Verify pins survive page reloads and server restarts if persistence is intended.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Avoid confusing duplication if a pinned section also shows sessions in cwd groups.
+- Keep this local/personal unless a broader state model is introduced.
+
+---
+
+## Feature: Syntax highlighting for code blocks
+
+### Context
+
+Assistant markdown already renders code blocks, but the archived usability plan lists syntax highlighting as a later polish item. Highlighted code could improve readability for longer technical answers and tool-related snippets.
+
+Relevant starting points likely include:
+
+- markdown rendering helpers/endpoints in `app.rb`
+- CSS in `views/`
+- existing markdown sanitization behavior
+
+### Goal
+
+Render fenced code blocks with readable syntax highlighting while preserving safe sanitized HTML output.
+
+### Checklist
+
+- [ ] Inspect the current markdown rendering and sanitization pipeline.
+- [ ] Evaluate a small Ruby-side or browser-side syntax highlighting approach.
+- [ ] Ensure highlighted output remains sanitized and safe.
+- [ ] Add styling compatible with the current dark theme.
+- [ ] Implement syntax highlighting for common fenced code languages.
+- [ ] Verify unknown languages and plain code blocks still render cleanly.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Do not add a large frontend build pipeline just for highlighting.
+- Preserve copyability and readability of code blocks.
+
+---
+
+## Feature: Reconcile messages after completed turns
+
+### Context
+
+The archived usability plan lists reconciling from `get_messages` after each completed turn as a later robustness idea. The browser currently renders live output incrementally from RPC events, while Pi session files remain the source of truth. A completed turn could be reconciled against Pi's authoritative final messages to avoid live-rendering drift.
+
+Relevant starting points likely include:
+
+- live event rendering in `views/`
+- `/events` and session message routes in `app.rb`
+- `PiRpcClient#get_messages`
+- historical message rendering helpers
+
+### Goal
+
+After Pi finishes a turn, the web transcript should match the final Pi session state without requiring a manual page refresh.
+
+### Checklist
+
+- [ ] Inspect how live-rendered messages can differ from historical/session-file messages.
+- [ ] Decide whether reconciliation should call RPC `get_messages`, re-read JSONL, or use another source.
+- [ ] Decide whether to re-render the full conversation area or patch only the latest turn.
+- [ ] Preserve scroll position and auto-scroll behavior during reconciliation.
+- [ ] Implement the approved reconciliation strategy after `turn_end` / `agent_end`.
+- [ ] Verify live transcript drift, missed events, and duplicate live cards are corrected after completion.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Avoid a disruptive full-page refresh if a targeted transcript refresh is practical.
+- Pi remains the source of truth; the browser should not invent final message state.
+
+---
+
+## Feature: Add date separators in conversations
+
+### Context
+
+The archived usability plan lists date separators as a later idea. Long sessions can span multiple days, and subtle separators could make older conversation history easier to scan.
+
+Relevant starting points likely include:
+
+- historical message rendering in `views/`
+- live message append logic in frontend JavaScript
+- timestamp formatting helpers in `app.rb` and `views/`
+
+### Goal
+
+Show unobtrusive date separators between messages from different days, without making conversations visually noisy.
+
+### Checklist
+
+- [ ] Inspect available timestamps for historical and live messages.
+- [ ] Decide separator granularity and formatting.
+- [ ] Implement date separators for historical rendering.
+- [ ] Implement date separators for live-appended messages if needed.
+- [ ] Verify behavior across same-day and multi-day sessions.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Keep this lower priority than navigation, reliability, and session-management improvements.
+- Avoid separators when timestamps are missing or unreliable.
