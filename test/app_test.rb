@@ -1156,6 +1156,33 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_live_event_script_dedupes_events_already_rendered_from_history
+    Dir.mktmpdir do |dir|
+      path = write_session_with_messages(dir, [{ role: "assistant", text: "Already shown" }])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "data-message-fingerprint=\"assistant:"
+      assert_includes response.body, "function messageTimestampKey(timestamp)"
+      assert_includes response.body, "function messageFingerprint(roleName, text, timestampKey)"
+      assert_includes response.body, "function liveMessageAlreadyRendered(roleName, text, timestampKey)"
+      assert_includes response.body, "if (live && liveMessageAlreadyRendered(roleName, text, timestampKey)) return null;"
+      assert_includes response.body, "function markLiveEntryRendered(entry, roleName, text, timestamp = null)"
+      assert_includes response.body, "entry.article.remove();"
+      assert_includes response.body, "function forgetLiveEntry(entry)"
+      assert_includes response.body, "if (storedEntry === entry) liveAssistantSegments.delete(key);"
+      assert_includes response.body, "if (storedEntry === entry) liveBashToolCalls.delete(key);"
+      assert_includes response.body, "markLiveEntryRendered(bashCallEntry, bashCallEntry.article.dataset.role || \"assistant\", mergedText)"
+      assert_includes response.body, "article.dataset.messageTimestamp = timestampKey;"
+    end
+  end
+
   def test_live_event_script_schedules_non_overlapping_polls
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -1243,7 +1270,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "segment.startIndex ?? update.contentIndex ?? fallbackIndex"
       assert_includes response.body, "function upsertLiveAssistantSegment(event, roleName, segment, fallbackIndex, shouldScroll, timestamp)"
       assert_includes response.body, "const existing = liveAssistantSegments.get(key);"
-      assert_includes response.body, "const updated = existing && updateLiveSegment(existing, roleName, segment, shouldScroll);"
+      assert_includes response.body, "const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);"
       assert_includes response.body, "liveAssistantSegments.set(key, entry);"
       assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_start\") resetLiveAssistantTracking();"
       assert_includes response.body, "if ([\"turn_end\", \"agent_end\"].includes(event.type)) {\n        if (liveAssistantSeen) showStatus(\"Done\");\n        setComposerState(\"done\", \"Done\");\n        resetLiveAssistantTracking();"

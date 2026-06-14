@@ -133,6 +133,25 @@ class PiWebGateway < Sinatra::Base
       format_time(message.timestamp) if message.timestamp
     end
 
+    def message_fingerprint(role, text, timestamp)
+      timestamp_key = message_timestamp_key(timestamp)
+      return unless timestamp_key
+
+      "#{message_role_key(role)}:#{timestamp_key}:#{stable_text_hash(normalized_message_text(text))}"
+    end
+
+    def message_timestamp_key(timestamp)
+      timestamp&.to_i&.to_s
+    end
+
+    def normalized_message_text(text)
+      text.to_s.gsub(/\r\n?/, "\n").strip
+    end
+
+    def stable_text_hash(text)
+      text.bytes.reduce(5381) { |hash, byte| ((hash << 5) + hash + byte) & 0xffffffff }.to_s(16)
+    end
+
     def render_message_body(message)
       return h(message.text) if message.thinking
       return h(message.text) unless message.role == "assistant" && !message.compact

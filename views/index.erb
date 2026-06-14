@@ -245,7 +245,7 @@
           <% end %>
 
           <% @messages.each do |message| %>
-            <article class="<%= h message_article_class(message) %>" data-role="<%= h message.role %>">
+            <article class="<%= h message_article_class(message) %>" data-role="<%= h message.role %>" data-message-fingerprint="<%= h message_fingerprint(message.role, message.text, message.timestamp) %>">
               <header class="message-header">
                 <div class="role"><%= h message_role_label(message.role) %></div>
                 <% if message_metadata(message) %>
@@ -780,6 +780,35 @@
       }, delay);
     }
 
+    function normalizedMessageText(text) {
+      return String(text || "").replace(/\r\n?/g, "\n").trim();
+    }
+
+    function stableTextHash(text) {
+      const bytes = new TextEncoder().encode(text);
+      let hash = 5381;
+      bytes.forEach((byte) => { hash = (((hash << 5) + hash) + byte) >>> 0; });
+      return hash.toString(16);
+    }
+
+    function messageTimestampKey(timestamp) {
+      if (!timestamp) return "";
+      const date = new Date(timestamp);
+      if (Number.isNaN(date.getTime())) return "";
+      return String(Math.floor(date.getTime() / 1000));
+    }
+
+    function messageFingerprint(roleName, text, timestampKey) {
+      if (!timestampKey) return "";
+      return `${messageRoleKey(roleName)}:${timestampKey}:${stableTextHash(normalizedMessageText(text))}`;
+    }
+
+    function liveMessageAlreadyRendered(roleName, text, timestampKey) {
+      const fingerprint = messageFingerprint(roleName, text, timestampKey);
+      if (!fingerprint) return false;
+      return [...(conversationScroll?.querySelectorAll(".message:not(.message--live)[data-message-fingerprint]") || [])].some((message) => message.dataset.messageFingerprint === fingerprint);
+    }
+
     function formatTimestamp(timestamp) {
       const date = timestamp ? new Date(timestamp) : new Date();
       if (Number.isNaN(date.getTime())) return "";
@@ -792,12 +821,17 @@
     }
 
     function appendMessage(roleName, text, live = true, forceScroll = false, timestamp = null, options = {}) {
+      const timestampKey = messageTimestampKey(timestamp);
+      if (live && liveMessageAlreadyRendered(roleName, text, timestampKey)) return null;
+
       const shouldScroll = followLiveOutput(forceScroll);
       const roleKey = messageRoleKey(roleName);
 
       const article = document.createElement("article");
       article.className = `message message--${roleKey}${options.thinking ? " message--thinking" : ""}${live ? " message--live" : ""}`;
       article.dataset.role = roleName;
+      article.dataset.messageTimestamp = timestampKey;
+      article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
 
       const header = document.createElement("header");
       header.className = "message-header";
@@ -834,12 +868,17 @@
     }
 
     function appendCompactMessage(roleName, summary, text, expanded = false, live = true, forceScroll = false, rawDetails = "", timestamp = null, options = {}) {
+      const timestampKey = messageTimestampKey(timestamp);
+      if (live && liveMessageAlreadyRendered(roleName, text, timestampKey)) return null;
+
       const shouldScroll = followLiveOutput(forceScroll);
       const roleKey = messageRoleKey(roleName);
 
       const article = document.createElement("article");
       article.className = `message message--${roleKey} message--compact${options.toolTranscript ? " message--tool-transcript" : ""}${expanded ? " message--tool-error" : ""}${live ? " message--live" : ""}`;
       article.dataset.role = roleName;
+      article.dataset.messageTimestamp = timestampKey;
+      article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
 
       const header = document.createElement("header");
       header.className = "message-header";
@@ -934,7 +973,28 @@
       return `${contentIndex}-${segment.compact ? "compact" : "text"}`;
     }
 
-    function updateLiveSegment(entry, roleName, segment, shouldScroll) {
+    function forgetLiveEntry(entry) {
+      liveAssistantSegments.forEach((storedEntry, key) => {
+        if (storedEntry === entry) liveAssistantSegments.delete(key);
+      });
+      liveBashToolCalls.forEach((storedEntry, key) => {
+        if (storedEntry === entry) liveBashToolCalls.delete(key);
+      });
+    }
+
+    function markLiveEntryRendered(entry, roleName, text, timestamp = null) {
+      const timestampKey = messageTimestampKey(timestamp) || entry.article.dataset.messageTimestamp;
+      if (liveMessageAlreadyRendered(roleName, text, timestampKey)) {
+        entry.article.remove();
+        forgetLiveEntry(entry);
+        return false;
+      }
+      entry.article.dataset.messageTimestamp = timestampKey;
+      entry.article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
+      return true;
+    }
+
+    function updateLiveSegment(entry, roleName, segment, shouldScroll, timestamp = null) {
       if (entry.compact !== segment.compact) return null;
 
       if (segment.compact) {
@@ -954,6 +1014,7 @@
         }
       }
 
+      if (!markLiveEntryRendered(entry, roleName, segment.text, timestamp)) return null;
       afterLiveOutputChange(shouldScroll);
       return entry;
     }
@@ -961,12 +1022,18 @@
     function upsertLiveAssistantSegment(event, roleName, segment, fallbackIndex, shouldScroll, timestamp) {
       const key = segmentIdentity(event, segment, fallbackIndex);
       const existing = liveAssistantSegments.get(key);
-      const updated = existing && updateLiveSegment(existing, roleName, segment, shouldScroll);
-      if (updated) return updated;
+      if (existing) {
+        const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);
+        if (updated) return updated;
+        forgetLiveEntry(existing);
+        if (liveMessageAlreadyRendered(roleName, segment.text, messageTimestampKey(timestamp))) return null;
+      }
+      if (liveMessageAlreadyRendered(roleName, segment.text, messageTimestampKey(timestamp))) return null;
 
       const entry = segment.compact ?
         appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, open: segment.expanded }) :
         appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking });
+      if (!entry) return null;
       liveAssistantSegments.set(key, entry);
       if (["bash", "read", "edit", "write"].includes(segment.toolName) && segment.toolCallId && !segment.isToolResult) liveBashToolCalls.set(segment.toolCallId, entry);
       return entry;
@@ -991,12 +1058,14 @@
         segments.forEach((segment) => {
           const bashCallEntry = ["bash", "read", "edit", "write"].includes(segment.toolName) && segment.toolCallId && liveBashToolCalls.get(segment.toolCallId);
           if (bashCallEntry && segment.isToolResult) {
-            bashCallEntry.body.textContent = segment.toolTranscript && !segment.expanded ? segment.text : [bashCallEntry.body.textContent, segment.text].filter(Boolean).join("\n\n");
+            const mergedText = segment.toolTranscript && !segment.expanded ? segment.text : [bashCallEntry.body.textContent, segment.text].filter(Boolean).join("\n\n");
+            bashCallEntry.body.textContent = mergedText;
             if (bashCallEntry.rawBody) {
               bashCallEntry.rawBody.textContent = [bashCallEntry.rawBody.textContent, segment.rawDetails].filter(Boolean).join("\n\n");
             }
             bashCallEntry.article.classList.toggle("message--tool-error", segment.expanded);
             if (segment.expanded && bashCallEntry.details) bashCallEntry.details.open = true;
+            if (!markLiveEntryRendered(bashCallEntry, bashCallEntry.article.dataset.role || "assistant", mergedText)) return;
             afterLiveOutputChange(shouldScroll);
           } else if (segment.compact) {
             appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, open: segment.expanded });
@@ -1010,7 +1079,7 @@
       liveAssistantSeen = true;
       segments.forEach((segment, index) => {
         const entry = upsertLiveAssistantSegment(event, roleName, segment, index, shouldScroll, timestamp);
-        if (!segment.compact) liveAssistantMessage = entry;
+        if (entry && !segment.compact) liveAssistantMessage = entry;
       });
     }
 
