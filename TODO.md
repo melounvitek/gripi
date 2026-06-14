@@ -216,3 +216,44 @@ Produce and, if approved, implement a notification system that alerts the user a
 - Prefer opt-in notifications; do not surprise the user with permission prompts on page load.
 - Snooze should suppress non-critical notifications, but critical errors may need separate consideration.
 - Keep notification text concise and avoid exposing sensitive prompt or tool-output details unnecessarily.
+
+---
+
+## Feature: Change model and thinking mode from the footer
+
+### Context
+
+The web gateway footer shows the current model and thinking setting. These should become interactive controls: the user should be able to click the model or thinking value in the footer and change them without leaving the current session view.
+
+Future sessions should inspect how the current model/thinking values are displayed, where session defaults or runtime options are stored, and how new prompts are submitted with those settings.
+
+Relevant starting points likely include:
+
+- footer rendering in `views/`
+- frontend JavaScript for session controls and form submission
+- server endpoints in `app.rb`
+- session configuration/state code in `lib/`
+- any existing model or thinking selection behavior elsewhere in the app
+
+### Goal
+
+The footer provides a clear, low-friction way to change the active model and thinking setting for subsequent requests in the current session, while accurately reflecting the current effective values.
+
+### Checklist
+
+- [ ] Inspect how the footer currently renders model and thinking information.
+- [ ] Inspect where model and thinking settings are stored and passed to Pi.
+- [ ] Determine whether changes should affect only the current session, new sessions, or both.
+- [ ] Design the footer interaction, such as a dropdown, popover, or inline selector.
+- [ ] Ensure available model and thinking options come from the same source as Pi or existing app configuration where possible.
+- [ ] Implement model selection from the footer.
+- [ ] Implement thinking-mode selection from the footer.
+- [ ] Ensure the selected values are used for subsequent user messages.
+- [ ] Verify the footer updates after changes and remains usable on small screens.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Avoid making the footer visually noisy; keep the controls subtle until clicked.
+- Be clear whether changes apply immediately to the next prompt or require a new session.
+- Prefer reusing existing configuration/model lists instead of hard-coding options if possible.
