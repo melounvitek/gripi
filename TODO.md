@@ -552,3 +552,41 @@ Determine whether unread highlighting is feasible and useful, then propose a min
 - Avoid duplicating sessions confusingly if an `Unread` section is added above directory groups.
 - Keep the indicator calm and readable; unread should guide attention, not create noise.
 - Be explicit about whether unread is per-browser, per-session, or globally persisted.
+
+---
+
+## Bug: Resume mobile sessions after browser closes
+
+### Context
+
+On mobile, if the user closes the browser or tab while a session is open and later returns, the previously opened session can get stuck and no longer appears to refresh. The page may still show the session, but live polling or session state does not recover as expected after the mobile browser suspends or discards the page.
+
+This likely involves browser lifecycle behavior on mobile, such as background suspension, bfcache restores, stale polling timers, or stale RPC/session state after reconnecting.
+
+Relevant starting points likely include:
+
+- frontend polling and visibility/page lifecycle handlers in `views/`
+- `/events` polling behavior in `app.rb`
+- active RPC client/session handling
+- browser events such as `visibilitychange`, `pageshow`, `pagehide`, `focus`, and network reconnects
+
+### Goal
+
+Returning to an open session on mobile should reliably resume refreshing, or force a safe refresh/reconnect, so the session does not remain stuck after the browser was closed or suspended.
+
+### Checklist
+
+- [ ] Reproduce or reason through the mobile close/return lifecycle that leaves a session stuck.
+- [ ] Inspect current event polling timer setup and whether it resumes after page restore.
+- [ ] Inspect whether stale in-flight polling state can block future polls after suspension.
+- [ ] Decide whether to restart polling, refresh session state, or reload the page on mobile/page restore.
+- [ ] Implement the smallest safe recovery behavior.
+- [ ] Verify returning to an open session after tab close/backgrounding on mobile.
+- [ ] Verify desktop polling behavior is unchanged.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Prefer a targeted lifecycle recovery over increasing polling frequency.
+- Avoid creating duplicate overlapping poll loops after repeated hide/show cycles.
+- Preserve the selected session and input contents where possible.
