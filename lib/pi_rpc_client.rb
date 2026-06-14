@@ -3,6 +3,8 @@ require "open3"
 require "thread"
 
 class PiRpcClient
+  DEFAULT_EVENT_BUFFER_LIMIT = 5_000
+
   def self.start(session_path, popen: Open3.method(:popen3))
     stdin, stdout, stderr, wait_thread = popen.call("pi", "--mode", "rpc", "--session", session_path)
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
@@ -13,7 +15,7 @@ class PiRpcClient
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
   end
 
-  def initialize(stdin:, stdout:, stderr: nil, wait_thread: nil)
+  def initialize(stdin:, stdout:, stderr: nil, wait_thread: nil, event_buffer_limit: DEFAULT_EVENT_BUFFER_LIMIT)
     @stdin = stdin
     @stdout = stdout
     @stderr = stderr
@@ -22,6 +24,8 @@ class PiRpcClient
     @responses = {}
     @pending_ids = {}
     @events = []
+    @event_sequence = 0
+    @event_buffer_limit = event_buffer_limit
     @mutex = Mutex.new
     @condition = ConditionVariable.new
     @reader_running = false
@@ -68,12 +72,14 @@ class PiRpcClient
     request("set_session_name", id: next_id("set_session_name"), name: name)
   end
 
-  def drain_events
+  def events_after(after_seq)
     ensure_reader
+    after_seq = after_seq.to_i
     @mutex.synchronize do
-      events = @events
-      @events = []
-      events
+      oldest_seq = @events.first&.first
+      missed = oldest_seq && after_seq < oldest_seq - 1
+      events = missed ? [] : @events.select { |seq, _event| seq > after_seq }.map(&:last)
+      { events: events, last_seq: @event_sequence, missed: !!missed }
     end
   end
 
@@ -159,7 +165,9 @@ class PiRpcClient
       if response["id"] && @pending_ids.delete(response["id"])
         @responses[response["id"]] = response
       else
-        @events << response
+        @event_sequence += 1
+        @events << [@event_sequence, response]
+        @events.shift while @events.length > @event_buffer_limit
       end
       @condition.broadcast
     end

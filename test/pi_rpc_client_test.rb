@@ -42,10 +42,26 @@ class PiRpcClientTest < Minitest::Test
     response = client.request("get_state", id: "state-1")
 
     assert_equal({ "id" => "state-1", "type" => "state", "cwd" => "/tmp/project" }, response)
-    assert_equal [{ "type" => "event", "name" => "queued" }], client.drain_events
-    assert_empty client.drain_events
+    assert_equal({ events: [{ "type" => "event", "name" => "queued" }], last_seq: 1, missed: false }, client.events_after(0))
+    assert_equal({ events: [{ "type" => "event", "name" => "queued" }], last_seq: 1, missed: false }, client.events_after(0))
+    assert_equal({ events: [], last_seq: 1, missed: false }, client.events_after(1))
     written = JSON.parse(input.string.lines.first)
     assert_equal({ "id" => "state-1", "type" => "get_state" }, written)
+  end
+
+  def test_reports_missed_events_when_cursor_precedes_buffer
+    input = StringIO.new
+    output = StringIO.new([
+      JSON.generate({ type: "event", name: "one" }),
+      JSON.generate({ type: "event", name: "two" }),
+      JSON.generate({ id: "state-1", type: "state" })
+    ].join("\n") + "\n")
+    client = PiRpcClient.new(stdin: input, stdout: output, event_buffer_limit: 1)
+
+    client.request("get_state", id: "state-1")
+
+    assert_equal({ events: [], last_seq: 2, missed: true }, client.events_after(0))
+    assert_equal({ events: [{ "type" => "event", "name" => "two" }], last_seq: 2, missed: false }, client.events_after(1))
   end
 
   def test_includes_payload_fields_in_command
