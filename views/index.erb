@@ -37,8 +37,8 @@
     a.session:hover { background: var(--panel-soft); border-color: var(--border); transform: translateX(1px); }
     a.session.selected { background: linear-gradient(90deg, rgba(88, 101, 242, 0.22), rgba(88, 101, 242, 0.08)); border-color: rgba(88, 101, 242, 0.55); }
     a.session.selected::before { content: ""; position: absolute; left: -1rem; top: 0.7rem; bottom: 0.7rem; width: 4px; border-radius: 999px; background: var(--accent); }
-    .session-title { font-weight: 650; overflow-wrap: anywhere; }
-    .session-meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+    .session-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-icon-button { flex: 0 0 auto; width: 1.65rem; height: 1.65rem; padding: 0; border-radius: 999px; line-height: 1; }
     .session-rename { display: none; gap: 0.35rem; grid-template-columns: minmax(0, 1fr) auto; margin: 0.3rem 0 0.55rem; }
     a.session.selected + .session-rename { display: grid; }
