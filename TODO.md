@@ -132,6 +132,46 @@ Determine and, if practical, implement a way for the web gateway to support the 
 
 ---
 
+## Feature: Investigate `/events` polling resilience and performance
+
+### Context
+
+The web gateway currently polls `/events?session=...` once per second from each open session page. The endpoint drains asynchronous Pi RPC events from the session's `PiRpcClient` and returns them to the browser for live rendering.
+
+A recent gateway hang looked like Puma thread saturation while serving repeated `/events` requests. Future sessions should investigate whether polling can be made safer and more efficient so slow or stuck RPC clients, multiple open tabs, or overlapping browser polls cannot wedge the web server.
+
+Relevant starting points likely include:
+
+- `/events` route in `app.rb`
+- `PiRpcClient#drain_events` and RPC reader behavior in `lib/pi_rpc_client.rb`
+- client polling loop in `views/index.erb`
+- Puma thread configuration and request timeout behavior
+
+### Goal
+
+Make live event delivery robust enough that the web UI remains responsive even when Pi RPC clients are slow, stuck, idle, or polled from multiple browser tabs.
+
+### Checklist
+
+- [ ] Inspect current `/events` server behavior and confirm whether it can create or remap RPC clients during polling.
+- [ ] Inspect the browser polling loop for overlapping requests, retry behavior, and behavior across multiple open tabs.
+- [ ] Reproduce or reason through how `/events` requests can occupy all Puma threads.
+- [ ] Evaluate simple client-side mitigations such as preventing overlapping polls, backing off while idle, and pausing in hidden tabs.
+- [ ] Evaluate server-side mitigations such as fast nonblocking drains, request timeouts, stale client cleanup, and avoiding RPC client creation from passive polling.
+- [ ] Consider whether Server-Sent Events, WebSockets, or a single shared poll loop would be a better long-term fit.
+- [ ] Propose the smallest safe improvement before implementation.
+- [ ] Add or update tests where practical.
+- [ ] Verify the page stays responsive under multiple open tabs and idle sessions.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Preserve near-real-time live output during active generation.
+- Prefer small changes that reduce the chance of Puma thread starvation before attempting a larger transport redesign.
+- Avoid losing events when changing drain or polling behavior.
+
+---
+
 ## Feature: Improve edit tool-call summaries
 
 ### Context
