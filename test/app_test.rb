@@ -1845,6 +1845,30 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_live_event_script_renders_tool_execution_updates
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "let liveToolExecutions = new Map();"
+      assert_includes response.body, "function renderToolExecutionEvent(event)"
+      assert_includes response.body, "event.type === \"tool_execution_update\""
+      assert_includes response.body, "event.partialResult?.content"
+      assert_includes response.body, "updateLiveToolExecution(entry, event, shouldScroll)"
+      assert_includes response.body, "appendCompactMessage(\"tool\", toolExecutionSummary(event), toolExecutionText(event)"
+      assert_includes response.body, "if (!event.toolCallId || [\"bash\", \"read\", \"edit\", \"write\"].includes(event.toolName)) return;"
+      assert_includes response.body, "if (segment.toolCallId && !segment.isToolResult && ![\"bash\", \"read\", \"edit\", \"write\"].includes(segment.toolName)) liveToolExecutions.set(segment.toolCallId, entry);"
+      assert_includes response.body, 'if (["tool_execution_start", "tool_execution_update", "tool_execution_end"].includes(event.type))'
+    end
+  end
+
   def test_live_event_script_keeps_active_sessions_pinned_after_layout
     Dir.mktmpdir do |dir|
       path = write_session(dir)

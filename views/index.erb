@@ -293,6 +293,7 @@
     let liveAssistantSegments = new Map();
     let liveAssistantSeen = false;
     let liveBashToolCalls = new Map();
+    let liveToolExecutions = new Map();
     let liveUserMessages = new Map();
     let liveStatusModel = null;
     let liveStatusThinking = null;
@@ -1165,6 +1166,7 @@
       liveAssistantMessage = null;
       liveAssistantSegments = new Map();
       liveBashToolCalls = new Map();
+      liveToolExecutions = new Map();
       liveUserMessages = new Map();
       liveAssistantSeen = false;
     }
@@ -1182,6 +1184,9 @@
       });
       liveBashToolCalls.forEach((storedEntry, key) => {
         if (storedEntry === entry) liveBashToolCalls.delete(key);
+      });
+      liveToolExecutions.forEach((storedEntry, key) => {
+        if (storedEntry === entry) liveToolExecutions.delete(key);
       });
       liveUserMessages.forEach((storedEntry, key) => {
         if (storedEntry === entry) liveUserMessages.delete(key);
@@ -1279,7 +1284,55 @@
       if (!entry) return null;
       liveAssistantSegments.set(key, entry);
       if (["bash", "read", "edit", "write"].includes(segment.toolName) && segment.toolCallId && !segment.isToolResult) liveBashToolCalls.set(segment.toolCallId, entry);
+      if (segment.toolCallId && !segment.isToolResult && !["bash", "read", "edit", "write"].includes(segment.toolName)) liveToolExecutions.set(segment.toolCallId, entry);
       return entry;
+    }
+
+    function toolExecutionResult(event) {
+      return event.type === "tool_execution_update" ? event.partialResult : event.result;
+    }
+
+    function toolExecutionContentText(event) {
+      const content = event.partialResult?.content || event.result?.content;
+      if (!content) return "";
+      return contentSegments(content, { toolName: "tool" }).map((segment) => segment.text).join("\n");
+    }
+
+    function toolExecutionText(event) {
+      if (event.type === "tool_execution_start") return "(running…)";
+      return toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
+    }
+
+    function toolExecutionSummary(event) {
+      const status = event.type === "tool_execution_end" ? (event.isError ? "failed" : "done") : "running";
+      return `${event.toolName || "tool"} ${status}`;
+    }
+
+    function toolExecutionRawDetails(event) {
+      const result = toolExecutionResult(event);
+      return result ? JSON.stringify(result, null, 2) : JSON.stringify({ args: event.args || {} }, null, 2);
+    }
+
+    function updateLiveToolExecution(entry, event, shouldScroll) {
+      renderToolSummary(entry.summaryText, null, toolExecutionSummary(event));
+      entry.body.textContent = toolExecutionText(event);
+      if (entry.rawBody) entry.rawBody.textContent = toolExecutionRawDetails(event);
+      entry.article.classList.toggle("message--tool-error", event.isError === true);
+      afterLiveOutputChange(shouldScroll);
+      return entry;
+    }
+
+    function renderToolExecutionEvent(event) {
+      if (!event.toolCallId || ["bash", "read", "edit", "write"].includes(event.toolName)) return;
+      const shouldScroll = followLiveOutput();
+      const existing = liveToolExecutions.get(event.toolCallId);
+      if (existing) {
+        updateLiveToolExecution(existing, event, shouldScroll);
+        return;
+      }
+
+      const entry = appendCompactMessage("tool", toolExecutionSummary(event), toolExecutionText(event), true, true, shouldScroll, toolExecutionRawDetails(event), eventTimestamp(event), { error: event.isError === true, open: true });
+      if (entry) liveToolExecutions.set(event.toolCallId, entry);
     }
 
     function renderMessageEvent(event) {
@@ -1295,8 +1348,16 @@
 
       if (roleName !== "assistant") {
         segments.forEach((segment, index) => {
+          const toolExecutionEntry = segment.toolCallId && liveToolExecutions.get(segment.toolCallId);
           const bashCallEntry = ["bash", "read", "edit", "write"].includes(segment.toolName) && segment.toolCallId && liveBashToolCalls.get(segment.toolCallId);
-          if (bashCallEntry && segment.isToolResult) {
+          if (toolExecutionEntry && segment.isToolResult) {
+            toolExecutionEntry.body.textContent = segment.text;
+            if (toolExecutionEntry.rawBody) toolExecutionEntry.rawBody.textContent = segment.rawDetails || "";
+            renderToolSummary(toolExecutionEntry.summaryText, segment.summaryParts, segment.summary);
+            toolExecutionEntry.article.classList.toggle("message--tool-error", segment.error === true);
+            if (!markLiveEntryRendered(toolExecutionEntry, toolExecutionEntry.article.dataset.role || "toolResult", segment.text, timestamp)) return;
+            afterLiveOutputChange(shouldScroll);
+          } else if (bashCallEntry && segment.isToolResult) {
             const mergedText = segment.toolTranscript && segment.error !== true ? segment.text : [bashCallEntry.body.textContent, segment.text].filter(Boolean).join("\n\n");
             bashCallEntry.body.textContent = mergedText;
             if (bashCallEntry.rawBody) {
@@ -1333,6 +1394,11 @@
       if (["message_start", "message_update", "message_end"].includes(event.type)) {
         renderMessageEvent(event);
         notifyFinalAssistantReply(event);
+        return;
+      }
+
+      if (["tool_execution_start", "tool_execution_update", "tool_execution_end"].includes(event.type)) {
+        renderToolExecutionEvent(event);
         return;
       }
 
