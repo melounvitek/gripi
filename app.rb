@@ -6,6 +6,7 @@ require "redcarpet"
 require "sanitize"
 require "securerandom"
 require_relative "lib/pi_session_store"
+require_relative "lib/pi_attachment_store"
 require_relative "lib/pi_rpc_client"
 require_relative "lib/pi_rpc_client_registry"
 
@@ -32,6 +33,7 @@ class PiWebGateway < Sinatra::Base
 
   set :root, File.dirname(__FILE__)
   set :sessions_root, ENV.fetch("PI_SESSIONS_ROOT", File.expand_path("~/.pi/agent/sessions"))
+  set :attachments_root, ENV.fetch("PI_ATTACHMENTS_ROOT", File.expand_path("~/.pi/web-gateway/attachments"))
   set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
   set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd) }]
   set :rpc_client_registry, nil
@@ -158,6 +160,10 @@ class PiWebGateway < Sinatra::Base
       text.bytes.reduce(5381) { |hash, byte| ((hash << 5) + hash + byte) & 0xffffffff }.to_s(16)
     end
 
+    def attachment_label(count)
+      "📎 #{count} image attachment#{count == 1 ? "" : "s"}"
+    end
+
     def render_message_body(message)
       return h(message.text) if message.thinking
       return h(message.text) unless message.role == "assistant" && !message.compact
@@ -255,7 +261,9 @@ class PiWebGateway < Sinatra::Base
     elsif rename_command
       nil
     else
+      submitted_at = Time.now
       with_rpc_client(session_path) { |client| client.prompt(message, images) }
+      attachment_store.record_prompt(session_path, message, images.length, timestamp: submitted_at)
     end
     redirect_path = session_redirect_path(session_path, expanded_cwds: expanded_cwds)
     if json_request?
@@ -349,12 +357,17 @@ class PiWebGateway < Sinatra::Base
     request.env["HTTP_ACCEPT"].to_s.include?("application/json")
   end
 
+  def attachment_store
+    PiAttachmentStore.new(root: settings.attachments_root)
+  end
+
   def prepare_session_view
     @store = PiSessionStore.new(root: settings.sessions_root, delete_missing_cwds: true)
     @groups = @store.grouped_sessions
     append_pending_active_session(@groups)
     @selected_session = find_selected_session(@groups.values.flatten)
     @messages = @selected_session && File.exist?(@selected_session.path) ? @store.messages(@selected_session.path) : []
+    @attachment_counts = @selected_session && File.exist?(@selected_session.path) ? attachment_store.counts_for_messages(@selected_session.path, @messages) : {}
     @session_status = @selected_session && File.exist?(@selected_session.path) ? @store.status(@selected_session.path) : nil
   end
 

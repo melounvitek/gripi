@@ -8,10 +8,16 @@ require_relative "../app"
 
 class AppTest < Minitest::Test
   def setup
+    @attachments_root = Dir.mktmpdir
+    PiWebGateway.set :attachments_root, @attachments_root
     PiWebGateway.set :rpc_client_registry, nil
     PiWebGateway.set :pending_rpc_cwds, {}
     PiWebGateway.set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
     PiWebGateway.set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd) }]
+  end
+
+  def teardown
+    FileUtils.remove_entry(@attachments_root) if @attachments_root && Dir.exist?(@attachments_root)
   end
 
   def test_posts_prompt_to_selected_session_and_redirects_back
@@ -181,6 +187,40 @@ class AppTest < Minitest::Test
         [:start, path],
         [:prompt, "What is this?", [{ type: "image", data: Base64.strict_encode64("fake image data"), mimeType: "image/png" }]]
       ], calls
+    end
+  end
+
+  def test_renders_historical_attachment_badge_for_uploaded_image_prompt
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      image_path = File.join(dir, "screenshot.png")
+      File.binwrite(image_path, "fake image data")
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      upload = Rack::Multipart::UploadedFile.new(image_path, "image/png", true)
+      post_response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "What is this?", "images[]" => upload }
+      )
+      File.open(path, "a") do |file|
+        file.puts(JSON.generate(
+          type: "message",
+          timestamp: Time.now.utc.iso8601,
+          message: { role: "user", content: [{ type: "text", text: "What is this?" }] }
+        ))
+      end
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 303, post_response.status
+      assert_equal 200, response.status
+      assert_includes response.body, "message-attachments"
+      assert_includes response.body, "📎 1 image attachment"
     end
   end
 

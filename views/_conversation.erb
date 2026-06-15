@@ -46,6 +46,9 @@
                   <pre class="message-body"><%= render_message_body(message) %></pre>
                 <% end %>
               <% end %>
+              <% if message.role == "user" && @attachment_counts[message.object_id].to_i.positive? %>
+                <div class="message-attachments"><%= h attachment_label(@attachment_counts[message.object_id]) %></div>
+              <% end %>
             </article>
           <% end %>
 
