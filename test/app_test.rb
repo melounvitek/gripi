@@ -1577,7 +1577,10 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes response.body, "function enterSessionShortcutMode()"
       assert_includes response.body, "event.ctrlKey && event.key.toLowerCase() === \"k\""
-      assert_includes response.body, "openRecentSessionShortcut(event.key)"
+      assert_includes response.body, "function recentSessionShortcutFromEvent(event)"
+      assert_includes response.body, "event.code.match(/^Digit([1-9])$/)"
+      assert_includes response.body, "event.code.match(/^Numpad([1-9])$/)"
+      assert_includes response.body, "openRecentSessionShortcut(shortcut)"
       assert_includes response.body, "exitSessionShortcutMode();\n      if (!link || !normalLeftClick(event)) return;"
       assert_includes response.body, "sessionShortcutTimer = setTimeout(exitSessionShortcutMode, 5000);"
       assert_includes response.body, "session-shortcuts-visible"

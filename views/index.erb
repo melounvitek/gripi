@@ -1673,6 +1673,11 @@
       return document.body.classList.contains("session-shortcuts-visible");
     }
 
+    function recentSessionShortcutFromEvent(event) {
+      if (/^[1-9]$/.test(event.key)) return event.key;
+      return event.code.match(/^Digit([1-9])$/)?.[1] || event.code.match(/^Numpad([1-9])$/)?.[1] || null;
+    }
+
     function normalLeftClick(event) {
       return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
     }
@@ -1691,9 +1696,10 @@
         return;
       }
 
-      if (/^[1-9]$/.test(event.key)) {
+      const shortcut = recentSessionShortcutFromEvent(event);
+      if (shortcut) {
         event.preventDefault();
-        openRecentSessionShortcut(event.key).catch(() => {});
+        openRecentSessionShortcut(shortcut).catch(() => {});
         return;
       }
 
