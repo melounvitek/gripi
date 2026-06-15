@@ -1641,9 +1641,11 @@
         const payload = await response.json();
         if (switchGeneration !== sessionSwitchGeneration) return false;
         resetSessionViewState();
+        const previousSidebarScrollTop = sessionSidebar?.scrollTop || 0;
         sessionSidebar.outerHTML = payload.sidebar_html;
         conversationPanel.outerHTML = payload.conversation_html;
         bindSessionDom();
+        if (sessionSidebar) sessionSidebar.scrollTop = previousSidebarScrollTop;
         bindSessionControls();
         if (push) history.pushState({ session: payload.session }, payload.title || "", payload.url || url);
         document.title = payload.title ? `${payload.title} · Pi Web Gateway` : "Pi Web Gateway";
