@@ -13,6 +13,7 @@ require_relative "lib/gateway_read_state_store"
 require_relative "lib/browser_access_store"
 require_relative "lib/pi_rpc_client"
 require_relative "lib/pi_rpc_client_registry"
+require_relative "lib/time_formatter"
 
 class SafeMarkdownRenderer < Redcarpet::Render::HTML
   ALLOWED_MARKDOWN_ELEMENTS = (Sanitize::Config::RELAXED[:elements] + %w[pre code]).uniq.freeze
@@ -183,6 +184,10 @@ class PiWebGateway < Sinatra::Base
 
     def format_time(time)
       time&.localtime&.strftime("%Y-%m-%d %H:%M") || "unknown"
+    end
+
+    def format_relative_time(time)
+      TimeFormatter.relative(time)
     end
 
     def message_role_key(role)

@@ -14,7 +14,7 @@
               <div class="session-content">
                 <div class="session-title"><%= h session.display_name %></div>
                 <div class="session-meta">
-                  <%= h project_label(session) %> · updated <%= h format_time(session.modified_at) %>
+                  <%= h project_label(session) %> · updated <%= h format_relative_time(session.modified_at) %>
                 </div>
               </div>
               <div class="session-indicators">
@@ -47,7 +47,7 @@
               <div class="session-content">
                 <div class="session-title"><%= h session.display_name %></div>
                 <div class="session-meta">
-                  <%= h session.message_count %> messages · updated <%= h format_time(session.modified_at) %>
+                  <%= h session.message_count %> messages · updated <%= h format_relative_time(session.modified_at) %>
                 </div>
               </div>
               <div class="session-indicators">

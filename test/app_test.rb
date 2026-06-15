@@ -1072,6 +1072,21 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_sidebar_uses_relative_time_formatter
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      FileUtils.touch(path, mtime: Time.now)
+      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, "updated just now"
+      refute_includes response.body, "updated 20"
+    end
+  end
+
   def test_recent_sessions_include_keyboard_shortcut_indices
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 9)
