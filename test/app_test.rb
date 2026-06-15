@@ -1868,11 +1868,15 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes response.body, "function sidebarFragmentUrl()"
       assert_includes response.body, "function sidebarScrollContainer()"
+      assert_includes response.body, "function bindSidebarScrollTracking()"
+      assert_includes response.body, "function recentlyInteractedWithSidebar()"
       assert_includes response.body, "async function refreshSidebar(generation = sessionViewGeneration)"
+      assert_includes response.body, "if (recentlyInteractedWithSidebar()) {\n        scheduleSidebarRefresh(1000);\n        return;\n      }"
       assert_includes response.body, "fetch(sidebarFragmentUrl())"
       assert_includes response.body, "const previousScrollTop = sidebarScrollContainer()?.scrollTop || 0;"
       assert_includes response.body, "const refreshedScrollContainer = sidebarScrollContainer();\n      if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = previousScrollTop;"
-      assert_includes response.body, "setTimeout(() => refreshSidebar().catch(() => {}), 2500)"
+      assert_includes response.body, "bindSidebarScrollTracking();"
+      assert_includes response.body, "setTimeout(() => refreshSidebar().catch(() => {}), delay)"
     end
   end
 

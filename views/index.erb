@@ -311,6 +311,7 @@
     let sessionViewGeneration = 0;
     let sessionSwitchGeneration = 0;
     let sessionShortcutTimer = null;
+    let lastSidebarInteractionAt = 0;
 
     function bindSessionDom() {
       sessionSidebar = document.querySelector(".session-sidebar");
@@ -342,6 +343,20 @@
       liveStatusThinking = existingModelMatch?.[2] || null;
       reconnectBanner = document.querySelector(".session-reconnect");
       reconnectButton = document.querySelector(".reconnect-button");
+      bindSidebarScrollTracking();
+    }
+
+    function markSidebarInteraction() {
+      lastSidebarInteractionAt = Date.now();
+    }
+
+    function bindSidebarScrollTracking() {
+      const scrollContainer = sidebarScrollContainer();
+      if (!scrollContainer) return;
+      scrollContainer.onscroll = markSidebarInteraction;
+      scrollContainer.onwheel = markSidebarInteraction;
+      scrollContainer.ontouchstart = markSidebarInteraction;
+      scrollContainer.onpointerdown = markSidebarInteraction;
     }
 
     function nearConversationTop() {
@@ -1610,17 +1625,26 @@
       return sidebarUrl;
     }
 
-    function scheduleSidebarRefresh() {
+    function scheduleSidebarRefresh(delay = 2500) {
       clearTimeout(sidebarRefreshTimer);
       if (document.hidden) return;
-      sidebarRefreshTimer = setTimeout(() => refreshSidebar().catch(() => {}), 2500);
+      sidebarRefreshTimer = setTimeout(() => refreshSidebar().catch(() => {}), delay);
     }
 
     function sidebarScrollContainer() {
       return sessionSidebar?.querySelector(".session-sidebar-content") || sessionSidebar;
     }
 
+    function recentlyInteractedWithSidebar() {
+      return Date.now() - lastSidebarInteractionAt < 1000;
+    }
+
     async function refreshSidebar(generation = sessionViewGeneration) {
+      if (recentlyInteractedWithSidebar()) {
+        scheduleSidebarRefresh(1000);
+        return;
+      }
+
       const response = await fetch(sidebarFragmentUrl());
       if (!response.ok || generation !== sessionViewGeneration) return;
       const html = await response.text();
@@ -1630,6 +1654,7 @@
       sessionSidebar = document.querySelector(".session-sidebar");
       const refreshedScrollContainer = sidebarScrollContainer();
       if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = previousScrollTop;
+      bindSidebarScrollTracking();
       scheduleSidebarRefresh();
     }
 
