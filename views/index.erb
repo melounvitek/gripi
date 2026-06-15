@@ -314,7 +314,7 @@
     let sessionShortcutTimer = null;
     let lastSidebarInteractionAt = 0;
     let notificationRegistration = null;
-    let lastAgentFinishedNotificationKey = null;
+    const notifiedFinalReplyKeys = new Set();
 
     function bindSessionDom() {
       sessionSidebar = document.querySelector(".session-sidebar");
@@ -576,7 +576,6 @@
     }
 
     async function showPiNotification(title, body, url, tag) {
-      if (!(document.hidden || !document.hasFocus())) return;
       const worker = await ensureNotificationWorker();
       if (!worker) return;
       if (worker.active) {
@@ -586,13 +585,41 @@
       }
     }
 
-    function notifyAgentFinished(event) {
+    function sessionUrl(sessionPath) {
+      return `/?session=${encodeURIComponent(sessionPath)}`;
+    }
+
+    function sessionIsActivelyViewed(sessionPath) {
+      return sessionPath && sessionPath === currentSessionPath() && !document.hidden && document.hasFocus();
+    }
+
+    function finalAssistantReplyKey(sessionPath, event) {
+      const message = eventMessage(event);
+      const text = messageText(message);
+      return [sessionPath, message?.id || message?.messageId || event.id || event.messageId || lastEventSeq, stableTextHash(text)].join(":");
+    }
+
+    function eventHasFinalAssistantText(event) {
+      const message = eventMessage(event);
+      const segments = message?.content ? contentSegments(message.content, message) : [{ text: messageText(message), compact: false }];
+      return segments.some((segment) => segment.text && !segment.compact && !segment.thinking);
+    }
+
+    function notifyFinalAssistantReply(event) {
+      const message = eventMessage(event);
+      const roleName = liveEventRole(event, message);
+      if (roleName !== "assistant" || event.type !== "message_end") return;
+      if (!eventHasFinalAssistantText(event)) return;
+
       const sessionPath = currentSessionPath();
-      const key = [sessionPath, lastEventSeq].join(":");
-      if (!sessionPath || lastAgentFinishedNotificationKey === key) return;
-      lastAgentFinishedNotificationKey = key;
+      if (!sessionPath) return;
+      if (sessionIsActivelyViewed(sessionPath)) return;
+
+      const key = finalAssistantReplyKey(sessionPath, event);
+      if (notifiedFinalReplyKeys.has(key)) return;
+      notifiedFinalReplyKeys.add(key);
       const name = document.querySelector(".session-header-name")?.textContent.trim() || "current session";
-      showPiNotification("Pi is waiting", `Task finished in ${name}.`, window.location.href, `pi-agent-finished:${sessionPath}`).catch(() => {});
+      showPiNotification("Pi replied", `New reply in ${name}.`, window.location.href, `pi-final-reply:${sessionPath}`).catch(() => {});
     }
 
     function updateStatusFromEvent(event) {
@@ -1305,6 +1332,7 @@
 
       if (["message_start", "message_update", "message_end"].includes(event.type)) {
         renderMessageEvent(event);
+        notifyFinalAssistantReply(event);
         return;
       }
 
@@ -1317,7 +1345,6 @@
       if (["turn_end", "agent_end"].includes(event.type)) {
         if (liveAssistantSeen) showStatus("Done");
         setComposerState("done", "Done");
-        notifyAgentFinished(event);
         resetLiveAssistantTracking();
         return;
       }
@@ -1679,6 +1706,32 @@
       sidebarRefreshTimer = setTimeout(() => refreshSidebar().catch(() => {}), delay);
     }
 
+    function sidebarAssistantResponseCounts(root = sessionSidebar) {
+      const counts = new Map();
+      root?.querySelectorAll("a.session[data-session-path][data-assistant-response-count]").forEach((link) => {
+        const sessionPath = link.dataset.sessionPath;
+        const count = Number(link.dataset.assistantResponseCount || 0);
+        counts.set(sessionPath, Math.max(counts.get(sessionPath) || 0, count));
+      });
+      return counts;
+    }
+
+    function notifyBackgroundFinalReplies(previousAssistantCounts) {
+      sessionSidebar?.querySelectorAll("a.session[data-session-path][data-assistant-response-count]").forEach((link) => {
+        const sessionPath = link.dataset.sessionPath;
+        const previousCount = previousAssistantCounts.get(sessionPath);
+        const currentCount = Number(link.dataset.assistantResponseCount || 0);
+        if (previousCount == null || currentCount <= previousCount) return;
+        if (sessionPath === currentSessionPath()) return;
+
+        const key = [sessionPath, currentCount].join(":");
+        if (notifiedFinalReplyKeys.has(key)) return;
+        notifiedFinalReplyKeys.add(key);
+        const name = link.querySelector(".session-title")?.textContent.trim() || "a background session";
+        showPiNotification("Pi replied", `New reply in ${name}.`, sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`).catch(() => {});
+      });
+    }
+
     function sidebarScrollContainer() {
       return sessionSidebar?.querySelector(".session-sidebar-content") || sessionSidebar;
     }
@@ -1703,8 +1756,10 @@
       const html = await response.text();
       if (generation !== sessionViewGeneration || !sessionSidebar) return;
       const previousScrollTop = sidebarScrollContainer()?.scrollTop || 0;
+      const previousAssistantCounts = sidebarAssistantResponseCounts();
       sessionSidebar.outerHTML = html;
       sessionSidebar = document.querySelector(".session-sidebar");
+      notifyBackgroundFinalReplies(previousAssistantCounts);
       const refreshedScrollContainer = sidebarScrollContainer();
       if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = previousScrollTop;
       updateHeaderFromSelectedSidebarSession();

@@ -2206,7 +2206,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_live_event_script_notifies_when_agent_finishes
+  def test_live_event_script_notifies_when_final_assistant_reply_arrives_outside_active_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       PiWebGateway.set :sessions_root, dir
@@ -2214,10 +2214,27 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "function notifyAgentFinished(event)"
-      assert_includes response.body, "showPiNotification(\"Pi is waiting\""
-      assert_includes response.body, "notifyAgentFinished(event);"
-      assert_includes response.body, "document.hidden || !document.hasFocus()"
+      assert_includes response.body, "function notifyFinalAssistantReply(event)"
+      assert_includes response.body, "if (roleName !== \"assistant\" || event.type !== \"message_end\") return;"
+      assert_includes response.body, "if (sessionIsActivelyViewed(sessionPath)) return;"
+      assert_includes response.body, "showPiNotification(\"Pi replied\""
+      assert_includes response.body, "notifyFinalAssistantReply(event);"
+    end
+  end
+
+  def test_sidebar_refresh_notifies_for_background_final_replies
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, "const previousAssistantCounts = sidebarAssistantResponseCounts();"
+      assert_includes response.body, "notifyBackgroundFinalReplies(previousAssistantCounts);"
+      assert_includes response.body, "if (sessionPath === currentSessionPath()) return;"
+      assert_includes response.body, "const key = [sessionPath, currentCount].join(\":\");"
+      assert_includes response.body, "showPiNotification(\"Pi replied\", `New reply in ${name}.`, sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`)"
     end
   end
 
@@ -2241,7 +2258,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);"
       assert_includes response.body, "liveAssistantSegments.set(key, entry);"
       assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_start\") resetLiveAssistantTracking();"
-      assert_includes response.body, "if ([\"turn_end\", \"agent_end\"].includes(event.type)) {\n        if (liveAssistantSeen) showStatus(\"Done\");\n        setComposerState(\"done\", \"Done\");\n        notifyAgentFinished(event);\n        resetLiveAssistantTracking();"
+      assert_includes response.body, "if ([\"turn_end\", \"agent_end\"].includes(event.type)) {\n        if (liveAssistantSeen) showStatus(\"Done\");\n        setComposerState(\"done\", \"Done\");\n        resetLiveAssistantTracking();"
     end
   end
 
