@@ -3,6 +3,7 @@
         <h1>Pi Sessions</h1>
         <label for="mobile-session-toggle" class="mobile-sessions-button mobile-sessions-close-button" aria-label="Close sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
       </div>
+      <div class="session-sidebar-content">
       <% if @groups.empty? %>
         <p class="empty">No sessions found.</p>
       <% else %>
@@ -73,4 +74,7 @@
           <% end %>
         </section>
       <% end %>
+      </div>
+
+      <a class="sidebar-notification-test-link" href="/notification-test">Notifications</a>
     </aside>
