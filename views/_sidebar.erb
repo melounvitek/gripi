@@ -1,5 +1,8 @@
     <aside class="session-sidebar">
-      <h1>Pi Sessions</h1>
+      <div class="session-sidebar-header">
+        <h1>Pi Sessions</h1>
+        <label for="mobile-session-toggle" class="mobile-sessions-button mobile-sessions-close-button" aria-label="Close sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
+      </div>
       <% if @groups.empty? %>
         <p class="empty">No sessions found.</p>
       <% else %>
