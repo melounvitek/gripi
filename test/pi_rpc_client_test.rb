@@ -64,6 +64,37 @@ class PiRpcClientTest < Minitest::Test
     assert_equal({ events: [{ "type" => "event", "name" => "two" }], last_seq: 2, missed: false }, client.events_after(1))
   end
 
+  def test_tracks_busy_state_from_turn_events
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    refute client.busy?
+    writer.puts JSON.generate({ type: "turn_start" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+    assert client.busy?
+
+    writer.puts JSON.generate({ type: "turn_end" })
+    writer.puts JSON.generate({ id: "state-2", type: "state" })
+    client.request("get_state", id: "state-2")
+    refute client.busy?
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_clears_busy_state_when_reader_exits
+    input = StringIO.new
+    output = StringIO.new(JSON.generate({ type: "turn_start" }) + "\n")
+    client = PiRpcClient.new(stdin: input, stdout: output)
+
+    client.events_after(0)
+    sleep 0.05
+
+    refute client.busy?
+  end
+
   def test_includes_payload_fields_in_command
     input = StringIO.new
     output = StringIO.new(JSON.generate({ id: "prompt-1", type: "accepted" }) + "\n")

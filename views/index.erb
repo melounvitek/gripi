@@ -23,7 +23,7 @@
     .attachment img { width: 2rem; height: 2rem; border-radius: 0.35rem; object-fit: cover; }
     .attachment button { padding: 0.1rem 0.35rem; background: transparent; border: 1px solid var(--border); color: var(--muted); }
     .attachment button:hover { color: var(--text); background: var(--panel-soft); transform: none; }
-    .composer-input-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 0.55rem; }
+    .composer-input-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; gap: 0.55rem; }
     .image-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     .attach-button { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; border-radius: 0.55rem; background: var(--panel-softer); color: var(--text); font-weight: 800; cursor: pointer; }
     .attach-button:hover { background: var(--border); }
@@ -121,11 +121,14 @@
     input, textarea { box-sizing: border-box; font: inherit; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.55rem; color: var(--text); background: var(--panel-soft); outline: none; }
     input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(138, 190, 183, 0.2); }
     textarea { width: 100%; resize: none; min-height: 2.75rem; max-height: 12rem; line-height: 1.4; }
-    .send-button { display: none; }
+    .send-button, .composer-stop-button { display: none; }
+    .composer-stop-button.is-visible { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; }
+    .attach-button.is-disabled { opacity: 0.48; cursor: not-allowed; pointer-events: none; }
     button { justify-self: end; padding: 0.5rem 0.9rem; border: 0; border-radius: 0.55rem; background: var(--accent); color: var(--button-text); font-weight: 700; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
     button:hover { background: var(--accent-hover); transform: translateY(-1px); }
     button:disabled { opacity: 0.48; cursor: not-allowed; transform: none; }
     button:disabled:hover { background: var(--accent); transform: none; }
+    [hidden] { display: none !important; }
     button.secondary { background: var(--panel-softer); color: var(--text); }
     button.secondary:hover { background: var(--border); }
     button.danger { background: #a55353; color: white; }
@@ -179,10 +182,12 @@
       .composer { padding: 0.65rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); overflow-x: hidden; }
       .composer-state { left: 0.75rem; }
       .composer-input-row { width: 100%; max-width: 100%; min-width: 0; grid-template-columns: 2.75rem minmax(0, 1fr) 3.25rem; gap: 0.4rem; }
-      .attach-button, .send-button { min-width: 0; width: 100%; min-height: 2.75rem; padding: 0; }
+      .attach-button, .send-button, .composer-stop-button { min-width: 0; width: 100%; min-height: 2.75rem; padding: 0; }
       .attach-button { font-size: 1.3rem; }
       .send-button { display: inline-flex; align-items: center; justify-content: center; font-size: 0; }
       .send-button::before { content: "↑"; font-size: 1.35rem; line-height: 1; }
+      .composer-stop-button { font-size: 0; }
+      .composer-stop-button::before { content: "⏹"; font-size: 1.1rem; line-height: 1; }
       .command-list { max-height: 30dvh; overflow-y: auto; }
       .composer-controls { justify-content: flex-start; }
       .session-status-bar { width: 100%; max-width: 100%; min-width: 0; justify-content: flex-start; flex-wrap: wrap; gap: 0.35rem 0.7rem; overflow: hidden; font-size: 0.72rem; }
@@ -217,6 +222,8 @@
     let promptTextarea = null;
     let promptSessionInput = null;
     let sendButton = null;
+    let composerStopButton = null;
+    let attachButton = null;
     let attachmentTray = null;
     let imageInput = null;
     let composerState = null;
@@ -261,6 +268,8 @@
       promptTextarea = promptForm?.querySelector("textarea") || null;
       promptSessionInput = promptForm?.querySelector('input[name="session"]') || null;
       sendButton = promptForm?.querySelector(".send-button") || null;
+      composerStopButton = promptForm?.querySelector(".composer-stop-button") || null;
+      attachButton = promptForm?.querySelector(".attach-button") || null;
       attachmentTray = promptForm?.querySelector(".attachment-tray") || null;
       imageInput = promptForm?.querySelector(".image-input") || null;
       composerState = document.querySelector(".composer-state");
@@ -491,8 +500,23 @@
         composerState.dataset.state = state;
         composerState.textContent = ["running", "sending", "error"].includes(state) ? label : "";
       }
-      if (abortButton) abortButton.disabled = !["running", "sending"].includes(state);
-      if (sendButton) sendButton.textContent = state === "sending" ? "Sending…" : "Send";
+      const composerBusy = ["running", "sending"].includes(state);
+      if (abortButton) abortButton.disabled = !composerBusy;
+      if (sendButton) {
+        sendButton.hidden = composerBusy;
+        sendButton.textContent = state === "sending" ? "Sending…" : "Send";
+      }
+      if (composerStopButton) {
+        composerStopButton.hidden = !composerBusy;
+        composerStopButton.disabled = !composerBusy;
+        composerStopButton.classList.toggle("is-visible", composerBusy);
+      }
+      if (promptTextarea) promptTextarea.disabled = composerBusy;
+      if (imageInput) imageInput.disabled = composerBusy;
+      if (attachButton) {
+        attachButton.classList.toggle("is-disabled", composerBusy);
+        attachButton.setAttribute("aria-disabled", composerBusy ? "true" : "false");
+      }
     }
 
     function resizePromptTextarea() {
@@ -543,6 +567,8 @@
     }
 
     function addImageFiles(files) {
+      if (promptTextarea?.disabled) return false;
+
       const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
       if (imageFiles.length === 0) return false;
 
@@ -1267,6 +1293,8 @@
     async function submitPrompt(event) {
       event.preventDefault();
 
+      if (promptTextarea?.disabled) return;
+
       const generation = sessionViewGeneration;
       const switchGeneration = sessionSwitchGeneration;
       const submittedSession = promptSessionInput?.value;
@@ -1578,6 +1606,8 @@
     function initializeSessionView({ focus = true } = {}) {
       if (liveOutput) {
         resetEventCursor();
+        const initialComposerState = liveOutput.dataset.composerState;
+        if (initialComposerState === "running") setComposerState(initialComposerState, "Pi is running…");
         scheduleNextEventPoll(0);
         requestAnimationFrame(() => {
           updatePromptPlaceholder();

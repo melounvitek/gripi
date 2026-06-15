@@ -29,6 +29,7 @@ class PiRpcClient
     @mutex = Mutex.new
     @condition = ConditionVariable.new
     @reader_running = false
+    @busy = false
     @reader = nil
   end
 
@@ -74,6 +75,10 @@ class PiRpcClient
 
   def event_sequence
     @mutex.synchronize { @event_sequence }
+  end
+
+  def busy?
+    @mutex.synchronize { @busy }
   end
 
   def events_after(after_seq)
@@ -160,6 +165,7 @@ class PiRpcClient
   ensure
     @mutex.synchronize do
       @reader_running = false
+      @busy = false
       @condition.broadcast
     end
   end
@@ -169,11 +175,21 @@ class PiRpcClient
       if response["id"] && @pending_ids.delete(response["id"])
         @responses[response["id"]] = response
       else
+        update_busy_state(response)
         @event_sequence += 1
         @events << [@event_sequence, response]
         @events.shift while @events.length > @event_buffer_limit
       end
       @condition.broadcast
+    end
+  end
+
+  def update_busy_state(response)
+    case response["type"]
+    when "agent_start", "turn_start"
+      @busy = true
+    when "agent_end", "turn_end"
+      @busy = false
     end
   end
 end

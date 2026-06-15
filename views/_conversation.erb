@@ -49,7 +49,7 @@
             </article>
           <% end %>
 
-          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h rpc_clients.event_sequence(@selected_session.path) %>"></section>
+          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h rpc_clients.event_sequence(@selected_session.path) %>" data-composer-state="<%= rpc_clients.busy?(@selected_session.path) ? "running" : "idle" %>"></section>
           <div class="jump-controls jump-controls--bottom">
             <button type="button" class="jump-button jump-to-next-user">next ↓</button>
             <button type="button" class="jump-button jump-to-latest">latest ↓</button>
@@ -83,6 +83,7 @@
                 <label for="image-input" class="attach-button" title="Attach images" aria-label="Attach images">＋</label>
                 <textarea name="message" rows="1" placeholder="Ask Pi… Enter to send, Shift+Enter for newline."></textarea>
                 <button type="submit" class="send-button">Send</button>
+                <button type="submit" class="danger composer-stop-button" form="abort-form" hidden disabled>Stop Pi</button>
               </div>
               <div class="composer-controls">
                 <div class="session-status-bar" id="session-status-bar" data-status-url="/status?session=<%= h Rack::Utils.escape(@selected_session.path) %>">

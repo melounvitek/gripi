@@ -760,6 +760,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "composer-input-row"
       assert_includes response.body, "Attach images"
       assert_includes response.body, "send-button"
+      assert_includes response.body, "composer-stop-button"
+      assert_includes response.body, "Stop Pi"
+      assert_includes response.body, "[hidden] { display: none !important; }"
       assert_includes response.body, "Ask Pi… Enter to send, Shift+Enter for newline."
       refute_includes response.body, "autofocus"
       assert_includes response.body, "Abort running Pi"
@@ -1558,6 +1561,11 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (commandFilter) commandFilter.value = \"\";"
       assert_includes response.body, "commandList?.querySelectorAll(\".command\").forEach((command) => { command.hidden = false; });"
       assert_includes response.body, "setComposerState(\"running\", \"Pi is running…\");"
+      assert_includes response.body, "const composerBusy = [\"running\", \"sending\"].includes(state);"
+      assert_includes response.body, "promptTextarea.disabled = composerBusy;"
+      assert_includes response.body, "composerStopButton.hidden = !composerBusy;"
+      assert_includes response.body, "if (promptTextarea?.disabled) return;"
+      assert_includes response.body, "if (promptTextarea?.disabled) return false;"
     end
   end
 
@@ -1582,6 +1590,28 @@ class AppTest < Minitest::Test
       assert_includes response.body, "liveAssistantSegments.set(key, entry);"
       assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_start\") resetLiveAssistantTracking();"
       assert_includes response.body, "if ([\"turn_end\", \"agent_end\"].includes(event.type)) {\n        if (liveAssistantSeen) showStatus(\"Done\");\n        setComposerState(\"done\", \"Done\");\n        resetLiveAssistantTracking();"
+    end
+  end
+
+  def test_initializes_composer_busy_state_for_running_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      client = FakeRpcClient.new([])
+      def client.busy? = true
+      registry.register(path, client)
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "data-composer-state=\"running\""
+      assert_includes response.body, "const initialComposerState = liveOutput.dataset.composerState;"
+      assert_includes response.body, "setComposerState(initialComposerState, \"Pi is running…\");"
     end
   end
 

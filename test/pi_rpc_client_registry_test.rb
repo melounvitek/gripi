@@ -58,6 +58,18 @@ class PiRpcClientRegistryTest < Minitest::Test
     assert_equal [[:events_after, 0], [:events_after, 0]], calls
   end
 
+  def test_reports_client_busy_state
+    calls = []
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+    client = FakeClient.new(calls)
+    registry.register("/tmp/session.jsonl", client)
+
+    refute registry.busy?("/tmp/session.jsonl")
+    client.busy = true
+    assert registry.busy?("/tmp/session.jsonl")
+    refute registry.busy?("/tmp/other.jsonl")
+  end
+
   def test_events_after_for_inactive_session_does_not_create_client
     calls = []
     registry = PiRpcClientRegistry.new(factory: ->(_session_path) { calls << [:start] })
@@ -86,8 +98,15 @@ class PiRpcClientRegistryTest < Minitest::Test
   end
 
   class FakeClient
+    attr_writer :busy
+
     def initialize(calls)
       @calls = calls
+      @busy = false
+    end
+
+    def busy?
+      @busy
     end
 
     def events_after(after_seq)
