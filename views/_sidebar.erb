@@ -20,8 +20,8 @@
             <a class="session <%= "selected" if selected?(session) %>" href="<%= h session_url(session.path) %>">
               <div class="session-title">
                 <%= h session.display_name %>
-                <% if rpc_clients.active?(session.path) %>
-                  <span class="session-running-indicator" title="RPC process running" aria-label="RPC process running"></span>
+                <% if rpc_clients.busy?(session.path) %>
+                  <span class="session-running-indicator" title="Pi is working" aria-label="Pi is working"></span>
                 <% end %>
               </div>
               <div class="session-meta">

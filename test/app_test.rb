@@ -1720,6 +1720,28 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_sidebar_running_indicator_uses_busy_state
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      idle_client = FakeRpcClient.new([])
+      registry.register(path, idle_client)
+      PiWebGateway.set :rpc_client_registry, registry
+
+      idle_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+      refute_includes idle_response.body, "RPC process running"
+
+      busy_client = FakeRpcClient.new([])
+      def busy_client.busy? = true
+      registry.register(path, busy_client)
+
+      busy_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+      assert_includes busy_response.body, "Pi is working"
+      assert_includes busy_response.body, "session-running-indicator"
+    end
+  end
+
   def test_initializes_composer_busy_state_for_running_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
