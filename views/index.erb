@@ -122,7 +122,7 @@
     input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(138, 190, 183, 0.2); }
     textarea { width: 100%; resize: none; min-height: 2.75rem; max-height: 12rem; line-height: 1.4; }
     .send-button, .composer-stop-button { display: none; }
-    .composer-stop-button.is-visible { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; }
+    .composer-stop-button.is-visible { display: inline-flex; }
     .attach-button.is-disabled { opacity: 0.48; cursor: not-allowed; pointer-events: none; }
     button { justify-self: end; padding: 0.5rem 0.9rem; border: 0; border-radius: 0.55rem; background: var(--accent); color: var(--button-text); font-weight: 700; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
     button:hover { background: var(--accent-hover); transform: translateY(-1px); }
@@ -182,12 +182,10 @@
       .composer { padding: 0.65rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); overflow-x: hidden; }
       .composer-state { left: 0.75rem; }
       .composer-input-row { width: 100%; max-width: 100%; min-width: 0; grid-template-columns: 2.75rem minmax(0, 1fr) 3.25rem; gap: 0.4rem; }
-      .attach-button, .send-button, .composer-stop-button { min-width: 0; width: 100%; min-height: 2.75rem; padding: 0; }
+      .attach-button, .send-button { min-width: 0; width: 100%; min-height: 2.75rem; padding: 0; }
       .attach-button { font-size: 1.3rem; }
       .send-button { display: inline-flex; align-items: center; justify-content: center; font-size: 0; }
       .send-button::before { content: "↑"; font-size: 1.35rem; line-height: 1; }
-      .composer-stop-button { font-size: 0; }
-      .composer-stop-button::before { content: "⏹"; font-size: 1.1rem; line-height: 1; }
       .command-list { max-height: 30dvh; overflow-y: auto; }
       .composer-controls { justify-content: flex-start; }
       .session-status-bar { width: 100%; max-width: 100%; min-width: 0; justify-content: flex-start; flex-wrap: wrap; gap: 0.35rem 0.7rem; overflow: hidden; font-size: 0.72rem; }
@@ -429,6 +427,10 @@
 
     function updatePromptPlaceholder() {
       if (!promptTextarea) return;
+      if (promptTextarea.disabled) {
+        promptTextarea.placeholder = "Pi is working…";
+        return;
+      }
       promptTextarea.placeholder = window.matchMedia?.("(max-width: 760px)").matches ? "Ask Pi…" : "Ask Pi… Enter to send, Shift+Enter for newline.";
     }
 
@@ -517,6 +519,7 @@
         attachButton.classList.toggle("is-disabled", composerBusy);
         attachButton.setAttribute("aria-disabled", composerBusy ? "true" : "false");
       }
+      updatePromptPlaceholder();
     }
 
     function resizePromptTextarea() {

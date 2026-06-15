@@ -3,7 +3,6 @@
         <header class="session-header">
           <label for="mobile-session-toggle" class="mobile-sessions-button"><span class="mobile-sessions-label">Sessions</span><span class="mobile-sessions-hide-label">Hide</span></label>
           <h1 title="<%= h @selected_session.display_name %>"><%= h @selected_session.display_name %></h1>
-          <button type="submit" class="danger abort-button session-abort-button" form="abort-form" disabled title="Abort running Pi" aria-label="Abort running Pi"><span aria-hidden="true">⏹</span></button>
         </header>
 
         <section class="conversation-scroll" id="conversation-scroll">
@@ -83,7 +82,7 @@
                 <label for="image-input" class="attach-button" title="Attach images" aria-label="Attach images">＋</label>
                 <textarea name="message" rows="1" placeholder="Ask Pi… Enter to send, Shift+Enter for newline."></textarea>
                 <button type="submit" class="send-button">Send</button>
-                <button type="submit" class="danger composer-stop-button" form="abort-form" hidden disabled>Stop Pi</button>
+                <button type="submit" class="danger abort-button session-abort-button composer-stop-button" form="abort-form" hidden disabled title="Abort running Pi" aria-label="Abort running Pi"><span aria-hidden="true">⏹</span></button>
               </div>
               <div class="composer-controls">
                 <div class="session-status-bar" id="session-status-bar" data-status-url="/status?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
