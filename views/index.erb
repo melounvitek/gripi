@@ -253,6 +253,7 @@
     let liveStatusThinking = null;
     let pendingImages = [];
     let eventPollTimer = null;
+    let sidebarRefreshTimer = null;
     let eventPollInFlight = false;
     let eventPollAbortController = null;
     let eventPollResumeTimer = null;
@@ -1521,10 +1522,12 @@
     function resetSessionViewState() {
       sessionViewGeneration += 1;
       clearTimeout(eventPollTimer);
+      clearTimeout(sidebarRefreshTimer);
       clearTimeout(eventPollResumeTimer);
       abortEventPoll();
       if (scheduledAutoScrollFrame) cancelAnimationFrame(scheduledAutoScrollFrame);
       eventPollTimer = null;
+      sidebarRefreshTimer = null;
       eventPollResumeTimer = null;
       scheduledAutoScrollFrame = null;
       resetLiveAssistantTracking();
@@ -1533,6 +1536,29 @@
       autoScrollEnabled = true;
       hideReconnectBanner();
       clearAttachments();
+    }
+
+    function sidebarFragmentUrl() {
+      const target = new URL(window.location.href);
+      const sidebarUrl = new URL("/sidebar", window.location.origin);
+      target.searchParams.forEach((value, key) => sidebarUrl.searchParams.append(key, value));
+      return sidebarUrl;
+    }
+
+    function scheduleSidebarRefresh() {
+      clearTimeout(sidebarRefreshTimer);
+      if (document.hidden) return;
+      sidebarRefreshTimer = setTimeout(() => refreshSidebar().catch(() => {}), 2500);
+    }
+
+    async function refreshSidebar(generation = sessionViewGeneration) {
+      const response = await fetch(sidebarFragmentUrl());
+      if (!response.ok || generation !== sessionViewGeneration) return;
+      const html = await response.text();
+      if (generation !== sessionViewGeneration || !sessionSidebar) return;
+      sessionSidebar.outerHTML = html;
+      sessionSidebar = document.querySelector(".session-sidebar");
+      scheduleSidebarRefresh();
     }
 
     function sessionFragmentUrl(url) {
@@ -1666,6 +1692,7 @@
           applyAutoScroll("auto");
         });
       }
+      scheduleSidebarRefresh();
     }
 
     window.addEventListener("resize", updatePromptPlaceholder);
@@ -1682,6 +1709,7 @@
       } else {
         scheduleNextEventPoll(0);
       }
+      scheduleSidebarRefresh();
     });
     window.addEventListener("pageshow", resumeEventPolling);
     window.addEventListener("focus", resumeEventPolling);

@@ -274,6 +274,11 @@ class PiWebGateway < Sinatra::Base
     erb :index
   end
 
+  get "/sidebar" do
+    prepare_session_view
+    erb :_sidebar, layout: false
+  end
+
   get "/session_fragment" do
     prepare_session_view
     content_type :json

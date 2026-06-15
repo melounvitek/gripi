@@ -917,6 +917,25 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_returns_sidebar_fragment_for_selected_session
+    Dir.mktmpdir do |dir|
+      paths = write_sessions(dir, count: 7)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sidebar",
+        params: { "session" => paths.first, "expanded_cwd" => [project_cwd(dir)] }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "session-sidebar"
+      assert_includes response.body, "expanded_cwd"
+      assert_includes response.body, "selected"
+      assert_includes response.body, "Session 1"
+    end
+  end
+
   def test_returns_session_fragment_for_selected_session
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 7)
@@ -1418,6 +1437,26 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (storedEntry === entry) liveBashToolCalls.delete(key);"
       assert_includes response.body, "markLiveEntryRendered(bashCallEntry, bashCallEntry.article.dataset.role || \"assistant\", mergedText)"
       assert_includes response.body, "article.dataset.messageTimestamp = timestampKey;"
+    end
+  end
+
+  def test_live_script_refreshes_sidebar_without_switching_sessions
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "function sidebarFragmentUrl()"
+      assert_includes response.body, "async function refreshSidebar(generation = sessionViewGeneration)"
+      assert_includes response.body, "fetch(sidebarFragmentUrl())"
+      assert_includes response.body, "sessionSidebar.outerHTML = html;"
+      assert_includes response.body, "setTimeout(() => refreshSidebar().catch(() => {}), 2500)"
     end
   end
 
