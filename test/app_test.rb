@@ -1553,6 +1553,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'if (options.optimistic) {'
       assert_includes response.body, "article.dataset.optimisticText = options.optimisticText ?? text;"
       assert_includes response.body, 'upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);'
+      assert_includes response.body, 'const displayText = roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text;'
+      assert_includes response.body, 'return { article, body, compact: false, userDisplayText: body?.textContent || segment.text };'
       assert_includes response.body, "function formatTimestamp(timestamp)"
       assert_includes response.body, "date.getHours()"
       refute_includes response.body, "date.getUTCHours()"

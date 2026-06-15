@@ -1058,6 +1058,7 @@
 
     function updateLiveSegment(entry, roleName, segment, shouldScroll, timestamp = null) {
       if (entry.compact !== segment.compact) return null;
+      const displayText = roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text;
 
       if (segment.compact) {
         renderToolSummary(entry.summaryText, segment.summaryParts, segment.summary);
@@ -1072,7 +1073,7 @@
         } else if (roleName === "assistant") {
           renderAssistantMarkdown(entry.body, segment.text);
         } else {
-          entry.body.textContent = segment.text;
+          entry.body.textContent = displayText;
         }
       }
 
@@ -1102,7 +1103,8 @@
       article.dataset.messageFingerprint = messageFingerprint("user", segment.text, article.dataset.messageTimestamp);
       const meta = article.querySelector(".message-meta");
       if (meta) meta.textContent = formatTimestamp(timestamp);
-      return { article, body: article.querySelector(".message-body"), compact: false };
+      const body = article.querySelector(".message-body");
+      return { article, body, compact: false, userDisplayText: body?.textContent || segment.text };
     }
 
     function upsertLiveUserSegment(event, segment, fallbackIndex, shouldScroll, timestamp) {
