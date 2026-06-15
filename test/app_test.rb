@@ -901,6 +901,24 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_recent_sessions_include_keyboard_shortcut_indices
+    Dir.mktmpdir do |dir|
+      paths = write_sessions(dir, count: 2)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sidebar",
+        params: { "session" => paths.last }
+      )
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      shortcuts = document.css(".recent-sessions a.session").map { |link| [link["data-session-shortcut"], link.at_css(".session-shortcut")&.text] }
+      assert_equal [["1", "1"], ["2", "2"]], shortcuts
+    end
+  end
+
   def test_omits_recent_sessions_from_collapsed_project_groups
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 7)
@@ -1542,6 +1560,24 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (storedEntry === entry) liveBashToolCalls.delete(key);"
       assert_includes response.body, "markLiveEntryRendered(bashCallEntry, bashCallEntry.article.dataset.role || \"assistant\", mergedText)"
       assert_includes response.body, "article.dataset.messageTimestamp = timestampKey;"
+    end
+  end
+
+  def test_live_script_supports_ctrl_k_recent_session_shortcuts
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, "function enterSessionShortcutMode()"
+      assert_includes response.body, "event.ctrlKey && event.key.toLowerCase() === \"k\""
+      assert_includes response.body, "openRecentSessionShortcut(event.key)"
+      assert_includes response.body, "exitSessionShortcutMode();\n      if (!link || !normalLeftClick(event)) return;"
+      assert_includes response.body, "sessionShortcutTimer = setTimeout(exitSessionShortcutMode, 5000);"
+      assert_includes response.body, "session-shortcuts-visible"
     end
   end
 

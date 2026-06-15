@@ -46,6 +46,8 @@
     a.session.unread .session-indicators::before { content: "new"; padding: 0.1rem 0.35rem; border: 1px solid rgba(138, 190, 183, 0.45); border-radius: 999px; color: var(--accent); background: rgba(138, 190, 183, 0.08); font-size: 0.62rem; font-weight: 800; line-height: 1; text-transform: uppercase; letter-spacing: 0.04em; }
     .session-content { min-width: 0; }
     .session-indicators { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; min-width: 0.7rem; }
+    .session-shortcut { display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid rgba(138, 190, 183, 0.55); border-radius: 999px; background: rgba(138, 190, 183, 0.14); color: var(--accent); font-size: 0.76rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    body.session-shortcuts-visible .recent-session .session-shortcut { display: inline-flex; }
     .session-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-icon-button { flex: 0 0 auto; width: 1.65rem; height: 1.65rem; padding: 0; border-radius: 999px; line-height: 1; }
@@ -277,6 +279,7 @@
     let scheduledAutoScrollFrame = null;
     let sessionViewGeneration = 0;
     let sessionSwitchGeneration = 0;
+    let sessionShortcutTimer = null;
 
     function loadUnreadSessions() {
       try {
@@ -1681,12 +1684,65 @@
       }
     }
 
+    function enterSessionShortcutMode() {
+      clearTimeout(sessionShortcutTimer);
+      document.body.classList.add("session-shortcuts-visible");
+      sessionShortcutTimer = setTimeout(exitSessionShortcutMode, 5000);
+    }
+
+    function exitSessionShortcutMode() {
+      clearTimeout(sessionShortcutTimer);
+      sessionShortcutTimer = null;
+      document.body.classList.remove("session-shortcuts-visible");
+    }
+
+    async function openRecentSessionShortcut(shortcut) {
+      const link = sessionSidebar?.querySelector(`.recent-session[data-session-shortcut="${shortcut}"]`);
+      if (!link) return false;
+      exitSessionShortcutMode();
+      clearUnreadSession(link.dataset.sessionPath);
+      if (link.classList.contains("selected")) return true;
+      return switchSession(link.href, { push: true, focus: true });
+    }
+
+    function sessionShortcutsVisible() {
+      return document.body.classList.contains("session-shortcuts-visible");
+    }
+
     function normalLeftClick(event) {
       return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
     }
 
+    document.addEventListener("keydown", (event) => {
+      if (event.ctrlKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        enterSessionShortcutMode();
+        return;
+      }
+
+      if (!sessionShortcutsVisible()) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        exitSessionShortcutMode();
+        return;
+      }
+
+      if (/^[1-9]$/.test(event.key)) {
+        event.preventDefault();
+        openRecentSessionShortcut(event.key).catch(() => {});
+        return;
+      }
+
+      if (!["Alt", "Control", "Meta", "Shift", "Tab"].includes(event.key)) exitSessionShortcutMode();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".session-sidebar")) exitSessionShortcutMode();
+    });
+
     document.addEventListener("click", async (event) => {
       const link = event.target.closest(".session-sidebar a.session");
+      exitSessionShortcutMode();
       if (!link || !normalLeftClick(event)) return;
 
       event.preventDefault();

@@ -5,8 +5,9 @@
       <% else %>
         <section class="recent-sessions">
           <h2>Recent sessions</h2>
-          <% recent_sidebar_sessions.each do |session| %>
-            <a class="session recent-session <%= "selected" if selected?(session) %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>">
+          <% recent_sidebar_sessions.each_with_index do |session, index| %>
+            <% shortcut = index + 1 %>
+            <a class="session recent-session <%= "selected" if selected?(session) %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>" data-session-shortcut="<%= h shortcut %>">
               <div class="session-content">
                 <div class="session-title"><%= h session.display_name %></div>
                 <div class="session-meta">
@@ -14,6 +15,7 @@
                 </div>
               </div>
               <div class="session-indicators">
+                <span class="session-shortcut" aria-hidden="true"><%= h shortcut %></span>
                 <% if rpc_clients.busy?(session.path) %>
                   <span class="session-running-indicator" title="Pi is working" aria-label="Pi is working"></span>
                 <% end %>
