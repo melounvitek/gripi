@@ -188,7 +188,7 @@
     @media (max-width: 760px) {
       html, body { width: 100%; max-width: 100vw; overflow-x: hidden; }
       .app-shell { display: block; width: 100%; max-width: 100vw; height: 100dvh; overflow-x: hidden; }
-      .session-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 10; display: block; width: min(21rem, calc(100vw - 3rem)); max-height: none; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); border-right: 1px solid var(--border); border-bottom: 0; transform: translateX(-105%); transition: transform 160ms ease; }
+      .session-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 10; display: flex; flex-direction: column; width: min(21rem, calc(100vw - 3rem)); max-height: none; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); border-right: 1px solid var(--border); border-bottom: 0; transform: translateX(-105%); transition: transform 160ms ease; }
       .mobile-session-toggle:checked + .session-sidebar { transform: translateX(0); }
       .mobile-sidebar-backdrop { position: fixed; inset: 0; z-index: 9; background: rgba(0, 0, 0, 0.46); }
       .mobile-session-toggle:checked ~ .mobile-sidebar-backdrop { display: block; }
