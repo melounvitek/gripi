@@ -784,6 +784,9 @@ class AppTest < Minitest::Test
       refute_includes response.body, "lastest ↓"
       assert_includes response.body, "mobile-sidebar-backdrop"
       assert_includes response.body, "scrollbar-gutter: stable"
+      assert_includes response.body, ".conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden;"
+      assert_includes response.body, ".message--tool .message-details summary, .message--tool-transcript .message-details summary { max-width: 100%; overflow-x: auto; white-space: nowrap; }"
+      assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body, .raw-details pre { max-width: 100%; overflow-x: auto; }"
       assert_includes response.body, "scrollbar-width: none"
     end
   end
