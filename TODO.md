@@ -19,6 +19,43 @@ The agent should:
 
 ---
 
+## Feature: Add basic gateway access protection
+
+### Context
+
+The web gateway currently relies on network/IP reachability. Simple access to the IP/port should not be enough to use the app. The goal is basic protection without adding a complex auth system.
+
+Likely options include:
+
+- App-level login with one configured password and a signed session cookie.
+- HTTP Basic Auth backed by environment variables.
+- Bearer token for script-friendly access, avoiding URL token leakage where possible.
+- Optional source-IP/Tailscale restriction as an additional layer, not the only gate.
+- Reverse-proxy auth if deployment config outside the app is preferred.
+
+### Goal
+
+Require a simple shared secret before the gateway UI and session endpoints are usable, while keeping local development and deployment straightforward.
+
+### Checklist
+
+- [ ] Decide whether to implement app-level password login, HTTP Basic Auth, or proxy-level auth.
+- [ ] Decide required environment variables and safe behavior when they are missing.
+- [ ] Protect UI pages and state-changing/session endpoints.
+- [ ] Keep health/static endpoints available only if intentionally needed.
+- [ ] Add logout or credential reset behavior if using cookie sessions.
+- [ ] Add or update tests for unauthenticated and authenticated access.
+- [ ] Document deployment configuration and restart requirements.
+- [ ] Note whether a gateway restart is needed.
+
+### Notes
+
+- Prefer a minimal app-level login password with a signed session cookie unless a reverse proxy is already handling auth.
+- Avoid storing secrets in the repo.
+- Do not rely on IP allowlisting alone.
+
+---
+
 ## Bug: Keep project session expansion scoped and temporary
 
 ### Context
