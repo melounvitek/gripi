@@ -24,6 +24,8 @@
       <% end %>
 
       <% @groups.each do |cwd, sessions| %>
+        <% sidebar_sessions = visible_sidebar_sessions(cwd, sessions) %>
+        <% next if sidebar_sessions.empty? && !expanded_cwd?(cwd) %>
         <section class="cwd-group">
           <div class="cwd-header">
             <h2 title="<%= h cwd %>"><%= h File.basename(cwd) %></h2>
@@ -35,7 +37,7 @@
               <button type="submit" class="sidebar-icon-button" title="New session in this directory" aria-label="New session in this directory">+</button>
             </form>
           </div>
-          <% visible_sidebar_sessions(cwd, sessions).each do |session| %>
+          <% sidebar_sessions.each do |session| %>
             <a class="session <%= "selected" if selected?(session) %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>">
               <div class="session-content">
                 <div class="session-title"><%= h session.display_name %></div>

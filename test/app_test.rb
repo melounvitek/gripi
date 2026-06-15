@@ -900,6 +900,50 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_omits_recent_sessions_from_collapsed_project_groups
+    Dir.mktmpdir do |dir|
+      paths = write_sessions(dir, count: 7)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sidebar",
+        params: { "session" => paths.last }
+      )
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      recent_titles = document.css(".recent-sessions a.session .session-title").map(&:text)
+      project_titles = document.css(".cwd-group a.session .session-title").map(&:text)
+      assert_equal ["Session 7", "Session 6", "Session 5", "Session 4", "Session 3"], recent_titles
+      refute_includes project_titles, "Session 7"
+      refute_includes project_titles, "Session 6"
+      refute_includes project_titles, "Session 5"
+      refute_includes project_titles, "Session 4"
+      refute_includes project_titles, "Session 3"
+      assert_includes project_titles, "Session 2"
+      assert_includes project_titles, "Session 1"
+    end
+  end
+
+  def test_hides_collapsed_project_groups_with_only_recent_sessions
+    Dir.mktmpdir do |dir|
+      paths = write_sessions(dir, count: 2)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sidebar",
+        params: { "session" => paths.last }
+      )
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      assert_equal ["Session 2", "Session 1"], document.css(".recent-sessions a.session .session-title").map(&:text)
+      assert_empty document.css(".cwd-group")
+    end
+  end
+
   def test_trims_sidebar_sessions_to_latest_five_by_default
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 7)
@@ -913,10 +957,11 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "Show all 7"
-      assert_includes response.body, "Session 7"
-      assert_includes response.body, "Session 3"
-      refute_includes response.body, "Session 2"
-      refute_includes response.body, "Session 1"
+      document = Nokogiri::HTML(response.body)
+      project_titles = document.css(".cwd-group a.session .session-title").map(&:text)
+      assert_operator project_titles.length, :<=, 5
+      assert_includes project_titles, "Session 2"
+      assert_includes project_titles, "Session 1"
     end
   end
 

@@ -6,6 +6,7 @@ require "redcarpet"
 require "nokogiri"
 require "sanitize"
 require "securerandom"
+require "set"
 require_relative "lib/pi_session_store"
 require_relative "lib/pi_attachment_store"
 require_relative "lib/pi_rpc_client"
@@ -92,8 +93,9 @@ class PiWebGateway < Sinatra::Base
     def visible_sidebar_sessions(cwd, sessions)
       return sessions if expanded_cwd?(cwd)
 
-      visible = sessions.first(SIDEBAR_SESSION_LIMIT)
-      if @selected_session&.cwd == cwd && !visible.any? { |session| selected?(session) }
+      project_sessions = sessions.reject { |session| recent_sidebar_session_paths.include?(session.path) }
+      visible = project_sessions.first(SIDEBAR_SESSION_LIMIT)
+      if @selected_session&.cwd == cwd && !recent_sidebar_session_paths.include?(@selected_session.path) && !visible.any? { |session| selected?(session) }
         visible + [@selected_session]
       else
         visible
@@ -101,7 +103,11 @@ class PiWebGateway < Sinatra::Base
     end
 
     def recent_sidebar_sessions
-      @groups.values.flatten.sort_by { |session| session.modified_at || Time.at(0) }.reverse.first(SIDEBAR_SESSION_LIMIT)
+      @recent_sidebar_sessions ||= @groups.values.flatten.sort_by { |session| session.modified_at || Time.at(0) }.reverse.first(SIDEBAR_SESSION_LIMIT)
+    end
+
+    def recent_sidebar_session_paths
+      @recent_sidebar_session_paths ||= recent_sidebar_sessions.map(&:path).to_set
     end
 
     def project_label(session)
