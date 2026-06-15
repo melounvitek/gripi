@@ -40,14 +40,23 @@ restart_log=/tmp/pi-web-gateway-restart.log
     echo "[$(date -Is)] No old gateway pid found"
   fi
 
+  env_file="$HOME/.config/pi-web-gateway/env"
+  if [ -f "$env_file" ]; then
+    echo "[$(date -Is)] Loading environment from $env_file"
+    set -a
+    . "$env_file"
+    set +a
+  fi
+
   echo "[$(date -Is)] Starting gateway"
   nohup mise exec -- bundle exec rackup -o 100.103.198.74 -p 4567 > /tmp/pi-web-gateway.log 2>&1 &
   new_pid=$!
   echo "[$(date -Is)] Started background pid: $new_pid"
 
   for _ in $(seq 1 30); do
-    if ps -p "$new_pid" >/dev/null 2>&1 && curl -fsS --max-time 1 http://100.103.198.74:4567/ >/dev/null 2>&1; then
-      echo "[$(date -Is)] Gateway is responding on http://100.103.198.74:4567/"
+    http_code=$(curl -sS --max-time 1 -o /dev/null -w '%{http_code}' http://100.103.198.74:4567/ || true)
+    if ps -p "$new_pid" >/dev/null 2>&1 && { [ "$http_code" = "200" ] || [ "$http_code" = "403" ]; }; then
+      echo "[$(date -Is)] Gateway is responding on http://100.103.198.74:4567/ with HTTP $http_code"
       exit 0
     fi
     sleep 0.5
@@ -68,7 +77,7 @@ After dispatching, verify with a separate tool call. If the first verification f
 
 ```bash
 ps -ef | rg 'puma .*pi-web-gateway|rackup|config.ru' | rg -v rg
-curl -fsS --max-time 2 -o /dev/null -w '%{http_code}\n' http://100.103.198.74:4567/
+curl -sS --max-time 2 -o /dev/null -w '%{http_code}\n' http://100.103.198.74:4567/
 tail -80 /tmp/pi-web-gateway-restart.log
 ```
 

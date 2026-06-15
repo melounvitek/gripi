@@ -1,5 +1,9 @@
+ENV["PI_GATEWAY_ADMIN_PASSWORD"] ||= "test-password"
+
 require "minitest/autorun"
 require "rack/mock"
+require "open3"
+require "rbconfig"
 require "tmpdir"
 require "json"
 require "fileutils"
@@ -25,6 +29,43 @@ class AppTest < Minitest::Test
     FileUtils.remove_entry(@attachments_root) if @attachments_root && Dir.exist?(@attachments_root)
     FileUtils.remove_entry(@read_state_root) if @read_state_root && Dir.exist?(@read_state_root)
     FileUtils.remove_entry(@browser_access_root) if @browser_access_root && Dir.exist?(@browser_access_root)
+  end
+
+  def test_app_boot_fails_without_admin_password
+    Dir.mktmpdir do |home|
+      env = ENV.to_h.merge("PI_GATEWAY_ENV_PATH" => File.join(home, "missing-env"), "PI_GATEWAY_ADMIN_PASSWORD" => nil)
+
+      _stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'")
+
+      refute status.success?
+      assert_includes stderr, "PI_GATEWAY_ADMIN_PASSWORD is required"
+    end
+  end
+
+  def test_app_boot_loads_admin_password_from_user_config
+    Dir.mktmpdir do |home|
+      env_path = File.join(home, "gateway-env")
+      File.write(env_path, "PI_GATEWAY_ADMIN_PASSWORD='from-file'\n")
+      env = ENV.to_h.merge("PI_GATEWAY_ENV_PATH" => env_path, "PI_GATEWAY_ADMIN_PASSWORD" => nil)
+
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.gateway_admin_password")
+
+      assert status.success?, stderr
+      assert_equal "from-file", stdout.strip
+    end
+  end
+
+  def test_app_boot_prefers_process_env_over_user_config
+    Dir.mktmpdir do |home|
+      env_path = File.join(home, "gateway-env")
+      File.write(env_path, "PI_GATEWAY_ADMIN_PASSWORD='from-file'\n")
+      env = ENV.to_h.merge("PI_GATEWAY_ENV_PATH" => env_path, "PI_GATEWAY_ADMIN_PASSWORD" => "from-process")
+
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.gateway_admin_password")
+
+      assert status.success?, stderr
+      assert_equal "from-process", stdout.strip
+    end
   end
 
   def test_unknown_browser_sees_access_gate_when_admin_password_is_configured
