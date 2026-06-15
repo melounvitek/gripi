@@ -906,7 +906,7 @@ class AppTest < Minitest::Test
 
   def test_recent_sessions_include_keyboard_shortcut_indices
     Dir.mktmpdir do |dir|
-      paths = write_sessions(dir, count: 2)
+      paths = write_sessions(dir, count: 9)
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
@@ -918,13 +918,13 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
       shortcuts = document.css(".recent-sessions a.session").map { |link| [link["data-session-shortcut"], link.at_css(".session-shortcut")&.text] }
-      assert_equal [["1", "1"], ["2", "2"]], shortcuts
+      assert_equal (1..9).map { |number| [number.to_s, number.to_s] }, shortcuts
     end
   end
 
   def test_omits_recent_sessions_from_collapsed_project_groups
     Dir.mktmpdir do |dir|
-      paths = write_sessions(dir, count: 7)
+      paths = write_sessions(dir, count: 11)
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
@@ -937,7 +937,11 @@ class AppTest < Minitest::Test
       document = Nokogiri::HTML(response.body)
       recent_titles = document.css(".recent-sessions a.session .session-title").map(&:text)
       project_titles = document.css(".cwd-group a.session .session-title").map(&:text)
-      assert_equal ["Session 7", "Session 6", "Session 5", "Session 4", "Session 3"], recent_titles
+      assert_equal ["Session 11", "Session 10", "Session 9", "Session 8", "Session 7", "Session 6", "Session 5", "Session 4", "Session 3"], recent_titles
+      refute_includes project_titles, "Session 11"
+      refute_includes project_titles, "Session 10"
+      refute_includes project_titles, "Session 9"
+      refute_includes project_titles, "Session 8"
       refute_includes project_titles, "Session 7"
       refute_includes project_titles, "Session 6"
       refute_includes project_titles, "Session 5"
@@ -968,7 +972,7 @@ class AppTest < Minitest::Test
 
   def test_trims_sidebar_sessions_to_latest_five_by_default
     Dir.mktmpdir do |dir|
-      paths = write_sessions(dir, count: 7)
+      paths = write_sessions(dir, count: 11)
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
@@ -978,7 +982,7 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "Show all 7"
+      assert_includes response.body, "Show all 11"
       document = Nokogiri::HTML(response.body)
       project_titles = document.css(".cwd-group a.session .session-title").map(&:text)
       assert_operator project_titles.length, :<=, 5

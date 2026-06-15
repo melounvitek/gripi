@@ -394,14 +394,14 @@ Determine whether useful keyboard shortcuts can be added safely, then implement 
 
 ### Checklist
 
-- [ ] Inspect current session navigation and recent-session UI behavior.
-- [ ] Inspect whether the web app already has keyboard shortcut handling.
-- [ ] Decide what `Cmd+K` / `Ctrl+K` should open or focus.
-- [ ] Decide which session ordering `Ctrl+1`, `Ctrl+2`, etc. should use.
-- [ ] Check for conflicts with browser/system shortcuts and text input behavior.
-- [ ] Design shortcut behavior that does not trigger while typing in prompts or forms, except where intentional.
-- [ ] Implement the approved shortcut behavior.
-- [ ] Add discoverability, such as tooltip text or a small shortcuts hint, if appropriate.
+- [x] Inspect current session navigation and recent-session UI behavior.
+- [x] Inspect whether the web app already has keyboard shortcut handling.
+- [x] Decide what `Cmd+K` / `Ctrl+K` should open or focus.
+- [x] Decide which session ordering `Ctrl+1`, `Ctrl+2`, etc. should use.
+- [x] Check for conflicts with browser/system shortcuts and text input behavior.
+- [x] Design shortcut behavior that does not trigger while typing in prompts or forms, except where intentional.
+- [x] Implement the approved shortcut behavior.
+- [x] Add discoverability, such as tooltip text or a small shortcuts hint, if appropriate.
 - [ ] Verify shortcuts on macOS-style `Cmd` and non-macOS `Ctrl` flows where practical.
 - [ ] Note whether a gateway restart is needed.
 

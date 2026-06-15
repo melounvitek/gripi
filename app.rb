@@ -87,6 +87,7 @@ class PiWebGateway < Sinatra::Base
     end
 
     SIDEBAR_SESSION_LIMIT = 5
+    RECENT_SIDEBAR_SESSION_LIMIT = 9
 
     def selected?(session)
       @selected_session&.path == session.path
@@ -113,7 +114,7 @@ class PiWebGateway < Sinatra::Base
     end
 
     def recent_sidebar_sessions
-      @recent_sidebar_sessions ||= @groups.values.flatten.sort_by { |session| session.modified_at || Time.at(0) }.reverse.first(SIDEBAR_SESSION_LIMIT)
+      @recent_sidebar_sessions ||= @groups.values.flatten.sort_by { |session| session.modified_at || Time.at(0) }.reverse.first(RECENT_SIDEBAR_SESSION_LIMIT)
     end
 
     def recent_sidebar_session_paths
