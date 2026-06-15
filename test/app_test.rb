@@ -1867,9 +1867,11 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "function sidebarFragmentUrl()"
+      assert_includes response.body, "function sidebarScrollContainer()"
       assert_includes response.body, "async function refreshSidebar(generation = sessionViewGeneration)"
       assert_includes response.body, "fetch(sidebarFragmentUrl())"
-      assert_includes response.body, "const previousScrollTop = sessionSidebar.scrollTop;\n      sessionSidebar.outerHTML = html;\n      sessionSidebar = document.querySelector(\".session-sidebar\");\n      if (sessionSidebar) sessionSidebar.scrollTop = previousScrollTop;"
+      assert_includes response.body, "const previousScrollTop = sidebarScrollContainer()?.scrollTop || 0;"
+      assert_includes response.body, "const refreshedScrollContainer = sidebarScrollContainer();\n      if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = previousScrollTop;"
       assert_includes response.body, "setTimeout(() => refreshSidebar().catch(() => {}), 2500)"
     end
   end
@@ -1893,10 +1895,10 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (switchGeneration !== sessionSwitchGeneration) return false;"
       assert_includes response.body, "if (link.classList.contains(\"selected\")) {\n        closeMobileSessionSidebar();\n        return;\n      }"
       assert_includes response.body, "function closeMobileSessionSidebar()"
-      assert_includes response.body, "const previousSidebarScrollTop = sessionSidebar?.scrollTop || 0;"
+      assert_includes response.body, "const previousSidebarScrollTop = sidebarScrollContainer()?.scrollTop || 0;"
       assert_includes response.body, "sessionSidebar.outerHTML = payload.sidebar_html;"
       assert_includes response.body, "conversationPanel.outerHTML = payload.conversation_html;"
-      assert_includes response.body, "if (sessionSidebar) sessionSidebar.scrollTop = previousSidebarScrollTop;"
+      assert_includes response.body, "const refreshedSidebarScrollContainer = sidebarScrollContainer();\n        if (refreshedSidebarScrollContainer) refreshedSidebarScrollContainer.scrollTop = previousSidebarScrollTop;"
       assert_includes response.body, "history.pushState({ session: payload.session }"
       assert_includes response.body, "window.addEventListener(\"popstate\""
       assert_includes response.body, "closeMobileSessionSidebar();"

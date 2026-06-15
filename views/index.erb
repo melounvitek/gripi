@@ -1616,15 +1616,20 @@
       sidebarRefreshTimer = setTimeout(() => refreshSidebar().catch(() => {}), 2500);
     }
 
+    function sidebarScrollContainer() {
+      return sessionSidebar?.querySelector(".session-sidebar-content") || sessionSidebar;
+    }
+
     async function refreshSidebar(generation = sessionViewGeneration) {
       const response = await fetch(sidebarFragmentUrl());
       if (!response.ok || generation !== sessionViewGeneration) return;
       const html = await response.text();
       if (generation !== sessionViewGeneration || !sessionSidebar) return;
-      const previousScrollTop = sessionSidebar.scrollTop;
+      const previousScrollTop = sidebarScrollContainer()?.scrollTop || 0;
       sessionSidebar.outerHTML = html;
       sessionSidebar = document.querySelector(".session-sidebar");
-      if (sessionSidebar) sessionSidebar.scrollTop = previousScrollTop;
+      const refreshedScrollContainer = sidebarScrollContainer();
+      if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = previousScrollTop;
       scheduleSidebarRefresh();
     }
 
@@ -1660,11 +1665,12 @@
         const payload = await response.json();
         if (switchGeneration !== sessionSwitchGeneration) return false;
         resetSessionViewState();
-        const previousSidebarScrollTop = sessionSidebar?.scrollTop || 0;
+        const previousSidebarScrollTop = sidebarScrollContainer()?.scrollTop || 0;
         sessionSidebar.outerHTML = payload.sidebar_html;
         conversationPanel.outerHTML = payload.conversation_html;
         bindSessionDom();
-        if (sessionSidebar) sessionSidebar.scrollTop = previousSidebarScrollTop;
+        const refreshedSidebarScrollContainer = sidebarScrollContainer();
+        if (refreshedSidebarScrollContainer) refreshedSidebarScrollContainer.scrollTop = previousSidebarScrollTop;
         bindSessionControls();
         if (push) history.pushState({ session: payload.session }, payload.title || "", payload.url || url);
         document.title = payload.title ? `${payload.title} · Pi Web Gateway` : "Pi Web Gateway";
