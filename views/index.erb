@@ -1601,8 +1601,10 @@
       if (!response.ok || generation !== sessionViewGeneration) return;
       const html = await response.text();
       if (generation !== sessionViewGeneration || !sessionSidebar) return;
+      const previousScrollTop = sessionSidebar.scrollTop;
       sessionSidebar.outerHTML = html;
       sessionSidebar = document.querySelector(".session-sidebar");
+      if (sessionSidebar) sessionSidebar.scrollTop = previousScrollTop;
       applySidebarUnreadState();
       scheduleSidebarRefresh();
     }

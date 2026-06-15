@@ -1493,7 +1493,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function sidebarFragmentUrl()"
       assert_includes response.body, "async function refreshSidebar(generation = sessionViewGeneration)"
       assert_includes response.body, "fetch(sidebarFragmentUrl())"
-      assert_includes response.body, "sessionSidebar.outerHTML = html;"
+      assert_includes response.body, "const previousScrollTop = sessionSidebar.scrollTop;\n      sessionSidebar.outerHTML = html;\n      sessionSidebar = document.querySelector(\".session-sidebar\");\n      if (sessionSidebar) sessionSidebar.scrollTop = previousScrollTop;"
       assert_includes response.body, "setTimeout(() => refreshSidebar().catch(() => {}), 2500)"
     end
   end
