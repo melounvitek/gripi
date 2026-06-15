@@ -19,6 +19,33 @@ The agent should:
 
 ---
 
+## Bug: Keep project session expansion scoped and temporary
+
+### Context
+
+Clicking "Show all" in a project session group currently adds expanded cwd parameters to the URL. That expansion can persist across reloads and no-full-reload session switches, and it can make multiple project groups appear expanded. This makes the sidebar noisy and surprising.
+
+Relevant starting points likely include:
+
+- `views/_sidebar.erb`
+- `views/_conversation.erb`
+- `app.rb` sidebar helpers and session redirect/fragment URLs
+- frontend session-switching code in `views/index.erb`
+
+### Goal
+
+"Show all" should affect only the intended project group, should not feel permanent after a reload, and should scale better for large projects.
+
+### Checklist
+
+- [ ] Inspect how `expanded_cwd` is carried through sidebar links, new-session forms, redirects, and session fragments.
+- [ ] Make expansion scoped to the clicked project group only.
+- [ ] Prevent project expansion from persisting unexpectedly across full reloads.
+- [ ] Consider pagination or incremental loading instead of rendering every session for large project groups.
+- [ ] Verify session switching, new session creation, browser reload, and back/forward behavior.
+
+---
+
 ## Feature: Align web aesthetics with Pi CLI
 
 ### Context
