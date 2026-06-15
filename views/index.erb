@@ -1457,6 +1457,10 @@
             showStatus(payload.error, true);
             return;
           }
+          if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {
+            await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
+            return;
+          }
           updateSessionHeaderName(payload.name);
           setComposerState("done", "Renamed");
           showStatus(eventStatusText({ type: "session_info", name: payload.name }), true);

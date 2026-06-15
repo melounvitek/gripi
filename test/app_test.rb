@@ -823,6 +823,33 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_json_rename_with_pending_path_returns_real_session_redirect
+    Dir.mktmpdir do |dir|
+      real_path = write_session(dir)
+      pending_path = File.join(dir, "pending-session.jsonl")
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        "HTTP_ACCEPT" => "application/json",
+        params: { "session" => pending_path, "message" => "/rename Lovely session" }
+      )
+      payload = JSON.parse(response.body)
+
+      assert_equal 200, response.status
+      assert_equal real_path, payload["session"]
+      assert_includes payload["redirect"], Rack::Utils.escape(real_path)
+      assert_equal "rename", payload["command"]
+      assert_equal "Lovely session", payload["name"]
+      assert_equal [[:get_state], [:set_session_name, "Lovely session"]], calls
+    end
+  end
+
   def test_deletes_sessions_whose_cwd_no_longer_exists
     Dir.mktmpdir do |dir|
       stale_dir = File.join(dir, "--stale--")
@@ -2106,7 +2133,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const renameCommand = sessionNameSlashCommand(message);"
       assert_includes response.body, "if (!renameCommand) {\n        resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
       assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });"
-      assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          updateSessionHeaderName(payload.name);\n          setComposerState(\"done\", \"Renamed\");\n          showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);\n          refreshSidebar().catch(() => {});\n          return;\n        }"
+      assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {\n            await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });\n            return;\n          }\n          updateSessionHeaderName(payload.name);\n          setComposerState(\"done\", \"Renamed\");\n          showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);\n          refreshSidebar().catch(() => {});\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"
       assert_includes response.body, "commandList?.removeAttribute(\"open\");"
