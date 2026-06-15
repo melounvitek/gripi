@@ -788,6 +788,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, ".message--tool .message-details summary, .message--tool-transcript .message-details summary { max-width: 100%; overflow-x: auto; white-space: nowrap; }"
       assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body, .raw-details pre { max-width: 100%; overflow-x: auto; }"
       assert_includes response.body, "scrollbar-width: none"
+      assert_includes response.body, ".message--user { margin-left: 10%; background: #343541; border-color: rgba(69, 133, 255, 0.72); color: #d4d4d4; }"
+      assert_includes response.body, ".message--assistant { margin-right: 10%; background: #080d20; border-color: rgba(69, 133, 255, 0.32); color: #f0c7a4; }"
     end
   end
 
