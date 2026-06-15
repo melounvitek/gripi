@@ -2241,7 +2241,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function notifyFinalAssistantReply(event)"
       assert_includes response.body, "if (roleName !== \"assistant\" || event.type !== \"message_end\") return;"
       assert_includes response.body, "if (sessionIsActivelyViewed(sessionPath)) return;"
-      assert_includes response.body, "showPiNotification(\"Pi replied\""
+      assert_includes response.body, "const body = notificationReplyPreview(finalAssistantReplyText(message));"
+      assert_includes response.body, "showPiNotification(name, body, window.location.href, `pi-final-reply:${sessionPath}`)"
       assert_includes response.body, "notifyFinalAssistantReply(event);"
     end
   end
@@ -2258,7 +2259,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "notifyBackgroundFinalReplies(previousAssistantCounts);"
       assert_includes response.body, "if (sessionPath === currentSessionPath()) return;"
       assert_includes response.body, "const key = [sessionPath, currentCount].join(\":\");"
-      assert_includes response.body, "showPiNotification(\"Pi replied\", `New reply in ${name}.`, sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`)"
+      assert_includes response.body, "showPiNotification(name, \"New reply.\", sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`)"
     end
   end
 

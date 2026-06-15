@@ -600,10 +600,23 @@
       return [sessionPath, message?.id || message?.messageId || event.id || event.messageId || lastEventSeq, stableTextHash(text)].join(":");
     }
 
-    function eventHasFinalAssistantText(event) {
-      const message = eventMessage(event);
+    function finalAssistantReplySegments(message) {
       const segments = message?.content ? contentSegments(message.content, message) : [{ text: messageText(message), compact: false }];
-      return segments.some((segment) => segment.text && !segment.compact && !segment.thinking);
+      return segments.filter((segment) => segment.text && !segment.compact && !segment.thinking);
+    }
+
+    function finalAssistantReplyText(message) {
+      return finalAssistantReplySegments(message).map((segment) => segment.text).join("\n");
+    }
+
+    function eventHasFinalAssistantText(event) {
+      return finalAssistantReplySegments(eventMessage(event)).length > 0;
+    }
+
+    function notificationReplyPreview(text) {
+      const preview = String(text || "").replace(/\s+/g, " ").trim();
+      if (!preview) return "New reply.";
+      return preview.length > 180 ? `${preview.slice(0, 177)}…` : preview;
     }
 
     function notifyFinalAssistantReply(event) {
@@ -620,7 +633,8 @@
       if (notifiedFinalReplyKeys.has(key)) return;
       notifiedFinalReplyKeys.add(key);
       const name = document.querySelector(".session-header-name")?.textContent.trim() || "current session";
-      showPiNotification("Pi replied", `New reply in ${name}.`, window.location.href, `pi-final-reply:${sessionPath}`).catch(() => {});
+      const body = notificationReplyPreview(finalAssistantReplyText(message));
+      showPiNotification(name, body, window.location.href, `pi-final-reply:${sessionPath}`).catch(() => {});
     }
 
     function updateStatusFromEvent(event) {
@@ -1794,7 +1808,7 @@
         if (notifiedFinalReplyKeys.has(key)) return;
         notifiedFinalReplyKeys.add(key);
         const name = link.querySelector(".session-title")?.textContent.trim() || "a background session";
-        showPiNotification("Pi replied", `New reply in ${name}.`, sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`).catch(() => {});
+        showPiNotification(name, "New reply.", sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`).catch(() => {});
       });
     }
 
