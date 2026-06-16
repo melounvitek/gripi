@@ -222,7 +222,8 @@
       .session-header-project { font-size: 0.76rem; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       .conversation-scroll { padding: 0.75rem; }
-      body:not(.is-conversation-scrolling) .jump-controls.is-visible { display: none; }
+      .jump-controls.is-visible { transition: opacity 140ms ease, visibility 140ms ease; }
+      body:not(.is-conversation-scrolling) .jump-controls.is-visible { display: flex; visibility: hidden; opacity: 0; pointer-events: none; }
       .message { margin-bottom: 0.65rem; padding: 0.75rem; border-radius: 0.75rem; }
       .message--user, .message--assistant { margin-left: 0; margin-right: 0; }
       .message-header { flex-wrap: wrap; }
@@ -368,6 +369,8 @@
     let sessionSwitchGeneration = 0;
     let sessionShortcutTimer = null;
     let conversationScrollRevealTimer = null;
+    let conversationScrollRevealResetTimer = null;
+    let conversationScrollRevealStartTop = null;
     let lastSidebarInteractionAt = 0;
     let cwdValidationTimer = null;
     let cwdValidationController = null;
@@ -455,13 +458,25 @@
       return userMessages().find((message) => message.getBoundingClientRect().top > scrollBottom + 8) || null;
     }
 
-    function revealConversationJumpControlsTemporarily() {
-      document.body.classList.add("is-conversation-scrolling");
-      if (conversationScrollRevealTimer) clearTimeout(conversationScrollRevealTimer);
-      conversationScrollRevealTimer = setTimeout(() => {
-        document.body.classList.remove("is-conversation-scrolling");
-        conversationScrollRevealTimer = null;
-      }, 1400);
+    function updateConversationJumpControlsReveal() {
+      if (!conversationScroll) return;
+      const scrollTop = conversationScroll.scrollTop;
+      if (conversationScrollRevealStartTop == null) conversationScrollRevealStartTop = scrollTop;
+      if (conversationScrollRevealResetTimer) clearTimeout(conversationScrollRevealResetTimer);
+      conversationScrollRevealResetTimer = setTimeout(() => {
+        if (!document.body.classList.contains("is-conversation-scrolling")) conversationScrollRevealStartTop = null;
+        conversationScrollRevealResetTimer = null;
+      }, 300);
+
+      if (document.body.classList.contains("is-conversation-scrolling") || Math.abs(scrollTop - conversationScrollRevealStartTop) >= 48) {
+        document.body.classList.add("is-conversation-scrolling");
+        if (conversationScrollRevealTimer) clearTimeout(conversationScrollRevealTimer);
+        conversationScrollRevealTimer = setTimeout(() => {
+          document.body.classList.remove("is-conversation-scrolling");
+          conversationScrollRevealTimer = null;
+          conversationScrollRevealStartTop = null;
+        }, 1400);
+      }
     }
 
     function updateScrollJumpButtons() {
@@ -1801,7 +1816,7 @@
       conversationScroll?.addEventListener("scroll", () => {
         if (!programmaticScroll) {
           autoScrollEnabled = nearConversationBottom();
-          revealConversationJumpControlsTemporarily();
+          updateConversationJumpControlsReveal();
         }
         updateScrollJumpButtons();
       }, { passive: true });
