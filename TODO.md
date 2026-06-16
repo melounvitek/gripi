@@ -108,7 +108,7 @@ The session view reliably follows new content during active updates, including b
 - [x] Implement bottom-pinning for normal active updates.
 - [x] Implement the long-latest-reply exception: align the latest model reply's top with the viewport top when that reply is taller than the visible area.
 - [x] Ensure user-initiated upward scrolling is not immediately overridden if the user intentionally leaves the bottom.
-- [ ] Verify behavior for rapid tool-call updates and long assistant replies.
+- [x] Verify behavior for rapid tool-call updates and long assistant replies.
 - [x] Note whether a gateway restart is needed.
 
 ### Notes
