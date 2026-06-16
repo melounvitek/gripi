@@ -131,7 +131,7 @@
     .command code { font-weight: 700; color: var(--accent); }
     .composer-state { display: none; align-items: center; gap: 0.4rem; min-height: 1.1rem; font-size: 0.85rem; color: var(--muted); }
     .composer-state::before { content: ""; width: 0.48rem; height: 0.48rem; border-radius: 999px; background: var(--muted-soft); }
-    .composer-state[data-state="running"], .composer-state[data-state="sending"] { display: inline-flex; color: var(--accent); font-weight: 700; animation: progress-blink 1000ms ease-in-out infinite; }
+    .composer-state[data-state="running"], .composer-state[data-state="sending"] { display: inline-flex; color: var(--accent); font-weight: 700; }
     .composer-state[data-state="running"]::before, .composer-state[data-state="sending"]::before { background: var(--success); box-shadow: 0 0 0 4px rgba(181, 189, 104, 0.15); }
     .composer-state[data-state="error"] { display: inline-flex; color: #ffb4b6; }
     .composer-state[data-state="error"]::before { background: var(--danger); }
@@ -195,7 +195,7 @@
     @keyframes session-switch-spin { to { transform: rotate(360deg); } }
     @keyframes stop-button-pulse { 0% { transform: scale(0.82); opacity: 0.9; } 70%, 100% { transform: scale(1.28); opacity: 0; } }
     @keyframes progress-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
-    @media (prefers-reduced-motion: reduce) { .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .composer-state[data-state="running"], .composer-state[data-state="sending"] { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before { animation: none; opacity: 1; } }
     .mobile-session-toggle, .mobile-sessions-button, .mobile-sidebar-backdrop { display: none; }
     .hamburger-icon { position: relative; display: inline-block; width: 1.25rem; height: 0.9rem; border-top: 2px solid currentColor; border-bottom: 2px solid currentColor; }
     .hamburger-icon::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid currentColor; transform: translateY(-50%); }
@@ -732,7 +732,7 @@
       if (!composerState || composerState.dataset.state !== "running" || !waitingForOutputSince) return;
 
       const elapsed = Date.now() - waitingForOutputSince;
-      composerState.textContent = elapsed >= 15000 ? `Pi is running… waiting for output ${formatWaitDuration(elapsed)}` : "Pi is running…";
+      composerState.textContent = `Pi is running… ${formatWaitDuration(elapsed)}`;
     }
 
     function startWaitingForOutput() {
