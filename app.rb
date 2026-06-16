@@ -230,9 +230,6 @@ class PiWebGateway < Sinatra::Base
 
     def session_url(session_path)
       query = { "session" => session_path }
-      query["expanded_cwd"] = expanded_cwds if expanded_cwds.any?
-      query["show_all_sessions"] = "1" if show_all_sidebar_sessions?
-      query["sidebar_sessions_limit"] = sidebar_sessions_limit_param if sidebar_sessions_limit_param
       "/?#{Rack::Utils.build_nested_query(query)}"
     end
 

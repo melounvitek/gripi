@@ -1609,6 +1609,9 @@ class AppTest < Minitest::Test
       assert_equal "Session 41", session_titles.first
       assert_equal "Session 1", session_titles.last
       refute document.at_css(".sidebar-load-more")
+      session_link = document.at_css('.recent-sessions a.session[href*="session-1.jsonl"]')
+      refute_includes session_link["href"], "sidebar_sessions_limit"
+      refute_includes session_link["href"], "show_all_sessions"
     end
   end
 
@@ -1625,7 +1628,7 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "session-sidebar"
-      assert_includes response.body, "expanded_cwd"
+      refute_includes response.body, "expanded_cwd"
       assert_includes response.body, "selected"
       assert_includes response.body, "Session 1"
     end
@@ -1650,7 +1653,7 @@ class AppTest < Minitest::Test
       assert_includes payload.fetch("url"), Rack::Utils.escape(paths.first)
       assert_includes payload.fetch("url"), "expanded_cwd"
       assert_includes payload.fetch("sidebar_html"), "session-sidebar"
-      assert_includes payload.fetch("sidebar_html"), "expanded_cwd"
+      refute_includes payload.fetch("sidebar_html"), "expanded_cwd"
       assert_includes payload.fetch("sidebar_html"), "selected"
       assert_includes payload.fetch("conversation_html"), "conversation-panel"
       assert_includes payload.fetch("conversation_html"), "expanded_cwd"
