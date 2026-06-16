@@ -168,6 +168,7 @@
     .jump-controls.is-visible { display: flex; }
     .jump-controls--top { top: 0.75rem; }
     .jump-controls--bottom { bottom: 0.75rem; }
+    .jump-controls--message-nav { top: calc(50% - 3rem); flex-direction: column; align-items: flex-end; width: max-content; height: 0; gap: 0.75rem; margin: 0 0.35rem 0 auto; }
     .jump-button { display: none; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28); pointer-events: auto; }
     .jump-button.is-visible { display: inline-flex; }
     .session-switch-overlay { position: fixed; inset: 0; z-index: 140; display: none; place-items: center; background: rgba(24, 24, 30, 0.5); backdrop-filter: blur(2px); }
@@ -328,6 +329,7 @@
     let conversationScroll = null;
     let topJumpControls = null;
     let bottomJumpControls = null;
+    let messageNavJumpControls = null;
     let jumpToFirstButton = null;
     let jumpToPreviousUserButton = null;
     let jumpToNextUserButton = null;
@@ -389,6 +391,7 @@
       conversationScroll = document.getElementById("conversation-scroll");
       topJumpControls = document.querySelector(".jump-controls--top");
       bottomJumpControls = document.querySelector(".jump-controls--bottom");
+      messageNavJumpControls = document.querySelector(".jump-controls--message-nav");
       jumpToFirstButton = document.querySelector(".jump-to-first");
       jumpToPreviousUserButton = document.querySelector(".jump-to-previous-user");
       jumpToNextUserButton = document.querySelector(".jump-to-next-user");
@@ -459,8 +462,9 @@
       jumpToPreviousUserButton?.classList.toggle("is-visible", showPreviousUser);
       jumpToNextUserButton?.classList.toggle("is-visible", showNextUser);
       jumpToLatestButton?.classList.toggle("is-visible", showLatest);
-      topJumpControls?.classList.toggle("is-visible", showFirst || showPreviousUser);
-      bottomJumpControls?.classList.toggle("is-visible", showNextUser || showLatest);
+      topJumpControls?.classList.toggle("is-visible", showFirst);
+      bottomJumpControls?.classList.toggle("is-visible", showLatest);
+      messageNavJumpControls?.classList.toggle("is-visible", showPreviousUser || showNextUser);
     }
 
     function latestReadableAssistantMessage() {

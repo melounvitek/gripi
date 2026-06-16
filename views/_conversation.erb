@@ -20,8 +20,11 @@
 
         <section class="conversation-scroll" id="conversation-scroll">
           <div class="jump-controls jump-controls--top">
-            <button type="button" class="jump-button jump-to-first">first ↑</button>
-            <button type="button" class="jump-button jump-to-previous-user">previous ↑</button>
+            <button type="button" class="jump-button jump-to-first">↑↑ top</button>
+          </div>
+          <div class="jump-controls jump-controls--message-nav">
+            <button type="button" class="jump-button jump-to-previous-user" aria-label="Previous user message">↑</button>
+            <button type="button" class="jump-button jump-to-next-user" aria-label="Next user message">↓</button>
           </div>
           <% if @messages.empty? %>
             <p class="empty">No messages in this session.</p>
@@ -68,8 +71,7 @@
           <% busy_since = rpc_clients.busy_since(@selected_session.path) %>
           <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h rpc_clients.event_sequence(@selected_session.path) %>" data-composer-state="<%= rpc_clients.busy?(@selected_session.path) ? "running" : "idle" %>" data-composer-state-since="<%= h(busy_since ? (busy_since.to_f * 1000).to_i : "") %>"></section>
           <div class="jump-controls jump-controls--bottom">
-            <button type="button" class="jump-button jump-to-next-user">next ↓</button>
-            <button type="button" class="jump-button jump-to-latest">latest ↓</button>
+            <button type="button" class="jump-button jump-to-latest">↓↓ bottom</button>
           </div>
         </section>
 
