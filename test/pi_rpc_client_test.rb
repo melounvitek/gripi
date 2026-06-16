@@ -65,20 +65,25 @@ class PiRpcClientTest < Minitest::Test
   end
 
   def test_tracks_busy_state_from_turn_events
+    now = Time.at(1_000)
     input = StringIO.new
     reader, writer = IO.pipe
-    client = PiRpcClient.new(stdin: input, stdout: reader)
+    client = PiRpcClient.new(stdin: input, stdout: reader, clock: -> { now })
 
     refute client.busy?
+    assert_nil client.busy_since
     writer.puts JSON.generate({ type: "turn_start" })
     writer.puts JSON.generate({ id: "state-1", type: "state" })
     client.request("get_state", id: "state-1")
     assert client.busy?
+    assert_equal Time.at(1_000), client.busy_since
 
+    now = Time.at(1_005)
     writer.puts JSON.generate({ type: "turn_end" })
     writer.puts JSON.generate({ id: "state-2", type: "state" })
     client.request("get_state", id: "state-2")
     refute client.busy?
+    assert_nil client.busy_since
   ensure
     writer&.close
     reader&.close
@@ -93,6 +98,7 @@ class PiRpcClientTest < Minitest::Test
     sleep 0.05
 
     refute client.busy?
+    assert_nil client.busy_since
   end
 
   def test_includes_payload_fields_in_command

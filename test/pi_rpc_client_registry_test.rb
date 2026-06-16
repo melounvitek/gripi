@@ -65,9 +65,13 @@ class PiRpcClientRegistryTest < Minitest::Test
     registry.register("/tmp/session.jsonl", client)
 
     refute registry.busy?("/tmp/session.jsonl")
+    assert_nil registry.busy_since("/tmp/session.jsonl")
     client.busy = true
+    client.busy_since = Time.at(1_000)
     assert registry.busy?("/tmp/session.jsonl")
+    assert_equal Time.at(1_000), registry.busy_since("/tmp/session.jsonl")
     refute registry.busy?("/tmp/other.jsonl")
+    assert_nil registry.busy_since("/tmp/other.jsonl")
   end
 
   def test_events_after_for_inactive_session_does_not_create_client
@@ -99,6 +103,7 @@ class PiRpcClientRegistryTest < Minitest::Test
 
   class FakeClient
     attr_writer :busy
+    attr_accessor :busy_since
 
     def initialize(calls)
       @calls = calls

@@ -15,7 +15,7 @@ class PiRpcClient
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
   end
 
-  def initialize(stdin:, stdout:, stderr: nil, wait_thread: nil, event_buffer_limit: DEFAULT_EVENT_BUFFER_LIMIT)
+  def initialize(stdin:, stdout:, stderr: nil, wait_thread: nil, event_buffer_limit: DEFAULT_EVENT_BUFFER_LIMIT, clock: -> { Time.now })
     @stdin = stdin
     @stdout = stdout
     @stderr = stderr
@@ -26,10 +26,12 @@ class PiRpcClient
     @events = []
     @event_sequence = 0
     @event_buffer_limit = event_buffer_limit
+    @clock = clock
     @mutex = Mutex.new
     @condition = ConditionVariable.new
     @reader_running = false
     @busy = false
+    @busy_since = nil
     @reader = nil
   end
 
@@ -79,6 +81,10 @@ class PiRpcClient
 
   def busy?
     @mutex.synchronize { @busy }
+  end
+
+  def busy_since
+    @mutex.synchronize { @busy_since }
   end
 
   def events_after(after_seq)
@@ -166,6 +172,7 @@ class PiRpcClient
     @mutex.synchronize do
       @reader_running = false
       @busy = false
+      @busy_since = nil
       @condition.broadcast
     end
   end
@@ -188,8 +195,10 @@ class PiRpcClient
     case response["type"]
     when "agent_start", "turn_start"
       @busy = true
+      @busy_since ||= @clock.call
     when "agent_end", "turn_end"
       @busy = false
+      @busy_since = nil
     end
   end
 end

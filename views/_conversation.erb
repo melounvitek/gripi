@@ -65,7 +65,8 @@
             </article>
           <% end %>
 
-          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h rpc_clients.event_sequence(@selected_session.path) %>" data-composer-state="<%= rpc_clients.busy?(@selected_session.path) ? "running" : "idle" %>"></section>
+          <% busy_since = rpc_clients.busy_since(@selected_session.path) %>
+          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h rpc_clients.event_sequence(@selected_session.path) %>" data-composer-state="<%= rpc_clients.busy?(@selected_session.path) ? "running" : "idle" %>" data-composer-state-since="<%= h(busy_since ? (busy_since.to_f * 1000).to_i : "") %>"></section>
           <div class="jump-controls jump-controls--bottom">
             <button type="button" class="jump-button jump-to-next-user">next ↓</button>
             <button type="button" class="jump-button jump-to-latest">latest ↓</button>

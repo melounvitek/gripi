@@ -735,8 +735,8 @@
       composerState.textContent = `Pi is running… ${formatWaitDuration(elapsed)}`;
     }
 
-    function startWaitingForOutput() {
-      waitingForOutputSince = Date.now();
+    function startWaitingForOutput(since = Date.now()) {
+      waitingForOutputSince = since || Date.now();
       clearInterval(waitingForOutputTimer);
       updateWaitingForOutputStatus();
       waitingForOutputTimer = setInterval(updateWaitingForOutputStatus, 1000);
@@ -748,8 +748,8 @@
       waitingForOutputTimer = null;
     }
 
-    function setComposerState(state, label) {
-      if (state === "running") startWaitingForOutput();
+    function setComposerState(state, label, since = null) {
+      if (state === "running" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());
       if (!["running", "sending"].includes(state)) stopWaitingForOutput();
       if (composerState) {
         composerState.dataset.state = state;
@@ -1628,7 +1628,7 @@
           lastEventSeq = payload.last_seq;
         }
         emptyEventPollCount = payload.events.length > 0 ? 0 : emptyEventPollCount + 1;
-        if (payload.events.length > 0 && composerState?.dataset.state === "running") startWaitingForOutput();
+        if (payload.events.length > 0 && composerState?.dataset.state === "running" && !waitingForOutputSince) startWaitingForOutput();
         updateWaitingForOutputStatus();
         payload.events.forEach((event) => {
           updateStatusFromEvent(event);
@@ -2360,7 +2360,8 @@
       if (liveOutput) {
         resetEventCursor();
         const initialComposerState = liveOutput.dataset.composerState;
-        if (initialComposerState === "running") setComposerState(initialComposerState, "Pi is running…");
+        const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);
+        if (initialComposerState === "running") setComposerState(initialComposerState, "Pi is running…", initialComposerStateSince);
         scheduleNextEventPoll(0);
         requestAnimationFrame(() => {
           updatePromptPlaceholder();

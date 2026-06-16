@@ -2593,6 +2593,7 @@ class AppTest < Minitest::Test
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
       client = FakeRpcClient.new([])
       def client.busy? = true
+      def client.busy_since = Time.at(1_000)
       registry.register(path, client)
       PiWebGateway.set :rpc_client_registry, registry
 
@@ -2603,8 +2604,12 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "data-composer-state=\"running\""
+      assert_includes response.body, "data-composer-state-since=\"1000000\""
       assert_includes response.body, "const initialComposerState = liveOutput.dataset.composerState;"
-      assert_includes response.body, "setComposerState(initialComposerState, \"Pi is running…\");"
+      assert_includes response.body, "const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);"
+      assert_includes response.body, "setComposerState(initialComposerState, \"Pi is running…\", initialComposerStateSince);"
+      assert_includes response.body, "if (state === \"running\" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());"
+      assert_includes response.body, "payload.events.length > 0 && composerState?.dataset.state === \"running\" && !waitingForOutputSince"
     end
   end
 
