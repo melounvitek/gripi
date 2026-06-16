@@ -352,6 +352,8 @@
     let hiddenAt = null;
     let lastEventPollSuccessAt = Date.now();
     let lastEventSeq = 0;
+    let waitingForOutputSince = null;
+    let waitingForOutputTimer = null;
     let emptyEventPollCount = 0;
     let autoScrollEnabled = true;
     let programmaticScroll = false;
@@ -716,10 +718,40 @@
       renderModelStatus();
     }
 
+    function formatWaitDuration(milliseconds) {
+      const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+      if (seconds < 60) return `${seconds}s`;
+      const minutes = Math.floor(seconds / 60);
+      return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+    }
+
+    function updateWaitingForOutputStatus() {
+      if (!composerState || composerState.dataset.state !== "running" || !waitingForOutputSince) return;
+
+      const elapsed = Date.now() - waitingForOutputSince;
+      composerState.textContent = elapsed >= 15000 ? `Pi is running… waiting for output ${formatWaitDuration(elapsed)}` : "Pi is running…";
+    }
+
+    function startWaitingForOutput() {
+      waitingForOutputSince = Date.now();
+      clearInterval(waitingForOutputTimer);
+      updateWaitingForOutputStatus();
+      waitingForOutputTimer = setInterval(updateWaitingForOutputStatus, 1000);
+    }
+
+    function stopWaitingForOutput() {
+      waitingForOutputSince = null;
+      clearInterval(waitingForOutputTimer);
+      waitingForOutputTimer = null;
+    }
+
     function setComposerState(state, label) {
+      if (state === "running") startWaitingForOutput();
+      if (!["running", "sending"].includes(state)) stopWaitingForOutput();
       if (composerState) {
         composerState.dataset.state = state;
         composerState.textContent = ["running", "sending", "error"].includes(state) ? label : "";
+        if (state === "running") updateWaitingForOutputStatus();
       }
       const composerBusy = ["running", "sending"].includes(state);
       if (abortButton) abortButton.disabled = !composerBusy;
@@ -1593,6 +1625,8 @@
           lastEventSeq = payload.last_seq;
         }
         emptyEventPollCount = payload.events.length > 0 ? 0 : emptyEventPollCount + 1;
+        if (payload.events.length > 0 && composerState?.dataset.state === "running") startWaitingForOutput();
+        updateWaitingForOutputStatus();
         payload.events.forEach((event) => {
           updateStatusFromEvent(event);
           renderEvent(event);
@@ -1813,6 +1847,7 @@
       scheduledAutoScrollFrame = null;
       resetLiveAssistantTracking();
       resetEventPollBackoff();
+      stopWaitingForOutput();
       lastEventSeq = 0;
       autoScrollEnabled = true;
       hideReconnectBanner();
