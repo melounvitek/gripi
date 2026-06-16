@@ -2106,6 +2106,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function nextJumpNavigationMessageBelowViewport()"
       assert_includes response.body, "[data-role=\"assistant\"].message--assistant:not(.message--thinking):not(.message--compact):not(.message--live)"
       assert_includes response.body, "function latestReadableAssistantMessageIsVisible()"
+      assert_includes response.body, "function completeLiveAssistantMessages()"
+      assert_includes response.body, "entry.article.classList.remove(\"message--live\")"
+      assert_includes response.body, "completeLiveAssistantMessages();"
       assert_includes response.body, "function applyAutoScroll(behavior = \"auto\")"
       assert_includes response.body, "requestAnimationFrame(() => requestAnimationFrame"
       assert_includes response.body, "function latestReadableAssistantMessage()"
@@ -2507,7 +2510,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);"
       assert_includes response.body, "liveAssistantSegments.set(key, entry);"
       assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_start\") resetLiveAssistantTracking();"
-      assert_includes response.body, "if ([\"turn_end\", \"agent_end\"].includes(event.type)) {\n        if (liveAssistantSeen) showStatus(\"Done\");\n        setComposerState(\"done\", \"Done\");\n        resetLiveAssistantTracking();"
+      assert_includes response.body, "if ([\"turn_end\", \"agent_end\"].includes(event.type)) {\n        if (liveAssistantSeen) showStatus(\"Done\");\n        completeLiveAssistantMessages();\n        setComposerState(\"done\", \"Done\");\n        resetLiveAssistantTracking();"
     end
   end
 
