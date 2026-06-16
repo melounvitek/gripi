@@ -745,6 +745,87 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_validates_new_session_cwd_as_json
+    Dir.mktmpdir do |dir|
+      cwd = File.join(dir, "project")
+      FileUtils.mkdir_p(cwd)
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sessions/validate_cwd",
+        params: { "cwd" => cwd },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal true, payload.fetch("valid")
+      assert_equal File.realpath(cwd), payload.fetch("cwd")
+    end
+  end
+
+  def test_rejects_invalid_new_session_cwd_as_json
+    Dir.mktmpdir do |dir|
+      missing = File.join(dir, "missing")
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sessions/validate_cwd",
+        params: { "cwd" => missing },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 422, response.status
+      payload = JSON.parse(response.body)
+      assert_equal false, payload.fetch("valid")
+      assert_includes payload.fetch("error"), "directory"
+    end
+  end
+
+  def test_creates_new_native_session_from_validated_cwd_as_json
+    Dir.mktmpdir do |dir|
+      cwd = File.join(dir, "new-project")
+      FileUtils.mkdir_p(cwd)
+      new_path = File.join(dir, "new-session.jsonl")
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :new_rpc_client_factory, [->(started_cwd) {
+        calls << [:start_new, started_cwd]
+        FakeRpcClient.new(calls, [], new_path)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/new_at_cwd",
+        params: { "cwd" => cwd },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal new_path, payload.fetch("session")
+      assert_includes payload.fetch("redirect"), Rack::Utils.escape(new_path)
+      assert_equal [[ :start_new, File.realpath(cwd) ], [ :get_state ]], calls
+    end
+  end
+
+  def test_rejects_new_session_from_invalid_cwd_as_json
+    Dir.mktmpdir do |dir|
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :new_rpc_client_factory, [->(started_cwd) {
+        calls << [:start_new, started_cwd]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/new_at_cwd",
+        params: { "cwd" => File.join(dir, "missing") },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 422, response.status
+      payload = JSON.parse(response.body)
+      assert_equal false, payload.fetch("valid")
+      assert_empty calls
+    end
+  end
+
   def test_event_poll_does_not_remap_pending_client_when_real_session_file_appears
     Dir.mktmpdir do |dir|
       real_path = write_session(dir)

@@ -539,21 +539,36 @@ class PiWebGateway < Sinatra::Base
     end
   end
 
+  get "/sessions/validate_cwd" do
+    result = validated_session_cwd(params["cwd"])
+    content_type :json
+    if result.fetch(:valid)
+      JSON.generate(valid: true, cwd: result.fetch(:cwd))
+    else
+      status 422
+      JSON.generate(valid: false, error: result.fetch(:error))
+    end
+  end
+
   post "/sessions/new" do
     session_path = params.fetch("session")
     current_session = PiSessionStore.new(root: settings.sessions_root).sessions.find { |session| session.path == session_path }
     cwd = current_session&.cwd || pending_rpc_cwd(session_path) || File.dirname(session_path)
-    client = settings.new_rpc_client_factory.first.call(cwd)
-    new_session_path = session_file_from(client.get_state) || pending_session_path(cwd)
-    rpc_clients.register(new_session_path, client)
-    remember_pending_rpc_cwd(new_session_path, cwd) unless File.exist?(new_session_path)
-    redirect_path = session_redirect_path(new_session_path, expanded_cwds: expanded_cwds)
-    if json_request?
-      content_type :json
-      JSON.generate(session: new_session_path, redirect: redirect_path)
-    else
-      redirect redirect_path
+    redirect_to_new_session(start_new_session(cwd))
+  end
+
+  post "/sessions/new_at_cwd" do
+    result = validated_session_cwd(params["cwd"])
+    unless result.fetch(:valid)
+      if json_request?
+        status 422
+        content_type :json
+        next JSON.generate(valid: false, error: result.fetch(:error))
+      end
+      halt 422, result.fetch(:error)
     end
+
+    redirect_to_new_session(start_new_session(result.fetch(:cwd)))
   end
 
   post "/abort" do
@@ -676,6 +691,37 @@ class PiWebGateway < Sinatra::Base
 
   def json_request?
     request.env["HTTP_ACCEPT"].to_s.include?("application/json")
+  end
+
+  def redirect_to_new_session(new_session_path)
+    redirect_path = session_redirect_path(new_session_path, expanded_cwds: expanded_cwds)
+    if json_request?
+      content_type :json
+      JSON.generate(session: new_session_path, redirect: redirect_path)
+    else
+      redirect redirect_path
+    end
+  end
+
+  def start_new_session(cwd)
+    client = settings.new_rpc_client_factory.first.call(cwd)
+    new_session_path = session_file_from(client.get_state) || pending_session_path(cwd)
+    rpc_clients.register(new_session_path, client)
+    remember_pending_rpc_cwd(new_session_path, cwd) unless File.exist?(new_session_path)
+    new_session_path
+  end
+
+  def validated_session_cwd(raw_cwd)
+    cwd = raw_cwd.to_s.strip
+    return { valid: false, error: "Enter an existing directory." } if cwd.empty?
+
+    expanded_cwd = File.expand_path(cwd)
+    return { valid: false, error: "Path must be an existing directory." } unless File.directory?(expanded_cwd)
+    return { valid: false, error: "Directory is not accessible." } unless File.readable?(expanded_cwd) && File.executable?(expanded_cwd)
+
+    { valid: true, cwd: File.realpath(expanded_cwd) }
+  rescue ArgumentError, Errno::ENOENT, Errno::EACCES
+    { valid: false, error: "Path must be an existing directory." }
   end
 
   def attachment_store
