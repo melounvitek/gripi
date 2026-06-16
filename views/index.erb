@@ -1293,14 +1293,6 @@
 
     function showStatus(_text, _forceScroll = false) {}
 
-    function completeLiveAssistantMessages() {
-      liveAssistantSegments.forEach((entry) => {
-        if (entry.article.dataset.role !== "assistant") return;
-        if (entry.article.classList.contains("message--thinking") || entry.article.classList.contains("message--compact")) return;
-        entry.article.classList.remove("message--live");
-      });
-    }
-
     function resetLiveAssistantTracking() {
       liveAssistantMessage = null;
       liveAssistantSegments = new Map();
@@ -1549,7 +1541,6 @@
 
       if (["turn_end", "agent_end"].includes(event.type)) {
         if (liveAssistantSeen) showStatus("Done");
-        completeLiveAssistantMessages();
         setComposerState("done", "Done");
         resetLiveAssistantTracking();
         return;
