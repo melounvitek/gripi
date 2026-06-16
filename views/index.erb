@@ -222,6 +222,7 @@
       .session-header-project { font-size: 0.76rem; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       .conversation-scroll { padding: 0.75rem; }
+      body:not(.is-conversation-scrolling) .jump-controls.is-visible { display: none; }
       .message { margin-bottom: 0.65rem; padding: 0.75rem; border-radius: 0.75rem; }
       .message--user, .message--assistant { margin-left: 0; margin-right: 0; }
       .message-header { flex-wrap: wrap; }
@@ -366,6 +367,7 @@
     let sessionViewGeneration = 0;
     let sessionSwitchGeneration = 0;
     let sessionShortcutTimer = null;
+    let conversationScrollRevealTimer = null;
     let lastSidebarInteractionAt = 0;
     let cwdValidationTimer = null;
     let cwdValidationController = null;
@@ -451,6 +453,15 @@
       if (!conversationScroll) return null;
       const scrollBottom = conversationScroll.getBoundingClientRect().bottom;
       return userMessages().find((message) => message.getBoundingClientRect().top > scrollBottom + 8) || null;
+    }
+
+    function revealConversationJumpControlsTemporarily() {
+      document.body.classList.add("is-conversation-scrolling");
+      if (conversationScrollRevealTimer) clearTimeout(conversationScrollRevealTimer);
+      conversationScrollRevealTimer = setTimeout(() => {
+        document.body.classList.remove("is-conversation-scrolling");
+        conversationScrollRevealTimer = null;
+      }, 1400);
     }
 
     function updateScrollJumpButtons() {
@@ -1788,7 +1799,10 @@
       });
 
       conversationScroll?.addEventListener("scroll", () => {
-        if (!programmaticScroll) autoScrollEnabled = nearConversationBottom();
+        if (!programmaticScroll) {
+          autoScrollEnabled = nearConversationBottom();
+          revealConversationJumpControlsTemporarily();
+        }
         updateScrollJumpButtons();
       }, { passive: true });
       jumpToFirstButton?.addEventListener("click", () => scrollToTop());
