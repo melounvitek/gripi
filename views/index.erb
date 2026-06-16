@@ -270,24 +270,25 @@
         <h2 id="new-session-modal-title">New session</h2>
         <button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>&times;</button>
       </div>
+      <% default_new_session_cwd = known_session_cwds.first %>
       <form class="new-session-cwd-form" method="post" action="/sessions/new_at_cwd" data-cwd-validation-url="/sessions/validate_cwd">
         <label class="modal-field">
           <span>Existing folder</span>
           <select name="known_cwd" data-new-session-known-cwd>
             <option value="">Choose a folder…</option>
             <% known_session_cwds.each do |cwd| %>
-              <option value="<%= h cwd %>"><%= h cwd %></option>
+              <option value="<%= h cwd %>"<%= cwd == default_new_session_cwd ? " selected" : "" %>><%= h cwd %></option>
             <% end %>
           </select>
         </label>
         <label class="modal-field">
           <span>Path</span>
-          <input type="text" name="cwd" autocomplete="off" placeholder="/home/vitek/Work/project" data-new-session-cwd-input>
+          <input type="text" name="cwd" autocomplete="off" placeholder="/home/vitek/Work/project" value="<%= h default_new_session_cwd.to_s %>" data-new-session-cwd-input>
         </label>
-        <div class="cwd-validation-message" data-new-session-cwd-message aria-live="polite">Enter an existing directory.</div>
+        <div class="cwd-validation-message<%= default_new_session_cwd ? " is-valid" : "" %>" data-new-session-cwd-message aria-live="polite"><%= default_new_session_cwd ? "Directory exists." : "Enter an existing directory." %></div>
         <div class="modal-actions">
           <button type="button" class="secondary" data-modal-close>Cancel</button>
-          <button type="submit" data-new-session-submit disabled>Start session</button>
+          <button type="submit" data-new-session-submit<%= default_new_session_cwd ? "" : " disabled" %>>Start session</button>
         </div>
       </form>
     </div>
@@ -2125,7 +2126,10 @@
     document.addEventListener("input", (event) => {
       const input = event.target.closest("[data-new-session-cwd-input]");
       if (!input) return;
-      validateNewSessionCwd(input.closest("form"));
+      const form = input.closest("form");
+      const select = form?.querySelector("[data-new-session-known-cwd]");
+      if (select && select.value !== input.value.trim()) select.value = "";
+      validateNewSessionCwd(form);
     });
 
     document.addEventListener("change", (event) => {

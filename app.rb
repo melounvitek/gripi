@@ -177,7 +177,10 @@ class PiWebGateway < Sinatra::Base
     end
 
     def known_session_cwds
-      @known_session_cwds ||= @groups.keys.sort_by { |cwd| File.basename(cwd).downcase }
+      @known_session_cwds ||= @groups.keys.sort_by do |cwd|
+        latest = @groups.fetch(cwd).map { |session| session.modified_at || Time.at(0) }.max || Time.at(0)
+        [-latest.to_f, File.basename(cwd).downcase]
+      end
     end
 
     def project_label(session)

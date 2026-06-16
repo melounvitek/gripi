@@ -1343,6 +1343,37 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_new_session_modal_defaults_to_most_recent_session_folder
+    Dir.mktmpdir do |dir|
+      older_cwd = File.join(dir, "older-project")
+      newer_cwd = File.join(dir, "newer-project")
+      FileUtils.mkdir_p(older_cwd)
+      FileUtils.mkdir_p(newer_cwd)
+      session_dir = File.join(dir, "sessions")
+      FileUtils.mkdir_p(session_dir)
+      older_path = File.join(session_dir, "older.jsonl")
+      newer_path = File.join(session_dir, "newer.jsonl")
+      File.write(older_path, JSON.generate({ type: "session", id: "older", cwd: older_cwd }) + "\n")
+      File.write(newer_path, JSON.generate({ type: "session", id: "newer", cwd: newer_cwd }) + "\n")
+      FileUtils.touch(older_path, mtime: Time.now - 60)
+      FileUtils.touch(newer_path, mtime: Time.now)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => newer_path })
+
+      assert_equal 200, response.status
+      modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
+      options = modal.css('select[data-new-session-known-cwd] option')
+      assert_equal [newer_cwd, older_cwd], options.map { |option| option["value"] }.reject(&:empty?)
+      selected_option = options.find { |option| option["selected"] }
+      assert_equal newer_cwd, selected_option["value"]
+      assert_equal newer_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
+      refute modal.at_css('button[data-new-session-submit]').key?("disabled")
+      assert_includes modal.at_css('[data-new-session-cwd-message]').text, "Directory exists."
+    end
+  end
+
   def test_page_includes_generic_modal_and_new_session_cwd_scripts
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -1361,6 +1392,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "abortEventPoll();"
       assert_includes response.body, "if (modalIsOpen()) return;"
       assert_includes response.body, "fetch(validationUrl"
+      assert_includes response.body, "if (select && select.value !== input.value.trim()) select.value = \"\";"
       assert_includes response.body, "form.dataset.submitting === \"true\""
       assert_includes response.body, "form.action, { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } }"
     end
