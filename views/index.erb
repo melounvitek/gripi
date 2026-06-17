@@ -844,8 +844,14 @@
 
     function resizePromptTextarea() {
       if (!promptTextarea) return;
+
       promptTextarea.style.height = "auto";
-      promptTextarea.style.height = `${promptTextarea.scrollHeight}px`;
+      const maxHeight = parseFloat(getComputedStyle(promptTextarea).maxHeight);
+      const hasMaxHeight = Number.isFinite(maxHeight) && maxHeight > 0;
+      const nextHeight = hasMaxHeight ? Math.min(promptTextarea.scrollHeight, maxHeight) : promptTextarea.scrollHeight;
+
+      promptTextarea.style.height = `${nextHeight}px`;
+      promptTextarea.style.overflowY = hasMaxHeight && promptTextarea.scrollHeight > maxHeight ? "auto" : "hidden";
     }
 
     function imageAttachmentLabel(count) {
