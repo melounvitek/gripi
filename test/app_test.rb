@@ -410,6 +410,77 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_posts_steering_prompt_to_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "steer" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[ :start, path ], [ :steer, "Actually do this" ]], calls
+      assert_equal true, JSON.parse(response.body).fetch("steer")
+    end
+  end
+
+  def test_steering_prompt_treats_rename_slash_command_as_message
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/name keep steering", "streaming_behavior" => "steer" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[ :start, path ], [ :steer, "/name keep steering" ]], calls
+      payload = JSON.parse(response.body)
+      assert_equal true, payload.fetch("steer")
+      refute payload.key?("command")
+    end
+  end
+
+  def test_rejects_steering_prompt_with_uploaded_images
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      image_path = File.join(dir, "screenshot.png")
+      File.binwrite(image_path, "fake image data")
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      upload = Rack::Multipart::UploadedFile.new(image_path, "image/png", true)
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "steer", "images[]" => upload },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 422, response.status
+      assert_empty calls
+      assert_equal "Steering messages cannot include images", JSON.parse(response.body).fetch("error")
+    end
+  end
+
   def test_posts_prompt_with_uploaded_images
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -1256,7 +1327,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "session-abort-button composer-stop-button"
       assert_includes response.body, "Loading…"
       refute_includes response.body, "Loading session…"
-      assert_includes response.body, "Pi is working…"
+      assert_includes response.body, "Steer Pi… Enter queues after current tool call."
       assert_includes response.body, "[hidden] { display: none !important; }"
       assert_includes response.body, "Ask Pi… Enter to send, Shift+Enter for newline."
       refute_includes response.body, "autofocus"
@@ -1809,10 +1880,10 @@ class AppTest < Minitest::Test
       header = document.at_css(".session-header")
       assert_equal "project", header.at_css(".session-header-project").text
       assert_equal "project", header.at_css(".session-header-project")["title"]
-      new_session_form = header.at_css('form.session-header-new-form[action="/sessions/new"]')
-      refute_nil new_session_form
-      assert_equal path, new_session_form.at_css('input[name="session"]')["value"]
-      assert_equal "New session in this directory", new_session_form.at_css("button")["aria-label"]
+      stop_button = header.at_css('button.composer-stop-button[form="abort-form"]')
+      refute_nil stop_button
+      assert_equal "Abort running Pi", stop_button["aria-label"]
+      assert stop_button.key?("hidden")
     end
   end
 
@@ -2638,8 +2709,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function updateHeaderFromSelectedSidebarSession()"
       assert_includes response.body, "const selectedTitle = sessionSidebar?.querySelector(\"a.session.selected .session-title\")?.textContent.trim();"
       assert_includes response.body, "updateHeaderFromSelectedSidebarSession();"
-      assert_includes response.body, "const renameCommand = sessionNameSlashCommand(message);"
-      assert_includes response.body, "if (!renameCommand) {\n        resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
+      assert_includes response.body, "const renameCommand = steering ? null : sessionNameSlashCommand(message);"
+      assert_includes response.body, "if (!renameCommand) {\n        if (!steering) resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
       assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });"
       assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {\n            await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });\n            return;\n          }\n          updateSessionHeaderName(payload.name);\n          setComposerState(\"done\", \"Renamed\");\n          showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);\n          refreshSidebar().catch(() => {});\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
@@ -2648,11 +2719,14 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (commandFilter) commandFilter.value = \"\";"
       assert_includes response.body, "commandList?.querySelectorAll(\".command\").forEach((command) => { command.hidden = false; });"
       assert_includes response.body, "setComposerState(\"running\", \"Pi is running…\");"
-      assert_includes response.body, "const composerBusy = [\"running\", \"sending\"].includes(state);"
-      assert_includes response.body, "promptTextarea.disabled = composerBusy;"
-      assert_includes response.body, "composerStopButton.hidden = !composerBusy;"
-      assert_includes response.body, "if (promptTextarea?.disabled) return;"
-      assert_includes response.body, "if (promptTextarea?.disabled) return false;"
+      assert_includes response.body, "composerStopButton = document.querySelector(\".session-header .composer-stop-button\") || null;"
+      assert_includes response.body, "if (!steering) resetLiveAssistantTracking();"
+      assert_includes response.body, "const agentBusy = [\"running\", \"sending\"].includes(state);"
+      assert_includes response.body, "promptTextarea.disabled = submitting;"
+      assert_includes response.body, "composerStopButton.hidden = !agentBusy;"
+      assert_includes response.body, "if (steering) formData.set(\"streaming_behavior\", \"steer\");"
+      assert_includes response.body, "if (!addImageFiles(files) && composerState?.dataset.state === \"running\") showStatus(\"Steering messages cannot include images\", true);"
+      assert_includes response.body, "Steer Pi… Enter queues after current tool call."
     end
   end
 
@@ -2875,6 +2949,10 @@ class AppTest < Minitest::Test
 
     def prompt(message, images = [])
       @calls << (images.empty? ? [:prompt, message] : [:prompt, message, images])
+    end
+
+    def steer(message)
+      @calls << [:steer, message]
     end
 
     def get_messages

@@ -50,6 +50,10 @@ class PiRpcClient
     request("prompt", id: next_id("prompt"), **payload)
   end
 
+  def steer(message)
+    request("steer", id: next_id("steer"), message: message)
+  end
+
   def abort
     request("abort", id: next_id("abort"))
   end

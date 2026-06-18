@@ -159,7 +159,7 @@
     input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(138, 190, 183, 0.2); }
     textarea { width: 100%; resize: none; min-height: 2.75rem; max-height: 12rem; line-height: 1.4; overflow-y: hidden; }
     .send-button, .composer-stop-button { display: none; }
-    .composer-stop-button.is-visible { position: relative; isolation: isolate; display: inline-flex; align-self: center; }
+    .session-header .composer-stop-button.is-visible { position: relative; isolation: isolate; display: inline-flex; align-self: center; }
     .composer-stop-button.is-visible:not(:disabled)::before { content: ""; position: absolute; inset: -0.34rem; z-index: -1; border: 2px solid rgba(204, 102, 102, 0.78); border-radius: inherit; animation: stop-button-pulse 1400ms ease-out infinite; pointer-events: none; }
     .attach-button.is-disabled { opacity: 0.48; cursor: not-allowed; pointer-events: none; }
     button { justify-self: end; padding: 0.5rem 0.9rem; border: 0; border-radius: 0.55rem; background: var(--accent); color: var(--button-text); font-weight: 700; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
@@ -404,7 +404,7 @@
       promptTextarea = promptForm?.querySelector("textarea") || null;
       promptSessionInput = promptForm?.querySelector('input[name="session"]') || null;
       sendButton = promptForm?.querySelector(".send-button") || null;
-      composerStopButton = promptForm?.querySelector(".composer-stop-button") || null;
+      composerStopButton = document.querySelector(".session-header .composer-stop-button") || null;
       attachButton = promptForm?.querySelector(".attach-button") || null;
       attachmentTray = promptForm?.querySelector(".attachment-tray") || null;
       imageInput = promptForm?.querySelector(".image-input") || null;
@@ -623,8 +623,12 @@
 
     function updatePromptPlaceholder() {
       if (!promptTextarea) return;
+      if (composerState?.dataset.state === "running") {
+        promptTextarea.placeholder = "Steer Pi… Enter queues after current tool call.";
+        return;
+      }
       if (promptTextarea.disabled) {
-        promptTextarea.placeholder = "Pi is working…";
+        promptTextarea.placeholder = "Sending…";
         return;
       }
       promptTextarea.placeholder = window.matchMedia?.("(max-width: 760px)").matches ? "Ask Pi…" : "Ask Pi… Enter to send, Shift+Enter for newline.";
@@ -826,22 +830,25 @@
         composerState.textContent = ["running", "sending", "error"].includes(state) ? label : "";
         if (state === "running") updateWaitingForOutputStatus();
       }
-      const composerBusy = ["running", "sending"].includes(state);
-      if (abortButton) abortButton.disabled = !composerBusy;
+      const agentBusy = ["running", "sending"].includes(state);
+      const submitting = state === "sending";
+      if (abortButton) abortButton.disabled = !agentBusy;
       if (sendButton) {
-        sendButton.hidden = composerBusy;
-        sendButton.textContent = state === "sending" ? "Sending…" : "Send";
+        sendButton.hidden = submitting;
+        sendButton.textContent = state === "running" ? "Steer" : state === "sending" ? "Sending…" : "Send";
+        sendButton.setAttribute("aria-label", state === "running" ? "Steer Pi" : "Send message");
       }
       if (composerStopButton) {
-        composerStopButton.hidden = !composerBusy;
-        composerStopButton.disabled = !composerBusy;
-        composerStopButton.classList.toggle("is-visible", composerBusy);
+        composerStopButton.hidden = !agentBusy;
+        composerStopButton.disabled = !agentBusy;
+        composerStopButton.classList.toggle("is-visible", agentBusy);
       }
-      if (promptTextarea) promptTextarea.disabled = composerBusy;
-      if (imageInput) imageInput.disabled = composerBusy;
+      if (promptTextarea) promptTextarea.disabled = submitting;
+      const attachmentsDisabled = agentBusy;
+      if (imageInput) imageInput.disabled = attachmentsDisabled;
       if (attachButton) {
-        attachButton.classList.toggle("is-disabled", composerBusy);
-        attachButton.setAttribute("aria-disabled", composerBusy ? "true" : "false");
+        attachButton.classList.toggle("is-disabled", attachmentsDisabled);
+        attachButton.setAttribute("aria-disabled", attachmentsDisabled ? "true" : "false");
       }
       updatePromptPlaceholder();
     }
@@ -921,7 +928,7 @@
     }
 
     function addImageFiles(files) {
-      if (promptTextarea?.disabled) return false;
+      if (promptTextarea?.disabled || composerState?.dataset.state === "running") return false;
 
       const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
       if (imageFiles.length === 0) return false;
@@ -1849,6 +1856,12 @@
 
       if (promptTextarea?.disabled) return;
 
+      const steering = composerState?.dataset.state === "running";
+      if (steering && pendingImages.length > 0) {
+        showStatus("Steering messages cannot include images", true);
+        return;
+      }
+
       const generation = sessionViewGeneration;
       const switchGeneration = sessionSwitchGeneration;
       const submittedSession = promptSessionInput?.value;
@@ -1858,10 +1871,11 @@
       const formData = new FormData(promptForm);
       formData.set("message", message);
       pendingImages.forEach((entry) => formData.append("images[]", entry.file, entry.file.name || "image"));
+      if (steering) formData.set("streaming_behavior", "steer");
 
-      const renameCommand = sessionNameSlashCommand(message);
+      const renameCommand = steering ? null : sessionNameSlashCommand(message);
       if (!renameCommand) {
-        resetLiveAssistantTracking();
+        if (!steering) resetLiveAssistantTracking();
         resetEventPollBackoff();
         scheduleNextEventPoll(0);
         appendMessage("user", [message, pendingImages.length > 0 ? `[${imageAttachmentLabel(pendingImages.length)}]` : ""].filter(Boolean).join("\n"), true, true, new Date(), { optimistic: true, optimisticText: message });
@@ -1874,8 +1888,8 @@
       commandList?.querySelectorAll(".command").forEach((command) => { command.hidden = false; });
       resizePromptTextarea();
       if (shouldAutofocusPrompt()) promptTextarea.focus();
-      setComposerState("sending", renameCommand ? "Renaming…" : "Sending…");
-      showStatus(renameCommand ? "Renaming session…" : "Sending…", true);
+      setComposerState("sending", renameCommand ? "Renaming…" : steering ? "Queueing steer…" : "Sending…");
+      showStatus(renameCommand ? "Renaming session…" : steering ? "Queueing steer…" : "Sending…", true);
 
       const response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
       if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
@@ -1907,6 +1921,7 @@
           return;
         }
         setComposerState("running", "Pi is running…");
+        if (payload?.steer) showStatus("Steer queued", true);
       } else {
         setComposerState("running", "Pi is running…");
       }
@@ -1991,7 +2006,12 @@
       });
 
       promptForm?.addEventListener("drop", (event) => {
-        if (addImageFiles(event.dataTransfer?.files || [])) event.preventDefault();
+        const files = event.dataTransfer?.files || [];
+        const hasImage = [...files].some((file) => file.type.startsWith("image/"));
+        if (!hasImage) return;
+
+        event.preventDefault();
+        if (!addImageFiles(files) && composerState?.dataset.state === "running") showStatus("Steering messages cannot include images", true);
       });
 
       imageInput?.addEventListener("change", () => {

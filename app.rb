@@ -554,8 +554,20 @@ class PiWebGateway < Sinatra::Base
     images = prompt_images_from(params["images"])
     halt 400, "Message cannot be empty" if message.strip.empty? && images.empty?
 
-    rename_command = session_name_slash_command(message)
-    if rename_command&.[](:name)
+    steering_prompt = params["streaming_behavior"].to_s == "steer"
+    if steering_prompt && !images.empty?
+      if json_request?
+        status 422
+        content_type :json
+        next JSON.generate(error: "Steering messages cannot include images")
+      end
+      halt 422, "Steering messages cannot include images"
+    end
+
+    rename_command = steering_prompt ? nil : session_name_slash_command(message)
+    if steering_prompt
+      with_rpc_client(session_path) { |client| client.steer(message) }
+    elsif rename_command&.[](:name)
       with_rpc_client(session_path) { |client| client.set_session_name(rename_command.fetch(:name)) }
     elsif rename_command
       nil
@@ -568,6 +580,7 @@ class PiWebGateway < Sinatra::Base
     if json_request?
       content_type :json
       payload = { session: session_path, redirect: redirect_path }
+      payload[:steer] = true if steering_prompt && !rename_command
       if rename_command
         payload[:command] = "rename"
         payload[:name] = rename_command[:name] if rename_command[:name]
