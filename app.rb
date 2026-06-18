@@ -228,6 +228,13 @@ class PiWebGateway < Sinatra::Base
       end
     end
 
+    def new_session_cwds
+      preferred_cwd = selected_project_cwd || @selected_session&.cwd
+      return known_session_cwds unless preferred_cwd
+
+      [preferred_cwd, *known_session_cwds.reject { |cwd| cwd == preferred_cwd }]
+    end
+
     def selected_project_cwd
       project = params["project"].to_s
       return if project.empty?
@@ -536,6 +543,11 @@ class PiWebGateway < Sinatra::Base
     erb :_sidebar, layout: false
   end
 
+  get "/new_session_modal" do
+    prepare_session_view
+    erb :_new_session_modal, layout: false
+  end
+
   get "/session_fragment" do
     prepare_session_view
     content_type :json
@@ -544,7 +556,8 @@ class PiWebGateway < Sinatra::Base
       title: @selected_session&.display_name.to_s,
       session: @selected_session&.path,
       sidebar_html: erb(:_sidebar, layout: false),
-      conversation_html: erb(:_conversation, layout: false)
+      conversation_html: erb(:_conversation, layout: false),
+      new_session_modal_html: erb(:_new_session_modal, layout: false)
     )
   end
 

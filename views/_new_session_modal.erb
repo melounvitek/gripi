@@ -1,0 +1,38 @@
+  <div class="modal-overlay" data-modal="new-session-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="new-session-modal-title">
+      <div class="modal-header">
+        <h2 id="new-session-modal-title">New session</h2>
+        <button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>&times;</button>
+      </div>
+      <% default_new_session_cwd = new_session_cwds.first %>
+      <form class="new-session-cwd-form" method="post" action="/sessions/new_at_cwd" data-cwd-validation-url="/sessions/validate_cwd">
+        <% if show_all_sidebar_sessions? %>
+          <input type="hidden" name="show_all_sessions" value="1">
+        <% end %>
+        <% if sidebar_sessions_limit_param %>
+          <input type="hidden" name="sidebar_sessions_limit" value="<%= h sidebar_sessions_limit_param %>">
+        <% end %>
+        <% if selected_project_cwd %>
+          <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
+        <% end %>
+        <label class="modal-field">
+          <span>Existing folder</span>
+          <select name="known_cwd" data-new-session-known-cwd>
+            <option value="">Choose a folder…</option>
+            <% new_session_cwds.each do |cwd| %>
+              <option value="<%= h cwd %>"<%= cwd == default_new_session_cwd ? " selected" : "" %>><%= h cwd %></option>
+            <% end %>
+          </select>
+        </label>
+        <label class="modal-field">
+          <span>Path</span>
+          <input type="text" name="cwd" autocomplete="off" placeholder="/home/vitek/Work/project" value="<%= h default_new_session_cwd.to_s %>" data-new-session-cwd-input>
+        </label>
+        <div class="cwd-validation-message<%= default_new_session_cwd ? " is-valid" : "" %>" data-new-session-cwd-message aria-live="polite"><%= default_new_session_cwd ? "Directory exists." : "Enter an existing directory." %></div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" data-modal-close>Cancel</button>
+          <button type="submit" data-new-session-submit<%= default_new_session_cwd ? "" : " disabled" %>>Start session</button>
+        </div>
+      </form>
+    </div>
+  </div>

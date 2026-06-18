@@ -1565,7 +1565,7 @@ class AppTest < Minitest::Test
       document = Nokogiri::HTML(response.body)
       button = document.at_css('.recent-sessions [data-modal-open="new-session-modal"]')
       assert button
-      assert_equal "+", button.text.strip
+      assert_equal "New session +", button.text.strip
       modal = document.at_css('body > [data-modal="new-session-modal"]')
       assert modal
       assert_equal "/sessions/new_at_cwd", modal.at_css('form.new-session-cwd-form')["action"]
@@ -1577,7 +1577,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_new_session_modal_defaults_to_most_recent_session_folder
+  def test_new_session_modal_defaults_to_current_session_folder
     Dir.mktmpdir do |dir|
       older_cwd = File.join(dir, "older-project")
       newer_cwd = File.join(dir, "newer-project")
@@ -1594,17 +1594,102 @@ class AppTest < Minitest::Test
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => newer_path })
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => older_path })
 
       assert_equal 200, response.status
       modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
       options = modal.css('select[data-new-session-known-cwd] option')
-      assert_equal [newer_cwd, older_cwd], options.map { |option| option["value"] }.reject(&:empty?)
+      assert_equal [older_cwd, newer_cwd], options.map { |option| option["value"] }.reject(&:empty?)
       selected_option = options.find { |option| option["selected"] }
-      assert_equal newer_cwd, selected_option["value"]
-      assert_equal newer_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
+      assert_equal older_cwd, selected_option["value"]
+      assert_equal older_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
       refute modal.at_css('button[data-new-session-submit]').key?("disabled")
       assert_includes modal.at_css('[data-new-session-cwd-message]').text, "Directory exists."
+    end
+  end
+
+  def test_new_session_modal_defaults_to_filtered_project_folder
+    Dir.mktmpdir do |dir|
+      current_cwd = File.join(dir, "current-project")
+      filtered_cwd = File.join(dir, "filtered-project")
+      newer_cwd = File.join(dir, "newer-project")
+      [current_cwd, filtered_cwd, newer_cwd].each { |cwd| FileUtils.mkdir_p(cwd) }
+      session_dir = File.join(dir, "sessions")
+      FileUtils.mkdir_p(session_dir)
+      current_path = File.join(session_dir, "current.jsonl")
+      filtered_path = File.join(session_dir, "filtered.jsonl")
+      newer_path = File.join(session_dir, "newer.jsonl")
+      File.write(current_path, JSON.generate({ type: "session", id: "current", cwd: current_cwd }) + "\n")
+      File.write(filtered_path, JSON.generate({ type: "session", id: "filtered", cwd: filtered_cwd }) + "\n")
+      File.write(newer_path, JSON.generate({ type: "session", id: "newer", cwd: newer_cwd }) + "\n")
+      FileUtils.touch(current_path, mtime: Time.now - 60)
+      FileUtils.touch(filtered_path, mtime: Time.now - 30)
+      FileUtils.touch(newer_path, mtime: Time.now)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => current_path, "project" => filtered_cwd }
+      )
+
+      assert_equal 200, response.status
+      modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
+      options = modal.css('select[data-new-session-known-cwd] option')
+      assert_equal [filtered_cwd, newer_cwd, current_cwd], options.map { |option| option["value"] }.reject(&:empty?)
+      selected_option = options.find { |option| option["selected"] }
+      assert_equal filtered_cwd, selected_option["value"]
+      assert_equal filtered_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
+    end
+  end
+
+  def test_session_fragment_includes_updated_new_session_modal
+    Dir.mktmpdir do |dir|
+      current_cwd = File.join(dir, "current-project")
+      filtered_cwd = File.join(dir, "filtered-project")
+      [current_cwd, filtered_cwd].each { |cwd| FileUtils.mkdir_p(cwd) }
+      session_dir = File.join(dir, "sessions")
+      FileUtils.mkdir_p(session_dir)
+      current_path = File.join(session_dir, "current.jsonl")
+      filtered_path = File.join(session_dir, "filtered.jsonl")
+      File.write(current_path, JSON.generate({ type: "session", id: "current", cwd: current_cwd }) + "\n")
+      File.write(filtered_path, JSON.generate({ type: "session", id: "filtered", cwd: filtered_cwd }) + "\n")
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/session_fragment",
+        params: { "session" => current_path, "project" => filtered_cwd }
+      )
+
+      assert_equal 200, response.status
+      modal = Nokogiri::HTML(JSON.parse(response.body).fetch("new_session_modal_html"))
+      selected_option = modal.at_css('select[data-new-session-known-cwd] option[selected]')
+      assert_equal filtered_cwd, selected_option["value"]
+      assert_equal filtered_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
+    end
+  end
+
+  def test_new_session_modal_fragment_defaults_to_filtered_project_folder
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      filtered_cwd = File.join(dir, "filtered-project")
+      FileUtils.mkdir_p(filtered_cwd)
+      filtered_path = File.join(dir, "filtered.jsonl")
+      File.write(filtered_path, JSON.generate({ type: "session", id: "filtered", cwd: filtered_cwd }) + "\n")
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/new_session_modal",
+        params: { "session" => path, "project" => filtered_cwd }
+      )
+
+      assert_equal 200, response.status
+      modal = Nokogiri::HTML(response.body)
+      selected_option = modal.at_css('select[data-new-session-known-cwd] option[selected]')
+      assert_equal filtered_cwd, selected_option["value"]
+      assert_equal filtered_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
     end
   end
 
@@ -1623,6 +1708,11 @@ class AppTest < Minitest::Test
       assert_includes response.body, ".session-switch-overlay { position: fixed; inset: 0; z-index: 140;"
       assert_includes response.body, ".modal-overlay { place-items: end stretch; padding: 0; }"
       assert_includes response.body, "submit.textContent = \"Starting…\""
+      assert_includes response.body, "function replaceNewSessionModalHtml(html)"
+      assert_includes response.body, "const [sidebarResponse, modalResponse] = await Promise.all(["
+      assert_includes response.body, "fetch(newSessionModalUrl(targetUrl.href))"
+      assert_includes response.body, "replaceNewSessionModalHtml(modalHtml);"
+      assert_includes response.body, "replaceNewSessionModalHtml(payload.new_session_modal_html);"
       assert_includes response.body, "abortEventPoll();"
       assert_includes response.body, "async function submitAbort(event)"
       assert_includes response.body, "if (modalIsOpen()) return;"

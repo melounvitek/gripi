@@ -67,7 +67,7 @@
     .sidebar-notification-test-link:hover { background: var(--border); }
     .session-project { display: inline-block; max-width: 100%; margin-top: 0.32rem; padding: 0.1rem 0.42rem; border: 1px solid rgba(138, 190, 183, 0.28); border-radius: 999px; background: rgba(138, 190, 183, 0.08); color: var(--accent); font-size: 0.72rem; font-weight: 800; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
     .session-meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sidebar-icon-button { flex: 0 0 auto; width: 1.65rem; height: 1.65rem; padding: 0; border-radius: 999px; line-height: 1; }
+    .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.55rem; border-radius: 999px; line-height: 1; }
     .session-rename { display: none; gap: 0.35rem; grid-template-columns: minmax(0, 1fr) auto; margin: 0.3rem 0 0.55rem; }
     a.session.selected + .session-rename { display: grid; }
     .session-rename input { min-width: 0; padding: 0.45rem 0.55rem; font-size: 0.82rem; }
@@ -277,44 +277,7 @@
 
     <%= erb :_conversation, layout: false %>
   </div>
-  <div class="modal-overlay" data-modal="new-session-modal" hidden>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="new-session-modal-title">
-      <div class="modal-header">
-        <h2 id="new-session-modal-title">New session</h2>
-        <button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>&times;</button>
-      </div>
-      <% default_new_session_cwd = known_session_cwds.first %>
-      <form class="new-session-cwd-form" method="post" action="/sessions/new_at_cwd" data-cwd-validation-url="/sessions/validate_cwd">
-        <% if show_all_sidebar_sessions? %>
-          <input type="hidden" name="show_all_sessions" value="1">
-        <% end %>
-        <% if sidebar_sessions_limit_param %>
-          <input type="hidden" name="sidebar_sessions_limit" value="<%= h sidebar_sessions_limit_param %>">
-        <% end %>
-        <% if selected_project_cwd %>
-          <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
-        <% end %>
-        <label class="modal-field">
-          <span>Existing folder</span>
-          <select name="known_cwd" data-new-session-known-cwd>
-            <option value="">Choose a folder…</option>
-            <% known_session_cwds.each do |cwd| %>
-              <option value="<%= h cwd %>"<%= cwd == default_new_session_cwd ? " selected" : "" %>><%= h cwd %></option>
-            <% end %>
-          </select>
-        </label>
-        <label class="modal-field">
-          <span>Path</span>
-          <input type="text" name="cwd" autocomplete="off" placeholder="/home/vitek/Work/project" value="<%= h default_new_session_cwd.to_s %>" data-new-session-cwd-input>
-        </label>
-        <div class="cwd-validation-message<%= default_new_session_cwd ? " is-valid" : "" %>" data-new-session-cwd-message aria-live="polite"><%= default_new_session_cwd ? "Directory exists." : "Enter an existing directory." %></div>
-        <div class="modal-actions">
-          <button type="button" class="secondary" data-modal-close>Cancel</button>
-          <button type="submit" data-new-session-submit<%= default_new_session_cwd ? "" : " disabled" %>>Start session</button>
-        </div>
-      </form>
-    </div>
-  </div>
+  <%= erb :_new_session_modal, layout: false %>
   <div class="session-switch-overlay" role="status" aria-live="polite" aria-label="Loading">
     <div class="session-switch-indicator"><span class="session-switch-spinner" aria-hidden="true"></span> Loading…</div>
   </div>
@@ -2175,6 +2138,13 @@
       if (selectedTitle) updateSessionHeaderName(selectedTitle);
     }
 
+    function replaceNewSessionModalHtml(html) {
+      const currentModal = document.querySelector('[data-modal="new-session-modal"]');
+      if (!html || !currentModal) return;
+
+      currentModal.outerHTML = html;
+    }
+
     function replaceSidebarHtml(html, { scrollTop = sidebarScrollContainer()?.scrollTop || 0, notify = true } = {}) {
       const previousAssistantCounts = sidebarAssistantResponseCounts();
       sessionSidebar.outerHTML = html;
@@ -2218,12 +2188,19 @@
       }
       targetUrl.searchParams.delete("sidebar_sessions_limit");
 
+      const viewGeneration = sessionViewGeneration;
+      const switchGeneration = sessionSwitchGeneration;
       const sidebarGeneration = ++sidebarUpdateGeneration;
-      const response = await fetch(sidebarFragmentUrl(targetUrl.href));
-      if (!response.ok || sidebarGeneration !== sidebarUpdateGeneration || !sessionSidebar) return;
-      const html = await response.text();
-      if (sidebarGeneration !== sidebarUpdateGeneration || !sessionSidebar) return;
+      const [sidebarResponse, modalResponse] = await Promise.all([
+        fetch(sidebarFragmentUrl(targetUrl.href)),
+        fetch(newSessionModalUrl(targetUrl.href))
+      ]);
+      if (!sidebarResponse.ok || !modalResponse.ok || !sessionSidebar) throw new Error("Project filter refresh failed");
+      if (viewGeneration !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || sidebarGeneration !== sidebarUpdateGeneration) return;
+      const [html, modalHtml] = await Promise.all([sidebarResponse.text(), modalResponse.text()]);
+      if (viewGeneration !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || sidebarGeneration !== sidebarUpdateGeneration || !sessionSidebar) return;
       replaceSidebarHtml(html, { scrollTop: 0, notify: false });
+      replaceNewSessionModalHtml(modalHtml);
       history.pushState(history.state, "", targetUrl.href);
       scheduleSidebarRefresh();
     }
@@ -2269,6 +2246,13 @@
       return fragmentUrl;
     }
 
+    function newSessionModalUrl(url) {
+      const target = new URL(url, window.location.href);
+      const modalUrl = new URL("/new_session_modal", window.location.origin);
+      target.searchParams.forEach((value, key) => modalUrl.searchParams.append(key, value));
+      return modalUrl;
+    }
+
     function showSessionSwitching() {
       document.body.classList.add("session-switching");
     }
@@ -2296,6 +2280,7 @@
         resetSessionViewState();
         sessionSidebar.outerHTML = payload.sidebar_html;
         conversationPanel.outerHTML = payload.conversation_html;
+        replaceNewSessionModalHtml(payload.new_session_modal_html);
         bindSessionDom();
         bindSessionControls();
         if (push) history.pushState({ session: payload.session }, payload.title || "", payload.url || url);
