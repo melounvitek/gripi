@@ -651,6 +651,29 @@ class PiWebGateway < Sinatra::Base
     redirect_to_new_session(start_new_session(result.fetch(:cwd)))
   end
 
+  get "/sessions/fork_messages" do
+    session_path = canonical_rpc_session_path(params.fetch("session"))
+    response = with_rpc_client(session_path) { |client| client.get_fork_messages }
+    messages = response_data(response).fetch("messages", [])
+    content_type :json
+    JSON.generate(messages: messages)
+  end
+
+  post "/sessions/fork" do
+    session_path = canonical_rpc_session_path(params.fetch("session"))
+    entry_id = params.fetch("entry_id").to_s
+    halt 400, "Fork entry cannot be empty" if entry_id.empty?
+
+    response = with_rpc_client(session_path) { |client| client.fork(entry_id) }
+    redirect_to_rpc_session_after_branch(session_path, response, text: response_data(response)["text"])
+  end
+
+  post "/sessions/clone" do
+    session_path = canonical_rpc_session_path(params.fetch("session"))
+    response = with_rpc_client(session_path) { |client| client.clone_session }
+    redirect_to_rpc_session_after_branch(session_path, response)
+  end
+
   post "/abort" do
     session_path = canonical_rpc_session_path(params.fetch("session"))
     with_rpc_client(session_path) { |client| client.abort }
@@ -793,6 +816,35 @@ class PiWebGateway < Sinatra::Base
     new_session_path = session_file_from(client.get_state) || pending_session_path(cwd)
     rpc_clients.register(new_session_path, client)
     remember_pending_rpc_cwd(new_session_path, cwd) unless File.exist?(new_session_path)
+    new_session_path
+  end
+
+  def redirect_to_rpc_session_after_branch(previous_session_path, response, text: nil)
+    data = response_data(response)
+    if data.is_a?(Hash) && data["cancelled"]
+      status 409 if json_request?
+      content_type :json if json_request?
+      return JSON.generate(cancelled: true, session: previous_session_path) if json_request?
+
+      redirect session_redirect_path(previous_session_path)
+    end
+
+    new_session_path = branch_session_path(previous_session_path)
+    redirect_path = session_redirect_path(new_session_path, expanded_cwds: expanded_cwds, show_all_sessions: show_all_sidebar_sessions?, sidebar_sessions_limit: sidebar_sessions_limit_param)
+    if json_request?
+      content_type :json
+      payload = { session: new_session_path, redirect: redirect_path }
+      payload[:text] = text if text
+      JSON.generate(payload)
+    else
+      redirect redirect_path
+    end
+  end
+
+  def branch_session_path(previous_session_path)
+    client = rpc_clients.client_for(previous_session_path)
+    new_session_path = session_file_from(client&.get_state) || previous_session_path
+    rpc_clients.move(previous_session_path, new_session_path) unless new_session_path == previous_session_path
     new_session_path
   end
 

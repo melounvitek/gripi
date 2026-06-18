@@ -818,6 +818,80 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_returns_fork_messages_for_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, [{ "entryId" => "entry-1", "text" => "Try this" }])
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sessions/fork_messages",
+        params: { "session" => path },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [{ "entryId" => "entry-1", "text" => "Try this" }], JSON.parse(response.body).fetch("messages")
+      assert_equal [[:start, path], [:get_fork_messages]], calls
+    end
+  end
+
+  def test_forks_session_and_returns_new_session_as_json
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      forked_path = File.join(File.dirname(path), "forked.jsonl")
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, [], forked_path)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/fork",
+        params: { "session" => path, "entry_id" => "entry-1", "show_all_sessions" => "1" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal forked_path, payload.fetch("session")
+      assert_equal "Forked prompt", payload.fetch("text")
+      assert_includes payload.fetch("redirect"), Rack::Utils.escape(forked_path)
+      assert_includes payload.fetch("redirect"), "show_all_sessions=1"
+      assert_equal [[:start, path], [:fork, "entry-1"], [:get_state]], calls
+    end
+  end
+
+  def test_clones_session_and_returns_new_session_as_json
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      cloned_path = File.join(File.dirname(path), "cloned.jsonl")
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, [], cloned_path)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/clone",
+        params: { "session" => path },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal cloned_path, payload.fetch("session")
+      assert_includes payload.fetch("redirect"), Rack::Utils.escape(cloned_path)
+      assert_equal [[:start, path], [:clone_session], [:get_state]], calls
+    end
+  end
+
   def test_validates_new_session_cwd_as_json
     Dir.mktmpdir do |dir|
       cwd = File.join(dir, "project")
@@ -3173,6 +3247,21 @@ class AppTest < Minitest::Test
     def get_commands
       @calls << [:get_commands]
       { "type" => "response", "command" => "get_commands", "success" => true, "data" => { "commands" => @commands } }
+    end
+
+    def get_fork_messages
+      @calls << [:get_fork_messages]
+      { "type" => "response", "command" => "get_fork_messages", "success" => true, "data" => { "messages" => @commands } }
+    end
+
+    def fork(entry_id)
+      @calls << [:fork, entry_id]
+      { "type" => "response", "command" => "fork", "success" => true, "data" => { "text" => "Forked prompt", "cancelled" => false } }
+    end
+
+    def clone_session
+      @calls << [:clone_session]
+      { "type" => "response", "command" => "clone", "success" => true, "data" => { "cancelled" => false } }
     end
 
     def abort
