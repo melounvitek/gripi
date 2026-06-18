@@ -2254,6 +2254,30 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_live_event_script_renders_subagent_progress_open_while_running
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, "function subagentDetailsFromEvent(event)"
+      assert_includes response.body, "function subagentDisplayText(details, fallback, running = false)"
+      assert_includes response.body, "function subagentResultRunning(details, result, index, running)"
+      assert_includes response.body, 'if (result.stopReason === "stop") return false;'
+      assert_includes response.body, 'if (event.toolName === "subagent")'
+      assert_includes response.body, 'entry.details.open = subagentRunning(event);'
+      assert_includes response.body, 'open: event.toolName === "subagent" && subagentRunning(event)'
+      assert_includes response.body, 'if (event.toolName === "subagent") return subagentSummary(subagentDetailsFromEvent(event), subagentRunning(event));'
+      assert_includes response.body, 'if (part.type === "toolCall") return items.push(`→ ${formatToolCallPlain(part.name, part.arguments || {})}`);'
+    end
+  end
+
   def test_live_event_script_keeps_active_sessions_pinned_after_layout
     Dir.mktmpdir do |dir|
       path = write_session(dir)

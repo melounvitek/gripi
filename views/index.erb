@@ -973,6 +973,13 @@
       return `${name}${path}${range}`;
     }
 
+    function formatToolCallPlain(name, args = {}) {
+      if (name === "bash") return `$ ${args.command || ""}${args.timeout ? ` (timeout ${args.timeout}s)` : ""}`;
+      if (["read", "edit", "write"].includes(name)) return toolSummaryPlain(name, args);
+      if (name === "grep") return `grep /${args.pattern || ""}/ in ${args.path || "."}`;
+      return name || "tool";
+    }
+
     function transcriptToolCallText(name, args = {}) {
       const summary = toolSummaryPlain(name, args);
       if (name !== "edit") return summary;
@@ -1460,6 +1467,101 @@
       return event.type === "tool_execution_update" ? event.partialResult : event.result;
     }
 
+    function subagentDetailsFromEvent(event) {
+      return toolExecutionResult(event)?.details;
+    }
+
+    function subagentRunning(event) {
+      return event.type !== "tool_execution_end";
+    }
+
+    function subagentResultFailed(result) {
+      return result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+    }
+
+    function subagentResultRunning(details, result, index, running) {
+      if (result.exitCode === -1) return true;
+      if (!running) return false;
+      if (result.exitCode !== 0) return false;
+      if (result.stopReason === "stop") return false;
+      if (details.mode === "parallel") return true;
+      return index === details.results.length - 1;
+    }
+
+    function subagentResultIcon(result, resultRunning = false) {
+      if (resultRunning || result.exitCode === -1) return "⏳";
+      return subagentResultFailed(result) ? "✗" : "✓";
+    }
+
+    function subagentFinalOutput(messages = []) {
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message?.role !== "assistant") continue;
+        const textPart = (message.content || []).find((part) => part?.type === "text" && part.text);
+        if (textPart) return textPart.text;
+      }
+      return "";
+    }
+
+    function subagentDisplayItems(messages = []) {
+      const items = [];
+      messages.forEach((message) => {
+        if (message?.role !== "assistant") return;
+        (message.content || []).forEach((part) => {
+          if (part.type === "text" && part.text) items.push(part.text.split("\n").slice(0, 3).join("\n"));
+          if (part.type === "toolCall") return items.push(`→ ${formatToolCallPlain(part.name, part.arguments || {})}`);
+        });
+      });
+      return items;
+    }
+
+    function subagentUsageText(usage = {}, model = "") {
+      const parts = [];
+      if (usage.turns) parts.push(`${usage.turns} turns`);
+      if (usage.input) parts.push(`↑${compactUsageNumber(usage.input)}`);
+      if (usage.output) parts.push(`↓${compactUsageNumber(usage.output)}`);
+      if (usage.cacheRead) parts.push(`R${compactUsageNumber(usage.cacheRead)}`);
+      if (usage.cacheWrite) parts.push(`W${compactUsageNumber(usage.cacheWrite)}`);
+      if (usage.cost) parts.push(`$${Number(usage.cost).toFixed(3)}`);
+      if (usage.contextTokens) parts.push(`ctx:${compactUsageNumber(usage.contextTokens)}`);
+      if (model) parts.push(model);
+      return parts.join(" ");
+    }
+
+    function compactUsageNumber(value) {
+      const number = Number(value || 0);
+      if (number < 1000) return String(Math.round(number));
+      if (number < 1000000) return `${(number / 1000).toFixed(number < 10000 ? 1 : 0)}k`;
+      return `${(number / 1000000).toFixed(1)}M`;
+    }
+
+    function subagentSummary(details, running = false) {
+      if (!details?.results?.length) return "subagent";
+      if (details.mode === "single" && details.results.length === 1) return `subagent ${details.results[0].agent}`;
+      const done = details.results.filter((result, index) => result.exitCode !== -1 && !subagentResultRunning(details, result, index, running)).length;
+      const total = details.results.length;
+      return `subagent ${details.mode} ${done}/${total}`;
+    }
+
+    function subagentDisplayText(details, fallback, running = false) {
+      if (!details?.results?.length) return fallback;
+      const lines = [];
+      details.results.forEach((result, index) => {
+        if (index > 0) lines.push("");
+        const resultRunning = subagentResultRunning(details, result, index, running);
+        lines.push(`${subagentResultIcon(result, resultRunning)} ${result.agent} (${result.agentSource || "unknown"})`);
+        const items = subagentDisplayItems(result.messages).slice(-10);
+        if (items.length > 0) {
+          lines.push(...items);
+        } else {
+          lines.push(subagentFinalOutput(result.messages) || result.errorMessage || result.stderr || "(running…)");
+        }
+        const usage = subagentUsageText(result.usage, result.model);
+        if (usage) lines.push(usage);
+      });
+      return lines.join("\n");
+    }
+
     function toolExecutionContentText(event) {
       const content = event.partialResult?.content || event.result?.content;
       if (!content) return "";
@@ -1468,10 +1570,13 @@
 
     function toolExecutionText(event) {
       if (event.type === "tool_execution_start") return "(running…)";
-      return toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
+      const fallback = toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
+      if (event.toolName === "subagent") return subagentDisplayText(subagentDetailsFromEvent(event), fallback, subagentRunning(event));
+      return fallback;
     }
 
     function toolExecutionSummary(event) {
+      if (event.toolName === "subagent") return subagentSummary(subagentDetailsFromEvent(event), subagentRunning(event));
       const status = event.type === "tool_execution_end" ? (event.isError ? "failed" : "done") : "running";
       return `${event.toolName || "tool"} ${status}`;
     }
@@ -1485,6 +1590,7 @@
       renderToolSummary(entry.summaryText, null, toolExecutionSummary(event));
       entry.body.textContent = toolExecutionText(event);
       if (entry.rawBody) entry.rawBody.textContent = toolExecutionRawDetails(event);
+      if (event.toolName === "subagent") entry.details.open = subagentRunning(event);
       entry.article.classList.toggle("message--tool-error", event.isError === true);
       afterLiveOutputChange(shouldScroll);
       return entry;
@@ -1499,7 +1605,7 @@
         return;
       }
 
-      const entry = appendCompactMessage("tool", toolExecutionSummary(event), toolExecutionText(event), true, true, shouldScroll, toolExecutionRawDetails(event), eventTimestamp(event), { error: event.isError === true, open: true });
+      const entry = appendCompactMessage("tool", toolExecutionSummary(event), toolExecutionText(event), true, true, shouldScroll, toolExecutionRawDetails(event), eventTimestamp(event), { error: event.isError === true, open: event.toolName === "subagent" && subagentRunning(event) });
       if (entry) liveToolExecutions.set(event.toolCallId, entry);
     }
 
