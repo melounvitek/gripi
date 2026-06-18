@@ -2681,7 +2681,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "notifyBackgroundFinalReplies(previousAssistantCounts);"
       assert_includes response.body, "if (sessionPath === currentSessionPath()) return;"
       assert_includes response.body, "const key = [sessionPath, currentCount].join(\":\");"
-      assert_includes response.body, "showPiNotification(name, \"New reply.\", sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`)"
+      assert_includes response.body, "const body = notificationReplyPreview(link.dataset.latestAssistantResponsePreview);"
+      assert_includes response.body, "showPiNotification(name, body, sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`)"
     end
   end
 

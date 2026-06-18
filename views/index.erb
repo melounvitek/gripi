@@ -2110,7 +2110,8 @@
         if (notifiedFinalReplyKeys.has(key)) return;
         notifiedFinalReplyKeys.add(key);
         const name = link.querySelector(".session-title")?.textContent.trim() || "a background session";
-        showPiNotification(name, "New reply.", sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`).catch(() => {});
+        const body = notificationReplyPreview(link.dataset.latestAssistantResponsePreview);
+        showPiNotification(name, body, sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`).catch(() => {});
       });
     }
 
