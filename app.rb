@@ -595,21 +595,29 @@ class PiWebGateway < Sinatra::Base
 
     rename_command = steering_prompt ? nil : session_name_slash_command(message)
     compact_command = steering_prompt ? nil : session_compact_slash_command(message)
+    fork_command = steering_prompt ? nil : session_fork_slash_command(message)
+    clone_command = steering_prompt ? nil : session_clone_slash_command(message)
+    branch_response = nil
     if steering_prompt
       with_rpc_client(session_path) { |client| client.steer(message) }
     elsif rename_command&.[](:name)
       with_rpc_client(session_path) { |client| client.set_session_name(rename_command.fetch(:name)) }
-    elsif rename_command
+    elsif rename_command || fork_command
       nil
     elsif compact_command
       with_rpc_client(session_path) { |client| client.compact(compact_command[:instructions]) }
+    elsif clone_command
+      response = with_rpc_client(session_path) { |client| client.clone_session }
+      branch_response = redirect_to_rpc_session_after_branch(session_path, response)
     else
       submitted_at = Time.now
       with_rpc_client(session_path) { |client| client.prompt(message, images) }
       attachment_store.record_prompt(session_path, message, images.length, timestamp: submitted_at)
     end
     redirect_path = session_redirect_path(session_path, expanded_cwds: expanded_cwds, show_all_sessions: show_all_sidebar_sessions?, sidebar_sessions_limit: sidebar_sessions_limit_param)
-    if json_request?
+    if branch_response
+      branch_response
+    elsif json_request?
       content_type :json
       payload = { session: session_path, redirect: redirect_path }
       payload[:steer] = true if steering_prompt && !rename_command
@@ -619,6 +627,8 @@ class PiWebGateway < Sinatra::Base
         payload[:error] = rename_command.fetch(:error) if rename_command[:error]
       elsif compact_command
         payload[:command] = "compact"
+      elsif fork_command
+        payload[:command] = "fork"
       end
       JSON.generate(payload)
     else
@@ -939,6 +949,14 @@ class PiWebGateway < Sinatra::Base
     { instructions: instructions.to_s.empty? ? nil : instructions }
   end
 
+  def session_fork_slash_command(message)
+    message.strip.match?(%r{\A/fork\z})
+  end
+
+  def session_clone_slash_command(message)
+    message.strip.match?(%r{\A/clone\z})
+  end
+
   def session_redirect_path(session_path, expanded_cwds: [], show_all_sessions: false, sidebar_sessions_limit: nil)
     query = { "session" => session_path }
     query["project"] = selected_project_cwd if selected_project_cwd
@@ -1022,7 +1040,11 @@ class PiWebGateway < Sinatra::Base
   end
 
   def builtin_commands
-    [{ "name" => "compact", "source" => "other", "description" => "Manually compact context, optional custom instructions" }]
+    [
+      { "name" => "compact", "source" => "other", "description" => "Manually compact context, optional custom instructions" },
+      { "name" => "fork", "source" => "other", "description" => "Open the fork picker for this session" },
+      { "name" => "clone", "source" => "other", "description" => "Clone this session and switch to the clone" }
+    ]
   end
 
   def rpc_clients

@@ -404,6 +404,55 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_fork_slash_command_returns_fork_command_without_rpc
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/fork" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_empty calls
+      payload = JSON.parse(response.body)
+      assert_equal path, payload.fetch("session")
+      assert_equal "fork", payload.fetch("command")
+    end
+  end
+
+  def test_clone_slash_command_clones_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      cloned_path = File.join(File.dirname(path), "cloned.jsonl")
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, [], cloned_path)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/clone" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[ :start, path ], [ :clone_session ], [ :get_state ]], calls
+      payload = JSON.parse(response.body)
+      assert_equal cloned_path, payload.fetch("session")
+      assert_includes payload.fetch("redirect"), Rack::Utils.escape(cloned_path)
+    end
+  end
+
   def test_multiline_compact_like_prompt_is_sent_as_prompt
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -522,6 +571,33 @@ class AppTest < Minitest::Test
       payload = JSON.parse(response.body)
       assert_equal true, payload.fetch("steer")
       refute payload.key?("command")
+    end
+  end
+
+  def test_steering_prompt_treats_fork_and_clone_slash_commands_as_messages
+    ["/fork", "/clone"].each do |message|
+      Dir.mktmpdir do |dir|
+        path = write_session(dir)
+        calls = []
+        PiWebGateway.set :sessions_root, dir
+        PiWebGateway.set :rpc_client_registry, nil
+        PiWebGateway.set :rpc_client_factory, [->(session_path) {
+          calls << [:start, session_path]
+          FakeRpcClient.new(calls)
+        }]
+
+        response = Rack::MockRequest.new(PiWebGateway).post(
+          "/prompt",
+          params: { "session" => path, "message" => message, "streaming_behavior" => "steer" },
+          "HTTP_ACCEPT" => "application/json"
+        )
+
+        assert_equal 200, response.status
+        assert_equal [[ :start, path ], [ :steer, message ]], calls
+        payload = JSON.parse(response.body)
+        assert_equal true, payload.fetch("steer")
+        refute payload.key?("command")
+      end
     end
   end
 
@@ -1256,10 +1332,12 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (2)"
+      assert_includes response.body, "Slash commands (4)"
       assert_includes response.body, "/review"
       assert_includes response.body, "Review code"
       assert_includes response.body, "/compact"
+      assert_includes response.body, "/fork"
+      assert_includes response.body, "/clone"
       refute_includes response.body, "<code>/new</code>"
       refute_includes response.body, "command-filter"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
@@ -1284,8 +1362,10 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (1)"
+      assert_includes response.body, "Slash commands (3)"
       assert_includes response.body, "/compact"
+      assert_includes response.body, "/fork"
+      assert_includes response.body, "/clone"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
     end
   end
@@ -3158,6 +3238,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (/^\\/(?:name|rename)$/.test(trimmed)) return { valid: false };"
       assert_includes response.body, "if (/^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(trimmed)) return { valid: true };"
       assert_includes response.body, "function sessionNameSlashCommand(message)"
+      assert_includes response.body, "function sessionForkSlashCommand(message)"
+      assert_includes response.body, "function sessionCloneSlashCommand(message)"
       assert_includes response.body, "function updateSessionHeaderName(name)"
       assert_includes response.body, "function sessionTitleFromEvent(event)"
       assert_includes response.body, "if (event.type === \"session_info\") return event.name;"
@@ -3169,12 +3251,15 @@ class AppTest < Minitest::Test
       assert_includes response.body, "updateHeaderFromSelectedSidebarSession();"
       assert_includes response.body, "const renameCommand = steering ? null : sessionNameSlashCommand(message);"
       assert_includes response.body, "const compactCommand = steering ? null : sessionCompactSlashCommand(message);"
-      assert_includes response.body, "if (!renameCommand && !compactCommand) {\n        if (!steering) resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
+      assert_includes response.body, "const forkCommand = steering ? null : sessionForkSlashCommand(message);"
+      assert_includes response.body, "const cloneCommand = steering ? null : sessionCloneSlashCommand(message);"
+      assert_includes response.body, "if (!renameCommand && !compactCommand && !forkCommand && !cloneCommand) {\n        if (!steering) resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
       assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });"
       assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {\n            await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });\n            return;\n          }\n          updateSessionHeaderName(payload.name);\n          setComposerState(\"done\", \"Renamed\");\n          showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);\n          refreshSidebar().catch(() => {});\n          return;\n        }"
       assert_includes response.body, "appendPendingCompactionMessage(new Date());"
       assert_includes response.body, "markSidebarSessionCompacting(submittedSession);"
       assert_includes response.body, "if (payload?.command === \"compact\") {\n          refreshSidebar().catch(() => {});\n          setComposerState(\"running\", \"Compacting…\");\n          showStatus(\"Compaction started\", true);\n          return;\n        }"
+      assert_includes response.body, "if (payload?.command === \"fork\") {\n          setComposerState(\"idle\");\n          showStatus(\"Choose a fork point\", true);\n          openForkSessionModal();\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"
       assert_includes response.body, "commandList?.removeAttribute(\"open\");"

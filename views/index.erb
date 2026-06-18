@@ -812,6 +812,14 @@
       return /^\/compact(?:[ \t]+[^\r\n]+)?$/.test(message.trim());
     }
 
+    function sessionForkSlashCommand(message) {
+      return /^\/fork$/.test(message.trim());
+    }
+
+    function sessionCloneSlashCommand(message) {
+      return /^\/clone$/.test(message.trim());
+    }
+
     function updateSessionHeaderName(name) {
       if (!name) return;
       const headerName = document.querySelector(".session-header-name");
@@ -1945,7 +1953,9 @@
 
       const renameCommand = steering ? null : sessionNameSlashCommand(message);
       const compactCommand = steering ? null : sessionCompactSlashCommand(message);
-      if (!renameCommand && !compactCommand) {
+      const forkCommand = steering ? null : sessionForkSlashCommand(message);
+      const cloneCommand = steering ? null : sessionCloneSlashCommand(message);
+      if (!renameCommand && !compactCommand && !forkCommand && !cloneCommand) {
         if (!steering) resetLiveAssistantTracking();
         resetEventPollBackoff();
         scheduleNextEventPoll(0);
@@ -1965,18 +1975,26 @@
       resetCommandSelection();
       resizePromptTextarea();
       if (shouldAutofocusPrompt()) promptTextarea.focus();
-      setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : steering ? "Queueing steer…" : "Sending…");
-      showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : steering ? "Queueing steer…" : "Sending…", true);
+      setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : forkCommand ? "Opening fork…" : steering ? "Queueing steer…" : "Sending…");
+      showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : forkCommand ? "Opening fork picker…" : steering ? "Queueing steer…" : "Sending…", true);
+      if (cloneCommand) showSessionSwitching();
 
       const response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
       if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
 
       if (!response.ok && response.type !== "opaqueredirect") {
+        if (cloneCommand) hideSessionSwitching();
         setComposerState("error", "Prompt failed");
         showStatus("Prompt failed to send", true);
       } else if (response.ok) {
         const payload = await response.json().catch(() => null);
         if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
+        if (cloneCommand && payload?.cancelled) {
+          hideSessionSwitching();
+          setComposerState("idle");
+          showStatus("Clone cancelled", true);
+          return;
+        }
         if (payload?.command === "rename") {
           if (payload.error) {
             setComposerState("error", payload.error);
@@ -1999,10 +2017,17 @@
           showStatus("Compaction started", true);
           return;
         }
+        if (payload?.command === "fork") {
+          setComposerState("idle");
+          showStatus("Choose a fork point", true);
+          openForkSessionModal();
+          return;
+        }
         if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {
           await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
           return;
         }
+        if (cloneCommand) hideSessionSwitching();
         setComposerState("running", "Pi is running…");
         if (payload?.steer) showStatus("Sent to queue", true);
       } else {
@@ -2699,13 +2724,22 @@
       return switched;
     }
 
+    function openForkSessionModal() {
+      const modal = document.querySelector('[data-modal="fork-session-modal"]');
+      openModal(modal);
+      loadForkMessages(modal).catch(() => {});
+    }
+
     document.addEventListener("click", (event) => {
       const opener = event.target.closest("[data-modal-open]");
       if (opener) {
         event.preventDefault();
         const modal = document.querySelector(`[data-modal="${opener.dataset.modalOpen}"]`);
+        if (opener.dataset.modalOpen === "fork-session-modal") {
+          openForkSessionModal();
+          return;
+        }
         openModal(modal);
-        if (opener.dataset.modalOpen === "fork-session-modal") loadForkMessages(modal).catch(() => {});
         return;
       }
 
