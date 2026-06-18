@@ -175,7 +175,7 @@ class PiSessionStore
   end
 
   def response_preview(text)
-    preview = text.to_s.gsub(/\s+/, " ").strip
+    preview = text.to_s.gsub(/<[^>]*>/, " ").gsub(/\bjavascript:/i, "").gsub(/\s+/, " ").strip
     preview.length > 180 ? "#{preview[0, 177]}…" : preview
   end
 
