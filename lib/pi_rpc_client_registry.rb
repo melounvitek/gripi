@@ -50,6 +50,11 @@ class PiRpcClientRegistry
     client&.respond_to?(:busy_since) ? client.busy_since : nil
   end
 
+  def agent_running?(session_path)
+    client = client_for(session_path)
+    client&.respond_to?(:agent_running?) ? client.agent_running? : false
+  end
+
   def begin_use(session_path)
     @mutex.synchronize do
       entry = @clients[session_path]

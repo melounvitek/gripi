@@ -64,7 +64,7 @@ class PiRpcClientTest < Minitest::Test
     assert_equal({ events: [{ "type" => "event", "name" => "two" }], last_seq: 2, missed: false }, client.events_after(1))
   end
 
-  def test_tracks_busy_state_from_turn_events
+  def test_tracks_busy_state_from_agent_events
     now = Time.at(1_000)
     input = StringIO.new
     reader, writer = IO.pipe
@@ -72,9 +72,43 @@ class PiRpcClientTest < Minitest::Test
 
     refute client.busy?
     assert_nil client.busy_since
+    writer.puts JSON.generate({ type: "agent_start" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+    assert client.busy?
+    assert_equal Time.at(1_000), client.busy_since
+    assert client.agent_running?
+
+    now = Time.at(1_005)
+    writer.puts JSON.generate({ type: "turn_end" })
+    writer.puts JSON.generate({ id: "state-2", type: "state" })
+    client.request("get_state", id: "state-2")
+    assert client.busy?
+    assert_equal Time.at(1_000), client.busy_since
+    assert client.agent_running?
+
+    now = Time.at(1_010)
+    writer.puts JSON.generate({ type: "agent_end" })
+    writer.puts JSON.generate({ id: "state-3", type: "state" })
+    client.request("get_state", id: "state-3")
+    refute client.busy?
+    assert_nil client.busy_since
+    refute client.agent_running?
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_tracks_busy_state_from_turn_events_when_agent_events_are_absent
+    now = Time.at(1_000)
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader, clock: -> { now })
+
     writer.puts JSON.generate({ type: "turn_start" })
     writer.puts JSON.generate({ id: "state-1", type: "state" })
     client.request("get_state", id: "state-1")
+
     assert client.busy?
     assert_equal Time.at(1_000), client.busy_since
 
@@ -82,6 +116,7 @@ class PiRpcClientTest < Minitest::Test
     writer.puts JSON.generate({ type: "turn_end" })
     writer.puts JSON.generate({ id: "state-2", type: "state" })
     client.request("get_state", id: "state-2")
+
     refute client.busy?
     assert_nil client.busy_since
   ensure

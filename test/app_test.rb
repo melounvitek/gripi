@@ -2706,7 +2706,11 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);"
       assert_includes response.body, "liveAssistantSegments.set(key, entry);"
       assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_start\") resetLiveAssistantTracking();"
-      assert_includes response.body, "if ([\"turn_end\", \"agent_end\"].includes(event.type)) {\n        if (liveAssistantSeen) showStatus(\"Done\");\n        setComposerState(\"done\", \"Done\");\n        resetLiveAssistantTracking();"
+      assert_includes response.body, "let liveAgentRunning = false;"
+      assert_includes response.body, "if (event.type === \"turn_end\") {"
+      assert_includes response.body, "if (!liveAgentRunning) setComposerState(\"done\", \"Done\");"
+      assert_includes response.body, "if (event.type === \"agent_end\") {"
+      assert_includes response.body, "liveAgentRunning = false;\n        if (liveAssistantSeen) showStatus(\"Done\");\n        setComposerState(\"done\", \"Done\");"
     end
   end
 
@@ -2806,6 +2810,7 @@ class AppTest < Minitest::Test
       client = FakeRpcClient.new([])
       def client.busy? = true
       def client.busy_since = Time.at(1_000)
+      def client.agent_running? = true
       registry.register(path, client)
       PiWebGateway.set :rpc_client_registry, registry
 
@@ -2817,8 +2822,10 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes response.body, "data-composer-state=\"running\""
       assert_includes response.body, "data-composer-state-since=\"1000000\""
+      assert_includes response.body, "data-agent-running=\"true\""
       assert_includes response.body, "const initialComposerState = liveOutput.dataset.composerState;"
       assert_includes response.body, "const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);"
+      assert_includes response.body, "liveAgentRunning = liveOutput.dataset.agentRunning === \"true\";"
       assert_includes response.body, "setComposerState(initialComposerState, \"Pi is running…\", initialComposerStateSince);"
       assert_includes response.body, "if (state === \"running\" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());"
       assert_includes response.body, "payload.events.length > 0 && composerState?.dataset.state === \"running\" && !waitingForOutputSince"

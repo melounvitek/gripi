@@ -32,6 +32,7 @@ class PiRpcClient
     @reader_running = false
     @busy = false
     @busy_since = nil
+    @agent_running = false
     @reader = nil
   end
 
@@ -85,6 +86,10 @@ class PiRpcClient
 
   def busy_since
     @mutex.synchronize { @busy_since }
+  end
+
+  def agent_running?
+    @mutex.synchronize { @agent_running }
   end
 
   def events_after(after_seq)
@@ -171,6 +176,7 @@ class PiRpcClient
   ensure
     @mutex.synchronize do
       @reader_running = false
+      @agent_running = false
       @busy = false
       @busy_since = nil
       @condition.broadcast
@@ -193,12 +199,23 @@ class PiRpcClient
 
   def update_busy_state(response)
     case response["type"]
-    when "agent_start", "turn_start"
+    when "agent_start"
+      @agent_running = true
       @busy = true
       @busy_since ||= @clock.call
-    when "agent_end", "turn_end"
-      @busy = false
-      @busy_since = nil
+    when "turn_start"
+      @busy = true
+      @busy_since ||= @clock.call
+    when "turn_end"
+      clear_busy_state unless @agent_running
+    when "agent_end"
+      @agent_running = false
+      clear_busy_state
     end
+  end
+
+  def clear_busy_state
+    @busy = false
+    @busy_since = nil
   end
 end
