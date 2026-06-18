@@ -6,7 +6,23 @@
             <h1 class="session-header-name" title="<%= h @selected_session.display_name %>"><%= h @selected_session.display_name %></h1>
             <div class="session-header-project" title="<%= h project_label(@selected_session) %>"><%= h project_label(@selected_session) %></div>
           </div>
-          <button type="submit" class="danger abort-button session-abort-button composer-stop-button" form="abort-form" hidden disabled title="Abort running Pi" aria-label="Abort running Pi"><span aria-hidden="true">⏹</span></button>
+          <div class="session-header-actions">
+            <button type="button" class="secondary session-header-action" data-modal-open="fork-session-modal">Fork</button>
+            <form method="post" action="/sessions/clone" class="clone-session-form">
+              <input type="hidden" name="session" value="<%= h @selected_session.path %>">
+              <% if show_all_sidebar_sessions? %>
+                <input type="hidden" name="show_all_sessions" value="1">
+              <% end %>
+              <% if sidebar_sessions_limit_param %>
+                <input type="hidden" name="sidebar_sessions_limit" value="<%= h sidebar_sessions_limit_param %>">
+              <% end %>
+              <% if selected_project_cwd %>
+                <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
+              <% end %>
+              <button type="submit" class="secondary session-header-action">Clone</button>
+            </form>
+            <button type="submit" class="danger abort-button session-abort-button composer-stop-button" form="abort-form" hidden disabled title="Abort running Pi" aria-label="Abort running Pi"><span aria-hidden="true">⏹</span></button>
+          </div>
         </header>
 
         <section class="conversation-scroll" id="conversation-scroll">

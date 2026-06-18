@@ -571,7 +571,8 @@ class PiWebGateway < Sinatra::Base
       session: @selected_session&.path,
       sidebar_html: erb(:_sidebar, layout: false),
       conversation_html: erb(:_conversation, layout: false),
-      new_session_modal_html: erb(:_new_session_modal, layout: false)
+      new_session_modal_html: erb(:_new_session_modal, layout: false),
+      fork_session_modal_html: erb(:_fork_session_modal, layout: false)
     )
   end
 

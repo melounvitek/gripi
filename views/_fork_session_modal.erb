@@ -1,0 +1,18 @@
+  <div class="modal-overlay" data-modal="fork-session-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="fork-session-modal-title">
+      <div class="modal-header">
+        <h2 id="fork-session-modal-title">Fork session</h2>
+        <button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>&times;</button>
+      </div>
+      <% if @selected_session %>
+        <div class="fork-session-list" data-fork-session-list data-fork-messages-url="/sessions/fork_messages?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
+          <p class="fork-session-status" data-fork-session-status>Loading fork points…</p>
+        </div>
+      <% else %>
+        <p class="fork-session-status">Select a session before forking.</p>
+      <% end %>
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-modal-close>Cancel</button>
+      </div>
+    </div>
+  </div>

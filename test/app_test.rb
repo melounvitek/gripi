@@ -1741,7 +1741,10 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      modal = Nokogiri::HTML(JSON.parse(response.body).fetch("new_session_modal_html"))
+      payload = JSON.parse(response.body)
+      modal = Nokogiri::HTML(payload.fetch("new_session_modal_html"))
+      fork_modal = Nokogiri::HTML(payload.fetch("fork_session_modal_html"))
+      assert_equal "/sessions/fork_messages?session=#{Rack::Utils.escape(current_path)}", fork_modal.at_css("[data-fork-session-list]")["data-fork-messages-url"]
       selected_option = modal.at_css('select[data-new-session-known-cwd] option[selected]')
       assert_equal filtered_cwd, selected_option["value"]
       assert_equal filtered_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
@@ -1791,6 +1794,12 @@ class AppTest < Minitest::Test
       assert_includes response.body, "fetch(newSessionModalUrl(targetUrl.href))"
       assert_includes response.body, "replaceNewSessionModalHtml(modalHtml);"
       assert_includes response.body, "replaceNewSessionModalHtml(payload.new_session_modal_html);"
+      assert_includes response.body, "replaceForkSessionModalHtml(payload.fork_session_modal_html);"
+      assert_includes response.body, "data-modal-open=\"fork-session-modal\""
+      assert_includes response.body, "class=\"clone-session-form\""
+      assert_includes response.body, "function loadForkMessages(modal)"
+      assert_includes response.body, "fetch(\"/sessions/fork\", { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } })"
+      assert_includes response.body, "await switchToBranchedSession(payload);"
       assert_includes response.body, "abortEventPoll();"
       assert_includes response.body, "async function submitAbort(event)"
       assert_includes response.body, "if (modalIsOpen()) return;"

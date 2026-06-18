@@ -21,7 +21,9 @@
     .session-header-title { flex: 1 1 auto; min-width: 0; display: grid; gap: 0.15rem; }
     .session-header h1 { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-project { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.84rem; font-weight: 650; }
-    .session-header-new-form { flex: 0 0 auto; margin: 0; }
+    .session-header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 0.45rem; }
+    .session-header-actions form { margin: 0; }
+    .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.82rem; }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 1.5rem; }
     .composer { position: sticky; bottom: 0; padding: 0.75rem 1.5rem 1rem; border-top: 1px solid var(--border); background: rgba(30, 30, 36, 0.97); box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.16); }
     .composer-inner { display: grid; gap: 0.6rem; }
@@ -196,6 +198,10 @@
     .modal-field { display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.85rem; font-weight: 700; }
     .modal-field input, .modal-field select { width: 100%; min-width: 0; }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
+    .fork-session-list { display: grid; gap: 0.55rem; }
+    .fork-session-status { margin: 0; color: var(--muted); }
+    .fork-session-option { width: 100%; justify-self: stretch; display: block; padding: 0.65rem 0.75rem; border: 1px solid var(--border); border-radius: 0.6rem; background: var(--panel-soft); color: var(--text); text-align: left; font-weight: 600; overflow-wrap: anywhere; }
+    .fork-session-option:hover { background: var(--panel-softer); transform: none; }
     .cwd-validation-message { min-height: 1.2rem; color: var(--muted); font-size: 0.85rem; }
     .cwd-validation-message.is-valid { color: var(--success); }
     .cwd-validation-message.is-invalid { color: #ffb4b6; }
@@ -226,6 +232,8 @@
       .conversation-panel { width: 100%; max-width: 100vw; height: 100dvh; min-width: 0; min-height: 0; overflow-x: hidden; }
       .session-header { width: 100%; max-width: 100vw; min-width: 0; padding: 0.75rem 1rem 0.6rem; gap: 0.75rem; overflow: hidden; }
       .session-header-title { flex: 1 1 0; }
+      .session-header-actions { gap: 0.35rem; }
+      .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.78rem; }
       .session-header h1 { font-size: 1rem; }
       .session-header-project { font-size: 0.76rem; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
@@ -276,6 +284,7 @@
     <%= erb :_conversation, layout: false %>
   </div>
   <%= erb :_new_session_modal, layout: false %>
+  <%= erb :_fork_session_modal, layout: false %>
   <div class="session-switch-overlay" role="status" aria-live="polite" aria-label="Loading">
     <div class="session-switch-indicator"><span class="session-switch-spinner" aria-hidden="true"></span> Loading…</div>
   </div>
@@ -2192,6 +2201,13 @@
       currentModal.outerHTML = html;
     }
 
+    function replaceForkSessionModalHtml(html) {
+      const currentModal = document.querySelector('[data-modal="fork-session-modal"]');
+      if (!html || !currentModal) return;
+
+      currentModal.outerHTML = html;
+    }
+
     function replaceSidebarHtml(html, { scrollTop = sidebarScrollContainer()?.scrollTop || 0, notify = true } = {}) {
       const previousAssistantCounts = sidebarAssistantResponseCounts();
       sessionSidebar.outerHTML = html;
@@ -2329,6 +2345,7 @@
         sessionSidebar.outerHTML = payload.sidebar_html;
         conversationPanel.outerHTML = payload.conversation_html;
         replaceNewSessionModalHtml(payload.new_session_modal_html);
+        replaceForkSessionModalHtml(payload.fork_session_modal_html);
         bindSessionDom();
         bindSessionControls();
         if (push) history.pushState({ session: payload.session }, payload.title || "", payload.url || url);
@@ -2467,11 +2484,102 @@
       return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
     }
 
+    function setForkSessionStatus(modal, text) {
+      const list = modal?.querySelector("[data-fork-session-list]");
+      if (!list) return;
+      list.replaceChildren();
+      const status = document.createElement("p");
+      status.className = "fork-session-status";
+      status.dataset.forkSessionStatus = "";
+      status.textContent = text;
+      list.append(status);
+    }
+
+    async function loadForkMessages(modal) {
+      const list = modal?.querySelector("[data-fork-session-list]");
+      const url = list?.dataset.forkMessagesUrl;
+      if (!list || !url || list.dataset.loaded === "true" || list.dataset.loading === "true") return;
+
+      list.dataset.loading = "true";
+      setForkSessionStatus(modal, "Loading fork points…");
+      try {
+        const response = await fetch(url, { headers: { "Accept": "application/json" } });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload) throw new Error("fork messages failed");
+        const messages = Array.isArray(payload.messages) ? payload.messages : [];
+        list.replaceChildren();
+        if (messages.length === 0) {
+          setForkSessionStatus(modal, "No previous user messages are available to fork.");
+          return;
+        }
+        messages.forEach((message) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "fork-session-option";
+          button.dataset.forkEntryId = message.entryId || message.entry_id || "";
+          button.textContent = message.text || "Untitled prompt";
+          list.append(button);
+        });
+        list.dataset.loaded = "true";
+      } catch (_error) {
+        setForkSessionStatus(modal, "Could not load fork points.");
+      } finally {
+        delete list.dataset.loading;
+      }
+    }
+
+    function addSessionViewFormParams(formData) {
+      if (showAllSessionsActive()) formData.set("show_all_sessions", "1");
+      const sidebarSessionsLimit = activeSidebarSessionsLimit();
+      if (sidebarSessionsLimit) formData.set("sidebar_sessions_limit", sidebarSessionsLimit);
+      const project = new URLSearchParams(window.location.search).get("project");
+      if (project) formData.set("project", project);
+    }
+
+    async function switchToBranchedSession(payload, { promptText = null } = {}) {
+      const switched = await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
+      if (switched && promptText !== null && promptTextarea) {
+        promptTextarea.value = promptText;
+        resizePromptTextarea();
+        promptTextarea.focus();
+      }
+      return switched;
+    }
+
     document.addEventListener("click", (event) => {
       const opener = event.target.closest("[data-modal-open]");
       if (opener) {
         event.preventDefault();
-        openModal(document.querySelector(`[data-modal="${opener.dataset.modalOpen}"]`));
+        const modal = document.querySelector(`[data-modal="${opener.dataset.modalOpen}"]`);
+        openModal(modal);
+        if (opener.dataset.modalOpen === "fork-session-modal") loadForkMessages(modal).catch(() => {});
+        return;
+      }
+
+      const forkOption = event.target.closest("[data-fork-entry-id]");
+      if (forkOption) {
+        event.preventDefault();
+        const modal = forkOption.closest("[data-modal]");
+        const formData = new FormData();
+        formData.set("session", currentSessionPath());
+        formData.set("entry_id", forkOption.dataset.forkEntryId);
+        addSessionViewFormParams(formData);
+        forkOption.disabled = true;
+        forkOption.textContent = "Forking…";
+        showSessionSwitching();
+        fetch("/sessions/fork", { method: "POST", body: formData, headers: { "Accept": "application/json" } })
+          .then(async (response) => {
+            const payload = await response.json().catch(() => null);
+            if (!response.ok || !payload || payload.cancelled) throw new Error("fork failed");
+            closeModal(modal);
+            await switchToBranchedSession(payload, { promptText: payload.text || "" });
+          })
+          .catch(() => {
+            setForkSessionStatus(modal, "Could not fork this session.");
+          })
+          .finally(() => {
+            hideSessionSwitching();
+          });
         return;
       }
 
@@ -2503,6 +2611,39 @@
       if (!input) return;
       input.value = select.value;
       validateNewSessionCwd(form, { delay: 0 });
+    });
+
+    document.addEventListener("submit", async (event) => {
+      const cloneForm = event.target.closest(".clone-session-form");
+      if (!cloneForm) return;
+
+      event.preventDefault();
+      if (cloneForm.dataset.submitting === "true") return;
+      const submit = cloneForm.querySelector('button[type="submit"]');
+      const originalSubmitText = submit?.textContent || "Clone";
+      const formData = new FormData(cloneForm);
+      addSessionViewFormParams(formData);
+      cloneForm.dataset.submitting = "true";
+      if (submit) {
+        submit.disabled = true;
+        submit.textContent = "Cloning…";
+      }
+      showSessionSwitching();
+      try {
+        const response = await fetch(cloneForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" } });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload || payload.cancelled) throw new Error("clone failed");
+        await switchToBranchedSession(payload);
+      } catch (_error) {
+        showStatus("Could not clone session", true);
+        if (submit) {
+          submit.disabled = false;
+          submit.textContent = originalSubmitText;
+        }
+      } finally {
+        delete cloneForm.dataset.submitting;
+        hideSessionSwitching();
+      }
     });
 
     document.addEventListener("submit", async (event) => {
