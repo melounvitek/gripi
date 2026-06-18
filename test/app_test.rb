@@ -1713,8 +1713,9 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
-      tree = document.at_css(".session-relation-tree")
+      tree = document.at_css("details.session-relation-tree")
       assert tree
+      refute tree["open"]
       assert_includes tree.text, "Related sessions"
       assert_includes tree.text, "Parent session"
       assert_includes tree.text, "Child session"

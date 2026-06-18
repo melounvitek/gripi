@@ -70,7 +70,8 @@
     .sidebar-notification-test-link:hover { background: var(--border); }
     .session-project { display: inline-block; max-width: 100%; margin-top: 0.32rem; padding: 0.1rem 0.42rem; border: 1px solid rgba(138, 190, 183, 0.28); border-radius: 999px; background: rgba(138, 190, 183, 0.08); color: var(--accent); font-size: 0.72rem; font-weight: 800; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid rgba(138, 190, 183, 0.22); border-radius: 0.7rem; background: rgba(8, 13, 32, 0.42); color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
-    .session-relation-tree-heading { margin-bottom: 0.35rem; color: #f0c7a4; font-size: 0.7rem; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; }
+    .session-relation-tree-heading { cursor: pointer; color: #f0c7a4; font-size: 0.7rem; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; }
+    .session-relation-tree[open] .session-relation-tree-heading { margin-bottom: 0.35rem; }
     .session-relation-tree-root, .session-relation-tree-children { margin: 0; padding: 0; list-style: none; }
     .session-relation-tree-children { margin-left: 0.8rem; padding-left: 0.85rem; border-left: 1px solid rgba(138, 190, 183, 0.28); }
     .session-relation-tree-node { margin: 0.18rem 0; }

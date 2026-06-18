@@ -6,12 +6,12 @@
             <h1 class="session-header-name" title="<%= h @selected_session.display_name %>"><%= h @selected_session.display_name %></h1>
             <div class="session-header-project" title="<%= h project_label(@selected_session) %>"><%= h project_label(@selected_session) %></div>
             <% if session_parent(@selected_session) || session_children(@selected_session).any? %>
-              <div class="session-relation-tree" aria-label="Related sessions">
-                <div class="session-relation-tree-heading">Related sessions</div>
+              <details class="session-relation-tree" aria-label="Related sessions">
+                <summary class="session-relation-tree-heading">Related sessions</summary>
                 <ul class="session-relation-tree-root">
                   <%= erb :_session_relation_tree_node, layout: false, locals: { session: session_family_root(@selected_session), current_session: @selected_session } %>
                 </ul>
-              </div>
+              </details>
             <% end %>
           </div>
           <div class="session-header-actions">
