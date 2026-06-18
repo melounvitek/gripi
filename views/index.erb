@@ -62,19 +62,24 @@
     a.session.unread .session-indicators::before { content: "new"; padding: 0.1rem 0.35rem; border: 1px solid rgba(138, 190, 183, 0.45); border-radius: 999px; color: var(--accent); background: rgba(138, 190, 183, 0.08); font-size: 0.62rem; font-weight: 800; line-height: 1; text-transform: uppercase; letter-spacing: 0.04em; }
     .session-content { min-width: 0; }
     .session-indicators { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; min-width: 0.7rem; }
-    .session-fork-indicator, .session-child-count { display: inline-flex; align-items: center; justify-content: center; min-width: 1.15rem; height: 1.15rem; padding: 0 0.28rem; border: 1px solid rgba(240, 199, 164, 0.34); border-radius: 999px; background: rgba(240, 199, 164, 0.08); color: #f0c7a4; font-size: 0.68rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    .session-fork-indicator { display: inline-flex; align-items: center; justify-content: center; min-width: 1.15rem; height: 1.15rem; border: 1px solid rgba(240, 199, 164, 0.34); border-radius: 999px; background: rgba(240, 199, 164, 0.08); color: #f0c7a4; font-size: 0.86rem; font-weight: 900; line-height: 1; }
     .session-shortcut { display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid rgba(138, 190, 183, 0.55); border-radius: 999px; background: rgba(138, 190, 183, 0.14); color: var(--accent); font-size: 0.76rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
     body.session-shortcuts-visible .recent-session .session-shortcut { display: inline-flex; }
     .session-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-notification-test-link { display: flex; align-items: center; justify-content: center; margin-top: 1.25rem; padding: 0.65rem 0.75rem; border-radius: 0.6rem; background: var(--panel-softer); color: var(--text); font-size: 0.86rem; font-weight: 800; text-decoration: none; }
     .sidebar-notification-test-link:hover { background: var(--border); }
     .session-project { display: inline-block; max-width: 100%; margin-top: 0.32rem; padding: 0.1rem 0.42rem; border: 1px solid rgba(138, 190, 183, 0.28); border-radius: 999px; background: rgba(138, 190, 183, 0.08); color: var(--accent); font-size: 0.72rem; font-weight: 800; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
-    .session-relations { display: flex; flex-wrap: wrap; gap: 0.35rem 0.55rem; margin-top: 0.35rem; color: var(--muted); font-size: 0.78rem; font-weight: 650; line-height: 1.35; }
-    .session-relation-group { min-width: 0; display: inline-flex; align-items: center; gap: 0.3rem; max-width: 100%; }
-    .session-relation-label { color: #f0c7a4; font-weight: 800; white-space: nowrap; }
-    .session-relations a { min-width: 0; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); text-decoration: none; }
-    .session-relations a:hover { text-decoration: underline; }
-    .session-relation-more { white-space: nowrap; }
+    .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid rgba(138, 190, 183, 0.22); border-radius: 0.7rem; background: rgba(8, 13, 32, 0.42); color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
+    .session-relation-tree-heading { margin-bottom: 0.35rem; color: #f0c7a4; font-size: 0.7rem; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; }
+    .session-relation-tree-root, .session-relation-tree-children { margin: 0; padding: 0; list-style: none; }
+    .session-relation-tree-children { margin-left: 0.8rem; padding-left: 0.85rem; border-left: 1px solid rgba(138, 190, 183, 0.28); }
+    .session-relation-tree-node { margin: 0.18rem 0; }
+    .session-relation-tree-item { min-width: 0; display: flex; align-items: center; gap: 0.4rem; }
+    .session-relation-tree-children > .session-relation-tree-node > .session-relation-tree-item::before { content: "└"; flex: 0 0 auto; color: rgba(138, 190, 183, 0.7); font-weight: 900; }
+    .session-relation-tree-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); text-decoration: none; }
+    .session-relation-tree-title:hover { text-decoration: underline; }
+    .session-relation-tree-node.is-current > .session-relation-tree-item .session-relation-tree-title { color: var(--text); font-weight: 900; }
+    .session-relation-current-marker { flex: 0 0 auto; padding: 0.08rem 0.35rem; border-radius: 999px; background: rgba(138, 190, 183, 0.16); color: var(--accent); font-size: 0.62rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; }
     .session-activity { margin-top: 0.24rem; color: var(--muted); font-size: 0.78rem; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .session-activity strong { color: var(--text); font-weight: 800; }
     .session-activity--running { color: var(--accent); font-weight: 800; }

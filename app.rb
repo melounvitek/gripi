@@ -280,6 +280,19 @@ class PiWebGateway < Sinatra::Base
       session_children(session).length
     end
 
+    def session_family_root(session)
+      current = session
+      seen_paths = {}
+      while current && !seen_paths[normalized_session_path(current.path)]
+        seen_paths[normalized_session_path(current.path)] = true
+        parent = session_parent(current)
+        return current unless parent
+
+        current = parent
+      end
+      current || session
+    end
+
     def session_by_path
       @session_by_path ||= all_sessions.each_with_object({}) { |session, index| index[normalized_session_path(session.path)] = session }
     end

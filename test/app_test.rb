@@ -1713,11 +1713,13 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
-      relations = document.at_css(".session-relations")
-      assert relations
-      assert_includes relations.text, "Forks"
-      assert_includes relations.text, "Child session"
-      assert_equal session_url_for(child_path), relations.at_css('a[href*="child.jsonl"]')["href"]
+      tree = document.at_css(".session-relation-tree")
+      assert tree
+      assert_includes tree.text, "Related sessions"
+      assert_includes tree.text, "Parent session"
+      assert_includes tree.text, "Child session"
+      assert_equal session_url_for(child_path), tree.at_css('a[href*="child.jsonl"]')["href"]
+      assert tree.at_css('.session-relation-tree-node.is-current')
     end
   end
 
@@ -1743,13 +1745,17 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
-      assert document.at_css('.recent-sessions a.session[href*="child.jsonl"] .session-fork-indicator')
-      assert_includes document.at_css('.recent-sessions a.session[href*="parent.jsonl"] .session-child-count').text, "1"
+      fork_indicator = document.at_css('.recent-sessions a.session[href*="child.jsonl"] .session-fork-indicator')
+      assert_equal "⑂", fork_indicator.text
+      assert_equal "Forked from Parent session", fork_indicator["title"]
+      refute document.at_css('.recent-sessions a.session[href*="parent.jsonl"] .session-fork-indicator')
+      refute document.at_css('.recent-sessions a.session[href*="parent.jsonl"] .session-child-count')
       refute document.at_css('.session-header-actions [data-modal-open="fork-session-modal"]')
       refute document.at_css('.session-header-actions .clone-session-form')
-      relations = document.at_css(".session-relations")
-      assert_includes relations.text, "Forked from"
-      assert_includes relations.text, "Parent session"
+      tree = document.at_css(".session-relation-tree")
+      assert_includes tree.text, "Related sessions"
+      assert_includes tree.text, "Parent session"
+      assert_includes tree.text, "Child session"
     end
   end
 

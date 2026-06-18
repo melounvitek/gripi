@@ -5,21 +5,12 @@
           <div class="session-header-title" title="<%= h @selected_session.display_name %> · <%= h project_label(@selected_session) %>">
             <h1 class="session-header-name" title="<%= h @selected_session.display_name %>"><%= h @selected_session.display_name %></h1>
             <div class="session-header-project" title="<%= h project_label(@selected_session) %>"><%= h project_label(@selected_session) %></div>
-            <% parent_session = session_parent(@selected_session) %>
-            <% child_sessions = session_children(@selected_session) %>
-            <% if parent_session || child_sessions.any? %>
-              <div class="session-relations" aria-label="Related sessions">
-                <% if parent_session %>
-                  <span class="session-relation-group"><span class="session-relation-label">Forked from</span> <a href="<%= h session_url(parent_session.path) %>"><%= h parent_session.display_name %></a></span>
-                <% end %>
-                <% if child_sessions.any? %>
-                  <span class="session-relation-group"><span class="session-relation-label">Forks</span>
-                    <% child_sessions.first(3).each do |child_session| %>
-                      <a href="<%= h session_url(child_session.path) %>"><%= h child_session.display_name %></a>
-                    <% end %>
-                    <% if child_sessions.length > 3 %><span class="session-relation-more">+<%= h child_sessions.length - 3 %> more</span><% end %>
-                  </span>
-                <% end %>
+            <% if session_parent(@selected_session) || session_children(@selected_session).any? %>
+              <div class="session-relation-tree" aria-label="Related sessions">
+                <div class="session-relation-tree-heading">Related sessions</div>
+                <ul class="session-relation-tree-root">
+                  <%= erb :_session_relation_tree_node, layout: false, locals: { session: session_family_root(@selected_session), current_session: @selected_session } %>
+                </ul>
               </div>
             <% end %>
           </div>
