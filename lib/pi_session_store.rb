@@ -17,7 +17,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, :final_assistant_response, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :cost_total, keyword_init: true)
 
   @session_cache = {}
@@ -166,7 +166,15 @@ class PiSessionStore
   end
 
   def final_assistant_response_text(message)
-    Array(message["content"]).filter_map do |part|
+    final_assistant_response_text_from_parts(Array(message["content"]))
+  end
+
+  def final_assistant_response_parts?(parts)
+    !final_assistant_response_text_from_parts(parts).empty?
+  end
+
+  def final_assistant_response_text_from_parts(parts)
+    parts.filter_map do |part|
       next part if part.is_a?(String)
       next unless part.is_a?(Hash) && part["type"] == "text"
 
@@ -246,7 +254,8 @@ class PiSessionStore
         raw_details: compact ? compact_raw_details(parts) : nil,
         thinking: parts.length == 1 && thinking_part?(parts.first),
         tool_summary_html: tool_summary_html(tool_call),
-        tool_transcript: transcript_tool?(tool_name)
+        tool_transcript: transcript_tool?(tool_name),
+        final_assistant_response: final_assistant_response_parts?(parts)
       )
     end
   end

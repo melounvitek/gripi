@@ -2002,6 +2002,7 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes response.body, 'class="message message--user" data-role="user"'
       assert_includes response.body, 'class="message message--assistant" data-role="assistant"'
+      assert_includes response.body, 'data-final-assistant-response="true"'
       assert_includes response.body, 'class="message message--status" data-role="system"'
       assert_includes response.body, 'class="message message--status" data-role="custom"'
       assert_includes response.body, 'message--tool'
@@ -2012,6 +2013,64 @@ class AppTest < Minitest::Test
       assert_includes response.body, Time.parse("2026-06-13T10:00:00Z").localtime.strftime("%Y-%m-%d %H:%M")
       refute_includes response.body, "Hello <Pi>"
       assert_includes response.body, "messageRoleKey"
+    end
+  end
+
+  def test_marks_only_final_assistant_text_responses_for_navigation
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "thinking", thinking: "not final" }]
+          }
+        },
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", name: "bash", arguments: { command: "echo hi" } }]
+          }
+        },
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Final answer" }]
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      assert_equal 1, document.css('[data-final-assistant-response="true"]').length
+      assert_equal "Final answer", document.at_css('[data-final-assistant-response="true"] .message-body').text.strip
+    end
+  end
+
+  def test_message_navigation_targets_user_messages_and_final_assistant_responses
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      assert_includes response.body, 'conversationTurnMessages()'
+      assert_includes response.body, '[data-role="user"].message, [data-final-assistant-response="true"]'
+      assert_includes response.body, 'const finalAssistantResponse = event.type === "message_end" && !segment.compact && !segment.thinking'
     end
   end
 
@@ -2793,7 +2852,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "date.getHours()"
       refute_includes response.body, "date.getUTCHours()"
       assert_includes response.body, "function eventTimestamp(event)"
-      assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking });'
+      assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse });'
       assert_includes response.body, 'function renderAssistantMarkdown(body, text, delay = 120)'
       assert_includes response.body, 'body.dataset.rendering = "pending";'
       assert_includes response.body, 'clearTimeout(body.markdownRenderTimeout);'

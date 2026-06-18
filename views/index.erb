@@ -459,8 +459,8 @@
       bottomJumpControls?.classList.toggle("is-visible", showLatest);
     }
 
-    function userMessages() {
-      return [...(conversationScroll?.querySelectorAll('[data-role="user"].message') || [])];
+    function conversationTurnMessages() {
+      return [...(conversationScroll?.querySelectorAll('[data-role="user"].message, [data-final-assistant-response="true"]') || [])];
     }
 
     function makeMessageTurnButton(direction, label, text) {
@@ -474,19 +474,19 @@
     }
 
     function syncMessageTurnNavs() {
-      const messages = userMessages();
+      const messages = conversationTurnMessages();
       messages.forEach((message, index) => {
         let nav = [...message.children].find((child) => child.classList?.contains("message-turn-nav"));
         if (!nav) {
           nav = document.createElement("nav");
           nav.className = "message-turn-nav";
-          nav.setAttribute("aria-label", "User message navigation");
+          nav.setAttribute("aria-label", "Conversation message navigation");
           message.prepend(nav);
         }
 
         nav.replaceChildren();
-        if (index > 0) nav.append(makeMessageTurnButton("previous", "Previous user message", "↑"));
-        if (index < messages.length - 1) nav.append(makeMessageTurnButton("next", "Next user message", "↓"));
+        if (index > 0) nav.append(makeMessageTurnButton("previous", "Previous conversation message", "↑"));
+        if (index < messages.length - 1) nav.append(makeMessageTurnButton("next", "Next conversation message", "↓"));
       });
     }
 
@@ -1177,6 +1177,7 @@
       article.dataset.role = roleName;
       article.dataset.messageTimestamp = timestampKey;
       article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
+      if (options.finalAssistantResponse) article.dataset.finalAssistantResponse = "true";
       if (options.optimistic) {
         article.dataset.optimistic = "true";
         article.dataset.optimisticText = options.optimisticText ?? text;
@@ -1421,10 +1422,17 @@
 
     function upsertLiveAssistantSegment(event, roleName, segment, fallbackIndex, shouldScroll, timestamp) {
       const key = segmentIdentity(event, segment, fallbackIndex);
+      const finalAssistantResponse = event.type === "message_end" && !segment.compact && !segment.thinking;
       const existing = liveAssistantSegments.get(key);
       if (existing) {
         const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);
-        if (updated) return updated;
+        if (updated) {
+          if (finalAssistantResponse) {
+            updated.article.dataset.finalAssistantResponse = "true";
+            syncMessageTurnNavs();
+          }
+          return updated;
+        }
         forgetLiveEntry(existing);
         if (liveMessageAlreadyRendered(roleName, segment.text, messageTimestampKey(timestamp))) return null;
       }
@@ -1432,8 +1440,9 @@
 
       const entry = segment.compact ?
         appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, open: segment.expanded, error: segment.error }) :
-        appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking });
+        appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse });
       if (!entry) return null;
+      if (finalAssistantResponse) entry.article.dataset.finalAssistantResponse = "true";
       liveAssistantSegments.set(key, entry);
       if (["bash", "read", "edit", "write"].includes(segment.toolName) && segment.toolCallId && !segment.isToolResult) liveBashToolCalls.set(segment.toolCallId, entry);
       if (segment.toolCallId && !segment.isToolResult && !["bash", "read", "edit", "write"].includes(segment.toolName)) liveToolExecutions.set(segment.toolCallId, entry);
@@ -2020,8 +2029,8 @@
         if (!turnButton) return;
 
         event.preventDefault();
-        const messages = userMessages();
-        const currentIndex = messages.indexOf(turnButton.closest('[data-role="user"].message'));
+        const messages = conversationTurnMessages();
+        const currentIndex = messages.indexOf(turnButton.closest(".message"));
         const targetIndex = turnButton.dataset.direction === "previous" ? currentIndex - 1 : currentIndex + 1;
         const target = messages[targetIndex];
         if (!target) return;
