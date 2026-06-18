@@ -175,11 +175,11 @@
     .session-abort-button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 2.1rem; height: 2.1rem; padding: 0; border-radius: 999px; font-size: 1rem; line-height: 1; }
     .copy-button { margin-left: auto; padding: 0.2rem 0.5rem; font-size: 0.75rem; background: transparent; border: 1px solid var(--border); color: var(--muted); }
     .copy-button:hover { color: var(--text); background: var(--panel-softer); transform: none; }
-    .jump-controls { position: sticky; z-index: 3; display: flex; justify-content: center; gap: 0.35rem; min-height: 2.75rem; margin: 0.5rem auto; visibility: hidden; opacity: 0; pointer-events: none; }
+    .jump-controls { position: sticky; z-index: 3; display: flex; justify-content: center; gap: 0.35rem; min-height: 2rem; margin: 0.25rem auto; visibility: hidden; opacity: 0; pointer-events: none; }
     .jump-controls.is-visible { visibility: visible; opacity: 1; }
     .jump-controls--top { top: 0.75rem; }
     .jump-controls--bottom { bottom: 0.75rem; }
-    .jump-button { display: none; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28); pointer-events: auto; }
+    .jump-button { display: none; align-items: center; justify-content: center; width: 2.75rem; height: 2rem; min-height: 0; padding: 0; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28); pointer-events: auto; }
     .jump-button.is-visible { display: inline-flex; }
     .session-switch-overlay { position: fixed; inset: 0; z-index: 140; display: none; place-items: center; background: rgba(24, 24, 30, 0.5); backdrop-filter: blur(2px); }
     body.session-switching .session-switch-overlay { display: grid; }
