@@ -1327,7 +1327,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "session-abort-button composer-stop-button"
       assert_includes response.body, "Loading…"
       refute_includes response.body, "Loading session…"
-      assert_includes response.body, "Steer Pi… Enter queues after current tool call."
+      assert_includes response.body, "Steer Pi…"
       assert_includes response.body, "[hidden] { display: none !important; }"
       assert_includes response.body, "Ask Pi… Enter to send, Shift+Enter for newline."
       refute_includes response.body, "autofocus"
@@ -2726,7 +2726,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "composerStopButton.hidden = !agentBusy;"
       assert_includes response.body, "if (steering) formData.set(\"streaming_behavior\", \"steer\");"
       assert_includes response.body, "if (!addImageFiles(files) && composerState?.dataset.state === \"running\") showStatus(\"Steering messages cannot include images\", true);"
-      assert_includes response.body, "Steer Pi… Enter queues after current tool call."
+      assert_includes response.body, "Steer Pi…"
     end
   end
 

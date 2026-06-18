@@ -624,7 +624,7 @@
     function updatePromptPlaceholder() {
       if (!promptTextarea) return;
       if (composerState?.dataset.state === "running") {
-        promptTextarea.placeholder = "Steer Pi… Enter queues after current tool call.";
+        promptTextarea.placeholder = "Steer Pi…";
         return;
       }
       if (promptTextarea.disabled) {
