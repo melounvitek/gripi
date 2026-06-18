@@ -2561,6 +2561,7 @@
       if (forkOption) {
         event.preventDefault();
         const modal = forkOption.closest("[data-modal]");
+        const originalForkText = forkOption.textContent;
         const formData = new FormData();
         formData.set("session", currentSessionPath());
         formData.set("entry_id", forkOption.dataset.forkEntryId);
@@ -2576,7 +2577,13 @@
             await switchToBranchedSession(payload, { promptText: payload.text || "" });
           })
           .catch(() => {
-            setForkSessionStatus(modal, "Could not fork this session.");
+            forkOption.disabled = false;
+            forkOption.textContent = originalForkText;
+            if (modal) {
+              setForkSessionStatus(modal, "Could not fork this session.");
+            } else {
+              showStatus("Could not fork this session", true);
+            }
           })
           .finally(() => {
             hideSessionSwitching();

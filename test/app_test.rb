@@ -1831,6 +1831,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function loadForkMessages(modal)"
       assert_includes response.body, "fetch(\"/sessions/fork\", { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } })"
       assert_includes response.body, "await switchToBranchedSession(payload);"
+      assert_includes response.body, "const originalForkText = forkOption.textContent;"
+      assert_includes response.body, "forkOption.textContent = originalForkText;"
+      assert_includes response.body, "showStatus(\"Could not fork this session\", true);"
       assert_includes response.body, "abortEventPoll();"
       assert_includes response.body, "async function submitAbort(event)"
       assert_includes response.body, "if (modalIsOpen()) return;"
@@ -2104,6 +2107,27 @@ class AppTest < Minitest::Test
       assert_includes payload.fetch("conversation_html"), paths.first
       assert_includes payload.fetch("conversation_html"), "project"
       assert_includes payload.fetch("conversation_html"), "session-header-project"
+    end
+  end
+
+  def test_renders_fork_button_for_user_messages_with_entry_ids
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        { type: "message", id: "user-entry-1", message: { role: "user", content: [{ type: "text", text: "Fork me" }] } },
+        { type: "message", id: "assistant-entry-1", message: { role: "assistant", content: [{ type: "text", text: "No fork button" }] } }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      user_message = document.at_css('[data-role="user"]')
+      assistant_message = document.at_css('[data-role="assistant"]')
+      fork_button = user_message.at_css('[data-fork-entry-id="user-entry-1"]')
+      assert_equal "Fork", fork_button.text.strip
+      assert_nil assistant_message.at_css("[data-fork-entry-id]")
     end
   end
 

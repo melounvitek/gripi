@@ -17,7 +17,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, :final_assistant_response, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, :final_assistant_response, :entry_id, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :cost_total, keyword_init: true)
 
   @session_cache = {}
@@ -221,6 +221,7 @@ class PiSessionStore
         role: role,
         text: text,
         timestamp: parse_time(entry["timestamp"]),
+        entry_id: entry["id"],
         compact: compact_message?(message),
         summary: compact_summary(message),
         expanded: role == "toolResult" ? false : message["isError"] == true,

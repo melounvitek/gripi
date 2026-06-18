@@ -100,7 +100,7 @@ class PiSessionStoreTest < Minitest::Test
       path = File.join(dir, "session.jsonl")
       write_jsonl(path, [
         { type: "session", id: "session-1", cwd: "/tmp/project" },
-        { type: "message", message: { role: "user", content: [{ type: "text", text: "Hello" }] } },
+        { type: "message", id: "user-entry-1", message: { role: "user", content: [{ type: "text", text: "Hello" }] } },
         { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Hi" }] } }
       ])
 
@@ -108,6 +108,7 @@ class PiSessionStoreTest < Minitest::Test
 
       assert_equal ["user", "assistant"], messages.map(&:role)
       assert_equal ["Hello", "Hi"], messages.map(&:text)
+      assert_equal "user-entry-1", messages.first.entry_id
     end
   end
 
