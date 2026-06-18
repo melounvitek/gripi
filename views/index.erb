@@ -335,6 +335,7 @@
     let eventPollInFlight = false;
     let eventPollAbortController = null;
     let eventPollResumeTimer = null;
+    let staleSessionRefreshInFlight = false;
     let hiddenAt = null;
     let lastEventPollSuccessAt = Date.now();
     let lastEventSeq = 0;
@@ -349,6 +350,7 @@
     let scheduledAutoScrollFrame = null;
     let sessionViewGeneration = 0;
     let sessionSwitchGeneration = 0;
+    const staleSessionRefreshAfterMs = 60 * 1000;
     let conversationScrollRevealTimer = null;
     let conversationScrollRevealDelayTimer = null;
     let lastConversationScrollRevealAt = 0;
@@ -1752,7 +1754,22 @@
       await refreshCurrentSessionPreservingComposer();
     }
 
-    function resumeEventPolling() {
+    async function refreshStaleSessionAfterResume(hiddenDuration = 0) {
+      if (!liveOutput || document.hidden) return false;
+      if (staleSessionRefreshInFlight) return true;
+
+      const pollingGap = Date.now() - lastEventPollSuccessAt;
+      if (hiddenDuration < staleSessionRefreshAfterMs && pollingGap < staleSessionRefreshAfterMs) return false;
+
+      staleSessionRefreshInFlight = true;
+      try {
+        return await refreshCurrentSessionPreservingComposer();
+      } finally {
+        staleSessionRefreshInFlight = false;
+      }
+    }
+
+    async function resumeEventPolling(hiddenDuration = 0) {
       if (!liveOutput) return;
 
       const resumeStartedAt = Date.now();
@@ -1761,6 +1778,7 @@
       abortEventPoll();
       resetEventPollBackoff();
       hideReconnectBanner();
+      if (await refreshStaleSessionAfterResume(hiddenDuration)) return;
       scheduleNextEventPoll(0);
       eventPollResumeTimer = setTimeout(() => {
         if (!document.hidden && lastEventPollSuccessAt < resumeStartedAt) showReconnectBanner();
@@ -2723,15 +2741,15 @@
       const hiddenDuration = hiddenAt ? Date.now() - hiddenAt : 0;
       hiddenAt = null;
       if (hiddenDuration > 5000) {
-        resumeEventPolling();
+        resumeEventPolling(hiddenDuration).catch(() => {});
       } else {
         scheduleNextEventPoll(0);
       }
       scheduleSidebarRefresh();
     });
-    window.addEventListener("pageshow", resumeEventPolling);
-    window.addEventListener("focus", resumeEventPolling);
-    window.addEventListener("online", resumeEventPolling);
+    window.addEventListener("pageshow", () => resumeEventPolling().catch(() => {}));
+    window.addEventListener("focus", () => resumeEventPolling().catch(() => {}));
+    window.addEventListener("online", () => resumeEventPolling().catch(() => {}));
     window.addEventListener("popstate", () => switchSession(window.location.href, { push: false, focus: false }));
 
     bindSessionDom();
