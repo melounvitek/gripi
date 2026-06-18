@@ -3148,7 +3148,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "appendCompactMessage(\"status\", \"Conversation compacted\", event.summary || \"Compaction completed\""
       assert_includes response.body, "refreshSessionStatus().catch(() => {});"
       assert_includes response.body, "if (event.type === \"compaction\") {\n        renderCompactionEvent(event);\n        return;\n      }"
-      assert_includes response.body, "if (event.type === \"compaction_end\") {\n          removePendingCompactionMessage();\n          if (!event.aborted) refreshSessionStatus().catch(() => {});\n          refreshSidebar().catch(() => {});\n        }"
+      assert_includes response.body, "if (event.type === \"compaction_end\") {\n          removePendingCompactionMessage();\n          if (!liveAgentRunning) setComposerState(\"done\", event.aborted ? \"Compaction aborted\" : \"Done\");\n          if (!event.aborted) refreshSessionStatus().catch(() => {});\n          refreshSidebar().catch(() => {});\n        }"
       assert_includes response.body, "if (/^\\/(?:name|rename)$/.test(trimmed)) return { valid: false };"
       assert_includes response.body, "if (/^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(trimmed)) return { valid: true };"
       assert_includes response.body, "function sessionNameSlashCommand(message)"

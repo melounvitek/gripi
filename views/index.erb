@@ -1694,6 +1694,7 @@
         showStatus(eventStatusText(event));
         if (event.type === "compaction_end") {
           removePendingCompactionMessage();
+          if (!liveAgentRunning) setComposerState("done", event.aborted ? "Compaction aborted" : "Done");
           if (!event.aborted) refreshSessionStatus().catch(() => {});
           refreshSidebar().catch(() => {});
         }
