@@ -2103,16 +2103,13 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, '.message-turn-nav--bottom { top: auto; bottom: 0.6rem; }'
-      assert_includes response.body, 'function previousMessage(message)'
-      assert_includes response.body, 'function nextMessage(message)'
       assert_includes response.body, 'function previousFinalAssistantResponse(message)'
       assert_includes response.body, 'function nextFinalAssistantResponse(message)'
-      assert_includes response.body, 'if (!target || previousMessage(message) === target) return;'
-      assert_includes response.body, 'if (!target || nextMessage(message) === target) return;'
-      assert_includes response.body, 'makeMessageTurnButton("previous", "Previous assistant response", "↑")'
-      assert_includes response.body, 'makeMessageTurnButton("next", "Next assistant response", "↓")'
-      assert_includes response.body, 'nav.className = "message-turn-nav message-turn-nav--bottom"'
+      assert_includes response.body, 'const previousTarget = previousFinalAssistantResponse(message);'
+      assert_includes response.body, 'const nextTarget = nextFinalAssistantResponse(message);'
+      assert_includes response.body, 'if (!previousTarget && !nextTarget) return;'
+      assert_includes response.body, 'if (previousTarget) nav.append(makeMessageTurnButton("previous", "Previous assistant response", "↑"));'
+      assert_includes response.body, 'if (nextTarget) nav.append(makeMessageTurnButton("next", "Next assistant response", "↓"));'
       assert_includes response.body, 'const finalAssistantResponse = event.type === "message_end" && !segment.compact && !segment.thinking'
     end
   end

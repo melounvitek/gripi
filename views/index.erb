@@ -93,12 +93,10 @@
     .message--live { box-shadow: 0 0 0 1px rgba(138, 190, 183, 0.45) inset, 0 6px 18px rgba(0, 0, 0, 0.12); }
     .message-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
     .message-turn-nav { position: absolute; top: 0.6rem; right: 0.6rem; display: inline-flex; gap: 0.3rem; pointer-events: none; }
-    .message-turn-nav--bottom { top: auto; bottom: 0.6rem; }
-    .message--user:has(.message-turn-nav--bottom) { padding-bottom: 2.75rem; }
     .message-turn-button { display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; padding: 0; border: 0; border-radius: 0.48rem; background: rgba(138, 190, 183, 0.88); color: var(--button-text); font-size: 0.78rem; font-weight: 800; line-height: 1; text-decoration: none; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2); opacity: 0.72; pointer-events: auto; transition: background 120ms ease, opacity 120ms ease, transform 120ms ease; }
     .message-turn-button:hover { background: var(--accent-hover); opacity: 1; transform: translateY(-1px); }
-    .message--assistant .message-header { padding-right: 2.2rem; }
-    .message--user .message-header { margin-bottom: 0.75rem; padding-right: 4.35rem; }
+    .message--assistant .message-header { padding-right: 4.35rem; }
+    .message--user .message-header { margin-bottom: 0.75rem; }
     .role { font-size: 0.74rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
     .message--error .role { color: #ffb4b6; }
     .message-meta { font-size: 0.75rem; color: var(--muted-soft); }
@@ -463,24 +461,8 @@
       bottomJumpControls?.classList.toggle("is-visible", showLatest);
     }
 
-    function userMessages() {
-      return [...(conversationScroll?.querySelectorAll('[data-role="user"].message') || [])];
-    }
-
     function finalAssistantResponseMessages() {
       return [...(conversationScroll?.querySelectorAll('[data-final-assistant-response="true"]') || [])];
-    }
-
-    function previousMessage(message) {
-      let previous = message.previousElementSibling;
-      while (previous && !previous.matches(".message")) previous = previous.previousElementSibling;
-      return previous;
-    }
-
-    function nextMessage(message) {
-      let next = message.nextElementSibling;
-      while (next && !next.matches(".message")) next = next.nextElementSibling;
-      return next;
     }
 
     function previousFinalAssistantResponse(message) {
@@ -505,24 +487,15 @@
       conversationScroll?.querySelectorAll(".message-turn-nav").forEach((nav) => nav.remove());
 
       finalAssistantResponseMessages().forEach((message) => {
-        const target = previousFinalAssistantResponse(message);
-        if (!target || previousMessage(message) === target) return;
+        const previousTarget = previousFinalAssistantResponse(message);
+        const nextTarget = nextFinalAssistantResponse(message);
+        if (!previousTarget && !nextTarget) return;
 
         const nav = document.createElement("nav");
         nav.className = "message-turn-nav";
         nav.setAttribute("aria-label", "Assistant response navigation");
-        nav.append(makeMessageTurnButton("previous", "Previous assistant response", "↑"));
-        message.prepend(nav);
-      });
-
-      userMessages().forEach((message) => {
-        const target = nextFinalAssistantResponse(message);
-        if (!target || nextMessage(message) === target) return;
-
-        const nav = document.createElement("nav");
-        nav.className = "message-turn-nav message-turn-nav--bottom";
-        nav.setAttribute("aria-label", "Assistant response navigation");
-        nav.append(makeMessageTurnButton("next", "Next assistant response", "↓"));
+        if (previousTarget) nav.append(makeMessageTurnButton("previous", "Previous assistant response", "↑"));
+        if (nextTarget) nav.append(makeMessageTurnButton("next", "Next assistant response", "↓"));
         message.prepend(nav);
       });
     }
