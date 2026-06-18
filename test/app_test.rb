@@ -1691,6 +1691,68 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_selected_session_shows_related_parent_and_child_sessions
+    Dir.mktmpdir do |dir|
+      session_dir = File.join(dir, "sessions")
+      FileUtils.mkdir_p(session_dir)
+      FileUtils.mkdir_p(project_cwd(dir))
+      parent_path = File.join(session_dir, "parent.jsonl")
+      child_path = File.join(session_dir, "child.jsonl")
+      File.write(parent_path, [
+        JSON.generate({ type: "session", id: "parent", cwd: project_cwd(dir) }),
+        JSON.generate({ type: "session_info", name: "Parent session" })
+      ].join("\n") + "\n")
+      File.write(child_path, [
+        JSON.generate({ type: "session", id: "child", cwd: project_cwd(dir), parentSession: parent_path }),
+        JSON.generate({ type: "session_info", name: "Child session" })
+      ].join("\n") + "\n")
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => parent_path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      relations = document.at_css(".session-relations")
+      assert relations
+      assert_includes relations.text, "Forks"
+      assert_includes relations.text, "Child session"
+      assert_equal session_url_for(child_path), relations.at_css('a[href*="child.jsonl"]')["href"]
+    end
+  end
+
+  def test_sidebar_marks_related_sessions_without_rendering_header_fork_clone_buttons
+    Dir.mktmpdir do |dir|
+      session_dir = File.join(dir, "sessions")
+      FileUtils.mkdir_p(session_dir)
+      FileUtils.mkdir_p(project_cwd(dir))
+      parent_path = File.join(session_dir, "parent.jsonl")
+      child_path = File.join(session_dir, "child.jsonl")
+      File.write(parent_path, [
+        JSON.generate({ type: "session", id: "parent", cwd: project_cwd(dir) }),
+        JSON.generate({ type: "session_info", name: "Parent session" })
+      ].join("\n") + "\n")
+      File.write(child_path, [
+        JSON.generate({ type: "session", id: "child", cwd: project_cwd(dir), parentSession: parent_path }),
+        JSON.generate({ type: "session_info", name: "Child session" })
+      ].join("\n") + "\n")
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => child_path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      assert document.at_css('.recent-sessions a.session[href*="child.jsonl"] .session-fork-indicator')
+      assert_includes document.at_css('.recent-sessions a.session[href*="parent.jsonl"] .session-child-count').text, "1"
+      refute document.at_css('.session-header-actions [data-modal-open="fork-session-modal"]')
+      refute document.at_css('.session-header-actions .clone-session-form')
+      relations = document.at_css(".session-relations")
+      assert_includes relations.text, "Forked from"
+      assert_includes relations.text, "Parent session"
+    end
+  end
+
   def test_sidebar_project_filter_lists_projects_by_recent_session_activity
     Dir.mktmpdir do |dir|
       older_cwd = File.join(dir, "older-project")
@@ -1993,8 +2055,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "replaceNewSessionModalHtml(modalHtml);"
       assert_includes response.body, "replaceNewSessionModalHtml(payload.new_session_modal_html);"
       assert_includes response.body, "replaceForkSessionModalHtml(payload.fork_session_modal_html);"
-      assert_includes response.body, "data-modal-open=\"fork-session-modal\""
-      assert_includes response.body, "class=\"clone-session-form\""
+      refute_includes response.body, "data-modal-open=\"fork-session-modal\""
+      refute_includes response.body, "class=\"clone-session-form\""
       assert_includes response.body, "function loadForkMessages(modal)"
       assert_includes response.body, "fetch(\"/sessions/fork\", { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } })"
       assert_includes response.body, "await switchToBranchedSession(payload);"
@@ -3667,6 +3729,10 @@ class AppTest < Minitest::Test
         ENV[key] = value
       end
     end
+  end
+
+  def session_url_for(path)
+    "/?session=#{Rack::Utils.escape(path)}"
   end
 
   def project_cwd(root)

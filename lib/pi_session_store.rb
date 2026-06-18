@@ -15,6 +15,7 @@ class PiSessionStore
     :latest_activity_kind,
     :latest_activity_title,
     :latest_activity_preview,
+    :parent_session_path,
     :created_at,
     :modified_at,
     keyword_init: true
@@ -219,6 +220,7 @@ class PiSessionStore
       latest_activity_kind: latest_activity_kind,
       latest_activity_title: latest_activity_title,
       latest_activity_preview: latest_activity_preview,
+      parent_session_path: session_entry["parentSession"],
       created_at: parse_time(session_entry["timestamp"]) || stat.ctime,
       modified_at: stat.mtime
     )

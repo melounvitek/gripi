@@ -32,6 +32,25 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_exposes_parent_session_path
+    Dir.mktmpdir do |dir|
+      session_dir = File.join(dir, "--project--")
+      FileUtils.mkdir_p(session_dir)
+      parent_path = File.join(session_dir, "parent.jsonl")
+      child_path = File.join(session_dir, "child.jsonl")
+      write_jsonl(parent_path, [
+        { type: "session", id: "parent", cwd: "/tmp/project" }
+      ])
+      write_jsonl(child_path, [
+        { type: "session", id: "child", cwd: "/tmp/project", parentSession: parent_path }
+      ])
+
+      child = PiSessionStore.new(root: dir).sessions.find { |session| session.path == child_path }
+
+      assert_equal parent_path, child.parent_session_path
+    end
+  end
+
   def test_exposes_latest_assistant_response_preview
     Dir.mktmpdir do |dir|
       session_dir = File.join(dir, "--project--")

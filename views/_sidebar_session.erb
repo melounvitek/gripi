@@ -1,4 +1,6 @@
             <% compacting = rpc_clients.compacting?(session.path) %>
+            <% parent_session = session_parent(session) %>
+            <% child_count = session_child_count(session) %>
             <a class="<%= h session_classes(session, "session", "recent-session", compacting ? "compacting" : nil) %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>" data-latest-assistant-response-preview="<%= h session.latest_assistant_response_preview.to_s %>"<% if shortcut %> data-session-shortcut="<%= h shortcut %>"<% end %>>
               <div class="session-content">
                 <div class="session-title"><%= h session.display_name %></div>
@@ -8,6 +10,8 @@
                 </div>
               </div>
               <div class="session-indicators">
+                <% if parent_session %><span class="session-fork-indicator" title="Forked from <%= h parent_session.display_name %>" aria-label="Forked session">↳</span><% end %>
+                <% if child_count.positive? %><span class="session-child-count" title="<%= h child_count %> forked <%= child_count == 1 ? "session" : "sessions" %>" aria-label="<%= h child_count %> forked <%= child_count == 1 ? "session" : "sessions" %>">⎇ <%= h child_count %></span><% end %>
                 <% if shortcut %><span class="session-shortcut" aria-hidden="true"><%= h shortcut %></span><% end %>
                 <% if compacting %>
                   <span class="session-compacting-indicator" title="Compacting context" aria-label="Compacting context"></span>

@@ -268,6 +268,40 @@ class PiWebGateway < Sinatra::Base
       "/?#{Rack::Utils.build_nested_query(query)}"
     end
 
+    def session_parent(session)
+      session_by_path[normalized_session_path(session&.parent_session_path)]
+    end
+
+    def session_children(session)
+      children_by_parent_path.fetch(normalized_session_path(session&.path), [])
+    end
+
+    def session_child_count(session)
+      session_children(session).length
+    end
+
+    def session_by_path
+      @session_by_path ||= all_sessions.each_with_object({}) { |session, index| index[normalized_session_path(session.path)] = session }
+    end
+
+    def children_by_parent_path
+      @children_by_parent_path ||= all_sessions.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |session, children|
+        parent_path = normalized_session_path(session.parent_session_path)
+        children[parent_path] << session if parent_path && session_by_path.key?(parent_path)
+      end.transform_values { |sessions| sessions.sort_by { |session| session.modified_at || Time.at(0) }.reverse }
+    end
+
+    def all_sessions
+      @all_sessions ||= @groups.values.flatten
+    end
+
+    def normalized_session_path(path)
+      value = path.to_s
+      return if value.empty?
+
+      File.expand_path(value)
+    end
+
     def expanded_cwds
       Array(params["expanded_cwd"])
     end
