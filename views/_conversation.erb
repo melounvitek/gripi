@@ -19,7 +19,7 @@
           </div>
         </header>
 
-        <section class="conversation-scroll" id="conversation-scroll">
+        <section class="conversation-scroll" id="conversation-scroll" tabindex="0">
           <div class="jump-controls jump-controls--top">
             <button type="button" class="jump-button jump-to-first" aria-label="Top">↑↑</button>
           </div>
@@ -129,7 +129,7 @@
           <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span><% if unread_sidebar_session_count.positive? %><span class="mobile-sessions-unread-badge" aria-label="<%= h unread_sidebar_session_aria_label %>" title="<%= h unread_sidebar_session_aria_label %>"><%= h unread_sidebar_session_count_label %></span><% end %></label>
           <h1>No session selected</h1>
         </header>
-        <section class="conversation-scroll" id="conversation-scroll">
+        <section class="conversation-scroll" id="conversation-scroll" tabindex="0">
           <p class="empty empty-state">Create a Pi session first, then refresh this page.</p>
         </section>
       <% end %>

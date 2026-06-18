@@ -25,6 +25,7 @@
     .session-header-actions form { margin: 0; }
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.82rem; }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 1.5rem; }
+    .conversation-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
     .composer { position: sticky; bottom: 0; padding: 0.75rem 1.5rem 1rem; border-top: 1px solid var(--border); background: rgba(30, 30, 36, 0.97); box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.16); }
     .composer-inner { display: grid; gap: 0.6rem; }
     .attachment-tray { display: none; flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem; border: 1px dashed var(--border); border-radius: 0.55rem; background: var(--panel-soft); }
@@ -666,6 +667,17 @@
 
     function shouldAutofocusPrompt() {
       return window.matchMedia?.("(pointer: fine)").matches !== false;
+    }
+
+    function desktopConversationFocusEnabled() {
+      return window.matchMedia?.("(max-width: 760px)").matches !== true;
+    }
+
+    function toggleConversationPromptFocus(event, nextElement) {
+      if (!nextElement || !desktopConversationFocusEnabled()) return false;
+      event.preventDefault();
+      nextElement.focus({ preventScroll: true });
+      return true;
     }
 
     function updatePromptPlaceholder() {
@@ -2252,6 +2264,8 @@
 
     function bindSessionControls() {
       promptTextarea?.addEventListener("keydown", (event) => {
+        if (event.key === "Tab" && toggleConversationPromptFocus(event, conversationScroll)) return;
+
         if (promptTextarea.value.startsWith("/") && commandList?.classList.contains("is-visible")) {
           if (event.key === "ArrowDown") {
             event.preventDefault();
@@ -2302,6 +2316,9 @@
         imageInput.value = "";
       });
 
+      conversationScroll?.addEventListener("keydown", (event) => {
+        if (event.key === "Tab") toggleConversationPromptFocus(event, promptTextarea);
+      });
       conversationScroll?.addEventListener("wheel", () => recordConversationScrollIntent("pointer"), { passive: true });
       conversationScroll?.addEventListener("touchstart", () => recordConversationScrollIntent("pointer"), { passive: true });
       conversationScroll?.addEventListener("pointerdown", () => recordConversationScrollIntent("pointer"), { passive: true });
