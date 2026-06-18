@@ -380,6 +380,9 @@
     let conversationScrollRevealDelayTimer = null;
     let lastConversationScrollRevealAt = 0;
     let messageJumpTargetsSuppressed = false;
+    let messageJumpSuppressionTimer = null;
+    let messageJumpSuppressionGeneration = 0;
+    let conversationScrollIntent = null;
     let lastSidebarInteractionAt = 0;
     let cwdValidationTimer = null;
     let cwdValidationController = null;
@@ -502,17 +505,51 @@
     }
 
     function resetMessageJumpButtons() {
-      messageJumpTargetsSuppressed = true;
       setJumpButton(jumpToFirstButton, "conversation", "↑↑", "Top");
       setJumpButton(jumpToLatestButton, "conversation", "↓↓", "Bottom");
+    }
+
+    function suppressMessageJumpTargetsDuringScroll() {
+      messageJumpTargetsSuppressed = true;
+      messageJumpSuppressionGeneration += 1;
+      const generation = messageJumpSuppressionGeneration;
+      resetMessageJumpButtons();
       updateScrollJumpButtons();
+
+      if (messageJumpSuppressionTimer) clearTimeout(messageJumpSuppressionTimer);
+      const releaseSuppression = () => {
+        if (generation !== messageJumpSuppressionGeneration) return;
+        messageJumpTargetsSuppressed = false;
+        if (messageJumpSuppressionTimer) clearTimeout(messageJumpSuppressionTimer);
+        messageJumpSuppressionTimer = null;
+        updateScrollJumpButtons();
+      };
+
+      if ("onscrollend" in window) {
+        conversationScroll?.addEventListener("scrollend", releaseSuppression, { once: true });
+      }
+      messageJumpSuppressionTimer = setTimeout(releaseSuppression, 1200);
+    }
+
+    function recordConversationScrollIntent(intent) {
+      conversationScrollIntent = intent;
+      if (intent !== "keyboard") messageJumpTargetsSuppressed = false;
+    }
+
+    function editableElement(element) {
+      return element?.closest?.("input, textarea, select, [contenteditable]");
+    }
+
+    function keyboardScrollKey(event) {
+      return ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Spacebar"].includes(event.key);
     }
 
     function updateScrollJumpButtons() {
       const messageTopTarget = conversationScrollDirection === "up" ? oversizedMessageJumpTarget("up") : null;
       const messageBottomTarget = conversationScrollDirection === "down" ? oversizedMessageJumpTarget("down") : null;
-      const showFirst = conversationScrollDirection === "up" && !autoScrollEnabled && !nearConversationTop();
-      const showLatest = conversationScrollDirection === "down" && !nearConversationBottom() && (!!messageBottomTarget || !latestReadableAssistantMessageIsVisible());
+      const allowJumpButtons = conversationScrollIntent !== "keyboard";
+      const showFirst = allowJumpButtons && conversationScrollDirection === "up" && !autoScrollEnabled && !nearConversationTop();
+      const showLatest = allowJumpButtons && conversationScrollDirection === "down" && !nearConversationBottom() && (!!messageBottomTarget || !latestReadableAssistantMessageIsVisible());
       setJumpButton(jumpToFirstButton, messageTopTarget ? "message" : "conversation", messageTopTarget ? "↑" : "↑↑", messageTopTarget ? "Message top" : "Top");
       setJumpButton(jumpToLatestButton, messageBottomTarget ? "message" : "conversation", messageBottomTarget ? "↓" : "↓↓", messageBottomTarget ? "Message bottom" : "Bottom");
       jumpToFirstButton?.classList.toggle("is-visible", showFirst);
@@ -592,7 +629,7 @@
 
       autoScrollEnabled = false;
       forceBottomAutoScroll = false;
-      resetMessageJumpButtons();
+      suppressMessageJumpTargetsDuringScroll();
       withProgrammaticScroll(() => scrollElementTopIntoView(target, behavior));
     }
 
@@ -602,7 +639,7 @@
 
       autoScrollEnabled = false;
       forceBottomAutoScroll = false;
-      resetMessageJumpButtons();
+      suppressMessageJumpTargetsDuringScroll();
       withProgrammaticScroll(() => scrollElementBottomIntoView(target, behavior));
     }
 
@@ -2265,10 +2302,16 @@
         imageInput.value = "";
       });
 
+      conversationScroll?.addEventListener("wheel", () => recordConversationScrollIntent("pointer"), { passive: true });
+      conversationScroll?.addEventListener("touchstart", () => recordConversationScrollIntent("pointer"), { passive: true });
+      conversationScroll?.addEventListener("pointerdown", () => recordConversationScrollIntent("pointer"), { passive: true });
+      document.addEventListener("keydown", (event) => {
+        if (editableElement(event.target) || !keyboardScrollKey(event)) return;
+        recordConversationScrollIntent("keyboard");
+      });
       conversationScroll?.addEventListener("scroll", () => {
         const currentScrollTop = conversationScroll.scrollTop;
         if (!programmaticScroll) {
-          messageJumpTargetsSuppressed = false;
           if (currentScrollTop > lastConversationScrollTop) conversationScrollDirection = "down";
           if (currentScrollTop < lastConversationScrollTop) conversationScrollDirection = "up";
           autoScrollEnabled = nearConversationBottom();

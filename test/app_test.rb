@@ -2975,7 +2975,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function scrollToBottom(behavior = \"auto\", { force = false } = {})"
       assert_includes response.body, "autoScrollEnabled = true;"
       assert_includes response.body, "forceBottomAutoScroll = force;"
-      assert_includes response.body, "jumpToLatestButton?.addEventListener(\"click\", () => scrollToBottom(\"auto\", { force: true }));"
+      assert_includes response.body, "if (jumpToLatestButton.dataset.jumpTarget === \"message\") scrollToMessageBottom();"
     end
   end
 
