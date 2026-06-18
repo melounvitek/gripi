@@ -1,7 +1,7 @@
-    <aside class="session-sidebar">
+    <aside class="session-sidebar" data-unread-session-count="<%= h unread_sidebar_session_count %>">
       <div class="session-sidebar-header">
         <h1>Pi Sessions</h1>
-        <label for="mobile-session-toggle" class="mobile-sessions-button mobile-sessions-close-button" aria-label="Close sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
+        <label for="mobile-session-toggle" class="mobile-sessions-button mobile-sessions-close-button" aria-label="Close sessions"><span class="hamburger-icon" aria-hidden="true"></span><% if unread_sidebar_session_count.positive? %><span class="mobile-sessions-unread-badge" aria-label="<%= h unread_sidebar_session_aria_label %>" title="<%= h unread_sidebar_session_aria_label %>"><%= h unread_sidebar_session_count_label %></span><% end %></label>
       </div>
       <div class="session-sidebar-content">
       <% if @groups.empty? %>

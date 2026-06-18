@@ -1,7 +1,7 @@
     <main class="conversation-panel">
       <% if @selected_session %>
         <header class="session-header">
-          <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
+          <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span><% if unread_sidebar_session_count.positive? %><span class="mobile-sessions-unread-badge" aria-label="<%= h unread_sidebar_session_aria_label %>" title="<%= h unread_sidebar_session_aria_label %>"><%= h unread_sidebar_session_count_label %></span><% end %></label>
           <div class="session-header-title" title="<%= h @selected_session.display_name %> · <%= h project_label(@selected_session) %>">
             <h1 class="session-header-name" title="<%= h @selected_session.display_name %>"><%= h @selected_session.display_name %></h1>
             <div class="session-header-project" title="<%= h project_label(@selected_session) %>"><%= h project_label(@selected_session) %></div>
@@ -114,7 +114,7 @@
         </div>
       <% else %>
         <header class="session-header">
-          <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
+          <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span><% if unread_sidebar_session_count.positive? %><span class="mobile-sessions-unread-badge" aria-label="<%= h unread_sidebar_session_aria_label %>" title="<%= h unread_sidebar_session_aria_label %>"><%= h unread_sidebar_session_count_label %></span><% end %></label>
           <h1>No session selected</h1>
         </header>
         <section class="conversation-scroll" id="conversation-scroll">

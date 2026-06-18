@@ -1803,6 +1803,41 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_mobile_hamburger_shows_unread_session_count
+    Dir.mktmpdir do |dir|
+      paths = write_sessions(dir, count: 4)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => paths.first })
+      File.write(paths[1], JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Unread two" }] } }) + "\n", mode: "a")
+      File.write(paths[2], JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Unread three" }] } }) + "\n", mode: "a")
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => paths.first })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      badges = document.css(".mobile-sessions-unread-badge")
+      assert_equal ["2", "2"], badges.map(&:text)
+      assert badges.all? { |badge| badge["aria-label"] == "2 unread sessions" }
+      assert_includes response.body, ".mobile-sessions-unread-badge"
+    end
+  end
+
+  def test_mobile_hamburger_hides_unread_session_count_when_none
+    Dir.mktmpdir do |dir|
+      paths = write_sessions(dir, count: 2)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => paths.last })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      assert_empty document.css(".mobile-sessions-unread-badge")
+    end
+  end
+
   def test_sidebar_hides_unread_header_when_no_unread_sessions
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 2)
@@ -2984,7 +3019,7 @@ class AppTest < Minitest::Test
       PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
       initial_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => first_path })
-      refute_includes initial_response.body, "unread"
+      assert_empty Nokogiri::HTML(initial_response.body).css("a.session.unread")
 
       File.write(second_path, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Done" }] } }) + "\n", mode: "a")
       unread_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => first_path })
@@ -2999,7 +3034,7 @@ class AppTest < Minitest::Test
       refute_includes page_response.body, "localStorage.getItem(\"piSidebarUnreadSessions\")"
 
       read_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => second_path })
-      refute_includes read_response.body, "unread"
+      assert_empty Nokogiri::HTML(read_response.body).css("a.session.unread")
     end
   end
 

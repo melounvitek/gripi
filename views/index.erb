@@ -211,6 +211,7 @@
     .mobile-session-toggle, .mobile-sessions-button, .mobile-sidebar-backdrop { display: none; }
     .hamburger-icon { position: relative; display: inline-block; width: 1.25rem; height: 0.9rem; border-top: 2px solid currentColor; border-bottom: 2px solid currentColor; }
     .hamburger-icon::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid currentColor; transform: translateY(-50%); }
+    .mobile-sessions-unread-badge { position: absolute; top: -0.42rem; right: -0.42rem; min-width: 1.15rem; height: 1.15rem; display: inline-flex; align-items: center; justify-content: center; padding: 0 0.32rem; border: 2px solid var(--panel); border-radius: 999px; background: var(--accent); color: var(--button-text); font-size: 0.68rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); }
     @supports (height: 100dvh) { .app-shell { height: 100dvh; } }
     @media (max-width: 760px) {
       html, body { width: 100%; max-width: 100vw; overflow-x: hidden; }
@@ -219,7 +220,7 @@
       .mobile-session-toggle:checked + .session-sidebar { transform: translateX(0); }
       .mobile-sidebar-backdrop { position: fixed; inset: 0; z-index: 9; background: rgba(0, 0, 0, 0.46); }
       .mobile-session-toggle:checked ~ .mobile-sidebar-backdrop { display: block; }
-      .mobile-sessions-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 0.55rem; background: var(--panel-softer); color: var(--text); cursor: pointer; }
+      .mobile-sessions-button { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 0.55rem; background: var(--panel-softer); color: var(--text); cursor: pointer; }
       .session-sidebar-header { position: sticky; top: calc(-0.75rem - env(safe-area-inset-top)); z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: calc(-0.75rem - env(safe-area-inset-top)) -0.75rem 0.5rem; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem 0.5rem; background: rgba(30, 30, 36, 0.96); backdrop-filter: blur(8px); }
       .mobile-sessions-close-button { margin-left: auto; }
       .session-sidebar h1 { margin: 0; font-size: 1rem; }
@@ -393,6 +394,7 @@
       reconnectBanner = document.querySelector(".session-reconnect");
       reconnectButton = document.querySelector(".reconnect-button");
       bindSidebarScrollTracking();
+      syncMobileSessionsUnreadBadges();
       syncMessageTurnNavs();
     }
 
@@ -2180,6 +2182,27 @@
       return document.activeElement?.matches("[data-sidebar-project-filter]");
     }
 
+    function syncMobileSessionsUnreadBadges() {
+      const count = Number(sessionSidebar?.dataset.unreadSessionCount || 0);
+      const label = `${count} unread ${count === 1 ? "session" : "sessions"}`;
+      const text = count > 99 ? "99+" : String(count);
+      document.querySelectorAll(".mobile-sessions-button").forEach((button) => {
+        let badge = button.querySelector(".mobile-sessions-unread-badge");
+        if (count <= 0) {
+          badge?.remove();
+          return;
+        }
+        if (!badge) {
+          badge = document.createElement("span");
+          badge.className = "mobile-sessions-unread-badge";
+          button.append(badge);
+        }
+        badge.textContent = text;
+        badge.setAttribute("aria-label", label);
+        badge.setAttribute("title", label);
+      });
+    }
+
     function updateHeaderFromSelectedSidebarSession() {
       const selectedTitle = sessionSidebar?.querySelector("a.session.selected .session-title")?.textContent.trim();
       if (selectedTitle) updateSessionHeaderName(selectedTitle);
@@ -2201,6 +2224,7 @@
       if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = scrollTop;
       updateHeaderFromSelectedSidebarSession();
       bindSidebarScrollTracking();
+      syncMobileSessionsUnreadBadges();
     }
 
     async function refreshSidebar(generation = sessionViewGeneration) {

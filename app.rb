@@ -167,6 +167,20 @@ class PiWebGateway < Sinatra::Base
       @unread_sidebar_sessions ||= sorted_sidebar_sessions.reject { |session| selected?(session) }.select { |session| unread?(session) }
     end
 
+    def unread_sidebar_session_count
+      unread_sidebar_sessions.length
+    end
+
+    def unread_sidebar_session_count_label
+      count = unread_sidebar_session_count
+      count > 99 ? "99+" : count.to_s
+    end
+
+    def unread_sidebar_session_aria_label
+      count = unread_sidebar_session_count
+      "#{count} unread #{count == 1 ? "session" : "sessions"}"
+    end
+
     def regular_sidebar_sessions
       @regular_sidebar_sessions ||= regular_sidebar_session_pool.first(sidebar_sessions_limit)
     end
