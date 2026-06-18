@@ -1834,6 +1834,11 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const originalForkText = forkOption.textContent;"
       assert_includes response.body, "forkOption.textContent = originalForkText;"
       assert_includes response.body, "showStatus(\"Could not fork this session\", true);"
+      assert_includes response.body, "function makeForkButton(entryId)"
+      assert_includes response.body, "function forkEntryIdFromEvent(event, message)"
+      assert_includes response.body, "return message?.entryId || message?.entry_id || event.entryId || event.entry_id || message?.id"
+      assert_includes response.body, "ensureForkButton(updated, entryId);"
+      assert_includes response.body, "appendMessage(\"user\", segment.text, true, shouldScroll, timestamp, { entryId });"
       assert_includes response.body, "abortEventPoll();"
       assert_includes response.body, "async function submitAbort(event)"
       assert_includes response.body, "if (modalIsOpen()) return;"
@@ -3022,7 +3027,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "article.dataset.optimisticText = options.optimisticText ?? text;"
       assert_includes response.body, 'upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);'
       assert_includes response.body, 'const displayText = roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text;'
-      assert_includes response.body, 'return { article, body, compact: false, userDisplayText: body?.textContent || segment.text };'
+      assert_includes response.body, 'const entry = { article, body, compact: false, userDisplayText: body?.textContent || segment.text };'
       assert_includes response.body, "function formatTimestamp(timestamp)"
       assert_includes response.body, "date.getHours()"
       refute_includes response.body, "date.getUTCHours()"

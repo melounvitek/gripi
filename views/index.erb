@@ -1171,6 +1171,7 @@
 
       header.append(role);
       if (meta.textContent) header.append(meta);
+      if (roleName === "user" && options.entryId) header.append(makeForkButton(options.entryId));
       if (roleName === "assistant" && !options.thinking) header.append(makeCopyButton());
       article.append(header);
       article.append(body);
@@ -1275,6 +1276,15 @@
       return button;
     }
 
+    function makeForkButton(entryId) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "copy-button";
+      button.dataset.forkEntryId = entryId;
+      button.textContent = "Fork";
+      return button;
+    }
+
     function showStatus(_text, _forceScroll = false) {}
 
     function resetLiveAssistantTracking() {
@@ -1357,7 +1367,18 @@
       return `${timestampKey || "untimed"}-${textHash}-${index}`;
     }
 
-    function optimisticUserEntry(segment, timestamp) {
+    function forkEntryIdFromEvent(event, message) {
+      return message?.entryId || message?.entry_id || event.entryId || event.entry_id || message?.id || message?.messageId || event.id || event.messageId;
+    }
+
+    function ensureForkButton(entry, entryId) {
+      if (!entry || !entryId || entry.article.querySelector("[data-fork-entry-id]")) return;
+
+      const header = entry.article.querySelector(".message-header");
+      if (header) header.append(makeForkButton(entryId));
+    }
+
+    function optimisticUserEntry(segment, timestamp, entryId = null) {
       const article = optimisticUserMessage(segment.text);
       if (!article) return null;
 
@@ -1368,15 +1389,23 @@
       const meta = article.querySelector(".message-meta");
       if (meta) meta.textContent = formatTimestamp(timestamp);
       const body = article.querySelector(".message-body");
-      return { article, body, compact: false, userDisplayText: body?.textContent || segment.text };
+      const entry = { article, body, compact: false, userDisplayText: body?.textContent || segment.text };
+      ensureForkButton(entry, entryId);
+      return entry;
     }
 
     function upsertLiveUserSegment(event, segment, fallbackIndex, shouldScroll, timestamp) {
+      const message = eventMessage(event);
+      const entryId = forkEntryIdFromEvent(event, message);
       const key = liveUserIdentity(event, segment, fallbackIndex, timestamp);
       const existing = liveUserMessages.get(key);
-      if (existing) return updateLiveSegment(existing, "user", segment, shouldScroll, timestamp);
+      if (existing) {
+        const updated = updateLiveSegment(existing, "user", segment, shouldScroll, timestamp);
+        ensureForkButton(updated, entryId);
+        return updated;
+      }
 
-      const entry = optimisticUserEntry(segment, timestamp) || appendMessage("user", segment.text, true, shouldScroll, timestamp);
+      const entry = optimisticUserEntry(segment, timestamp, entryId) || appendMessage("user", segment.text, true, shouldScroll, timestamp, { entryId });
       if (!entry) return null;
       liveUserMessages.set(key, entry);
       return entry;
