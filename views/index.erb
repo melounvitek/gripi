@@ -379,6 +379,7 @@
     let waitingForOutputTimer = null;
     let emptyEventPollCount = 0;
     let autoScrollEnabled = true;
+    let forceBottomAutoScroll = false;
     let programmaticScroll = false;
     let lastConversationScrollTop = 0;
     let conversationScrollDirection = null;
@@ -485,7 +486,7 @@
     }
 
     function updateScrollJumpButtons() {
-      const showFirst = conversationScrollDirection === "up" && !nearConversationTop();
+      const showFirst = conversationScrollDirection === "up" && !autoScrollEnabled && !nearConversationTop();
       const showLatest = conversationScrollDirection === "down" && !nearConversationBottom() && !latestReadableAssistantMessageIsVisible();
       jumpToFirstButton?.classList.toggle("is-visible", showFirst);
       jumpToLatestButton?.classList.toggle("is-visible", showLatest);
@@ -553,7 +554,7 @@
 
       withProgrammaticScroll(() => {
         const latestAssistant = latestReadableAssistantMessage();
-        if (latestAssistant && latestAssistant === latestMessageElement() && latestAssistant.offsetHeight > conversationScroll.clientHeight) {
+        if (!forceBottomAutoScroll && latestAssistant && latestAssistant === latestMessageElement() && latestAssistant.offsetHeight > conversationScroll.clientHeight) {
           scrollElementTopIntoView(latestAssistant, behavior);
         } else {
           conversationScroll.scrollTo({ top: conversationScroll.scrollHeight, behavior });
@@ -574,6 +575,7 @@
     function scrollToTop(behavior = "smooth") {
       if (!conversationScroll) return;
       autoScrollEnabled = false;
+      forceBottomAutoScroll = false;
       withProgrammaticScroll(() => {
         conversationScroll.scrollTo({ top: 0, behavior });
       });
@@ -588,13 +590,15 @@
     function scrollToUserMessage(message, behavior = "smooth") {
       if (!message) return;
       autoScrollEnabled = false;
+      forceBottomAutoScroll = false;
       withProgrammaticScroll(() => scrollElementTopIntoView(message, behavior, topJumpControlsOffset()));
       updateScrollJumpButtons();
     }
 
-    function scrollToBottom(behavior = "auto") {
+    function scrollToBottom(behavior = "auto", { force = false } = {}) {
       if (!conversationScroll) return;
       autoScrollEnabled = true;
+      forceBottomAutoScroll = force;
       withProgrammaticScroll(() => {
         conversationScroll.scrollTo({ top: conversationScroll.scrollHeight, behavior });
       });
@@ -2001,13 +2005,14 @@
           if (currentScrollTop > lastConversationScrollTop) conversationScrollDirection = "down";
           if (currentScrollTop < lastConversationScrollTop) conversationScrollDirection = "up";
           autoScrollEnabled = nearConversationBottom();
+          forceBottomAutoScroll = false;
           updateConversationJumpControlsReveal();
         }
         lastConversationScrollTop = currentScrollTop;
         updateScrollJumpButtons();
       }, { passive: true });
       jumpToFirstButton?.addEventListener("click", () => scrollToTop());
-      jumpToLatestButton?.addEventListener("click", () => scrollToBottom());
+      jumpToLatestButton?.addEventListener("click", () => scrollToBottom("auto", { force: true }));
       reconnectButton?.addEventListener("click", reconnectSession);
       conversationPanel?.addEventListener("click", (event) => {
         const turnButton = event.target.closest(".message-turn-button");
@@ -2084,6 +2089,7 @@
       stopWaitingForOutput();
       lastEventSeq = 0;
       autoScrollEnabled = true;
+      forceBottomAutoScroll = false;
       hideReconnectBanner();
       clearAttachments();
     }

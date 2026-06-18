@@ -1294,7 +1294,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "Date.now() - lastConversationScrollRevealAt > 120"
       assert_includes response.body, "}, 300);"
       assert_includes response.body, "updateConversationJumpControlsReveal();"
-      assert_includes response.body, 'conversationScrollDirection === "up" && !nearConversationTop()'
+      assert_includes response.body, 'conversationScrollDirection === "up" && !autoScrollEnabled && !nearConversationTop()'
       assert_includes response.body, 'conversationScrollDirection === "down" && !nearConversationBottom()'
       assert_includes response.body, ".message--tool .message-details summary, .message--tool-transcript .message-details summary { max-width: 100%; overflow-x: auto; white-space: nowrap; }"
       assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body, .raw-details pre { max-width: 100%; overflow-x: auto; }"
@@ -2291,6 +2291,7 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "let autoScrollEnabled = true;"
+      assert_includes response.body, "let forceBottomAutoScroll = false;"
       assert_includes response.body, "let programmaticScroll = false;"
       assert_includes response.body, "function nearConversationTop()"
       assert_includes response.body, "function latestReadableAssistantMessageIsVisible()"
@@ -2298,7 +2299,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "requestAnimationFrame(() => requestAnimationFrame"
       assert_includes response.body, "function latestReadableAssistantMessage()"
       assert_includes response.body, "function latestMessageElement()"
-      assert_includes response.body, "if (latestAssistant && latestAssistant === latestMessageElement() && latestAssistant.offsetHeight > conversationScroll.clientHeight)"
+      assert_includes response.body, "if (!forceBottomAutoScroll && latestAssistant && latestAssistant === latestMessageElement() && latestAssistant.offsetHeight > conversationScroll.clientHeight)"
       assert_includes response.body, "autoScrollEnabled = nearConversationBottom();"
       assert_includes response.body, "if (autoScrollEnabled && body.closest(\".message\") === latestReadableAssistantMessage()) scheduleAutoScroll();"
       assert_includes response.body, "if (shouldScroll && autoScrollEnabled) scheduleAutoScroll();"
@@ -2309,7 +2310,10 @@ class AppTest < Minitest::Test
       assert_includes response.body, "scrollToUserMessage(target);"
       assert_includes response.body, "function topJumpControlsOffset()"
       assert_includes response.body, "return remSize * 3.5;"
+      assert_includes response.body, "function scrollToBottom(behavior = \"auto\", { force = false } = {})"
       assert_includes response.body, "autoScrollEnabled = true;"
+      assert_includes response.body, "forceBottomAutoScroll = force;"
+      assert_includes response.body, "jumpToLatestButton?.addEventListener(\"click\", () => scrollToBottom(\"auto\", { force: true }));"
     end
   end
 
