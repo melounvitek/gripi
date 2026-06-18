@@ -378,6 +378,7 @@
     let conversationScrollRevealTimer = null;
     let conversationScrollRevealDelayTimer = null;
     let lastConversationScrollRevealAt = 0;
+    let messageJumpTargetsSuppressed = false;
     let lastSidebarInteractionAt = 0;
     let cwdValidationTimer = null;
     let cwdValidationController = null;
@@ -474,9 +475,45 @@
       }, 300);
     }
 
+    function oversizedMessageJumpTarget(direction) {
+      if (!conversationScroll || messageJumpTargetsSuppressed) return null;
+
+      const scrollRect = conversationScroll.getBoundingClientRect();
+      const tolerance = 2;
+      return [...conversationScroll.querySelectorAll(".message")].find((message) => {
+        if (message.offsetHeight <= conversationScroll.clientHeight + tolerance) return false;
+
+        const messageRect = message.getBoundingClientRect();
+        if (direction === "up") {
+          return messageRect.top < scrollRect.top - tolerance && messageRect.bottom > scrollRect.top + tolerance;
+        }
+
+        return messageRect.bottom > scrollRect.bottom + tolerance && messageRect.top < scrollRect.bottom - tolerance;
+      }) || null;
+    }
+
+    function setJumpButton(button, target, label, ariaLabel) {
+      if (!button) return;
+
+      button.textContent = label;
+      button.setAttribute("aria-label", ariaLabel);
+      button.dataset.jumpTarget = target;
+    }
+
+    function resetMessageJumpButtons() {
+      messageJumpTargetsSuppressed = true;
+      setJumpButton(jumpToFirstButton, "conversation", "↑↑", "Top");
+      setJumpButton(jumpToLatestButton, "conversation", "↓↓", "Bottom");
+      updateScrollJumpButtons();
+    }
+
     function updateScrollJumpButtons() {
+      const messageTopTarget = conversationScrollDirection === "up" ? oversizedMessageJumpTarget("up") : null;
+      const messageBottomTarget = conversationScrollDirection === "down" ? oversizedMessageJumpTarget("down") : null;
       const showFirst = conversationScrollDirection === "up" && !autoScrollEnabled && !nearConversationTop();
-      const showLatest = conversationScrollDirection === "down" && !nearConversationBottom() && !latestReadableAssistantMessageIsVisible();
+      const showLatest = conversationScrollDirection === "down" && !nearConversationBottom() && (!!messageBottomTarget || !latestReadableAssistantMessageIsVisible());
+      setJumpButton(jumpToFirstButton, messageTopTarget ? "message" : "conversation", messageTopTarget ? "↑" : "↑↑", messageTopTarget ? "Message top" : "Top");
+      setJumpButton(jumpToLatestButton, messageBottomTarget ? "message" : "conversation", messageBottomTarget ? "↓" : "↓↓", messageBottomTarget ? "Message bottom" : "Bottom");
       jumpToFirstButton?.classList.toggle("is-visible", showFirst);
       jumpToLatestButton?.classList.toggle("is-visible", showLatest);
       topJumpControls?.classList.toggle("is-visible", showFirst);
@@ -498,6 +535,14 @@
       const scrollRect = conversationScroll.getBoundingClientRect();
       const elementRect = element.getBoundingClientRect();
       const top = conversationScroll.scrollTop + elementRect.top - scrollRect.top - topOffset;
+      conversationScroll.scrollTo({ top, behavior });
+    }
+
+    function scrollElementBottomIntoView(element, behavior = "smooth", bottomOffset = 0) {
+      if (!conversationScroll || !element) return;
+      const scrollRect = conversationScroll.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      const top = conversationScroll.scrollTop + elementRect.bottom - scrollRect.bottom + bottomOffset;
       conversationScroll.scrollTo({ top, behavior });
     }
 
@@ -538,6 +583,26 @@
         conversationScroll.scrollTo({ top: 0, behavior });
       });
       updateScrollJumpButtons();
+    }
+
+    function scrollToMessageTop(behavior = "smooth") {
+      const target = oversizedMessageJumpTarget("up");
+      if (!target) return scrollToTop(behavior);
+
+      autoScrollEnabled = false;
+      forceBottomAutoScroll = false;
+      resetMessageJumpButtons();
+      withProgrammaticScroll(() => scrollElementTopIntoView(target, behavior));
+    }
+
+    function scrollToMessageBottom(behavior = "smooth") {
+      const target = oversizedMessageJumpTarget("down");
+      if (!target) return scrollToBottom(behavior, { force: true });
+
+      autoScrollEnabled = false;
+      forceBottomAutoScroll = false;
+      resetMessageJumpButtons();
+      withProgrammaticScroll(() => scrollElementBottomIntoView(target, behavior));
     }
 
     function scrollToBottom(behavior = "auto", { force = false } = {}) {
@@ -2202,6 +2267,7 @@
       conversationScroll?.addEventListener("scroll", () => {
         const currentScrollTop = conversationScroll.scrollTop;
         if (!programmaticScroll) {
+          messageJumpTargetsSuppressed = false;
           if (currentScrollTop > lastConversationScrollTop) conversationScrollDirection = "down";
           if (currentScrollTop < lastConversationScrollTop) conversationScrollDirection = "up";
           autoScrollEnabled = nearConversationBottom();
@@ -2211,8 +2277,14 @@
         lastConversationScrollTop = currentScrollTop;
         updateScrollJumpButtons();
       }, { passive: true });
-      jumpToFirstButton?.addEventListener("click", () => scrollToTop());
-      jumpToLatestButton?.addEventListener("click", () => scrollToBottom("auto", { force: true }));
+      jumpToFirstButton?.addEventListener("click", () => {
+        if (jumpToFirstButton.dataset.jumpTarget === "message") scrollToMessageTop();
+        else scrollToTop();
+      });
+      jumpToLatestButton?.addEventListener("click", () => {
+        if (jumpToLatestButton.dataset.jumpTarget === "message") scrollToMessageBottom();
+        else scrollToBottom("auto", { force: true });
+      });
       reconnectButton?.addEventListener("click", reconnectSession);
       conversationPanel?.addEventListener("click", (event) => {
         if (!event.target.closest("[data-collapse-details]")) return;
