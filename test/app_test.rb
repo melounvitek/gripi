@@ -358,6 +358,75 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_compact_slash_command_compacts_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/compact recent work" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[ :start, path ], [ :compact, "recent work" ]], calls
+      payload = JSON.parse(response.body)
+      assert_equal path, payload.fetch("session")
+      assert_equal "compact", payload.fetch("command")
+    end
+  end
+
+  def test_bare_compact_slash_command_compacts_without_instructions
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/compact" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[ :start, path ], [ :compact, nil ]], calls
+      assert_equal "compact", JSON.parse(response.body).fetch("command")
+    end
+  end
+
+  def test_multiline_compact_like_prompt_is_sent_as_prompt
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, nil
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/compact recent\nwork" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[ :start, path ], [ :prompt, "/compact recent\nwork" ]], calls
+      refute JSON.parse(response.body).key?("command")
+    end
+  end
+
   def test_bare_rename_slash_command_returns_usage_without_prompting
     ["/name", "/rename"].each do |message|
       Dir.mktmpdir do |dir|
@@ -1187,9 +1256,10 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (1)"
+      assert_includes response.body, "Slash commands (2)"
       assert_includes response.body, "/review"
       assert_includes response.body, "Review code"
+      assert_includes response.body, "/compact"
       refute_includes response.body, "<code>/new</code>"
       refute_includes response.body, "command-filter"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
@@ -1214,7 +1284,8 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (0)"
+      assert_includes response.body, "Slash commands (1)"
+      assert_includes response.body, "/compact"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
     end
   end
@@ -3053,9 +3124,11 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const selectedTitle = sessionSidebar?.querySelector(\"a.session.selected .session-title\")?.textContent.trim();"
       assert_includes response.body, "updateHeaderFromSelectedSidebarSession();"
       assert_includes response.body, "const renameCommand = steering ? null : sessionNameSlashCommand(message);"
-      assert_includes response.body, "if (!renameCommand) {\n        if (!steering) resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
+      assert_includes response.body, "const compactCommand = steering ? null : sessionCompactSlashCommand(message);"
+      assert_includes response.body, "if (!renameCommand && !compactCommand) {\n        if (!steering) resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
       assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });"
       assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {\n            await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });\n            return;\n          }\n          updateSessionHeaderName(payload.name);\n          setComposerState(\"done\", \"Renamed\");\n          showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);\n          refreshSidebar().catch(() => {});\n          return;\n        }"
+      assert_includes response.body, "if (payload?.command === \"compact\") {\n          setComposerState(\"running\", \"Compacting…\");\n          showStatus(\"Compaction started\", true);\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"
       assert_includes response.body, "commandList?.removeAttribute(\"open\");"

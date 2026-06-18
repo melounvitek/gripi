@@ -803,6 +803,10 @@
       return null;
     }
 
+    function sessionCompactSlashCommand(message) {
+      return /^\/compact(?:[ \t]+[^\r\n]+)?$/.test(message.trim());
+    }
+
     function updateSessionHeaderName(name) {
       if (!name) return;
       const headerName = document.querySelector(".session-header-name");
@@ -1852,11 +1856,16 @@
       if (steering) formData.set("streaming_behavior", "steer");
 
       const renameCommand = steering ? null : sessionNameSlashCommand(message);
-      if (!renameCommand) {
+      const compactCommand = steering ? null : sessionCompactSlashCommand(message);
+      if (!renameCommand && !compactCommand) {
         if (!steering) resetLiveAssistantTracking();
         resetEventPollBackoff();
         scheduleNextEventPoll(0);
         appendMessage("user", [message, pendingImages.length > 0 ? `[${imageAttachmentLabel(pendingImages.length)}]` : ""].filter(Boolean).join("\n"), true, true, new Date(), { optimistic: true, optimisticText: message });
+      } else if (compactCommand) {
+        resetLiveAssistantTracking();
+        resetEventPollBackoff();
+        scheduleNextEventPoll(0);
       }
       promptTextarea.value = "";
       clearAttachments();
@@ -1865,8 +1874,8 @@
       resetCommandSelection();
       resizePromptTextarea();
       if (shouldAutofocusPrompt()) promptTextarea.focus();
-      setComposerState("sending", renameCommand ? "Renaming…" : steering ? "Queueing steer…" : "Sending…");
-      showStatus(renameCommand ? "Renaming session…" : steering ? "Queueing steer…" : "Sending…", true);
+      setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : steering ? "Queueing steer…" : "Sending…");
+      showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : steering ? "Queueing steer…" : "Sending…", true);
 
       const response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
       if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
@@ -1891,6 +1900,11 @@
           setComposerState("done", "Renamed");
           showStatus(eventStatusText({ type: "session_info", name: payload.name }), true);
           refreshSidebar().catch(() => {});
+          return;
+        }
+        if (payload?.command === "compact") {
+          setComposerState("running", "Compacting…");
+          showStatus("Compaction started", true);
           return;
         }
         if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {

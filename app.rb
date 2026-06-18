@@ -593,12 +593,15 @@ class PiWebGateway < Sinatra::Base
     end
 
     rename_command = steering_prompt ? nil : session_name_slash_command(message)
+    compact_command = steering_prompt ? nil : session_compact_slash_command(message)
     if steering_prompt
       with_rpc_client(session_path) { |client| client.steer(message) }
     elsif rename_command&.[](:name)
       with_rpc_client(session_path) { |client| client.set_session_name(rename_command.fetch(:name)) }
     elsif rename_command
       nil
+    elsif compact_command
+      with_rpc_client(session_path) { |client| client.compact(compact_command[:instructions]) }
     else
       submitted_at = Time.now
       with_rpc_client(session_path) { |client| client.prompt(message, images) }
@@ -613,6 +616,8 @@ class PiWebGateway < Sinatra::Base
         payload[:command] = "rename"
         payload[:name] = rename_command[:name] if rename_command[:name]
         payload[:error] = rename_command.fetch(:error) if rename_command[:error]
+      elsif compact_command
+        payload[:command] = "compact"
       end
       JSON.generate(payload)
     else
@@ -925,6 +930,14 @@ class PiWebGateway < Sinatra::Base
     name ? { name: name } : { error: "Usage: /#{match[1]} <name>" }
   end
 
+  def session_compact_slash_command(message)
+    match = message.strip.match(%r{\A/compact(?:[ \t]+([^\r\n]+))?\z})
+    return nil unless match
+
+    instructions = match[1]&.strip
+    { instructions: instructions.to_s.empty? ? nil : instructions }
+  end
+
   def session_redirect_path(session_path, expanded_cwds: [], show_all_sessions: false, sidebar_sessions_limit: nil)
     query = { "session" => session_path }
     query["project"] = selected_project_cwd if selected_project_cwd
@@ -1001,9 +1014,14 @@ class PiWebGateway < Sinatra::Base
   def commands_for(session_path)
     response = with_rpc_client(session_path) { |client| client.get_commands }
     data = response_data(response)
-    data.is_a?(Hash) && data["commands"].is_a?(Array) ? data["commands"] : []
+    commands = data.is_a?(Hash) && data["commands"].is_a?(Array) ? data["commands"] : []
+    (builtin_commands + commands).uniq { |command| command["name"] }
   rescue Errno::EPIPE, IOError
-    []
+    builtin_commands
+  end
+
+  def builtin_commands
+    [{ "name" => "compact", "source" => "other", "description" => "Manually compact context, optional custom instructions" }]
   end
 
   def rpc_clients
