@@ -3148,7 +3148,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "appendCompactMessage(\"status\", \"Conversation compacted\", event.summary || \"Compaction completed\""
       assert_includes response.body, "refreshSessionStatus().catch(() => {});"
       assert_includes response.body, "if (event.type === \"compaction\") {\n        renderCompactionEvent(event);\n        return;\n      }"
-      assert_includes response.body, "if (event.type === \"compaction_end\" && !event.aborted) refreshSessionStatus().catch(() => {});"
+      assert_includes response.body, "if (event.type === \"compaction_end\") {\n          removePendingCompactionMessage();\n          if (!event.aborted) refreshSessionStatus().catch(() => {});\n          refreshSidebar().catch(() => {});\n        }"
       assert_includes response.body, "if (/^\\/(?:name|rename)$/.test(trimmed)) return { valid: false };"
       assert_includes response.body, "if (/^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(trimmed)) return { valid: true };"
       assert_includes response.body, "function sessionNameSlashCommand(message)"
@@ -3166,7 +3166,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (!renameCommand && !compactCommand) {\n        if (!steering) resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
       assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });"
       assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {\n            await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });\n            return;\n          }\n          updateSessionHeaderName(payload.name);\n          setComposerState(\"done\", \"Renamed\");\n          showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);\n          refreshSidebar().catch(() => {});\n          return;\n        }"
-      assert_includes response.body, "if (payload?.command === \"compact\") {\n          setComposerState(\"running\", \"Compacting…\");\n          showStatus(\"Compaction started\", true);\n          return;\n        }"
+      assert_includes response.body, "appendPendingCompactionMessage(new Date());"
+      assert_includes response.body, "markSidebarSessionCompacting(submittedSession);"
+      assert_includes response.body, "if (payload?.command === \"compact\") {\n          refreshSidebar().catch(() => {});\n          setComposerState(\"running\", \"Compacting…\");\n          showStatus(\"Compaction started\", true);\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"
       assert_includes response.body, "commandList?.removeAttribute(\"open\");"
@@ -3309,6 +3311,45 @@ class AppTest < Minitest::Test
 
       unread_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => second_path })
       assert_includes unread_response.body, "class=\"session recent-session unread"
+    end
+  end
+
+  def test_sidebar_shows_persisted_compaction_activity
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Older answer" }] } },
+        { type: "compaction", timestamp: "2026-06-13T10:02:00Z", summary: "Important summary\nwith details" }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      link = document.at_css("a.session")
+      assert_includes link.text, "Conversation compacted"
+      assert_includes link.text, "Important summary with details"
+      assert_equal "compaction", link["data-latest-activity-kind"]
+      assert_equal "Important summary with details", link["data-latest-activity-preview"]
+    end
+  end
+
+  def test_sidebar_shows_compacting_state_for_active_compaction
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      client = FakeRpcClient.new([])
+      def client.compacting? = true
+      registry.register(path, client)
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, "Compacting…"
+      assert_includes response.body, "session-compacting-indicator"
     end
   end
 

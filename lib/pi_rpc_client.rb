@@ -33,6 +33,7 @@ class PiRpcClient
     @busy = false
     @busy_since = nil
     @agent_running = false
+    @compacting = false
     @reader = nil
   end
 
@@ -73,7 +74,13 @@ class PiRpcClient
 
   def compact(custom_instructions = nil)
     payload = custom_instructions.to_s.empty? ? {} : { customInstructions: custom_instructions }
-    request("compact", id: next_id("compact"), **payload)
+    @mutex.synchronize { mark_compacting }
+    response = request("compact", id: next_id("compact"), **payload)
+    @mutex.synchronize { clear_compacting } if !response || response["success"] == false
+    response
+  rescue StandardError
+    @mutex.synchronize { clear_compacting }
+    raise
   end
 
   def get_fork_messages
@@ -106,6 +113,10 @@ class PiRpcClient
 
   def agent_running?
     @mutex.synchronize { @agent_running }
+  end
+
+  def compacting?
+    @mutex.synchronize { @compacting }
   end
 
   def events_after(after_seq)
@@ -193,6 +204,7 @@ class PiRpcClient
     @mutex.synchronize do
       @reader_running = false
       @agent_running = false
+      @compacting = false
       @busy = false
       @busy_since = nil
       @condition.broadcast
@@ -219,6 +231,8 @@ class PiRpcClient
       @agent_running = true
       @busy = true
       @busy_since ||= @clock.call
+    when "compaction_start"
+      mark_compacting
     when "turn_start"
       @busy = true
       @busy_since ||= @clock.call
@@ -227,7 +241,20 @@ class PiRpcClient
     when "agent_end"
       @agent_running = false
       clear_busy_state
+    when "compaction", "compaction_end"
+      clear_compacting
     end
+  end
+
+  def mark_compacting
+    @compacting = true
+    @busy = true
+    @busy_since ||= @clock.call
+  end
+
+  def clear_compacting
+    @compacting = false
+    clear_busy_state unless @agent_running
   end
 
   def clear_busy_state

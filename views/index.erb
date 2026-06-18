@@ -68,14 +68,18 @@
     .sidebar-notification-test-link { display: flex; align-items: center; justify-content: center; margin-top: 1.25rem; padding: 0.65rem 0.75rem; border-radius: 0.6rem; background: var(--panel-softer); color: var(--text); font-size: 0.86rem; font-weight: 800; text-decoration: none; }
     .sidebar-notification-test-link:hover { background: var(--border); }
     .session-project { display: inline-block; max-width: 100%; margin-top: 0.32rem; padding: 0.1rem 0.42rem; border: 1px solid rgba(138, 190, 183, 0.28); border-radius: 999px; background: rgba(138, 190, 183, 0.08); color: var(--accent); font-size: 0.72rem; font-weight: 800; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
+    .session-activity { margin-top: 0.24rem; color: var(--muted); font-size: 0.78rem; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .session-activity strong { color: var(--text); font-weight: 800; }
+    .session-activity--running { color: var(--accent); font-weight: 800; }
     .session-meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.55rem; border-radius: 999px; line-height: 1; }
     .session-rename { display: none; gap: 0.35rem; grid-template-columns: minmax(0, 1fr) auto; margin: 0.3rem 0 0.55rem; }
     a.session.selected + .session-rename { display: grid; }
     .session-rename input { min-width: 0; padding: 0.45rem 0.55rem; font-size: 0.82rem; }
     .session-rename button { padding: 0.45rem 0.6rem; font-size: 0.82rem; }
-    .session-running-indicator { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--success); font-size: 0.75rem; font-weight: 700; }
-    .session-running-indicator::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 4px rgba(181, 189, 104, 0.16); animation: progress-blink 1000ms ease-in-out infinite; }
+    .session-running-indicator, .session-compacting-indicator { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--success); font-size: 0.75rem; font-weight: 700; }
+    .session-running-indicator::before, .session-compacting-indicator::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 4px rgba(181, 189, 104, 0.16); animation: progress-blink 1000ms ease-in-out infinite; }
+    .session-compacting-indicator::before { background: var(--warning); box-shadow: 0 0 0 4px rgba(255, 255, 0, 0.14); }
     .empty { color: var(--muted); background: var(--panel-soft); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem; }
     .empty-state { max-width: 34rem; margin: 2rem auto; text-align: center; }
     .message { position: relative; min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 0.9rem; padding: 0.9rem; margin-bottom: 0.85rem; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); scroll-margin-top: 3.5rem; }
@@ -209,7 +213,7 @@
     @keyframes session-switch-spin { to { transform: rotate(360deg); } }
     @keyframes stop-button-pulse { 0% { transform: scale(0.82); opacity: 0.9; } 70%, 100% { transform: scale(1.28); opacity: 0; } }
     @keyframes progress-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
-    @media (prefers-reduced-motion: reduce) { .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before { animation: none; opacity: 1; } }
     .mobile-session-toggle, .mobile-sessions-button, .mobile-sidebar-backdrop { display: none; }
     .hamburger-icon { position: relative; display: inline-block; width: 1.25rem; height: 0.9rem; border-top: 2px solid currentColor; border-bottom: 2px solid currentColor; }
     .hamburger-icon::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid currentColor; transform: translateY(-50%); }
@@ -1587,11 +1591,23 @@
       if (entry) liveToolExecutions.set(event.toolCallId, entry);
     }
 
+    function removePendingCompactionMessage() {
+      liveOutput?.querySelectorAll('[data-pending-compaction="true"]').forEach((entry) => entry.remove());
+    }
+
+    function appendPendingCompactionMessage(timestamp = new Date()) {
+      if (liveOutput?.querySelector('[data-pending-compaction="true"]')) return;
+      const entry = appendCompactMessage("status", "Compacting conversation…", "Pi is summarizing the conversation so the session can continue with less context.", true, true, true, "", timestamp, { open: true });
+      if (entry?.article) entry.article.dataset.pendingCompaction = "true";
+    }
+
     function renderCompactionEvent(event) {
+      removePendingCompactionMessage();
       appendCompactMessage("status", "Conversation compacted", event.summary || "Compaction completed", false, true, true, JSON.stringify(event, null, 2), eventTimestamp(event));
       showStatus("Compaction finished");
       setComposerState("done", "Done");
       refreshSessionStatus().catch(() => {});
+      refreshSidebar().catch(() => {});
     }
 
     function renderMessageEvent(event) {
@@ -1676,7 +1692,11 @@
       if (["custom", "custom_message", "session_info", "queue_update", "compaction_start", "compaction_end"].includes(event.type)) {
         updateSessionHeaderName(sessionTitleFromEvent(event));
         showStatus(eventStatusText(event));
-        if (event.type === "compaction_end" && !event.aborted) refreshSessionStatus().catch(() => {});
+        if (event.type === "compaction_end") {
+          removePendingCompactionMessage();
+          if (!event.aborted) refreshSessionStatus().catch(() => {});
+          refreshSidebar().catch(() => {});
+        }
         return;
       }
 
@@ -1879,6 +1899,8 @@
         resetLiveAssistantTracking();
         resetEventPollBackoff();
         scheduleNextEventPoll(0);
+        appendPendingCompactionMessage(new Date());
+        markSidebarSessionCompacting(submittedSession);
       }
       promptTextarea.value = "";
       clearAttachments();
@@ -1916,6 +1938,7 @@
           return;
         }
         if (payload?.command === "compact") {
+          refreshSidebar().catch(() => {});
           setComposerState("running", "Compacting…");
           showStatus("Compaction started", true);
           return;
@@ -2183,6 +2206,24 @@
       clearTimeout(sidebarRefreshTimer);
       if (document.hidden || modalIsOpen()) return;
       sidebarRefreshTimer = setTimeout(() => refreshSidebar().catch(() => {}), delay);
+    }
+
+    function markSidebarSessionCompacting(sessionPath) {
+      if (!sessionPath || !sessionSidebar) return;
+      const selector = `a.session[data-session-path="${CSS.escape(sessionPath)}"]`;
+      const link = sessionSidebar.querySelector(selector);
+      if (!link) return;
+      link.classList.add("compacting");
+      const content = link.querySelector(".session-content");
+      let activity = link.querySelector(".session-activity");
+      if (!activity && content) {
+        activity = document.createElement("div");
+        content.insertBefore(activity, content.querySelector(".session-meta"));
+      }
+      if (activity) {
+        activity.className = "session-activity session-activity--running";
+        activity.textContent = "Compacting…";
+      }
     }
 
     function sidebarAssistantResponseCounts(root = sessionSidebar) {

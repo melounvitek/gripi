@@ -12,6 +12,9 @@ class PiSessionStore
     :message_count,
     :assistant_response_count,
     :latest_assistant_response_preview,
+    :latest_activity_kind,
+    :latest_activity_title,
+    :latest_activity_preview,
     :created_at,
     :modified_at,
     keyword_init: true
@@ -169,6 +172,9 @@ class PiSessionStore
     message_count = 0
     assistant_response_count = 0
     latest_assistant_response_preview = nil
+    latest_activity_kind = nil
+    latest_activity_title = nil
+    latest_activity_preview = nil
 
     read_entries(path).each do |entry|
       case entry["type"]
@@ -182,10 +188,17 @@ class PiSessionStore
         if final_assistant_response?(message)
           assistant_response_count += 1
           latest_assistant_response_preview = response_preview(final_assistant_response_text(message))
+          latest_activity_kind = "assistant"
+          latest_activity_title = nil
+          latest_activity_preview = latest_assistant_response_preview
         end
         if first_user_message.nil? && message["role"] == "user"
           first_user_message = content_text(message["content"])
         end
+      when "compaction"
+        latest_activity_kind = "compaction"
+        latest_activity_title = "Conversation compacted"
+        latest_activity_preview = response_preview(entry["summary"])
       end
     end
 
@@ -203,6 +216,9 @@ class PiSessionStore
       message_count: message_count,
       assistant_response_count: assistant_response_count,
       latest_assistant_response_preview: latest_assistant_response_preview,
+      latest_activity_kind: latest_activity_kind,
+      latest_activity_title: latest_activity_title,
+      latest_activity_preview: latest_activity_preview,
       created_at: parse_time(session_entry["timestamp"]) || stat.ctime,
       modified_at: stat.mtime
     )

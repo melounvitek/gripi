@@ -1,14 +1,22 @@
-            <a class="<%= h session_classes(session, "session", "recent-session") %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>" data-latest-assistant-response-preview="<%= h session.latest_assistant_response_preview.to_s %>"<% if shortcut %> data-session-shortcut="<%= h shortcut %>"<% end %>>
+            <% compacting = rpc_clients.compacting?(session.path) %>
+            <a class="<%= h session_classes(session, "session", "recent-session", compacting ? "compacting" : nil) %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>" data-latest-assistant-response-preview="<%= h session.latest_assistant_response_preview.to_s %>" data-latest-activity-kind="<%= h session.latest_activity_kind.to_s %>" data-latest-activity-preview="<%= h session.latest_activity_preview.to_s %>"<% if shortcut %> data-session-shortcut="<%= h shortcut %>"<% end %>>
               <div class="session-content">
                 <div class="session-title"><%= h session.display_name %></div>
                 <div class="session-project" title="<%= h session.cwd %>"><%= h project_label(session) %></div>
+                <% if compacting %>
+                  <div class="session-activity session-activity--running">Compacting…</div>
+                <% elsif !session.latest_activity_preview.to_s.empty? %>
+                  <div class="session-activity session-activity--<%= h session.latest_activity_kind.to_s %>"><% if !session.latest_activity_title.to_s.empty? %><strong><%= h session.latest_activity_title %></strong> · <% end %><%= h session.latest_activity_preview %></div>
+                <% end %>
                 <div class="session-meta">
                   updated <%= h format_relative_time(session.modified_at) %>
                 </div>
               </div>
               <div class="session-indicators">
                 <% if shortcut %><span class="session-shortcut" aria-hidden="true"><%= h shortcut %></span><% end %>
-                <% if rpc_clients.busy?(session.path) %>
+                <% if compacting %>
+                  <span class="session-compacting-indicator" title="Compacting context" aria-label="Compacting context"></span>
+                <% elsif rpc_clients.busy?(session.path) %>
                   <span class="session-running-indicator" title="Pi is working" aria-label="Pi is working"></span>
                 <% end %>
               </div>

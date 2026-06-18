@@ -50,6 +50,11 @@ class PiRpcClientRegistry
     client&.respond_to?(:busy_since) ? client.busy_since : nil
   end
 
+  def compacting?(session_path)
+    client = client_for(session_path)
+    client&.respond_to?(:compacting?) ? client.compacting? : false
+  end
+
   def agent_running?(session_path)
     client = client_for(session_path)
     client&.respond_to?(:agent_running?) ? client.agent_running? : false

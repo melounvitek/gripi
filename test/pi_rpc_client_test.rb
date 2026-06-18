@@ -1,6 +1,7 @@
 require "minitest/autorun"
 require "stringio"
 require "json"
+require "timeout"
 require_relative "../lib/pi_rpc_client"
 
 class PiRpcClientTest < Minitest::Test
@@ -120,6 +121,58 @@ class PiRpcClientTest < Minitest::Test
     refute client.busy?
     assert_nil client.busy_since
   ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_tracks_compacting_state_from_compaction_events
+    now = Time.at(1_000)
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader, clock: -> { now })
+
+    writer.puts JSON.generate({ type: "compaction_start" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+
+    assert client.busy?
+    assert client.compacting?
+    assert_equal Time.at(1_000), client.busy_since
+
+    writer.puts JSON.generate({ type: "compaction" })
+    writer.puts JSON.generate({ id: "state-2", type: "state" })
+    client.request("get_state", id: "state-2")
+
+    refute client.busy?
+    refute client.compacting?
+    assert_nil client.busy_since
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_keeps_compacting_state_after_compact_response_until_compaction_end
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    thread = Thread.new { client.compact }
+    Timeout.timeout(1) { sleep 0.01 until input.string.include?("compact") }
+    writer.puts JSON.generate({ type: "compaction_start" })
+    writer.puts JSON.generate({ id: "compact-1", type: "response", command: "compact", success: true })
+    thread.join(1)
+
+    assert client.compacting?
+    assert client.busy?
+
+    writer.puts JSON.generate({ type: "compaction_end" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+
+    refute client.compacting?
+    refute client.busy?
+  ensure
+    thread&.kill
     writer&.close
     reader&.close
   end
