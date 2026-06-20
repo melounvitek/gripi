@@ -3026,7 +3026,6 @@
           button.className = "fork-session-option";
           button.dataset.treeEntryId = entry.entryId || entry.entry_id || "";
           if (entry.editorText !== undefined || entry.editor_text !== undefined) button.dataset.treeEditorText = entry.editorText ?? entry.editor_text ?? "";
-          button.style.paddingLeft = `${0.75 + Math.max(0, Number(entry.depth) || 0) * 1.15}rem`;
 
           const role = document.createElement("span");
           role.className = "tree-session-role";
