@@ -122,4 +122,4 @@ Reviewed the remaining `app.rb` helpers and intentionally stopped without furthe
 
 ### 11. Finish the plan
 
-- [ ] Move completed `PLAN.md` into `plans/`.
+- [x] Move completed `PLAN.md` into `plans/`.
