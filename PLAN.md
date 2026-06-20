@@ -113,10 +113,12 @@ Preserve current behavior exactly while extracting clear backend concepts from `
 
 ### 10. Review remaining `app.rb` helpers and stop intentionally
 
-- [ ] Review remaining private helpers.
-- [ ] Extract more only if a clear business concept remains.
-- [ ] Leave small Sinatra/view helpers in place when extracting them would create noise.
-- [ ] Run full suite.
+- [x] Review remaining private helpers.
+- [x] Extract more only if a clear business concept remains.
+- [x] Leave small Sinatra/view helpers in place when extracting them would create noise.
+- [x] Run full suite.
+
+Reviewed the remaining `app.rb` helpers and intentionally stopped without further extraction: the leftovers are route response glue, Sinatra/view helpers, cache/store accessors, or small adapters around already-extracted concepts.
 
 ### 11. Finish the plan
 
