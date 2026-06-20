@@ -2069,7 +2069,7 @@ class AppTest < Minitest::Test
       document = Nokogiri::HTML(response.body)
       button = document.at_css('.recent-sessions [data-modal-open="new-session-modal"]')
       assert button
-      assert_equal "New session +", button.text.strip
+      assert_equal "+", button.text.strip
       modal = document.at_css('body > [data-modal="new-session-modal"]')
       assert modal
       assert_equal "/sessions/new_at_cwd", modal.at_css('form.new-session-cwd-form')["action"]
@@ -2706,7 +2706,8 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, 'message--thinking'
-      assert_includes response.body, '<span class="thinking-prefix">Thinking:</span> Private reasoning'
+      refute_includes response.body, 'Thinking:'
+      assert_includes response.body, 'Private reasoning'
       refute_includes response.body, '<summary><span class="compact-summary">thinking</span></summary>'
       refute_includes response.body, "**Heading**"
       assert_includes response.body, "Private reasoning"
@@ -2787,7 +2788,8 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, 'class="message message--assistant message--thinking" data-role="assistant"'
-      assert_includes response.body, '<span class="thinking-prefix">Thinking:</span> Thinking through the problem'
+      refute_includes response.body, 'Thinking:'
+      assert_includes response.body, 'Thinking through the problem'
       refute_includes response.body, '<summary><span class="compact-summary">thinking</span></summary>'
       assert_includes response.body, '<summary><span class="compact-summary">$ ls</span></summary>'
       assert_includes response.body, 'class="message message--tool message--compact" data-role="toolResult"'

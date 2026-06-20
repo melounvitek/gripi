@@ -134,7 +134,6 @@
     .details-collapse-button:hover { color: var(--text); }
     .compact-summary { margin-left: 0.25rem; }
     .message-body--thinking { font-size: 0.95rem; font-style: italic; line-height: 1.45; color: var(--muted); }
-    .thinking-prefix { font-style: normal; font-weight: 700; color: var(--muted-soft); }
     .message-body--markdown { line-height: 1.6; overflow-wrap: anywhere; }
     .message-body--markdown[data-rendering="pending"]:empty::before { content: "…"; color: var(--muted); }
     .message-body--markdown > :first-child { margin-top: 0; }
@@ -1335,10 +1334,7 @@
       const body = document.createElement(roleName === "assistant" ? "div" : "pre");
       body.className = options.thinking ? "message-body message-body--thinking" : (roleName === "assistant" ? "message-body message-body--markdown" : "message-body");
       if (options.thinking) {
-        const prefix = document.createElement("span");
-        prefix.className = "thinking-prefix";
-        prefix.textContent = "Thinking:";
-        body.append(prefix, " ", document.createTextNode(text));
+        body.textContent = text;
       } else if (roleName === "assistant") {
         renderAssistantMarkdown(body, text);
       } else {
@@ -1524,10 +1520,7 @@
         if (entry.rawBody) entry.rawBody.textContent = segment.rawDetails || "";
       } else {
         if (segment.thinking) {
-          const prefix = entry.body.querySelector(".thinking-prefix");
-          entry.body.textContent = "";
-          if (prefix) entry.body.append(prefix, " ");
-          entry.body.append(document.createTextNode(segment.text));
+          entry.body.textContent = segment.text;
         } else if (roleName === "assistant") {
           renderAssistantMarkdown(entry.body, segment.text);
         } else {

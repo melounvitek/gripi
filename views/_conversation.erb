@@ -41,7 +41,7 @@
                 <% end %>
               </header>
               <% if message.thinking %>
-                <div class="message-body message-body--thinking"><span class="thinking-prefix">Thinking:</span> <%= render_message_body(message) %></div>
+                <div class="message-body message-body--thinking"><%= render_message_body(message) %></div>
               <% elsif message.compact %>
                 <details class="message-details"<%= " open" if message.expanded %>>
                   <summary><span class="compact-summary"><%= message.tool_summary_html || h(message.summary) %></span></summary>
