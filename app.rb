@@ -515,6 +515,27 @@ class PiWebGateway < Sinatra::Base
       markdown_renderer.render(message.text)
     end
 
+    def render_compact_message_body(message)
+      return h(message.text) unless message.tool_transcript && %w[edit write].include?(message.tool_name)
+
+      message.text.to_s.lines(chomp: true).map do |line|
+        %(<span class="tool-diff-line #{h(tool_diff_line_class(line))}">#{h(line)}</span>)
+      end.join
+    end
+
+    def tool_diff_line_class(line)
+      case line
+      when /\A\+/
+        "tool-diff-line--add"
+      when /\A-/
+        "tool-diff-line--remove"
+      when /\A(?:Edit \d+|write\b|Wrote\b)/
+        "tool-diff-line--meta"
+      else
+        "tool-diff-line--context"
+      end
+    end
+
     def session_status_items(status)
       return [] unless status
 

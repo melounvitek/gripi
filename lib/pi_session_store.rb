@@ -309,7 +309,8 @@ class PiSessionStore
         error: message["isError"] == true,
         tool_call_id: message["toolCallId"],
         tool_name: message["toolName"],
-        raw_details: compact_raw_details(message["content"]) || (compact_message?(message) ? JSON.pretty_generate(message) : nil)
+        raw_details: compact_raw_details(message["content"]) || (compact_message?(message) ? JSON.pretty_generate(message) : nil),
+        tool_transcript: transcript_tool?(message["toolName"])
       )]
     end
   end
@@ -349,7 +350,11 @@ class PiSessionStore
   end
 
   def paired_tool_text(call_message, result_message)
-    return result_message.text if transcript_tool?(call_message.tool_name) && !result_message.error
+    if transcript_tool?(call_message.tool_name) && !result_message.error
+      return [call_message.text, result_message.text].reject(&:empty?).join("\n\n") if call_message.tool_name == "write"
+
+      return result_message.text
+    end
 
     [call_message.text, result_message.text].reject(&:empty?).join("\n\n")
   end
@@ -492,6 +497,7 @@ class PiSessionStore
     arguments = part["arguments"].is_a?(Hash) ? part["arguments"] : {}
     summary = [part["name"], arguments["path"]].compact.join(" ")
     summary += ":#{read_range(arguments)}" if part["name"] == "read" && read_range(arguments)
+    return [summary, preview_text("+", arguments["content"])].reject(&:empty?).join("\n") if part["name"] == "write"
     return summary unless part["name"] == "edit"
 
     edit_preview = Array(arguments["edits"]).each_with_index.map do |edit, index|

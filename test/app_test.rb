@@ -2837,7 +2837,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, '<summary><span class="compact-summary">$ ls</span></summary>'
       assert_includes response.body, 'class="message message--tool message--compact" data-role="toolResult"'
       assert_includes response.body, '<summary><span class="compact-summary">bash</span></summary>'
-      assert_includes response.body, 'class="message message--tool message--compact message--tool-error" data-role="toolResult"'
+      assert_includes response.body, 'class="message message--tool message--compact message--tool-transcript message--tool-error" data-role="toolResult"'
       refute_includes response.body, '<details class="message-details" open>'
       assert_includes response.body, "Thinking through the problem"
       assert_includes response.body, "file list"
@@ -2891,7 +2891,7 @@ class AppTest < Minitest::Test
           timestamp: "2026-06-13T10:02:00Z",
           message: {
             role: "assistant",
-            content: [{ type: "toolCall", id: "write-1", name: "write", arguments: { path: "notes/status.txt", content: "done" } }]
+            content: [{ type: "toolCall", id: "write-1", name: "write", arguments: { path: "notes/status.txt", content: "done\n<script>alert('x')</script>" } }]
           }
         },
         {
@@ -2918,9 +2918,39 @@ class AppTest < Minitest::Test
       assert_includes response.body, '<summary><span class="compact-summary"><span class="tool-command">write</span> <span class="tool-path">notes/status.txt</span></span></summary>'
       assert_includes response.body, '<button type="button" class="details-collapse-button" data-collapse-details>▴ Collapse details</button>'
       refute_includes response.body, '<details class="message-details" open>'
-      assert_includes response.body, '+71 assert_equal [true, false], messages.map(&amp;:thinking)'
+      assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+71 assert_equal [true, false], messages.map(&amp;:thinking)</span>'
       assert_includes response.body, '545 assert_equal 200, response.status'
+      assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+ done</span>'
+      assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+ &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;</span>'
+      refute_includes response.body, '<script>alert'
       assert_includes response.body, 'Wrote notes/status.txt'
+    end
+  end
+
+  def test_renders_unpaired_edit_tool_results_with_diff_coloring
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "toolResult",
+            toolName: "edit",
+            content: [{ type: "text", text: "edited" }],
+            details: { diff: "- old\n+ new" },
+            isError: false
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, 'message--tool-transcript'
+      assert_includes response.body, '<span class="tool-diff-line tool-diff-line--remove">- old</span>'
+      assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+ new</span>'
     end
   end
 
@@ -3093,7 +3123,11 @@ class AppTest < Minitest::Test
       assert_includes response.body, "toolSummaryParts(toolName, toolPart?.arguments || {})"
       assert_includes response.body, "function transcriptToolCallText(name, args = {})"
       assert_includes response.body, 'if (lines[lines.length - 1] === "") lines.pop();'
-      assert_includes response.body, "segment.toolTranscript && segment.error !== true ? segment.text"
+      assert_includes response.body, 'function renderToolTranscriptBody(body, text, toolName = "")'
+      assert_includes response.body, 'body.dataset.rawText = text || "";'
+      assert_includes response.body, 'span.className = `tool-diff-line ${toolDiffLineClass(line)}`;'
+      assert_includes response.body, 'segment.toolTranscript && segment.error !== true && segment.toolName !== "write" ? segment.text'
+      assert_includes response.body, '[bashCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\\n\\n")'
       assert_includes response.body, 'details.open = options.open === true;'
       assert_includes response.body, 'collapseButton.textContent = "▴ Collapse details";'
       assert_includes response.body, 'event.target.closest("[data-collapse-details]")'
