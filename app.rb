@@ -7,6 +7,7 @@ require_relative "lib/prompts/uploaded_images"
 require_relative "lib/rpc/pending_session_registry"
 require_relative "lib/rpc/branch_session"
 require_relative "lib/rpc/start_new_session"
+require_relative "lib/rpc/command_catalog"
 require "securerandom"
 require "ipaddr"
 require_relative "lib/pi_session_store"
@@ -1053,22 +1054,9 @@ class PiWebGateway < Sinatra::Base
 
   def commands_for(session_path)
     response = with_rpc_client(session_path) { |client| client.get_commands }
-    data = response_data(response)
-    commands = data.is_a?(Hash) && data["commands"].is_a?(Array) ? data["commands"] : []
-    commands = commands.reject { |command| ["pi_web_tree", "pi_web_tree_leaf"].include?(command["name"]) }
-    (builtin_commands + commands).uniq { |command| command["name"] }
+    Rpc::CommandCatalog.commands_from(response)
   rescue Errno::EPIPE, IOError
-    builtin_commands
-  end
-
-  def builtin_commands
-    [
-      { "name" => "compact", "source" => "other", "description" => "Manually compact context, optional custom instructions" },
-      { "name" => "fork", "source" => "other", "description" => "Open the fork picker for this session" },
-      { "name" => "tree", "source" => "other", "description" => "Navigate the current session tree" },
-      { "name" => "clone", "source" => "other", "description" => "Clone this session and switch to the clone" },
-      { "name" => "new", "source" => "other", "description" => "Start a new session in this folder" }
-    ]
+    Rpc::CommandCatalog.builtin_commands
   end
 
   def rpc_clients
