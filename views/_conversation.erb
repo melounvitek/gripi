@@ -20,15 +20,6 @@
         </header>
 
         <section class="conversation-scroll" id="conversation-scroll" tabindex="0">
-          <% if @viewing_older_tree_leaf && @latest_tree_leaf_id %>
-            <div class="tree-position-banner" role="status">
-              <div>
-                <strong>Viewing earlier tree point.</strong>
-                <span>Your next message will branch from here.</span>
-              </div>
-              <button type="button" class="secondary" data-tree-entry-id="<%= h @latest_tree_leaf_id %>" data-tree-latest-entry-id="<%= h @latest_tree_leaf_id %>">Jump to latest</button>
-            </div>
-          <% end %>
           <div class="jump-controls jump-controls--top">
             <button type="button" class="jump-button jump-to-first" aria-label="Top">↑↑</button>
           </div>
@@ -105,6 +96,15 @@
             </div>
 
             <form method="post" action="/prompt" class="prompt-form" enctype="multipart/form-data">
+              <% if @viewing_older_tree_leaf && @latest_tree_leaf_id %>
+                <div class="tree-position-banner" role="status">
+                  <div>
+                    <strong>Viewing earlier tree point.</strong>
+                    <span>Your next message will branch from here.</span>
+                  </div>
+                  <button type="button" class="secondary" data-tree-entry-id="<%= h @latest_tree_leaf_id %>" data-tree-latest-entry-id="<%= h @latest_tree_leaf_id %>">Jump to latest</button>
+                </div>
+              <% end %>
               <input type="hidden" name="session" value="<%= h @selected_session.path %>">
               <% if selected_project_cwd %>
                 <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
