@@ -58,12 +58,12 @@ Preserve current behavior exactly while extracting clear backend concepts from `
 
 ### 4. Extract pending RPC session lifecycle
 
-- [ ] Add `Rpc::PendingSessionRegistry` or equivalent.
-- [ ] Move mutex/hash pending cwd behavior there.
-- [ ] Preserve pending-session path, cwd, and remapping behavior.
-- [ ] Run pending-session/remap tests.
-- [ ] Refactor the extracted pending-session code for readability, simplicity, and obviousness.
-- [ ] Run full suite.
+- [x] Add `Rpc::PendingSessionRegistry` or equivalent.
+- [x] Move mutex/hash pending cwd behavior there.
+- [x] Preserve pending-session path, cwd, and remapping behavior.
+- [x] Run pending-session/remap tests.
+- [x] Refactor the extracted pending-session code for readability, simplicity, and obviousness.
+- [x] Run full suite.
 
 ### 5. Extract new and branched session workflows
 

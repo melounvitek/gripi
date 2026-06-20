@@ -4,6 +4,7 @@ require "json"
 require_relative "lib/rendering/markdown_renderer"
 require_relative "lib/prompts/slash_command"
 require_relative "lib/prompts/uploaded_images"
+require_relative "lib/rpc/pending_session_registry"
 require "securerandom"
 require "ipaddr"
 require_relative "lib/pi_session_store"
@@ -74,8 +75,7 @@ class PiWebGateway < Sinatra::Base
   set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
   set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd) }]
   set :rpc_client_registry, nil
-  set :pending_rpc_cwds, {}
-  set :pending_rpc_cwds_mutex, Mutex.new
+  set :pending_session_registry, Rpc::PendingSessionRegistry.new
   set :rpc_idle_timeout_seconds, ENV.fetch("PI_RPC_IDLE_TIMEOUT_SECONDS", "1800").to_i
 
   helpers do
@@ -1127,33 +1127,27 @@ class PiWebGateway < Sinatra::Base
   end
 
   def remember_pending_rpc_cwd(session_path, cwd)
-    settings.pending_rpc_cwds_mutex.synchronize do
-      settings.pending_rpc_cwds[session_path] = cwd
-    end
+    pending_session_registry.remember(session_path, cwd)
   end
 
   def pending_rpc_cwd(session_path)
-    settings.pending_rpc_cwds_mutex.synchronize do
-      settings.pending_rpc_cwds[session_path]
-    end
+    pending_session_registry.cwd_for(session_path)
   end
 
   def pending_rpc_cwd_paths
-    settings.pending_rpc_cwds_mutex.synchronize do
-      settings.pending_rpc_cwds.keys
-    end
+    pending_session_registry.paths
   end
 
   def pending_rpc_cwd_entries
-    settings.pending_rpc_cwds_mutex.synchronize do
-      settings.pending_rpc_cwds.to_a
-    end
+    pending_session_registry.entries
   end
 
   def forget_pending_rpc_cwd(session_path)
-    settings.pending_rpc_cwds_mutex.synchronize do
-      settings.pending_rpc_cwds.delete(session_path)
-    end
+    pending_session_registry.forget(session_path)
+  end
+
+  def pending_session_registry
+    settings.pending_session_registry
   end
 
   def session_cwd(session_path)

@@ -20,7 +20,7 @@ class AppTest < Minitest::Test
     PiWebGateway.set :browser_access_path, File.join(@browser_access_root, "browser-access.json")
     PiWebGateway.set :gateway_admin_password, nil
     PiWebGateway.set :rpc_client_registry, nil
-    PiWebGateway.set :pending_rpc_cwds, {}
+    PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new
     PiWebGateway.set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
     PiWebGateway.set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd) }]
   end
@@ -1037,7 +1037,7 @@ class AppTest < Minitest::Test
       pending_path = File.join(dir, "pending-session.jsonl")
       calls = []
       PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
+      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
       PiWebGateway.set :new_rpc_client_factory, [->(cwd) {
         calls << [:start_new, cwd]
         FakeRpcClient.new(calls)
@@ -1308,7 +1308,7 @@ class AppTest < Minitest::Test
         "HTTP_ACCEPT" => "application/json"
       )
       assert_equal forked_path, JSON.parse(post_response.body).fetch("session")
-      assert_equal project_cwd(dir), PiWebGateway.pending_rpc_cwds.fetch(forked_path)
+      assert_equal project_cwd(dir), PiWebGateway.pending_session_registry.cwd_for(forked_path)
 
       fragment_response = Rack::MockRequest.new(PiWebGateway).get(
         "/session_fragment",
@@ -1438,7 +1438,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [{ "type" => "from-pending" }], real_path))
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
+      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
       response = Rack::MockRequest.new(PiWebGateway).get(
         "/events",
@@ -1449,7 +1449,7 @@ class AppTest < Minitest::Test
       assert_equal({ "events" => [], "last_seq" => 0, "missed" => false }, JSON.parse(response.body))
       refute registry.active?(real_path)
       assert registry.active?(pending_path)
-      assert_includes PiWebGateway.pending_rpc_cwds, pending_path
+      assert_includes PiWebGateway.pending_session_registry.paths, pending_path
       assert_empty calls
     end
   end
@@ -1463,7 +1463,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
+      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
       response = Rack::MockRequest.new(PiWebGateway).post(
         "/prompt",
@@ -1473,7 +1473,7 @@ class AppTest < Minitest::Test
       assert_equal 303, response.status
       assert registry.active?(real_path)
       refute registry.active?(pending_path)
-      refute_includes PiWebGateway.pending_rpc_cwds, pending_path
+      refute_includes PiWebGateway.pending_session_registry.paths, pending_path
       assert_equal [[:get_state], [:prompt, "Continue"]], calls
     end
   end
@@ -1487,7 +1487,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
+      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
       response = Rack::MockRequest.new(PiWebGateway).post(
         "/prompt",
@@ -1499,7 +1499,7 @@ class AppTest < Minitest::Test
       refute_includes response["Location"], Rack::Utils.escape(pending_path)
       assert registry.active?(real_path)
       refute registry.active?(pending_path)
-      refute_includes PiWebGateway.pending_rpc_cwds, pending_path
+      refute_includes PiWebGateway.pending_session_registry.paths, pending_path
       assert_equal [[:get_state], [:prompt, "Continue"]], calls
     end
   end
@@ -1513,7 +1513,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
+      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
       response = Rack::MockRequest.new(PiWebGateway).post(
         "/prompt",
@@ -1538,7 +1538,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
+      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
       response = Rack::MockRequest.new(PiWebGateway).post(
         "/prompt",
@@ -1820,7 +1820,7 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       pending_path = File.join(File.dirname(path), "pending-session.jsonl")
       PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
+      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
       response = Rack::MockRequest.new(PiWebGateway).get(
         "/",
@@ -1842,7 +1842,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new([], [], real_path))
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_rpc_cwds, { pending_path => project_cwd(dir) }
+      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
       response = Rack::MockRequest.new(PiWebGateway).get(
         "/",
