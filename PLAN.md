@@ -96,12 +96,12 @@ Preserve current behavior exactly while extracting clear backend concepts from `
 
 ### 8. Extract sidebar read model
 
-- [ ] Add `Sessions::Sidebar` or equivalent.
-- [ ] Move sidebar sorting, unread grouping, search, project filtering, pagination, and load-more rules there.
-- [ ] Keep ERB output unchanged.
-- [ ] Run sidebar tests.
-- [ ] Refactor the extracted sidebar code for readability, simplicity, and obviousness.
-- [ ] Run full suite.
+- [x] Add `Sessions::Sidebar` or equivalent.
+- [x] Move sidebar sorting, unread grouping, search, project filtering, pagination, and load-more rules there.
+- [x] Keep ERB output unchanged.
+- [x] Run sidebar tests.
+- [x] Refactor the extracted sidebar code for readability, simplicity, and obviousness.
+- [x] Run full suite.
 
 ### 9. Extract session family read model
 

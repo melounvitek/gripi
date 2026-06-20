@@ -8,6 +8,7 @@ require_relative "lib/rpc/pending_session_registry"
 require_relative "lib/rpc/branch_session"
 require_relative "lib/rpc/start_new_session"
 require_relative "lib/rpc/command_catalog"
+require_relative "lib/sessions/sidebar"
 require_relative "lib/sessions/session_view"
 require "securerandom"
 require "ipaddr"
@@ -87,15 +88,15 @@ class PiWebGateway < Sinatra::Base
       ERB::Util.html_escape(value)
     end
 
-    RECENT_SIDEBAR_SESSION_LIMIT = 20
-    SIDEBAR_SESSION_PAGE_SIZE = 20
+    RECENT_SIDEBAR_SESSION_LIMIT = Sessions::Sidebar::RECENT_SESSION_LIMIT
+    SIDEBAR_SESSION_PAGE_SIZE = Sessions::Sidebar::SESSION_PAGE_SIZE
 
     def selected?(session)
-      @selected_session&.path == session.path
+      @sidebar.selected?(session)
     end
 
     def unread?(session)
-      !selected?(session) && read_state_store.unread?(session)
+      @sidebar.unread?(session)
     end
 
     def session_classes(session, *classes)
@@ -103,91 +104,71 @@ class PiWebGateway < Sinatra::Base
     end
 
     def sorted_sidebar_sessions
-      @sorted_sidebar_sessions ||= @groups.values.flatten.sort_by { |session| session.modified_at || Time.at(0) }.reverse
+      @sidebar.sorted_sessions
     end
 
     def sidebar_current_session
-      @selected_session
+      @sidebar.current_session
     end
 
     def unread_sidebar_sessions
-      @unread_sidebar_sessions ||= sorted_sidebar_sessions.reject { |session| selected?(session) }.select { |session| unread?(session) && session_matches_sidebar_search?(session) }
+      @sidebar.unread_sessions
     end
 
     def unread_sidebar_session_count
-      unread_sidebar_sessions.length
+      @sidebar.unread_session_count
     end
 
     def unread_sidebar_session_count_label
-      count = unread_sidebar_session_count
-      count > 99 ? "99+" : count.to_s
+      @sidebar.unread_session_count_label
     end
 
     def unread_sidebar_session_aria_label
-      count = unread_sidebar_session_count
-      "#{count} unread #{count == 1 ? "session" : "sessions"}"
+      @sidebar.unread_session_aria_label
     end
 
     def regular_sidebar_sessions
-      @regular_sidebar_sessions ||= regular_sidebar_session_pool.first(sidebar_sessions_limit)
+      @sidebar.regular_sessions
     end
 
     def regular_sidebar_session_pool
-      @regular_sidebar_session_pool ||= begin
-        sessions = sorted_sidebar_sessions.reject { |session| selected?(session) || unread?(session) }
-        sessions = sessions.select { |session| session.cwd == selected_project_cwd } if selected_project_cwd
-        sessions.select { |session| session_matches_sidebar_search?(session) }
-      end
+      @sidebar.regular_session_pool
     end
 
     def recent_sidebar_sessions
-      [sidebar_current_session, *unread_sidebar_sessions, *regular_sidebar_sessions].compact
+      @sidebar.recent_sessions
     end
 
     def show_all_sidebar_sessions?
-      params["show_all_sessions"] == "1"
+      @sidebar.show_all_sessions?
     end
 
     def sidebar_sessions_limit
-      return regular_sidebar_session_pool.length if show_all_sidebar_sessions?
-
-      requested_limit = params["sidebar_sessions_limit"].to_i
-      requested_limit = RECENT_SIDEBAR_SESSION_LIMIT if requested_limit < RECENT_SIDEBAR_SESSION_LIMIT
-      requested_limit
+      @sidebar.sessions_limit
     end
 
     def sidebar_sessions_limit_param
-      return nil if show_all_sidebar_sessions? || sidebar_sessions_limit <= RECENT_SIDEBAR_SESSION_LIMIT
-
-      sidebar_sessions_limit.to_s
+      @sidebar.sessions_limit_param
     end
 
     def sidebar_sessions_overflow?
-      regular_sidebar_sessions.length < regular_sidebar_session_pool.length
+      @sidebar.sessions_overflow?
     end
 
     def sidebar_next_sessions_limit
-      [sidebar_sessions_limit + SIDEBAR_SESSION_PAGE_SIZE, regular_sidebar_session_pool.length].min
+      @sidebar.next_sessions_limit
     end
 
     def sidebar_sessions_remaining_count
-      regular_sidebar_session_pool.length - regular_sidebar_sessions.length
+      @sidebar.sessions_remaining_count
     end
 
     def sidebar_sessions_load_more_url
-      query = {}
-      query["session"] = @selected_session.path if @selected_session
-      query["project"] = selected_project_cwd if selected_project_cwd
-      query["session_search"] = sidebar_session_search_query if sidebar_session_search?
-      query["sidebar_sessions_limit"] = sidebar_next_sessions_limit.to_s
-      "/?#{Rack::Utils.build_nested_query(query)}"
+      @sidebar.sessions_load_more_url
     end
 
     def known_session_cwds
-      @known_session_cwds ||= @groups.keys.sort_by do |cwd|
-        latest = @groups.fetch(cwd).map { |session| session.modified_at || Time.at(0) }.max || Time.at(0)
-        [-latest.to_f, File.basename(cwd).downcase]
-      end
+      @sidebar.known_session_cwds
     end
 
     def new_session_cwds
@@ -198,12 +179,10 @@ class PiWebGateway < Sinatra::Base
     end
 
     def selected_project_cwd
-      project = params["project"].to_s
-      return if project.empty?
-      return project unless defined?(@groups) && @groups
-      return project if @groups.key?(project)
+      return @sidebar.selected_project_cwd if defined?(@sidebar) && @sidebar
 
-      nil
+      project = params["project"].to_s
+      project.empty? ? nil : project
     end
 
     def project_label(session)
@@ -211,34 +190,27 @@ class PiWebGateway < Sinatra::Base
     end
 
     def sidebar_session_search_query
+      return @sidebar.search_query if defined?(@sidebar) && @sidebar
+
       params["session_search"].to_s.strip
     end
 
     def sidebar_session_search?
+      return @sidebar.search? if defined?(@sidebar) && @sidebar
+
       !sidebar_session_search_query.empty?
     end
 
     def session_matches_sidebar_search?(session)
-      query = sidebar_session_search_query.downcase
-      return true if query.empty?
-
-      [session.display_name, session.cwd, project_label(session), session.first_user_message].any? do |value|
-        value.to_s.downcase.include?(query)
-      end
+      @sidebar.matches_search?(session)
     end
 
     def sidebar_search_clear_url
-      query = {}
-      query["session"] = @selected_session.path if @selected_session
-      query["project"] = selected_project_cwd if selected_project_cwd
-      "/?#{Rack::Utils.build_nested_query(query)}"
+      @sidebar.search_clear_url
     end
 
     def session_url(session_path)
-      query = { "session" => session_path }
-      query["project"] = selected_project_cwd if selected_project_cwd
-      query["session_search"] = sidebar_session_search_query if sidebar_session_search?
-      "/?#{Rack::Utils.build_nested_query(query)}"
+      @sidebar.session_url(session_path)
     end
 
     def session_parent(session)

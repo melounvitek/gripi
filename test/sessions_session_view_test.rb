@@ -4,6 +4,7 @@ require "minitest/autorun"
 require "tmpdir"
 require "json"
 require_relative "../lib/sessions/session_view"
+require_relative "../lib/sessions/sidebar"
 require_relative "../lib/pi_session_store"
 require_relative "../lib/gateway_read_state_store"
 require_relative "../lib/pi_attachment_store"
@@ -29,6 +30,7 @@ class SessionsSessionViewTest < Minitest::Test
       assert_instance_of PiSessionStore, assignments.fetch(:@store)
       assert_equal [session_path], assignments.fetch(:@groups).values.flatten.map(&:path)
       assert_equal session_path, assignments.fetch(:@selected_session).path
+      assert_instance_of Sessions::Sidebar, assignments.fetch(:@sidebar)
       assert_equal ["Hello"], assignments.fetch(:@messages).map(&:text)
       assert_equal({}, assignments.fetch(:@attachment_counts))
       assert_instance_of PiSessionStore::Status, assignments.fetch(:@session_status)

@@ -1,4 +1,5 @@
 require_relative "../pi_session_store"
+require_relative "sidebar"
 
 module Sessions
   class SessionView
@@ -8,6 +9,7 @@ module Sessions
       :groups,
       :all_sessions,
       :selected_session,
+      :sidebar,
       :current_tree_leaf_known,
       :latest_tree_leaf_id,
       :viewing_older_tree_leaf,
@@ -49,6 +51,12 @@ module Sessions
       @read_state_store.observe_sessions(@all_sessions)
       @selected_session = find_selected_session
       @read_state_store.mark_read(@selected_session) if @selected_session && @mark_selected_read
+      @sidebar = Sessions::Sidebar.new(
+        groups: @groups,
+        selected_session: @selected_session,
+        params: @params,
+        read_state_store: @read_state_store
+      )
       prepare_conversation
       self
     end
@@ -59,6 +67,7 @@ module Sessions
         :@groups => @groups,
         :@all_sessions => @all_sessions,
         :@selected_session => @selected_session,
+        :@sidebar => @sidebar,
         :@current_tree_leaf_known => @current_tree_leaf_known,
         :@latest_tree_leaf_id => @latest_tree_leaf_id,
         :@viewing_older_tree_leaf => @viewing_older_tree_leaf,
