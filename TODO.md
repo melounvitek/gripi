@@ -38,11 +38,11 @@ Relevant starting points likely include:
 
 ### Checklist
 
-- [ ] Inspect how `expanded_cwd` is carried through sidebar links, new-session forms, redirects, and session fragments.
-- [ ] Make expansion scoped to the clicked project group only.
-- [ ] Prevent project expansion from persisting unexpectedly across full reloads.
+- [x] Inspect how `expanded_cwd` is carried through sidebar links, new-session forms, redirects, and session fragments.
+- [x] Make expansion scoped to the clicked project group only.
+- [x] Prevent project expansion from persisting unexpectedly across full reloads.
 - [x] Consider pagination or incremental loading instead of rendering every session for large project groups.
-- [ ] Verify session switching, new session creation, browser reload, and back/forward behavior.
+- [x] Verify session switching, new session creation, browser reload, and back/forward behavior.
 
 ---
 

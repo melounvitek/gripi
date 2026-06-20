@@ -6,12 +6,6 @@
       </div>
       <% default_new_session_cwd = new_session_cwds.first %>
       <form class="new-session-cwd-form" method="post" action="/sessions/new_at_cwd" data-cwd-validation-url="/sessions/validate_cwd">
-        <% if show_all_sidebar_sessions? %>
-          <input type="hidden" name="show_all_sessions" value="1">
-        <% end %>
-        <% if sidebar_sessions_limit_param %>
-          <input type="hidden" name="sidebar_sessions_limit" value="<%= h sidebar_sessions_limit_param %>">
-        <% end %>
         <% if selected_project_cwd %>
           <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
         <% end %>

@@ -97,15 +97,6 @@
 
             <form method="post" action="/prompt" class="prompt-form" enctype="multipart/form-data">
               <input type="hidden" name="session" value="<%= h @selected_session.path %>">
-              <% expanded_cwds.each do |expanded_cwd| %>
-                <input type="hidden" name="expanded_cwd[]" value="<%= h expanded_cwd %>">
-              <% end %>
-              <% if show_all_sidebar_sessions? %>
-                <input type="hidden" name="show_all_sessions" value="1">
-              <% end %>
-              <% if sidebar_sessions_limit_param %>
-                <input type="hidden" name="sidebar_sessions_limit" value="<%= h sidebar_sessions_limit_param %>">
-              <% end %>
               <% if selected_project_cwd %>
                 <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
               <% end %>

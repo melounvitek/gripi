@@ -395,6 +395,7 @@
     let messageJumpSuppressionGeneration = 0;
     let conversationScrollIntent = null;
     let lastSidebarInteractionAt = 0;
+    let temporarySidebarSessionsLimit = null;
     let cwdValidationTimer = null;
     let cwdValidationController = null;
     let notificationRegistration = null;
@@ -2471,6 +2472,9 @@
 
     function sidebarFragmentUrl(url = window.location.href) {
       const target = new URL(url, window.location.href);
+      if (url === window.location.href && temporarySidebarSessionsLimit && !target.searchParams.has("sidebar_sessions_limit")) {
+        target.searchParams.set("sidebar_sessions_limit", temporarySidebarSessionsLimit);
+      }
       const sidebarUrl = new URL("/sidebar", window.location.origin);
       target.searchParams.forEach((value, key) => sidebarUrl.searchParams.append(key, value));
       if (!sidebarUrl.searchParams.has("session")) {
@@ -2632,6 +2636,7 @@
         targetUrl.searchParams.delete("project");
       }
       targetUrl.searchParams.delete("sidebar_sessions_limit");
+      temporarySidebarSessionsLimit = null;
 
       const viewGeneration = sessionViewGeneration;
       const switchGeneration = sessionSwitchGeneration;
@@ -2665,12 +2670,12 @@
 
       try {
         const targetUrl = new URL(button.href, window.location.href);
+        temporarySidebarSessionsLimit = targetUrl.searchParams.get("sidebar_sessions_limit") || temporarySidebarSessionsLimit;
         const response = await fetch(sidebarFragmentUrl(targetUrl.href));
         if (!response.ok || !sessionSidebar || viewGeneration !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || sidebarGeneration !== sidebarUpdateGeneration) return;
         const html = await response.text();
         if (!sessionSidebar || viewGeneration !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || sidebarGeneration !== sidebarUpdateGeneration) return;
         replaceSidebarHtml(html, { scrollTop: previousScrollTop });
-        history.replaceState(history.state, "", targetUrl.href);
         scheduleSidebarRefresh();
       } catch (_error) {
       } finally {
@@ -2685,14 +2690,14 @@
     }
 
     function sessionFragmentUrl(url) {
-      const target = new URL(url, window.location.href);
+      const target = new URL(url || window.location.href, window.location.href);
       const fragmentUrl = new URL("/session_fragment", window.location.origin);
       target.searchParams.forEach((value, key) => fragmentUrl.searchParams.append(key, value));
       return fragmentUrl;
     }
 
     function newSessionModalUrl(url) {
-      const target = new URL(url, window.location.href);
+      const target = new URL(url || window.location.href, window.location.href);
       const modalUrl = new URL("/new_session_modal", window.location.origin);
       target.searchParams.forEach((value, key) => modalUrl.searchParams.append(key, value));
       return modalUrl;
@@ -2707,6 +2712,7 @@
     }
 
     async function switchSession(url, { push = true, focus = true } = {}) {
+      temporarySidebarSessionsLimit = null;
       const switchGeneration = ++sessionSwitchGeneration;
       let navigatingAway = false;
       showSessionSwitching();
@@ -2753,14 +2759,6 @@
 
     function currentSessionPath() {
       return promptSessionInput?.value || new URLSearchParams(window.location.search).get("session") || "";
-    }
-
-    function showAllSessionsActive() {
-      return new URLSearchParams(window.location.search).get("show_all_sessions") === "1";
-    }
-
-    function activeSidebarSessionsLimit() {
-      return new URLSearchParams(window.location.search).get("sidebar_sessions_limit") || "";
     }
 
     function activeSidebarSessionSearch() {
@@ -2915,9 +2913,6 @@
     }
 
     function addSessionViewFormParams(formData) {
-      if (showAllSessionsActive()) formData.set("show_all_sessions", "1");
-      const sidebarSessionsLimit = activeSidebarSessionsLimit();
-      if (sidebarSessionsLimit) formData.set("sidebar_sessions_limit", sidebarSessionsLimit);
       const project = new URLSearchParams(window.location.search).get("project");
       if (project) formData.set("project", project);
       const sessionSearch = activeSidebarSessionSearch();
@@ -3060,8 +3055,6 @@
 
       const formData = new FormData(form);
       addSessionViewFormParams(formData);
-      if (!showAllSessionsActive()) formData.delete("show_all_sessions");
-      if (!activeSidebarSessionsLimit()) formData.delete("sidebar_sessions_limit");
       const modal = form.closest("[data-modal]");
       const originalSubmitText = submit?.textContent || "Start session";
       form.dataset.submitting = "true";
@@ -3188,7 +3181,6 @@
       try {
         const formData = new FormData(form);
         addSessionViewFormParams(formData);
-        if (!activeSidebarSessionsLimit()) formData.delete("sidebar_sessions_limit");
         const response = await fetch(form.action, { method: "POST", body: formData, headers: { "Accept": "application/json" } });
         if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;
         if (!response.ok) {

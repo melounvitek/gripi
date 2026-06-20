@@ -46,12 +46,6 @@
             <% if sidebar_session_search? %>
               <input type="hidden" name="session_search" value="<%= h sidebar_session_search_query %>">
             <% end %>
-            <% if show_all_sidebar_sessions? %>
-              <input type="hidden" name="show_all_sessions" value="1">
-            <% end %>
-            <% if sidebar_sessions_limit_param %>
-              <input type="hidden" name="sidebar_sessions_limit" value="<%= h sidebar_sessions_limit_param %>">
-            <% end %>
             <select class="sidebar-project-filter" name="project" aria-label="Filter sessions by project" data-sidebar-project-filter>
               <option value="">All projects</option>
               <% known_session_cwds.each do |cwd| %>

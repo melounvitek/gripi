@@ -310,7 +310,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_json_prompt_redirect_preserves_sidebar_view_state
+  def test_json_prompt_redirect_does_not_preserve_temporary_sidebar_expansion
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
@@ -329,8 +329,8 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       payload = JSON.parse(response.body)
       assert_includes payload.fetch("redirect"), Rack::Utils.escape(path)
-      assert_includes payload.fetch("redirect"), "expanded_cwd"
-      assert_includes payload.fetch("redirect"), "show_all_sessions=1"
+      refute_includes payload.fetch("redirect"), "expanded_cwd"
+      refute_includes payload.fetch("redirect"), "show_all_sessions=1"
     end
   end
 
@@ -982,8 +982,8 @@ class AppTest < Minitest::Test
       payload = JSON.parse(response.body)
       assert_equal new_path, payload.fetch("session")
       assert_includes payload.fetch("redirect"), Rack::Utils.escape(new_path)
-      assert_includes payload.fetch("redirect"), "expanded_cwd"
-      assert_includes payload.fetch("redirect"), "show_all_sessions=1"
+      refute_includes payload.fetch("redirect"), "expanded_cwd"
+      refute_includes payload.fetch("redirect"), "show_all_sessions=1"
       assert_equal [[ :start_new, project_cwd(dir) ], [ :get_state ]], calls
     end
   end
@@ -1032,7 +1032,7 @@ class AppTest < Minitest::Test
       assert_equal forked_path, payload.fetch("session")
       assert_equal "Forked prompt", payload.fetch("text")
       assert_includes payload.fetch("redirect"), Rack::Utils.escape(forked_path)
-      assert_includes payload.fetch("redirect"), "show_all_sessions=1"
+      refute_includes payload.fetch("redirect"), "show_all_sessions=1"
       assert_equal [[:start, path], [:fork, "entry-1"], [:get_state]], calls
     end
   end
@@ -1148,7 +1148,7 @@ class AppTest < Minitest::Test
       payload = JSON.parse(response.body)
       assert_equal new_path, payload.fetch("session")
       assert_includes payload.fetch("redirect"), Rack::Utils.escape(new_path)
-      assert_includes payload.fetch("redirect"), "show_all_sessions=1"
+      refute_includes payload.fetch("redirect"), "show_all_sessions=1"
       assert_equal [[ :start_new, File.realpath(cwd) ], [ :get_state ]], calls
     end
   end
@@ -2073,7 +2073,8 @@ class AppTest < Minitest::Test
       modal = document.at_css('body > [data-modal="new-session-modal"]')
       assert modal
       assert_equal "/sessions/new_at_cwd", modal.at_css('form.new-session-cwd-form')["action"]
-      assert_equal "1", modal.at_css('input[name="show_all_sessions"]')["value"]
+      refute modal.at_css('input[name="show_all_sessions"]')
+      refute modal.at_css('input[name="sidebar_sessions_limit"]')
       assert_includes modal.css('option').map { |option| option["value"] }, project_cwd(dir)
       assert_includes modal.text, "Start session"
       assert_includes modal.text, "Existing folder"
@@ -2246,12 +2247,17 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (select && select.value !== input.value.trim()) select.value = \"\";"
       assert_includes response.body, "form.dataset.submitting === \"true\""
       assert_includes response.body, "function addSessionViewFormParams(formData)"
-      assert_includes response.body, "if (showAllSessionsActive()) formData.set(\"show_all_sessions\", \"1\");"
       assert_includes response.body, "form.action, { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } }"
       assert_includes response.body, "const sessionSearch = activeSidebarSessionSearch();"
       assert_includes response.body, "if (sessionSearch) formData.set(\"session_search\", sessionSearch);"
+      refute_includes response.body, "showAllSessionsActive"
+      refute_includes response.body, "activeSidebarSessionsLimit"
       assert_includes response.body, "const currentProject = new URLSearchParams(window.location.search).get(\"project\");"
       assert_includes response.body, "if (currentProject) url.searchParams.set(\"project\", currentProject);"
+      assert_includes response.body, "let temporarySidebarSessionsLimit = null;"
+      assert_includes response.body, "target.searchParams.set(\"sidebar_sessions_limit\", temporarySidebarSessionsLimit);"
+      assert_includes response.body, "temporarySidebarSessionsLimit = targetUrl.searchParams.get(\"sidebar_sessions_limit\")"
+      refute_includes response.body, "history.replaceState(history.state"
       assert_includes response.body, "function sidebarProjectFilterActive()"
       assert_includes response.body, "function sidebarSearchActive()"
       assert_includes response.body, "function sidebarControlActive()"
@@ -2507,12 +2513,12 @@ class AppTest < Minitest::Test
       assert_equal paths.first, payload.fetch("session")
       assert_equal "Session 1", payload.fetch("title")
       assert_includes payload.fetch("url"), Rack::Utils.escape(paths.first)
-      assert_includes payload.fetch("url"), "expanded_cwd"
+      refute_includes payload.fetch("url"), "expanded_cwd"
       assert_includes payload.fetch("sidebar_html"), "session-sidebar"
       refute_includes payload.fetch("sidebar_html"), "expanded_cwd"
       assert_includes payload.fetch("sidebar_html"), "selected"
       assert_includes payload.fetch("conversation_html"), "conversation-panel"
-      assert_includes payload.fetch("conversation_html"), "expanded_cwd"
+      refute_includes payload.fetch("conversation_html"), "expanded_cwd"
       assert_includes payload.fetch("conversation_html"), paths.first
       assert_includes payload.fetch("conversation_html"), "project"
       assert_includes payload.fetch("conversation_html"), "session-header-project"
