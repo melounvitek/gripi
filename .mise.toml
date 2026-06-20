@@ -5,9 +5,13 @@ ruby = "4.0.2"
 description = "Install dependencies and create local gateway config"
 run = "bin/setup"
 
-[tasks.dev]
+[tasks.start]
 description = "Run the web gateway on port 4567"
-run = "bundle exec rackup -o 0.0.0.0 -p 4567"
+run = "RACK_ENV=production bundle exec rackup -o 0.0.0.0 -p 4567"
+
+[tasks.dev]
+description = "Run the web gateway in development mode on port 4567"
+run = "RACK_ENV=development bundle exec rackup -o 0.0.0.0 -p 4567"
 
 [tasks.test]
 description = "Run the test suite"
