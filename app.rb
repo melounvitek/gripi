@@ -8,6 +8,7 @@ require_relative "lib/rpc/pending_session_registry"
 require_relative "lib/rpc/branch_session"
 require_relative "lib/rpc/start_new_session"
 require_relative "lib/rpc/command_catalog"
+require_relative "lib/sessions/session_family"
 require_relative "lib/sessions/sidebar"
 require_relative "lib/sessions/session_view"
 require "securerandom"
@@ -214,50 +215,19 @@ class PiWebGateway < Sinatra::Base
     end
 
     def session_parent(session)
-      session_by_path[normalized_session_path(session&.parent_session_path)]
+      @session_family.parent(session)
     end
 
     def session_children(session)
-      children_by_parent_path.fetch(normalized_session_path(session&.path), [])
+      @session_family.children(session)
     end
 
     def session_child_count(session)
-      session_children(session).length
+      @session_family.child_count(session)
     end
 
     def session_family_root(session)
-      current = session
-      seen_paths = {}
-      while current && !seen_paths[normalized_session_path(current.path)]
-        seen_paths[normalized_session_path(current.path)] = true
-        parent = session_parent(current)
-        return current unless parent
-
-        current = parent
-      end
-      current || session
-    end
-
-    def session_by_path
-      @session_by_path ||= all_sessions.each_with_object({}) { |session, index| index[normalized_session_path(session.path)] = session }
-    end
-
-    def children_by_parent_path
-      @children_by_parent_path ||= all_sessions.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |session, children|
-        parent_path = normalized_session_path(session.parent_session_path)
-        children[parent_path] << session if parent_path && session_by_path.key?(parent_path)
-      end.transform_values { |sessions| sessions.sort_by { |session| session.modified_at || Time.at(0) }.reverse }
-    end
-
-    def all_sessions
-      @all_sessions ||= @groups.values.flatten
-    end
-
-    def normalized_session_path(path)
-      value = path.to_s
-      return if value.empty?
-
-      File.expand_path(value)
+      @session_family.root(session)
     end
 
     def format_time(time)

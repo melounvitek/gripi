@@ -1,4 +1,5 @@
 require_relative "../pi_session_store"
+require_relative "session_family"
 require_relative "sidebar"
 
 module Sessions
@@ -9,6 +10,7 @@ module Sessions
       :groups,
       :all_sessions,
       :selected_session,
+      :session_family,
       :sidebar,
       :current_tree_leaf_known,
       :latest_tree_leaf_id,
@@ -50,6 +52,7 @@ module Sessions
       @all_sessions = @groups.values.flatten
       @read_state_store.observe_sessions(@all_sessions)
       @selected_session = find_selected_session
+      @session_family = Sessions::SessionFamily.new(@all_sessions)
       @read_state_store.mark_read(@selected_session) if @selected_session && @mark_selected_read
       @sidebar = Sessions::Sidebar.new(
         groups: @groups,
@@ -67,6 +70,7 @@ module Sessions
         :@groups => @groups,
         :@all_sessions => @all_sessions,
         :@selected_session => @selected_session,
+        :@session_family => @session_family,
         :@sidebar => @sidebar,
         :@current_tree_leaf_known => @current_tree_leaf_known,
         :@latest_tree_leaf_id => @latest_tree_leaf_id,
