@@ -1113,6 +1113,76 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_session_store_messages_can_follow_selected_tree_leaf
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        { type: "message", id: "user-1", parentId: nil, timestamp: "2026-06-13T10:00:00Z", message: { role: "user", content: [{ type: "text", text: "First prompt" }] } },
+        { type: "message", id: "assistant-1", parentId: "user-1", timestamp: "2026-06-13T10:01:00Z", message: { role: "assistant", content: [{ type: "text", text: "First answer" }] } },
+        { type: "message", id: "user-2", parentId: "assistant-1", timestamp: "2026-06-13T10:02:00Z", message: { role: "user", content: [{ type: "text", text: "Later prompt" }] } },
+        { type: "message", id: "assistant-2", parentId: "user-2", timestamp: "2026-06-13T10:03:00Z", message: { role: "assistant", content: [{ type: "text", text: "Later answer" }] } }
+      ])
+
+      messages = PiSessionStore.new(root: dir).messages(path, current_leaf_id: "assistant-1")
+
+      assert_equal ["First prompt", "First answer"], messages.map(&:text)
+    end
+  end
+
+  def test_sidebar_refresh_does_not_query_active_tree_leaf
+    Dir.mktmpdir do |dir|
+      path = write_session_with_messages(dir, [{ role: "user", text: "Hello" }])
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+      request = Rack::MockRequest.new(PiWebGateway)
+
+      request.post("/sessions/tree", params: { "session" => path, "entry_id" => "entry-1" }, "HTTP_ACCEPT" => "application/json")
+      response = request.get("/sidebar", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_equal [[:start, path], [:navigate_tree, "entry-1"]], calls
+    end
+  end
+
+  def test_conversation_views_follow_active_tree_leaf
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        { type: "message", id: "user-1", parentId: nil, timestamp: "2026-06-13T10:00:00Z", message: { role: "user", content: [{ type: "text", text: "First prompt" }] } },
+        { type: "message", id: "assistant-1", parentId: "user-1", timestamp: "2026-06-13T10:01:00Z", message: { role: "assistant", content: [{ type: "text", text: "First answer" }] } },
+        { type: "message", id: "user-2", parentId: "assistant-1", timestamp: "2026-06-13T10:02:00Z", message: { role: "user", content: [{ type: "text", text: "Later prompt" }] } },
+        { type: "message", id: "assistant-2", parentId: "user-2", timestamp: "2026-06-13T10:03:00Z", message: { role: "assistant", content: [{ type: "text", text: "Later answer" }] } }
+      ])
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+      request = Rack::MockRequest.new(PiWebGateway)
+
+      request.post("/sessions/tree", params: { "session" => path, "entry_id" => "assistant-1" }, "HTTP_ACCEPT" => "application/json")
+      fragment_response = request.get("/session_fragment", params: { "session" => path }, "HTTP_ACCEPT" => "application/json")
+      page_response = request.get("/", params: { "session" => path })
+
+      assert_equal 200, fragment_response.status
+      conversation_html = JSON.parse(fragment_response.body).fetch("conversation_html")
+      assert_includes conversation_html, "First prompt"
+      assert_includes conversation_html, "First answer"
+      refute_includes conversation_html, "Later prompt"
+      refute_includes conversation_html, "Later answer"
+      assert_equal 200, page_response.status
+      page_conversation_text = Nokogiri::HTML(page_response.body).at_css(".conversation-panel").text
+      assert_includes page_conversation_text, "First prompt"
+      assert_includes page_conversation_text, "First answer"
+      refute_includes page_conversation_text, "Later prompt"
+      refute_includes page_conversation_text, "Later answer"
+      assert_equal [[:start, path], [:navigate_tree, "assistant-1"], [:tree_leaf], [:tree_leaf]], calls
+    end
+  end
+
   def test_navigates_session_tree_and_returns_json
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -4009,6 +4079,7 @@ class AppTest < Minitest::Test
 
     def navigate_tree(entry_id)
       @calls << [:navigate_tree, entry_id]
+      @session_file = entry_id
       { "type" => "response", "command" => "prompt", "success" => true, "data" => { "cancelled" => false } }
     end
 

@@ -57,9 +57,9 @@ class PiSessionStore
     sessions.group_by(&:cwd)
   end
 
-  def messages(path)
+  def messages(path, current_leaf_id: nil)
     pending_tool_calls = {}
-    read_entries(path).each_with_object([]) do |entry, rendered_messages|
+    session_entries(path, current_leaf_id: current_leaf_id).each_with_object([]) do |entry, rendered_messages|
       if entry["type"] == "compaction"
         rendered_messages << compaction_message_from_entry(entry)
         next
@@ -132,6 +132,29 @@ class PiSessionStore
   end
 
   private
+
+  def session_entries(path, current_leaf_id: nil)
+    entries = read_entries(path)
+    return entries if current_leaf_id.to_s.empty?
+
+    tree_path = tree_path_entry_ids(entries, current_leaf_id)
+    return entries if tree_path.empty?
+
+    entries.select { |entry| !tree_node_entry?(entry) || tree_path.include?(entry["id"]) }
+  end
+
+  def tree_path_entry_ids(entries, leaf_id)
+    entries_by_id = entries.filter_map { |entry| [entry["id"], entry] if entry["id"] }.to_h
+    path = []
+    entry = entries_by_id[leaf_id]
+
+    while entry
+      path << entry["id"]
+      entry = entries_by_id[entry["parentId"]]
+    end
+
+    path.reverse
+  end
 
   def tree_node_entry?(entry)
     entry["id"] && entry["type"] != "session"

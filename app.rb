@@ -732,7 +732,7 @@ class PiWebGateway < Sinatra::Base
   end
 
   get "/" do
-    prepare_session_view
+    prepare_session_view(include_conversation: true)
     erb :index
   end
 
@@ -747,7 +747,7 @@ class PiWebGateway < Sinatra::Base
   end
 
   get "/session_fragment" do
-    prepare_session_view
+    prepare_session_view(include_conversation: true)
     content_type :json
     JSON.generate(
       url: session_view_url,
@@ -1104,7 +1104,7 @@ class PiWebGateway < Sinatra::Base
     @read_state_store
   end
 
-  def prepare_session_view
+  def prepare_session_view(include_conversation: false)
     remap_selected_pending_session
     @store = PiSessionStore.new(root: settings.sessions_root, delete_missing_cwds: true)
     @groups = @store.grouped_sessions
@@ -1113,9 +1113,21 @@ class PiWebGateway < Sinatra::Base
     read_state_store.observe_sessions(all_sessions)
     @selected_session = find_selected_session(all_sessions)
     read_state_store.mark_read(@selected_session) if @selected_session && should_mark_selected_session_read?
-    @messages = @selected_session && File.exist?(@selected_session.path) ? @store.messages(@selected_session.path) : []
-    @attachment_counts = @selected_session && File.exist?(@selected_session.path) ? attachment_store.counts_for_messages(@selected_session.path, @messages) : {}
-    @session_status = @selected_session && File.exist?(@selected_session.path) ? @store.status(@selected_session.path) : nil
+    current_leaf_id = include_conversation && @selected_session && File.exist?(@selected_session.path) ? active_session_tree_leaf(@selected_session.path) : nil
+    @messages = @selected_session && File.exist?(@selected_session.path) ? @store.messages(@selected_session.path, current_leaf_id: current_leaf_id) : []
+    @attachment_counts = include_conversation && @selected_session && File.exist?(@selected_session.path) ? attachment_store.counts_for_messages(@selected_session.path, @messages) : {}
+    @session_status = include_conversation && @selected_session && File.exist?(@selected_session.path) ? @store.status(@selected_session.path) : nil
+  end
+
+  def active_session_tree_leaf(session_path)
+    return unless rpc_clients.active?(session_path)
+
+    client = rpc_clients.begin_use(session_path)
+    return unless client&.respond_to?(:tree_leaf)
+
+    client.tree_leaf
+  ensure
+    rpc_clients.end_use(session_path) if client
   end
 
   def should_mark_selected_session_read?
