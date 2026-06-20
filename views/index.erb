@@ -148,6 +148,11 @@
     .message-code-block { position: relative; }
     .message-body--markdown pre { padding: 0.85rem; border-radius: 0.6rem; background: var(--code); color: var(--text); overflow-x: auto; white-space: pre; border: 1px solid var(--border); }
     .message-body--markdown pre code { padding: 0; background: transparent; color: inherit; }
+    .message-body--markdown code.highlight .syntax-comment { color: #808080; font-style: italic; }
+    .message-body--markdown code.highlight .syntax-keyword { color: #b294bb; }
+    .message-body--markdown code.highlight .syntax-string { color: #b5bd68; }
+    .message-body--markdown code.highlight .syntax-number, .message-body--markdown code.highlight .syntax-symbol, .message-body--markdown code.highlight .syntax-literal { color: #de935f; }
+    .message-body--markdown code.highlight .syntax-function, .message-body--markdown code.highlight .syntax-key, .message-body--markdown code.highlight .syntax-variable { color: #81a2be; }
     .code-block-copy-button { position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; background: rgba(24, 24, 30, 0.88); }
     .message-body--markdown a { color: var(--link); }
     .message-attachments { display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.6rem; padding: 0.25rem 0.45rem; border-radius: 0.45rem; background: rgba(138, 190, 183, 0.12); color: var(--muted); font-size: 0.82rem; font-weight: 700; }

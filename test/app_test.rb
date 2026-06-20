@@ -751,6 +751,49 @@ class AppTest < Minitest::Test
     assert_includes html, "<ol start=\"5\">\n<li>Fifth</li>\n</ol>"
   end
 
+  def test_markdown_highlights_fenced_code_blocks_safely
+    response = Rack::MockRequest.new(PiWebGateway).post(
+      "/markdown",
+      params: { "text" => "```ruby\nputs :ok\n<script>alert('x')</script>\n```\n\n```unknown\n<bad>\n```" }
+    )
+
+    assert_equal 200, response.status
+    html = JSON.parse(response.body).fetch("html")
+    assert_includes html, "<code class=\"highlight ruby\">"
+    assert_includes html, "<span class=\"syntax-function\">puts</span>"
+    assert_includes html, "&lt;script&gt;alert("
+    assert_includes html, "&lt;/script&gt;"
+    assert_includes html, "<code class=\"unknown\">&lt;bad&gt;"
+    refute_includes html, "<script>"
+    refute_includes html, "<bad>"
+  end
+
+  def test_markdown_highlights_common_fenced_code_language_aliases
+    markdown = <<~MARKDOWN
+      ```js
+      const value = true
+      ```
+
+      ```json
+      {"ok": true}
+      ```
+
+      ```bash
+      echo "$HOME"
+      ```
+    MARKDOWN
+    response = Rack::MockRequest.new(PiWebGateway).post("/markdown", params: { "text" => markdown })
+
+    assert_equal 200, response.status
+    html = JSON.parse(response.body).fetch("html")
+    assert_includes html, "<code class=\"highlight javascript\">"
+    assert_includes html, "<span class=\"syntax-keyword\">const</span>"
+    assert_includes html, "<code class=\"highlight json\">"
+    assert_includes html, "<span class=\"syntax-key\">\"ok\"</span>"
+    assert_includes html, "<code class=\"highlight shell\">"
+    assert_includes html, "<span class=\"syntax-function\">echo</span>"
+  end
+
   def test_returns_buffered_rpc_events_for_selected_session_cursor
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -2735,7 +2778,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "<h2>Plan</h2>"
       assert_includes response.body, "<li>One</li>"
       assert_includes response.body, "<code>two</code>"
-      assert_includes response.body, "<pre><code class=\"ruby\">puts :ok\n</code></pre>"
+      assert_includes response.body, "<pre><code class=\"highlight ruby\"><span class=\"syntax-function\">puts</span> <span class=\"syntax-symbol\">:ok</span>\n</code></pre>"
       refute_includes response.body, "<script>alert"
       refute_includes response.body, "javascript:alert"
       assert_includes response.body, "## Not markdown &lt;script&gt;alert(&#39;user&#39;)&lt;/script&gt;"

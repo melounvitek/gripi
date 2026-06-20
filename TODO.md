@@ -334,18 +334,19 @@ Render fenced code blocks with readable syntax highlighting while preserving saf
 
 ### Checklist
 
-- [ ] Inspect the current markdown rendering and sanitization pipeline.
-- [ ] Evaluate a small Ruby-side or browser-side syntax highlighting approach.
-- [ ] Ensure highlighted output remains sanitized and safe.
-- [ ] Add styling compatible with the current dark theme.
-- [ ] Implement syntax highlighting for common fenced code languages.
-- [ ] Verify unknown languages and plain code blocks still render cleanly.
-- [ ] Note whether a gateway restart is needed.
+- [x] Inspect the current markdown rendering and sanitization pipeline.
+- [x] Evaluate a small Ruby-side or browser-side syntax highlighting approach.
+- [x] Ensure highlighted output remains sanitized and safe.
+- [x] Add styling compatible with the current dark theme.
+- [x] Implement syntax highlighting for common fenced code languages.
+- [x] Verify unknown languages and plain code blocks still render cleanly.
+- [x] Note whether a gateway restart is needed.
 
 ### Notes
 
 - Do not add a large frontend build pipeline just for highlighting.
 - Preserve copyability and readability of code blocks.
+- Implemented Ruby-side lightweight highlighting for Ruby, JavaScript/TypeScript, JSON, and shell aliases inside the existing sanitized markdown pipeline. Gateway restart is needed for the running service to pick up the server/CSS changes.
 
 ---
 
