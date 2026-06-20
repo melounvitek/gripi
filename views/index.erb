@@ -357,6 +357,7 @@
     let liveStatusModel = null;
     let liveStatusThinking = null;
     let pendingImages = [];
+    let restorePromptFocusAfterSending = false;
     let eventPollTimer = null;
     let sidebarRefreshTimer = null;
     let sidebarUpdateGeneration = 0;
@@ -904,7 +905,14 @@
         composerStopButton.disabled = !agentBusy;
         composerStopButton.classList.toggle("is-visible", agentBusy);
       }
-      if (promptTextarea) promptTextarea.disabled = submitting;
+      if (promptTextarea) {
+        if (submitting && document.activeElement === promptTextarea) restorePromptFocusAfterSending = true;
+        promptTextarea.disabled = submitting;
+        if (!submitting && restorePromptFocusAfterSending) {
+          restorePromptFocusAfterSending = false;
+          if (shouldAutofocusPrompt()) promptTextarea.focus({ preventScroll: true });
+        }
+      }
       const attachmentsDisabled = agentBusy;
       if (imageInput) imageInput.disabled = attachmentsDisabled;
       if (attachButton) {

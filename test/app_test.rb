@@ -3303,6 +3303,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "let liveAssistantSegments = new Map();"
       assert_includes response.body, "let liveAssistantSeen = false;"
       assert_includes response.body, "let liveUserMessages = new Map();"
+      assert_includes response.body, "let restorePromptFocusAfterSending = false;"
       assert_includes response.body, "function optimisticUserMessage(text)"
       assert_includes response.body, "function upsertLiveUserSegment(event, segment, fallbackIndex, shouldScroll, timestamp)"
       assert_includes response.body, 'if (live && roleName === "user" && !options.optimistic && optimisticUserMessageAlreadyRendered(text)) return null;'
@@ -3365,6 +3366,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (!steering) resetLiveAssistantTracking();"
       assert_includes response.body, "const agentBusy = [\"running\", \"sending\"].includes(state);"
       assert_includes response.body, "promptTextarea.disabled = submitting;"
+      assert_includes response.body, "if (!submitting && restorePromptFocusAfterSending)"
+      assert_includes response.body, "promptTextarea.focus({ preventScroll: true });"
       assert_includes response.body, "composerStopButton.hidden = !agentBusy;"
       assert_includes response.body, "if (steering) formData.set(\"streaming_behavior\", \"steer\");"
       assert_includes response.body, "if (!addImageFiles(files) && composerState?.dataset.state === \"running\") showStatus(\"Steering messages cannot include images\", true);"
