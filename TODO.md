@@ -116,7 +116,7 @@ The session view reliably follows new content during active updates, including b
 - Be careful not to create scroll jitter.
 - Prefer requestAnimationFrame or another DOM-settled timing mechanism if scroll calculations happen before layout is complete.
 - Future sessions should preserve the user's ability to manually scroll up and read older content.
-- Implemented explicit auto-scroll state, double `requestAnimationFrame` post-layout scroll scheduling, and a tall latest-assistant-message top-alignment exception. Automated tests pass; manual browser verification for rapid tool bursts and long replies remains open.
+- Implemented explicit auto-scroll state, double `requestAnimationFrame` post-layout scroll scheduling, and a tall latest-assistant-message top-alignment exception. Automated tests pass.
 - Gateway restart is needed for the deployed web UI to pick up these frontend changes.
 
 ---
