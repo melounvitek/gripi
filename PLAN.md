@@ -32,11 +32,11 @@ Preserve current behavior exactly while extracting clear backend concepts from `
 
 ### 1. Extract markdown rendering
 
-- [ ] Move `SafeMarkdownRenderer` to `lib/rendering/markdown_renderer.rb` or equivalent.
-- [ ] Keep `/markdown` behavior unchanged.
-- [ ] Keep existing markdown sanitization/highlighting tests green.
-- [ ] Refactor the extracted markdown renderer for readability, simplicity, and obviousness.
-- [ ] Run full suite.
+- [x] Move `SafeMarkdownRenderer` to `lib/rendering/markdown_renderer.rb` or equivalent.
+- [x] Keep `/markdown` behavior unchanged.
+- [x] Keep existing markdown sanitization/highlighting tests green.
+- [x] Refactor the extracted markdown renderer for readability, simplicity, and obviousness.
+- [x] Run full suite.
 
 ### 2. Extract prompt parsing concepts
 
