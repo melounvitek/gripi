@@ -40,12 +40,12 @@ Preserve current behavior exactly while extracting clear backend concepts from `
 
 ### 2. Extract prompt parsing concepts
 
-- [ ] Add `Prompts::SlashCommand` or equivalent.
-- [ ] Move `/name`, `/rename`, `/compact`, `/fork`, `/tree`, `/clone`, and `/new` parsing there.
-- [ ] Keep `/prompt` response payloads unchanged.
-- [ ] Run prompt/slash command tests.
-- [ ] Refactor the extracted prompt parsing code for readability, simplicity, and obviousness.
-- [ ] Run full suite.
+- [x] Add `Prompts::SlashCommand` or equivalent.
+- [x] Move `/name`, `/rename`, `/compact`, `/fork`, `/tree`, `/clone`, and `/new` parsing there.
+- [x] Keep `/prompt` response payloads unchanged.
+- [x] Run prompt/slash command tests.
+- [x] Refactor the extracted prompt parsing code for readability, simplicity, and obviousness.
+- [x] Run full suite.
 
 ### 3. Extract uploaded image handling
 

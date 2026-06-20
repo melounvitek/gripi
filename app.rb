@@ -3,6 +3,7 @@ require "erb"
 require "json"
 require "base64"
 require_relative "lib/rendering/markdown_renderer"
+require_relative "lib/prompts/slash_command"
 require "securerandom"
 require "ipaddr"
 require_relative "lib/pi_session_store"
@@ -628,24 +629,19 @@ class PiWebGateway < Sinatra::Base
       halt 422, "Steering messages cannot include images"
     end
 
-    rename_command = steering_prompt ? nil : session_name_slash_command(message)
-    compact_command = steering_prompt ? nil : session_compact_slash_command(message)
-    fork_command = steering_prompt ? nil : session_fork_slash_command(message)
-    tree_command = steering_prompt ? nil : session_tree_slash_command(message)
-    clone_command = steering_prompt ? nil : session_clone_slash_command(message)
-    new_command = steering_prompt ? nil : session_new_slash_command(message)
+    slash_command = steering_prompt ? nil : Prompts::SlashCommand.parse(message)
     branch_response = nil
     if steering_prompt
       with_rpc_client(session_path) { |client| client.steer(message) }
-    elsif rename_command&.[](:name)
-      with_rpc_client(session_path) { |client| client.set_session_name(rename_command.fetch(:name)) }
-    elsif rename_command || fork_command || tree_command
+    elsif slash_command&.type == :rename && slash_command.name
+      with_rpc_client(session_path) { |client| client.set_session_name(slash_command.name) }
+    elsif slash_command&.type == :rename || [:fork, :tree].include?(slash_command&.type)
       nil
-    elsif compact_command
-      with_rpc_client(session_path) { |client| client.compact(compact_command[:instructions]) }
-    elsif new_command
+    elsif slash_command&.type == :compact
+      with_rpc_client(session_path) { |client| client.compact(slash_command.instructions) }
+    elsif slash_command&.type == :new
       branch_response = redirect_to_new_session(start_new_session(current_session_cwd(session_path)), command: "new")
-    elsif clone_command
+    elsif slash_command&.type == :clone
       response = with_rpc_client(session_path) { |client| client.clone_session }
       branch_response = redirect_to_rpc_session_after_branch(session_path, response)
     else
@@ -659,17 +655,11 @@ class PiWebGateway < Sinatra::Base
     elsif json_request?
       content_type :json
       payload = { session: session_path, redirect: redirect_path }
-      payload[:steer] = true if steering_prompt && !rename_command
-      if rename_command
-        payload[:command] = "rename"
-        payload[:name] = rename_command[:name] if rename_command[:name]
-        payload[:error] = rename_command.fetch(:error) if rename_command[:error]
-      elsif compact_command
-        payload[:command] = "compact"
-      elsif fork_command
-        payload[:command] = "fork"
-      elsif tree_command
-        payload[:command] = "tree"
+      payload[:steer] = true if steering_prompt && !slash_command
+      if slash_command
+        payload[:command] = slash_command.type.to_s
+        payload[:name] = slash_command.name if slash_command.name
+        payload[:error] = slash_command.error if slash_command.error
       end
       JSON.generate(payload)
     else
@@ -1012,38 +1002,6 @@ class PiWebGateway < Sinatra::Base
     query["project"] = selected_project_cwd if selected_project_cwd
     query["session_search"] = sidebar_session_search_query if sidebar_session_search?
     "/?#{Rack::Utils.build_nested_query(query)}"
-  end
-
-  def session_name_slash_command(message)
-    match = message.strip.match(%r{\A/(name|rename)(?:[ \t]+([^\r\n]+))?\z})
-    return nil unless match
-
-    name = match[2]&.strip
-    name ? { name: name } : { error: "Usage: /#{match[1]} <name>" }
-  end
-
-  def session_compact_slash_command(message)
-    match = message.strip.match(%r{\A/compact(?:[ \t]+([^\r\n]+))?\z})
-    return nil unless match
-
-    instructions = match[1]&.strip
-    { instructions: instructions.to_s.empty? ? nil : instructions }
-  end
-
-  def session_fork_slash_command(message)
-    message.strip.match?(%r{\A/fork\z})
-  end
-
-  def session_tree_slash_command(message)
-    message.strip.match?(%r{\A/tree\z})
-  end
-
-  def session_clone_slash_command(message)
-    message.strip.match?(%r{\A/clone\z})
-  end
-
-  def session_new_slash_command(message)
-    message.strip.match?(%r{\A/new\z})
   end
 
   def session_redirect_path(session_path)
