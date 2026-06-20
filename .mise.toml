@@ -2,8 +2,8 @@
 ruby = "4.0.2"
 
 [tasks.setup]
-description = "Install Ruby dependencies"
-run = "bundle install"
+description = "Install dependencies and create local gateway config"
+run = "bin/setup"
 
 [tasks.dev]
 description = "Run the web gateway on port 4567"
