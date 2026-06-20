@@ -5,6 +5,8 @@ require_relative "lib/rendering/markdown_renderer"
 require_relative "lib/prompts/slash_command"
 require_relative "lib/prompts/uploaded_images"
 require_relative "lib/rpc/pending_session_registry"
+require_relative "lib/rpc/branch_session"
+require_relative "lib/rpc/start_new_session"
 require "securerandom"
 require "ipaddr"
 require_relative "lib/pi_session_store"
@@ -884,11 +886,13 @@ class PiWebGateway < Sinatra::Base
   end
 
   def start_new_session(cwd)
-    client = settings.new_rpc_client_factory.first.call(cwd)
-    new_session_path = session_file_from(client.get_state) || pending_session_path(cwd)
-    rpc_clients.register(new_session_path, client)
-    remember_pending_rpc_cwd(new_session_path, cwd) unless File.exist?(new_session_path)
-    new_session_path
+    Rpc::StartNewSession.call(
+      cwd,
+      client_factory: settings.new_rpc_client_factory.first,
+      rpc_clients: rpc_clients,
+      pending_sessions: pending_session_registry,
+      sessions_root: settings.sessions_root
+    )
   end
 
   def redirect_to_rpc_session_after_branch(previous_session_path, response, text: nil)
@@ -914,13 +918,12 @@ class PiWebGateway < Sinatra::Base
   end
 
   def branch_session_path(previous_session_path)
-    client = rpc_clients.client_for(previous_session_path)
-    new_session_path = session_file_from(client&.get_state) || previous_session_path
-    if new_session_path != previous_session_path
-      rpc_clients.move(previous_session_path, new_session_path)
-      remember_pending_rpc_cwd(new_session_path, branched_session_cwd(previous_session_path)) unless File.exist?(new_session_path)
-    end
-    new_session_path
+    Rpc::BranchSession.call(
+      previous_session_path,
+      rpc_clients: rpc_clients,
+      pending_sessions: pending_session_registry,
+      cwd: branched_session_cwd(previous_session_path)
+    )
   end
 
   def branched_session_cwd(previous_session_path)
@@ -1126,10 +1129,6 @@ class PiWebGateway < Sinatra::Base
     end&.first
   end
 
-  def remember_pending_rpc_cwd(session_path, cwd)
-    pending_session_registry.remember(session_path, cwd)
-  end
-
   def pending_rpc_cwd(session_path)
     pending_session_registry.cwd_for(session_path)
   end
@@ -1152,10 +1151,6 @@ class PiWebGateway < Sinatra::Base
 
   def session_cwd(session_path)
     PiSessionStore.new(root: settings.sessions_root).sessions.find { |session| session.path == session_path }&.cwd
-  end
-
-  def pending_session_path(cwd)
-    File.join(settings.sessions_root, "pending-#{SecureRandom.uuid}.jsonl")
   end
 
   def response_data(response)

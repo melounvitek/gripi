@@ -67,13 +67,13 @@ Preserve current behavior exactly while extracting clear backend concepts from `
 
 ### 5. Extract new and branched session workflows
 
-- [ ] Add `Rpc::StartNewSession.call` or equivalent workflow object.
-- [ ] Add `Rpc::BranchSession.call` or equivalent workflow object.
-- [ ] Preserve new/fork/clone redirects and JSON payloads.
-- [ ] Preserve pending real-session remapping behavior.
-- [ ] Run new/fork/clone/session remap tests.
-- [ ] Refactor the extracted session workflow code for readability, simplicity, and obviousness.
-- [ ] Run full suite.
+- [x] Add `Rpc::StartNewSession.call` or equivalent workflow object.
+- [x] Add `Rpc::BranchSession.call` or equivalent workflow object.
+- [x] Preserve new/fork/clone redirects and JSON payloads.
+- [x] Preserve pending real-session remapping behavior.
+- [x] Run new/fork/clone/session remap tests.
+- [x] Refactor the extracted session workflow code for readability, simplicity, and obviousness.
+- [x] Run full suite.
 
 ### 6. Extract command catalog
 
