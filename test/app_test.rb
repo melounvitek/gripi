@@ -2495,16 +2495,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const originalForkText = forkOption.textContent;"
       assert_includes response.body, "forkOption.textContent = originalForkText;"
       assert_includes response.body, "showStatus(\"Could not fork this session\", true);"
-      assert_includes response.body, "function makeForkButton(entryId)"
-      assert_includes response.body, "function forkEntryIdFromEvent(event, message)"
-      assert_includes response.body, "return message?.entryId || message?.entry_id || event.entryId || event.entry_id || message?.id"
-      assert_includes response.body, "function scheduleResolveForkButton(entry, text)"
-      assert_includes response.body, "resolveForkButtonFromMessages(entry, text, sessionViewGeneration, 1)"
-      assert_includes response.body, "normalizedMessageText(message.text) === normalizedMessageText(text)"
-      assert_includes response.body, "ensureForkButton(updated, entryId);"
-      assert_includes response.body, "if (updated && !entryId) scheduleResolveForkButton(updated, segment.text);"
-      assert_includes response.body, "if (!entryId) scheduleResolveForkButton(entry, segment.text);"
-      assert_includes response.body, "appendMessage(\"user\", segment.text, true, shouldScroll, timestamp, { entryId });"
+      refute_includes response.body, "function makeForkButton(entryId)"
+      refute_includes response.body, "function forkEntryIdFromEvent(event, message)"
+      refute_includes response.body, "function scheduleResolveForkButton(entry, text)"
       assert_includes response.body, "abortEventPoll();"
       assert_includes response.body, "async function submitAbort(event)"
       assert_includes response.body, "if (modalIsOpen()) return;"
@@ -2790,7 +2783,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_renders_fork_button_for_user_messages_with_entry_ids
+  def test_does_not_render_fork_button_for_user_messages
     Dir.mktmpdir do |dir|
       path = write_session_with_raw_messages(dir, [
         { type: "message", id: "user-entry-1", message: { role: "user", content: [{ type: "text", text: "Fork me" }] } },
@@ -2805,8 +2798,7 @@ class AppTest < Minitest::Test
       document = Nokogiri::HTML(response.body)
       user_message = document.at_css('[data-role="user"]')
       assistant_message = document.at_css('[data-role="assistant"]')
-      fork_button = user_message.at_css('[data-fork-entry-id="user-entry-1"]')
-      assert_equal "Fork", fork_button.text.strip
+      assert_nil user_message.at_css("[data-fork-entry-id]")
       assert_nil assistant_message.at_css("[data-fork-entry-id]")
     end
   end
