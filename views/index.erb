@@ -111,8 +111,8 @@
     .message--tool { background: #080d20; border-color: rgba(69, 133, 255, 0.32); border-style: dashed; color: var(--text); }
     .message--tool-transcript { background: #283228; border-color: rgba(181, 189, 104, 0.28); color: #d8ded8; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     .message--tool-transcript .message-details summary { color: #d8ded8; }
-    .message--tool-transcript .message-body { color: rgba(216, 222, 216, 0.68); line-height: 1.35; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
-    .tool-diff-line { display: block; width: max-content; min-width: 100%; margin: 0 -0.25rem; padding: 0 0.25rem; border-left: 2px solid transparent; }
+    .message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: rgba(216, 222, 216, 0.68); line-height: 1.35; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
+    .tool-diff-line { display: block; margin: 0 -0.25rem; padding: 0 0.25rem; border-left: 2px solid transparent; }
     .tool-diff-line--add { border-left-color: rgba(181, 189, 104, 0.75); background: rgba(181, 189, 104, 0.12); color: #d8f0a0; }
     .tool-diff-line--remove { border-left-color: rgba(204, 102, 102, 0.8); background: rgba(204, 102, 102, 0.12); color: #f0b0a8; }
     .tool-diff-line--meta { color: var(--accent); font-weight: 700; }
