@@ -107,4 +107,16 @@ Preserve current behavior exactly while extracting clear backend concepts from `
 - [ ] Extract more only if a clear business concept remains.
 - [ ] Leave small Sinatra/view helpers in place when extracting them would create noise.
 - [ ] Run full suite.
+
+### 11. Refactor extracted backend files for clarity
+
+- [ ] After the extraction steps are complete and tested, review the new `lib/` files.
+- [ ] Simplify names, method shapes, and object boundaries where that makes the code easier to read.
+- [ ] Remove awkward extraction artifacts and unnecessary indirection.
+- [ ] Keep behavior unchanged unless a deliberate follow-up change is discussed.
+- [ ] Run focused tests for touched areas.
+- [ ] Run full suite.
+
+### 12. Finish the plan
+
 - [ ] Move completed `PLAN.md` into `plans/`.
