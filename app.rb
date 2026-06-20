@@ -779,13 +779,14 @@ class PiWebGateway < Sinatra::Base
     rename_command = steering_prompt ? nil : session_name_slash_command(message)
     compact_command = steering_prompt ? nil : session_compact_slash_command(message)
     fork_command = steering_prompt ? nil : session_fork_slash_command(message)
+    tree_command = steering_prompt ? nil : session_tree_slash_command(message)
     clone_command = steering_prompt ? nil : session_clone_slash_command(message)
     branch_response = nil
     if steering_prompt
       with_rpc_client(session_path) { |client| client.steer(message) }
     elsif rename_command&.[](:name)
       with_rpc_client(session_path) { |client| client.set_session_name(rename_command.fetch(:name)) }
-    elsif rename_command || fork_command
+    elsif rename_command || fork_command || tree_command
       nil
     elsif compact_command
       with_rpc_client(session_path) { |client| client.compact(compact_command[:instructions]) }
@@ -812,6 +813,8 @@ class PiWebGateway < Sinatra::Base
         payload[:command] = "compact"
       elsif fork_command
         payload[:command] = "fork"
+      elsif tree_command
+        payload[:command] = "tree"
       end
       JSON.generate(payload)
     else
@@ -857,6 +860,26 @@ class PiWebGateway < Sinatra::Base
     messages = response_data(response).fetch("messages", [])
     content_type :json
     JSON.generate(messages: messages)
+  end
+
+  get "/sessions/tree_entries" do
+    session_path = canonical_rpc_session_path(params.fetch("session"))
+    current_leaf_id = with_rpc_client(session_path) { |client| client.tree_leaf }
+    entries = PiSessionStore.new(root: settings.sessions_root).tree_entries(session_path, current_leaf_id: current_leaf_id)
+    content_type :json
+    JSON.generate(entries: entries)
+  end
+
+  post "/sessions/tree" do
+    session_path = canonical_rpc_session_path(params.fetch("session"))
+    entry_id = params.fetch("entry_id").to_s
+    halt 400, "Tree entry cannot be empty" if entry_id.empty?
+
+    response = with_rpc_client(session_path) { |client| client.navigate_tree(entry_id) }
+    data = response_data(response)
+    payload = { session: session_path, redirect: session_redirect_path(session_path), cancelled: data.is_a?(Hash) ? data["cancelled"] || false : false }
+    content_type :json
+    JSON.generate(payload)
   end
 
   post "/sessions/fork" do
@@ -1135,6 +1158,10 @@ class PiWebGateway < Sinatra::Base
     message.strip.match?(%r{\A/fork\z})
   end
 
+  def session_tree_slash_command(message)
+    message.strip.match?(%r{\A/tree\z})
+  end
+
   def session_clone_slash_command(message)
     message.strip.match?(%r{\A/clone\z})
   end
@@ -1214,6 +1241,7 @@ class PiWebGateway < Sinatra::Base
     response = with_rpc_client(session_path) { |client| client.get_commands }
     data = response_data(response)
     commands = data.is_a?(Hash) && data["commands"].is_a?(Array) ? data["commands"] : []
+    commands = commands.reject { |command| ["pi_web_tree", "pi_web_tree_leaf"].include?(command["name"]) }
     (builtin_commands + commands).uniq { |command| command["name"] }
   rescue Errno::EPIPE, IOError
     builtin_commands
@@ -1223,6 +1251,7 @@ class PiWebGateway < Sinatra::Base
     [
       { "name" => "compact", "source" => "other", "description" => "Manually compact context, optional custom instructions" },
       { "name" => "fork", "source" => "other", "description" => "Open the fork picker for this session" },
+      { "name" => "tree", "source" => "other", "description" => "Navigate the current session tree" },
       { "name" => "clone", "source" => "other", "description" => "Clone this session and switch to the clone" }
     ]
   end

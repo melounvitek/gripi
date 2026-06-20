@@ -1,17 +1,19 @@
 require "json"
 require "open3"
+require "securerandom"
 require "thread"
 
 class PiRpcClient
   DEFAULT_EVENT_BUFFER_LIMIT = 5_000
+  GATEWAY_EXTENSION_PATH = File.expand_path("../pi_extensions/pi-web-gateway-tree.ts", __dir__)
 
   def self.start(session_path, popen: Open3.method(:popen3))
-    stdin, stdout, stderr, wait_thread = popen.call("pi", "--mode", "rpc", "--session", session_path)
+    stdin, stdout, stderr, wait_thread = popen.call("pi", "--mode", "rpc", "--extension", GATEWAY_EXTENSION_PATH, "--session", session_path)
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
   end
 
   def self.start_in_cwd(cwd, popen: Open3.method(:popen3))
-    stdin, stdout, stderr, wait_thread = popen.call("pi", "--mode", "rpc", chdir: cwd)
+    stdin, stdout, stderr, wait_thread = popen.call("pi", "--mode", "rpc", "--extension", GATEWAY_EXTENSION_PATH, chdir: cwd)
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
   end
 
@@ -95,6 +97,26 @@ class PiRpcClient
     request("clone", id: next_id("clone"))
   end
 
+  def navigate_tree(entry_id)
+    request_id = SecureRandom.hex(8)
+    response = request("prompt", id: next_id("prompt"), message: "/pi_web_tree #{entry_id} #{request_id}")
+    return response unless response&.fetch("success", true)
+
+    result = wait_for_status("pi_web_tree:#{request_id}")
+    return response unless result
+
+    response.merge("data" => { "cancelled" => result == "cancelled" })
+  end
+
+  def tree_leaf
+    request_id = SecureRandom.hex(8)
+    response = request("prompt", id: next_id("prompt"), message: "/pi_web_tree_leaf #{request_id}")
+    return unless response&.fetch("success", true)
+
+    result = wait_for_status("pi_web_tree_leaf:#{request_id}")
+    result == "__root__" ? nil : result
+  end
+
   def set_session_name(name)
     request("set_session_name", id: next_id("set_session_name"), name: name)
   end
@@ -159,6 +181,32 @@ class PiRpcClient
   end
 
   private
+
+  def wait_for_status(status_key, timeout: 5)
+    deadline = @clock.call + timeout
+
+    @mutex.synchronize do
+      loop do
+        result = status_from_events(status_key)
+        return result if result
+        return nil unless @reader_running
+
+        remaining = deadline - @clock.call
+        return nil unless remaining.positive?
+
+        @condition.wait(@mutex, [remaining, 0.1].min)
+      end
+    end
+  end
+
+  def status_from_events(status_key)
+    event = @events.reverse_each.find do |_seq, candidate|
+      candidate["type"] == "extension_ui_request" &&
+        candidate["method"] == "setStatus" &&
+        candidate["statusKey"] == status_key
+    end
+    event&.last&.[]("statusText")
+  end
 
   def close_io(io)
     io&.close unless io&.closed?

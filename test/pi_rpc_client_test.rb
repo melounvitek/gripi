@@ -17,7 +17,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start("/tmp/session.jsonl", popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["pi", "--mode", "rpc", "--session", "/tmp/session.jsonl"]], calls
+    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls
   end
 
   def test_starts_new_pi_rpc_process_in_cwd
@@ -32,7 +32,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start_in_cwd("/tmp/project", popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["pi", "--mode", "rpc", { chdir: "/tmp/project" }]], calls
+    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls
   end
 
   def test_sends_jsonl_command_and_returns_matching_response
@@ -199,6 +199,38 @@ class PiRpcClientTest < Minitest::Test
     assert_equal({ "id" => "prompt-1", "type" => "prompt", "message" => "Hello", "images" => [{ "type" => "image", "data" => "abc", "mimeType" => "image/png" }] }, JSON.parse(input.string))
   end
 
+  def test_tree_leaf_reports_current_leaf_from_extension_bridge
+    input = StringIO.new
+    output = StringIO.new([
+      JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "pi_web_tree_leaf:abc123", statusText: "entry-9" }),
+      JSON.generate({ id: "prompt-1", type: "response", command: "prompt", success: true })
+    ].join("\n") + "\n")
+    client = PiRpcClient.new(stdin: input, stdout: output)
+
+    leaf_id = with_secure_random_hex("abc123") do
+      client.tree_leaf
+    end
+
+    assert_equal "entry-9", leaf_id
+    assert_equal({ "id" => "prompt-1", "type" => "prompt", "message" => "/pi_web_tree_leaf abc123" }, JSON.parse(input.string))
+  end
+
+  def test_navigate_tree_reports_cancelled_status_from_extension_bridge
+    input = StringIO.new
+    output = StringIO.new([
+      JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "pi_web_tree:abc123", statusText: "cancelled" }),
+      JSON.generate({ id: "prompt-1", type: "response", command: "prompt", success: true })
+    ].join("\n") + "\n")
+    client = PiRpcClient.new(stdin: input, stdout: output)
+
+    response = with_secure_random_hex("abc123") do
+      client.navigate_tree("entry-2")
+    end
+
+    assert_equal true, response.fetch("data").fetch("cancelled")
+    assert_equal({ "id" => "prompt-1", "type" => "prompt", "message" => "/pi_web_tree entry-2 abc123" }, JSON.parse(input.string))
+  end
+
   def test_command_helpers_send_supported_rpc_commands
     input = StringIO.new
     output = StringIO.new([
@@ -214,7 +246,9 @@ class PiRpcClientTest < Minitest::Test
       JSON.generate({ id: "set_session_name-10", type: "response", command: "set_session_name", success: true }),
       JSON.generate({ id: "get_fork_messages-11", type: "response", command: "get_fork_messages", success: true, data: { messages: [] } }),
       JSON.generate({ id: "fork-12", type: "response", command: "fork", success: true, data: { text: "Hello", cancelled: false } }),
-      JSON.generate({ id: "clone-13", type: "response", command: "clone", success: true, data: { cancelled: false } })
+      JSON.generate({ id: "clone-13", type: "response", command: "clone", success: true, data: { cancelled: false } }),
+      JSON.generate({ id: "prompt-14", type: "response", command: "prompt", success: true }),
+      JSON.generate({ id: "prompt-15", type: "response", command: "prompt", success: true })
     ].join("\n") + "\n")
     client = PiRpcClient.new(stdin: input, stdout: output)
 
@@ -231,6 +265,12 @@ class PiRpcClientTest < Minitest::Test
     client.get_fork_messages
     client.fork("entry-1")
     client.clone_session
+    with_secure_random_hex("abc123") do
+      client.navigate_tree("entry-2")
+    end
+    with_secure_random_hex("def456") do
+      client.tree_leaf
+    end
 
     assert_equal [
       { "id" => "get_state-1", "type" => "get_state" },
@@ -245,7 +285,19 @@ class PiRpcClientTest < Minitest::Test
       { "id" => "set_session_name-10", "type" => "set_session_name", "name" => "Useful name" },
       { "id" => "get_fork_messages-11", "type" => "get_fork_messages" },
       { "id" => "fork-12", "type" => "fork", "entryId" => "entry-1" },
-      { "id" => "clone-13", "type" => "clone" }
+      { "id" => "clone-13", "type" => "clone" },
+      { "id" => "prompt-14", "type" => "prompt", "message" => "/pi_web_tree entry-2 abc123" },
+      { "id" => "prompt-15", "type" => "prompt", "message" => "/pi_web_tree_leaf def456" }
     ], input.string.lines.map { |line| JSON.parse(line) }
+  end
+
+  private
+
+  def with_secure_random_hex(value)
+    original = SecureRandom.method(:hex)
+    SecureRandom.define_singleton_method(:hex) { |_length = nil| value }
+    yield
+  ensure
+    SecureRandom.define_singleton_method(:hex, original)
   end
 end

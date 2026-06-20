@@ -16,3 +16,22 @@
       </div>
     </div>
   </div>
+
+  <div class="modal-overlay" data-modal="tree-session-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="tree-session-modal-title">
+      <div class="modal-header">
+        <h2 id="tree-session-modal-title">Session tree</h2>
+        <button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>&times;</button>
+      </div>
+      <% if @selected_session %>
+        <div class="fork-session-list" data-tree-session-list data-tree-entries-url="/sessions/tree_entries?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
+          <p class="fork-session-status" data-tree-session-status>Loading session tree…</p>
+        </div>
+      <% else %>
+        <p class="fork-session-status">Select a session before opening the tree.</p>
+      <% end %>
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-modal-close>Cancel</button>
+      </div>
+    </div>
+  </div>

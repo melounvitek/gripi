@@ -453,6 +453,30 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_tree_slash_command_returns_tree_command_without_rpc
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/tree" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_empty calls
+      payload = JSON.parse(response.body)
+      assert_equal path, payload.fetch("session")
+      assert_equal "tree", payload.fetch("command")
+    end
+  end
+
   def test_clone_slash_command_clones_selected_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -599,8 +623,8 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_steering_prompt_treats_fork_and_clone_slash_commands_as_messages
-    ["/fork", "/clone"].each do |message|
+  def test_steering_prompt_treats_fork_tree_and_clone_slash_commands_as_messages
+    ["/fork", "/tree", "/clone"].each do |message|
       Dir.mktmpdir do |dir|
         path = write_session(dir)
         calls = []
@@ -1053,6 +1077,66 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_returns_tree_entries_for_selected_session
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        { type: "message", id: "user-1", parentId: nil, timestamp: "2026-06-13T10:00:00Z", message: { role: "user", content: [{ type: "text", text: "First prompt" }] } },
+        { type: "message", id: "assistant-1", parentId: "user-1", timestamp: "2026-06-13T10:01:00Z", message: { role: "assistant", content: [{ type: "text", text: "First answer" }] } },
+        { type: "message", id: "hidden-tool-call-only-assistant", parentId: "assistant-1", timestamp: "2026-06-13T10:01:10Z", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }] } },
+        { type: "message", id: "tool-call-only-assistant", parentId: "assistant-1", timestamp: "2026-06-13T10:01:15Z", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "bash", arguments: { command: "pwd" } }] } },
+        { type: "message", id: "tool-result-1", parentId: "assistant-1", timestamp: "2026-06-13T10:01:30Z", message: { role: "toolResult", content: [{ type: "text", text: "Tool output" }] } },
+        { type: "label", id: "label-1", parentId: "user-1", timestamp: "2026-06-13T10:01:45Z", targetId: "user-1", label: "checkpoint" },
+        { type: "message", id: "user-2", parentId: "label-1", timestamp: "2026-06-13T10:02:00Z", message: { role: "user", content: [{ type: "text", text: "Alternate prompt" }] } }
+      ])
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, [], "tool-call-only-assistant")
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sessions/tree_entries",
+        params: { "session" => path },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      entries = JSON.parse(response.body).fetch("entries")
+      assert_equal ["user-1", "assistant-1", "tool-call-only-assistant", "tool-result-1", "user-2"], entries.map { |entry| entry.fetch("entryId") }
+      assert_equal [0, 1, 2, 2, 2], entries.map { |entry| entry.fetch("depth") }
+      assert_equal ["user", "assistant", "assistant", "toolResult", "user"], entries.map { |entry| entry.fetch("role") }
+      assert_equal "Alternate prompt", entries.last.fetch("text")
+      assert_equal "Alternate prompt", entries.last.fetch("editorText")
+      refute entries[1].key?("editorText")
+      assert_equal [[:start, path], [:tree_leaf]], calls
+    end
+  end
+
+  def test_navigates_session_tree_and_returns_json
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/tree",
+        params: { "session" => path, "entry_id" => "entry-1" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal path, payload.fetch("session")
+      assert_includes payload.fetch("redirect"), Rack::Utils.escape(path)
+      assert_equal [[:start, path], [:navigate_tree, "entry-1"]], calls
+    end
+  end
+
   def test_forks_session_and_returns_new_session_as_json
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -1394,18 +1478,25 @@ class AppTest < Minitest::Test
       PiWebGateway.set :sessions_root, dir
       PiWebGateway.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
-        FakeRpcClient.new(calls, [{ "name" => "review", "source" => "skill", "description" => "Review code" }])
+        FakeRpcClient.new(calls, [
+          { "name" => "review", "source" => "skill", "description" => "Review code" },
+          { "name" => "pi_web_tree", "source" => "extension", "description" => "Internal bridge" },
+          { "name" => "pi_web_tree_leaf", "source" => "extension", "description" => "Internal bridge" }
+        ])
       }]
 
       response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (4)"
+      assert_includes response.body, "Slash commands (5)"
       assert_includes response.body, "/review"
       assert_includes response.body, "Review code"
       assert_includes response.body, "/compact"
       assert_includes response.body, "/fork"
+      assert_includes response.body, "/tree"
       assert_includes response.body, "/clone"
+      refute_includes response.body, "pi_web_tree"
+      refute_includes response.body, "pi_web_tree_leaf"
       refute_includes response.body, "<code>/new</code>"
       refute_includes response.body, "command-filter"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
@@ -1430,9 +1521,10 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (3)"
+      assert_includes response.body, "Slash commands (4)"
       assert_includes response.body, "/compact"
       assert_includes response.body, "/fork"
+      assert_includes response.body, "/tree"
       assert_includes response.body, "/clone"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
     end
@@ -3561,6 +3653,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (/^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(trimmed)) return { valid: true };"
       assert_includes response.body, "function sessionNameSlashCommand(message)"
       assert_includes response.body, "function sessionForkSlashCommand(message)"
+      assert_includes response.body, "function sessionTreeSlashCommand(message)"
       assert_includes response.body, "function sessionCloneSlashCommand(message)"
       assert_includes response.body, "function updateSessionHeaderName(name)"
       assert_includes response.body, "function sessionTitleFromEvent(event)"
@@ -3574,14 +3667,16 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const renameCommand = steering ? null : sessionNameSlashCommand(message);"
       assert_includes response.body, "const compactCommand = steering ? null : sessionCompactSlashCommand(message);"
       assert_includes response.body, "const forkCommand = steering ? null : sessionForkSlashCommand(message);"
+      assert_includes response.body, "const treeCommand = steering ? null : sessionTreeSlashCommand(message);"
       assert_includes response.body, "const cloneCommand = steering ? null : sessionCloneSlashCommand(message);"
-      assert_includes response.body, "if (!renameCommand && !compactCommand && !forkCommand && !cloneCommand) {\n        if (!steering) resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
+      assert_includes response.body, "if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand) {\n        if (!steering) resetLiveAssistantTracking();\n        resetEventPollBackoff();\n        scheduleNextEventPoll(0);\n        appendMessage(\"user\", [message, pendingImages.length > 0"
       assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });"
       assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {\n            await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });\n            return;\n          }\n          updateSessionHeaderName(payload.name);\n          setComposerState(\"done\", \"Renamed\");\n          showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);\n          refreshSidebar().catch(() => {});\n          return;\n        }"
       assert_includes response.body, "appendPendingCompactionMessage(new Date());"
       assert_includes response.body, "markSidebarSessionCompacting(submittedSession);"
       assert_includes response.body, "if (payload?.command === \"compact\") {\n          refreshSidebar().catch(() => {});\n          setComposerState(\"running\", \"Compacting…\");\n          showStatus(\"Compaction started\", true);\n          return;\n        }"
       assert_includes response.body, "if (payload?.command === \"fork\") {\n          setComposerState(\"idle\");\n          showStatus(\"Choose a fork point\", true);\n          openForkSessionModal();\n          return;\n        }"
+      assert_includes response.body, "if (payload?.command === \"tree\") {\n          setComposerState(\"idle\");\n          showStatus(\"Choose a tree entry\", true);\n          openTreeSessionModal();\n          return;\n        }"
       assert_includes response.body, "promptForm.requestSubmit();"
       assert_includes response.body, "function resizePromptTextarea()"
       assert_includes response.body, "commandList?.removeAttribute(\"open\");"
@@ -3910,6 +4005,16 @@ class AppTest < Minitest::Test
     def clone_session
       @calls << [:clone_session]
       { "type" => "response", "command" => "clone", "success" => true, "data" => { "cancelled" => false } }
+    end
+
+    def navigate_tree(entry_id)
+      @calls << [:navigate_tree, entry_id]
+      { "type" => "response", "command" => "prompt", "success" => true, "data" => { "cancelled" => false } }
+    end
+
+    def tree_leaf
+      @calls << [:tree_leaf]
+      @session_file
     end
 
     def abort
