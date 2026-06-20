@@ -105,11 +105,11 @@ Preserve current behavior exactly while extracting clear backend concepts from `
 
 ### 9. Extract session family read model
 
-- [ ] Add `Sessions::SessionFamily` or equivalent.
-- [ ] Move parent/child/root indexing rules there.
-- [ ] Run relation/tree/sidebar tests.
-- [ ] Refactor the extracted session family code for readability, simplicity, and obviousness.
-- [ ] Run full suite.
+- [x] Add `Sessions::SessionFamily` or equivalent.
+- [x] Move parent/child/root indexing rules there.
+- [x] Run relation/tree/sidebar tests.
+- [x] Refactor the extracted session family code for readability, simplicity, and obviousness.
+- [x] Run full suite.
 
 ### 10. Review remaining `app.rb` helpers and stop intentionally
 
