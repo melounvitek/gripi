@@ -781,6 +781,7 @@ class PiWebGateway < Sinatra::Base
     fork_command = steering_prompt ? nil : session_fork_slash_command(message)
     tree_command = steering_prompt ? nil : session_tree_slash_command(message)
     clone_command = steering_prompt ? nil : session_clone_slash_command(message)
+    new_command = steering_prompt ? nil : session_new_slash_command(message)
     branch_response = nil
     if steering_prompt
       with_rpc_client(session_path) { |client| client.steer(message) }
@@ -790,6 +791,8 @@ class PiWebGateway < Sinatra::Base
       nil
     elsif compact_command
       with_rpc_client(session_path) { |client| client.compact(compact_command[:instructions]) }
+    elsif new_command
+      branch_response = redirect_to_new_session(start_new_session(current_session_cwd(session_path)), command: "new")
     elsif clone_command
       response = with_rpc_client(session_path) { |client| client.clone_session }
       branch_response = redirect_to_rpc_session_after_branch(session_path, response)
@@ -835,9 +838,7 @@ class PiWebGateway < Sinatra::Base
 
   post "/sessions/new" do
     session_path = params.fetch("session")
-    current_session = PiSessionStore.new(root: settings.sessions_root).sessions.find { |session| session.path == session_path }
-    cwd = current_session&.cwd || pending_rpc_cwd(session_path) || File.dirname(session_path)
-    redirect_to_new_session(start_new_session(cwd))
+    redirect_to_new_session(start_new_session(current_session_cwd(session_path)))
   end
 
   post "/sessions/new_at_cwd" do
@@ -1025,14 +1026,21 @@ class PiWebGateway < Sinatra::Base
     request.env["HTTP_ACCEPT"].to_s.include?("application/json")
   end
 
-  def redirect_to_new_session(new_session_path)
+  def redirect_to_new_session(new_session_path, command: nil)
     redirect_path = session_redirect_path(new_session_path)
     if json_request?
       content_type :json
-      JSON.generate(session: new_session_path, redirect: redirect_path)
+      payload = { session: new_session_path, redirect: redirect_path }
+      payload[:command] = command if command
+      JSON.generate(payload)
     else
       redirect redirect_path
     end
+  end
+
+  def current_session_cwd(session_path)
+    current_session = PiSessionStore.new(root: settings.sessions_root).sessions.find { |session| session.path == session_path }
+    current_session&.cwd || pending_rpc_cwd(session_path) || File.dirname(session_path)
   end
 
   def start_new_session(cwd)
@@ -1166,6 +1174,10 @@ class PiWebGateway < Sinatra::Base
     message.strip.match?(%r{\A/clone\z})
   end
 
+  def session_new_slash_command(message)
+    message.strip.match?(%r{\A/new\z})
+  end
+
   def session_redirect_path(session_path)
     query = { "session" => session_path }
     query["project"] = selected_project_cwd if selected_project_cwd
@@ -1252,7 +1264,8 @@ class PiWebGateway < Sinatra::Base
       { "name" => "compact", "source" => "other", "description" => "Manually compact context, optional custom instructions" },
       { "name" => "fork", "source" => "other", "description" => "Open the fork picker for this session" },
       { "name" => "tree", "source" => "other", "description" => "Navigate the current session tree" },
-      { "name" => "clone", "source" => "other", "description" => "Clone this session and switch to the clone" }
+      { "name" => "clone", "source" => "other", "description" => "Clone this session and switch to the clone" },
+      { "name" => "new", "source" => "other", "description" => "Start a new session in this folder" }
     ]
   end
 

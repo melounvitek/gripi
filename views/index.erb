@@ -987,6 +987,10 @@
       return /^\/clone$/.test(message.trim());
     }
 
+    function sessionNewSlashCommand(message) {
+      return /^\/new$/.test(message.trim());
+    }
+
     function updateSessionHeaderName(name) {
       if (!name) return;
       const headerName = document.querySelector(".session-header-name");
@@ -2171,7 +2175,8 @@
       const forkCommand = steering ? null : sessionForkSlashCommand(message);
       const treeCommand = steering ? null : sessionTreeSlashCommand(message);
       const cloneCommand = steering ? null : sessionCloneSlashCommand(message);
-      if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand) {
+      const newCommand = steering ? null : sessionNewSlashCommand(message);
+      if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand) {
         if (!steering) resetLiveAssistantTracking();
         resetEventPollBackoff();
         scheduleNextEventPoll(0);
@@ -2191,15 +2196,15 @@
       resetCommandSelection();
       resizePromptTextarea();
       if (shouldAutofocusPrompt()) promptTextarea.focus();
-      setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : steering ? "Queueing steer…" : "Sending…");
-      showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : steering ? "Queueing steer…" : "Sending…", true);
-      if (cloneCommand) showSessionSwitching();
+      setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : steering ? "Queueing steer…" : "Sending…");
+      showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : steering ? "Queueing steer…" : "Sending…", true);
+      if (cloneCommand || newCommand) showSessionSwitching();
 
       const response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
       if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
 
       if (!response.ok && response.type !== "opaqueredirect") {
-        if (cloneCommand) hideSessionSwitching();
+        if (cloneCommand || newCommand) hideSessionSwitching();
         setComposerState("error", "Prompt failed");
         showStatus("Prompt failed to send", true);
       } else if (response.ok) {
@@ -2249,7 +2254,7 @@
           await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
           return;
         }
-        if (cloneCommand) hideSessionSwitching();
+        if (cloneCommand || newCommand) hideSessionSwitching();
         setComposerState("running", "Pi is running…");
         if (payload?.steer) showStatus("Sent to queue", true);
       } else {
