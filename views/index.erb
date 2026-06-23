@@ -620,6 +620,16 @@
       setTimeout(() => { programmaticScroll = false; }, 120);
     }
 
+    function positionInitialConversationAtBottom() {
+      if (!conversationScroll) return;
+
+      autoScrollEnabled = true;
+      forceBottomAutoScroll = false;
+      conversationScroll.scrollTop = conversationScroll.scrollHeight;
+      lastConversationScrollTop = conversationScroll.scrollTop;
+      updateScrollJumpButtons();
+    }
+
     function applyAutoScroll(behavior = "auto") {
       if (!conversationScroll || !autoScrollEnabled) return;
 
@@ -3424,6 +3434,7 @@
         liveAgentRunning = liveOutput.dataset.agentRunning === "true";
         if (initialComposerState === "running") setComposerState(initialComposerState, "Pi is running…", initialComposerStateSince);
         scheduleNextEventPoll(0);
+        positionInitialConversationAtBottom();
         requestAnimationFrame(() => {
           updatePromptPlaceholder();
           resizePromptTextarea();
