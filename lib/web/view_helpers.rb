@@ -235,7 +235,7 @@ module Web
       return h(message.text) unless message.tool_transcript && %w[edit write].include?(message.tool_name)
 
       message.text.to_s.lines(chomp: true).map do |line|
-        %(<span class="tool-diff-line #{h(tool_diff_line_class(line))}">#{h(line)}</span>)
+        %(<span class="tool-diff-line #{h(tool_diff_line_class(line, message.tool_preview))}">#{h(line)}</span>)
       end.join
     end
 
@@ -252,12 +252,14 @@ module Web
       "/message_raw_details?#{Rack::Utils.build_nested_query(query)}"
     end
 
-    def tool_diff_line_class(line)
+    def tool_diff_line_class(line, preview = false)
+      return "tool-diff-line--meta tool-diff-line--preview-heading" if preview && line.match?(/\AEdit \d+/)
+
       case line
       when /\A\+/
-        "tool-diff-line--add"
+        ["tool-diff-line--add", ("tool-diff-line--preview-ellipsis" if preview && line == "+ …")].compact.join(" ")
       when /\A-/
-        "tool-diff-line--remove"
+        ["tool-diff-line--remove", ("tool-diff-line--preview-ellipsis" if preview && line == "- …")].compact.join(" ")
       when /\A(?:Edit \d+|write\b|Wrote\b)/
         "tool-diff-line--meta"
       else

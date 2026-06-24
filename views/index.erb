@@ -117,6 +117,9 @@
     .tool-diff-line--add { border-left-color: rgba(181, 189, 104, 0.75); background: rgba(181, 189, 104, 0.12); color: #d8f0a0; }
     .tool-diff-line--remove { border-left-color: rgba(204, 102, 102, 0.8); background: rgba(204, 102, 102, 0.12); color: #f0b0a8; }
     .tool-diff-line--meta { color: var(--accent); font-weight: 700; }
+    .message-body--edit-preview .tool-diff-line--preview-heading { margin-top: 0.45rem; padding-top: 0.45rem; border-top: 1px solid rgba(138, 190, 183, 0.18); color: var(--accent); font-weight: 800; }
+    .message-body--edit-preview .tool-diff-line--preview-heading:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+    .message-body--edit-preview .tool-diff-line--preview-ellipsis { font-style: italic; opacity: 0.78; }
     .tool-diff-line--context { color: rgba(216, 222, 216, 0.68); }
     .tool-command { color: var(--text); font-weight: 800; }
     .tool-path { color: var(--accent); font-weight: 500; }
@@ -1301,6 +1304,7 @@
           toolName,
           isToolResult: message.role === "toolResult" || toolPart?.type === "toolResult",
           toolTranscript: ["read", "edit", "write"].includes(toolName),
+          toolPreview: toolPart?.type === "toolCall" && toolName === "edit",
           rawDetails
         };
       }).filter((segment) => segment.text);
@@ -1526,7 +1530,7 @@
       summaryElement.append(summaryText);
       const body = document.createElement("pre");
       body.className = "message-body";
-      renderToolTranscriptBody(body, text, options.toolName);
+      renderToolTranscriptBody(body, text, options.toolName, { preview: options.toolPreview === true });
       const collapseButton = document.createElement("button");
       collapseButton.type = "button";
       collapseButton.className = "details-collapse-button";
@@ -1553,8 +1557,10 @@
       return { article, details, body, summaryText, rawBody, compact: true, toolName: options.toolName || "" };
     }
 
-    function renderToolTranscriptBody(body, text, toolName = "") {
+    function renderToolTranscriptBody(body, text, toolName = "", options = {}) {
+      const preview = options.preview === true && toolName === "edit";
       body.dataset.rawText = text || "";
+      body.classList.toggle("message-body--edit-preview", preview);
       body.replaceChildren();
       if (!["edit", "write"].includes(toolName)) {
         body.textContent = text;
@@ -1563,15 +1569,16 @@
 
       String(text || "").split("\n").forEach((line) => {
         const span = document.createElement("span");
-        span.className = `tool-diff-line ${toolDiffLineClass(line)}`;
+        span.className = `tool-diff-line ${toolDiffLineClass(line, preview)}`;
         span.textContent = line;
         body.append(span);
       });
     }
 
-    function toolDiffLineClass(line) {
-      if (line.startsWith("+")) return "tool-diff-line--add";
-      if (line.startsWith("-")) return "tool-diff-line--remove";
+    function toolDiffLineClass(line, preview = false) {
+      if (preview && /^Edit \d+/.test(line)) return "tool-diff-line--meta tool-diff-line--preview-heading";
+      if (line.startsWith("+")) return `tool-diff-line--add${preview && line === "+ …" ? " tool-diff-line--preview-ellipsis" : ""}`;
+      if (line.startsWith("-")) return `tool-diff-line--remove${preview && line === "- …" ? " tool-diff-line--preview-ellipsis" : ""}`;
       if (/^(Edit \d+|write\b|Wrote\b)/.test(line)) return "tool-diff-line--meta";
       return "tool-diff-line--context";
     }
@@ -1666,7 +1673,7 @@
 
       if (segment.compact) {
         renderToolSummary(entry.summaryText, segment.summaryParts, segment.summary);
-        entry.body.textContent = segment.text;
+        renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });
         if (entry.rawBody) entry.rawBody.textContent = segment.rawDetails || "";
       } else {
         if (segment.thinking) {
@@ -1736,7 +1743,7 @@
       if (liveMessageAlreadyRendered(roleName, segment.text, messageTimestampKey(timestamp))) return null;
 
       const entry = segment.compact ?
-        appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, open: segment.expanded, error: segment.error }) :
+        appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolPreview: segment.toolPreview, open: segment.expanded, error: segment.error }) :
         appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse });
       if (!entry) return null;
       if (finalAssistantResponse) entry.article.dataset.finalAssistantResponse = "true";
@@ -1928,7 +1935,7 @@
           const toolExecutionEntry = segment.toolCallId && liveToolExecutions.get(segment.toolCallId);
           const bashCallEntry = ["bash", "read", "edit", "write"].includes(segment.toolName) && segment.toolCallId && liveBashToolCalls.get(segment.toolCallId);
           if (toolExecutionEntry && segment.isToolResult) {
-            renderToolTranscriptBody(toolExecutionEntry.body, segment.text, segment.toolName || toolExecutionEntry.toolName);
+            renderToolTranscriptBody(toolExecutionEntry.body, segment.text, segment.toolName || toolExecutionEntry.toolName, { preview: segment.toolPreview === true });
             if (toolExecutionEntry.rawBody) toolExecutionEntry.rawBody.textContent = segment.rawDetails || "";
             renderToolSummary(toolExecutionEntry.summaryText, segment.summaryParts, segment.summary);
             toolExecutionEntry.article.classList.toggle("message--tool-error", segment.error === true);
@@ -1936,7 +1943,8 @@
             afterLiveOutputChange(shouldScroll);
           } else if (bashCallEntry && segment.isToolResult) {
             const mergedText = segment.toolTranscript && segment.error !== true && segment.toolName !== "write" ? segment.text : [bashCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\n\n");
-            renderToolTranscriptBody(bashCallEntry.body, mergedText, segment.toolName || bashCallEntry.toolName);
+            const preview = segment.toolPreview === true || (segment.error === true && bashCallEntry.body.classList.contains("message-body--edit-preview"));
+            renderToolTranscriptBody(bashCallEntry.body, mergedText, segment.toolName || bashCallEntry.toolName, { preview });
             if (bashCallEntry.rawBody) {
               bashCallEntry.rawBody.textContent = [bashCallEntry.rawBody.textContent, segment.rawDetails].filter(Boolean).join("\n\n");
             }
@@ -1946,7 +1954,7 @@
           } else if (roleName === "user" && !segment.compact) {
             upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);
           } else if (segment.compact) {
-            appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, open: segment.expanded, error: segment.error });
+            appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded, true, shouldScroll, segment.rawDetails, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolPreview: segment.toolPreview, open: segment.expanded, error: segment.error });
           } else {
             appendMessage(roleName, segment.text, true, shouldScroll, timestamp);
           }

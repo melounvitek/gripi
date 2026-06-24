@@ -21,7 +21,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, :final_assistant_response, :entry_id, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :final_assistant_response, :entry_id, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :context_estimated, :cost_total, keyword_init: true)
 
   @session_cache = {}
@@ -73,6 +73,7 @@ class PiSessionStore
           call_message.raw_details = [call_message.raw_details, message.raw_details].compact.reject(&:empty?).join("\n\n")
           call_message.expanded ||= message.expanded
           call_message.error ||= message.error
+          call_message.tool_preview = false unless message.error
           next
         end
 
@@ -481,6 +482,7 @@ class PiSessionStore
         thinking: parts.length == 1 && thinking_part?(parts.first),
         tool_summary_html: tool_summary_html(tool_call),
         tool_transcript: transcript_tool?(tool_name),
+        tool_preview: tool_call && tool_name == "edit",
         final_assistant_response: final_assistant_response_parts?(parts)
       )
     end

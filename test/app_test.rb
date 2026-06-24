@@ -3173,12 +3173,49 @@ class AppTest < Minitest::Test
       assert_includes response.body, '<summary><span class="compact-summary"><span class="tool-command">write</span> <span class="tool-path">notes/status.txt</span></span></summary>'
       assert_includes response.body, '<button type="button" class="details-collapse-button" data-collapse-details>▴ Collapse details</button>'
       refute_includes response.body, '<details class="message-details" open>'
+      refute_includes response.body, 'message-body message-body--edit-preview'
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+71 assert_equal [true, false], messages.map(&amp;:thinking)</span>'
       assert_includes response.body, '545 assert_equal 200, response.status'
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+ done</span>'
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+ &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;</span>'
       refute_includes response.body, '<script>alert'
       assert_includes response.body, 'Wrote notes/status.txt'
+    end
+  end
+
+  def test_failed_edit_tool_results_keep_preview_styling
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "edit-1", name: "edit", arguments: { path: "app.rb", edits: [{ oldText: "old", newText: "new" }] } }]
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:01Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "edit-1",
+            toolName: "edit",
+            content: [{ type: "text", text: "Edit failed" }],
+            isError: true
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, 'message-body message-body--edit-preview'
+      assert_includes response.body, '<span class="tool-diff-line tool-diff-line--meta tool-diff-line--preview-heading">Edit 1</span>'
+      assert_includes response.body, '<span class="tool-diff-line tool-diff-line--remove">- old</span>'
+      assert_includes response.body, 'Edit failed'
     end
   end
 
@@ -3378,9 +3415,13 @@ class AppTest < Minitest::Test
       assert_includes response.body, "toolSummaryParts(toolName, toolPart?.arguments || {})"
       assert_includes response.body, "function transcriptToolCallText(name, args = {})"
       assert_includes response.body, 'if (lines[lines.length - 1] === "") lines.pop();'
-      assert_includes response.body, 'function renderToolTranscriptBody(body, text, toolName = "")'
+      assert_includes response.body, 'function renderToolTranscriptBody(body, text, toolName = "", options = {})'
       assert_includes response.body, 'body.dataset.rawText = text || "";'
-      assert_includes response.body, 'span.className = `tool-diff-line ${toolDiffLineClass(line)}`;'
+      assert_includes response.body, 'body.classList.toggle("message-body--edit-preview", preview);'
+      assert_includes response.body, 'span.className = `tool-diff-line ${toolDiffLineClass(line, preview)}`;'
+      assert_includes response.body, 'renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });'
+      assert_includes response.body, 'toolPreview: toolPart?.type === "toolCall" && toolName === "edit"'
+      assert_includes response.body, 'bashCallEntry.body.classList.contains("message-body--edit-preview")'
       assert_includes response.body, 'segment.toolTranscript && segment.error !== true && segment.toolName !== "write" ? segment.text'
       assert_includes response.body, '[bashCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\\n\\n")'
       assert_includes response.body, 'details.open = options.open === true;'

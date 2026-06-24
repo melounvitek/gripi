@@ -13,7 +13,7 @@
               <% elsif message.compact %>
                 <details class="message-details"<%= " open" if message.expanded %>>
                   <summary><span class="compact-summary"><%= message.tool_summary_html || h(message.summary) %></span></summary>
-                  <pre class="message-body"><%= render_compact_message_body(message) %></pre>
+                  <pre class="message-body<%= ' message-body--edit-preview' if message.tool_preview %>"><%= render_compact_message_body(message) %></pre>
                   <% if message.raw_details.to_s != "" %>
                     <% if defined?(message_index) && message_index && defer_raw_details?(message) %>
                       <details class="raw-details" data-deferred-raw-details="true" data-message-index="<%= h message_index %>" data-raw-details-url="<%= h raw_details_url(message_index, message) %>">
