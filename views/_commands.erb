@@ -1,5 +1,6 @@
 <details class="command-list" id="command-list" data-loaded="true">
   <summary>Slash commands (<%= h @commands.length %>)</summary>
+  <div class="command-list-message" data-queued-slash-message hidden>Slash commands are not supported in queued follow-up messages.</div>
   <% commands_by_source = @commands.group_by { |command| command["source"] || "other" } %>
   <% ["extension", "prompt", "skill", "other"].each do |source| %>
     <% next unless commands_by_source[source]&.any? %>

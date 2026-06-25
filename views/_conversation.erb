@@ -45,6 +45,7 @@
           <div class="composer-inner">
             <details class="command-list" id="command-list" data-loaded="false" data-commands-url="/commands?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
               <summary>Slash commands</summary>
+              <div class="command-list-message" data-queued-slash-message hidden>Slash commands are not supported in queued follow-up messages.</div>
             </details>
 
             <form method="post" action="/abort" class="abort-form" id="abort-form">
