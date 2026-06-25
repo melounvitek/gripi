@@ -57,6 +57,12 @@ class PiRpcClient
     request("steer", id: next_id("steer"), message: message)
   end
 
+  def follow_up(message, images = [])
+    payload = { message: message }
+    payload[:images] = images unless images.empty?
+    request("follow_up", id: next_id("follow_up"), **payload)
+  end
+
   def abort
     request("abort", id: next_id("abort"))
   end

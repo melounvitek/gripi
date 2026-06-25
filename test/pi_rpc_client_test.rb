@@ -248,7 +248,8 @@ class PiRpcClientTest < Minitest::Test
       JSON.generate({ id: "fork-12", type: "response", command: "fork", success: true, data: { text: "Hello", cancelled: false } }),
       JSON.generate({ id: "clone-13", type: "response", command: "clone", success: true, data: { cancelled: false } }),
       JSON.generate({ id: "prompt-14", type: "response", command: "prompt", success: true }),
-      JSON.generate({ id: "prompt-15", type: "response", command: "prompt", success: true })
+      JSON.generate({ id: "prompt-15", type: "response", command: "prompt", success: true }),
+      JSON.generate({ id: "follow_up-16", type: "response", command: "follow_up", success: true })
     ].join("\n") + "\n")
     client = PiRpcClient.new(stdin: input, stdout: output)
 
@@ -271,6 +272,7 @@ class PiRpcClientTest < Minitest::Test
     with_secure_random_hex("def456") do
       client.tree_leaf
     end
+    client.follow_up("After done", [{ type: "image", data: "def", mimeType: "image/jpeg" }])
 
     assert_equal [
       { "id" => "get_state-1", "type" => "get_state" },
@@ -287,7 +289,8 @@ class PiRpcClientTest < Minitest::Test
       { "id" => "fork-12", "type" => "fork", "entryId" => "entry-1" },
       { "id" => "clone-13", "type" => "clone" },
       { "id" => "prompt-14", "type" => "prompt", "message" => "/pi_web_tree entry-2 abc123" },
-      { "id" => "prompt-15", "type" => "prompt", "message" => "/pi_web_tree_leaf def456" }
+      { "id" => "prompt-15", "type" => "prompt", "message" => "/pi_web_tree_leaf def456" },
+      { "id" => "follow_up-16", "type" => "follow_up", "message" => "After done", "images" => [{ "type" => "image", "data" => "def", "mimeType" => "image/jpeg" }] }
     ], input.string.lines.map { |line| JSON.parse(line) }
   end
 

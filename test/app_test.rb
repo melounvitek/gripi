@@ -603,7 +603,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_posts_steering_prompt_to_selected_session
+  def test_posts_follow_up_prompt_to_selected_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
@@ -615,17 +615,17 @@ class AppTest < Minitest::Test
 
       response = Rack::MockRequest.new(PiWebGateway).post(
         "/prompt",
-        params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "steer" },
+        params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "follow_up" },
         "HTTP_ACCEPT" => "application/json"
       )
 
       assert_equal 200, response.status
-      assert_equal [[ :start, path ], [ :steer, "Actually do this" ]], calls
-      assert_equal true, JSON.parse(response.body).fetch("steer")
+      assert_equal [[ :start, path ], [ :follow_up, "Actually do this" ]], calls
+      assert_equal true, JSON.parse(response.body).fetch("follow_up")
     end
   end
 
-  def test_steering_prompt_treats_rename_slash_command_as_message
+  def test_follow_up_prompt_treats_rename_slash_command_as_message
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
@@ -637,19 +637,19 @@ class AppTest < Minitest::Test
 
       response = Rack::MockRequest.new(PiWebGateway).post(
         "/prompt",
-        params: { "session" => path, "message" => "/name keep steering", "streaming_behavior" => "steer" },
+        params: { "session" => path, "message" => "/name keep steering", "streaming_behavior" => "follow_up" },
         "HTTP_ACCEPT" => "application/json"
       )
 
       assert_equal 200, response.status
-      assert_equal [[ :start, path ], [ :steer, "/name keep steering" ]], calls
+      assert_equal [[ :start, path ], [ :follow_up, "/name keep steering" ]], calls
       payload = JSON.parse(response.body)
-      assert_equal true, payload.fetch("steer")
+      assert_equal true, payload.fetch("follow_up")
       refute payload.key?("command")
     end
   end
 
-  def test_steering_prompt_treats_fork_tree_clone_and_new_slash_commands_as_messages
+  def test_follow_up_prompt_treats_fork_tree_clone_and_new_slash_commands_as_messages
     ["/fork", "/tree", "/clone", "/new"].each do |message|
       Dir.mktmpdir do |dir|
         path = write_session(dir)
@@ -663,20 +663,20 @@ class AppTest < Minitest::Test
 
         response = Rack::MockRequest.new(PiWebGateway).post(
           "/prompt",
-          params: { "session" => path, "message" => message, "streaming_behavior" => "steer" },
+          params: { "session" => path, "message" => message, "streaming_behavior" => "follow_up" },
           "HTTP_ACCEPT" => "application/json"
         )
 
         assert_equal 200, response.status
-        assert_equal [[ :start, path ], [ :steer, message ]], calls
+        assert_equal [[ :start, path ], [ :follow_up, message ]], calls
         payload = JSON.parse(response.body)
-        assert_equal true, payload.fetch("steer")
+        assert_equal true, payload.fetch("follow_up")
         refute payload.key?("command")
       end
     end
   end
 
-  def test_rejects_steering_prompt_with_uploaded_images
+  def test_posts_follow_up_prompt_with_uploaded_images
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       image_path = File.join(dir, "screenshot.png")
@@ -691,13 +691,16 @@ class AppTest < Minitest::Test
       upload = Rack::Multipart::UploadedFile.new(image_path, "image/png", true)
       response = Rack::MockRequest.new(PiWebGateway).post(
         "/prompt",
-        params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "steer", "images[]" => upload },
+        params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "follow_up", "images[]" => upload },
         "HTTP_ACCEPT" => "application/json"
       )
 
-      assert_equal 422, response.status
-      assert_empty calls
-      assert_equal "Steering messages cannot include images", JSON.parse(response.body).fetch("error")
+      assert_equal 200, response.status
+      assert_equal [
+        [:start, path],
+        [:follow_up, "Actually do this", [{ type: "image", data: Base64.strict_encode64("fake image data"), mimeType: "image/png" }]]
+      ], calls
+      assert_equal true, JSON.parse(response.body).fetch("follow_up")
     end
   end
 
@@ -1887,7 +1890,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "session-abort-button composer-stop-button"
       assert_includes response.body, "Loading…"
       refute_includes response.body, "Loading session…"
-      assert_includes response.body, "Send to queue…"
+      assert_includes response.body, "Send follow-up…"
       assert_includes response.body, "[hidden] { display: none !important; }"
       assert_includes response.body, "Ask Pi… Enter to send, Shift+Enter for newline."
       refute_includes response.body, "autofocus"
@@ -3874,18 +3877,17 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function updateHeaderFromSelectedSidebarSession()"
       assert_includes response.body, "const selectedTitle = sessionSidebar?.querySelector(\"a.session.selected .session-title\")?.textContent.trim();"
       assert_includes response.body, "updateHeaderFromSelectedSidebarSession();"
-      assert_includes response.body, "const renameCommand = steering ? null : sessionNameSlashCommand(message);"
-      assert_includes response.body, "const compactCommand = steering ? null : sessionCompactSlashCommand(message);"
-      assert_includes response.body, "const forkCommand = steering ? null : sessionForkSlashCommand(message);"
-      assert_includes response.body, "const treeCommand = steering ? null : sessionTreeSlashCommand(message);"
-      assert_includes response.body, "const cloneCommand = steering ? null : sessionCloneSlashCommand(message);"
-      assert_includes response.body, "const newCommand = steering ? null : sessionNewSlashCommand(message);"
+      assert_includes response.body, "const renameCommand = followUp ? null : sessionNameSlashCommand(message);"
+      assert_includes response.body, "const compactCommand = followUp ? null : sessionCompactSlashCommand(message);"
+      assert_includes response.body, "const forkCommand = followUp ? null : sessionForkSlashCommand(message);"
+      assert_includes response.body, "const treeCommand = followUp ? null : sessionTreeSlashCommand(message);"
+      assert_includes response.body, "const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);"
+      assert_includes response.body, "const newCommand = followUp ? null : sessionNewSlashCommand(message);"
       assert_includes response.body, "if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand) {"
-      assert_includes response.body, "if (!steering) {\n          resetLiveAssistantTracking();\n          document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n        }"
+      assert_includes response.body, "if (!followUp) {\n          resetLiveAssistantTracking();\n          document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n          appendMessage(\"user\", [message, pendingImages.length > 0"
+      assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });\n        }"
       assert_includes response.body, "resetEventPollBackoff();"
       assert_includes response.body, "scheduleNextEventPoll(0);"
-      assert_includes response.body, "appendMessage(\"user\", [message, pendingImages.length > 0"
-      assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });"
       assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {\n            await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });\n            return;\n          }\n          updateSessionHeaderName(payload.name);\n          setComposerState(\"done\", \"Renamed\");\n          showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);\n          refreshSidebar().catch(() => {});\n          return;\n        }"
       assert_includes response.body, "appendPendingCompactionMessage(new Date());"
       assert_includes response.body, "markSidebarSessionCompacting(submittedSession);"
@@ -3906,8 +3908,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (!submitting && restorePromptFocusAfterSending)"
       assert_includes response.body, "promptTextarea.focus({ preventScroll: true });"
       assert_includes response.body, "composerStopButton.hidden = !agentBusy;"
-      assert_includes response.body, "if (steering) formData.set(\"streaming_behavior\", \"steer\");"
-      assert_includes response.body, "if (!addImageFiles(files) && composerState?.dataset.state === \"running\") showStatus(\"Steering messages cannot include images\", true);"
+      assert_includes response.body, "if (followUp) formData.set(\"streaming_behavior\", \"follow_up\");"
+      assert_includes response.body, "const attachmentsDisabled = submitting;"
+      assert_includes response.body, "addImageFiles(files);"
       assert_includes response.body, "function confirmOrStopRunningTask(event)"
       assert_includes response.body, "if (composerState?.dataset.state !== \"running\") return false;"
       assert_includes response.body, "if (event.repeat) return true;"
@@ -3915,7 +3918,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (composerState) composerState.textContent = \"Stopping current task…\";"
       assert_includes response.body, "abortForm.requestSubmit();"
       assert_includes response.body, "if (event.key === \"Escape\" && confirmOrStopRunningTask(event)) return;"
-      assert_includes response.body, "Send to queue…"
+      assert_includes response.body, "Send follow-up…"
     end
   end
 
@@ -4383,6 +4386,10 @@ class AppTest < Minitest::Test
 
     def steer(message)
       @calls << [:steer, message]
+    end
+
+    def follow_up(message, images = [])
+      @calls << (images.empty? ? [:follow_up, message] : [:follow_up, message, images])
     end
 
     def get_messages

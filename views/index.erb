@@ -815,7 +815,7 @@
     function updatePromptPlaceholder() {
       if (!promptTextarea) return;
       if (composerState?.dataset.state === "running") {
-        promptTextarea.placeholder = "Send to queue…";
+        promptTextarea.placeholder = "Send follow-up…";
         return;
       }
       if (promptTextarea.disabled) {
@@ -1032,7 +1032,7 @@
       if (sendButton) {
         sendButton.hidden = submitting;
         sendButton.textContent = state === "running" ? "Queue" : state === "sending" ? "Sending…" : "Send";
-        sendButton.setAttribute("aria-label", state === "running" ? "Send to queue" : "Send message");
+        sendButton.setAttribute("aria-label", state === "running" ? "Send follow-up" : "Send message");
       }
       if (composerStopButton) {
         composerStopButton.hidden = !agentBusy;
@@ -1047,7 +1047,7 @@
           if (shouldAutofocusPrompt()) promptTextarea.focus({ preventScroll: true });
         }
       }
-      const attachmentsDisabled = agentBusy;
+      const attachmentsDisabled = submitting;
       if (imageInput) imageInput.disabled = attachmentsDisabled;
       if (attachButton) {
         attachButton.classList.toggle("is-disabled", attachmentsDisabled);
@@ -2184,11 +2184,7 @@
 
       if (promptTextarea?.disabled) return;
 
-      const steering = composerState?.dataset.state === "running";
-      if (steering && pendingImages.length > 0) {
-        showStatus("Steering messages cannot include images", true);
-        return;
-      }
+      const followUp = composerState?.dataset.state === "running";
 
       const generation = sessionViewGeneration;
       const switchGeneration = sessionSwitchGeneration;
@@ -2200,22 +2196,22 @@
       addSessionViewFormParams(formData);
       formData.set("message", message);
       pendingImages.forEach((entry) => formData.append("images[]", entry.file, entry.file.name || "image"));
-      if (steering) formData.set("streaming_behavior", "steer");
+      if (followUp) formData.set("streaming_behavior", "follow_up");
 
-      const renameCommand = steering ? null : sessionNameSlashCommand(message);
-      const compactCommand = steering ? null : sessionCompactSlashCommand(message);
-      const forkCommand = steering ? null : sessionForkSlashCommand(message);
-      const treeCommand = steering ? null : sessionTreeSlashCommand(message);
-      const cloneCommand = steering ? null : sessionCloneSlashCommand(message);
-      const newCommand = steering ? null : sessionNewSlashCommand(message);
+      const renameCommand = followUp ? null : sessionNameSlashCommand(message);
+      const compactCommand = followUp ? null : sessionCompactSlashCommand(message);
+      const forkCommand = followUp ? null : sessionForkSlashCommand(message);
+      const treeCommand = followUp ? null : sessionTreeSlashCommand(message);
+      const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);
+      const newCommand = followUp ? null : sessionNewSlashCommand(message);
       if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand) {
-        if (!steering) {
+        if (!followUp) {
           resetLiveAssistantTracking();
           document.querySelectorAll(".tree-position-banner").forEach((banner) => banner.remove());
+          appendMessage("user", [message, pendingImages.length > 0 ? `[${imageAttachmentLabel(pendingImages.length)}]` : ""].filter(Boolean).join("\n"), true, true, new Date(), { optimistic: true, optimisticText: message });
         }
         resetEventPollBackoff();
         scheduleNextEventPoll(0);
-        appendMessage("user", [message, pendingImages.length > 0 ? `[${imageAttachmentLabel(pendingImages.length)}]` : ""].filter(Boolean).join("\n"), true, true, new Date(), { optimistic: true, optimisticText: message });
       } else if (compactCommand) {
         resetLiveAssistantTracking();
         resetLiveCompactionTracking();
@@ -2231,8 +2227,8 @@
       resetCommandSelection();
       resizePromptTextarea();
       if (shouldAutofocusPrompt()) promptTextarea.focus();
-      setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : steering ? "Queueing steer…" : "Sending…");
-      showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : steering ? "Queueing steer…" : "Sending…", true);
+      setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : followUp ? "Queueing follow-up…" : "Sending…");
+      showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : followUp ? "Queueing follow-up…" : "Sending…", true);
       if (cloneCommand || newCommand) showSessionSwitching();
 
       const response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
@@ -2291,7 +2287,7 @@
         }
         if (cloneCommand || newCommand) hideSessionSwitching();
         setComposerState("running", "Pi is running…");
-        if (payload?.steer) showStatus("Sent to queue", true);
+        if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
       } else {
         setComposerState("running", "Pi is running…");
       }
@@ -2464,7 +2460,7 @@
         if (!hasImage) return;
 
         event.preventDefault();
-        if (!addImageFiles(files) && composerState?.dataset.state === "running") showStatus("Steering messages cannot include images", true);
+        addImageFiles(files);
       });
 
       imageInput?.addEventListener("change", () => {

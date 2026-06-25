@@ -121,20 +121,14 @@ module Web
         images = prompt_images_from(params["images"])
         halt 400, "Message cannot be empty" if message.strip.empty? && images.empty?
 
-        steering_prompt = params["streaming_behavior"].to_s == "steer"
-        if steering_prompt && !images.empty?
-          if json_request?
-            status 422
-            content_type :json
-            next JSON.generate(error: "Steering messages cannot include images")
-          end
-          halt 422, "Steering messages cannot include images"
-        end
+        follow_up_prompt = params["streaming_behavior"].to_s == "follow_up"
 
-        slash_command = steering_prompt ? nil : Prompts::SlashCommand.parse(message)
+        slash_command = follow_up_prompt ? nil : Prompts::SlashCommand.parse(message)
         branch_response = nil
-        if steering_prompt
-          with_rpc_client(session_path) { |client| client.steer(message) }
+        if follow_up_prompt
+          submitted_at = Time.now
+          with_rpc_client(session_path) { |client| client.follow_up(message, images) }
+          attachment_store.record_prompt(session_path, message, images.length, timestamp: submitted_at)
         elsif slash_command&.type == :rename && slash_command.name
           with_rpc_client(session_path) { |client| client.set_session_name(slash_command.name) }
         elsif slash_command&.type == :rename || [:fork, :tree].include?(slash_command&.type)
@@ -157,7 +151,7 @@ module Web
         elsif json_request?
           content_type :json
           payload = { session: session_path, redirect: redirect_path }
-          payload[:steer] = true if steering_prompt && !slash_command
+          payload[:follow_up] = true if follow_up_prompt && !slash_command
           if slash_command
             payload[:command] = slash_command.type.to_s
             payload[:name] = slash_command.name if slash_command.name
