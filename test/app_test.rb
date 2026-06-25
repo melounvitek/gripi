@@ -3383,9 +3383,13 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, '<div class="message-details-summary"><span class="compact-summary">$ git status --short (timeout 30s)</span></div>'
-      assert_includes response.body, "$ git status --short (timeout 30s)"
-      assert_includes response.body, " M app.rb"
+      document = Nokogiri::HTML(response.body)
+      bash_card = document.css(".message--compact").find do |card|
+        card.at_css(".compact-summary")&.text == "$ git status --short (timeout 30s)"
+      end
+
+      assert bash_card
+      assert_equal " M app.rb", bash_card.at_css(".message-body").text
       assert_includes response.body, "Raw details"
       assert_includes response.body, '&quot;type&quot;: &quot;toolCall&quot;'
       assert_includes response.body, '&quot;toolCallId&quot;: &quot;call_123&quot;'
@@ -3422,7 +3426,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });'
       assert_includes response.body, 'toolPreview: toolPart?.type === "toolCall" && toolName === "edit"'
       assert_includes response.body, 'bashCallEntry.body.classList.contains("message-body--edit-preview")'
-      assert_includes response.body, 'segment.toolTranscript && segment.error !== true && segment.toolName !== "write" ? segment.text'
+      assert_includes response.body, 'segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text'
       assert_includes response.body, '[bashCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\\n\\n")'
       refute_includes response.body, 'details.open = options.open === true;'
       refute_includes response.body, 'collapseButton.textContent = "▴ Collapse details";'

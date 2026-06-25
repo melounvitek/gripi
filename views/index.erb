@@ -1931,7 +1931,7 @@
             if (!markLiveEntryRendered(toolExecutionEntry, toolExecutionEntry.article.dataset.role || "toolResult", segment.text, timestamp)) return;
             afterLiveOutputChange(shouldScroll);
           } else if (bashCallEntry && segment.isToolResult) {
-            const mergedText = segment.toolTranscript && segment.error !== true && segment.toolName !== "write" ? segment.text : [bashCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\n\n");
+            const mergedText = segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text : [bashCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\n\n");
             const preview = segment.toolPreview === true || (segment.error === true && bashCallEntry.body.classList.contains("message-body--edit-preview"));
             renderToolTranscriptBody(bashCallEntry.body, mergedText, segment.toolName || bashCallEntry.toolName, { preview });
             if (bashCallEntry.rawBody) {
