@@ -259,7 +259,7 @@ module Web
       return false unless %w[assistant tool toolResult].include?(message.role)
       return false unless message.compact && !message.thinking && !message.final_assistant_response
 
-      tool_output_lines(message).length > TOOL_OUTPUT_MOBILE_TAIL_LINES
+      tool_output_lines(message).length > TOOL_OUTPUT_DESKTOP_TAIL_LINES
     end
 
     def tool_output_lines(message)

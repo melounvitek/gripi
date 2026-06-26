@@ -1603,7 +1603,7 @@
       }
 
       const expanded = collapse.dataset.expanded === "true";
-      const shouldCollapse = collapse.dataset.toolOutputCollapsible === "true" && lines.length > TOOL_OUTPUT_MOBILE_TAIL_LINES;
+      const shouldCollapse = collapse.dataset.toolOutputCollapsible === "true" && lines.length > TOOL_OUTPUT_DESKTOP_TAIL_LINES;
       const fullTemplate = collapse.querySelector("[data-tool-output-full]");
       const tailTemplate = collapse.querySelector("[data-tool-output-tail]");
       const control = collapse.querySelector("[data-tool-output-collapse-control]");
@@ -3545,15 +3545,14 @@
       const collapse = button.closest("[data-tool-output-collapse]");
       const body = collapse?.querySelector("[data-tool-output-body]");
       const fullTemplate = collapse?.querySelector("[data-tool-output-full]");
-      const tailTemplate = collapse?.querySelector("[data-tool-output-tail]");
-      if (!collapse || !body || !fullTemplate || !tailTemplate) return;
+      const control = collapse?.querySelector("[data-tool-output-collapse-control]");
+      if (!collapse || !body || !fullTemplate || !control) return;
 
-      const expanded = collapse.dataset.expanded !== "true";
-      collapse.dataset.expanded = expanded ? "true" : "false";
-      collapse.dataset.collapsed = expanded ? "false" : "true";
-      button.setAttribute("aria-expanded", expanded ? "true" : "false");
-      button.textContent = expanded ? "Collapse" : "Expand";
-      body.replaceChildren(...Array.from((expanded ? fullTemplate : tailTemplate).content.cloneNode(true).childNodes));
+      collapse.dataset.expanded = "true";
+      collapse.dataset.collapsed = "false";
+      button.setAttribute("aria-expanded", "true");
+      control.hidden = true;
+      body.replaceChildren(...Array.from(fullTemplate.content.cloneNode(true).childNodes));
     });
 
     document.addEventListener("click", async (event) => {

@@ -3176,6 +3176,46 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_does_not_show_expand_when_all_tool_output_lines_are_visible_on_desktop
+    Dir.mktmpdir do |dir|
+      output = (1..18).map { |index| "line #{index}" }.join("\n")
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "bash-1", name: "bash", arguments: { command: "medium command" } }]
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:01Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "bash-1",
+            toolName: "bash",
+            content: [{ type: "text", text: output }],
+            isError: false
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      tool_card = compact_card_with_summary(document, "$ medium command")
+      assert tool_card
+      assert_nil tool_card.at_css("[data-tool-output-collapse]")
+      visible_lines = tool_card.css(".message-body .tool-output-line").map(&:text)
+      assert_equal "line 1", visible_lines.first
+      assert_equal "line 18", visible_lines.last
+    end
+  end
+
   def test_does_not_tail_collapse_final_assistant_or_thinking_messages
     Dir.mktmpdir do |dir|
       long_text = (1..25).map { |index| "assistant line #{index}" }.join("\n")
@@ -3578,8 +3618,10 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'function renderToolTranscriptBody(body, text, toolName = "", options = {})'
       assert_includes response.body, 'body.dataset.rawText = text || "";'
       assert_includes response.body, 'body.classList.toggle("message-body--edit-preview", preview);'
+      assert_includes response.body, 'const shouldCollapse = collapse.dataset.toolOutputCollapsible === "true" && lines.length > TOOL_OUTPUT_DESKTOP_TAIL_LINES;'
       assert_includes response.body, 'fullTemplate?.content.replaceChildren(...toolOutputLineNodes(lines, toolName, preview, 0));'
       assert_includes response.body, 'tailTemplate?.content.replaceChildren(...toolOutputLineNodes(tailLines, toolName, preview, desktopExtraCount));'
+      assert_includes response.body, 'control.hidden = true;'
       assert_includes response.body, 'span.className = `tool-diff-line ${toolDiffLineClass(line, preview)}`;'
       assert_includes response.body, 'renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });'
       assert_includes response.body, 'toolPreview: toolPart?.type === "toolCall" && toolName === "edit"'
