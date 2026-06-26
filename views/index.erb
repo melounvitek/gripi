@@ -137,6 +137,16 @@
     .message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; }
     .message--tool .message-body, .message--tool-transcript .message-body, .raw-details pre { max-width: 100%; overflow-x: auto; }
     .compact-summary { margin-left: 0.25rem; }
+    .tool-output-collapse { display: grid; gap: 0.4rem; }
+    .tool-output-collapse-control { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.82rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .tool-output-toggle { justify-self: start; min-height: 0; padding: 0.15rem 0.45rem; border: 1px solid rgba(138, 190, 183, 0.28); background: transparent; color: var(--accent); font-size: 0.78rem; }
+    .tool-output-toggle:hover { background: rgba(138, 190, 183, 0.12); color: var(--text); transform: none; }
+    .tool-output-hidden-count--mobile { display: none; }
+    .tool-output-line { display: block; min-height: 1.35em; }
+    @media (max-width: 720px) {
+      .tool-output-hidden-count--desktop, .tool-output-tail-desktop-extra { display: none; }
+      .tool-output-hidden-count--mobile { display: inline; }
+    }
     .message-body--thinking { font-size: 0.95rem; font-style: italic; line-height: 1.45; color: var(--muted); }
     .message-body--markdown { line-height: 1.6; overflow-wrap: anywhere; }
     .message-body--markdown[data-rendering="pending"]:empty::before { content: "…"; color: var(--muted); }
@@ -1525,10 +1535,35 @@
       summaryText.className = "compact-summary";
       renderToolSummary(summaryText, options.summaryParts, summary);
       summaryElement.append(summaryText);
+      const output = document.createElement("div");
+      output.className = "tool-output-collapse";
+      output.dataset.toolOutputCollapse = "";
+      output.dataset.toolOutputCollapsible = ["assistant", "tool", "toolResult"].includes(roleName) ? "true" : "false";
+      output.dataset.collapsed = "false";
+      const control = document.createElement("div");
+      control.className = "tool-output-collapse-control";
+      control.dataset.toolOutputCollapseControl = "";
+      const desktopCount = document.createElement("span");
+      desktopCount.className = "tool-output-hidden-count tool-output-hidden-count--desktop";
+      const mobileCount = document.createElement("span");
+      mobileCount.className = "tool-output-hidden-count tool-output-hidden-count--mobile";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "tool-output-toggle";
+      toggle.dataset.toolOutputToggle = "";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.textContent = "Expand";
+      control.append(desktopCount, mobileCount, toggle);
       const body = document.createElement("pre");
       body.className = "message-body";
+      body.dataset.toolOutputBody = "";
+      const fullTemplate = document.createElement("template");
+      fullTemplate.dataset.toolOutputFull = "";
+      const tailTemplate = document.createElement("template");
+      tailTemplate.dataset.toolOutputTail = "";
+      output.append(control, body, fullTemplate, tailTemplate);
       renderToolTranscriptBody(body, text, options.toolName, { preview: options.toolPreview === true });
-      details.append(summaryElement, body);
+      details.append(summaryElement, output);
 
       let rawBody = null;
       if (rawDetails) {
@@ -1548,21 +1583,61 @@
       return { article, details, body, summaryText, rawBody, compact: true, toolName: options.toolName || "" };
     }
 
+    const TOOL_OUTPUT_DESKTOP_TAIL_LINES = 18;
+    const TOOL_OUTPUT_MOBILE_TAIL_LINES = 12;
+
     function renderToolTranscriptBody(body, text, toolName = "", options = {}) {
       const preview = options.preview === true && toolName === "edit";
       body.dataset.rawText = text || "";
+      const rawText = body.dataset.rawText;
+      const lines = String(rawText).split("\n");
+      if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+      const collapse = body.closest("[data-tool-output-collapse]");
       body.classList.toggle("message-body--edit-preview", preview);
-      body.replaceChildren();
-      if (!["edit", "write"].includes(toolName)) {
-        body.textContent = text;
+
+      if (!collapse) {
+        body.replaceChildren(...toolOutputLineNodes(lines, toolName, preview, 0));
         return;
       }
 
-      String(text || "").split("\n").forEach((line) => {
+      const expanded = collapse.dataset.expanded === "true";
+      const shouldCollapse = collapse.dataset.toolOutputCollapsible === "true" && lines.length > TOOL_OUTPUT_MOBILE_TAIL_LINES;
+      const fullTemplate = collapse.querySelector("[data-tool-output-full]");
+      const tailTemplate = collapse.querySelector("[data-tool-output-tail]");
+      const control = collapse.querySelector("[data-tool-output-collapse-control]");
+      const desktopCount = collapse.querySelector(".tool-output-hidden-count--desktop");
+      const mobileCount = collapse.querySelector(".tool-output-hidden-count--mobile");
+
+      fullTemplate?.replaceChildren(...toolOutputLineNodes(lines, toolName, preview, 0));
+      if (shouldCollapse) {
+        const tailLines = lines.slice(-TOOL_OUTPUT_DESKTOP_TAIL_LINES);
+        const desktopExtraCount = Math.max(tailLines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0);
+        tailTemplate?.replaceChildren(...toolOutputLineNodes(tailLines, toolName, preview, desktopExtraCount));
+        if (desktopCount) desktopCount.textContent = `… (${Math.max(lines.length - TOOL_OUTPUT_DESKTOP_TAIL_LINES, 0)} earlier lines)`;
+        if (mobileCount) mobileCount.textContent = `… (${Math.max(lines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0)} earlier lines)`;
+      }
+
+      control.hidden = !shouldCollapse;
+      collapse.dataset.collapsed = shouldCollapse && !expanded ? "true" : "false";
+      body.replaceChildren(...Array.from((shouldCollapse && !expanded ? tailTemplate : fullTemplate).content.cloneNode(true).childNodes));
+    }
+
+    function toolOutputLineNodes(lines, toolName, preview, desktopOnlyCount) {
+      if (["edit", "write"].includes(toolName)) {
+        return lines.map((line, index) => {
+          const span = document.createElement("span");
+          span.className = `tool-diff-line ${toolDiffLineClass(line, preview)}`;
+          if (index < desktopOnlyCount) span.classList.add("tool-output-tail-desktop-extra");
+          span.textContent = line;
+          return span;
+        });
+      }
+
+      return lines.map((line, index) => {
         const span = document.createElement("span");
-        span.className = `tool-diff-line ${toolDiffLineClass(line, preview)}`;
+        span.className = `tool-output-line${index < desktopOnlyCount ? " tool-output-tail-desktop-extra" : ""}`;
         span.textContent = line;
-        body.append(span);
+        return span;
       });
     }
 
@@ -1869,7 +1944,7 @@
 
     function updateLiveToolExecution(entry, event, shouldScroll) {
       renderToolSummary(entry.summaryText, null, toolExecutionSummary(event));
-      entry.body.textContent = toolExecutionText(event);
+      renderToolTranscriptBody(entry.body, toolExecutionText(event), event.toolName || entry.toolName);
       if (entry.rawBody) entry.rawBody.textContent = toolExecutionRawDetails(event);
       entry.article.classList.toggle("message--tool-error", event.isError === true);
       afterLiveOutputChange(shouldScroll);
@@ -1885,7 +1960,7 @@
         return;
       }
 
-      const entry = appendCompactMessage("tool", toolExecutionSummary(event), toolExecutionText(event), true, true, shouldScroll, toolExecutionRawDetails(event), eventTimestamp(event), { error: event.isError === true });
+      const entry = appendCompactMessage("tool", toolExecutionSummary(event), toolExecutionText(event), true, true, shouldScroll, toolExecutionRawDetails(event), eventTimestamp(event), { toolName: event.toolName, error: event.isError === true });
       if (entry) liveToolExecutions.set(event.toolCallId, entry);
     }
 
@@ -3459,6 +3534,24 @@
       } finally {
         if (!navigatingAway && switchGeneration === sessionSwitchGeneration && viewGeneration === sessionViewGeneration) hideSessionSwitching();
       }
+    });
+
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-tool-output-toggle]");
+      if (!button) return;
+
+      const collapse = button.closest("[data-tool-output-collapse]");
+      const body = collapse?.querySelector("[data-tool-output-body]");
+      const fullTemplate = collapse?.querySelector("[data-tool-output-full]");
+      const tailTemplate = collapse?.querySelector("[data-tool-output-tail]");
+      if (!collapse || !body || !fullTemplate || !tailTemplate) return;
+
+      const expanded = collapse.dataset.expanded !== "true";
+      collapse.dataset.expanded = expanded ? "true" : "false";
+      collapse.dataset.collapsed = expanded ? "false" : "true";
+      button.setAttribute("aria-expanded", expanded ? "true" : "false");
+      button.textContent = expanded ? "Collapse" : "Expand";
+      body.replaceChildren(...Array.from((expanded ? fullTemplate : tailTemplate).content.cloneNode(true).childNodes));
     });
 
     document.addEventListener("click", async (event) => {

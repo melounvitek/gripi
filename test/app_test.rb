@@ -3106,6 +3106,77 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_collapses_long_tool_outputs_to_latest_lines
+    Dir.mktmpdir do |dir|
+      long_output = (1..25).map { |index| "line #{index}" }.join("\n")
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "bash-1", name: "bash", arguments: { command: "long command" } }]
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:01Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "bash-1",
+            toolName: "bash",
+            content: [{ type: "text", text: long_output }],
+            isError: false
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      tool_card = compact_card_with_summary(document, "$ long command")
+      assert tool_card
+      assert_equal "true", tool_card.at_css("[data-tool-output-collapse]")["data-collapsed"]
+      assert_includes tool_card.at_css("[data-tool-output-collapse-control]").text, "earlier lines"
+      assert_equal "Expand", tool_card.at_css("[data-tool-output-toggle]").text
+      visible_lines = tool_card.at_css(".message-body").css(".tool-output-line").map(&:text)
+      refute_includes visible_lines, "line 1"
+      assert_includes visible_lines, "line 8"
+      assert_includes visible_lines, "line 25"
+    end
+  end
+
+  def test_does_not_tail_collapse_final_assistant_or_thinking_messages
+    Dir.mktmpdir do |dir|
+      long_text = (1..25).map { |index| "assistant line #{index}" }.join("\n")
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: { role: "assistant", content: [{ type: "thinking", thinking: long_text }] }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:01:00Z",
+          message: { role: "assistant", content: [{ type: "text", text: long_text }] }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      assert_empty document.css("[data-tool-output-collapse]")
+      assert_includes response.body, "assistant line 1"
+      assert_includes response.body, "assistant line 25"
+    end
+  end
+
   def test_renders_read_edit_and_write_tools_as_collapsed_transcripts
     Dir.mktmpdir do |dir|
       path = write_session_with_raw_messages(dir, [
@@ -3174,6 +3245,8 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      assert_empty document.css("[data-tool-output-collapse]")
       assert_includes response.body, 'message--tool-transcript'
       assert_includes response.body, '<div class="message-details-summary"><span class="compact-summary"><span class="tool-command">read</span> <span class="tool-path">test/app_test.rb</span><span class="tool-range">:545-654</span></span></div>'
       assert_includes response.body, '<div class="message-details-summary"><span class="compact-summary"><span class="tool-command">edit</span> <span class="tool-path">test/pi_session_store_test.rb</span></span></div>'
@@ -3513,7 +3586,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "event.type === \"tool_execution_update\""
       assert_includes response.body, "event.partialResult?.content"
       assert_includes response.body, "updateLiveToolExecution(entry, event, shouldScroll)"
+      assert_includes response.body, "renderToolTranscriptBody(entry.body, toolExecutionText(event), event.toolName || entry.toolName)"
       assert_includes response.body, "appendCompactMessage(\"tool\", toolExecutionSummary(event), toolExecutionText(event)"
+      assert_includes response.body, "{ toolName: event.toolName, error: event.isError === true }"
       assert_includes response.body, "if (!event.toolCallId || [\"bash\", \"read\", \"edit\", \"write\"].includes(event.toolName)) return;"
       assert_includes response.body, "if (segment.toolCallId && !segment.isToolResult && ![\"bash\", \"read\", \"edit\", \"write\"].includes(segment.toolName)) liveToolExecutions.set(segment.toolCallId, entry);"
       assert_includes response.body, 'if (["tool_execution_start", "tool_execution_update", "tool_execution_end"].includes(event.type))'

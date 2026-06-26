@@ -7,6 +7,8 @@ require_relative "../time_formatter"
 module Web
   module ViewHelpers
     RAW_DETAILS_INLINE_BYTE_LIMIT = 8 * 1024
+    TOOL_OUTPUT_DESKTOP_TAIL_LINES = 18
+    TOOL_OUTPUT_MOBILE_TAIL_LINES = 12
 
     def h(value)
       ERB::Util.html_escape(value)
@@ -232,10 +234,43 @@ module Web
     end
 
     def render_compact_message_body(message)
-      return h(message.text) unless message.tool_transcript && %w[edit write].include?(message.tool_name)
+      render_compact_message_lines(message, tool_output_lines(message), 0)
+    end
 
-      message.text.to_s.lines(chomp: true).map do |line|
-        %(<span class="tool-diff-line #{h(tool_diff_line_class(line, message.tool_preview))}">#{h(line)}</span>)
+    def collapsible_tool_output?(message)
+      return false unless %w[assistant tool toolResult].include?(message.role)
+      return false unless message.compact && !message.thinking && !message.final_assistant_response
+
+      tool_output_lines(message).length > TOOL_OUTPUT_MOBILE_TAIL_LINES
+    end
+
+    def tool_output_lines(message)
+      message.text.to_s.lines(chomp: true)
+    end
+
+    def tool_output_hidden_line_count(message, tail_lines)
+      [tool_output_lines(message).length - tail_lines, 0].max
+    end
+
+    def render_tool_output_tail(message)
+      tail_lines = tool_output_lines(message).last(TOOL_OUTPUT_DESKTOP_TAIL_LINES) || []
+      desktop_extra_count = [tail_lines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0].max
+      render_compact_message_lines(message, tail_lines, desktop_extra_count)
+    end
+
+    def render_compact_message_lines(message, lines, desktop_only_count)
+      if message.tool_transcript && %w[edit write].include?(message.tool_name)
+        return lines.map.with_index do |line, index|
+          classes = ["tool-diff-line", tool_diff_line_class(line, message.tool_preview)]
+          classes << "tool-output-tail-desktop-extra" if index < desktop_only_count
+          %(<span class="#{h(classes.join(" "))}">#{h(line)}</span>)
+        end.join
+      end
+
+      lines.map.with_index do |line, index|
+        classes = ["tool-output-line"]
+        classes << "tool-output-tail-desktop-extra" if index < desktop_only_count
+        %(<span class="#{h(classes.join(" "))}">#{h(line)}</span>)
       end.join
     end
 
