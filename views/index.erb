@@ -1610,11 +1610,11 @@
       const desktopCount = collapse.querySelector(".tool-output-hidden-count--desktop");
       const mobileCount = collapse.querySelector(".tool-output-hidden-count--mobile");
 
-      fullTemplate?.replaceChildren(...toolOutputLineNodes(lines, toolName, preview, 0));
+      fullTemplate?.content.replaceChildren(...toolOutputLineNodes(lines, toolName, preview, 0));
       if (shouldCollapse) {
         const tailLines = lines.slice(-TOOL_OUTPUT_DESKTOP_TAIL_LINES);
         const desktopExtraCount = Math.max(tailLines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0);
-        tailTemplate?.replaceChildren(...toolOutputLineNodes(tailLines, toolName, preview, desktopExtraCount));
+        tailTemplate?.content.replaceChildren(...toolOutputLineNodes(tailLines, toolName, preview, desktopExtraCount));
         if (desktopCount) desktopCount.textContent = `… (${Math.max(lines.length - TOOL_OUTPUT_DESKTOP_TAIL_LINES, 0)} earlier lines)`;
         if (mobileCount) mobileCount.textContent = `… (${Math.max(lines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0)} earlier lines)`;
       }

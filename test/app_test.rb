@@ -3578,6 +3578,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'function renderToolTranscriptBody(body, text, toolName = "", options = {})'
       assert_includes response.body, 'body.dataset.rawText = text || "";'
       assert_includes response.body, 'body.classList.toggle("message-body--edit-preview", preview);'
+      assert_includes response.body, 'fullTemplate?.content.replaceChildren(...toolOutputLineNodes(lines, toolName, preview, 0));'
+      assert_includes response.body, 'tailTemplate?.content.replaceChildren(...toolOutputLineNodes(tailLines, toolName, preview, desktopExtraCount));'
       assert_includes response.body, 'span.className = `tool-diff-line ${toolDiffLineClass(line, preview)}`;'
       assert_includes response.body, 'renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });'
       assert_includes response.body, 'toolPreview: toolPart?.type === "toolCall" && toolName === "edit"'
