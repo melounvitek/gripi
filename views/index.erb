@@ -135,7 +135,7 @@
     .message-details { min-width: 0; max-width: 100%; }
     .message-details-summary { margin-bottom: 0.5rem; font-weight: 700; color: var(--muted); }
     .message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; }
-    .message--tool .message-body, .message--tool-transcript .message-body, .raw-details pre { max-width: 100%; overflow-x: auto; }
+    .message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }
     .compact-summary { margin-left: 0.25rem; }
     .tool-output-collapse { display: grid; gap: 0.4rem; }
     .tool-output-collapse-control { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.82rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
@@ -173,8 +173,6 @@
     .message-image { max-width: min(100%, 28rem); max-height: 28rem; border-radius: 0.6rem; border: 1px solid var(--border); object-fit: contain; background: var(--panel-soft); }
     .message-attachments { display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.6rem; padding: 0.25rem 0.45rem; border-radius: 0.45rem; background: rgba(138, 190, 183, 0.12); color: var(--muted); font-size: 0.82rem; font-weight: 700; }
     .message--tool-error .message-details-summary { color: #ffb4b6; }
-    .raw-details { margin-top: 0.75rem; }
-    .raw-details summary { font-size: 0.8rem; font-weight: 600; color: var(--muted-soft); }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
     .prompt-form, .inline-form { display: grid; gap: 0.5rem; margin: 0; }
     .command-list { display: none; border: 1px solid var(--border); border-radius: 0.75rem; padding: 0.75rem; scrollbar-gutter: stable; background: var(--panel-soft); }
@@ -679,29 +677,6 @@
       conversationScroll.scrollTop = previousTop + (conversationScroll.scrollHeight - previousHeight);
       lastConversationScrollTop = conversationScroll.scrollTop;
       updateScrollJumpButtons();
-    }
-
-    async function loadDeferredRawDetails(details, generation = sessionViewGeneration) {
-      if (!details || details.dataset.deferredRawDetails !== "true" || details.dataset.rawDetailsLoaded === "true" || details.dataset.rawDetailsLoading === "true") return;
-
-      const pre = details.querySelector("pre");
-      const url = details.dataset.rawDetailsUrl;
-      if (!pre || !url) return;
-
-      details.dataset.rawDetailsLoading = "true";
-      const sessionPath = currentSessionPath();
-      try {
-        const response = await fetch(url, { headers: { "Accept": "application/json" } });
-        if (!response.ok || generation !== sessionViewGeneration || sessionPath !== currentSessionPath() || !details.isConnected) return;
-        const payload = await response.json();
-        if (generation !== sessionViewGeneration || sessionPath !== currentSessionPath() || !details.isConnected) return;
-
-        pre.textContent = payload.raw_details || "";
-        details.dataset.rawDetailsLoaded = "true";
-      } catch (_error) {
-      } finally {
-        delete details.dataset.rawDetailsLoading;
-      }
     }
 
     async function loadOlderConversationHistory(generation = sessionViewGeneration) {
@@ -1567,22 +1542,10 @@
       renderToolTranscriptBody(body, text, options.toolName, { preview: options.toolPreview === true });
       details.append(summaryElement, output);
 
-      let rawBody = null;
-      if (rawDetails) {
-        const rawDetailsElement = document.createElement("details");
-        rawDetailsElement.className = "raw-details";
-        const rawSummary = document.createElement("summary");
-        rawSummary.textContent = "Raw details";
-        rawBody = document.createElement("pre");
-        rawBody.textContent = rawDetails;
-        rawDetailsElement.append(rawSummary, rawBody);
-        details.append(rawDetailsElement);
-      }
-
       article.append(header, details);
       liveOutput.append(article);
       afterLiveOutputChange(shouldScroll, live);
-      return { article, details, body, summaryText, rawBody, compact: true, toolName: options.toolName || "" };
+      return { article, details, body, summaryText, compact: true, toolName: options.toolName || "" };
     }
 
     const TOOL_OUTPUT_DESKTOP_TAIL_LINES = 18;
@@ -1742,7 +1705,6 @@
       if (segment.compact) {
         renderToolSummary(entry.summaryText, segment.summaryParts, segment.summary);
         renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });
-        if (entry.rawBody) entry.rawBody.textContent = segment.rawDetails || "";
       } else {
         if (segment.thinking) {
           entry.body.textContent = segment.text;
@@ -1947,7 +1909,6 @@
     function updateLiveToolExecution(entry, event, shouldScroll) {
       renderToolSummary(entry.summaryText, null, toolExecutionSummary(event));
       renderToolTranscriptBody(entry.body, toolExecutionText(event), event.toolName || entry.toolName);
-      if (entry.rawBody) entry.rawBody.textContent = toolExecutionRawDetails(event);
       entry.article.classList.toggle("message--tool-error", event.isError === true);
       afterLiveOutputChange(shouldScroll);
       return entry;
@@ -2003,18 +1964,14 @@
           const bashCallEntry = ["bash", "read", "edit", "write"].includes(segment.toolName) && segment.toolCallId && liveBashToolCalls.get(segment.toolCallId);
           if (toolExecutionEntry && segment.isToolResult) {
             renderToolTranscriptBody(toolExecutionEntry.body, segment.text, segment.toolName || toolExecutionEntry.toolName, { preview: segment.toolPreview === true });
-            if (toolExecutionEntry.rawBody) toolExecutionEntry.rawBody.textContent = segment.rawDetails || "";
             renderToolSummary(toolExecutionEntry.summaryText, segment.summaryParts, segment.summary);
             toolExecutionEntry.article.classList.toggle("message--tool-error", segment.error === true);
             if (!markLiveEntryRendered(toolExecutionEntry, toolExecutionEntry.article.dataset.role || "toolResult", segment.text, timestamp)) return;
             afterLiveOutputChange(shouldScroll);
           } else if (bashCallEntry && segment.isToolResult) {
-            const mergedText = segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text : [bashCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\n\n");
+            const mergedText = segment.toolName === "read" && segment.error !== true ? "" : (segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text : [bashCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\n\n"));
             const preview = segment.toolPreview === true || (segment.error === true && bashCallEntry.body.classList.contains("message-body--edit-preview"));
             renderToolTranscriptBody(bashCallEntry.body, mergedText, segment.toolName || bashCallEntry.toolName, { preview });
-            if (bashCallEntry.rawBody) {
-              bashCallEntry.rawBody.textContent = [bashCallEntry.rawBody.textContent, segment.rawDetails].filter(Boolean).join("\n\n");
-            }
             bashCallEntry.article.classList.toggle("message--tool-error", segment.error === true);
             if (!markLiveEntryRendered(bashCallEntry, bashCallEntry.article.dataset.role || "assistant", mergedText)) return;
             afterLiveOutputChange(shouldScroll);
@@ -2589,10 +2546,6 @@
       conversationScroll?.addEventListener("keydown", (event) => {
         if (event.key === "Tab") toggleConversationPromptFocus(event, promptTextarea);
       });
-      conversationScroll?.addEventListener("toggle", (event) => {
-        const details = event.target.closest?.("details.raw-details[data-deferred-raw-details='true']");
-        if (details?.open) loadDeferredRawDetails(details).catch(() => {});
-      }, true);
       conversationScroll?.addEventListener("wheel", () => recordConversationScrollIntent("pointer"), { passive: true });
       conversationScroll?.addEventListener("touchstart", () => recordConversationScrollIntent("pointer"), { passive: true });
       conversationScroll?.addEventListener("pointerdown", () => recordConversationScrollIntent("pointer"), { passive: true });

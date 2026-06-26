@@ -1966,7 +1966,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'conversationScrollDirection === "up" && !autoScrollEnabled && !nearConversationTop()'
       assert_includes response.body, 'conversationScrollDirection === "down" && !nearConversationBottom()'
       assert_includes response.body, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; }"
-      assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body, .raw-details pre { max-width: 100%; overflow-x: auto; }"
+      assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
       assert_includes response.body, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: rgba(216, 222, 216, 0.68); line-height: 1.35; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
       assert_includes response.body, ".tool-diff-line { display: block; margin: 0 -0.25rem;"
       assert_includes response.body, "scrollbar-width: none"
@@ -3322,7 +3322,7 @@ class AppTest < Minitest::Test
       refute_includes response.body, '<details class="message-details"'
       refute_includes response.body, 'message-body message-body--edit-preview'
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+71 assert_equal [true, false], messages.map(&amp;:thinking)</span>'
-      assert_includes response.body, '545 assert_equal 200, response.status'
+      refute_includes response.body, '545 assert_equal 200, response.status'
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+ done</span>'
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+ &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;</span>'
       refute_includes response.body, '<script>alert'
@@ -3531,7 +3531,7 @@ class AppTest < Minitest::Test
         tool_card = compact_card_with_summary(document, summary)
 
         assert tool_card, "Expected compact card for #{summary}"
-        assert_empty tool_card.at_css(".message-body").text
+        assert_nil tool_card.at_css(".message-body")
       end
 
       assert_equal ["Edit 1", "- old", "+ new"], compact_card_with_summary(document, "edit PLAN.md").css(".tool-diff-line").map(&:text)
@@ -3582,9 +3582,9 @@ class AppTest < Minitest::Test
 
       assert bash_card
       assert_equal " M app.rb", bash_card.at_css(".message-body").text
-      assert_includes response.body, "Raw details"
-      assert_includes response.body, '&quot;type&quot;: &quot;toolCall&quot;'
-      assert_includes response.body, '&quot;toolCallId&quot;: &quot;call_123&quot;'
+      refute_includes response.body, "Raw details"
+      refute_includes response.body, '&quot;type&quot;: &quot;toolCall&quot;'
+      refute_includes response.body, '&quot;toolCallId&quot;: &quot;call_123&quot;'
       refute_includes response.body, "[thinking]"
       refute_includes response.body, '<div class="message-details-summary"><span class="compact-summary">bash</span></div>'
     end
@@ -3605,7 +3605,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function contentSegments(content, message = {})"
       assert_includes response.body, "appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded"
       assert_includes response.body, "segment.rawDetails"
-      assert_includes response.body, "Raw details"
+      refute_includes response.body, "Raw details"
       assert_includes response.body, "function renderToolSummary(container, parts, fallback)"
       assert_includes response.body, "message--tool-transcript"
       assert_includes response.body, "toolSummaryParts(toolName, toolPart?.arguments || {})"
@@ -4393,7 +4393,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_defers_large_raw_details_in_initial_conversation_and_fetches_them
+  def test_does_not_render_large_raw_details_in_initial_conversation
     Dir.mktmpdir do |dir|
       large_raw_details = "large raw detail token #{"x" * 9000}"
       path = write_session_with_raw_messages(dir, [
@@ -4406,21 +4406,12 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
-      raw_details = document.at_css("details.raw-details[data-deferred-raw-details='true']")
-      assert raw_details
-      assert_equal "0", raw_details["data-message-index"]
-      assert_includes raw_details["data-raw-details-url"], "/message_raw_details"
+      refute document.at_css("details.raw-details")
       refute_includes response.body, large_raw_details
-      assert_includes raw_details.text, "Raw details available"
-
-      raw_response = Rack::MockRequest.new(PiWebGateway).get(raw_details["data-raw-details-url"])
-
-      assert_equal 200, raw_response.status
-      assert_includes JSON.parse(raw_response.body).fetch("raw_details"), large_raw_details
     end
   end
 
-  def test_keeps_small_raw_details_inline
+  def test_does_not_render_small_raw_details_inline
     Dir.mktmpdir do |dir|
       small_raw_details = "small raw detail token"
       path = write_session_with_raw_messages(dir, [
@@ -4433,12 +4424,12 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
-      refute document.at_css("details.raw-details[data-deferred-raw-details='true']")
-      assert_includes response.body, small_raw_details
+      refute document.at_css("details.raw-details")
+      refute_includes response.body, small_raw_details
     end
   end
 
-  def test_older_conversation_window_renders_stable_message_indices_for_deferred_raw_details
+  def test_older_conversation_window_does_not_render_raw_details
     Dir.mktmpdir do |dir|
       large_raw_details = "older raw detail token #{"x" * 9000}"
       raw_entries = Array.new(10) do |index|
@@ -4457,13 +4448,8 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       html = JSON.parse(response.body).fetch("html")
       document = Nokogiri::HTML(html)
-      raw_details = document.at_css("details.raw-details[data-deferred-raw-details='true']")
-      assert raw_details
-      assert_equal "10", raw_details["data-message-index"]
+      refute document.at_css("details.raw-details")
       refute_includes html, large_raw_details
-
-      raw_response = Rack::MockRequest.new(PiWebGateway).get(raw_details["data-raw-details-url"])
-      assert_includes JSON.parse(raw_response.body).fetch("raw_details"), large_raw_details
     end
   end
 

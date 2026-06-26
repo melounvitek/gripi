@@ -500,6 +500,7 @@ class PiSessionStore
     return result_message.text if call_message.tool_name == "bash"
 
     if transcript_tool?(call_message.tool_name) && !result_message.error
+      return "" if call_message.tool_name == "read"
       return [call_message.text, result_message.text].reject(&:empty?).join("\n\n") if call_message.tool_name == "write"
 
       return result_message.text

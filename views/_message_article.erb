@@ -15,31 +15,20 @@
               <% elsif message.compact %>
                 <div class="message-details message-details--always-open">
                   <div class="message-details-summary"><span class="compact-summary"><%= message.tool_summary_html || h(message.summary) %></span></div>
-                  <% if collapsible_tool_output?(message) %>
-                    <div class="tool-output-collapse" data-tool-output-collapse data-tool-output-collapsible="true" data-collapsed="true">
-                      <div class="tool-output-collapse-control" data-tool-output-collapse-control>
-                        <span class="tool-output-hidden-count tool-output-hidden-count--desktop">… (<%= h tool_output_hidden_line_count(message, Web::ViewHelpers::TOOL_OUTPUT_DESKTOP_TAIL_LINES) %> earlier lines)</span>
-                        <span class="tool-output-hidden-count tool-output-hidden-count--mobile">… (<%= h tool_output_hidden_line_count(message, Web::ViewHelpers::TOOL_OUTPUT_MOBILE_TAIL_LINES) %> earlier lines)</span>
-                        <button type="button" class="tool-output-toggle" data-tool-output-toggle aria-expanded="false">Expand</button>
+                  <% if message.text.to_s != "" %>
+                    <% if collapsible_tool_output?(message) %>
+                      <div class="tool-output-collapse" data-tool-output-collapse data-tool-output-collapsible="true" data-collapsed="true">
+                        <div class="tool-output-collapse-control" data-tool-output-collapse-control>
+                          <span class="tool-output-hidden-count tool-output-hidden-count--desktop">… (<%= h tool_output_hidden_line_count(message, Web::ViewHelpers::TOOL_OUTPUT_DESKTOP_TAIL_LINES) %> earlier lines)</span>
+                          <span class="tool-output-hidden-count tool-output-hidden-count--mobile">… (<%= h tool_output_hidden_line_count(message, Web::ViewHelpers::TOOL_OUTPUT_MOBILE_TAIL_LINES) %> earlier lines)</span>
+                          <button type="button" class="tool-output-toggle" data-tool-output-toggle aria-expanded="false">Expand</button>
+                        </div>
+                        <pre class="message-body<%= ' message-body--edit-preview' if message.tool_preview %>" data-tool-output-body><%= render_tool_output_tail(message) %></pre>
+                        <template data-tool-output-full><%= render_compact_message_body(message) %></template>
+                        <template data-tool-output-tail><%= render_tool_output_tail(message) %></template>
                       </div>
-                      <pre class="message-body<%= ' message-body--edit-preview' if message.tool_preview %>" data-tool-output-body><%= render_tool_output_tail(message) %></pre>
-                      <template data-tool-output-full><%= render_compact_message_body(message) %></template>
-                      <template data-tool-output-tail><%= render_tool_output_tail(message) %></template>
-                    </div>
-                  <% else %>
-                    <pre class="message-body<%= ' message-body--edit-preview' if message.tool_preview %>"><%= render_compact_message_body(message) %></pre>
-                  <% end %>
-                  <% if message.raw_details.to_s != "" %>
-                    <% if defined?(message_index) && message_index && defer_raw_details?(message) %>
-                      <details class="raw-details" data-deferred-raw-details="true" data-message-index="<%= h message_index %>" data-raw-details-url="<%= h raw_details_url(message_index, message) %>">
-                        <summary>Raw details available</summary>
-                        <pre></pre>
-                      </details>
                     <% else %>
-                      <details class="raw-details">
-                        <summary>Raw details</summary>
-                        <pre><%= h message.raw_details %></pre>
-                      </details>
+                      <pre class="message-body<%= ' message-body--edit-preview' if message.tool_preview %>"><%= render_compact_message_body(message) %></pre>
                     <% end %>
                   <% end %>
                 </div>
