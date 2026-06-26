@@ -93,13 +93,27 @@ module Web
         content_type :json
         JSON.generate(
           html: result.fetch(:messages).map.with_index(result.fetch(:start_index)) { |message, message_index|
-            erb(:_message_article, layout: false, locals: { message: message, message_index: message_index, attachment_count: result.fetch(:attachment_counts)[message.object_id] })
+            erb(:_message_article, layout: false, locals: { message: message, message_index: message_index, attachment_count: result.fetch(:attachment_counts)[message.object_id], attachment_images: result.fetch(:attachment_images)[message.object_id] })
           }.join,
           start_index: result.fetch(:start_index),
           next_cursor: result.fetch(:next_cursor),
           has_older_messages: result.fetch(:has_older_messages),
           older_message_count: result.fetch(:older_message_count)
         )
+      end
+
+      app.get "/attachments/:session_hash/:file" do
+        halt 404 unless params["session_hash"].to_s.match?(/\A[a-f0-9]{64}\z/)
+        halt 404 unless params["file"].to_s.match?(/\A[a-f0-9]{64}\.(png|jpg|gif|webp)\z/)
+
+        path = File.join(settings.attachments_root, params["session_hash"], params["file"])
+        root = File.realpath(settings.attachments_root)
+        real_path = File.realpath(path)
+        halt 404 unless real_path.start_with?("#{root}#{File::SEPARATOR}")
+        mime_type Rack::Mime.mime_type(File.extname(real_path))
+        send_file real_path
+      rescue SystemCallError
+        halt 404
       end
 
       app.get "/message_raw_details" do

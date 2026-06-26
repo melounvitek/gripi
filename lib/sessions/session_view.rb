@@ -25,6 +25,7 @@ module Sessions
       :conversation_has_older_messages,
       :conversation_older_message_count,
       :attachment_counts,
+      :attachment_images,
       :session_status
 
     def self.build(**kwargs)
@@ -46,7 +47,8 @@ module Sessions
         next_cursor: next_cursor,
         has_older_messages: next_cursor.positive?,
         older_message_count: next_cursor,
-        attachment_counts: attachment_store.counts_for_messages(session_path, messages)
+        attachment_counts: attachment_store.counts_for_messages(session_path, messages),
+        attachment_images: attachment_store.images_for_messages(session_path, messages)
       }
     rescue SystemCallError
       empty_older_window
@@ -59,7 +61,8 @@ module Sessions
         next_cursor: 0,
         has_older_messages: false,
         older_message_count: 0,
-        attachment_counts: {}
+        attachment_counts: {},
+        attachment_images: {}
       }
     end
 
@@ -153,6 +156,7 @@ module Sessions
         :@conversation_has_older_messages => @conversation_has_older_messages,
         :@conversation_older_message_count => @conversation_older_message_count,
         :@attachment_counts => @attachment_counts,
+        :@attachment_images => @attachment_images,
         :@session_status => @session_status
       }
     end
@@ -202,6 +206,7 @@ module Sessions
       @conversation_older_message_count = @conversation_start_index
       @conversation_has_older_messages = @conversation_older_message_count.positive?
       @attachment_counts = existing_conversation ? @attachment_store.counts_for_messages(@selected_session.path, @messages) : {}
+      @attachment_images = existing_conversation ? @attachment_store.images_for_messages(@selected_session.path, @messages) : {}
       @session_status = existing_conversation ? @store.status(@selected_session.path) : nil
     end
 

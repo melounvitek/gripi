@@ -1,4 +1,5 @@
 require "minitest/autorun"
+require "base64"
 require "tmpdir"
 require "json"
 require "fileutils"
@@ -29,6 +30,26 @@ class PiSessionStoreTest < Minitest::Test
       assert_equal 2, session.message_count
       assert session.created_at
       assert session.modified_at
+    end
+  end
+
+  def test_preserves_image_blocks_and_image_only_user_messages
+    Dir.mktmpdir do |dir|
+      session_dir = File.join(dir, "--project--")
+      FileUtils.mkdir_p(session_dir)
+      path = File.join(session_dir, "session.jsonl")
+      image_data = Base64.strict_encode64("fake image data")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        { type: "message", message: { role: "user", content: [{ type: "image", data: image_data, mimeType: "image/png" }] } }
+      ])
+
+      messages = PiSessionStore.new(root: dir).messages(path)
+
+      assert_equal 1, messages.length
+      assert_equal "user", messages.first.role
+      assert_equal "", messages.first.text
+      assert_equal [{ data: image_data, mime_type: "image/png" }], messages.first.images
     end
   end
 

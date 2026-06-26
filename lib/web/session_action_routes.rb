@@ -96,6 +96,10 @@ module Web
         halt 400, error.message
       end
 
+      def message_with_attachment_paths(message, paths)
+        paths.empty? ? message : [message.strip, paths.join("\n")].reject(&:empty?).join("\n\n")
+      end
+
       def command_session_available?(session_path)
         rpc_clients.active?(session_path) || known_session_path?(session_path)
       end
@@ -119,7 +123,9 @@ module Web
         session_path = canonical_rpc_session_path(params.fetch("session"))
         message = params.fetch("message").to_s
         images = prompt_images_from(params["images"])
-        halt 400, "Message cannot be empty" if message.strip.empty? && images.empty?
+        attachment_paths = attachment_store.persist_prompt_images(session_path, images)
+        rpc_message = message_with_attachment_paths(message, attachment_paths)
+        halt 400, "Message cannot be empty" if rpc_message.strip.empty? && images.empty?
 
         follow_up_prompt = params["streaming_behavior"].to_s == "follow_up"
 
@@ -127,8 +133,8 @@ module Web
         branch_response = nil
         if follow_up_prompt
           submitted_at = Time.now
-          with_rpc_client(session_path) { |client| client.follow_up(message, images) }
-          attachment_store.record_prompt(session_path, message, images.length, timestamp: submitted_at)
+          with_rpc_client(session_path) { |client| client.follow_up(rpc_message, images) }
+          attachment_store.record_prompt(session_path, rpc_message, images.length, timestamp: submitted_at, paths: attachment_paths, mime_types: images.map { |image| image[:mimeType] })
         elsif slash_command&.type == :rename && slash_command.name
           with_rpc_client(session_path) { |client| client.set_session_name(slash_command.name) }
         elsif slash_command&.type == :rename || [:fork, :tree].include?(slash_command&.type)
@@ -142,8 +148,8 @@ module Web
           branch_response = redirect_to_rpc_session_after_branch(session_path, response)
         else
           submitted_at = Time.now
-          with_rpc_client(session_path) { |client| client.prompt(message, images) }
-          attachment_store.record_prompt(session_path, message, images.length, timestamp: submitted_at)
+          with_rpc_client(session_path) { |client| client.prompt(rpc_message, images) }
+          attachment_store.record_prompt(session_path, rpc_message, images.length, timestamp: submitted_at, paths: attachment_paths, mime_types: images.map { |image| image[:mimeType] })
         end
         redirect_path = session_redirect_path(session_path)
         if branch_response

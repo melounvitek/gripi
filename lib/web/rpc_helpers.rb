@@ -40,6 +40,7 @@ module Web
       return unless real_path && File.exist?(real_path) && session_cwd(real_path) == cwd
 
       rpc_clients.move(session_path, real_path)
+      attachment_store.migrate_session(session_path, real_path)
       forget_pending_rpc_cwd(session_path)
       real_path
     end
@@ -51,6 +52,7 @@ module Web
       return unless pending_path
 
       rpc_clients.move(pending_path, session_path)
+      attachment_store.migrate_session(pending_path, session_path)
       forget_pending_rpc_cwd(pending_path)
     end
 

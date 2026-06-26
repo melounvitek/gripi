@@ -696,10 +696,10 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_equal [
-        [:start, path],
-        [:follow_up, "Actually do this", [{ type: "image", data: Base64.strict_encode64("fake image data"), mimeType: "image/png" }]]
-      ], calls
+      assert_equal [:start, path], calls[0]
+      assert_equal :follow_up, calls[1][0]
+      assert_match %r{\AActually do this\n\n/.+/[a-f0-9]{64}/[a-f0-9]{64}\.png\z}, calls[1][1]
+      assert_equal [{ type: "image", data: Base64.strict_encode64("fake image data"), mimeType: "image/png" }], calls[1][2]
       assert_equal true, JSON.parse(response.body).fetch("follow_up")
     end
   end
@@ -723,14 +723,14 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 303, response.status
-      assert_equal [
-        [:start, path],
-        [:prompt, "What is this?", [{ type: "image", data: Base64.strict_encode64("fake image data"), mimeType: "image/png" }]]
-      ], calls
+      assert_equal [:start, path], calls[0]
+      assert_equal :prompt, calls[1][0]
+      assert_match %r{\AWhat is this\?\n\n/.+/[a-f0-9]{64}/[a-f0-9]{64}\.png\z}, calls[1][1]
+      assert_equal [{ type: "image", data: Base64.strict_encode64("fake image data"), mimeType: "image/png" }], calls[1][2]
     end
   end
 
-  def test_renders_historical_attachment_badge_for_uploaded_image_prompt
+  def test_renders_historical_uploaded_image_prompt
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       image_path = File.join(dir, "screenshot.png")
@@ -751,7 +751,7 @@ class AppTest < Minitest::Test
         file.puts(JSON.generate(
           type: "message",
           timestamp: Time.now.utc.iso8601,
-          message: { role: "user", content: [{ type: "text", text: "What is this?" }] }
+          message: { role: "user", content: [{ type: "text", text: calls[1][1] }] }
         ))
       end
 
@@ -759,8 +759,35 @@ class AppTest < Minitest::Test
 
       assert_equal 303, post_response.status
       assert_equal 200, response.status
-      assert_includes response.body, "message-attachments"
-      assert_includes response.body, "📎 1 image attachment"
+      assert_includes response.body, "message-images"
+      assert_includes response.body, "/attachments/"
+      refute_includes response.body, "📎 1 image attachment"
+
+      attachment_url = response.body.match(%r{/attachments/[a-f0-9]{64}/[a-f0-9]{64}\.png})[0]
+      attachment_response = Rack::MockRequest.new(PiWebGateway).get(attachment_url)
+      assert_equal 200, attachment_response.status
+      assert_equal "fake image data", attachment_response.body
+    end
+  end
+
+  def test_renders_jsonl_image_only_user_message
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      image_data = Base64.strict_encode64("fake image data")
+      PiWebGateway.set :sessions_root, dir
+      File.open(path, "a") do |file|
+        file.puts(JSON.generate(
+          type: "message",
+          timestamp: Time.now.utc.iso8601,
+          message: { role: "user", content: [{ type: "image", data: image_data, mimeType: "image/png" }] }
+        ))
+      end
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, "message-images"
+      assert_includes response.body, "data:image/png;base64,#{image_data}"
     end
   end
 

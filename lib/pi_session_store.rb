@@ -21,7 +21,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :final_assistant_response, :entry_id, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :expanded, :error, :tool_call_id, :tool_name, :raw_details, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :final_assistant_response, :entry_id, :images, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :context_estimated, :cost_total, keyword_init: true)
 
   @session_cache = {}
@@ -440,7 +440,8 @@ class PiSessionStore
       assistant_messages_from_entry(message, parse_time(entry["timestamp"]))
     else
       text = tool_result_text(message)
-      return [] if text.empty?
+      images = content_images(message["content"])
+      return [] if text.empty? && images.empty?
 
       [Message.new(
         role: role,
@@ -454,6 +455,7 @@ class PiSessionStore
         tool_call_id: message["toolCallId"],
         tool_name: message["toolName"],
         raw_details: compact_raw_details(message["content"]) || (compact_message?(message) ? JSON.pretty_generate(message) : nil),
+        images: images,
         tool_transcript: transcript_tool?(message["toolName"])
       )]
     end
@@ -566,6 +568,16 @@ class PiSessionStore
 
       part["text"] || thinking_text(part) || tool_text(part)
     end.join("\n")
+  end
+
+  def content_images(content)
+    Array(content).filter_map do |part|
+      next unless part.is_a?(Hash) && part["type"] == "image"
+      next unless ["image/png", "image/jpeg", "image/gif", "image/webp"].include?(part["mimeType"])
+      next if part["data"].to_s.empty?
+
+      { data: part["data"], mime_type: part["mimeType"] }
+    end
   end
 
   def compact_part?(part)

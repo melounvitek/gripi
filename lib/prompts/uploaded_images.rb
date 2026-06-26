@@ -4,6 +4,7 @@ module Prompts
   class UploadedImages
     MAX_IMAGES = 5
     MAX_IMAGE_BYTES = 10 * 1024 * 1024
+    ALLOWED_MIME_TYPES = %w[image/png image/jpeg image/gif image/webp].freeze
 
     ValidationError = Class.new(StandardError)
 
@@ -28,7 +29,7 @@ module Prompts
     def image_from(upload)
       tempfile = uploaded_tempfile(upload)
       mime_type = uploaded_content_type(upload).to_s
-      raise ValidationError, "Only image uploads are supported" unless tempfile && mime_type.start_with?("image/")
+      raise ValidationError, "Only image uploads are supported" unless tempfile && ALLOWED_MIME_TYPES.include?(mime_type)
       raise ValidationError, "Image upload is too large" if tempfile.size > MAX_IMAGE_BYTES
 
       tempfile.rewind if tempfile.respond_to?(:rewind)

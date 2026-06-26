@@ -231,6 +231,24 @@ module Web
       markdown_renderer.render(message.text)
     end
 
+    def render_message_images(images)
+      Array(images).filter_map do |image|
+        src = image[:src] || image["src"] || data_image_src(image)
+        next if src.to_s.empty?
+
+        %(<img class="message-image" src="#{h(src)}" alt="Attached image">)
+      end.join
+    end
+
+    def data_image_src(image)
+      mime_type = image[:mime_type] || image["mime_type"] || image[:mimeType] || image["mimeType"]
+      data = image[:data] || image["data"]
+      return unless %w[image/png image/jpeg image/gif image/webp].include?(mime_type)
+      return if data.to_s.empty?
+
+      "data:#{mime_type};base64,#{data}"
+    end
+
     def render_compact_message_body(message)
       return h(message.text) unless message.tool_transcript && %w[edit write].include?(message.tool_name)
 

@@ -8,6 +8,8 @@
                   <button type="button" class="copy-button" data-copy-target="message">Copy</button>
                 <% end %>
               </header>
+              <% visible_images = Array(message.images) %>
+              <% visible_images = Array(defined?(attachment_images) ? attachment_images : []) if visible_images.empty? %>
               <% if message.thinking %>
                 <div class="message-body message-body--thinking"><%= render_message_body(message) %></div>
               <% elsif message.compact %>
@@ -35,7 +37,9 @@
                   <pre class="message-body"><%= render_message_body(message) %></pre>
                 <% end %>
               <% end %>
-              <% if message.role == "user" && attachment_count.to_i.positive? %>
+              <% if visible_images.any? %>
+                <div class="message-images"><%= render_message_images(visible_images) %></div>
+              <% elsif message.role == "user" && attachment_count.to_i.positive? %>
                 <div class="message-attachments"><%= h attachment_label(attachment_count) %></div>
               <% end %>
             </article>

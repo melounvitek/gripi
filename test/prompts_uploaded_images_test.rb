@@ -39,6 +39,14 @@ class PromptsUploadedImagesTest < Minitest::Test
     assert_equal "Too many images", error.message
   end
 
+  def test_rejects_unsupported_image_uploads
+    error = assert_raises(Prompts::UploadedImages::ValidationError) do
+      Prompts::UploadedImages.parse([{ tempfile: StringIO.new("svg"), type: "image/svg+xml" }])
+    end
+
+    assert_equal "Only image uploads are supported", error.message
+  end
+
   def test_rejects_non_image_uploads
     error = assert_raises(Prompts::UploadedImages::ValidationError) do
       Prompts::UploadedImages.parse([{ tempfile: StringIO.new("text"), type: "text/plain" }])
