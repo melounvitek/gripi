@@ -47,10 +47,11 @@
     .sidebar-session-search input { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--text); font-size: 0.84rem; background: rgba(40, 40, 50, 0.72); }
     .sidebar-search-toggle { min-width: 1.65rem; padding: 0.2rem 0.45rem; font-size: 1rem; }
     .sidebar-search-toggle.is-active { color: var(--accent); border: 1px solid rgba(138, 190, 183, 0.35); }
-    .sidebar-search-clear { flex: 0 0 auto; color: var(--muted); font-size: 0.76rem; font-weight: 800; text-decoration: none; }
-    .sidebar-search-clear:hover { color: var(--text); text-decoration: underline; }
     .sidebar-project-filter-form { margin: 0 0 0.65rem; }
-    .sidebar-project-filter { width: 100%; padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.84rem; font-weight: 700; background: rgba(40, 40, 50, 0.72); }
+    .sidebar-filter-row { display: flex; align-items: center; gap: 0.45rem; }
+    .sidebar-project-filter { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.84rem; font-weight: 700; background: rgba(40, 40, 50, 0.72); }
+    .sidebar-filters-clear { flex: 0 0 auto; color: var(--muted); font-size: 0.76rem; font-weight: 800; text-decoration: none; white-space: nowrap; }
+    .sidebar-filters-clear:hover { color: var(--text); text-decoration: underline; }
     .recent-sessions { margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid rgba(80, 80, 80, 0.7); }
     .recent-sessions-header { display: flex; align-items: center; gap: 0.4rem; margin: 0.75rem 0 0.5rem; }
     .recent-sessions-header h2 { flex: 1; min-width: 0; }
@@ -3431,13 +3432,15 @@
       const button = event.target.closest("[data-sidebar-search-toggle]");
       if (!button) return;
 
-      const form = button.closest(".recent-sessions")?.querySelector(".sidebar-session-search");
+      const container = button.closest(".recent-sessions");
+      const form = container?.querySelector(".sidebar-session-search");
       const input = form?.querySelector('input[name="session_search"]');
+      const projectSelect = container?.querySelector("[data-sidebar-project-filter]");
       if (!form || !input) return;
 
       form.classList.toggle("is-open");
       const open = form.classList.contains("is-open");
-      button.classList.toggle("is-active", open || input.value.trim() !== "");
+      button.classList.toggle("is-active", open || input.value.trim() !== "" || projectSelect?.value !== "");
       button.setAttribute("aria-expanded", open ? "true" : "false");
       if (open) input.focus();
     });

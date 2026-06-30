@@ -51,6 +51,19 @@ class SessionsSidebarTest < Minitest::Test
     assert_equal ["beta-project", "gamma-project", "alpha-project"], sidebar.known_session_cwds
   end
 
+  def test_clear_filters_url_removes_search_and_project_but_keeps_session
+    current = session("current", "current-project", "Current", 20)
+    filtered = session("filtered", "filtered-project", "Filtered", 10)
+    sidebar = build_sidebar(
+      groups: groups(current, filtered),
+      selected_session: current,
+      params: { "project" => filtered.cwd, "session_search" => "work" }
+    )
+
+    assert sidebar.filters?
+    assert_equal "/?session=#{Rack::Utils.escape(current.path)}", sidebar.filters_clear_url
+  end
+
   private
 
   def build_sidebar(groups:, selected_session:, params: {}, unread_paths: [])

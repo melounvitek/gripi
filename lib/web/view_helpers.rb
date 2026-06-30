@@ -124,12 +124,18 @@ module Web
       !sidebar_session_search_query.empty?
     end
 
+    def sidebar_filters?
+      return @sidebar.filters? if defined?(@sidebar) && @sidebar
+
+      sidebar_session_search? || !!selected_project_cwd
+    end
+
     def session_matches_sidebar_search?(session)
       @sidebar.matches_search?(session)
     end
 
-    def sidebar_search_clear_url
-      @sidebar.search_clear_url
+    def sidebar_filters_clear_url
+      @sidebar.filters_clear_url
     end
 
     def session_url(session_path)

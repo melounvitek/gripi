@@ -113,6 +113,10 @@ module Sessions
       !search_query.empty?
     end
 
+    def filters?
+      search? || !!selected_project_cwd
+    end
+
     def matches_search?(session)
       query = search_query.downcase
       return true if query.empty?
@@ -122,8 +126,8 @@ module Sessions
       end
     end
 
-    def search_clear_url
-      url_for(include_search: false)
+    def filters_clear_url
+      url_for(include_filters: false)
     end
 
     def session_url(session_path)
@@ -136,10 +140,10 @@ module Sessions
       File.basename(session.cwd.to_s)
     end
 
-    def url_for(session: @selected_session&.path, include_search: true, sidebar_sessions_limit: nil)
+    def url_for(session: @selected_session&.path, include_filters: true, include_search: include_filters, sidebar_sessions_limit: nil)
       query = {}
       query["session"] = session if session
-      query["project"] = selected_project_cwd if selected_project_cwd
+      query["project"] = selected_project_cwd if include_filters && selected_project_cwd
       query["session_search"] = search_query if include_search && search?
       query["sidebar_sessions_limit"] = sidebar_sessions_limit if sidebar_sessions_limit
       "/?#{Rack::Utils.build_nested_query(query)}"

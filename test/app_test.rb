@@ -2157,10 +2157,43 @@ class AppTest < Minitest::Test
       assert_equal "missing", document.at_css('.sidebar-session-search input[name="session_search"]')["value"]
       assert_includes document.at_css(".sidebar-session-search")["class"], "is-open"
       assert_equal "true", document.at_css("[data-sidebar-search-toggle]")["aria-expanded"]
-      assert_includes response.body, "No sessions match this search."
+      assert_includes response.body, "No sessions match these filters."
       assert_includes document.at_css('.sidebar-project-filter-form input[name="session_search"]')["value"], "missing"
       session_link = document.at_css('.recent-sessions a.session[href]')
       assert_includes session_link["href"], "session_search=missing"
+    end
+  end
+
+  def test_sidebar_filter_clear_button_resets_search_and_project_together
+    Dir.mktmpdir do |dir|
+      current_cwd = File.join(dir, "current-project")
+      filtered_cwd = File.join(dir, "filtered-project")
+      FileUtils.mkdir_p(current_cwd)
+      FileUtils.mkdir_p(filtered_cwd)
+      session_dir = File.join(dir, "sessions")
+      FileUtils.mkdir_p(session_dir)
+      current_path = File.join(session_dir, "current.jsonl")
+      filtered_path = File.join(session_dir, "filtered.jsonl")
+      File.write(current_path, JSON.generate({ type: "session", id: "current", cwd: current_cwd }) + "\n")
+      File.write(filtered_path, JSON.generate({ type: "session", id: "filtered", cwd: filtered_cwd }) + "\n")
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sidebar",
+        params: { "session" => current_path, "project" => filtered_cwd, "session_search" => "filtered" }
+      )
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      toggle = document.at_css("[data-sidebar-search-toggle]")
+      clear = document.at_css(".sidebar-filters-clear")
+      assert_includes toggle["class"], "is-active"
+      assert_equal "true", toggle["aria-expanded"]
+      assert_equal "Clear filters", clear.text
+      assert_includes clear["href"], "session=#{Rack::Utils.escape(current_path)}"
+      refute_includes clear["href"], "project="
+      refute_includes clear["href"], "session_search="
     end
   end
 
