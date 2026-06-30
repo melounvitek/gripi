@@ -1966,6 +1966,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'conversationScrollDirection === "up" && !autoScrollEnabled && !nearConversationTop()'
       assert_includes response.body, 'conversationScrollDirection === "down" && !nearConversationBottom()'
       assert_includes response.body, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; }"
+      assert_includes response.body, ".message--compact .message-details-summary:last-child { margin-bottom: 0; }"
       assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
       assert_includes response.body, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: rgba(216, 222, 216, 0.68); line-height: 1.35; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
       assert_includes response.body, ".tool-diff-line { display: block; margin: 0 -0.25rem;"
