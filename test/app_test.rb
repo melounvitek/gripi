@@ -2414,8 +2414,11 @@ class AppTest < Minitest::Test
       project_option = modal.css('option').find { |option| option["value"] == project_cwd(dir) }
       assert_equal File.basename(project_cwd(dir)), project_option.text
       assert_includes modal.text, "Start session"
-      assert_includes modal.text, "Existing folder"
-      assert_includes modal.text, "Path"
+      assert_includes modal.text, "Project"
+      assert modal.at_css('[data-new-session-project-fields]')
+      assert modal.at_css('[data-new-session-path-fields]').key?("hidden")
+      assert_equal project_cwd(dir), modal.at_css('input[name="cwd"]')["value"]
+      assert_equal "__new_path__", modal.at_css('option[data-new-session-new-path-option]')["value"]
     end
   end
 
@@ -2437,7 +2440,7 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
-      project_options = modal.css('select[data-new-session-known-cwd] option').reject { |option| option["value"].to_s.empty? }
+      project_options = modal.css('select[data-new-session-known-cwd] option').reject { |option| option["value"].to_s.empty? || option["data-new-session-new-path-option"] }
       assert_equal ["app — #{first_cwd}", "app — #{second_cwd}"], project_options.map(&:text)
     end
   end
@@ -2464,12 +2467,13 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
       options = modal.css('select[data-new-session-known-cwd] option')
-      assert_equal [older_cwd, newer_cwd], options.map { |option| option["value"] }.reject(&:empty?)
+      assert_equal [older_cwd, newer_cwd], options.map { |option| option["value"] }.reject { |value| value.empty? || value == "__new_path__" }
       selected_option = options.find { |option| option["selected"] }
       assert_equal older_cwd, selected_option["value"]
-      assert_equal older_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
+      assert_equal older_cwd, modal.at_css('input[name="cwd"]')["value"]
+      assert modal.at_css('[data-new-session-path-fields]').key?("hidden")
+      assert modal.at_css('[data-new-session-cwd-message]').key?("hidden")
       refute modal.at_css('button[data-new-session-submit]').key?("disabled")
-      assert_includes modal.at_css('[data-new-session-cwd-message]').text, "Directory exists."
     end
   end
 
@@ -2501,10 +2505,10 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
       options = modal.css('select[data-new-session-known-cwd] option')
-      assert_equal [filtered_cwd, newer_cwd, current_cwd], options.map { |option| option["value"] }.reject(&:empty?)
+      assert_equal [filtered_cwd, newer_cwd, current_cwd], options.map { |option| option["value"] }.reject { |value| value.empty? || value == "__new_path__" }
       selected_option = options.find { |option| option["selected"] }
       assert_equal filtered_cwd, selected_option["value"]
-      assert_equal filtered_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
+      assert_equal filtered_cwd, modal.at_css('input[name="cwd"]')["value"]
     end
   end
 
@@ -2534,7 +2538,7 @@ class AppTest < Minitest::Test
       assert_equal "/sessions/fork_messages?session=#{Rack::Utils.escape(current_path)}", fork_modal.at_css("[data-fork-session-list]")["data-fork-messages-url"]
       selected_option = modal.at_css('select[data-new-session-known-cwd] option[selected]')
       assert_equal filtered_cwd, selected_option["value"]
-      assert_equal filtered_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
+      assert_equal filtered_cwd, modal.at_css('input[name="cwd"]')["value"]
     end
   end
 
@@ -2557,7 +2561,7 @@ class AppTest < Minitest::Test
       modal = Nokogiri::HTML(response.body)
       selected_option = modal.at_css('select[data-new-session-known-cwd] option[selected]')
       assert_equal filtered_cwd, selected_option["value"]
-      assert_equal filtered_cwd, modal.at_css('input[data-new-session-cwd-input]')["value"]
+      assert_equal filtered_cwd, modal.at_css('input[name="cwd"]')["value"]
     end
   end
 
@@ -2597,7 +2601,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "async function submitAbort(event)"
       assert_includes response.body, "if (modalIsOpen()) return;"
       assert_includes response.body, "fetch(validationUrl"
-      assert_includes response.body, "if (select && select.value !== input.value.trim()) select.value = \"\";"
+      assert_includes response.body, "function setNewSessionProjectMode(form)"
+      assert_includes response.body, "function setNewSessionPathMode(form,"
+      assert_includes response.body, "data-new-session-new-path-option"
       assert_includes response.body, "form.dataset.submitting === \"true\""
       assert_includes response.body, "function addSessionViewFormParams(formData)"
       assert_includes response.body, "form.action, { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } }"

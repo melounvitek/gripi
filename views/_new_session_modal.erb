@@ -5,27 +5,36 @@
         <button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>&times;</button>
       </div>
       <% default_new_session_cwd = new_session_cwds.first %>
-      <form class="new-session-cwd-form" method="post" action="/sessions/new_at_cwd" data-cwd-validation-url="/sessions/validate_cwd">
+      <% new_path_option_value = "__new_path__" %>
+      <form class="new-session-cwd-form" method="post" action="/sessions/new_at_cwd" data-cwd-validation-url="/sessions/validate_cwd" data-new-session-new-path-value="<%= h new_path_option_value %>">
         <% if selected_project_cwd %>
           <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
         <% end %>
         <% if sidebar_session_search? %>
           <input type="hidden" name="session_search" value="<%= h sidebar_session_search_query %>">
         <% end %>
-        <label class="modal-field">
-          <span>Existing folder</span>
-          <select name="known_cwd" data-new-session-known-cwd>
-            <option value="">Choose a folder…</option>
-            <% new_session_cwds.each do |cwd| %>
-              <option value="<%= h cwd %>"<%= cwd == default_new_session_cwd ? " selected" : "" %>><%= h new_session_cwd_label(cwd) %></option>
-            <% end %>
-          </select>
-        </label>
-        <label class="modal-field">
-          <span>Path</span>
-          <input type="text" name="cwd" autocomplete="off" placeholder="/home/vitek/Work/project" value="<%= h default_new_session_cwd.to_s %>" data-new-session-cwd-input>
-        </label>
-        <div class="cwd-validation-message<%= default_new_session_cwd ? " is-valid" : "" %>" data-new-session-cwd-message aria-live="polite"><%= default_new_session_cwd ? "Directory exists." : "Enter an existing directory." %></div>
+        <input type="hidden" name="cwd" value="<%= h default_new_session_cwd.to_s %>" data-new-session-cwd-value>
+        <div data-new-session-project-fields<%= default_new_session_cwd ? "" : " hidden" %>>
+          <label class="modal-field">
+            <span>Project</span>
+            <select name="known_cwd" data-new-session-known-cwd>
+              <% new_session_cwds.each do |cwd| %>
+                <option value="<%= h cwd %>"<%= cwd == default_new_session_cwd ? " selected" : "" %>><%= h new_session_cwd_label(cwd) %></option>
+              <% end %>
+              <option value="<%= h new_path_option_value %>" data-new-session-new-path-option>Add new path…</option>
+            </select>
+          </label>
+        </div>
+        <div data-new-session-path-fields<%= default_new_session_cwd ? " hidden" : "" %>>
+          <label class="modal-field">
+            <span>Path</span>
+            <input type="text" autocomplete="off" placeholder="/home/vitek/Work/project" data-new-session-cwd-input>
+          </label>
+          <% if default_new_session_cwd %>
+            <button type="button" class="secondary" data-new-session-project-mode>Choose existing project instead</button>
+          <% end %>
+        </div>
+        <div class="cwd-validation-message" data-new-session-cwd-message aria-live="polite"<%= default_new_session_cwd ? " hidden" : "" %>>Enter an existing directory.</div>
         <div class="modal-actions">
           <button type="button" class="secondary" data-modal-close>Cancel</button>
           <button type="submit" data-new-session-submit<%= default_new_session_cwd ? "" : " disabled" %>>Start session</button>
