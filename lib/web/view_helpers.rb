@@ -101,6 +101,12 @@ module Web
       [preferred_cwd, *known_session_cwds.reject { |cwd| cwd == preferred_cwd }]
     end
 
+    def new_session_cwd_label(cwd)
+      basename = File.basename(cwd.to_s)
+      duplicate = new_session_cwds.count { |known_cwd| File.basename(known_cwd.to_s) == basename } > 1
+      duplicate ? "#{basename} — #{cwd}" : basename
+    end
+
     def selected_project_cwd
       return @sidebar.selected_project_cwd if defined?(@sidebar) && @sidebar
 

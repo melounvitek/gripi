@@ -2411,9 +2411,34 @@ class AppTest < Minitest::Test
       refute modal.at_css('input[name="show_all_sessions"]')
       refute modal.at_css('input[name="sidebar_sessions_limit"]')
       assert_includes modal.css('option').map { |option| option["value"] }, project_cwd(dir)
+      project_option = modal.css('option').find { |option| option["value"] == project_cwd(dir) }
+      assert_equal File.basename(project_cwd(dir)), project_option.text
       assert_includes modal.text, "Start session"
       assert_includes modal.text, "Existing folder"
       assert_includes modal.text, "Path"
+    end
+  end
+
+  def test_new_session_modal_disambiguates_duplicate_project_names
+    Dir.mktmpdir do |dir|
+      first_cwd = File.join(dir, "team-a", "app")
+      second_cwd = File.join(dir, "team-b", "app")
+      [first_cwd, second_cwd].each { |cwd| FileUtils.mkdir_p(cwd) }
+      session_dir = File.join(dir, "sessions")
+      FileUtils.mkdir_p(session_dir)
+      first_path = File.join(session_dir, "first.jsonl")
+      second_path = File.join(session_dir, "second.jsonl")
+      File.write(first_path, JSON.generate({ type: "session", id: "first", cwd: first_cwd }) + "\n")
+      File.write(second_path, JSON.generate({ type: "session", id: "second", cwd: second_cwd }) + "\n")
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => first_path })
+
+      assert_equal 200, response.status
+      modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
+      project_options = modal.css('select[data-new-session-known-cwd] option').reject { |option| option["value"].to_s.empty? }
+      assert_equal ["app — #{first_cwd}", "app — #{second_cwd}"], project_options.map(&:text)
     end
   end
 

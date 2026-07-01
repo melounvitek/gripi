@@ -17,7 +17,7 @@
           <select name="known_cwd" data-new-session-known-cwd>
             <option value="">Choose a folder…</option>
             <% new_session_cwds.each do |cwd| %>
-              <option value="<%= h cwd %>"<%= cwd == default_new_session_cwd ? " selected" : "" %>><%= h cwd %></option>
+              <option value="<%= h cwd %>"<%= cwd == default_new_session_cwd ? " selected" : "" %>><%= h new_session_cwd_label(cwd) %></option>
             <% end %>
           </select>
         </label>
