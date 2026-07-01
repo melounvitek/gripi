@@ -2254,7 +2254,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_new_session_redirect_uses_selected_cwd_as_project_filter
+  def test_new_session_redirect_does_not_preserve_sidebar_project_filter
     Dir.mktmpdir do |dir|
       production_cwd = File.join(dir, "mixit-production-tool")
       wholesale_cwd = File.join(dir, "mixit-wholesale")
@@ -2276,8 +2276,7 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       redirect = JSON.parse(response.body).fetch("redirect")
-      assert_includes redirect, "project=#{Rack::Utils.escape(File.realpath(wholesale_cwd))}"
-      refute_includes redirect, "project=#{Rack::Utils.escape(production_cwd)}"
+      refute_includes redirect, "project="
       assert_equal [[:start_new, File.realpath(wholesale_cwd)], [:get_state]], calls
     end
   end
