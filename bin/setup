@@ -1,23 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-config_dir="${PI_GATEWAY_CONFIG_DIR:-$HOME/.config/pi-web-gateway}"
-env_file="${PI_GATEWAY_ENV_PATH:-$config_dir/env}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 bundle install
 
-mkdir -p "$(dirname "$env_file")"
-touch "$env_file"
-chmod 600 "$env_file"
-
-if grep -q '^PI_GATEWAY_ADMIN_PASSWORD=' "$env_file"; then
-  echo "PI_GATEWAY_ADMIN_PASSWORD is already configured in $env_file"
-else
-  password="$(ruby -rsecurerandom -e 'puts SecureRandom.hex(4)')"
-  if [ -s "$env_file" ] && [ "$(tail -c 1 "$env_file")" != "" ]; then
-    printf '\n' >> "$env_file"
-  fi
-  printf 'PI_GATEWAY_ADMIN_PASSWORD=%s\n' "$password" >> "$env_file"
-  echo "Created a random PI_GATEWAY_ADMIN_PASSWORD in $env_file"
-  echo "You can change the gateway admin password by editing that file."
-fi
+"$script_dir/gateway-password"

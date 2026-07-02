@@ -15,7 +15,7 @@ mise install
 mise run setup
 ```
 
-The setup task installs Ruby dependencies and creates a local gateway config file at `~/.config/pi-web-gateway/env` if needed. When `PI_GATEWAY_ADMIN_PASSWORD` is missing, setup generates a random admin password there and prints the file path. You can change the gateway admin password by editing that file.
+The setup task installs Ruby dependencies and creates a local gateway config file at `~/.config/pi-web-gateway/env` if needed. When `PI_GATEWAY_ADMIN_PASSWORD` is missing, setup generates a random admin password there and prints it once. Change the gateway admin password by editing that file.
 
 ## Run the gateway
 
@@ -70,7 +70,7 @@ Start the browser gateway:
 docker compose up gateway
 ```
 
-The gateway listens on <http://localhost:4567> by default and binds to `127.0.0.1`. Set `PI_GATEWAY_BIND=0.0.0.0` only when you want remote access. If `PI_GATEWAY_ADMIN_PASSWORD` is blank, the container generates one and stores it in the `gateway_config` volume. To set your own password, put it in `.env` before starting the gateway.
+The gateway listens on <http://localhost:4567> by default and binds to `127.0.0.1`. Set `PI_GATEWAY_BIND=0.0.0.0` only when you want remote access. If `PI_GATEWAY_ADMIN_PASSWORD` is blank, the container generates one, prints it once, and stores it in the `gateway_config` volume. To set your own password, put it in `.env` before starting the gateway.
 
 To expose existing codebases, set `PI_WORKSPACE` in `.env` to an absolute path:
 

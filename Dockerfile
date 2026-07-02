@@ -62,7 +62,7 @@ RUN bundle install
 
 COPY . .
 RUN chown -R piuser:"$(id -gn piuser)" /app \
-  && chmod +x bin/start bin/setup bin/docker-entrypoint
+  && chmod +x bin/start bin/setup bin/docker-entrypoint bin/gateway-password
 
 USER piuser
 ENTRYPOINT ["tini", "--", "/app/bin/docker-entrypoint"]
