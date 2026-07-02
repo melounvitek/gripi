@@ -3113,9 +3113,7 @@
           const payload = await response.json().catch(() => null);
           if (controller.signal.aborted || input.value.trim() !== cwd) return;
           if (response.ok && payload?.valid) {
-            const resolvedCwd = payload.cwd || cwd;
-            input.value = resolvedCwd;
-            hiddenCwd.value = resolvedCwd;
+            hiddenCwd.value = payload.cwd || cwd;
             setCwdValidationState(form, "valid", "Directory exists.");
           } else {
             setCwdValidationState(form, "invalid", payload?.error || "Path must be an existing directory.");

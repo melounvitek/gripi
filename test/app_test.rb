@@ -2647,6 +2647,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "async function submitAbort(event)"
       assert_includes response.body, "if (modalIsOpen()) return;"
       assert_includes response.body, "fetch(validationUrl"
+      refute_includes response.body, "input.value = resolvedCwd"
       assert_includes response.body, "function setNewSessionProjectMode(form)"
       assert_includes response.body, "function setNewSessionPathMode(form,"
       assert_includes response.body, "function syncNewSessionSelectedCwd(form)"
