@@ -4903,6 +4903,81 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_approved_workspace_can_approve_pending_workspace_request
+    Dir.mktmpdir do |dir|
+      write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :gateway_admin_password, "secret"
+      PiWebGateway.set :multi_user_mode, true
+      approver_cookie = workspace_cookie_for("Correct Horse 42")
+      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("approver", label: "test")
+      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      pending = store.request_access(workspace_id_for("Different Horse 42"), browser_token: "requester")
+      request = Rack::MockRequest.new(PiWebGateway)
+
+      pending_response = request.get("/workspace-access/pending", "HTTP_COOKIE" => "pi_gateway_browser=approver; #{approver_cookie}")
+      assert_equal 200, pending_response.status
+      assert_equal pending.fetch("code"), JSON.parse(pending_response.body).fetch("requests").first.fetch("code")
+
+      approve_response = request.post(
+        "/workspace-access/approve",
+        params: { "code" => pending.fetch("code") },
+        "HTTP_COOKIE" => "pi_gateway_browser=approver; #{approver_cookie}"
+      )
+      assert_equal 200, approve_response.status
+      assert store.approved?(workspace_id_for("Different Horse 42"))
+    end
+  end
+
+  def test_workspace_approval_requires_current_approved_workspace
+    Dir.mktmpdir do |dir|
+      write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :gateway_admin_password, "secret"
+      PiWebGateway.set :multi_user_mode, true
+      workspace_cookie_for("Correct Horse 42")
+      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("approved-browser", label: "test")
+      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      pending = store.request_access(workspace_id_for("Different Horse 42"), browser_token: "requester")
+      request = Rack::MockRequest.new(PiWebGateway)
+
+      pending_response = request.get("/workspace-access/pending", "HTTP_COOKIE" => "pi_gateway_browser=approved-browser")
+      approve_response = request.post(
+        "/workspace-access/approve",
+        params: { "code" => pending.fetch("code") },
+        "HTTP_COOKIE" => "pi_gateway_browser=approved-browser"
+      )
+
+      assert_equal 403, pending_response.status
+      assert_equal 403, approve_response.status
+      refute store.approved?(workspace_id_for("Different Horse 42"))
+    end
+  end
+
+  def test_approved_workspace_can_deny_pending_workspace_request
+    Dir.mktmpdir do |dir|
+      write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :gateway_admin_password, "secret"
+      PiWebGateway.set :multi_user_mode, true
+      approver_cookie = workspace_cookie_for("Correct Horse 42")
+      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("approver", label: "test")
+      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      workspace_id = workspace_id_for("Different Horse 42")
+      pending = store.request_access(workspace_id, browser_token: "requester")
+      request = Rack::MockRequest.new(PiWebGateway)
+
+      deny_response = request.post(
+        "/workspace-access/deny",
+        params: { "code" => pending.fetch("code") },
+        "HTTP_COOKIE" => "pi_gateway_browser=approver; #{approver_cookie}"
+      )
+
+      assert_equal 200, deny_response.status
+      assert_equal "denied", store.pending_status(workspace_id)
+    end
+  end
+
   def test_multi_user_session_list_hides_unowned_and_other_workspace_sessions
     Dir.mktmpdir do |dir|
       own_path, other_path, unowned_path = write_sessions(dir, count: 3)

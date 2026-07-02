@@ -339,7 +339,7 @@
     }
   </style>
 </head>
-<body data-browser-access-enabled="<%= browser_access_enabled? ? "true" : "false" %>">
+<body data-browser-access-enabled="<%= browser_access_enabled? ? "true" : "false" %>" data-workspace-access-enabled="<%= multi_user_mode? ? "true" : "false" %>">
   <div class="app-shell">
     <input type="checkbox" class="mobile-session-toggle" id="mobile-session-toggle">
     <%= erb :_sidebar, layout: false %>
@@ -359,6 +359,16 @@
       <div class="browser-access-actions">
         <button class="secondary" type="button" data-browser-access-deny>Deny</button>
         <button type="button" data-browser-access-allow>Allow</button>
+      </div>
+    </div>
+  </div>
+  <div class="browser-access-overlay" data-workspace-access-overlay aria-live="polite">
+    <div class="browser-access-card">
+      <div class="browser-access-title" data-workspace-access-title></div>
+      <div class="browser-access-meta" data-workspace-access-meta></div>
+      <div class="browser-access-actions">
+        <button class="secondary" type="button" data-workspace-access-deny>Deny</button>
+        <button type="button" data-workspace-access-allow>Allow</button>
       </div>
     </div>
   </div>
@@ -390,6 +400,9 @@
     let browserAccessOverlay = null;
     let browserAccessCurrentCode = null;
     let browserAccessPollTimer = null;
+    let workspaceAccessOverlay = null;
+    let workspaceAccessCurrentCode = null;
+    let workspaceAccessPollTimer = null;
     let liveAssistantMessage = null;
     let liveAssistantSegments = new Map();
     let liveAssistantSeen = false;
@@ -3075,6 +3088,8 @@
       clearTimeout(sidebarRefreshTimer);
       clearTimeout(browserAccessPollTimer);
       browserAccessPollTimer = null;
+      clearTimeout(workspaceAccessPollTimer);
+      workspaceAccessPollTimer = null;
       abortEventPoll();
       document.body.classList.add("modal-open");
       modal.querySelector("input, select, textarea, button")?.focus();
@@ -3088,6 +3103,7 @@
         scheduleNextEventPoll(0);
         scheduleSidebarRefresh(0);
         if (document.body.dataset.browserAccessEnabled === "true" && !browserAccessPollTimer) pollBrowserAccessRequests();
+        if (document.body.dataset.workspaceAccessEnabled === "true" && !workspaceAccessPollTimer) pollWorkspaceAccessRequests();
       }
     }
 
@@ -3760,9 +3776,66 @@
       if (event.target.closest("[data-browser-access-deny]")) resolveBrowserAccessRequest("deny").catch(() => {});
     });
 
+    function workspaceAccessElements() {
+      return {
+        overlay: document.querySelector("[data-workspace-access-overlay]"),
+        title: document.querySelector("[data-workspace-access-title]"),
+        meta: document.querySelector("[data-workspace-access-meta]"),
+        allow: document.querySelector("[data-workspace-access-allow]"),
+        deny: document.querySelector("[data-workspace-access-deny]")
+      };
+    }
+
+    async function pollWorkspaceAccessRequests() {
+      if (modalIsOpen()) return;
+      try {
+        const response = await fetch("/workspace-access/pending", { headers: { "Accept": "application/json" } });
+        if (response.ok) {
+          const payload = await response.json();
+          showWorkspaceAccessRequest((payload.requests || [])[0]);
+        }
+      } catch (_error) {
+      } finally {
+        if (!modalIsOpen()) workspaceAccessPollTimer = setTimeout(pollWorkspaceAccessRequests, 3000);
+      }
+    }
+
+    function showWorkspaceAccessRequest(request) {
+      const elements = workspaceAccessElements();
+      workspaceAccessOverlay = elements.overlay;
+      if (!elements.overlay) return;
+      if (!request) {
+        workspaceAccessCurrentCode = null;
+        elements.overlay.classList.remove("is-visible");
+        return;
+      }
+
+      workspaceAccessCurrentCode = request.code;
+      elements.title.textContent = `New workspace requests access: ${request.code}`;
+      elements.meta.textContent = "Approve only if a trusted colleague is waiting for this code.";
+      elements.overlay.classList.add("is-visible");
+    }
+
+    async function resolveWorkspaceAccessRequest(action) {
+      if (!workspaceAccessCurrentCode) return;
+      const formData = new FormData();
+      formData.set("code", workspaceAccessCurrentCode);
+      await fetch(`/workspace-access/${action}`, { method: "POST", body: formData, headers: { "Accept": "application/json" } });
+      showWorkspaceAccessRequest(null);
+      clearTimeout(workspaceAccessPollTimer);
+      workspaceAccessPollTimer = null;
+      pollWorkspaceAccessRequests();
+    }
+
+    document.addEventListener("click", (event) => {
+      if (event.target.closest("[data-workspace-access-allow]")) resolveWorkspaceAccessRequest("approve").catch(() => {});
+      if (event.target.closest("[data-workspace-access-deny]")) resolveWorkspaceAccessRequest("deny").catch(() => {});
+    });
+
     function initializeSessionView({ focus = true } = {}) {
       ensureNotificationWorker().catch(() => {});
       if (document.body.dataset.browserAccessEnabled === "true" && !browserAccessPollTimer) pollBrowserAccessRequests();
+      if (document.body.dataset.workspaceAccessEnabled === "true" && !workspaceAccessPollTimer) pollWorkspaceAccessRequests();
       if (liveOutput) {
         enhanceMarkdownCodeBlocks(conversationScroll);
         resetEventCursor();

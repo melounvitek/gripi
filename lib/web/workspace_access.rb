@@ -9,6 +9,9 @@ module Web
     WORKSPACE_ENDPOINTS = %w[
       /workspace-key
       /workspace-access/status
+      /workspace-access/pending
+      /workspace-access/approve
+      /workspace-access/deny
     ].freeze
     WORKSPACE_COOKIE = "pi_gateway_workspace".freeze
     STORE_CACHE = {}
@@ -84,6 +87,10 @@ module Web
 
       def workspace_bootstrap_required?
         !workspace_access_store.any_approved?
+      end
+
+      def workspace_approval_allowed?
+        (approved_browser? || !browser_access_enabled?) && approved_current_workspace?
       end
 
       def set_workspace_cookie(workspace_id)
@@ -184,6 +191,34 @@ module Web
 
         content_type :json
         JSON.generate(status: status_value)
+      end
+
+      app.get "/workspace-access/pending" do
+        halt 404 unless multi_user_mode?
+        halt 403 unless workspace_approval_allowed?
+
+        content_type :json
+        JSON.generate(requests: workspace_access_store.pending_requests)
+      end
+
+      app.post "/workspace-access/approve" do
+        halt 404 unless multi_user_mode?
+        halt 403 unless workspace_approval_allowed?
+        halt 400, "Code is required" if params["code"].to_s.empty?
+
+        request = workspace_access_store.approve_code(params.fetch("code"))
+        content_type :json
+        JSON.generate(ok: !request.nil?)
+      end
+
+      app.post "/workspace-access/deny" do
+        halt 404 unless multi_user_mode?
+        halt 403 unless workspace_approval_allowed?
+        halt 400, "Code is required" if params["code"].to_s.empty?
+
+        request = workspace_access_store.deny_code(params.fetch("code"))
+        content_type :json
+        JSON.generate(ok: !request.nil?)
       end
     end
   end
