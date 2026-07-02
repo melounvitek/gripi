@@ -46,7 +46,7 @@ mise run dev
 
 ## Dockerized runtime
 
-The repository includes a portable Docker setup that runs both the gateway and the Pi CLI inside the container. The only host directory exposed to Pi is the workspace you mount; Pi config, sessions, OAuth/API-key credentials, and gateway config persist in Docker volumes by default.
+The repository includes a portable Docker setup that runs both the gateway and the Pi CLI inside the container. The image includes Ruby, Node.js, Pi, mise, and common development tools. The only host directory exposed to Pi is the workspace you mount; Pi config, sessions, OAuth/API-key credentials, gateway config, and mise-installed runtimes persist in Docker volumes by default.
 
 ```sh
 cp .env.example .env
@@ -78,6 +78,16 @@ PI_WORKSPACE=/home/alice/code
 
 That host directory appears at the same path inside the container, so Pi sees `/home/alice/code/project-a` as `/home/alice/code/project-a`. If `PI_WORKSPACE` is not set, Compose falls back to `./workspace` mounted at `/work`.
 
+Mise is available inside the container for project runtime setup. Trust and install tools from inside the mounted project as needed:
+
+```sh
+docker compose run --rm pi mise trust
+docker compose run --rm pi mise install
+docker compose run --rm pi mise exec -- <command>
+```
+
+Mise data, config, and cache are stored in Docker volumes, so installed runtimes survive container recreation without touching the host's mise installation.
+
 For direct Pi use in the current repository without Compose, build the image and mount the current directory:
 
 ```sh
@@ -85,6 +95,9 @@ docker build -t pi-web-gateway:local .
 docker run --rm -it \
   -v "$PWD:/work" \
   -v pi_web_gateway_pi_data:/home/piuser/.pi \
+  -v pi_web_gateway_mise_data:/home/piuser/.local/share/mise \
+  -v pi_web_gateway_mise_config:/home/piuser/.config/mise \
+  -v pi_web_gateway_mise_cache:/home/piuser/.cache/mise \
   -w /work \
   pi-web-gateway:local pi
 ```

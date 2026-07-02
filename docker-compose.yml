@@ -25,6 +25,9 @@ services:
       - ${PI_WORKSPACE:-./workspace}:${PI_WORKSPACE:-/work}
       - pi_data:/home/piuser/.pi
       - gateway_config:/home/piuser/.config/pi-web-gateway
+      - mise_data:/home/piuser/.local/share/mise
+      - mise_config:/home/piuser/.config/mise
+      - mise_cache:/home/piuser/.cache/mise
 
   pi:
     image: ${PI_GATEWAY_IMAGE:-pi-web-gateway:local}
@@ -51,7 +54,13 @@ services:
       - ${PI_WORKSPACE:-./workspace}:${PI_WORKSPACE:-/work}
       - pi_data:/home/piuser/.pi
       - gateway_config:/home/piuser/.config/pi-web-gateway
+      - mise_data:/home/piuser/.local/share/mise
+      - mise_config:/home/piuser/.config/mise
+      - mise_cache:/home/piuser/.cache/mise
 
 volumes:
   pi_data:
   gateway_config:
+  mise_data:
+  mise_config:
+  mise_cache:

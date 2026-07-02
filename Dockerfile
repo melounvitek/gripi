@@ -10,7 +10,10 @@ ENV APP_HOME=/app \
     HOME=/home/piuser \
     BUNDLE_PATH=/usr/local/bundle \
     GEM_HOME=/usr/local/bundle \
-    PATH=/usr/local/bundle/bin:/home/piuser/.local/bin:$PATH
+    MISE_DATA_DIR=/home/piuser/.local/share/mise \
+    MISE_CONFIG_DIR=/home/piuser/.config/mise \
+    MISE_CACHE_DIR=/home/piuser/.cache/mise \
+    PATH=/usr/local/bundle/bin:/home/piuser/.local/share/mise/shims:/home/piuser/.local/bin:$PATH
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -37,11 +40,12 @@ RUN apt-get update \
   && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
   && apt-get update \
   && apt-get install -y --no-install-recommends nodejs \
+  && curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
   && npm install -g --ignore-scripts @earendil-works/pi-coding-agent@${PI_VERSION} \
   && if getent group "$GROUP_ID" >/dev/null; then group_name="$(getent group "$GROUP_ID" | cut -d: -f1)"; else groupadd --gid "$GROUP_ID" piuser && group_name=piuser; fi \
   && if getent passwd "$USER_ID" >/dev/null; then echo "USER_ID $USER_ID already exists in the base image" >&2; exit 1; fi \
   && useradd --uid "$USER_ID" --gid "$group_name" --create-home --shell /bin/bash piuser \
-  && mkdir -p /app /work /home/piuser/.pi /home/piuser/.config/pi-web-gateway \
+  && mkdir -p /app /work /home/piuser/.pi /home/piuser/.config/pi-web-gateway /home/piuser/.local/share/mise /home/piuser/.config/mise /home/piuser/.cache/mise \
   && chown -R piuser:"$group_name" /app /work /home/piuser \
   && ln -s /usr/bin/fdfind /usr/local/bin/fd \
   && rm -rf /var/lib/apt/lists/*
