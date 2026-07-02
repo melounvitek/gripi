@@ -64,6 +64,12 @@ class PiSessionStore
         rendered_messages << compaction_message_from_entry(entry)
         next
       end
+
+      if (error_message = error_message_from_entry(entry))
+        rendered_messages << error_message
+        next
+      end
+
       next unless entry["type"] == "message"
 
       messages_from_entry(entry).each do |message|
@@ -429,6 +435,38 @@ class PiSessionStore
       expanded: false,
       raw_details: JSON.pretty_generate(entry)
     )
+  end
+
+  def error_message_from_entry(entry)
+    return if entry["type"] != "error" && !entry.key?("error") && !entry.key?("finalError")
+
+    text = error_text(entry)
+    return if text.empty?
+
+    Message.new(
+      role: "error",
+      text: text,
+      timestamp: parse_time(entry["timestamp"]),
+      compact: false,
+      expanded: true,
+      error: true,
+      raw_details: JSON.pretty_generate(entry)
+    )
+  end
+
+  def error_text(value)
+    case value
+    when String
+      value.strip
+    when Hash
+      [value["error"], value["finalError"], value["message"], value["text"], value.dig("details", "error"), value.dig("details", "message")].each do |candidate|
+        text = error_text(candidate)
+        return text unless text.empty?
+      end
+      ""
+    else
+      ""
+    end
   end
 
   def messages_from_entry(entry)

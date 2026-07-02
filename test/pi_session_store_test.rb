@@ -172,6 +172,62 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_reads_structured_error_entries_as_error_messages
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        {
+          type: "error",
+          timestamp: "2026-06-13T10:00:00Z",
+          error: {
+            type: "invalid_request_error",
+            message: "Third-party apps now draw from extra usage.",
+            request_id: "req_123"
+          }
+        }
+      ])
+
+      messages = PiSessionStore.new(root: dir).messages(path)
+
+      assert_equal 1, messages.length
+      assert_equal "error", messages.first.role
+      assert_equal "Third-party apps now draw from extra usage.", messages.first.text
+      assert messages.first.error
+      assert_equal Time.parse("2026-06-13T10:00:00Z"), messages.first.timestamp
+    end
+  end
+
+  def test_reads_error_details_as_error_messages
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        { type: "error", timestamp: "2026-06-13T10:00:00Z", details: { message: "Nested provider failure" } }
+      ])
+
+      messages = PiSessionStore.new(root: dir).messages(path)
+
+      assert_equal ["error"], messages.map(&:role)
+      assert_equal ["Nested provider failure"], messages.map(&:text)
+    end
+  end
+
+  def test_reads_final_error_entries_as_error_messages
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        { type: "agent_end", timestamp: "2026-06-13T10:00:00Z", finalError: { message: "Provider failed" } }
+      ])
+
+      messages = PiSessionStore.new(root: dir).messages(path)
+
+      assert_equal ["error"], messages.map(&:role)
+      assert_equal ["Provider failed"], messages.map(&:text)
+    end
+  end
+
   def test_reads_compaction_entries_as_compact_status_messages
     Dir.mktmpdir do |dir|
       path = File.join(dir, "session.jsonl")

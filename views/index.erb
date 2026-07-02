@@ -394,6 +394,7 @@
     let liveAssistantSegments = new Map();
     let liveAssistantSeen = false;
     let liveAgentRunning = false;
+    let liveErrorSeen = false;
     let liveCompactionRendered = false;
     let liveBashToolCalls = new Map();
     let liveToolExecutions = new Map();
@@ -1457,6 +1458,38 @@
       return event?.timestamp || event?.message?.timestamp || event?.delta?.timestamp || event?.item?.timestamp;
     }
 
+    function errorValueText(value) {
+      if (!value) return "";
+      if (typeof value === "string") return value.trim();
+      if (typeof value !== "object") return "";
+      return errorValueText(value.error) ||
+        errorValueText(value.finalError) ||
+        errorValueText(value.message) ||
+        errorValueText(value.text) ||
+        errorValueText(value.details?.error) ||
+        errorValueText(value.details?.message);
+    }
+
+    function eventErrorText(event) {
+      if (!event || typeof event !== "object") return "";
+      const errorText = errorValueText(event.error) || errorValueText(event.finalError);
+      if (errorText) return errorText;
+      if (event.type === "error" || /(?:error|fail(?:ed|ure)?)/i.test(event.type || "")) {
+        return errorValueText(event);
+      }
+      return "";
+    }
+
+    function renderErrorEvent(event) {
+      const errorText = eventErrorText(event);
+      if (!errorText) return false;
+      liveErrorSeen = true;
+      appendMessage("error", errorText, true, true, eventTimestamp(event));
+      showStatus(errorText, true);
+      setComposerState("error", errorText);
+      return true;
+    }
+
     function appendMessage(roleName, text, live = true, forceScroll = false, timestamp = null, options = {}) {
       const timestampKey = messageTimestampKey(timestamp);
       if (live && roleName === "user" && !options.optimistic && optimisticUserMessageAlreadyRendered(text)) return null;
@@ -2032,12 +2065,14 @@
     function renderEvent(event) {
       if (event.type === "agent_start") {
         liveAgentRunning = true;
+        liveErrorSeen = false;
         setComposerState("running", "Pi is running…");
         showStatus("Pi is thinking…");
         return;
       }
 
       if (event.type === "turn_start") {
+        liveErrorSeen = false;
         setComposerState("running", "Pi is running…");
         showStatus("Pi is thinking…");
         return;
@@ -2085,23 +2120,29 @@
       }
 
       if (event.type === "turn_end") {
-        if (liveAssistantSeen) showStatus("Done");
-        if (!liveAgentRunning) setComposerState("done", "Done");
+        if (!liveErrorSeen) {
+          if (liveAssistantSeen) showStatus("Done");
+          if (!liveAgentRunning) setComposerState("done", "Done");
+        }
         resetLiveAssistantTracking();
         return;
       }
 
       if (event.type === "agent_end") {
         liveAgentRunning = false;
-        if (liveAssistantSeen) showStatus("Done");
-        setComposerState("done", "Done");
+        if (renderErrorEvent(event)) {
+          resetLiveAssistantTracking();
+          return;
+        }
+        if (!liveErrorSeen) {
+          if (liveAssistantSeen) showStatus("Done");
+          setComposerState("done", "Done");
+        }
         resetLiveAssistantTracking();
         return;
       }
 
-      if (event.error) {
-        appendMessage("error", event.error);
-      }
+      renderErrorEvent(event);
     }
 
     function eventPollDelay() {
@@ -2688,6 +2729,7 @@
       resetLiveAssistantTracking();
       resetLiveCompactionTracking();
       liveAgentRunning = false;
+      liveErrorSeen = false;
       resetEventPollBackoff();
       stopWaitingForOutput();
       lastEventSeq = 0;

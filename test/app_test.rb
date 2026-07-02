@@ -4266,6 +4266,11 @@ class AppTest < Minitest::Test
       assert_includes response.body, "date.getHours()"
       refute_includes response.body, "date.getUTCHours()"
       assert_includes response.body, "function eventTimestamp(event)"
+      assert_includes response.body, "function eventErrorText(event)"
+      assert_includes response.body, "renderErrorEvent(event)"
+      assert_includes response.body, "let liveErrorSeen = false;"
+      assert_includes response.body, "liveErrorSeen = true;"
+      assert_includes response.body, "appendMessage(\"error\", errorText, true, true, eventTimestamp(event));"
       assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse });'
       assert_includes response.body, 'function renderAssistantMarkdown(body, text, delay = 120)'
       assert_includes response.body, 'body.dataset.rendering = "pending";'
@@ -4400,9 +4405,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_start\") resetLiveAssistantTracking();"
       assert_includes response.body, "let liveAgentRunning = false;"
       assert_includes response.body, "if (event.type === \"turn_end\") {"
-      assert_includes response.body, "if (!liveAgentRunning) setComposerState(\"done\", \"Done\");"
+      assert_includes response.body, "if (!liveErrorSeen) {\n          if (liveAssistantSeen) showStatus(\"Done\");\n          if (!liveAgentRunning) setComposerState(\"done\", \"Done\");\n        }"
       assert_includes response.body, "if (event.type === \"agent_end\") {"
-      assert_includes response.body, "liveAgentRunning = false;\n        if (liveAssistantSeen) showStatus(\"Done\");\n        setComposerState(\"done\", \"Done\");"
+      assert_includes response.body, "liveAgentRunning = false;\n        if (renderErrorEvent(event)) {\n          resetLiveAssistantTracking();\n          return;\n        }\n        if (!liveErrorSeen) {\n          if (liveAssistantSeen) showStatus(\"Done\");\n          setComposerState(\"done\", \"Done\");\n        }"
     end
   end
 
