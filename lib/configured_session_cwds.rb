@@ -11,6 +11,8 @@ class ConfiguredSessionCwds
     return [] unless @path && File.file?(@path)
 
     File.readlines(@path).filter_map { |line| canonical_directory(line) }.uniq
+  rescue SystemCallError
+    []
   end
 
   private

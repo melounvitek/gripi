@@ -104,7 +104,7 @@ module Web
     end
 
     def configured_session_cwds
-      ConfiguredSessionCwds.read(settings.session_cwds_path)
+      @configured_session_cwds ||= ConfiguredSessionCwds.read(settings.session_cwds_path)
     end
 
     def new_session_cwd_label(cwd)

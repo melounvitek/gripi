@@ -26,7 +26,6 @@ class PiWebGateway < Sinatra::Base
   set :root, File.dirname(__FILE__)
   set :sessions_root, ENV.fetch("PI_SESSIONS_ROOT", File.expand_path("~/.pi/agent/sessions"))
   set :attachments_root, ENV.fetch("PI_ATTACHMENTS_ROOT", File.expand_path("~/.pi/web-gateway/attachments"))
-  set :session_cwds_path, ENV.fetch("PI_SESSION_CWDS_PATH", File.expand_path("~/.config/pi-web-gateway/session-cwds.txt"))
   GATEWAY_ENV_PATH = ENV.fetch("PI_GATEWAY_ENV_PATH", File.expand_path("~/.config/pi-web-gateway/env"))
 
   def self.load_gateway_env_file
@@ -61,6 +60,7 @@ class PiWebGateway < Sinatra::Base
   end
 
   load_gateway_env_file
+  set :session_cwds_path, ENV.fetch("PI_SESSION_CWDS_PATH", File.expand_path("~/.config/pi-web-gateway/session-cwds.txt"))
   set :host_authorization, lambda {
     configured_hosts = permitted_hosts_from_env
     if development?

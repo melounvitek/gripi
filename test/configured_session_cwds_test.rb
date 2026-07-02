@@ -18,6 +18,19 @@ class ConfiguredSessionCwdsTest < Minitest::Test
     end
   end
 
+  def test_returns_empty_list_when_config_file_cannot_be_read
+    Dir.mktmpdir do |dir|
+      config_path = File.join(dir, "session-cwds.txt")
+      File.write(config_path, "#{dir}\n")
+      FileUtils.chmod(0, config_path)
+      skip "config file is still readable" if File.readable?(config_path)
+
+      assert_empty ConfiguredSessionCwds.read(config_path)
+    ensure
+      FileUtils.chmod(0o600, config_path) if config_path && File.exist?(config_path)
+    end
+  end
+
   def test_expands_home_directory
     Dir.mktmpdir do |home|
       project = File.join(home, "project")

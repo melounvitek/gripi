@@ -62,6 +62,20 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_app_boot_loads_session_cwds_path_from_user_config
+    Dir.mktmpdir do |home|
+      env_path = File.join(home, "gateway-env")
+      session_cwds_path = File.join(home, "session-cwds.txt")
+      File.write(env_path, "PI_GATEWAY_ADMIN_PASSWORD='from-file'\nPI_SESSION_CWDS_PATH=#{session_cwds_path}\n")
+      env = ENV.to_h.merge("PI_GATEWAY_ENV_PATH" => env_path, "PI_GATEWAY_ADMIN_PASSWORD" => nil, "PI_SESSION_CWDS_PATH" => nil)
+
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.session_cwds_path")
+
+      assert status.success?, stderr
+      assert_equal session_cwds_path, stdout.strip
+    end
+  end
+
   def test_app_boot_configures_pi_rpc_command_from_node_and_pi_paths
     env = ENV.to_h.merge(
       "PI_GATEWAY_ADMIN_PASSWORD" => "secret",
