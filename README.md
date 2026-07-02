@@ -47,6 +47,17 @@ PI_GATEWAY_PI=/path/to/pi
 
 When these are set, the gateway starts Pi as `$PI_GATEWAY_NODE $PI_GATEWAY_PI`. Set both variables together, or leave both unset to run `pi` from `PATH`.
 
+## Always-present new session folders
+
+Add directories to `~/.config/pi-web-gateway/session-cwds.txt` to keep them available in the New session dialog even before they have sessions:
+
+```txt
+/home/vitek/Work/pi-web-gateway
+/home/vitek/Work/another-project
+```
+
+Use one directory per line. Blank lines and `#` comments are ignored. Only existing readable directories are shown. Set `PI_SESSION_CWDS_PATH` to use a different file.
+
 ## Shared gateway session keys
 
 Set `PI_MULTI_USER_MODE=1` to ask approved browsers for a personal session key before showing sessions. The key selects a private session list: the same key on another approved browser shows the same sessions. Existing sessions without an owner are hidden while this mode is on, but they reappear when the mode is off.
