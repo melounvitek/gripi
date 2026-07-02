@@ -47,6 +47,14 @@ PI_GATEWAY_PI=/path/to/pi
 
 When these are set, the gateway starts Pi as `$PI_GATEWAY_NODE $PI_GATEWAY_PI`. Set both variables together, or leave both unset to run `pi` from `PATH`.
 
+## Shared gateway session keys
+
+Set `PI_MULTI_USER_MODE=1` to ask approved browsers for a personal session key before showing sessions. The key selects a private session list: the same key on another approved browser shows the same sessions. Existing sessions without an owner are hidden while this mode is on, but they reappear when the mode is off.
+
+The gateway generates a stable workspace secret at `~/.pi/web-gateway/workspace-secret` by default. Override `PI_WORKSPACE_SECRET_PATH` or `PI_WORKSPACE_OWNERSHIP_PATH` if you need different storage locations.
+
+This mode separates gateway session visibility for trusted users. It is not OS-level process, filesystem, or credential isolation.
+
 ## Development server
 
 ```sh

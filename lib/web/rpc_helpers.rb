@@ -35,12 +35,14 @@ module Web
     def remap_active_pending_rpc_client(session_path)
       cwd = pending_rpc_cwd(session_path)
       return unless cwd && rpc_clients.active?(session_path)
+      return if multi_user_mode? && !workspace_session_ownership_store.owned_by?(session_path, current_workspace_id)
 
       real_path = session_file_from(rpc_clients.client_for(session_path).get_state)
       return unless real_path && File.exist?(real_path) && session_cwd(real_path) == cwd
 
       rpc_clients.move(session_path, real_path)
       attachment_store.migrate_session(session_path, real_path)
+      claim_session_for_current_workspace(real_path)
       forget_pending_rpc_cwd(session_path)
       real_path
     end
@@ -50,9 +52,11 @@ module Web
 
       pending_path = matching_pending_rpc_path(session_path)
       return unless pending_path
+      return if multi_user_mode? && !workspace_session_ownership_store.owned_by?(pending_path, current_workspace_id)
 
       rpc_clients.move(pending_path, session_path)
       attachment_store.migrate_session(pending_path, session_path)
+      claim_session_for_current_workspace(session_path)
       forget_pending_rpc_cwd(pending_path)
     end
 

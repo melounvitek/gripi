@@ -16,6 +16,7 @@ module Web
       end
 
       def redirect_to_new_session(new_session_path, command: nil)
+        claim_session_for_current_workspace(new_session_path)
         redirect_path = session_redirect_path(new_session_path)
         if json_request?
           content_type :json
@@ -52,7 +53,7 @@ module Web
           redirect session_redirect_path(previous_session_path)
         end
 
-        new_session_path = branch_session_path(previous_session_path)
+        new_session_path = claim_session_for_current_workspace(branch_session_path(previous_session_path))
         redirect_path = session_redirect_path(new_session_path)
         if json_request?
           content_type :json
@@ -133,7 +134,7 @@ module Web
       app.helpers Helpers
 
       app.post "/prompt" do
-        session_path = canonical_rpc_session_path(params.fetch("session"))
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         message = params.fetch("message").to_s
         images = prompt_images_from(params["images"])
         attachment_paths = attachment_store.persist_prompt_images(session_path, images)
@@ -196,7 +197,7 @@ module Web
       end
 
       app.post "/sessions/new" do
-        session_path = params.fetch("session")
+        session_path = require_current_workspace_session!(params.fetch("session"))
         redirect_to_new_session(start_new_session(current_session_cwd(session_path)))
       end
 
@@ -216,7 +217,7 @@ module Web
       end
 
       app.get "/sessions/fork_messages" do
-        session_path = canonical_rpc_session_path(params.fetch("session"))
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         response = with_rpc_client(session_path) { |client| client.get_fork_messages }
         messages = response_data(response).fetch("messages", [])
         content_type :json
@@ -224,7 +225,7 @@ module Web
       end
 
       app.get "/sessions/tree_entries" do
-        session_path = canonical_rpc_session_path(params.fetch("session"))
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         current_leaf_id = with_rpc_client(session_path) { |client| client.tree_leaf }
         store = PiSessionStore.new(root: settings.sessions_root)
         entries = store.tree_entries(session_path, current_leaf_id: current_leaf_id)
@@ -233,7 +234,7 @@ module Web
       end
 
       app.post "/sessions/tree" do
-        session_path = canonical_rpc_session_path(params.fetch("session"))
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         entry_id = params.fetch("entry_id").to_s
         halt 400, "Tree entry cannot be empty" if entry_id.empty?
 
@@ -245,7 +246,7 @@ module Web
       end
 
       app.post "/sessions/fork" do
-        session_path = canonical_rpc_session_path(params.fetch("session"))
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         entry_id = params.fetch("entry_id").to_s
         halt 400, "Fork entry cannot be empty" if entry_id.empty?
 
@@ -254,13 +255,13 @@ module Web
       end
 
       app.post "/sessions/clone" do
-        session_path = canonical_rpc_session_path(params.fetch("session"))
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         response = with_rpc_client(session_path) { |client| client.clone_session }
         redirect_to_rpc_session_after_branch(session_path, response)
       end
 
       app.post "/abort" do
-        session_path = canonical_rpc_session_path(params.fetch("session"))
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         with_rpc_client(session_path) { |client| client.abort }
         if json_request?
           content_type :json
@@ -271,14 +272,14 @@ module Web
       end
 
       app.post "/compact" do
-        session_path = canonical_rpc_session_path(params.fetch("session"))
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         instructions = params["instructions"].to_s.strip
         with_rpc_client(session_path) { |client| client.compact(instructions.empty? ? nil : instructions) }
         redirect session_redirect_path(session_path)
       end
 
       app.post "/rename" do
-        session_path = canonical_rpc_session_path(params.fetch("session"))
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         name = params.fetch("name").to_s.strip
         halt 400, "Name cannot be empty" if name.empty?
 
@@ -287,14 +288,14 @@ module Web
       end
 
       app.get "/events" do
-        session_path = params.fetch("session")
+        session_path = require_current_workspace_session!(params.fetch("session"))
         after_seq = params.fetch("after", 0).to_i
         content_type :json
         JSON.generate(rpc_clients.events_after(session_path, after_seq))
       end
 
       app.get "/status" do
-        session_path = params.fetch("session")
+        session_path = require_current_workspace_session!(params.fetch("session"))
         halt 404 unless File.exist?(session_path)
 
         content_type :json
@@ -307,7 +308,7 @@ module Web
       end
 
       app.get "/commands" do
-        session_path = params.fetch("session")
+        session_path = require_current_workspace_session!(params.fetch("session"))
         halt 404 unless command_session_available?(session_path)
 
         @commands = commands_for(session_path)

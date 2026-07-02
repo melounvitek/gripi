@@ -16,7 +16,8 @@ module Web
           attachment_store: attachment_store,
           rpc_clients: rpc_clients,
           mark_selected_read: should_mark_selected_session_read?,
-          pending_session_cwd: ->(path) { pending_rpc_cwd(path) }
+          pending_session_cwd: ->(path) { pending_rpc_cwd(path) },
+          session_filter: workspace_session_filter
         ).to_instance_variables.each do |name, value|
           instance_variable_set(name, value)
         end
@@ -83,9 +84,10 @@ module Web
       end
 
       app.get "/conversation_older" do
+        session_path = require_current_workspace_session!(params["session"].to_s)
         result = Sessions::SessionView.older_window(
           sessions_root: settings.sessions_root,
-          session_path: params["session"].to_s,
+          session_path: session_path,
           cursor: params["cursor"].to_i,
           attachment_store: attachment_store,
           rpc_clients: rpc_clients
@@ -105,6 +107,7 @@ module Web
       app.get "/attachments/:session_hash/:file" do
         halt 404 unless params["session_hash"].to_s.match?(/\A[a-f0-9]{64}\z/)
         halt 404 unless params["file"].to_s.match?(/\A[a-f0-9]{64}\.(png|jpg|gif|webp)\z/)
+        require_current_workspace_session_hash!(params["session_hash"].to_s)
 
         path = File.join(settings.attachments_root, params["session_hash"], params["file"])
         root = File.realpath(settings.attachments_root)
@@ -120,9 +123,10 @@ module Web
         message_index = Integer(params["message_index"], exception: false)
         halt 404 unless message_index
 
+        session_path = require_current_workspace_session!(params["session"].to_s)
         raw_details = Sessions::SessionView.raw_details(
           sessions_root: settings.sessions_root,
-          session_path: params["session"].to_s,
+          session_path: session_path,
           message_index: message_index,
           raw_details_token: params["raw_details_token"],
           rpc_clients: rpc_clients

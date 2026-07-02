@@ -108,6 +108,7 @@ module Sessions
       rpc_clients:,
       mark_selected_read:,
       pending_session_cwd:,
+      session_filter: nil,
       now: Time.now
     )
       @sessions_root = sessions_root
@@ -118,12 +119,13 @@ module Sessions
       @rpc_clients = rpc_clients
       @mark_selected_read = mark_selected_read
       @pending_session_cwd = pending_session_cwd
+      @session_filter = session_filter
       @now = now
     end
 
     def build
       @store = PiSessionStore.new(root: @sessions_root, delete_missing_cwds: true)
-      @groups = @store.grouped_sessions
+      @groups = filtered_groups(@store.grouped_sessions)
       append_pending_active_session
       @all_sessions = @groups.values.flatten
       @read_state_store.observe_sessions(@all_sessions)
@@ -163,12 +165,31 @@ module Sessions
 
     private
 
+    def filtered_groups(groups)
+      return groups unless @session_filter
+
+      groups.each_with_object({}) do |(cwd, sessions), filtered|
+        visible_sessions = sessions.select { |session| @session_filter.call(session) }
+        filtered[cwd] = visible_sessions unless visible_sessions.empty?
+      end
+    end
+
     def append_pending_active_session
       pending_path = selected_session_path
       return if pending_path.empty? || File.exist?(pending_path)
 
       cwd = @pending_session_cwd.call(pending_path)
       return unless cwd
+      return if @session_filter && !@session_filter.call(PiSessionStore::Session.new(
+        path: pending_path,
+        cwd: cwd,
+        id: File.basename(pending_path, ".jsonl"),
+        display_name: PENDING_SESSION_DISPLAY_NAME,
+        first_user_message: nil,
+        message_count: 0,
+        created_at: nil,
+        modified_at: @now
+      ))
 
       @groups[cwd] ||= []
       @groups[cwd].unshift(PiSessionStore::Session.new(

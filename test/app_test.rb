@@ -15,9 +15,13 @@ class AppTest < Minitest::Test
     @attachments_root = Dir.mktmpdir
     @read_state_root = Dir.mktmpdir
     @browser_access_root = Dir.mktmpdir
+    @workspace_root = Dir.mktmpdir
     PiWebGateway.set :attachments_root, @attachments_root
     PiWebGateway.set :read_state_path, File.join(@read_state_root, "read-state.json")
     PiWebGateway.set :browser_access_path, File.join(@browser_access_root, "browser-access.json")
+    PiWebGateway.set :multi_user_mode, false
+    PiWebGateway.set :workspace_secret_path, File.join(@workspace_root, "workspace-secret")
+    PiWebGateway.set :workspace_ownership_path, File.join(@workspace_root, "session-owners.json")
     PiWebGateway.set :gateway_admin_password, nil
     PiWebGateway.set :rpc_client_registry, nil
     PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new
@@ -29,6 +33,7 @@ class AppTest < Minitest::Test
     FileUtils.remove_entry(@attachments_root) if @attachments_root && Dir.exist?(@attachments_root)
     FileUtils.remove_entry(@read_state_root) if @read_state_root && Dir.exist?(@read_state_root)
     FileUtils.remove_entry(@browser_access_root) if @browser_access_root && Dir.exist?(@browser_access_root)
+    FileUtils.remove_entry(@workspace_root) if @workspace_root && Dir.exist?(@workspace_root)
   end
 
   def test_app_boot_fails_without_admin_password
@@ -4811,6 +4816,163 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_multi_user_flow_requires_session_key_after_browser_approval
+    Dir.mktmpdir do |dir|
+      write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :gateway_admin_password, "secret"
+      PiWebGateway.set :multi_user_mode, true
+      request = Rack::MockRequest.new(PiWebGateway)
+
+      blocked = request.get("/")
+      browser_cookie = Array(blocked["Set-Cookie"]).first.split(";", 2).first
+      login = request.post("/browser-access/admin-login", params: { "password" => "secret" }, "HTTP_COOKIE" => browser_cookie)
+      assert_equal 303, login.status
+
+      needs_key = request.get("/", "HTTP_COOKIE" => browser_cookie)
+      assert_equal 403, needs_key.status
+      assert_includes needs_key.body, "Personal session key"
+
+      weak_key = request.post("/workspace-key", params: { "workspace_key" => "short" }, "HTTP_COOKIE" => browser_cookie)
+      assert_equal 403, weak_key.status
+      assert_includes weak_key.body, "Use at least 12 characters"
+
+      key_response = request.post("/workspace-key", params: { "workspace_key" => "Correct Horse 42" }, "HTTP_COOKIE" => browser_cookie)
+      workspace_cookie = Array(key_response["Set-Cookie"]).first.split(";", 2).first
+      assert_equal 303, key_response.status
+      assert_includes workspace_cookie, "pi_gateway_workspace="
+      assert File.exist?(PiWebGateway.settings.workspace_secret_path)
+    end
+  end
+
+  def test_multi_user_session_list_hides_unowned_and_other_workspace_sessions
+    Dir.mktmpdir do |dir|
+      own_path, other_path, unowned_path = write_sessions(dir, count: 3)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :multi_user_mode, true
+      own_cookie = workspace_cookie_for("Correct Horse 42")
+      other_workspace_id = workspace_id_for("Different Horse 42")
+      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store.claim(own_path, workspace_id_from_cookie(own_cookie))
+      store.claim(other_path, other_workspace_id)
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", "HTTP_COOKIE" => own_cookie)
+
+      assert_equal 200, response.status
+      assert_includes response.body, Rack::Utils.escape(own_path)
+      refute_includes response.body, Rack::Utils.escape(other_path)
+      refute_includes response.body, Rack::Utils.escape(unowned_path)
+    end
+  end
+
+  def test_multi_user_mode_off_shows_sessions_even_if_ownership_file_exists
+    Dir.mktmpdir do |dir|
+      paths = write_sessions(dir, count: 2)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :multi_user_mode, false
+      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store.claim(paths.first, "workspace-a")
+      store.claim(paths.last, "workspace-b")
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/")
+
+      assert_equal 200, response.status
+      assert_includes response.body, Rack::Utils.escape(paths.first)
+      assert_includes response.body, Rack::Utils.escape(paths.last)
+    end
+  end
+
+  def test_multi_user_direct_session_endpoints_reject_other_workspace_sessions
+    Dir.mktmpdir do |dir|
+      own_path, other_path = write_sessions(dir, count: 2)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :multi_user_mode, true
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+      own_cookie = workspace_cookie_for("Correct Horse 42")
+      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store.claim(own_path, workspace_id_from_cookie(own_cookie))
+      store.claim(other_path, workspace_id_for("Different Horse 42"))
+
+      status_response = Rack::MockRequest.new(PiWebGateway).get("/status", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
+      prompt_response = Rack::MockRequest.new(PiWebGateway).post("/prompt", params: { "session" => other_path, "message" => "Hello" }, "HTTP_COOKIE" => own_cookie)
+
+      assert_equal 404, status_response.status
+      assert_equal 404, prompt_response.status
+      assert_empty calls
+    end
+  end
+
+  def test_multi_user_rejects_other_workspace_attachment_urls
+    Dir.mktmpdir do |dir|
+      own_path, other_path = write_sessions(dir, count: 2)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :multi_user_mode, true
+      cookie = workspace_cookie_for("Correct Horse 42")
+      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store.claim(own_path, workspace_id_from_cookie(cookie))
+      store.claim(other_path, workspace_id_for("Different Horse 42"))
+      other_hash = Digest::SHA256.hexdigest(other_path)
+      attachment_dir = File.join(PiWebGateway.settings.attachments_root, other_hash)
+      FileUtils.mkdir_p(attachment_dir)
+      File.binwrite(File.join(attachment_dir, "#{"a" * 64}.png"), "image")
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/attachments/#{other_hash}/#{"a" * 64}.png", "HTTP_COOKIE" => cookie)
+
+      assert_equal 404, response.status
+    end
+  end
+
+  def test_multi_user_rejects_other_workspace_pending_session_without_remapping
+    Dir.mktmpdir do |dir|
+      real_path = write_session(dir)
+      pending_path = File.join(dir, "pending-session.jsonl")
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      PiWebGateway.set :multi_user_mode, true
+      own_cookie = workspace_cookie_for("Correct Horse 42")
+      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store.claim(pending_path, workspace_id_for("Different Horse 42"))
+
+      response = Rack::MockRequest.new(PiWebGateway).post("/prompt", params: { "session" => pending_path, "message" => "Hello" }, "HTTP_COOKIE" => own_cookie)
+
+      assert_equal 404, response.status
+      assert_empty calls
+      assert registry.active?(pending_path)
+      refute registry.active?(real_path)
+      assert_includes PiWebGateway.pending_session_registry.paths, pending_path
+    end
+  end
+
+  def test_multi_user_new_session_claims_workspace_owner
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      new_path = File.join(File.dirname(path), "new-session.jsonl")
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :multi_user_mode, true
+      PiWebGateway.set :new_rpc_client_factory, [->(cwd) {
+        calls << [:start_new, cwd]
+        FakeRpcClient.new(calls, [], new_path)
+      }]
+      cookie = workspace_cookie_for("Correct Horse 42")
+      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store.claim(path, workspace_id_from_cookie(cookie))
+
+      response = Rack::MockRequest.new(PiWebGateway).post("/sessions/new", params: { "session" => path }, "HTTP_COOKIE" => cookie)
+
+      assert_equal 303, response.status
+      assert store.owned_by?(new_path, workspace_id_from_cookie(cookie))
+    end
+  end
+
   private
 
   def compact_card_with_summary(document, summary)
@@ -4955,6 +5117,20 @@ class AppTest < Minitest::Test
     entries = [{ type: "session", id: "session-1", cwd: project_cwd(root) }] + messages
     File.write(path, entries.map { |entry| JSON.generate(entry) }.join("\n") + "\n")
     path
+  end
+
+  def workspace_cookie_for(key)
+    workspace_id = workspace_id_for(key)
+    "pi_gateway_workspace=#{workspace_id}"
+  end
+
+  def workspace_id_for(key)
+    secret = WorkspaceSecretStore.new(path: PiWebGateway.settings.workspace_secret_path).secret
+    OpenSSL::HMAC.hexdigest("SHA256", secret, key.strip)
+  end
+
+  def workspace_id_from_cookie(cookie)
+    cookie.split("=", 2).last
   end
 
   def with_env(values)
