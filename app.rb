@@ -5,6 +5,7 @@ require_relative "lib/sessions/session_family"
 require_relative "lib/sessions/sidebar"
 require "ipaddr"
 require_relative "lib/pi_session_store"
+require_relative "lib/configured_session_cwds"
 require_relative "lib/web/view_helpers"
 require_relative "lib/web/store_helpers"
 require_relative "lib/web/rpc_helpers"
@@ -25,6 +26,7 @@ class PiWebGateway < Sinatra::Base
   set :root, File.dirname(__FILE__)
   set :sessions_root, ENV.fetch("PI_SESSIONS_ROOT", File.expand_path("~/.pi/agent/sessions"))
   set :attachments_root, ENV.fetch("PI_ATTACHMENTS_ROOT", File.expand_path("~/.pi/web-gateway/attachments"))
+  set :session_cwds_path, ENV.fetch("PI_SESSION_CWDS_PATH", File.expand_path("~/.config/pi-web-gateway/session-cwds.txt"))
   GATEWAY_ENV_PATH = ENV.fetch("PI_GATEWAY_ENV_PATH", File.expand_path("~/.config/pi-web-gateway/env"))
 
   def self.load_gateway_env_file

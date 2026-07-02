@@ -2,6 +2,7 @@ require "erb"
 require_relative "../rendering/markdown_renderer"
 require_relative "../sessions/session_view"
 require_relative "../sessions/sidebar"
+require_relative "../configured_session_cwds"
 require_relative "../time_formatter"
 
 module Web
@@ -96,9 +97,14 @@ module Web
 
     def new_session_cwds
       preferred_cwd = selected_project_cwd || @selected_session&.cwd
-      return known_session_cwds unless preferred_cwd
+      cwds = [*known_session_cwds, *configured_session_cwds].uniq
+      return cwds unless preferred_cwd
 
-      [preferred_cwd, *known_session_cwds.reject { |cwd| cwd == preferred_cwd }]
+      [preferred_cwd, *cwds.reject { |cwd| cwd == preferred_cwd }]
+    end
+
+    def configured_session_cwds
+      ConfiguredSessionCwds.read(settings.session_cwds_path)
     end
 
     def new_session_cwd_label(cwd)

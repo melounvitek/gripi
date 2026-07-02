@@ -24,6 +24,7 @@ class AppTest < Minitest::Test
     PiWebGateway.set :workspace_access_path, File.join(@workspace_root, "workspace-access.json")
     PiWebGateway.set :workspace_ownership_path, File.join(@workspace_root, "session-owners.json")
     PiWebGateway.set :gateway_admin_password, nil
+    PiWebGateway.set :session_cwds_path, nil
     PiWebGateway.set :rpc_client_registry, nil
     PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new
     PiWebGateway.set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
@@ -2499,6 +2500,53 @@ class AppTest < Minitest::Test
       sidebar_button = document.at_css('.session-sidebar [data-modal-open="new-session-modal"]')
       assert_equal "Choose directory", sidebar_button.text.strip
       refute_includes response.body, "Create a Pi session first, then refresh this page."
+    end
+  end
+
+  def test_new_session_modal_lists_configured_folder_without_sessions
+    Dir.mktmpdir do |dir|
+      configured_cwd = File.join(dir, "configured-project")
+      missing_cwd = File.join(dir, "missing-project")
+      FileUtils.mkdir_p(configured_cwd)
+      config_path = File.join(dir, "session-cwds.txt")
+      File.write(config_path, "#{configured_cwd}\n#{missing_cwd}\n")
+      sessions_root = File.join(dir, "sessions")
+      FileUtils.mkdir_p(sessions_root)
+      PiWebGateway.set :sessions_root, sessions_root
+      PiWebGateway.set :session_cwds_path, config_path
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/")
+
+      assert_equal 200, response.status
+      modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
+      options = modal.css('select[data-new-session-known-cwd] option')
+      assert_equal [configured_cwd], options.map { |option| option["value"] }.reject { |value| value.empty? || value == "__new_path__" }
+      assert_equal configured_cwd, modal.at_css('input[name="cwd"]')["value"]
+      assert modal.at_css('[data-new-session-project-fields]')
+      assert modal.at_css('[data-new-session-path-fields]').key?("hidden")
+      refute modal.at_css('button[data-new-session-submit]').key?("disabled")
+    end
+  end
+
+  def test_new_session_modal_deduplicates_configured_and_session_folders
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      cwd = project_cwd(dir)
+      configured_cwd = File.join(dir, "configured-project")
+      FileUtils.mkdir_p(configured_cwd)
+      config_path = File.join(dir, "session-cwds.txt")
+      File.write(config_path, "#{cwd}\n#{configured_cwd}\n")
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :session_cwds_path, config_path
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
+      options = modal.css('select[data-new-session-known-cwd] option')
+      assert_equal [cwd, configured_cwd], options.map { |option| option["value"] }.reject { |value| value.empty? || value == "__new_path__" }
     end
   end
 
