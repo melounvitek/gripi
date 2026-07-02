@@ -114,6 +114,19 @@ module Web
       rescue Errno::EPIPE, IOError
         Rpc::CommandCatalog.builtin_commands
       end
+
+      def halt_failed_rpc_prompt(response)
+        return unless response.is_a?(Hash) && response["success"] == false
+
+        error = response["error"].to_s.strip
+        error = "Prompt failed to send" if error.empty?
+        status 422
+        if json_request?
+          content_type :json
+          halt JSON.generate(success: false, error: error)
+        end
+        halt error
+      end
     end
 
     def self.registered(app)
@@ -133,7 +146,8 @@ module Web
         branch_response = nil
         if follow_up_prompt
           submitted_at = Time.now
-          with_rpc_client(session_path) { |client| client.follow_up(rpc_message, images) }
+          response = with_rpc_client(session_path) { |client| client.follow_up(rpc_message, images) }
+          halt_failed_rpc_prompt(response)
           attachment_store.record_prompt(session_path, rpc_message, images.length, timestamp: submitted_at, paths: attachment_paths, mime_types: images.map { |image| image[:mimeType] })
         elsif slash_command&.type == :rename && slash_command.name
           with_rpc_client(session_path) { |client| client.set_session_name(slash_command.name) }
@@ -148,7 +162,8 @@ module Web
           branch_response = redirect_to_rpc_session_after_branch(session_path, response)
         else
           submitted_at = Time.now
-          with_rpc_client(session_path) { |client| client.prompt(rpc_message, images) }
+          response = with_rpc_client(session_path) { |client| client.prompt(rpc_message, images) }
+          halt_failed_rpc_prompt(response)
           attachment_store.record_prompt(session_path, rpc_message, images.length, timestamp: submitted_at, paths: attachment_paths, mime_types: images.map { |image| image[:mimeType] })
         end
         redirect_path = session_redirect_path(session_path)

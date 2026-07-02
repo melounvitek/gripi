@@ -334,6 +334,36 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_json_prompt_returns_rpc_failure_without_recording_prompt
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        client = FakeRpcClient.new(calls)
+        client.define_singleton_method(:prompt) do |message, images = []|
+          calls << (images.empty? ? [:prompt, message] : [:prompt, message, images])
+          { "type" => "response", "command" => "prompt", "success" => false, "error" => "No API key found for the selected model." }
+        end
+        client
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "Hello Pi" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 422, response.status
+      assert_equal [[ :start, path ], [ :prompt, "Hello Pi" ]], calls
+      payload = JSON.parse(response.body)
+      assert_equal false, payload.fetch("success")
+      assert_equal "No API key found for the selected model.", payload.fetch("error")
+      refute_includes File.read(path), "Hello Pi"
+    end
+  end
+
   def test_name_slash_command_renames_selected_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -4047,6 +4077,18 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (!response.ok || generation !== sessionViewGeneration || statusBar !== sessionStatusBar) return;"
       assert_includes response.body, "refreshSessionStatus(generation).catch(() => {});"
       assert_includes response.body, "function resetSessionViewState()"
+      assert_includes response.body, "function markOptimisticUserMessageFailed(text)"
+      assert_includes response.body, "const previousWaitingForOutputSince = waitingForOutputSince;"
+      assert_includes response.body, "const submittedImageFiles = pendingImages.map((entry) => entry.file);"
+      assert_includes response.body, "submittedImageFiles.forEach((file) => formData.append(\"images[]\", file, file.name || \"image\"));"
+      assert_includes response.body, "const errorMessage = payload?.error || \"Prompt failed to send\";"
+      assert_includes response.body, "if (promptTextarea && message) promptTextarea.value = message;"
+      assert_includes response.body, "pendingImages = submittedImageFiles.map((file) => ({ file, url: URL.createObjectURL(file) }));"
+      assert_includes response.body, "renderAttachments();"
+      assert_includes response.body, "setComposerState(\"running\", \"Pi is running…\", previousWaitingForOutputSince);"
+      assert_includes response.body, "markOptimisticUserMessageFailed(message);"
+      assert_includes response.body, "message.hasAttribute(\"data-optimistic-text\") ? message.dataset.optimisticText : message.querySelector(\".message-body\")?.textContent"
+      assert_includes response.body, "appendMessage(\"assistant\", `Prompt failed to send:\\n\\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true });"
       assert_includes response.body, "clearTimeout(eventPollTimer);"
       assert_includes response.body, "eventPollInFlight = false;"
       assert_includes response.body, "sessionViewGeneration += 1;"
@@ -4261,7 +4303,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);"
       assert_includes response.body, "const newCommand = followUp ? null : sessionNewSlashCommand(message);"
       assert_includes response.body, "if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand) {"
-      assert_includes response.body, "if (!followUp) {\n          resetLiveAssistantTracking();\n          document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n          appendMessage(\"user\", [message, pendingImages.length > 0"
+      assert_includes response.body, "if (!followUp) {\n          resetLiveAssistantTracking();\n          document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n          appendMessage(\"user\", [message, submittedImageFiles.length > 0"
       assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });\n        }"
       assert_includes response.body, "resetEventPollBackoff();"
       assert_includes response.body, "scheduleNextEventPoll(0);"
