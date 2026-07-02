@@ -54,13 +54,15 @@ mkdir -p workspace
 # optionally edit PI_WORKSPACE in .env to an absolute path containing your codebases
 ```
 
-`.env` may contain secrets such as provider API keys and `PI_GATEWAY_ADMIN_PASSWORD`; do not commit it. You can also leave provider keys blank and authorize Pi interactively:
+`.env` may contain secrets such as provider API keys and `PI_GATEWAY_ADMIN_PASSWORD`; do not commit it. Before using the gateway, Pi must have provider credentials. Either set provider API keys in `.env`, or leave them blank and authorize Pi interactively:
 
 ```sh
 docker compose build
 docker compose run --rm pi pi
 # inside Pi, run /login and choose your provider
 ```
+
+The `/login` credentials are stored in the `pi_data` Docker volume, so this is normally a one-time setup per Docker volume. If prompts appear to start but never produce an assistant response in a fresh Docker setup, verify that Pi is authorized with the command above.
 
 Start the browser gateway:
 
