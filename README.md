@@ -46,12 +46,12 @@ mise run dev
 
 ## Dockerized runtime
 
-The repository includes a portable Docker setup that runs both the gateway and the Pi CLI inside the container. The only host directory exposed to Pi is the workspace you mount at `/work`; Pi config, sessions, OAuth/API-key credentials, and gateway config persist in Docker volumes by default.
+The repository includes a portable Docker setup that runs both the gateway and the Pi CLI inside the container. The only host directory exposed to Pi is the workspace you mount; Pi config, sessions, OAuth/API-key credentials, and gateway config persist in Docker volumes by default.
 
 ```sh
 cp .env.example .env
 mkdir -p workspace
-# edit .env, especially PI_WORKSPACE if your code lives elsewhere
+# optionally edit PI_WORKSPACE in .env to an absolute path containing your codebases
 ```
 
 `.env` may contain secrets such as provider API keys and `PI_GATEWAY_ADMIN_PASSWORD`; do not commit it. You can also leave provider keys blank and authorize Pi interactively:
@@ -70,13 +70,15 @@ docker compose up gateway
 
 The gateway listens on <http://localhost:4567> by default and binds to `127.0.0.1`. Set `PI_GATEWAY_BIND=0.0.0.0` only when you want remote access. If `PI_GATEWAY_ADMIN_PASSWORD` is blank, the container generates one and stores it in the `gateway_config` volume. To set your own password, put it in `.env` before starting the gateway.
 
-To expose existing codebases, set `PI_WORKSPACE` in `.env`:
+To expose existing codebases, set `PI_WORKSPACE` in `.env` to an absolute path:
 
 ```sh
 PI_WORKSPACE=/home/alice/code
 ```
 
-That host directory appears as `/work` inside the container. For direct Pi use in the current repository without Compose, build the image and mount the current directory:
+That host directory appears at the same path inside the container, so Pi sees `/home/alice/code/project-a` as `/home/alice/code/project-a`. If `PI_WORKSPACE` is not set, Compose falls back to `./workspace` mounted at `/work`.
+
+For direct Pi use in the current repository without Compose, build the image and mount the current directory:
 
 ```sh
 docker build -t pi-web-gateway:local .

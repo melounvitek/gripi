@@ -22,7 +22,7 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
-      - ${PI_WORKSPACE:-./workspace}:/work
+      - ${PI_WORKSPACE:-./workspace}:${PI_WORKSPACE:-/work}
       - pi_data:/home/piuser/.pi
       - gateway_config:/home/piuser/.config/pi-web-gateway
 
@@ -37,7 +37,7 @@ services:
         USER_ID: ${HOST_UID:-1000}
         GROUP_ID: ${HOST_GID:-1000}
     profiles: ["tools"]
-    working_dir: /work
+    working_dir: ${PI_WORKSPACE:-/work}
     command: ["pi"]
     stdin_open: true
     tty: true
@@ -48,7 +48,7 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
-      - ${PI_WORKSPACE:-./workspace}:/work
+      - ${PI_WORKSPACE:-./workspace}:${PI_WORKSPACE:-/work}
       - pi_data:/home/piuser/.pi
       - gateway_config:/home/piuser/.config/pi-web-gateway
 
