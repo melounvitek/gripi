@@ -5,7 +5,10 @@
       </div>
       <div class="session-sidebar-content">
       <% if @groups.empty? %>
-        <p class="empty">No sessions found.</p>
+        <div class="empty sidebar-empty">
+          <span>No sessions yet.</span>
+          <button type="button" class="sidebar-empty-action" data-modal-open="new-session-modal">Choose directory</button>
+        </div>
       <% else %>
         <section class="recent-sessions">
           <% shortcut_index = 0 %>

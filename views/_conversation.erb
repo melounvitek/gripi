@@ -101,10 +101,16 @@
       <% else %>
         <header class="session-header">
           <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span><% if unread_sidebar_session_count.positive? %><span class="mobile-sessions-unread-badge" aria-label="<%= h unread_sidebar_session_aria_label %>" title="<%= h unread_sidebar_session_aria_label %>"><%= h unread_sidebar_session_count_label %></span><% end %></label>
-          <h1>No session selected</h1>
+          <h1>Welcome to Pi</h1>
         </header>
         <section class="conversation-scroll" id="conversation-scroll" tabindex="0">
-          <p class="empty empty-state">Create a Pi session first, then refresh this page.</p>
+          <div class="empty empty-state">
+            <div class="empty-state-title">No sessions yet</div>
+            <p>Choose an existing project directory to start your first Pi session.</p>
+            <div class="empty-state-actions">
+              <button type="button" data-modal-open="new-session-modal">Choose directory</button>
+            </div>
+          </div>
         </section>
       <% end %>
     </main>

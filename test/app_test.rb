@@ -2419,6 +2419,25 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_empty_session_page_prompts_for_existing_directory
+    Dir.mktmpdir do |dir|
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/")
+      document = Nokogiri::HTML(response.body)
+
+      assert_equal 200, response.status
+      assert_equal "Welcome to Pi", document.at_css(".session-header h1").text
+      assert_includes document.at_css(".empty-state").text, "Choose an existing project directory"
+      empty_state_button = document.at_css('.empty-state [data-modal-open="new-session-modal"]')
+      assert_equal "Choose directory", empty_state_button.text.strip
+      sidebar_button = document.at_css('.session-sidebar [data-modal-open="new-session-modal"]')
+      assert_equal "Choose directory", sidebar_button.text.strip
+      refute_includes response.body, "Create a Pi session first, then refresh this page."
+    end
+  end
+
   def test_recent_sessions_include_new_session_modal
     Dir.mktmpdir do |dir|
       path = write_session(dir)

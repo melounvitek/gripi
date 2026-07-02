@@ -108,6 +108,11 @@
     .session-compacting-indicator::before { background: var(--warning); box-shadow: 0 0 0 4px rgba(255, 255, 0, 0.14); }
     .empty { color: var(--muted); background: var(--panel-soft); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem; }
     .empty-state { max-width: 34rem; margin: 2rem auto; text-align: center; }
+    .empty-state-title { margin: 0 0 0.45rem; color: var(--text); font-size: 1.2rem; font-weight: 800; }
+    .empty-state p { margin: 0; }
+    .empty-state-actions { display: flex; justify-content: center; margin-top: 1rem; }
+    .sidebar-empty { display: grid; gap: 0.85rem; }
+    .sidebar-empty-action { width: 100%; justify-self: stretch; }
     .message { position: relative; min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 0.9rem; padding: 0.9rem; margin-bottom: 0.85rem; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); scroll-margin-top: 3.5rem; }
     .message--user { margin-left: 10%; background: #343541; border-color: rgba(69, 133, 255, 0.72); color: #d4d4d4; }
     .message--assistant { margin-right: 10%; background: #080d20; border-color: rgba(69, 133, 255, 0.32); color: #f0c7a4; }
