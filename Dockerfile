@@ -14,7 +14,7 @@ ENV APP_HOME=/app \
     MISE_DATA_DIR=/home/piuser/.local/share/mise \
     MISE_CONFIG_DIR=/home/piuser/.config/mise \
     MISE_CACHE_DIR=/home/piuser/.cache/mise \
-    PATH=/usr/local/bundle/bin:/home/piuser/.local/share/mise/shims:/home/piuser/.local/bin:$PATH
+    PATH=/usr/local/bundle/bin:/home/piuser/.local/bin:/home/piuser/.local/share/mise/shims:$PATH
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -46,7 +46,10 @@ RUN apt-get update \
   && if getent group "$GROUP_ID" >/dev/null; then group_name="$(getent group "$GROUP_ID" | cut -d: -f1)"; else groupadd --gid "$GROUP_ID" piuser && group_name=piuser; fi \
   && if getent passwd "$USER_ID" >/dev/null; then echo "USER_ID $USER_ID already exists in the base image" >&2; exit 1; fi \
   && useradd --uid "$USER_ID" --gid "$group_name" --create-home --shell /bin/bash piuser \
-  && mkdir -p /app /work /home/piuser/.pi /home/piuser/.config/pi-web-gateway /home/piuser/.local/share/mise /home/piuser/.config/mise /home/piuser/.cache/mise \
+  && pi_bin="$(command -v pi)" \
+  && mkdir -p /app /work /home/piuser/.pi /home/piuser/.config/pi-web-gateway /home/piuser/.local/bin /home/piuser/.local/share/mise /home/piuser/.config/mise /home/piuser/.cache/mise \
+  && printf '#!/usr/bin/env bash\nexec /usr/bin/node %s "$@"\n' "$pi_bin" > /home/piuser/.local/bin/pi \
+  && chmod +x /home/piuser/.local/bin/pi \
   && chown -R piuser:"$group_name" /app /work /home/piuser \
   && ln -s /usr/bin/fdfind /usr/local/bin/fd \
   && rm -rf /var/lib/apt/lists/*

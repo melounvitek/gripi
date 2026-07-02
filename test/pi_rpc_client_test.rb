@@ -50,6 +50,20 @@ class PiRpcClientTest < Minitest::Test
     assert_equal({ "id" => "state-1", "type" => "get_state" }, written)
   end
 
+  def test_raises_clear_error_when_pi_process_exits_before_write
+    stdin = Object.new
+    def stdin.write(_payload)
+      raise Errno::EPIPE
+    end
+
+    client = PiRpcClient.new(stdin: stdin, stdout: StringIO.new)
+
+    error = assert_raises(IOError) do
+      client.request("get_state", id: "state-1")
+    end
+    assert_includes error.message, "Pi RPC process exited before accepting command"
+  end
+
   def test_reports_missed_events_when_cursor_precedes_buffer
     input = StringIO.new
     output = StringIO.new([

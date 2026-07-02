@@ -170,8 +170,13 @@ class PiRpcClient
     command = payload.merge(id: id, type: type)
     @mutex.synchronize { @pending_ids[id] = true }
     ensure_reader
-    @stdin.write(JSON.generate(command) + "\n")
-    @stdin.flush if @stdin.respond_to?(:flush)
+    begin
+      @stdin.write(JSON.generate(command) + "\n")
+      @stdin.flush if @stdin.respond_to?(:flush)
+    rescue Errno::EPIPE
+      @mutex.synchronize { @pending_ids.delete(id) }
+      raise IOError, "Pi RPC process exited before accepting command"
+    end
 
     @mutex.synchronize do
       loop do
