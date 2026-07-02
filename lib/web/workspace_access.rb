@@ -1,6 +1,7 @@
 require "json"
 require "openssl"
 require_relative "../workspace_secret_store"
+require_relative "../workspace_access_store"
 require_relative "../workspace_session_ownership_store"
 
 module Web

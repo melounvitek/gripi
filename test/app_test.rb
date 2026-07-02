@@ -4816,6 +4816,28 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_workspace_access_store_tracks_approved_pending_and_denied_workspaces
+    path = File.join(@workspace_root, "workspace-access.json")
+    store = WorkspaceAccessStore.new(path: path)
+
+    refute store.approved?("workspace-a")
+    store.approve_workspace("workspace-a")
+    assert store.approved?("workspace-a")
+
+    request = store.request_access("workspace-b", browser_token: "browser-token")
+    assert_match(/\A[A-Z0-9]{4}-[A-Z0-9]{4}\z/, request.fetch("code"))
+    assert_equal "pending", store.pending_status("workspace-b")
+    assert_equal request.fetch("code"), store.pending_requests.first.fetch("code")
+
+    store.deny_code(request.fetch("code"))
+    assert_equal "denied", store.pending_status("workspace-b")
+    assert_empty store.pending_requests
+
+    stored = JSON.parse(File.read(path))
+    assert_equal ["workspace-a"], stored.fetch("approved_workspaces").map { |workspace| workspace.fetch("workspace_id") }
+    assert_equal ["workspace-b"], stored.fetch("pending_requests").map { |pending| pending.fetch("workspace_id") }
+  end
+
   def test_multi_user_flow_requires_session_key_after_browser_approval
     Dir.mktmpdir do |dir|
       write_session(dir)
