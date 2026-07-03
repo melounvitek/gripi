@@ -95,7 +95,8 @@ This mode separates gateway session visibility for trusted users. It is not OS-l
 
 ## Note
 
-This project is written in Ruby, because I am a Ruby developer, and I expected I might need to jump in while trying full vibe-coding for the first time. I have mostly stayed out of the generated code, so please do not treat it as a sample of my usual Ruby style, it probably is not :-).
+This project is written in Ruby, because I am a Ruby developer trying full vibe-coding for the first time, and I expected I might need to jump in. It turned out that was not needed, so I have mostly stayed out of the generated code -- so please, do not treat it as a sample of my usual Ruby style. It very likely is not :-).
+
 
 ## Development server
 
