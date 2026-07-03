@@ -2,7 +2,7 @@
 
 Browser UI for local Pi sessions.
 
-<img width="1470" height="956" alt="image" src="https://github.com/user-attachments/assets/3aa0d8f3-265b-4de0-ac65-b91f7af70a2f" />
+<img width="1470" height="956" alt="image" src="https://github.com/user-attachments/assets/09b55035-b68a-46d7-b1ce-24697d8e3412" />
 
 ## Features
 
