@@ -208,10 +208,17 @@ module Web
       end
     end
 
+    def message_display_role_label(message)
+      return "tool" if message.compact && message.role == "assistant" && !message.tool_name.to_s.empty?
+
+      message_role_label(message.role)
+    end
+
     def message_article_class(message)
       classes = ["message", "message--#{message_role_key(message.role)}"]
       classes << "message--compact" if message.compact
       classes << "message--thinking" if message.thinking
+      classes << "message--tool-call" if message.compact && message.role == "assistant" && !message.tool_name.to_s.empty?
       classes << "message--tool-transcript" if message.tool_transcript
       classes << "message--tool-error" if message.error
       classes.join(" ")

@@ -1,6 +1,6 @@
             <article class="<%= h message_article_class(message) %>" data-role="<%= h message.role %>" data-message-fingerprint="<%= h message_fingerprint(message.role, message.text, message.timestamp) %>"<%= " data-message-index=\"#{h message_index}\"" if defined?(message_index) && message_index %><%= ' data-final-assistant-response="true"' if message.final_assistant_response %>>
               <header class="message-header">
-                <div class="role"><%= h message_role_label(message.role) %></div>
+                <div class="role"><%= h message_display_role_label(message) %></div>
                 <% if message_metadata(message) %>
                   <div class="message-meta"><%= h message_metadata(message) %></div>
                 <% end %>

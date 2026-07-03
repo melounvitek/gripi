@@ -118,10 +118,11 @@
     .message--assistant { margin-right: 10%; background: #080d20; border-color: rgba(69, 133, 255, 0.32); color: #f0c7a4; }
     .message--thinking { margin-right: 16%; background: #080d20; border-color: rgba(69, 133, 255, 0.22); border-style: dashed; color: #7f7f88; box-shadow: none; }
     .message--status { background: rgba(24, 24, 30, 0.72); color: var(--muted); box-shadow: none; }
-    .message--tool { background: #080d20; border-color: rgba(69, 133, 255, 0.32); border-style: dashed; color: var(--text); }
-    .message--tool-transcript { background: #283228; border-color: rgba(181, 189, 104, 0.28); color: #d8ded8; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    .message--tool-transcript .message-details-summary { color: #d8ded8; }
-    .message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: rgba(216, 222, 216, 0.68); line-height: 1.35; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
+    .message--tool, .message--tool-call { background: rgba(28, 38, 32, 0.82); border-color: rgba(138, 190, 183, 0.24); border-style: dashed; color: rgba(216, 222, 216, 0.74); box-shadow: none; }
+    .message--tool-transcript { background: rgba(28, 38, 32, 0.82); border-color: rgba(138, 190, 183, 0.24); border-style: dashed; color: rgba(216, 222, 216, 0.74); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .message--tool .role, .message--tool-call .role, .message--tool-transcript .role { color: var(--accent); }
+    .message--tool-transcript .message-details-summary { color: rgba(216, 222, 216, 0.82); }
+    .message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: rgba(216, 222, 216, 0.62); font-size: 0.92rem; line-height: 1.35; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
     .tool-diff-line { display: block; margin: 0 -0.25rem; padding: 0 0.25rem; border-left: 2px solid transparent; }
     .tool-diff-line--add { border-left-color: rgba(181, 189, 104, 0.75); background: rgba(181, 189, 104, 0.12); color: #d8f0a0; }
     .tool-diff-line--remove { border-left-color: rgba(204, 102, 102, 0.8); background: rgba(204, 102, 102, 0.12); color: #f0b0a8; }
@@ -1561,7 +1562,7 @@
       const roleKey = messageRoleKey(roleName);
 
       const article = document.createElement("article");
-      article.className = `message message--${roleKey} message--compact${options.toolTranscript ? " message--tool-transcript" : ""}${options.error === true ? " message--tool-error" : ""}${live ? " message--live" : ""}`;
+      article.className = `message message--${roleKey} message--compact${options.toolName && roleName === "assistant" ? " message--tool-call" : ""}${options.toolTranscript ? " message--tool-transcript" : ""}${options.error === true ? " message--tool-error" : ""}${live ? " message--live" : ""}`;
       article.dataset.role = roleName;
       article.dataset.messageTimestamp = timestampKey;
       article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
@@ -1570,7 +1571,7 @@
       header.className = "message-header";
       const role = document.createElement("div");
       role.className = "role";
-      role.textContent = messageRoleLabel(roleName);
+      role.textContent = options.toolName && roleName === "assistant" ? "tool" : messageRoleLabel(roleName);
       const meta = document.createElement("div");
       meta.className = "message-meta";
       meta.textContent = formatTimestamp(timestamp);

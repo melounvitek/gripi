@@ -2047,13 +2047,13 @@ class AppTest < Minitest::Test
       assert_includes response.body, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; }"
       assert_includes response.body, ".message--compact .message-details-summary:last-child { margin-bottom: 0; }"
       assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
-      assert_includes response.body, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: rgba(216, 222, 216, 0.68); line-height: 1.35; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
+      assert_includes response.body, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: rgba(216, 222, 216, 0.62); font-size: 0.92rem; line-height: 1.35; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
       assert_includes response.body, ".tool-diff-line { display: block; margin: 0 -0.25rem;"
       assert_includes response.body, "scrollbar-width: none"
       assert_includes response.body, ".message--user { margin-left: 10%; background: #343541; border-color: rgba(69, 133, 255, 0.72); color: #d4d4d4; }"
       assert_includes response.body, ".message--assistant { margin-right: 10%; background: #080d20; border-color: rgba(69, 133, 255, 0.32); color: #f0c7a4; }"
       assert_includes response.body, ".message--thinking { margin-right: 16%; background: #080d20; border-color: rgba(69, 133, 255, 0.22); border-style: dashed; color: #7f7f88; box-shadow: none; }"
-      assert_includes response.body, ".message--tool { background: #080d20; border-color: rgba(69, 133, 255, 0.32); border-style: dashed; color: var(--text); }"
+      assert_includes response.body, ".message--tool, .message--tool-call { background: rgba(28, 38, 32, 0.82); border-color: rgba(138, 190, 183, 0.24); border-style: dashed; color: rgba(216, 222, 216, 0.74); box-shadow: none; }"
     end
   end
 
@@ -3781,7 +3781,7 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       refute_includes response.body, '<details class="message-details"'
-      assert_includes response.body, 'class="message message--assistant message--compact message--tool-transcript message--tool-error" data-role="assistant"'
+      assert_includes response.body, 'class="message message--assistant message--compact message--tool-call message--tool-transcript message--tool-error" data-role="assistant"'
       document = Nokogiri::HTML(response.body)
       page_text = document.text
 
