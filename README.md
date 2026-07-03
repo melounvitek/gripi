@@ -4,6 +4,8 @@ Browser UI for local Pi sessions.
 
 <img width="1470" height="956" alt="image" src="https://github.com/user-attachments/assets/09b55035-b68a-46d7-b1ce-24697d8e3412" />
 
+I'm scared to see the code (this my test of true vibe-coding), but it works nicely!
+
 ## Features
 
 - Browse, resume, and start Pi sessions from the browser
