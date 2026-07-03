@@ -19,6 +19,7 @@ class AppTest < Minitest::Test
     PiWebGateway.set :attachments_root, @attachments_root
     PiWebGateway.set :read_state_path, File.join(@read_state_root, "read-state.json")
     PiWebGateway.set :browser_access_path, File.join(@browser_access_root, "browser-access.json")
+    PiWebGateway.set :browser_auth_disabled, false
     PiWebGateway.set :multi_user_mode, false
     PiWebGateway.set :workspace_secret_path, File.join(@workspace_root, "workspace-secret")
     PiWebGateway.set :workspace_access_path, File.join(@workspace_root, "workspace-access.json")
@@ -41,6 +42,38 @@ class AppTest < Minitest::Test
   def test_app_boot_fails_without_admin_password
     Dir.mktmpdir do |home|
       env = ENV.to_h.merge("PI_GATEWAY_ENV_PATH" => File.join(home, "missing-env"), "PI_GATEWAY_ADMIN_PASSWORD" => nil)
+
+      _stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'")
+
+      refute status.success?
+      assert_includes stderr, "PI_GATEWAY_ADMIN_PASSWORD is required"
+    end
+  end
+
+  def test_app_boot_allows_missing_admin_password_when_browser_auth_is_disabled_for_single_user
+    Dir.mktmpdir do |home|
+      env = ENV.to_h.merge(
+        "PI_GATEWAY_ENV_PATH" => File.join(home, "missing-env"),
+        "PI_GATEWAY_ADMIN_PASSWORD" => nil,
+        "PI_BROWSER_AUTH_DISABLED" => "1",
+        "PI_MULTI_USER_MODE" => nil
+      )
+
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.browser_auth_disabled")
+
+      assert status.success?, stderr
+      assert_equal "true", stdout.strip
+    end
+  end
+
+  def test_app_boot_requires_admin_password_when_browser_auth_is_disabled_for_multi_user
+    Dir.mktmpdir do |home|
+      env = ENV.to_h.merge(
+        "PI_GATEWAY_ENV_PATH" => File.join(home, "missing-env"),
+        "PI_GATEWAY_ADMIN_PASSWORD" => nil,
+        "PI_BROWSER_AUTH_DISABLED" => "1",
+        "PI_MULTI_USER_MODE" => "1"
+      )
 
       _stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'")
 
@@ -210,6 +243,22 @@ class AppTest < Minitest::Test
       state = JSON.parse(File.read(PiWebGateway.settings.browser_access_path))
       assert_equal 1, state.fetch("pending_requests").length
       refute state.fetch("pending_requests").first.fetch("requested")
+    end
+  end
+
+  def test_browser_auth_disabled_opens_single_user_gateway_without_browser_approval
+    Dir.mktmpdir do |dir|
+      write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :gateway_admin_password, nil
+      PiWebGateway.set :browser_auth_disabled, true
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/")
+
+      assert_equal 200, response.status
+      assert_includes response.body, "Pi Web Gateway"
+      refute_includes response.body, "Browser access required"
+      refute File.exist?(PiWebGateway.settings.browser_access_path)
     end
   end
 
@@ -4899,6 +4948,22 @@ class AppTest < Minitest::Test
     stored = JSON.parse(File.read(path))
     assert_equal ["workspace-a"], stored.fetch("approved_workspaces").map { |workspace| workspace.fetch("workspace_id") }
     assert_equal ["workspace-b"], stored.fetch("pending_requests").map { |pending| pending.fetch("workspace_id") }
+  end
+
+  def test_browser_auth_disabled_still_requires_user_token_in_multi_user_mode
+    Dir.mktmpdir do |dir|
+      write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :gateway_admin_password, "secret"
+      PiWebGateway.set :browser_auth_disabled, true
+      PiWebGateway.set :multi_user_mode, true
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/")
+
+      assert_equal 403, response.status
+      assert_includes response.body, "User token"
+      refute_includes response.body, "Browser access required"
+    end
   end
 
   def test_multi_user_flow_uses_user_token_without_browser_approval
