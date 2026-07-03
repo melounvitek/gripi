@@ -92,7 +92,13 @@ module Web
       end
 
       def workspace_bootstrap_required?
+        return false if workspace_token_auto_approval?
+
         !workspace_access_store.any_approved?
+      end
+
+      def workspace_token_auto_approval?
+        settings.browser_auth_disabled
       end
 
       def workspace_approval_allowed?
@@ -165,6 +171,10 @@ module Web
         else
           workspace_id = workspace_id_for_key(key)
           if workspace_access_store.approved?(workspace_id)
+            set_workspace_cookie(workspace_id)
+            redirect safe_return_to
+          elsif workspace_token_auto_approval?
+            workspace_access_store.approve_workspace(workspace_id)
             set_workspace_cookie(workspace_id)
             redirect safe_return_to
           elsif workspace_bootstrap_required?

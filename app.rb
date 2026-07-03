@@ -75,7 +75,7 @@ class PiWebGateway < Sinatra::Base
   browser_auth_disabled = ENV.fetch("PI_BROWSER_AUTH_DISABLED", "").match?(/\A(?:1|true|yes|on)\z/i)
   multi_user_mode = ENV.fetch("PI_MULTI_USER_MODE", "").match?(/\A(?:1|true|yes|on)\z/i)
   gateway_admin_password = ENV["PI_GATEWAY_ADMIN_PASSWORD"].to_s
-  if gateway_admin_password.empty? && (!browser_auth_disabled || multi_user_mode)
+  if gateway_admin_password.empty? && !browser_auth_disabled
     raise "PI_GATEWAY_ADMIN_PASSWORD is required. Set it in #{GATEWAY_ENV_PATH} or in the gateway process environment."
   end
 

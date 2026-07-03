@@ -66,7 +66,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_app_boot_requires_admin_password_when_browser_auth_is_disabled_for_multi_user
+  def test_app_boot_allows_missing_admin_password_when_browser_auth_is_disabled_for_multi_user
     Dir.mktmpdir do |home|
       env = ENV.to_h.merge(
         "PI_GATEWAY_ENV_PATH" => File.join(home, "missing-env"),
@@ -75,10 +75,10 @@ class AppTest < Minitest::Test
         "PI_MULTI_USER_MODE" => "1"
       )
 
-      _stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'")
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.multi_user_mode")
 
-      refute status.success?
-      assert_includes stderr, "PI_GATEWAY_ADMIN_PASSWORD is required"
+      assert status.success?, stderr
+      assert_equal "true", stdout.strip
     end
   end
 
@@ -4966,6 +4966,24 @@ class AppTest < Minitest::Test
       assert_equal 403, response.status
       assert_includes response.body, "User token"
       refute_includes response.body, "Browser access required"
+    end
+  end
+
+  def test_browser_auth_disabled_auto_approves_new_user_token_in_multi_user_mode
+    Dir.mktmpdir do |dir|
+      write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :gateway_admin_password, nil
+      PiWebGateway.set :browser_auth_disabled, true
+      PiWebGateway.set :multi_user_mode, true
+      request = Rack::MockRequest.new(PiWebGateway)
+
+      response = request.post("/workspace-key", params: { "workspace_key" => "piu_correct_horse_42" })
+
+      workspace_cookie = Array(response["Set-Cookie"]).first.split(";", 2).first
+      assert_equal 303, response.status
+      assert_includes workspace_cookie, "pi_gateway_workspace="
+      assert WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path).approved?(workspace_id_from_cookie(workspace_cookie))
     end
   end
 

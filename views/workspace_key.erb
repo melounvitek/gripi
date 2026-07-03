@@ -60,7 +60,7 @@
       <input type="hidden" name="return_to" value="<%= h(@workspace_return_to || request.fullpath) %>">
       <input type="hidden" name="workspace_key" value="<%= h @generated_workspace_token %>">
       <% if @workspace_bootstrap_required %><input type="password" name="admin_password" placeholder="Admin password" autocomplete="current-password"><% end %>
-      <button type="submit"><%= @workspace_bootstrap_required ? "Create first user" : "Ask for access" %></button>
+      <button type="submit"><%= @workspace_bootstrap_required ? "Create first user" : (settings.browser_auth_disabled ? "Open" : "Ask for access") %></button>
     </form>
     <% if @workspace_bootstrap_required %><p class="muted">First user setup can also be approved manually by editing <code><%= h settings.workspace_access_path %></code>.</p><% end %>
   </main>
@@ -76,7 +76,11 @@
   <main>
     <h1>User token</h1>
     <p>Enter your private user token. Approved tokens open immediately.</p>
-    <p class="muted">New tokens need approval before they can open a session list.</p>
+    <% if settings.browser_auth_disabled %>
+      <p class="muted">New tokens open immediately and create a private session list.</p>
+    <% else %>
+      <p class="muted">New tokens need approval before they can open a session list.</p>
+    <% end %>
     <% if @workspace_bootstrap_required %><p class="muted">Create the first user with the admin password, or manually approve the token in <code><%= h settings.workspace_access_path %></code>.</p><% end %>
     <% if @workspace_key_error %><div class="error"><%= h @workspace_key_error %></div><% end %>
     <% if @workspace_bootstrap_pending_request %><p class="muted">A pending request was written with code <code><%= h @workspace_bootstrap_pending_request.fetch("code") %></code>. To approve manually, copy that pending request into <code>approved_workspaces</code> in <code><%= h settings.workspace_access_path %></code>.</p><% end %>
