@@ -72,14 +72,17 @@ class PiWebGateway < Sinatra::Base
     end
   }
 
+  browser_auth_disabled = ENV.fetch("PI_BROWSER_AUTH_DISABLED", "").match?(/\A(?:1|true|yes|on)\z/i)
+  multi_user_mode = ENV.fetch("PI_MULTI_USER_MODE", "").match?(/\A(?:1|true|yes|on)\z/i)
   gateway_admin_password = ENV["PI_GATEWAY_ADMIN_PASSWORD"].to_s
-  if gateway_admin_password.empty?
+  if gateway_admin_password.empty? && (!browser_auth_disabled || multi_user_mode)
     raise "PI_GATEWAY_ADMIN_PASSWORD is required. Set it in #{GATEWAY_ENV_PATH} or in the gateway process environment."
   end
 
   set :read_state_path, ENV.fetch("PI_READ_STATE_PATH", File.expand_path("~/.pi/web-gateway/read-state.json"))
   set :browser_access_path, ENV.fetch("PI_BROWSER_ACCESS_PATH", File.expand_path("~/.pi/web-gateway/browser-access.json"))
-  set :multi_user_mode, ENV.fetch("PI_MULTI_USER_MODE", "").match?(/\A(?:1|true|yes|on)\z/i)
+  set :browser_auth_disabled, browser_auth_disabled
+  set :multi_user_mode, multi_user_mode
   set :workspace_secret_path, ENV.fetch("PI_WORKSPACE_SECRET_PATH", File.expand_path("~/.pi/web-gateway/workspace-secret"))
   set :workspace_access_path, ENV.fetch("PI_WORKSPACE_ACCESS_PATH", File.expand_path("~/.pi/web-gateway/workspace-access.json"))
   set :workspace_ownership_path, ENV.fetch("PI_WORKSPACE_OWNERSHIP_PATH", File.expand_path("~/.pi/web-gateway/session-owners.json"))

@@ -19,7 +19,7 @@ module Web
       private
 
       def browser_access_enabled?
-        !settings.gateway_admin_password.to_s.empty?
+        !settings.browser_auth_disabled && !settings.gateway_admin_password.to_s.empty?
       end
 
       def browser_access_store
