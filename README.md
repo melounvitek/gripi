@@ -63,6 +63,13 @@ PI_GATEWAY_PI=/path/to/pi
 
 When these are set, the gateway starts Pi as `$PI_GATEWAY_NODE $PI_GATEWAY_PI`. Set both variables together, or leave both unset to run `pi` from `PATH`.
 
+## App-like use
+
+Pi Web Gateway works well as an installed web app:
+
+- On iPhone or iPad, add it to your Home Screen and open it as a web app: <https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios>
+- On Mac or Linux, install it as a Chrome web app: <https://support.google.com/chrome/answer/9658361?hl=en&co=GENIE.Platform%3DDesktop>
+
 ## Pinned session directories
 
 Add directories to `~/.config/pi-web-gateway/pinned-dirs` to keep them available in the New Session dialog, even when they do not currently have sessions:
