@@ -2198,6 +2198,44 @@
       eventPollInFlight = false;
     }
 
+    function composerDraftStorageKey(session = promptSessionInput?.value || "") {
+      return session ? `pi-web-gateway:composer-draft:${session}` : null;
+    }
+
+    function loadStoredComposerDraft() {
+      const key = composerDraftStorageKey();
+      if (!key || !promptTextarea) return;
+
+      try {
+        const message = localStorage.getItem(key);
+        if (message === null || promptTextarea.value) return;
+        promptTextarea.value = message;
+        resizePromptTextarea();
+      } catch (_error) {
+      }
+    }
+
+    function persistStoredComposerDraft() {
+      const key = composerDraftStorageKey();
+      if (!key || !promptTextarea) return;
+
+      try {
+        if (promptTextarea.value) localStorage.setItem(key, promptTextarea.value);
+        else localStorage.removeItem(key);
+      } catch (_error) {
+      }
+    }
+
+    function clearStoredComposerDraft(session = promptSessionInput?.value || "") {
+      const key = composerDraftStorageKey(session);
+      if (!key) return;
+
+      try {
+        localStorage.removeItem(key);
+      } catch (_error) {
+      }
+    }
+
     function composerDraft() {
       return {
         session: promptSessionInput?.value || "",
@@ -2211,6 +2249,7 @@
       if (promptTextarea && draft.message) {
         promptTextarea.value = draft.message;
         resizePromptTextarea();
+        persistStoredComposerDraft();
       }
       if (draft.images.length > 0) addImageFiles(draft.images);
     }
@@ -2349,6 +2388,7 @@
         markSidebarSessionCompacting(submittedSession);
       }
       promptTextarea.value = "";
+      clearStoredComposerDraft(submittedSession);
       clearAttachments();
       commandList?.classList.remove("is-visible");
       commandList?.removeAttribute("open");
@@ -2359,18 +2399,19 @@
       showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : followUp ? "Queueing follow-up…" : "Sending…", true);
       if (cloneCommand || newCommand) showSessionSwitching();
 
-      const response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
-      if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
-
-      if (!response.ok && response.type !== "opaqueredirect") {
-        const payload = await response.json().catch(() => null);
-        if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
-        const errorMessage = payload?.error || "Prompt failed to send";
-        if (promptTextarea && message) promptTextarea.value = message;
+      const restoreSubmittedComposerInput = () => {
+        if (promptTextarea && message) {
+          promptTextarea.value = message;
+          persistStoredComposerDraft();
+        }
         pendingImages = submittedImageFiles.map((file) => ({ file, url: URL.createObjectURL(file) }));
         renderAttachments();
         resizePromptTextarea();
         if (cloneCommand || newCommand) hideSessionSwitching();
+      };
+
+      const showPromptFailure = (errorMessage) => {
+        restoreSubmittedComposerInput();
         if (followUp) {
           setComposerState("running", "Pi is running…", previousWaitingForOutputSince);
           showStatus(errorMessage, true);
@@ -2380,21 +2421,45 @@
         setComposerState("error", errorMessage);
         showStatus(errorMessage, true);
         appendMessage("assistant", `Prompt failed to send:\n\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true });
+      };
+
+      let response;
+      try {
+        response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
+      } catch (_error) {
+        if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
+        showPromptFailure("Prompt failed to send");
+        return;
+      }
+      if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
+
+      if (!response.ok && response.type !== "opaqueredirect") {
+        const payload = await response.json().catch(() => null);
+        if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
+        if (cloneCommand && payload?.cancelled) {
+          restoreSubmittedComposerInput();
+          setComposerState("idle");
+          showStatus("Clone cancelled", true);
+          return;
+        }
+        showPromptFailure(payload?.error || "Prompt failed to send");
       } else if (response.ok) {
         const payload = await response.json().catch(() => null);
         if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
         if (cloneCommand && payload?.cancelled) {
-          hideSessionSwitching();
+          restoreSubmittedComposerInput();
           setComposerState("idle");
           showStatus("Clone cancelled", true);
           return;
         }
         if (payload?.command === "rename") {
           if (payload.error) {
+            restoreSubmittedComposerInput();
             setComposerState("error", payload.error);
             showStatus(payload.error, true);
             return;
           }
+          clearStoredComposerDraft(submittedSession);
           if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {
             await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
             return;
@@ -2405,6 +2470,7 @@
           refreshSidebar().catch(() => {});
           return;
         }
+        clearStoredComposerDraft(submittedSession);
         if (payload?.command === "compact") {
           refreshSidebar().catch(() => {});
           setComposerState("running", "Compacting…");
@@ -2431,6 +2497,7 @@
         setComposerState("running", "Pi is running…");
         if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
       } else {
+        clearStoredComposerDraft(submittedSession);
         setComposerState("running", "Pi is running…");
       }
       scrollToBottom();
@@ -2683,6 +2750,7 @@
       reconnectButton?.addEventListener("click", reconnectSession);
       promptTextarea?.addEventListener("input", () => {
         resizePromptTextarea();
+        persistStoredComposerDraft();
         if (!commandList) return;
 
         updateCommandListForPrompt();
@@ -3001,6 +3069,7 @@
     }
 
     async function switchSession(url, { push = true, focus = true } = {}) {
+      persistStoredComposerDraft();
       temporarySidebarSessionsLimit = null;
       const switchGeneration = ++sessionSwitchGeneration;
       let navigatingAway = false;
@@ -3848,6 +3917,7 @@
         positionInitialConversationAtBottom();
         loadOlderConversationHistory(sessionViewGeneration).catch(() => {});
         requestAnimationFrame(() => {
+          loadStoredComposerDraft();
           updatePromptPlaceholder();
           resizePromptTextarea();
           if (focus && shouldAutofocusPrompt()) promptTextarea?.focus();
