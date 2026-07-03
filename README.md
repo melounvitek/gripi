@@ -4,11 +4,24 @@ Browser UI for local Pi sessions.
 
 <img width="1470" height="956" alt="image" src="https://github.com/user-attachments/assets/3aa0d8f3-265b-4de0-ac65-b91f7af70a2f" />
 
+## Features
+
+- Browse, resume, and start Pi sessions from the browser
+- Use locally or over a private VPN such as Tailscale
+- Supports many native Pi slash commands, including `/tree`, `/compact`, and custom skills
+
+## Status and security
+
+Pi Web Gateway provides a browser UI for working with Pi CLI sessions. It can run purely on your local machine, or on a standalone machine reachable over a private VPN such as Tailscale, which is the preferred way to use it remotely.
+
+Pi Web Gateway tries to stay close to native Pi CLI behavior: Pi-owned session data and workflows are preserved, with gateway-only metadata stored separately where needed.
+
+The gateway has basic browser approval and admin-password protection, but it is still intended only for trusted networks. Do not expose it directly to the public internet. Approved browsers can view sessions and start Pi processes with the same local filesystem, repository, and credential access as the gateway process.
 
 ## Requirements
 
 - [mise](https://mise.jdx.dev/)
-- Pi CLI available on `PATH`
+- [Pi CLI](https://pi.dev/) available on `PATH`
 
 ## Setup
 
