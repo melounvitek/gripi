@@ -23,7 +23,7 @@ After each implementation step:
 2. Restart the local Sinatra/Puma server so route/view/CSS/JS changes are loaded.
 3. Verify the app manually at:
 
-> http://100.103.198.74:4567/
+> http://100.x.y.z:4567/
 
 4. Report the exact link to open, what changed, and what to test there.
 

@@ -77,8 +77,8 @@ Pi Web Gateway works well as an installed web app:
 Add directories to `~/.config/pi-web-gateway/pinned-dirs` to keep them available in the New Session dialog, even when they do not currently have sessions:
 
 ```txt
-/home/vitek/Work/pi-web-gateway
-/home/vitek/Work/another-project
+/home/alice/projects/pi-web-gateway
+/home/alice/projects/another-project
 ```
 
 Use one directory per line. Blank lines and `#` comments are ignored. Only existing readable directories are shown. Set `PI_SESSION_CWDS_PATH` to use a different file.

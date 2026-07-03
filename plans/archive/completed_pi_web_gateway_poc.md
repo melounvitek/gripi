@@ -19,7 +19,7 @@ Target experience:
 
 After each implementation step, restart the local Sinatra/Puma server so route changes are loaded, then verify the current app on:
 
-> http://100.103.198.74:4567/
+> http://100.x.y.z:4567/
 
 Then report the exact link to open and briefly describe what to test there.
 

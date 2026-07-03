@@ -22,6 +22,6 @@ For changes affecting conversation/message rendering, check both server-rendered
 
 ## Local server
 
-The dev server runs as the user systemd service `pi-web-gateway.service` on `100.103.198.74:4567`, logging to `/tmp/pi-web-gateway.log`.
+The dev server runs as the user systemd service `pi-web-gateway.service`, logging to `/tmp/pi-web-gateway.log`.
 
 Do not restart it unless explicitly asked; for code changes, tell the user a restart is needed. When restarting, use `systemctl --user restart pi-web-gateway.service` and verify with `systemctl --user status pi-web-gateway.service --no-pager` plus a curl check. For design-only changes (CSS/markup presentation tweaks), a restart is not needed; a browser refresh is enough.
