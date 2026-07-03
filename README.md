@@ -20,7 +20,7 @@ Pi Web Gateway tries to stay close to native Pi CLI behavior: Pi-owned session d
 
 The gateway has basic browser approval and admin-password protection, but it is still intended only for trusted networks. Do not expose it directly to the public internet. Approved browsers can view sessions and start Pi processes with the same local filesystem, repository, and credential access as the gateway process.
 
-For single-user deployments on a trusted private URL, set `PI_BROWSER_AUTH_DISABLED=1` to skip browser approval entirely. Anyone who can open the gateway URL can use it. In multi-user mode, this only disables browser approval; each user still needs an approved personal user token.
+For deployments on a trusted private URL, set `PI_BROWSER_AUTH_DISABLED=1` to skip browser approval entirely. Anyone who can open the gateway URL can use it. In multi-user mode, users still need a personal user token, but new tokens are accepted immediately without approval.
 
 ## Requirements
 
@@ -35,7 +35,7 @@ mise install
 mise run setup
 ```
 
-The setup task installs Ruby dependencies and creates a local gateway config file at `~/.config/pi-web-gateway/env` if needed. When `PI_GATEWAY_ADMIN_PASSWORD` is missing, setup generates a random admin password there and prints it once. Change the gateway admin password by editing that file. The admin password is not required when `PI_BROWSER_AUTH_DISABLED=1` is set outside multi-user mode.
+The setup task installs Ruby dependencies and creates a local gateway config file at `~/.config/pi-web-gateway/env` if needed. When `PI_GATEWAY_ADMIN_PASSWORD` is missing, setup generates a random admin password there and prints it once. Change the gateway admin password by editing that file. The admin password is not required when `PI_BROWSER_AUTH_DISABLED=1` is set.
 
 ## Run the gateway
 
@@ -87,7 +87,7 @@ Use one directory per line. Blank lines and `#` comments are ignored. Only exist
 
 ## Shared gateway session keys
 
-Set `PI_MULTI_USER_MODE=1` to ask users for a personal session key before showing sessions. The key selects a private session list: the same key on another browser shows the same sessions. Existing sessions without an owner are hidden while this mode is on, but they reappear when the mode is off.
+Set `PI_MULTI_USER_MODE=1` to ask users for a personal session key before showing sessions. The key selects a private session list: the same key on another browser shows the same sessions. Existing sessions without an owner are hidden while this mode is on, but they reappear when the mode is off. With `PI_BROWSER_AUTH_DISABLED=1`, new keys are accepted immediately; otherwise, an approved user must approve each new key.
 
 The gateway generates a stable workspace secret at `~/.pi/web-gateway/workspace-secret` by default. Override `PI_WORKSPACE_SECRET_PATH` or `PI_WORKSPACE_OWNERSHIP_PATH` if you need different storage locations.
 
