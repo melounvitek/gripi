@@ -1855,7 +1855,7 @@
     function upsertLiveAssistantSegment(event, roleName, segment, fallbackIndex, shouldScroll, timestamp) {
       const key = segmentIdentity(event, segment, fallbackIndex);
       const finalAssistantResponse = event.type === "message_end" && !segment.compact && !segment.thinking;
-      const streamingAssistantResponse = !finalAssistantResponse && !segment.compact;
+      const streamingAssistantResponse = event.type !== "message_end" && !segment.compact;
       const existing = liveAssistantSegments.get(key);
       if (existing) {
         const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);
