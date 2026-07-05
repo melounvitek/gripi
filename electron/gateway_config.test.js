@@ -8,6 +8,7 @@ const {
   addGateway,
   readGatewayConfig,
   readOrCreateGatewayConfig,
+  removeGateway,
   saveGateway,
   writeGatewayConfig
 } = require("./gateway_config");
@@ -114,6 +115,46 @@ test("updates an existing gateway and makes it active", () => {
       gateways: [{ id: "id-1", name: "Renamed", url: "https://pi.example.test/" }],
       activeGatewayId: "id-1"
     });
+  });
+});
+
+test("removes a gateway and activates another one", () => {
+  withTempConfig((file, idGenerator) => {
+    const config = addGateway(readGatewayConfig(file, idGenerator), { name: "Mini", url: "http://100.64.0.10:4567" }, idGenerator);
+    const nextConfig = removeGateway(config, "id-2");
+
+    assert.deepEqual(nextConfig, {
+      gateways: [{ id: "id-1", name: "Local", url: DEFAULT_GATEWAY_URL }],
+      activeGatewayId: "id-1"
+    });
+  });
+});
+
+test("keeps the active gateway when removing a different gateway", () => {
+  withTempConfig((file, idGenerator) => {
+    const config = addGateway(readGatewayConfig(file, idGenerator), { name: "Mini", url: "http://100.64.0.10:4567" }, idGenerator);
+    const nextConfig = removeGateway(config, "id-1");
+
+    assert.deepEqual(nextConfig, {
+      gateways: [{ id: "id-2", name: "Mini", url: "http://100.64.0.10:4567/" }],
+      activeGatewayId: "id-2"
+    });
+  });
+});
+
+test("refuses to remove the last gateway", () => {
+  withTempConfig((file, idGenerator) => {
+    const config = readGatewayConfig(file, idGenerator);
+
+    assert.throws(() => removeGateway(config, "id-1"), /Cannot remove the only gateway/);
+  });
+});
+
+test("refuses to remove an unknown gateway", () => {
+  withTempConfig((file, idGenerator) => {
+    const config = addGateway(readGatewayConfig(file, idGenerator), { name: "Mini", url: "http://100.64.0.10:4567" }, idGenerator);
+
+    assert.throws(() => removeGateway(config, "missing"), /Gateway not found/);
   });
 });
 

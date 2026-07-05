@@ -103,7 +103,7 @@ mise run desktop
 
 The shell opens <http://localhost:4567/> by default. If that URL is unavailable, the desktop shell lets you save another gateway URL, such as a Tailscale/private-network address. Saved gateways open as tabs with isolated Electron sessions, so browser approval, cookies, storage, and service workers are separate for each gateway.
 
-Use **File → Add Gateway…** to add another gateway. The tab bar stays hidden while only one gateway is configured.
+Use **File → Add Gateway…** to add another gateway, and **File → Remove Current Gateway…** to remove the active gateway. The tab bar stays hidden while only one gateway is configured.
 
 You can also point the active gateway at a different URL for one launch with either option:
 

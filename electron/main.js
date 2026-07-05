@@ -1,9 +1,10 @@
-const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
   addGateway,
   readOrCreateGatewayConfig,
+  removeGateway,
   saveGateway,
   writeGatewayConfig
 } = require("./gateway_config");
@@ -96,6 +97,20 @@ function registerGatewayConfigIpc() {
     config = writeGatewayConfig(gatewayConfigPath(), saveGateway(config, gateway));
     return config;
   });
+
+  ipcMain.handle("gateway-config:remove-gateway", async (_event, id) => {
+    config = writeGatewayConfig(gatewayConfigPath(), removeGateway(config, id));
+    await clearGatewaySession(id).catch((error) => {
+      console.warn(`Could not clear session data for removed gateway ${id}:`, error);
+    });
+    return config;
+  });
+}
+
+async function clearGatewaySession(id) {
+  const gatewaySession = session.fromPartition(`persist:pi-gateway-${id}`);
+  await gatewaySession.clearStorageData();
+  await gatewaySession.clearCache();
 }
 
 function installAppMenu() {
@@ -110,6 +125,12 @@ function installAppMenu() {
           accelerator: "CmdOrCtrl+N",
           click: () => {
             if (mainWindow) mainWindow.webContents.send("gateway:add-requested");
+          }
+        },
+        {
+          label: "Remove Current Gateway…",
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send("gateway:remove-requested");
           }
         },
         { type: "separator" },

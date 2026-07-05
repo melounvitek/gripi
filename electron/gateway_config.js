@@ -39,6 +39,16 @@ function saveGateway(config, gateway) {
   return { gateways, activeGatewayId: normalizedGateway.id };
 }
 
+function removeGateway(config, gatewayId) {
+  if (config.gateways.length <= 1) throw new Error("Cannot remove the only gateway.");
+
+  const gateways = config.gateways.filter((gateway) => gateway.id !== gatewayId);
+  if (gateways.length === config.gateways.length) throw new Error("Gateway not found.");
+
+  const activeGateway = gateways.find((gateway) => gateway.id === config.activeGatewayId) || gateways[0];
+  return { gateways, activeGatewayId: activeGateway.id };
+}
+
 function normalizeConfig(config, idGenerator) {
   if (config && typeof config === "object") {
     if (Array.isArray(config.gateways)) {
@@ -105,6 +115,7 @@ module.exports = {
   normalizeGatewayUrl,
   readGatewayConfig,
   readOrCreateGatewayConfig,
+  removeGateway,
   saveGateway,
   writeGatewayConfig
 };

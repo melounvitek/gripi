@@ -6,6 +6,7 @@ let setupDraft = null;
 const webviews = new Map();
 const offlineGateways = new Map();
 const loadingGateways = new Map();
+let isRemovingGateway = false;
 
 window.addEventListener("error", (event) => {
   showFatalError(event.error?.message || event.message || "Unexpected desktop shell error.");
@@ -18,6 +19,10 @@ window.addEventListener("unhandledrejection", (event) => {
 window.piGatewayDesktop.onAddGatewayRequested(() => {
   setupDraft = { name: "", url: "http://localhost:4567/" };
   render();
+});
+
+window.piGatewayDesktop.onRemoveGatewayRequested(async () => {
+  await removeActiveGateway();
 });
 
 loadConfig();
@@ -141,6 +146,30 @@ function hideAllWebviews() {
 
 function removePanels() {
   for (const panel of content.querySelectorAll(".panel")) panel.remove();
+}
+
+async function removeActiveGateway() {
+  if (!config || setupDraft || isRemovingGateway) return;
+
+  const gateway = activeGateway();
+  if (config.gateways.length <= 1) {
+    window.alert("Cannot remove the only gateway.");
+    return;
+  }
+
+  if (!window.confirm(`Remove gateway “${gateway.name}”?`)) return;
+
+  isRemovingGateway = true;
+  try {
+    config = await window.piGatewayDesktop.removeGateway(gateway.id);
+    offlineGateways.delete(gateway.id);
+    loadingGateways.delete(gateway.id);
+    render();
+  } catch (error) {
+    window.alert(error.message || "Could not remove this gateway.");
+  } finally {
+    isRemovingGateway = false;
+  }
 }
 
 function activeGateway() {
