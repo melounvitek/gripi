@@ -4568,12 +4568,12 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const existing = liveAssistantSegments.get(key);"
       assert_includes response.body, "const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);"
       assert_includes response.body, "liveAssistantSegments.set(key, entry);"
-      assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_start\") {\n        forceBottomAutoScroll = false;\n        followOversizedMessageBottom = false;\n        resetLiveAssistantTracking();\n      }"
+      assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_start\") {\n        forceBottomAutoScroll = false;\n        followOversizedMessageBottom = false;\n        clearLiveAssistantStreaming();\n        resetLiveAssistantTracking();\n      }"
       assert_includes response.body, "let liveAgentRunning = false;"
       assert_includes response.body, "if (event.type === \"turn_end\") {"
-      assert_includes response.body, "if (!liveErrorSeen) {\n          if (liveAssistantSeen) showStatus(\"Done\");\n          if (!liveAgentRunning) setComposerState(\"done\", \"Done\");\n        }"
+      assert_includes response.body, "if (!liveErrorSeen) {\n          if (liveAssistantSeen) showStatus(\"Done\");\n          if (!liveAgentRunning) setComposerState(\"done\", \"Done\");\n        }\n        clearLiveAssistantStreaming();\n        resetLiveAssistantTracking();"
       assert_includes response.body, "if (event.type === \"agent_end\") {"
-      assert_includes response.body, "liveAgentRunning = false;\n        if (renderErrorEvent(event)) {\n          resetLiveAssistantTracking();\n          return;\n        }\n        if (!liveErrorSeen) {\n          if (liveAssistantSeen) showStatus(\"Done\");\n          setComposerState(\"done\", \"Done\");\n        }"
+      assert_includes response.body, "liveAgentRunning = false;\n        if (renderErrorEvent(event)) {\n          clearLiveAssistantStreaming();\n          resetLiveAssistantTracking();\n          return;\n        }\n        if (!liveErrorSeen) {\n          if (liveAssistantSeen) showStatus(\"Done\");\n          setComposerState(\"done\", \"Done\");\n        }\n        clearLiveAssistantStreaming();\n        resetLiveAssistantTracking();"
     end
   end
 

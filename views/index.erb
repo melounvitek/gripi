@@ -1775,6 +1775,7 @@
     }
 
     function clearLiveAssistantStreaming() {
+      conversationScroll?.querySelectorAll(".message--assistant.message--streaming").forEach((article) => article.classList.remove("message--streaming"));
       liveAssistantSegments.forEach((entry) => entry.article.classList.remove("message--streaming"));
     }
 
@@ -2065,6 +2066,7 @@
       if (roleName === "assistant" && event.type === "message_start") {
         forceBottomAutoScroll = false;
         followOversizedMessageBottom = false;
+        clearLiveAssistantStreaming();
         resetLiveAssistantTracking();
       }
       if (roleName === "assistant" && event.type === "message_end") clearLiveAssistantStreaming();
@@ -2170,6 +2172,7 @@
           if (liveAssistantSeen) showStatus("Done");
           if (!liveAgentRunning) setComposerState("done", "Done");
         }
+        clearLiveAssistantStreaming();
         resetLiveAssistantTracking();
         return;
       }
@@ -2177,6 +2180,7 @@
       if (event.type === "agent_end") {
         liveAgentRunning = false;
         if (renderErrorEvent(event)) {
+          clearLiveAssistantStreaming();
           resetLiveAssistantTracking();
           return;
         }
@@ -2184,6 +2188,7 @@
           if (liveAssistantSeen) showStatus("Done");
           setComposerState("done", "Done");
         }
+        clearLiveAssistantStreaming();
         resetLiveAssistantTracking();
         return;
       }
