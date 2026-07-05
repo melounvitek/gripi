@@ -16,3 +16,19 @@ run = "RACK_ENV=development bundle exec rackup -o 0.0.0.0 -p 4567"
 [tasks.test]
 description = "Run the test suite"
 run = "bundle exec ruby -Itest test/*_test.rb"
+
+[tasks.desktop]
+description = "Run the Electron desktop shell"
+run = "npm run desktop"
+
+[tasks.desktop-check]
+description = "Run Electron desktop shell checks"
+run = "npm run desktop:check"
+
+[tasks.desktop-dist-linux]
+description = "Build Linux Electron desktop shell packages"
+run = "npm run dist:linux"
+
+[tasks.desktop-dist-mac]
+description = "Build macOS Electron desktop shell packages"
+run = "npm run dist:mac"

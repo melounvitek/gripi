@@ -86,6 +86,43 @@ Pi Web Gateway works well as an installed web app:
 - On iPhone or iPad, add it to your Home Screen and open it as a web app: <https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios>
 - On Mac or Linux, install it as a Chrome web app: <https://support.google.com/chrome/answer/9658361?hl=en&co=GENIE.Platform%3DDesktop>
 
+### Electron desktop shell
+
+This repository also includes a thin Electron shell. It does not start or bundle the gateway server; start the server separately first:
+
+```sh
+mise run start
+```
+
+Then, in another terminal, run the desktop shell:
+
+```sh
+npm install
+mise run desktop
+```
+
+The shell opens <http://localhost:4567/> by default. If that URL is unavailable, the desktop shell lets you save another gateway URL, such as a Tailscale/private-network address. Saved gateways open as tabs with isolated Electron sessions, so browser approval, cookies, storage, and service workers are separate for each gateway.
+
+Use **File → Add Gateway…** to add another gateway, and **File → Remove Current Gateway…** to remove the active gateway. The tab bar stays hidden while only one gateway is configured.
+
+You can also point the active gateway at a different URL for one launch with either option:
+
+```sh
+PI_GATEWAY_DESKTOP_URL=https://pi-gateway.example.internal mise run desktop
+npm run desktop -- --gateway-url=http://100.x.y.z:4567
+```
+
+Command-line and environment URLs take precedence over the saved URL.
+
+Build distributable Electron packages with electron-builder:
+
+```sh
+mise run desktop-dist-linux
+mise run desktop-dist-mac
+```
+
+Linux builds produce an AppImage artifact under `dist/`. macOS builds produce dmg and zip artifacts when run on macOS. Unsigned macOS builds are useful for local testing, but distributing them to other users may trigger Gatekeeper warnings unless they are signed and notarized with an Apple Developer ID.
+
 ## Pinned session directories
 
 Add directories to `~/.config/pi-web-gateway/pinned-dirs` to keep them available in the New Session dialog, even when they do not currently have sessions:
