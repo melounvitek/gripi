@@ -23,9 +23,23 @@ test("uses --gateway-url before environment configuration", () => {
   );
 });
 
+test("uses configured URL when environment and argument are absent", () => {
+  assert.equal(
+    gatewayUrl({}, ["electron", "."], "http://configured.example.test:4567"),
+    "http://configured.example.test:4567/"
+  );
+});
+
+test("uses environment configuration before persisted configuration", () => {
+  assert.equal(
+    gatewayUrl({ PI_GATEWAY_DESKTOP_URL: "https://env.example.test" }, [], "http://configured.example.test:4567"),
+    "https://env.example.test/"
+  );
+});
+
 test("falls back to localhost for unsupported URL schemes", () => {
   assert.equal(
-    gatewayUrl({ PI_GATEWAY_DESKTOP_URL: "file:///tmp/gateway.html" }, []),
+    gatewayUrl({ PI_GATEWAY_DESKTOP_URL: "file:///tmp/gateway.html" }, [], "http://configured.example.test:4567"),
     DEFAULT_GATEWAY_URL
   );
 });

@@ -48,6 +48,31 @@
         overflow-x: auto;
       }
 
+      label {
+        display: block;
+        margin-top: 22px;
+        color: #f1f1f4;
+        font-weight: 700;
+      }
+
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        margin: 8px 0 14px;
+        padding: 12px 14px;
+        border: 1px solid #3a3a46;
+        border-radius: 10px;
+        background: #111116;
+        color: #f1f1f4;
+        font: inherit;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
       button {
         border: 0;
         border-radius: 999px;
@@ -62,26 +87,51 @@
         color: #9999a6;
         font-size: 0.9rem;
       }
+
+      .error {
+        color: #ff9f9f;
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>Pi Web Gateway is not running</h1>
-      <p>Start the gateway in a terminal, then retry this desktop window.</p>
+      <p>Start the gateway in a terminal, or point this desktop shell at a gateway running on another trusted machine.</p>
       <code>mise run start</code>
-      <button type="button" id="retry">Retry</button>
+      <label for="gateway-url">Gateway URL</label>
+      <input id="gateway-url" type="url" spellcheck="false" autocomplete="url" placeholder="http://localhost:4567/">
+      <div class="actions">
+        <button type="button" id="retry">Retry</button>
+        <button type="button" id="save-retry">Save and Retry</button>
+      </div>
       <p class="muted" id="details"></p>
+      <p class="error" id="error" role="alert"></p>
     </main>
     <script>
       const params = new URLSearchParams(window.location.search);
-      const target = params.get("target") || "http://localhost:4567";
+      const target = params.get("target") || "http://localhost:4567/";
       const reason = params.get("reason");
+      const gatewayUrlInput = document.getElementById("gateway-url");
+      const errorMessage = document.getElementById("error");
+
+      gatewayUrlInput.value = target;
+      document.getElementById("details").textContent = reason ? `${target} — ${reason}` : target;
 
       document.getElementById("retry").addEventListener("click", () => {
-        window.location.href = target;
+        window.location.href = gatewayUrlInput.value;
       });
 
-      document.getElementById("details").textContent = reason ? `${target} — ${reason}` : target;
+      document.getElementById("save-retry").addEventListener("click", async () => {
+        errorMessage.textContent = "";
+
+        try {
+          if (!window.piGatewayDesktop) throw new Error("Desktop configuration is unavailable.");
+          const savedUrl = await window.piGatewayDesktop.saveGatewayUrl(gatewayUrlInput.value);
+          window.location.href = savedUrl;
+        } catch (error) {
+          errorMessage.textContent = error.message || "Could not save the gateway URL.";
+        }
+      });
     </script>
   </body>
 </html>

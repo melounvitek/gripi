@@ -1,12 +1,15 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("node:path");
 const { fileURLToPath, pathToFileURL } = require("node:url");
+const { readGatewayUrl, writeGatewayUrl } = require("./gateway_config");
 const { gatewayUrl } = require("./gateway_url");
 
 const OFFLINE_PAGE_PATH = path.join(__dirname, "offline.html");
+const PRELOAD_PATH = path.join(__dirname, "preload.js");
 
 function createWindow() {
-  const targetUrl = gatewayUrl();
+  const configPath = gatewayConfigPath();
+  let targetUrl = gatewayUrl(process.env, process.argv, readGatewayUrl(configPath));
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -16,6 +19,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: PRELOAD_PATH,
       sandbox: true
     }
   });
@@ -27,6 +31,11 @@ function createWindow() {
 
   win.webContents.on("will-navigate", (event, url) => {
     if (sameOrigin(url, targetUrl) || isOfflinePage(url)) return;
+
+    if (isOfflinePage(win.webContents.getURL()) && safeExternalUrl(url)) {
+      targetUrl = new URL(url).toString();
+      return;
+    }
 
     event.preventDefault();
     openExternalUrl(url);
@@ -78,7 +87,21 @@ function showOfflinePage(win, targetUrl, reason) {
   win.loadURL(offlineUrl.toString());
 }
 
-app.whenReady().then(createWindow);
+function gatewayConfigPath() {
+  return path.join(app.getPath("userData"), "config.json");
+}
+
+function registerGatewayUrlIpc() {
+  ipcMain.handle("gateway-url:save", (event, url) => {
+    if (!isOfflinePage(event.senderFrame.url)) throw new Error("Gateway URL can only be saved from the offline page.");
+    return writeGatewayUrl(gatewayConfigPath(), url);
+  });
+}
+
+app.whenReady().then(() => {
+  registerGatewayUrlIpc();
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

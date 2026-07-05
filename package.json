@@ -11,7 +11,7 @@
   },
   "scripts": {
     "desktop": "electron .",
-    "desktop:check": "node --test electron/*.test.js && node --check electron/main.js",
+    "desktop:check": "node --test electron/*.test.js && node --check electron/main.js && node --check electron/preload.js",
     "dist": "electron-builder",
     "dist:linux": "electron-builder --linux",
     "dist:mac": "electron-builder --mac"
