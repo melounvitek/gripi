@@ -30,6 +30,7 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "electron/assets/icon.icns",
       "target": [
         "dmg",
         "zip"
@@ -37,6 +38,7 @@
     },
     "linux": {
       "category": "Development",
+      "icon": "electron/assets/icons",
       "syncDesktopName": true,
       "target": [
         "AppImage"
