@@ -106,14 +106,20 @@ function ensureWebviews() {
   for (const gateway of config.gateways) {
     const existingWebview = webviews.get(gateway.id);
     if (existingWebview) {
-      if (existingWebview.src !== gateway.url) existingWebview.src = gateway.url;
-      continue;
+      if (existingWebview.dataset.gatewayUrl === gateway.url) continue;
+      if (sameUrlOrigin(existingWebview.dataset.gatewayUrl, gateway.url)) {
+        setGatewayUrl(existingWebview, gateway.url);
+        continue;
+      }
+
+      existingWebview.remove();
+      webviews.delete(gateway.id);
     }
 
     const webview = document.createElement("webview");
     loadingGateways.set(gateway.id, true);
     webview.partition = `persist:pi-gateway-${gateway.id}`;
-    webview.src = gateway.url;
+    setGatewayUrl(webview, gateway.url);
     webview.addEventListener("did-attach", () => {
       loadingGateways.delete(gateway.id);
       render();
@@ -222,9 +228,12 @@ function offlinePanel(gateway, reason) {
     cancelLabel: "Retry",
     details: `${gateway.url} — ${reason}`,
     onSave: async ({ name, url }) => {
+      const previousUrl = gateway.url;
       config = await window.piGatewayDesktop.saveGateway({ id: gateway.id, name, url });
+      const savedGateway = config.gateways.find((existingGateway) => existingGateway.id === gateway.id) || gateway;
       offlineGateways.delete(gateway.id);
       render();
+      if (sameUrlOrigin(previousUrl, savedGateway.url)) retryGatewayUrl(gateway.id, savedGateway.url);
     },
     onCancel: () => {
       offlineGateways.delete(gateway.id);
@@ -294,6 +303,31 @@ function gatewayFormPanel({ title, description, gateway, saveLabel, cancelLabel,
 
   panel.append(card);
   return panel;
+}
+
+function setGatewayUrl(webview, url) {
+  webview.dataset.gatewayUrl = url;
+  webview.src = url;
+}
+
+function sameUrlOrigin(firstUrl, secondUrl) {
+  try {
+    return new URL(firstUrl).origin === new URL(secondUrl).origin;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function retryGatewayUrl(gatewayId, url) {
+  const webview = webviews.get(gatewayId);
+  if (!webview) return;
+
+  webview.dataset.gatewayUrl = url;
+  if (webview.src === url) {
+    webview.reload();
+  } else {
+    webview.src = url;
+  }
 }
 
 function reloadGateway(gatewayId) {

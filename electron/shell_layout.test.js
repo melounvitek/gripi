@@ -47,3 +47,11 @@ test("desktop shell chrome remains usable in narrow or short windows", () => {
   assert.match(html, /\.card\s*{[^}]*box-sizing:\s*border-box;/s);
   assert.match(html, /@media \(max-height: 520px\)/);
 });
+
+test("desktop shell does not reset an existing gateway webview after in-app navigation", () => {
+  const shell = read("electron/shell.js");
+
+  assert.match(shell, /existingWebview\.dataset\.gatewayUrl === gateway\.url/);
+  assert.match(shell, /sameUrlOrigin\(existingWebview\.dataset\.gatewayUrl, gateway\.url\)/);
+  assert.doesNotMatch(shell, /existingWebview\.src !== gateway\.url/);
+});
