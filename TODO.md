@@ -2,9 +2,9 @@
 
 ## Electron desktop shell
 
-- [ ] Check small-window behavior on macOS.
-  - [ ] The shell should keep tabs, setup forms, offline panels, and action buttons usable when the app window is made narrow or short.
-  - [ ] The gateway web UI remains responsible for its own responsive layout inside each tab.
+- [x] Check small-window browser-like behavior.
+  - [x] The shell should keep tabs, setup forms, offline panels, and action buttons usable when the app window is made narrow or short.
+  - [x] The gateway web UI remains responsible for its own responsive layout inside each tab.
 
 - [ ] Add a custom app logo.
   - [ ] The packaged app currently uses the default Electron icon.

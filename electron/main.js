@@ -24,8 +24,6 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    minWidth: 900,
-    minHeight: 600,
     title: "Pi Web Gateway",
     webPreferences: {
       contextIsolation: true,

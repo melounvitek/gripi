@@ -13,6 +13,8 @@
       }
 
       body {
+        display: flex;
+        flex-direction: column;
         height: 100vh;
         margin: 0;
         overflow: hidden;
@@ -20,9 +22,12 @@
 
       #tabs {
         display: flex;
+        flex-shrink: 0;
         align-items: center;
         gap: 6px;
         height: 40px;
+        overflow-x: auto;
+        overflow-y: hidden;
         padding: 0 10px;
         border-bottom: 1px solid #30303a;
         background: #202028;
@@ -33,7 +38,8 @@
       }
 
       .tab {
-        max-width: 220px;
+        flex: 0 1 220px;
+        min-width: 44px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -52,11 +58,8 @@
 
       #content {
         position: relative;
-        height: 100vh;
-      }
-
-      body.has-tabs #content {
-        height: calc(100vh - 41px);
+        flex: 1;
+        min-height: 0;
       }
 
       webview {
@@ -75,12 +78,14 @@
         inset: 0;
         display: grid;
         place-items: center;
+        overflow: auto;
         padding: 24px;
         background: #18181e;
       }
 
       .card {
-        width: min(680px, calc(100vw - 48px));
+        box-sizing: border-box;
+        width: min(680px, 100%);
         padding: 32px;
         border: 1px solid #3a3a46;
         border-radius: 18px;
@@ -152,6 +157,17 @@
       .error {
         min-height: 1.2em;
         color: #ff9f9f;
+      }
+
+      @media (max-height: 520px) {
+        .panel {
+          place-items: start center;
+          padding-block: 12px;
+        }
+
+        .card {
+          padding: 20px;
+        }
       }
     </style>
   </head>
