@@ -1213,6 +1213,10 @@
       return part && typeof part === "object" && ["toolCall", "toolResult"].includes(part.type);
     }
 
+    function subagentToolCall(part) {
+      return part && typeof part === "object" && part.type === "toolCall" && part.name === "subagent";
+    }
+
     function thinkingPart(part) {
       return part && typeof part === "object" && part.type === "thinking";
     }
@@ -1311,6 +1315,8 @@
       const parts = Array.isArray(content) ? content : [content];
       const groups = [];
       parts.forEach((part, index) => {
+        if (subagentToolCall(part)) return;
+
         const compact = message.role === "toolResult" || compactContentPart(part);
         const bashCall = part && typeof part === "object" && part.type === "toolCall" && part.name === "bash";
         const lastGroup = groups[groups.length - 1];

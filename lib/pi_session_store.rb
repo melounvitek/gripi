@@ -584,6 +584,8 @@ class PiSessionStore
   def content_groups(content)
     groups = []
     Array(content).each do |part|
+      next if subagent_tool_call?(part)
+
       compact = compact_part?(part)
       if thinking_part?(part)
         groups << [false, [part]]
@@ -621,6 +623,10 @@ class PiSessionStore
 
   def compact_part?(part)
     part.is_a?(Hash) && ["toolCall", "toolResult"].include?(part["type"])
+  end
+
+  def subagent_tool_call?(part)
+    part.is_a?(Hash) && part["type"] == "toolCall" && part["name"] == "subagent"
   end
 
   def thinking_part?(part)

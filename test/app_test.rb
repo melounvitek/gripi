@@ -4017,6 +4017,51 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_historical_subagent_tool_call_is_hidden_when_result_renders_output
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "toolCall", name: "subagent", arguments: { agent: "reviewer", task: "Review the diff" } }
+            ]
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:01:00Z",
+          message: {
+            role: "toolResult",
+            toolName: "subagent",
+            content: [{ type: "text", text: "No findings." }],
+            isError: false
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/",
+        params: { "session" => path }
+      )
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      subagent_cards = document.css(".message--compact").select do |card|
+        card.at_css(".compact-summary")&.text == "subagent"
+      end
+
+      assert_equal 1, subagent_cards.length
+      assert_equal "No findings.", subagent_cards.first.at_css(".message-body").text
+      refute_includes response.body, "[tool: subagent]"
+      refute_includes response.body, "Review the diff"
+    end
+  end
+
   def test_live_event_script_supports_compact_tool_rendering
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -4067,6 +4112,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, '["bash", "read", "edit", "write"].includes(segment.toolName)'
       assert_includes response.body, "part.type === \"toolCall\""
       assert_includes response.body, "part.type === \"thinking\""
+      assert_includes response.body, "function subagentToolCall(part)"
+      assert_includes response.body, "if (subagentToolCall(part)) return;"
     end
   end
 
