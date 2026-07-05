@@ -32,6 +32,8 @@ For deployments on a trusted private URL, set `PI_BROWSER_AUTH_DISABLED=1` to sk
 ## Setup
 
 ```sh
+git clone https://github.com/melounvitek/pi-web-gateway.git
+cd pi-web-gateway
 mise trust
 mise install
 mise run setup
