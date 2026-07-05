@@ -141,7 +141,8 @@
     .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after,
     .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after,
     .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after,
-    .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { content: "▍"; display: inline-block; margin-left: 0.12rem; color: var(--accent-hover); animation: streaming-caret-blink 1000ms steps(1) infinite; }
+    .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after,
+    .message--assistant.message--streaming .message-body--thinking::after { content: "▍"; display: inline-block; margin-left: 0.12rem; color: var(--accent-hover); animation: streaming-caret-blink 1000ms steps(1) infinite; }
     .message-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
     .message--user .message-header { margin-bottom: 0.75rem; }
     .role { font-size: 0.74rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
@@ -280,7 +281,7 @@
     @keyframes progress-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
     @keyframes streaming-bubble-pulse { 0%, 100% { box-shadow: 0 0 0 1px rgba(138, 190, 183, 0.36) inset, 0 6px 18px rgba(0, 0, 0, 0.12); } 50% { box-shadow: 0 0 0 2px rgba(0, 215, 255, 0.42) inset, 0 0 20px rgba(0, 215, 255, 0.12), 0 6px 18px rgba(0, 0, 0, 0.12); } }
     @keyframes streaming-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) { .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after, .message--assistant.message--streaming .message-body--thinking::after { animation: none; opacity: 1; } }
     .mobile-session-toggle, .mobile-sessions-button, .mobile-sidebar-backdrop { display: none; }
     .hamburger-icon { position: relative; display: inline-block; width: 1.25rem; height: 0.9rem; border-top: 2px solid currentColor; border-bottom: 2px solid currentColor; }
     .hamburger-icon::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid currentColor; transform: translateY(-50%); }
@@ -1854,7 +1855,7 @@
     function upsertLiveAssistantSegment(event, roleName, segment, fallbackIndex, shouldScroll, timestamp) {
       const key = segmentIdentity(event, segment, fallbackIndex);
       const finalAssistantResponse = event.type === "message_end" && !segment.compact && !segment.thinking;
-      const streamingAssistantResponse = !finalAssistantResponse && !segment.compact && !segment.thinking;
+      const streamingAssistantResponse = !finalAssistantResponse && !segment.compact;
       const existing = liveAssistantSegments.get(key);
       if (existing) {
         const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);
