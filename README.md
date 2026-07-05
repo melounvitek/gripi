@@ -41,6 +41,14 @@ mise run setup
 
 The setup task installs Ruby dependencies and creates a local gateway config file at `~/.config/pi-web-gateway/env` if needed. When `PI_GATEWAY_ADMIN_PASSWORD` is missing, setup generates a random admin password there and prints it once. Change the gateway admin password by editing that file. The admin password is not required when `PI_BROWSER_AUTH_DISABLED=1` is set.
 
+## Optional Pi setup
+
+Pi Web Gateway uses native Pi session names when available. If you do not already have your own session-naming workflow, consider installing the [`@furbyhaxx/pi-session-naming`](https://github.com/furbyhaxx/pi-session-naming) Pi package:
+
+```sh
+pi install npm:@furbyhaxx/pi-session-naming
+```
+
 ## Run the gateway
 
 ```sh
