@@ -1,6 +1,9 @@
     <aside class="session-sidebar" data-unread-session-count="<%= h unread_sidebar_session_count %>">
       <div class="session-sidebar-header">
-        <h1>Pi Sessions</h1>
+        <div class="sidebar-title">
+          <h1>Pi Sessions</h1>
+          <div class="sidebar-server-origin"><%= h request.base_url %></div>
+        </div>
         <label for="mobile-session-toggle" class="mobile-sessions-button mobile-sessions-close-button" aria-label="Close sessions"><span class="hamburger-icon" aria-hidden="true"></span><% if unread_sidebar_session_count.positive? %><span class="mobile-sessions-unread-badge" aria-label="<%= h unread_sidebar_session_aria_label %>" title="<%= h unread_sidebar_session_aria_label %>"><%= h unread_sidebar_session_count_label %></span><% end %></label>
       </div>
       <div class="session-sidebar-content">
