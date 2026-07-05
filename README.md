@@ -114,14 +114,25 @@ npm run desktop -- --gateway-url=http://100.x.y.z:4567
 
 Command-line and environment URLs take precedence over the saved URL.
 
-Build distributable Electron packages with electron-builder:
+Build distributable Electron packages with electron-builder after installing npm dependencies:
+
+```sh
+npm ci
+```
+
+On Linux, build an AppImage artifact under `dist/`:
 
 ```sh
 mise run desktop-dist-linux
+```
+
+On macOS, build dmg and zip artifacts under `dist/`:
+
+```sh
 mise run desktop-dist-mac
 ```
 
-Linux builds produce an AppImage artifact under `dist/`. macOS builds produce dmg and zip artifacts when run on macOS. Unsigned macOS builds are useful for local testing, but distributing them to other users may trigger Gatekeeper warnings unless they are signed and notarized with an Apple Developer ID.
+macOS packages must be built on macOS. Unsigned macOS builds are useful for local testing, but distributing them to other users may trigger Gatekeeper warnings unless they are signed and notarized with an Apple Developer ID.
 
 ## Pinned session directories
 
