@@ -115,7 +115,6 @@ function ensureWebviews() {
     });
     webview.addEventListener("did-finish-load", () => {
       loadingGateways.delete(gateway.id);
-      offlineGateways.delete(gateway.id);
       render();
     });
     webview.addEventListener("did-fail-load", (event) => {
