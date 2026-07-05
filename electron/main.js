@@ -25,6 +25,7 @@ function createWindow() {
     width: 1400,
     height: 900,
     title: "Pi Web Gateway",
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

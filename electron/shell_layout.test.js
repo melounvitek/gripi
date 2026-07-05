@@ -16,6 +16,12 @@ test("desktop window does not enforce a larger minimum size than a browser tab",
   assert.doesNotMatch(main, /minHeight\s*:/);
 });
 
+test("desktop window hides the native menu bar by default", () => {
+  const main = read("electron/main.js");
+
+  assert.match(main, /autoHideMenuBar:\s*true/);
+});
+
 test("desktop shell chrome remains usable in narrow or short windows", () => {
   const html = read("electron/shell.html");
 
