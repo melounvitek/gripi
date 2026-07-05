@@ -443,6 +443,7 @@
     let emptyEventPollCount = 0;
     let autoScrollEnabled = true;
     let forceBottomAutoScroll = false;
+    let followOversizedMessageBottom = false;
     let programmaticScroll = false;
     let lastConversationScrollTop = 0;
     let conversationScrollDirection = null;
@@ -485,6 +486,7 @@
       conversationScroll = document.getElementById("conversation-scroll");
       lastConversationScrollTop = conversationScroll?.scrollTop || 0;
       conversationScrollDirection = null;
+      followOversizedMessageBottom = false;
       topJumpControls = document.querySelector(".jump-controls--top");
       bottomJumpControls = document.querySelector(".jump-controls--bottom");
       jumpToFirstButton = document.querySelector(".jump-to-first");
@@ -671,6 +673,7 @@
 
       autoScrollEnabled = true;
       forceBottomAutoScroll = false;
+      followOversizedMessageBottom = false;
       conversationScroll.scrollTop = conversationScroll.scrollHeight;
       lastConversationScrollTop = conversationScroll.scrollTop;
       updateScrollJumpButtons();
@@ -750,7 +753,7 @@
 
       withProgrammaticScroll(() => {
         const latestAssistant = latestReadableAssistantMessage();
-        if (!forceBottomAutoScroll && latestAssistant && latestAssistant === latestMessageElement() && latestAssistant.offsetHeight > conversationScroll.clientHeight) {
+        if (!forceBottomAutoScroll && !followOversizedMessageBottom && latestAssistant && latestAssistant === latestMessageElement() && latestAssistant.offsetHeight > conversationScroll.clientHeight) {
           scrollElementTopIntoView(latestAssistant, behavior);
         } else {
           conversationScroll.scrollTo({ top: conversationScroll.scrollHeight, behavior });
@@ -772,6 +775,7 @@
       if (!conversationScroll) return;
       autoScrollEnabled = false;
       forceBottomAutoScroll = false;
+      followOversizedMessageBottom = false;
       withProgrammaticScroll(() => {
         conversationScroll.scrollTo({ top: 0, behavior });
       });
@@ -784,6 +788,7 @@
 
       autoScrollEnabled = false;
       forceBottomAutoScroll = false;
+      followOversizedMessageBottom = false;
       suppressMessageJumpTargetsDuringScroll();
       withProgrammaticScroll(() => scrollElementTopIntoView(target, behavior));
     }
@@ -792,8 +797,11 @@
       const target = oversizedMessageJumpTarget("down");
       if (!target) return scrollToBottom(behavior, { force: true });
 
-      autoScrollEnabled = false;
+      const latestAssistant = latestReadableAssistantMessage();
+      const latestOversizedAssistant = target === latestAssistant && target === latestMessageElement();
+      autoScrollEnabled = latestOversizedAssistant;
       forceBottomAutoScroll = false;
+      followOversizedMessageBottom = latestOversizedAssistant;
       suppressMessageJumpTargetsDuringScroll();
       withProgrammaticScroll(() => scrollElementBottomIntoView(target, behavior));
     }
@@ -802,6 +810,7 @@
       if (!conversationScroll) return;
       autoScrollEnabled = true;
       forceBottomAutoScroll = force;
+      followOversizedMessageBottom = true;
       withProgrammaticScroll(() => {
         conversationScroll.scrollTo({ top: conversationScroll.scrollHeight, behavior });
       });
@@ -2050,7 +2059,11 @@
       const segments = message?.content ? contentSegments(message.content, message) : [{ text: messageText(message), compact: false, summary: "", startIndex: 0, endIndex: 0 }].filter((segment) => segment.text);
       const roleName = liveEventRole(event, message);
 
-      if (roleName === "assistant" && event.type === "message_start") resetLiveAssistantTracking();
+      if (roleName === "assistant" && event.type === "message_start") {
+        forceBottomAutoScroll = false;
+        followOversizedMessageBottom = false;
+        resetLiveAssistantTracking();
+      }
       if (roleName === "assistant" && event.type === "message_end") clearLiveAssistantStreaming();
       if (segments.length === 0) return;
 
@@ -2750,6 +2763,7 @@
           if (currentScrollTop < lastConversationScrollTop) conversationScrollDirection = "up";
           autoScrollEnabled = nearConversationBottom();
           forceBottomAutoScroll = false;
+          followOversizedMessageBottom = autoScrollEnabled;
           updateConversationJumpControlsReveal();
         }
         lastConversationScrollTop = currentScrollTop;
@@ -3938,6 +3952,7 @@
           resizePromptTextarea();
           if (focus && shouldAutofocusPrompt()) promptTextarea?.focus();
           forceBottomAutoScroll = true;
+          followOversizedMessageBottom = true;
           applyAutoScroll("auto");
           forceBottomAutoScroll = false;
         });
