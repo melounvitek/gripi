@@ -30,7 +30,7 @@ Recommended shape:
    PI_GATEWAY_HOST=100.x.y.z mise run start
    ```
 
-4. Open `http://100.x.y.z:4567` from your browser, mobile web app, or the desktop app's “Add Gateway…” menu.
+4. Open `http://100.x.y.z:4567` from your browser, mobile web app, or the desktop app's “Add Server…” menu.
 
 Do not bind the gateway to a public interface unless you have added your own strong network-level protection.
 

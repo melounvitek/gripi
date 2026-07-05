@@ -121,14 +121,14 @@ function installAppMenu() {
       label: "File",
       submenu: [
         {
-          label: "Add Gateway…",
+          label: "Add Server…",
           accelerator: "CmdOrCtrl+N",
           click: () => {
             if (mainWindow) mainWindow.webContents.send("gateway:add-requested");
           }
         },
         {
-          label: "Remove Current Gateway…",
+          label: "Remove Current Server…",
           click: () => {
             if (mainWindow) mainWindow.webContents.send("gateway:remove-requested");
           }

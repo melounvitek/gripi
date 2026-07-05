@@ -61,3 +61,16 @@ test("desktop shell does not reset an existing gateway webview after in-app navi
   assert.match(shell, /sameUrlOrigin\(existingWebview\.dataset\.gatewayUrl, gateway\.url\)/);
   assert.doesNotMatch(shell, /existingWebview\.src !== gateway\.url/);
 });
+
+test("desktop server management uses server wording", () => {
+  const main = read("electron/main.js");
+  const shell = read("electron/shell.js");
+
+  assert.match(main, /Add Server…/);
+  assert.match(main, /Remove Current Server…/);
+  assert.match(shell, /Add Server/);
+  assert.match(shell, /New Server/);
+  assert.match(shell, /Server URL/);
+  assert.match(shell, /Remove server/);
+  assert.doesNotMatch(shell, /Add Gateway|New Gateway|Gateway URL|Remove gateway/);
+});

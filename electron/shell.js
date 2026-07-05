@@ -64,7 +64,7 @@ function renderTabs() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "tab active";
-    button.textContent = "New Gateway";
+    button.textContent = "New Server";
     tabs.append(button);
   }
 }
@@ -89,7 +89,7 @@ function renderContent() {
   webviews.get(gateway.id).hidden = false;
 
   if (loadingGateways.has(gateway.id)) {
-    content.append(messagePanel("Opening gateway", `Loading ${gateway.url}…`));
+    content.append(messagePanel("Opening server", `Loading ${gateway.url}…`));
   }
 }
 
@@ -141,7 +141,7 @@ function ensureWebviews() {
     window.setTimeout(() => {
       if (!loadingGateways.has(gateway.id)) return;
       loadingGateways.delete(gateway.id);
-      offlineGateways.set(gateway.id, "The embedded gateway view did not attach. Try rebuilding the app or opening the gateway in a browser.");
+      offlineGateways.set(gateway.id, "The embedded server view did not attach. Try rebuilding the app or opening the server in a browser.");
       render();
     }, 5000);
   }
@@ -160,11 +160,11 @@ async function removeActiveGateway() {
 
   const gateway = activeGateway();
   if (config.gateways.length <= 1) {
-    window.alert("Cannot remove the only gateway.");
+    window.alert("Cannot remove the only server.");
     return;
   }
 
-  if (!window.confirm(`Remove gateway “${gateway.name}”?`)) return;
+  if (!window.confirm(`Remove server “${gateway.name}”?`)) return;
 
   isRemovingGateway = true;
   try {
@@ -173,7 +173,7 @@ async function removeActiveGateway() {
     loadingGateways.delete(gateway.id);
     render();
   } catch (error) {
-    window.alert(error.message || "Could not remove this gateway.");
+    window.alert(error.message || "Could not remove this server.");
   } finally {
     isRemovingGateway = false;
   }
@@ -203,8 +203,8 @@ function showFatalError(message) {
 
 function setupPanel(draft) {
   return gatewayFormPanel({
-    title: "Add Gateway",
-    description: "Add a trusted Pi Web Gateway URL to open it in its own isolated tab.",
+    title: "Add Server",
+    description: "Add a trusted Pi server URL to open it in its own isolated tab.",
     gateway: draft,
     saveLabel: "Add and Open",
     cancelLabel: config.gateways.length > 0 ? "Cancel" : null,
@@ -223,7 +223,7 @@ function setupPanel(draft) {
 function offlinePanel(gateway, reason) {
   return gatewayFormPanel({
     title: `${gateway.name} is not reachable`,
-    description: "Start the gateway in a terminal, retry the saved URL, or update this tab to another trusted gateway URL.",
+    description: "Start the server in a terminal, retry the saved URL, or update this tab to another trusted server URL.",
     gateway,
     saveLabel: "Save and Retry",
     cancelLabel: "Retry",
@@ -258,7 +258,7 @@ function gatewayFormPanel({ title, description, gateway, saveLabel, cancelLabel,
       <input name="name" type="text" autocomplete="off" required>
     </label>
     <label>
-      Gateway URL
+      Server URL
       <input name="url" type="url" spellcheck="false" autocomplete="url" required>
     </label>
     <div class="actions"></div>
@@ -298,7 +298,7 @@ function gatewayFormPanel({ title, description, gateway, saveLabel, cancelLabel,
         url: card.elements.url.value
       });
     } catch (error) {
-      card.querySelector(".error").textContent = error.message || "Could not save this gateway.";
+      card.querySelector(".error").textContent = error.message || "Could not save this server.";
     }
   });
 

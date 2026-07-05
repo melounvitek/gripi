@@ -40,10 +40,10 @@ function saveGateway(config, gateway) {
 }
 
 function removeGateway(config, gatewayId) {
-  if (config.gateways.length <= 1) throw new Error("Cannot remove the only gateway.");
+  if (config.gateways.length <= 1) throw new Error("Cannot remove the only server.");
 
   const gateways = config.gateways.filter((gateway) => gateway.id !== gatewayId);
-  if (gateways.length === config.gateways.length) throw new Error("Gateway not found.");
+  if (gateways.length === config.gateways.length) throw new Error("Server not found.");
 
   const activeGateway = gateways.find((gateway) => gateway.id === config.activeGatewayId) || gateways[0];
   return { gateways, activeGatewayId: activeGateway.id };
@@ -61,7 +61,7 @@ function normalizeConfig(config, idGenerator) {
 
     const migratedUrl = normalizeGatewayUrl(config.gatewayUrl);
     if (migratedUrl) {
-      const gateway = { id: idGenerator(), name: "Pi Gateway", url: migratedUrl };
+      const gateway = { id: idGenerator(), name: "Pi Server", url: migratedUrl };
       return { gateways: [gateway], activeGatewayId: gateway.id };
     }
   }

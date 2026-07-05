@@ -40,7 +40,7 @@ test("migrates the previous single gatewayUrl config", () => {
     fs.writeFileSync(file, JSON.stringify({ gatewayUrl: "https://pi.example.test" }));
 
     assert.deepEqual(readGatewayConfig(file, idGenerator), {
-      gateways: [{ id: "id-1", name: "Pi Gateway", url: "https://pi.example.test/" }],
+      gateways: [{ id: "id-1", name: "Pi Server", url: "https://pi.example.test/" }],
       activeGatewayId: "id-1"
     });
   });
@@ -146,7 +146,7 @@ test("refuses to remove the last gateway", () => {
   withTempConfig((file, idGenerator) => {
     const config = readGatewayConfig(file, idGenerator);
 
-    assert.throws(() => removeGateway(config, "id-1"), /Cannot remove the only gateway/);
+    assert.throws(() => removeGateway(config, "id-1"), /Cannot remove the only server/);
   });
 });
 
@@ -154,7 +154,7 @@ test("refuses to remove an unknown gateway", () => {
   withTempConfig((file, idGenerator) => {
     const config = addGateway(readGatewayConfig(file, idGenerator), { name: "Mini", url: "http://100.64.0.10:4567" }, idGenerator);
 
-    assert.throws(() => removeGateway(config, "missing"), /Gateway not found/);
+    assert.throws(() => removeGateway(config, "missing"), /Server not found/);
   });
 });
 
