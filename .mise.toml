@@ -24,3 +24,11 @@ run = "npm run desktop"
 [tasks.desktop-check]
 description = "Run Electron desktop shell checks"
 run = "npm run desktop:check"
+
+[tasks.desktop-dist-linux]
+description = "Build Linux Electron desktop shell packages"
+run = "npm run dist:linux"
+
+[tasks.desktop-dist-mac]
+description = "Build macOS Electron desktop shell packages"
+run = "npm run dist:mac"

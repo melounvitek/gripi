@@ -108,6 +108,15 @@ PI_GATEWAY_DESKTOP_URL=https://pi-gateway.example.internal mise run desktop
 npm run desktop -- --gateway-url=http://100.x.y.z:4567
 ```
 
+Build distributable Electron packages with electron-builder:
+
+```sh
+mise run desktop-dist-linux
+mise run desktop-dist-mac
+```
+
+Linux builds produce an AppImage artifact under `dist/`. macOS builds produce dmg and zip artifacts when run on macOS. Unsigned macOS builds are useful for local testing, but distributing them to other users may trigger Gatekeeper warnings unless they are signed and notarized with an Apple Developer ID.
+
 ## Pinned session directories
 
 Add directories to `~/.config/pi-web-gateway/pinned-dirs` to keep them available in the New Session dialog, even when they do not currently have sessions:

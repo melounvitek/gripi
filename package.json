@@ -3,15 +3,44 @@
   "version": "0.1.0",
   "private": true,
   "description": "Thin Electron shell for Pi Web Gateway.",
+  "author": "Pi Web Gateway contributors",
   "main": "electron/main.js",
+  "desktopName": "pi-web-gateway",
   "engines": {
     "node": ">=22.12.0"
   },
   "scripts": {
     "desktop": "electron .",
-    "desktop:check": "node --test electron/*.test.js && node --check electron/main.js"
+    "desktop:check": "node --test electron/*.test.js && node --check electron/main.js",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux",
+    "dist:mac": "electron-builder --mac"
   },
   "devDependencies": {
-    "electron": "^43.0.0"
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "dev.pi-web-gateway.desktop",
+    "productName": "Pi Web Gateway",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "syncDesktopName": true,
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }
