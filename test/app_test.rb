@@ -4315,6 +4315,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "setComposerState(\"running\", \"Pi is running…\", previousWaitingForOutputSince);"
       assert_includes response.body, "markOptimisticUserMessageFailed(message);"
       assert_includes response.body, "message.hasAttribute(\"data-optimistic-text\") ? message.dataset.optimisticText : message.querySelector(\".message-body\")?.textContent"
+      assert_includes response.body, 'return targetText.startsWith(`${optimisticText}\\n`);'
       assert_includes response.body, "appendMessage(\"assistant\", `Prompt failed to send:\\n\\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true });"
       assert_includes response.body, "clearTimeout(eventPollTimer);"
       assert_includes response.body, "eventPollInFlight = false;"
@@ -4486,6 +4487,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'if (live && roleName === "user" && !options.optimistic && optimisticUserMessageAlreadyRendered(text)) return null;'
       assert_includes response.body, 'if (options.optimistic) {'
       assert_includes response.body, "article.dataset.optimisticText = options.optimisticText ?? text;"
+      assert_includes response.body, "article.dataset.optimisticImageCount = String(options.images?.length || 0);"
       assert_includes response.body, 'upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);'
       assert_includes response.body, 'const displayText = roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text;'
       assert_includes response.body, 'const entry = { article, body, compact: false, userDisplayText: body?.textContent || segment.text };'
@@ -4535,8 +4537,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);"
       assert_includes response.body, "const newCommand = followUp ? null : sessionNewSlashCommand(message);"
       assert_includes response.body, "if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand) {"
-      assert_includes response.body, "if (!followUp) {\n          resetLiveAssistantTracking();\n          document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n          appendMessage(\"user\", [message, submittedImageFiles.length > 0"
-      assert_includes response.body, "true, true, new Date(), { optimistic: true, optimisticText: message });\n        }"
+      assert_includes response.body, "if (!followUp) {\n          resetLiveAssistantTracking();\n          document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n          const optimisticImages = pendingImages.map"
+      assert_includes response.body, "const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || \"Attached image\" }));\n          appendMessage(\"user\", message || `[${imageAttachmentLabel(submittedImageFiles.length)}]`, true, true, new Date(), { optimistic: true, optimisticText: message, images: optimisticImages });\n        }"
       assert_includes response.body, "resetEventPollBackoff();"
       assert_includes response.body, "scheduleNextEventPoll(0);"
       assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            restoreSubmittedComposerInput();\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          clearStoredComposerDraft(submittedSession);"

@@ -19,6 +19,17 @@ class LiveStreamingJsTest < Minitest::Test
     assert_cleanup_before_reset_in('if (!liveErrorSeen) {', after: 'if (event.type === "agent_end")')
   end
 
+  def test_optimistic_user_message_can_render_uploaded_image_previews
+    script = File.read(VIEW_PATH)
+
+    assert_includes script, "function renderMessageImages(article, images = [])"
+    assert_includes script, "article.dataset.optimisticImageCount = String(options.images?.length || 0);"
+    assert_includes script, 'return targetText.startsWith(`${optimisticText}\\n`);'
+    assert_includes script, "renderMessageImages(article, options.images);"
+    assert_includes script, "const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || \"Attached image\" }));"
+    assert_includes script, "images: optimisticImages"
+  end
+
   private
 
   def assert_cleanup_before_reset_in(block_start, after: nil)

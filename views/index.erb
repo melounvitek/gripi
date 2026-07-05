@@ -1471,8 +1471,15 @@
     }
 
     function optimisticUserMessage(text) {
+      const targetText = normalizedMessageText(text);
       return [...(conversationScroll?.querySelectorAll('.message--live[data-role="user"][data-optimistic="true"]') || [])]
-        .find((message) => normalizedMessageText(message.hasAttribute("data-optimistic-text") ? message.dataset.optimisticText : message.querySelector(".message-body")?.textContent) === normalizedMessageText(text));
+        .find((message) => {
+          const optimisticText = normalizedMessageText(message.hasAttribute("data-optimistic-text") ? message.dataset.optimisticText : message.querySelector(".message-body")?.textContent);
+          if (optimisticText === targetText) return true;
+          if (Number(message.dataset.optimisticImageCount || 0) <= 0) return false;
+          if (!optimisticText) return targetText.length > 0;
+          return targetText.startsWith(`${optimisticText}\n`);
+        });
     }
 
     function optimisticUserMessageAlreadyRendered(text) {
@@ -1484,6 +1491,7 @@
       if (!message) return;
       delete message.dataset.optimistic;
       delete message.dataset.optimisticText;
+      delete message.dataset.optimisticImageCount;
     }
 
     function formatTimestamp(timestamp) {
@@ -1529,6 +1537,28 @@
       return true;
     }
 
+    function renderMessageImages(article, images = []) {
+      const visibleImages = images.filter((image) => image?.src);
+      if (visibleImages.length === 0) return;
+
+      const container = document.createElement("div");
+      container.className = "message-images";
+      visibleImages.forEach((image) => {
+        const element = document.createElement("img");
+        element.className = "message-image";
+        element.src = image.src;
+        element.alt = image.alt || "Attached image";
+        element.loading = "lazy";
+        if (image.src.startsWith("blob:")) {
+          const revoke = () => URL.revokeObjectURL(image.src);
+          element.addEventListener("load", revoke, { once: true });
+          element.addEventListener("error", revoke, { once: true });
+        }
+        container.append(element);
+      });
+      article.append(container);
+    }
+
     function appendMessage(roleName, text, live = true, forceScroll = false, timestamp = null, options = {}) {
       const timestampKey = messageTimestampKey(timestamp);
       if (live && roleName === "user" && !options.optimistic && optimisticUserMessageAlreadyRendered(text)) return null;
@@ -1546,6 +1576,7 @@
       if (options.optimistic) {
         article.dataset.optimistic = "true";
         article.dataset.optimisticText = options.optimisticText ?? text;
+        article.dataset.optimisticImageCount = String(options.images?.length || 0);
       }
 
       const header = document.createElement("header");
@@ -1574,6 +1605,7 @@
       if (roleName === "assistant" && !options.thinking) header.append(makeCopyButton());
       article.append(header);
       article.append(body);
+      renderMessageImages(article, options.images);
       liveOutput.append(article);
       afterLiveOutputChange(shouldScroll, live);
       return { article, body, compact: false };
@@ -1850,6 +1882,7 @@
 
       delete article.dataset.optimistic;
       delete article.dataset.optimisticText;
+      delete article.dataset.optimisticImageCount;
       article.dataset.messageTimestamp = messageTimestampKey(timestamp);
       article.dataset.messageFingerprint = messageFingerprint("user", segment.text, article.dataset.messageTimestamp);
       const meta = article.querySelector(".message-meta");
@@ -2418,7 +2451,8 @@
         if (!followUp) {
           resetLiveAssistantTracking();
           document.querySelectorAll(".tree-position-banner").forEach((banner) => banner.remove());
-          appendMessage("user", [message, submittedImageFiles.length > 0 ? `[${imageAttachmentLabel(submittedImageFiles.length)}]` : ""].filter(Boolean).join("\n"), true, true, new Date(), { optimistic: true, optimisticText: message });
+          const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || "Attached image" }));
+          appendMessage("user", message || `[${imageAttachmentLabel(submittedImageFiles.length)}]`, true, true, new Date(), { optimistic: true, optimisticText: message, images: optimisticImages });
         }
         resetEventPollBackoff();
         scheduleNextEventPoll(0);
