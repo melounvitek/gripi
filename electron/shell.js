@@ -6,6 +6,8 @@ let setupDraft = null;
 const webviews = new Map();
 const offlineGateways = new Map();
 const loadingGateways = new Map();
+const unreadSessionCounts = new Map();
+const unreadRefreshTimers = new Map();
 let isRemovingGateway = false;
 
 window.addEventListener("error", (event) => {
@@ -23,6 +25,10 @@ window.piGatewayDesktop.onAddGatewayRequested(() => {
 
 window.piGatewayDesktop.onRemoveGatewayRequested(async () => {
   await removeActiveGateway();
+});
+
+window.piGatewayDesktop.onRenameGatewayRequested(async () => {
+  await renameActiveGateway();
 });
 
 loadConfig();
@@ -51,7 +57,8 @@ function renderTabs() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `tab${gateway.id === config.activeGatewayId && !setupDraft ? " active" : ""}`;
-    button.textContent = gateway.name;
+    button.textContent = gatewayTabLabel(gateway);
+    button.title = gateway.name;
     button.addEventListener("click", async () => {
       setupDraft = null;
       config = await window.piGatewayDesktop.activateGateway(gateway.id);
@@ -100,6 +107,8 @@ function ensureWebviews() {
     if (!gatewayIds.has(gatewayId)) {
       webview.remove();
       webviews.delete(gatewayId);
+      unreadSessionCounts.delete(gatewayId);
+      clearGatewayUnreadRefresh(gatewayId);
     }
   }
 
@@ -127,6 +136,7 @@ function ensureWebviews() {
     });
     webview.addEventListener("did-finish-load", () => {
       loadingGateways.delete(gateway.id);
+      refreshGatewayUnreadCount(gateway.id);
       render();
     });
     webview.addEventListener("did-fail-load", (event) => {
@@ -137,6 +147,7 @@ function ensureWebviews() {
     });
     webviews.set(gateway.id, webview);
     content.append(webview);
+    unreadRefreshTimers.set(gateway.id, window.setInterval(() => refreshGatewayUnreadCount(gateway.id), 5000));
 
     window.setTimeout(() => {
       if (!loadingGateways.has(gateway.id)) return;
@@ -171,6 +182,8 @@ async function removeActiveGateway() {
     config = await window.piGatewayDesktop.removeGateway(gateway.id);
     offlineGateways.delete(gateway.id);
     loadingGateways.delete(gateway.id);
+    unreadSessionCounts.delete(gateway.id);
+    clearGatewayUnreadRefresh(gateway.id);
     render();
   } catch (error) {
     window.alert(error.message || "Could not remove this server.");
@@ -179,8 +192,51 @@ async function removeActiveGateway() {
   }
 }
 
+async function renameActiveGateway() {
+  if (!config || setupDraft) return;
+
+  const gateway = activeGateway();
+  const name = window.prompt("Rename current server", gateway.name);
+  if (name == null) return;
+
+  config = await window.piGatewayDesktop.saveGateway({ ...gateway, name });
+  render();
+}
+
 function activeGateway() {
   return config.gateways.find((gateway) => gateway.id === config.activeGatewayId) || config.gateways[0];
+}
+
+function gatewayTabLabel(gateway) {
+  const unreadCount = unreadSessionCounts.get(gateway.id) || 0;
+  if (unreadCount <= 0) return gateway.name;
+
+  return `${gateway.name} (${unreadCount > 99 ? "99+" : unreadCount})`;
+}
+
+async function refreshGatewayUnreadCount(gatewayId) {
+  const webview = webviews.get(gatewayId);
+  if (!webview) return;
+
+  try {
+    const count = await webview.executeJavaScript('Number(document.querySelector(".session-sidebar[data-unread-session-count]")?.dataset.unreadSessionCount || 0)', true);
+    updateGatewayUnreadCount(gatewayId, count);
+  } catch (_error) {
+  }
+}
+
+function clearGatewayUnreadRefresh(gatewayId) {
+  const timer = unreadRefreshTimers.get(gatewayId);
+  if (timer) window.clearInterval(timer);
+  unreadRefreshTimers.delete(gatewayId);
+}
+
+function updateGatewayUnreadCount(gatewayId, count) {
+  const unreadCount = Number.isFinite(count) ? Math.max(0, count) : 0;
+  if ((unreadSessionCounts.get(gatewayId) || 0) === unreadCount) return;
+
+  unreadSessionCounts.set(gatewayId, unreadCount);
+  renderTabs();
 }
 
 function messagePanel(title, message) {

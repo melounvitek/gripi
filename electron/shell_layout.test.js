@@ -67,10 +67,20 @@ test("desktop server management uses server wording", () => {
   const shell = read("electron/shell.js");
 
   assert.match(main, /Add Server…/);
+  assert.match(main, /Rename Current Server…/);
   assert.match(main, /Remove Current Server…/);
   assert.match(shell, /Add Server/);
   assert.match(shell, /New Server/);
   assert.match(shell, /Server URL/);
   assert.match(shell, /Remove server/);
   assert.doesNotMatch(shell, /Add Gateway|New Gateway|Gateway URL|Remove gateway/);
+});
+
+test("desktop shell shows unread session counts in server tabs", () => {
+  const shell = read("electron/shell.js");
+
+  assert.match(shell, /const unreadSessionCounts = new Map\(\);/);
+  assert.match(shell, /button\.textContent = gatewayTabLabel\(gateway\);/);
+  assert.match(shell, /function gatewayTabLabel\(gateway\)/);
+  assert.match(shell, /\.session-sidebar\[data-unread-session-count\]/);
 });

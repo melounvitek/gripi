@@ -128,6 +128,12 @@ function installAppMenu() {
           }
         },
         {
+          label: "Rename Current Server…",
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send("gateway:rename-requested");
+          }
+        },
+        {
           label: "Remove Current Server…",
           click: () => {
             if (mainWindow) mainWindow.webContents.send("gateway:remove-requested");

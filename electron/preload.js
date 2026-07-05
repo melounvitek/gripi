@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld("piGatewayDesktop", {
   onRemoveGatewayRequested: (callback) => {
     ipcRenderer.on("gateway:remove-requested", callback);
   },
+  onRenameGatewayRequested: (callback) => {
+    ipcRenderer.on("gateway:rename-requested", callback);
+  },
   removeGateway: (id) => ipcRenderer.invoke("gateway-config:remove-gateway", id),
   saveGateway: (gateway) => ipcRenderer.invoke("gateway-config:save-gateway", gateway)
 });
