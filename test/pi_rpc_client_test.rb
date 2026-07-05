@@ -1,6 +1,7 @@
 require "minitest/autorun"
 require "stringio"
 require "json"
+require "open3"
 require "timeout"
 require_relative "../lib/pi_rpc_client"
 
@@ -17,7 +18,49 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start("/tmp/session.jsonl", popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls
+    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls.map { |args| args.drop(1) }
+  end
+
+  def test_removes_gateway_ruby_environment_when_starting_pi
+    calls = []
+    input = StringIO.new
+    output = StringIO.new
+    popen = ->(*args) do
+      calls << args
+      [input, output, StringIO.new, Object.new]
+    end
+
+    with_env(
+      "BUNDLE_GEMFILE" => "/gateway/Gemfile",
+      "BUNDLE_LOCKFILE" => "/gateway/Gemfile.lock",
+      "BUNDLER_SETUP" => "/gateway/bundler/setup",
+      "GEM_HOME" => "/gateway/gems",
+      "RUBYOPT" => "-rbundler/setup",
+      "PATH" => "/usr/bin"
+    ) do
+      PiRpcClient.start("/tmp/session.jsonl", popen: popen)
+    end
+
+    child_env = calls.fetch(0).fetch(0)
+    assert_nil child_env.fetch("BUNDLE_GEMFILE")
+    assert_nil child_env.fetch("BUNDLE_LOCKFILE")
+    assert_nil child_env.fetch("BUNDLER_SETUP")
+    assert_nil child_env.fetch("GEM_HOME")
+    assert_nil child_env.fetch("RUBYOPT")
+    assert_equal "/usr/bin", child_env.fetch("PATH")
+  end
+
+  def test_pi_process_env_unsets_ruby_environment_for_spawn
+    with_env(
+      "BUNDLE_GEMFILE" => "/gateway/Gemfile",
+      "GEM_HOME" => "/gateway/gems",
+      "RUBYOPT" => "-rbundler/setup"
+    ) do
+      stdout, stderr, status = Open3.capture3(PiRpcClient.pi_process_env, RbConfig.ruby, "-e", "puts [ENV['BUNDLE_GEMFILE'], ENV['GEM_HOME'], ENV['RUBYOPT']].compact")
+
+      assert status.success?, stderr
+      assert_empty stdout
+    end
   end
 
   def test_starts_pi_rpc_process_with_configured_node_and_pi_paths
@@ -32,7 +75,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start("/tmp/session.jsonl", command_prefix: ["/opt/node", "/opt/pi"], popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls
+    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls.map { |args| args.drop(1) }
   end
 
   def test_starts_new_pi_rpc_process_in_cwd
@@ -47,7 +90,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start_in_cwd("/tmp/project", popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls
+    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls.map { |args| args.drop(1) }
   end
 
   def test_starts_new_pi_rpc_process_with_configured_node_and_pi_paths
@@ -62,7 +105,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start_in_cwd("/tmp/project", command_prefix: ["/opt/node", "/opt/pi"], popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls
+    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls.map { |args| args.drop(1) }
   end
 
   def test_command_prefix_defaults_to_pi
@@ -355,6 +398,18 @@ class PiRpcClientTest < Minitest::Test
   end
 
   private
+
+  def with_env(values)
+    old_values = values.keys.to_h { |key| [key, ENV[key]] }
+    values.each do |key, value|
+      value.nil? ? ENV.delete(key) : ENV[key] = value
+    end
+    yield
+  ensure
+    old_values.each do |key, value|
+      value.nil? ? ENV.delete(key) : ENV[key] = value
+    end
+  end
 
   def with_secure_random_hex(value)
     original = SecureRandom.method(:hex)

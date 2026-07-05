@@ -6,15 +6,26 @@ require "thread"
 class PiRpcClient
   DEFAULT_EVENT_BUFFER_LIMIT = 5_000
   GATEWAY_EXTENSION_PATH = File.expand_path("../pi_extensions/pi-web-gateway-tree.ts", __dir__)
+  RUBY_ENV_KEYS = %w[
+    GEM_HOME
+    GEM_PATH
+    RUBYLIB
+    RUBYOPT
+  ].freeze
 
   def self.start(session_path, command_prefix: ["pi"], popen: Open3.method(:popen3))
-    stdin, stdout, stderr, wait_thread = popen.call(*command_prefix, "--mode", "rpc", "--extension", GATEWAY_EXTENSION_PATH, "--session", session_path)
+    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GATEWAY_EXTENSION_PATH, "--session", session_path)
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
   end
 
   def self.start_in_cwd(cwd, command_prefix: ["pi"], popen: Open3.method(:popen3))
-    stdin, stdout, stderr, wait_thread = popen.call(*command_prefix, "--mode", "rpc", "--extension", GATEWAY_EXTENSION_PATH, chdir: cwd)
+    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GATEWAY_EXTENSION_PATH, chdir: cwd)
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
+  end
+
+  def self.pi_process_env
+    unset_keys = ENV.keys.select { |key| key.start_with?("BUNDLE_", "BUNDLER_") } | RUBY_ENV_KEYS
+    ENV.to_h.merge(unset_keys.to_h { |key| [key, nil] })
   end
 
   def self.command_prefix(node_path:, pi_path:)
