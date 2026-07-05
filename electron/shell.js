@@ -118,6 +118,7 @@ function ensureWebviews() {
 
     const webview = document.createElement("webview");
     loadingGateways.set(gateway.id, true);
+    webview.setAttribute("allowpopups", "");
     webview.partition = `persist:pi-gateway-${gateway.id}`;
     setGatewayUrl(webview, gateway.url);
     webview.addEventListener("did-attach", () => {
