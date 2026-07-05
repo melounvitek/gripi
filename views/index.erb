@@ -2148,6 +2148,7 @@
 
       liveAssistantSeen = true;
       segments.forEach((segment, index) => {
+        if (segment.compact) clearLiveAssistantStreaming();
         const entry = upsertLiveAssistantSegment(event, roleName, segment, index, shouldScroll, timestamp);
         if (entry && !segment.compact) liveAssistantMessage = entry;
       });
