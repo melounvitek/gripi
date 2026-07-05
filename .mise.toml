@@ -32,3 +32,7 @@ run = "npm run dist:linux"
 [tasks.desktop-dist-mac]
 description = "Build macOS Electron desktop shell packages"
 run = "npm run dist:mac"
+
+[tasks.desktop-install]
+description = "Build and install the Electron desktop shell for the current user"
+run = "bin/install-desktop"

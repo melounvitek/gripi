@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PRODUCT_NAME="Pi Web Gateway"
+DESKTOP_ID="pi-web-gateway"
+
+log() {
+  printf '%s\n' "$*"
+}
+
+fail() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+ensure_npm_dependencies() {
+  cd "$ROOT_DIR"
+
+  if [[ ! -d node_modules/electron-builder ]]; then
+    npm ci
+  fi
+}
+
+run_build() {
+  local task="$1"
+
+  cd "$ROOT_DIR"
+  ensure_npm_dependencies
+  rm -rf dist
+  mise run "$task"
+}
+
+first_match() {
+  find "$@" -print -quit
+}
+
+install_mac() {
+  run_build desktop-dist-mac
+
+  local app_path
+  app_path="$(first_match "$ROOT_DIR/dist" -type d -name "${PRODUCT_NAME}.app")"
+  [[ -n "$app_path" ]] || fail "built macOS app was not found under dist/"
+
+  local applications_dir="$HOME/Applications"
+  local target_path="$applications_dir/${PRODUCT_NAME}.app"
+
+  mkdir -p "$applications_dir"
+  rm -rf "$target_path"
+  ditto "$app_path" "$target_path"
+
+  log "Installed ${PRODUCT_NAME} to $target_path"
+  log "Spotlight should find it after macOS indexes ~/Applications."
+}
+
+install_linux() {
+  run_build desktop-dist-linux
+
+  local appimage_path
+  appimage_path="$(first_match "$ROOT_DIR/dist" -maxdepth 1 -type f -name "*.AppImage")"
+  [[ -n "$appimage_path" ]] || fail "built Linux AppImage was not found under dist/"
+
+  local data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+  local install_dir="$data_home/${DESKTOP_ID}"
+  local applications_dir="$data_home/applications"
+  local target_path="$install_dir/${PRODUCT_NAME}.AppImage"
+  local icon_path="$install_dir/icon.png"
+  local desktop_path="$applications_dir/${DESKTOP_ID}.desktop"
+
+  mkdir -p "$install_dir" "$applications_dir"
+  cp "$appimage_path" "$target_path"
+  chmod +x "$target_path"
+  cp "$ROOT_DIR/electron/assets/icons/1024x1024.png" "$icon_path"
+
+  cat > "$desktop_path" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=${PRODUCT_NAME}
+Comment=Thin Electron shell for Pi Web Gateway
+Exec="${target_path}"
+Icon=${icon_path}
+Terminal=false
+Categories=Development;
+StartupWMClass=${PRODUCT_NAME}
+DESKTOP
+
+  chmod 0644 "$desktop_path"
+
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$applications_dir" >/dev/null 2>&1 || true
+  fi
+
+  log "Installed ${PRODUCT_NAME} to $target_path"
+  log "Registered launcher at $desktop_path"
+}
+
+case "$(uname -s)" in
+  Darwin)
+    install_mac
+    ;;
+  Linux)
+    install_linux
+    ;;
+  *)
+    fail "unsupported platform: $(uname -s)"
+    ;;
+esac

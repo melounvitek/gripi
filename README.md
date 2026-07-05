@@ -132,6 +132,14 @@ On macOS, build dmg and zip artifacts under `dist/`:
 mise run desktop-dist-mac
 ```
 
+To build and install or update the desktop shell for the current user:
+
+```sh
+mise run desktop-install
+```
+
+On macOS, this installs the app to `~/Applications` so Spotlight can find it. On Linux, this installs the AppImage under `${XDG_DATA_HOME:-~/.local/share}/pi-web-gateway` and registers a desktop launcher under `${XDG_DATA_HOME:-~/.local/share}/applications`.
+
 macOS packages must be built on macOS. Unsigned macOS builds are useful for local testing, but distributing them to other users may trigger Gatekeeper warnings unless they are signed and notarized with an Apple Developer ID.
 
 ## Pinned session directories
