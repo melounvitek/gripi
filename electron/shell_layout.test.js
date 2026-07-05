@@ -22,6 +22,21 @@ test("desktop window hides the native menu bar by default", () => {
   assert.match(main, /autoHideMenuBar:\s*true/);
 });
 
+test("same-origin gateway popups open in an Electron window", () => {
+  const main = read("electron/main.js");
+
+  assert.match(main, /if \(sameOrigin\(url, allowedOrigin\)\) return openSameOriginPopupWindow\(url, allowedOrigin, partition\);/);
+  assert.match(main, /function openSameOriginPopupWindow\(url, allowedOrigin, partition\)/);
+});
+
+test("desktop keeps popup windows alive until they close", () => {
+  const main = read("electron/main.js");
+
+  assert.match(main, /const popupWindows = new Set\(\);/);
+  assert.match(main, /popupWindows\.add\(popupWindow\);/);
+  assert.match(main, /popupWindow\.on\("closed", \(\) => popupWindows\.delete\(popupWindow\)\);/);
+});
+
 test("desktop shell chrome remains usable in narrow or short windows", () => {
   const html = read("electron/shell.html");
 

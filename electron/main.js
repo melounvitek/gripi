@@ -12,10 +12,11 @@ const { gatewayUrl } = require("./gateway_url");
 
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 const SHELL_PAGE_PATH = path.join(__dirname, "shell.html");
+const popupWindows = new Set();
 
 let config = null;
 let mainWindow = null;
-let pendingWebviewOrigins = [];
+let pendingWebviews = [];
 
 function createWindow() {
   config = readOrCreateGatewayConfig(gatewayConfigPath());
@@ -50,11 +51,11 @@ function createWindow() {
     webPreferences.contextIsolation = true;
     webPreferences.nodeIntegration = false;
     webPreferences.sandbox = true;
-    pendingWebviewOrigins.push(allowedOrigin);
+    pendingWebviews.push({ allowedOrigin, partition: webPreferences.partition });
   });
   mainWindow.webContents.on("did-attach-webview", (_event, guestContents) => {
-    const allowedOrigin = pendingWebviewOrigins.shift();
-    if (allowedOrigin) installGatewayNavigationGuard(guestContents, allowedOrigin);
+    const webview = pendingWebviews.shift();
+    if (webview) installGatewayNavigationGuard(guestContents, webview.allowedOrigin, webview.partition);
   });
 
   mainWindow.loadURL(pathToFileURL(SHELL_PAGE_PATH).toString());
@@ -144,8 +145,10 @@ function installAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function installGatewayNavigationGuard(guestContents, allowedOrigin) {
+function installGatewayNavigationGuard(guestContents, allowedOrigin, partition) {
   guestContents.setWindowOpenHandler(({ url }) => {
+    if (sameOrigin(url, allowedOrigin)) return openSameOriginPopupWindow(url, allowedOrigin, partition);
+
     openExternalUrl(url);
     return { action: "deny" };
   });
@@ -168,6 +171,29 @@ function installGatewayNavigationGuard(guestContents, allowedOrigin) {
 function openExternalUrl(url) {
   if (!safeExternalUrl(url)) return;
   shell.openExternal(url);
+}
+
+function openSameOriginPopupWindow(url, allowedOrigin, partition) {
+  const webPreferences = {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true
+  };
+  if (partition) webPreferences.partition = partition;
+
+  const popupWindow = new BrowserWindow({
+    width: 1100,
+    height: 800,
+    autoHideMenuBar: true,
+    webPreferences
+  });
+
+  popupWindows.add(popupWindow);
+  popupWindow.on("closed", () => popupWindows.delete(popupWindow));
+  installGatewayNavigationGuard(popupWindow.webContents, allowedOrigin, partition);
+  popupWindow.loadURL(url);
+
+  return { action: "deny" };
 }
 
 function sameOrigin(candidateUrl, allowedOrigin) {
