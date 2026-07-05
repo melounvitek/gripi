@@ -6,7 +6,7 @@ Browser UI for local Pi sessions.
 
 <img width="360" alt="Pi Web Gateway mobile screenshot" src="docs/images/mobile-screenshot.png" />
 
-I'm scared to see the code (the project is my attempt to try real vibe-coding), but it works nicely!
+I'm scared to look into the code (the project is my attempt to try real vibe-coding), but it works nicely!
 
 ## Features
 
