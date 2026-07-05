@@ -36,6 +36,60 @@ Recommended shape:
 
 Do not bind the gateway to a public interface unless you have added your own strong network-level protection.
 
+### Tailscale HTTPS with a systemd user service
+
+To keep the gateway running after login, create `~/.config/systemd/user/pi-web-gateway.service`:
+
+```ini
+[Unit]
+Description=Pi Web Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/pi-web-gateway
+EnvironmentFile=-%h/.config/pi-web-gateway/env
+Environment=PI_GATEWAY_HOST=127.0.0.1
+Environment=PI_GATEWAY_PORT=4567
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=%h/.local/bin/mise exec -- bin/start
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+```
+
+Use the real checkout path for `WorkingDirectory`. The explicit `PATH` is important when `pi` is installed in `~/.local/bin`; systemd user services do not always inherit the same shell environment as your terminal.
+
+Enable and start the gateway:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now pi-web-gateway.service
+```
+
+Then expose the local gateway over Tailscale HTTPS:
+
+```sh
+tailscale serve --bg --yes 4567
+```
+
+If Tailscale requires elevated permissions, run this once and retry:
+
+```sh
+sudo tailscale set --operator=$USER
+```
+
+Useful checks:
+
+```sh
+systemctl --user status pi-web-gateway.service --no-pager
+journalctl --user -u pi-web-gateway.service -f
+tailscale serve status
+```
+
 ## 3. Local gateway and remote gateway
 
 Use this when you want one gateway server on your laptop and another gateway server on an always-on computer.
