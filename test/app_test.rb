@@ -2547,6 +2547,21 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_sidebar_shows_server_origin_under_heading
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path }, "HTTP_HOST" => "pi.example.test:9292", "rack.url_scheme" => "https")
+      document = Nokogiri::HTML(response.body)
+
+      assert_equal 200, response.status
+      assert_equal "https://pi.example.test:9292", document.at_css(".sidebar-server-origin").text.strip
+      assert_operator response.body.index("<h1>Pi Sessions</h1>"), :<, response.body.index("sidebar-server-origin")
+    end
+  end
+
   def test_empty_session_page_prompts_for_existing_directory
     Dir.mktmpdir do |dir|
       PiWebGateway.set :sessions_root, dir
