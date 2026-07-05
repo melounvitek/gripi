@@ -41,37 +41,24 @@ The setup task installs Ruby dependencies and creates a local config file at `~/
 ## Run
 
 ```sh
-mise run start
+PI_GATEWAY_HOST=127.0.0.1 mise run start
 ```
 
 Open <http://localhost:4567>.
 
-To listen on a specific host or port:
-
-```sh
-PI_GATEWAY_HOST=100.x.y.z mise run start
-PI_GATEWAY_PORT=4568 mise run start
-```
+For local, VPS, and mixed setups, see [example setups](docs/examples.md).
 
 ## Install as an app
 
-### Desktop app
-
-Build and install the Electron desktop shell for the current user:
+Desktop:
 
 ```sh
 mise run desktop-install
 ```
 
-The desktop app connects to your running gateway server. Start the server separately with:
+The desktop app connects to a running gateway server.
 
-```sh
-mise run start
-```
-
-### Mobile web app
-
-On mobile, install Pi Web Gateway from the browser:
+Mobile:
 
 - iPhone/iPad: use Safari and “Add to Home Screen”
 - Android: use Chrome and install/add to home screen
@@ -80,34 +67,12 @@ On mobile, install Pi Web Gateway from the browser:
 
 Edit `~/.config/pi-web-gateway/env` for local settings.
 
-Common options:
-
 ```sh
-PI_GATEWAY_HOST=100.x.y.z
-PI_GATEWAY_PORT=4568
 PI_BROWSER_AUTH_DISABLED=1
 PI_MULTI_USER_MODE=1
 ```
 
-`PI_BROWSER_AUTH_DISABLED=1` skips browser approval for trusted private URLs.
-
-`PI_MULTI_USER_MODE=1` asks users for a personal session key before showing sessions. The same key on another browser shows the same sessions. This separates gateway session visibility for trusted users, but it is not OS-level process, filesystem, or credential isolation.
-
-If Pi needs a different Node runtime than the one selected by mise, set both:
-
-```sh
-PI_GATEWAY_NODE=/path/to/node
-PI_GATEWAY_PI=/path/to/pi
-```
-
-Add pinned session directories to `~/.config/pi-web-gateway/pinned-dirs` to keep them available in the New Session dialog:
-
-```txt
-/home/alice/projects/pi-web-gateway
-/home/alice/projects/another-project
-```
-
-One directory per line. Blank lines and `#` comments are ignored.
+Pass `PI_GATEWAY_HOST` or `PI_GATEWAY_PORT` when starting the server. See [configuration](docs/configuration.md) for details and advanced options.
 
 ## Optional Pi setup
 
