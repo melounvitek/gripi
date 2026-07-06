@@ -205,7 +205,7 @@ function showGatewayNotification(event, payload) {
   const title = stringPayloadValue(payload?.title) || "Pi Web Gateway";
   const body = stringPayloadValue(payload?.body) || "Notification from Pi Web Gateway.";
   const url = resolveSameOriginUrl(payload?.url || "/", gateway.allowedOrigin);
-  const notification = new Notification({ title, body, icon: path.join(__dirname, "assets", "icon.svg") });
+  const notification = new Notification({ title, body, icon: path.join(__dirname, "assets", "icons", "1024x1024.png") });
   notification.on("click", () => {
     if (mainWindow) {
       if (gateway.gatewayId) mainWindow.webContents.send("gateway:activate-requested", gateway.gatewayId);
