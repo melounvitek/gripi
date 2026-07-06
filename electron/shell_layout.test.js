@@ -54,6 +54,21 @@ test("desktop gateway webviews allow target blank popups", () => {
   assert.match(shell, /webview\.setAttribute\("allowpopups", ""\);/);
 });
 
+test("desktop gateway webviews install the notification bridge", () => {
+  const main = read("electron/main.js");
+  const preload = read("electron/gateway_preload.js");
+
+  assert.match(main, /const GATEWAY_PRELOAD_PATH = path\.join\(__dirname, "gateway_preload\.js"\);/);
+  assert.match(main, /webPreferences\.preload = GATEWAY_PRELOAD_PATH;/);
+  assert.match(main, /ipcMain\.handle\("gateway-notification:show"/);
+  assert.match(main, /event\.senderFrame\?\.url/);
+  assert.match(main, /gatewayIdFromPartition/);
+  assert.match(main, /gateway:activate-requested/);
+  assert.match(main, /new Notification/);
+  assert.match(preload, /piGatewayElectron/);
+  assert.match(preload, /gateway-notification:show/);
+});
+
 test("desktop shell does not reset an existing gateway webview after in-app navigation", () => {
   const shell = read("electron/shell.js");
 
@@ -83,4 +98,13 @@ test("desktop shell shows unread session counts in server tabs", () => {
   assert.match(shell, /button\.textContent = gatewayTabLabel\(gateway\);/);
   assert.match(shell, /function gatewayTabLabel\(gateway\)/);
   assert.match(shell, /\.session-sidebar\[data-unread-session-count\]/);
+});
+
+test("desktop shell can activate the gateway that emitted a notification", () => {
+  const preload = read("electron/preload.js");
+  const shell = read("electron/shell.js");
+
+  assert.match(preload, /onGatewayActivationRequested/);
+  assert.match(shell, /onGatewayActivationRequested/);
+  assert.match(shell, /activateGateway\(id\)/);
 });

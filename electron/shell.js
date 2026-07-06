@@ -23,6 +23,13 @@ window.piGatewayDesktop.onAddGatewayRequested(() => {
   render();
 });
 
+window.piGatewayDesktop.onGatewayActivationRequested(async (id) => {
+  if (!config?.gateways.some((gateway) => gateway.id === id)) return;
+  setupDraft = null;
+  config = await window.piGatewayDesktop.activateGateway(id);
+  render();
+});
+
 window.piGatewayDesktop.onRemoveGatewayRequested(async () => {
   await removeActiveGateway();
 });

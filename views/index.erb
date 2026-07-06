@@ -918,18 +918,27 @@
       }
     }
 
+    function desktopNotificationAvailable() {
+      return Boolean(window.piGatewayElectron?.showNotification);
+    }
+
     function notificationAvailable() {
-      return "Notification" in window && "serviceWorker" in navigator;
+      return desktopNotificationAvailable() || ("Notification" in window && "serviceWorker" in navigator);
     }
 
     async function ensureNotificationWorker() {
-      if (!notificationAvailable() || Notification.permission !== "granted") return null;
+      if (desktopNotificationAvailable() || !notificationAvailable() || Notification.permission !== "granted") return null;
       notificationRegistration ||= await navigator.serviceWorker.register("/service-worker.js");
       await navigator.serviceWorker.ready;
       return notificationRegistration;
     }
 
     async function showPiNotification(title, body, url, tag) {
+      if (desktopNotificationAvailable()) {
+        await window.piGatewayElectron.showNotification({ type: "pi-notification", title, body, url, tag });
+        return;
+      }
+
       const worker = await ensureNotificationWorker();
       if (!worker) return;
       if (worker.active) {

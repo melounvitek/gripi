@@ -44,8 +44,16 @@
       statusBox.classList.toggle("error", error);
     }
 
-    function notificationAvailable() {
+    function desktopNotificationAvailable() {
+      return Boolean(window.piGatewayElectron?.showNotification);
+    }
+
+    function webNotificationAvailable() {
       return "Notification" in window && "serviceWorker" in navigator;
+    }
+
+    function notificationAvailable() {
+      return desktopNotificationAvailable() || webNotificationAvailable();
     }
 
     async function registerServiceWorker() {
@@ -62,7 +70,10 @@
         return;
       }
 
-      if (Notification.permission === "granted") {
+      if (desktopNotificationAvailable()) {
+        sendButton.disabled = false;
+        setStatus("Desktop notifications are available. Tap Send test notification.");
+      } else if (Notification.permission === "granted") {
         await registerServiceWorker();
         sendButton.disabled = false;
         setStatus("Permission is granted. Tap Send test notification.");
@@ -82,6 +93,10 @@
           await refreshState();
           return;
         }
+        if (desktopNotificationAvailable()) {
+          await refreshState();
+          return;
+        }
         setStatus("Registering service worker…");
         await registerServiceWorker();
         setStatus("Requesting notification permission…");
@@ -95,10 +110,13 @@
 
     sendButton.addEventListener("click", async () => {
       try {
-        const worker = await registerServiceWorker();
-        if (Notification.permission !== "granted") {
-          await refreshState();
-          return;
+        let worker = null;
+        if (!desktopNotificationAvailable()) {
+          worker = await registerServiceWorker();
+          if (Notification.permission !== "granted") {
+            await refreshState();
+            return;
+          }
         }
         const payload = {
           type: "pi-notification-test",
@@ -107,7 +125,10 @@
           tag: "pi-notification-test",
           url: "/notification-test"
         };
-        if (worker.active) {
+        if (desktopNotificationAvailable()) {
+          const result = await window.piGatewayElectron.showNotification(payload);
+          if (!result?.ok) throw new Error("Desktop notification bridge did not accept the request.");
+        } else if (worker.active) {
           worker.active.postMessage(payload);
         } else {
           await worker.showNotification(payload.title, {

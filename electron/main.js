@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, ipcMain, session, shell } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -11,8 +11,10 @@ const {
 const { gatewayUrl } = require("./gateway_url");
 
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
+const GATEWAY_PRELOAD_PATH = path.join(__dirname, "gateway_preload.js");
 const SHELL_PAGE_PATH = path.join(__dirname, "shell.html");
 const popupWindows = new Set();
+const gatewayWebContents = new Map();
 
 let config = null;
 let mainWindow = null;
@@ -47,7 +49,7 @@ function createWindow() {
       return;
     }
 
-    delete webPreferences.preload;
+    webPreferences.preload = GATEWAY_PRELOAD_PATH;
     webPreferences.contextIsolation = true;
     webPreferences.nodeIntegration = false;
     webPreferences.sandbox = true;
@@ -79,6 +81,10 @@ function gatewayConfigPath() {
 
 function registerGatewayConfigIpc() {
   ipcMain.handle("gateway-config:get", () => config);
+
+  ipcMain.handle("gateway-notification:show", (event, payload) => {
+    return showGatewayNotification(event, payload);
+  });
 
   ipcMain.handle("gateway-config:activate", (_event, id) => {
     const gateway = config.gateways.find((existingGateway) => existingGateway.id === id);
@@ -152,6 +158,10 @@ function installAppMenu() {
 }
 
 function installGatewayNavigationGuard(guestContents, allowedOrigin, partition) {
+  gatewayWebContents.set(guestContents.id, { allowedOrigin, gatewayId: gatewayIdFromPartition(partition), partition });
+  guestContents.once("destroyed", () => gatewayWebContents.delete(guestContents.id));
+  installGatewayPermissionHandlers(partition, allowedOrigin);
+
   guestContents.setWindowOpenHandler(({ url }) => {
     if (sameOrigin(url, allowedOrigin)) return openSameOriginPopupWindow(url, allowedOrigin, partition);
 
@@ -172,6 +182,60 @@ function installGatewayNavigationGuard(guestContents, allowedOrigin, partition) 
     event.preventDefault();
     openExternalUrl(url);
   });
+}
+
+function installGatewayPermissionHandlers(partition, allowedOrigin) {
+  const gatewaySession = partition ? session.fromPartition(partition) : session.defaultSession;
+  gatewaySession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+    if (permission !== "notifications") return false;
+    return requestingOrigin === allowedOrigin;
+  });
+  gatewaySession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    callback(permission === "notifications" && details.requestingOrigin === allowedOrigin);
+  });
+}
+
+function showGatewayNotification(event, payload) {
+  const sender = event.sender;
+  const gateway = gatewayWebContents.get(sender.id);
+  if (!gateway || !sameOrigin(sender.getURL(), gateway.allowedOrigin)) return { ok: false };
+  if (!sameOrigin(event.senderFrame?.url, gateway.allowedOrigin)) return { ok: false };
+  if (!Notification.isSupported()) return { ok: false };
+
+  const title = stringPayloadValue(payload?.title) || "Pi Web Gateway";
+  const body = stringPayloadValue(payload?.body) || "Notification from Pi Web Gateway.";
+  const url = resolveSameOriginUrl(payload?.url || "/", gateway.allowedOrigin);
+  const notification = new Notification({ title, body, icon: path.join(__dirname, "assets", "icon.svg") });
+  notification.on("click", () => {
+    if (mainWindow) {
+      if (gateway.gatewayId) mainWindow.webContents.send("gateway:activate-requested", gateway.gatewayId);
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    if (url && !sender.isDestroyed()) sender.loadURL(url).catch(() => {});
+  });
+  notification.show();
+  return { ok: true };
+}
+
+function gatewayIdFromPartition(partition) {
+  return partition?.match(/^persist:pi-gateway-(.+)$/)?.[1] || null;
+}
+
+function stringPayloadValue(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 500) : null;
+}
+
+function resolveSameOriginUrl(candidateUrl, allowedOrigin) {
+  try {
+    const url = new URL(candidateUrl, allowedOrigin);
+    if (url.origin !== allowedOrigin) return null;
+    return url.toString();
+  } catch (_error) {
+    return null;
+  }
 }
 
 function openExternalUrl(url) {

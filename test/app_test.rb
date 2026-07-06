@@ -204,6 +204,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "Notification test"
       assert_includes response.body, "navigator.serviceWorker.register"
       assert_includes response.body, "Notification.requestPermission"
+      assert_includes response.body, "piGatewayElectron"
       assert_includes response.body, "worker.active.postMessage"
       refute_includes response.body, "iPhone"
       refute_includes response.body, "iOS"
