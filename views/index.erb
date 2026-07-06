@@ -84,10 +84,16 @@
     .session-shortcut { display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid rgba(138, 190, 183, 0.55); border-radius: 999px; background: rgba(138, 190, 183, 0.14); color: var(--accent); font-size: 0.76rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
     body.session-shortcuts-visible .recent-session .session-shortcut { display: inline-flex; }
     .session-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sidebar-notification-toggle { width: 100%; justify-self: stretch; display: flex; align-items: center; justify-content: center; margin-top: 1.25rem; padding: 0.65rem 0.75rem; border-radius: 0.6rem; background: var(--panel-softer); color: var(--text); font-size: 1.05rem; font-weight: 800; text-decoration: none; }
+    .sidebar-notification-toggle { width: 100%; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.55rem; margin-top: 1.25rem; padding: 0.6rem 0.65rem; border: 1px solid transparent; border-radius: 0.6rem; background: var(--panel-softer); color: var(--text); font-size: 0.84rem; font-weight: 800; text-align: left; }
     .sidebar-notification-toggle:hover { background: var(--border); }
-    .sidebar-notification-toggle.is-enabled { color: var(--accent); }
+    .sidebar-notification-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+    .sidebar-notification-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-notification-state { min-width: 4.4rem; padding: 0.18rem 0.45rem; border: 1px solid rgba(128, 128, 128, 0.28); border-radius: 999px; background: rgba(128, 128, 128, 0.1); color: var(--muted); font-size: 0.7rem; font-weight: 900; line-height: 1.15; text-align: center; text-transform: uppercase; letter-spacing: 0.04em; }
+    .sidebar-notification-toggle.is-enabled { border-color: rgba(138, 190, 183, 0.38); background: rgba(138, 190, 183, 0.1); }
+    .sidebar-notification-toggle.is-enabled .sidebar-notification-icon, .sidebar-notification-toggle.is-enabled .sidebar-notification-state { color: var(--accent); }
+    .sidebar-notification-toggle.is-enabled .sidebar-notification-state { border-color: rgba(138, 190, 183, 0.48); background: rgba(138, 190, 183, 0.16); }
     .sidebar-notification-toggle.is-disabled { color: var(--muted); }
+    .sidebar-notification-toggle.is-blocked .sidebar-notification-state { border-color: rgba(204, 102, 102, 0.42); background: rgba(204, 102, 102, 0.12); color: #ffb4b6; }
     .session-project { display: inline-block; max-width: 100%; margin-top: 0.32rem; padding: 0.1rem 0.42rem; border: 1px solid rgba(138, 190, 183, 0.28); border-radius: 999px; background: rgba(138, 190, 183, 0.08); color: var(--accent); font-size: 0.72rem; font-weight: 800; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid rgba(138, 190, 183, 0.22); border-radius: 0.7rem; background: rgba(8, 13, 32, 0.42); color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
     .session-relation-tree-heading { cursor: pointer; color: #f0c7a4; font-size: 0.7rem; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; }
@@ -937,18 +943,25 @@
       return !notificationsDisabled() && (desktopNotificationAvailable() || (("Notification" in window) && Notification.permission === "granted"));
     }
 
+    function notificationToggleState() {
+      if (notificationsDisabled()) return { name: "off", label: "Off", title: "Notifications off — click to enable" };
+      if (notificationsEnabled()) return { name: "enabled", label: "On", title: "Notifications on — click to disable" };
+      if (!desktopNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied") return { name: "blocked", label: "Blocked", title: "Notifications blocked — click for setup help" };
+      return { name: "enable", label: "Enable", title: "Enable notifications" };
+    }
+
     function updateNotificationToggle() {
       const toggle = document.querySelector("[data-notification-toggle]");
       if (!toggle) return;
 
-      const enabled = notificationsEnabled();
-      const disabled = notificationsDisabled();
-      toggle.classList.toggle("is-enabled", enabled);
-      toggle.classList.toggle("is-disabled", disabled || !enabled);
-      toggle.title = enabled ? "Disable notifications" : "Enable notifications";
-      toggle.setAttribute("aria-label", toggle.title);
-      const icon = toggle.querySelector("[data-notification-toggle-icon]");
-      if (icon) icon.textContent = enabled ? "🔕" : "🔔";
+      const state = notificationToggleState();
+      toggle.classList.toggle("is-enabled", state.name === "enabled");
+      toggle.classList.toggle("is-disabled", state.name === "off" || state.name === "enable");
+      toggle.classList.toggle("is-blocked", state.name === "blocked");
+      toggle.title = state.title;
+      toggle.setAttribute("aria-label", state.title);
+      const stateLabel = toggle.querySelector("[data-notification-toggle-state]");
+      if (stateLabel) stateLabel.textContent = state.label;
     }
 
     async function toggleNotifications() {

@@ -190,6 +190,13 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes response.body, 'data-notification-toggle'
       assert_includes response.body, 'aria-label="Enable notifications"'
+      assert_includes response.body, 'class="sidebar-notification-label">Notifications</span>'
+      assert_includes response.body, 'data-notification-toggle-state>Enable</span>'
+      enabled_state = 'if (notificationsEnabled()) return { name: "enabled", label: "On"'
+      blocked_state = 'if (!desktopNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied")'
+      assert_includes response.body, enabled_state
+      assert_includes response.body, blocked_state
+      assert_operator response.body.index(enabled_state), :<, response.body.index(blocked_state)
       refute_includes response.body, ">Notifications</a>"
     end
   end
