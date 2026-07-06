@@ -3,6 +3,7 @@ const content = document.getElementById("content");
 
 let config = null;
 let setupDraft = null;
+let renameDraft = null;
 const webviews = new Map();
 const offlineGateways = new Map();
 const loadingGateways = new Map();
@@ -19,6 +20,7 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 window.piGatewayDesktop.onAddGatewayRequested(() => {
+  renameDraft = null;
   setupDraft = { name: "", url: "http://localhost:4567/" };
   render();
 });
@@ -26,6 +28,7 @@ window.piGatewayDesktop.onAddGatewayRequested(() => {
 window.piGatewayDesktop.onGatewayActivationRequested(async (id) => {
   if (!config?.gateways.some((gateway) => gateway.id === id)) return;
   setupDraft = null;
+  renameDraft = null;
   config = await window.piGatewayDesktop.activateGateway(id);
   render();
 });
@@ -61,7 +64,7 @@ function render() {
 }
 
 function renderTabs() {
-  const showTabs = config.gateways.length > 1 || setupDraft;
+  const showTabs = config.gateways.length > 1 || setupDraft || renameDraft;
   document.body.classList.toggle("has-tabs", Boolean(showTabs));
   tabs.hidden = !showTabs;
   tabs.replaceChildren();
@@ -71,11 +74,12 @@ function renderTabs() {
   for (const gateway of config.gateways) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `tab${gateway.id === config.activeGatewayId && !setupDraft ? " active" : ""}`;
+    button.className = `tab${gateway.id === config.activeGatewayId && !setupDraft && !renameDraft ? " active" : ""}`;
     button.textContent = gatewayTabLabel(gateway);
     button.title = gateway.name;
     button.addEventListener("click", async () => {
       setupDraft = null;
+      renameDraft = null;
       config = await window.piGatewayDesktop.activateGateway(gateway.id);
       render();
     });
@@ -89,6 +93,14 @@ function renderTabs() {
     button.textContent = "New Server";
     tabs.append(button);
   }
+
+  if (renameDraft) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tab active";
+    button.textContent = "Rename Server";
+    tabs.append(button);
+  }
 }
 
 function renderContent() {
@@ -98,6 +110,11 @@ function renderContent() {
 
   if (setupDraft) {
     content.append(setupPanel(setupDraft));
+    return;
+  }
+
+  if (renameDraft) {
+    content.append(renamePanel(renameDraft));
     return;
   }
 
@@ -192,6 +209,7 @@ async function removeActiveGateway() {
 
   if (!window.confirm(`Remove server “${gateway.name}”?`)) return;
 
+  renameDraft = null;
   isRemovingGateway = true;
   try {
     config = await window.piGatewayDesktop.removeGateway(gateway.id);
@@ -210,11 +228,7 @@ async function removeActiveGateway() {
 async function renameActiveGateway() {
   if (!config || setupDraft) return;
 
-  const gateway = activeGateway();
-  const name = window.prompt("Rename current server", gateway.name);
-  if (name == null) return;
-
-  config = await window.piGatewayDesktop.saveGateway({ ...gateway, name });
+  renameDraft = activeGateway();
   render();
 }
 
@@ -310,6 +324,27 @@ function setupPanel(draft) {
   });
 }
 
+function renamePanel(gateway) {
+  return gatewayFormPanel({
+    title: "Rename Server",
+    description: "Update the display name for this Pi server.",
+    gateway,
+    saveLabel: "Rename",
+    cancelLabel: "Cancel",
+    showUrl: false,
+    onSave: async ({ name }) => {
+      const currentGateway = config.gateways.find((existingGateway) => existingGateway.id === gateway.id);
+      if (currentGateway) config = await window.piGatewayDesktop.saveGateway({ ...currentGateway, name });
+      renameDraft = null;
+      render();
+    },
+    onCancel: () => {
+      renameDraft = null;
+      render();
+    }
+  });
+}
+
 function offlinePanel(gateway, reason) {
   return gatewayFormPanel({
     title: `${gateway.name} is not reachable`,
@@ -334,7 +369,7 @@ function offlinePanel(gateway, reason) {
   });
 }
 
-function gatewayFormPanel({ title, description, gateway, saveLabel, cancelLabel, details, onSave, onCancel }) {
+function gatewayFormPanel({ title, description, gateway, saveLabel, cancelLabel, details, showUrl = true, onSave, onCancel }) {
   const panel = document.createElement("section");
   panel.className = "panel";
 
@@ -360,6 +395,8 @@ function gatewayFormPanel({ title, description, gateway, saveLabel, cancelLabel,
   card.querySelector(".description").textContent = description;
   card.elements.name.value = gateway.name || "";
   card.elements.url.value = gateway.url || "http://localhost:4567/";
+  card.elements.url.disabled = !showUrl;
+  card.elements.url.closest("label").hidden = !showUrl;
   card.querySelector(".muted").textContent = details || "";
 
   const actions = card.querySelector(".actions");

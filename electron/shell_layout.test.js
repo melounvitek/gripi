@@ -86,8 +86,13 @@ test("desktop server management uses server wording", () => {
   assert.match(main, /Remove Current Server…/);
   assert.match(shell, /Add Server/);
   assert.match(shell, /New Server/);
+  assert.match(shell, /Rename Server/);
   assert.match(shell, /Server URL/);
   assert.match(shell, /Remove server/);
+  assert.match(shell, /setupDraft = null;\n  renameDraft = null;\n  config = await window\.piGatewayDesktop\.activateGateway\(id\);/);
+  assert.match(shell, /renameDraft = null;\n  setupDraft = \{ name: "", url: "http:\/\/localhost:4567\/" \};/);
+  assert.match(shell, /const currentGateway = config\.gateways\.find\(\(existingGateway\) => existingGateway\.id === gateway\.id\);/);
+  assert.doesNotMatch(shell, /window\.prompt/);
   assert.doesNotMatch(shell, /Add Gateway|New Gateway|Gateway URL|Remove gateway/);
 });
 
