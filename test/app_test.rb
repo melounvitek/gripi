@@ -2153,6 +2153,7 @@ class AppTest < Minitest::Test
       refute document.at_css(".session-sidebar")
       refute document.at_css(".mobile-sidebar-backdrop")
       assert_includes response.body, 'if (new URLSearchParams(window.location.search).get("session_only") === "1") formData.set("session_only", "1");'
+      assert_includes response.body, "if (!sessionSidebar) return;"
       refute document.at_css('.session-header-actions a[aria-label="Open session in new window"]')
     end
   end
@@ -2170,6 +2171,7 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_equal path, query["session"]
       assert_equal "1", query["session_only"]
+      assert_nil payload["sidebar_html"]
     end
   end
 

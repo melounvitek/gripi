@@ -2981,6 +2981,7 @@
 
     function scheduleSidebarRefresh(delay = 2500) {
       clearTimeout(sidebarRefreshTimer);
+      if (!sessionSidebar) return;
       if (document.hidden || modalIsOpen()) return;
       sidebarRefreshTimer = setTimeout(() => refreshSidebar().catch(() => {}), delay);
     }
@@ -3105,6 +3106,7 @@
     }
 
     async function refreshSidebar(generation = sessionViewGeneration) {
+      if (!sessionSidebar) return;
       if (modalIsOpen()) return;
       if (sidebarControlActive() || recentlyInteractedWithSidebar()) {
         scheduleSidebarRefresh(1000);

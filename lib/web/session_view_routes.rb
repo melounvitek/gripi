@@ -78,7 +78,7 @@ module Web
           url: session_view_url,
           title: @selected_session&.display_name.to_s,
           session: @selected_session&.path,
-          sidebar_html: erb(:_sidebar, layout: false),
+          sidebar_html: session_only? ? nil : erb(:_sidebar, layout: false),
           conversation_html: erb(:_conversation, layout: false),
           new_session_modal_html: erb(:_new_session_modal, layout: false),
           fork_session_modal_html: erb(:_fork_session_modal, layout: false)
