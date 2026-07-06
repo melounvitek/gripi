@@ -127,8 +127,15 @@ function installAppMenu() {
       label: "File",
       submenu: [
         {
-          label: "Add Server…",
+          label: "New Session…",
           accelerator: "CmdOrCtrl+N",
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send("gateway:new-session-requested");
+          }
+        },
+        {
+          label: "Add Server…",
+          accelerator: "CmdOrCtrl+Shift+N",
           click: () => {
             if (mainWindow) mainWindow.webContents.send("gateway:add-requested");
           }
@@ -143,6 +150,13 @@ function installAppMenu() {
           label: "Remove Current Server…",
           click: () => {
             if (mainWindow) mainWindow.webContents.send("gateway:remove-requested");
+          }
+        },
+        {
+          label: "Next Server",
+          accelerator: "Ctrl+Tab",
+          click: () => {
+            if (mainWindow) mainWindow.webContents.send("gateway:activate-next-requested");
           }
         },
         { type: "separator" },

@@ -188,8 +188,9 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => session_path })
 
       assert_equal 200, response.status
-      assert_includes response.body, 'href="/notification-test"'
-      assert_includes response.body, "Notifications"
+      assert_includes response.body, 'data-notification-toggle'
+      assert_includes response.body, 'aria-label="Enable notifications"'
+      refute_includes response.body, ">Notifications</a>"
     end
   end
 
@@ -4253,6 +4254,9 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "function enterSessionShortcutMode()"
+      assert_includes response.body, "function openNewSessionModal()"
+      assert_includes response.body, "isCtrlOrMetaShortcut(event, \"n\")"
+      assert_includes response.body, "window.addEventListener(\"pi:new-session-requested\""
       assert_includes response.body, "event.key === \"Control\""
       assert_includes response.body, "if (!event.ctrlKey) return;"
       assert_includes response.body, "function recentSessionShortcutFromEvent(event)"
@@ -4642,6 +4646,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "if (roleName !== \"assistant\" || event.type !== \"message_end\") return;"
       assert_includes response.body, "if (sessionIsActivelyViewed(sessionPath)) return;"
       assert_includes response.body, "const body = notificationReplyPreview(finalAssistantReplyText(message));"
+      assert_includes response.body, "if (notificationsDisabled()) return;"
       assert_includes response.body, "showPiNotification(name, body, window.location.href, `pi-final-reply:${sessionPath}`)"
       assert_includes response.body, "notifyFinalAssistantReply(event);"
     end

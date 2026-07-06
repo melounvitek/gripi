@@ -30,6 +30,14 @@ window.piGatewayDesktop.onGatewayActivationRequested(async (id) => {
   render();
 });
 
+window.piGatewayDesktop.onNewSessionRequested(() => {
+  openActiveGatewayNewSessionModal();
+});
+
+window.piGatewayDesktop.onNextGatewayRequested(async () => {
+  await activateNextGateway();
+});
+
 window.piGatewayDesktop.onRemoveGatewayRequested(async () => {
   await removeActiveGateway();
 });
@@ -212,6 +220,25 @@ async function renameActiveGateway() {
 
 function activeGateway() {
   return config.gateways.find((gateway) => gateway.id === config.activeGatewayId) || config.gateways[0];
+}
+
+function openActiveGatewayNewSessionModal() {
+  if (!config || setupDraft) return;
+
+  const webview = webviews.get(activeGateway().id);
+  if (!webview || webview.hidden) return;
+
+  webview.executeJavaScript('window.dispatchEvent(new CustomEvent("pi:new-session-requested"))', true).catch(() => {});
+}
+
+async function activateNextGateway() {
+  if (!config || setupDraft || config.gateways.length <= 1) return;
+
+  const currentIndex = Math.max(0, config.gateways.findIndex((gateway) => gateway.id === config.activeGatewayId));
+  const nextGateway = config.gateways[(currentIndex + 1) % config.gateways.length];
+  setupDraft = null;
+  config = await window.piGatewayDesktop.activateGateway(nextGateway.id);
+  render();
 }
 
 function gatewayTabLabel(gateway) {

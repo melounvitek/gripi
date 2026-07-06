@@ -84,8 +84,10 @@
     .session-shortcut { display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid rgba(138, 190, 183, 0.55); border-radius: 999px; background: rgba(138, 190, 183, 0.14); color: var(--accent); font-size: 0.76rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
     body.session-shortcuts-visible .recent-session .session-shortcut { display: inline-flex; }
     .session-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sidebar-notification-test-link { display: flex; align-items: center; justify-content: center; margin-top: 1.25rem; padding: 0.65rem 0.75rem; border-radius: 0.6rem; background: var(--panel-softer); color: var(--text); font-size: 0.86rem; font-weight: 800; text-decoration: none; }
-    .sidebar-notification-test-link:hover { background: var(--border); }
+    .sidebar-notification-toggle { width: 100%; justify-self: stretch; display: flex; align-items: center; justify-content: center; margin-top: 1.25rem; padding: 0.65rem 0.75rem; border-radius: 0.6rem; background: var(--panel-softer); color: var(--text); font-size: 1.05rem; font-weight: 800; text-decoration: none; }
+    .sidebar-notification-toggle:hover { background: var(--border); }
+    .sidebar-notification-toggle.is-enabled { color: var(--accent); }
+    .sidebar-notification-toggle.is-disabled { color: var(--muted); }
     .session-project { display: inline-block; max-width: 100%; margin-top: 0.32rem; padding: 0.1rem 0.42rem; border: 1px solid rgba(138, 190, 183, 0.28); border-radius: 999px; background: rgba(138, 190, 183, 0.08); color: var(--accent); font-size: 0.72rem; font-weight: 800; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid rgba(138, 190, 183, 0.22); border-radius: 0.7rem; background: rgba(8, 13, 32, 0.42); color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
     .session-relation-tree-heading { cursor: pointer; color: #f0c7a4; font-size: 0.7rem; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; }
@@ -506,6 +508,7 @@
       liveStatusThinking = existingModelMatch?.[2] || null;
       reconnectBanner = document.querySelector(".session-reconnect");
       reconnectButton = document.querySelector(".reconnect-button");
+      updateNotificationToggle();
       bindSidebarScrollTracking();
       syncMobileSessionsUnreadBadges();
     }
@@ -926,6 +929,50 @@
       return desktopNotificationAvailable() || ("Notification" in window && "serviceWorker" in navigator);
     }
 
+    function notificationsDisabled() {
+      return localStorage.getItem("pi:notifications-disabled") === "true";
+    }
+
+    function notificationsEnabled() {
+      return !notificationsDisabled() && (desktopNotificationAvailable() || (("Notification" in window) && Notification.permission === "granted"));
+    }
+
+    function updateNotificationToggle() {
+      const toggle = document.querySelector("[data-notification-toggle]");
+      if (!toggle) return;
+
+      const enabled = notificationsEnabled();
+      const disabled = notificationsDisabled();
+      toggle.classList.toggle("is-enabled", enabled);
+      toggle.classList.toggle("is-disabled", disabled || !enabled);
+      toggle.title = enabled ? "Disable notifications" : "Enable notifications";
+      toggle.setAttribute("aria-label", toggle.title);
+      const icon = toggle.querySelector("[data-notification-toggle-icon]");
+      if (icon) icon.textContent = enabled ? "🔕" : "🔔";
+    }
+
+    async function toggleNotifications() {
+      if (notificationsEnabled()) {
+        localStorage.setItem("pi:notifications-disabled", "true");
+        updateNotificationToggle();
+        return;
+      }
+
+      localStorage.removeItem("pi:notifications-disabled");
+      if (desktopNotificationAvailable()) {
+        updateNotificationToggle();
+        return;
+      }
+
+      if (!notificationAvailable() || Notification.permission === "denied") {
+        window.location.href = "/notification-test";
+        return;
+      }
+
+      if (Notification.permission === "default") await Notification.requestPermission();
+      updateNotificationToggle();
+    }
+
     async function ensureNotificationWorker() {
       if (desktopNotificationAvailable() || !notificationAvailable() || Notification.permission !== "granted") return null;
       notificationRegistration ||= await navigator.serviceWorker.register("/service-worker.js");
@@ -934,6 +981,8 @@
     }
 
     async function showPiNotification(title, body, url, tag) {
+      if (notificationsDisabled()) return;
+
       if (desktopNotificationAvailable()) {
         await window.piGatewayElectron.showNotification({ type: "pi-notification", title, body, url, tag });
         return;
@@ -3241,6 +3290,14 @@
       if (toggle) toggle.checked = false;
     }
 
+    function openNewSessionModal() {
+      openModal(document.querySelector('[data-modal="new-session-modal"]'));
+    }
+
+    function isCtrlOrMetaShortcut(event, key) {
+      return (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === key;
+    }
+
     function modalIsOpen() {
       return !!document.querySelector("[data-modal]:not([hidden])");
     }
@@ -3642,6 +3699,16 @@
       setNewSessionProjectMode(button.closest("form"));
     });
 
+    document.addEventListener("click", (event) => {
+      const toggle = event.target.closest("[data-notification-toggle]");
+      if (!toggle) return;
+
+      event.preventDefault();
+      toggleNotifications().catch(() => {
+        window.location.href = "/notification-test";
+      });
+    });
+
     document.addEventListener("submit", async (event) => {
       const cloneForm = event.target.closest(".clone-session-form");
       if (!cloneForm) return;
@@ -3717,6 +3784,8 @@
       }
     });
 
+    window.addEventListener("pi:new-session-requested", () => openNewSessionModal());
+
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && modalIsOpen()) {
         event.preventDefault();
@@ -3725,6 +3794,12 @@
       }
 
       if (modalIsOpen()) return;
+
+      if (isCtrlOrMetaShortcut(event, "n") && !event.shiftKey) {
+        event.preventDefault();
+        openNewSessionModal();
+        return;
+      }
 
       if (event.key === "Escape" && confirmOrStopRunningTask(event)) return;
 

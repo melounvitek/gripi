@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld("piGatewayDesktop", {
   onGatewayActivationRequested: (callback) => {
     ipcRenderer.on("gateway:activate-requested", (_event, id) => callback(id));
   },
+  onNewSessionRequested: (callback) => {
+    ipcRenderer.on("gateway:new-session-requested", callback);
+  },
+  onNextGatewayRequested: (callback) => {
+    ipcRenderer.on("gateway:activate-next-requested", callback);
+  },
   onRemoveGatewayRequested: (callback) => {
     ipcRenderer.on("gateway:remove-requested", callback);
   },

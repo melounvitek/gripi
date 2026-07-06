@@ -108,3 +108,23 @@ test("desktop shell can activate the gateway that emitted a notification", () =>
   assert.match(shell, /onGatewayActivationRequested/);
   assert.match(shell, /activateGateway\(id\)/);
 });
+
+test("desktop shortcuts separate new sessions from server management", () => {
+  const main = read("electron/main.js");
+  const preload = read("electron/preload.js");
+  const shell = read("electron/shell.js");
+
+  assert.match(main, /label: "New Session…"/);
+  assert.match(main, /accelerator: "CmdOrCtrl\+N"/);
+  assert.match(main, /gateway:new-session-requested/);
+  assert.match(main, /label: "Add Server…"/);
+  assert.match(main, /accelerator: "CmdOrCtrl\+Shift\+N"/);
+  assert.match(main, /accelerator: "Ctrl\+Tab"/);
+  assert.match(main, /gateway:activate-next-requested/);
+  assert.match(preload, /onNewSessionRequested/);
+  assert.match(preload, /onNextGatewayRequested/);
+  assert.match(shell, /onNewSessionRequested/);
+  assert.match(shell, /openActiveGatewayNewSessionModal/);
+  assert.match(shell, /onNextGatewayRequested/);
+  assert.match(shell, /activateNextGateway/);
+});
