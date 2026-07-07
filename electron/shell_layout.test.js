@@ -133,4 +133,7 @@ test("desktop shortcuts separate new sessions from server management", () => {
   assert.match(shell, /openActiveGatewayNewSessionModal/);
   assert.match(shell, /onNextGatewayRequested/);
   assert.match(shell, /activateNextGateway/);
+  assert.match(shell, /focusActiveGatewayPrompt/);
+  assert.match(shell, /webview\.focus\(\);/);
+  assert.match(shell, /window\.dispatchEvent\(new CustomEvent\("pi:desktop-server-activated"\)\)/);
 });

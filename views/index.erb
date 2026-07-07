@@ -3800,7 +3800,12 @@
       }
     });
 
+    function focusPromptAfterDesktopServerActivation() {
+      if (shouldAutofocusPrompt()) promptTextarea?.focus({ preventScroll: true });
+    }
+
     window.addEventListener("pi:new-session-requested", () => openNewSessionModal());
+    window.addEventListener("pi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && modalIsOpen()) {

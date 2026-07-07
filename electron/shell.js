@@ -253,6 +253,17 @@ async function activateNextGateway() {
   setupDraft = null;
   config = await window.piGatewayDesktop.activateGateway(nextGateway.id);
   render();
+  focusActiveGatewayPrompt();
+}
+
+function focusActiveGatewayPrompt() {
+  if (!config || setupDraft) return;
+
+  const webview = webviews.get(activeGateway().id);
+  if (!webview || webview.hidden) return;
+
+  webview.focus();
+  webview.executeJavaScript('window.dispatchEvent(new CustomEvent("pi:desktop-server-activated"))', true).catch(() => {});
 }
 
 function gatewayTabLabel(gateway) {

@@ -4266,6 +4266,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function openNewSessionModal()"
       assert_includes response.body, "isCtrlOrMetaShortcut(event, \"n\")"
       assert_includes response.body, "window.addEventListener(\"pi:new-session-requested\""
+      assert_includes response.body, "window.addEventListener(\"pi:desktop-server-activated\""
+      assert_includes response.body, "focusPromptAfterDesktopServerActivation"
       assert_includes response.body, "event.key === \"Control\""
       assert_includes response.body, "if (!event.ctrlKey) return;"
       assert_includes response.body, "function recentSessionShortcutFromEvent(event)"
