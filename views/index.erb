@@ -3367,7 +3367,8 @@
       workspaceAccessPollTimer = null;
       abortEventPoll();
       document.body.classList.add("modal-open");
-      modal.querySelector("input, select, textarea, button")?.focus();
+      const defaultFocus = modal.querySelector("[data-modal-default-focus]:not(:disabled)");
+      (defaultFocus || modal.querySelector("input, select, textarea, button"))?.focus();
     }
 
     function closeModal(modal) {
@@ -3379,7 +3380,12 @@
         scheduleSidebarRefresh(0);
         if (document.body.dataset.browserAccessEnabled === "true" && !browserAccessPollTimer) pollBrowserAccessRequests();
         if (document.body.dataset.workspaceAccessEnabled === "true" && !workspaceAccessPollTimer) pollWorkspaceAccessRequests();
+        focusPromptAfterModalClose(modal);
       }
+    }
+
+    function focusPromptAfterModalClose(modal) {
+      if (modal?.dataset.modal === "new-session-modal" && shouldAutofocusPrompt()) promptTextarea?.focus({ preventScroll: true });
     }
 
     function setCwdValidationState(form, state, message) {
@@ -3845,6 +3851,17 @@
     window.addEventListener("pi:new-session-requested", () => openNewSessionModal());
     window.addEventListener("pi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
+    function handleNewSessionModalTab(event) {
+      if (event.key !== "Tab") return;
+      const modal = document.querySelector('[data-modal="new-session-modal"]:not([hidden])');
+      const select = modal?.querySelector("[data-new-session-known-cwd]");
+      const submit = modal?.querySelector("[data-new-session-submit]:not(:disabled)");
+      if (!modal || !select || select.closest("[hidden]") || !submit) return;
+
+      event.preventDefault();
+      (document.activeElement === select ? submit : select).focus();
+    }
+
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && modalIsOpen()) {
         event.preventDefault();
@@ -3852,6 +3869,7 @@
         return;
       }
 
+      handleNewSessionModalTab(event);
       if (modalIsOpen()) return;
 
       if (isCtrlOrMetaShortcut(event, "n") && !event.shiftKey) {

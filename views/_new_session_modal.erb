@@ -2,7 +2,7 @@
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="new-session-modal-title">
       <div class="modal-header">
         <h2 id="new-session-modal-title">New session</h2>
-        <button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>&times;</button>
+        <button type="button" class="modal-close-button secondary" aria-label="Close" tabindex="-1" data-modal-close>&times;</button>
       </div>
       <% default_new_session_cwd = new_session_cwds.first %>
       <% new_path_option_value = "__new_path__" %>
@@ -36,8 +36,7 @@
         </div>
         <div class="cwd-validation-message" data-new-session-cwd-message aria-live="polite"<%= default_new_session_cwd ? " hidden" : "" %>>Enter an existing directory.</div>
         <div class="modal-actions">
-          <button type="button" class="secondary" data-modal-close>Cancel</button>
-          <button type="submit" data-new-session-submit<%= default_new_session_cwd ? "" : " disabled" %>>Start session</button>
+          <button type="submit" data-new-session-submit data-modal-default-focus<%= default_new_session_cwd ? "" : " disabled" %>>Start session</button>
         </div>
       </form>
     </div>

@@ -2726,6 +2726,9 @@ class AppTest < Minitest::Test
       project_option = modal.css('option').find { |option| option["value"] == project_cwd(dir) }
       assert_equal File.basename(project_cwd(dir)), project_option.text
       assert_includes modal.text, "Start session"
+      refute_includes modal.text, "Cancel"
+      assert modal.at_css('button[data-new-session-submit][data-modal-default-focus]')
+      assert_equal "-1", modal.at_css('button[data-modal-close]')["tabindex"]
       assert_includes modal.text, "Project"
       assert modal.at_css('[data-new-session-project-fields]')
       assert modal.at_css('[data-new-session-path-fields]').key?("hidden")
@@ -2889,6 +2892,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function openModal(modal)"
       assert_includes response.body, "function closeModal(modal)"
       assert_includes response.body, "function modalIsOpen()"
+      assert_includes response.body, "function focusPromptAfterModalClose(modal)"
+      assert_includes response.body, "function handleNewSessionModalTab(event)"
       assert_includes response.body, ".session-switch-overlay { position: fixed; inset: 0; z-index: 140;"
       assert_includes response.body, ".modal-overlay { place-items: end stretch; padding: 0; }"
       assert_includes response.body, "submit.textContent = \"Starting…\""
@@ -2906,6 +2911,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const originalForkText = forkOption.textContent;"
       assert_includes response.body, "forkOption.textContent = originalForkText;"
       assert_includes response.body, "showStatus(\"Could not fork this session\", true);"
+      assert_includes response.body, "modal.querySelector(\"[data-modal-default-focus]:not(:disabled)\")"
+      assert_includes response.body, "focusPromptAfterModalClose(modal);"
+      assert_includes response.body, "handleNewSessionModalTab(event);"
       refute_includes response.body, "function makeForkButton(entryId)"
       refute_includes response.body, "function forkEntryIdFromEvent(event, message)"
       refute_includes response.body, "function scheduleResolveForkButton(entry, text)"
