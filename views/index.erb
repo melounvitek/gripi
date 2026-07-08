@@ -2932,6 +2932,11 @@
     }
 
     async function copyText(text) {
+      if (window.piGatewayElectron?.copyText) {
+        const result = await window.piGatewayElectron.copyText(text);
+        if (result?.ok) return true;
+      }
+
       if (navigator.clipboard?.writeText && window.isSecureContext) {
         try {
           await navigator.clipboard.writeText(text);

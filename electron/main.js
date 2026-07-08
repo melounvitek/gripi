@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, clipboard, ipcMain, session, shell } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -84,6 +84,10 @@ function registerGatewayConfigIpc() {
 
   ipcMain.handle("gateway-notification:show", (event, payload) => {
     return showGatewayNotification(event, payload);
+  });
+
+  ipcMain.handle("gateway-clipboard:write", (event, text) => {
+    return writeGatewayClipboard(event, text);
   });
 
   ipcMain.handle("gateway-config:activate", (_event, id) => {
@@ -214,6 +218,17 @@ function installGatewayPermissionHandlers(partition, allowedOrigin) {
   gatewaySession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
     callback(allowedGatewayPermissions.has(permission) && details.requestingOrigin === allowedOrigin);
   });
+}
+
+function writeGatewayClipboard(event, text) {
+  const sender = event.sender;
+  const gateway = gatewayWebContents.get(sender.id);
+  if (!gateway || !sameOrigin(sender.getURL(), gateway.allowedOrigin)) return { ok: false };
+  if (!sameOrigin(event.senderFrame?.url, gateway.allowedOrigin)) return { ok: false };
+  if (typeof text !== "string") return { ok: false };
+
+  clipboard.writeText(text);
+  return { ok: true };
 }
 
 function showGatewayNotification(event, payload) {

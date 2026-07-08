@@ -77,6 +77,19 @@ test("desktop gateway webviews allow same-origin clipboard writes", () => {
   assert.match(main, /allowedGatewayPermissions\.has\(permission\) && details\.requestingOrigin === allowedOrigin/);
 });
 
+test("desktop gateway webviews install an app clipboard bridge", () => {
+  const main = read("electron/main.js");
+  const preload = read("electron/gateway_preload.js");
+
+  assert.match(main, /clipboard/);
+  assert.match(main, /ipcMain\.handle\("gateway-clipboard:write"/);
+  assert.match(main, /clipboard\.writeText\(text\)/);
+  assert.match(main, /sameOrigin\(event\.senderFrame\?\.url, gateway\.allowedOrigin\)/);
+  assert.match(preload, /copyText: \(text\) => ipcRenderer\.invoke\("gateway-clipboard:write", text\)/);
+  assert.match(preload, /data-copy-target/);
+  assert.match(preload, /stopImmediatePropagation\(\)/);
+});
+
 test("desktop shell does not reset an existing gateway webview after in-app navigation", () => {
   const shell = read("electron/shell.js");
 

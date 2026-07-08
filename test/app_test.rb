@@ -5072,6 +5072,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "data-copy-target"
       assert_includes response.body, "enhanceMarkdownCodeBlocks(body)"
       assert_includes response.body, 'button.dataset.copyTarget === "code-block"'
+      assert_includes response.body, "window.piGatewayElectron?.copyText"
       assert_includes response.body, "navigator.clipboard.writeText"
       assert_includes response.body, "window.isSecureContext"
       assert_includes response.body, "catch (_error)"
