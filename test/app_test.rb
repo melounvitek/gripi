@@ -4450,6 +4450,41 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_live_output_restores_running_tool_progress_with_the_current_event_cursor
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      client = FakeRpcClient.new([], [{ "type" => "old" }])
+      def client.live_snapshot
+        {
+          event_sequence: 7,
+          active_tool_events: [
+            {
+              "type" => "tool_execution_update",
+              "toolCallId" => "call-1",
+              "toolName" => "subagent",
+              "partialResult" => { "content" => [{ "type" => "text", "text" => "Reviewing" }] }
+            }
+          ]
+        }
+      end
+      registry.register(path, client)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      live_output = document.at_css("#live-output")
+      assert_equal "7", live_output["data-events-after"]
+      assert_equal "call-1", JSON.parse(live_output["data-active-tool-events"]).first["toolCallId"]
+      assert_includes response.body, "function restoreActiveToolExecutions()"
+      assert_includes response.body, "restoreActiveToolExecutions();"
+      assert_includes response.body, "renderToolExecutionEvent(event);"
+    end
+  end
+
   def test_live_event_script_schedules_non_overlapping_polls
     Dir.mktmpdir do |dir|
       path = write_session(dir)

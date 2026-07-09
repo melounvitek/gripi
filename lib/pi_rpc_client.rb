@@ -5,6 +5,10 @@ require "thread"
 
 class PiRpcClient
   DEFAULT_EVENT_BUFFER_LIMIT = 5_000
+  MAX_ACTIVE_TOOL_SNAPSHOTS = 16
+  MAX_ACTIVE_TOOL_SNAPSHOT_BYTES = 64 * 1024
+  MAX_ACTIVE_TOOL_SNAPSHOT_ID_BYTES = 1_024
+  SNAPSHOT_TOOL_NAME = "subagent"
   GATEWAY_EXTENSION_PATH = File.expand_path("../pi_extensions/pi-web-gateway-tree.ts", __dir__)
   RUBY_ENV_KEYS = %w[
     GEM_HOME
@@ -51,6 +55,7 @@ class PiRpcClient
     @pending_ids = {}
     @events = []
     @event_sequence = 0
+    @active_tool_events = {}
     @event_buffer_limit = event_buffer_limit
     @clock = clock
     @mutex = Mutex.new
@@ -153,6 +158,15 @@ class PiRpcClient
 
   def event_sequence
     @mutex.synchronize { @event_sequence }
+  end
+
+  def live_snapshot
+    @mutex.synchronize do
+      {
+        event_sequence: @event_sequence,
+        active_tool_events: @active_tool_events.values
+      }
+    end
   end
 
   def busy?
@@ -276,7 +290,7 @@ class PiRpcClient
       next if line.strip.empty?
 
       begin
-        store_response(JSON.parse(line))
+        store_response(JSON.parse(line), serialized_bytesize: line.bytesize)
       rescue JSON::ParserError
         next
       end
@@ -288,24 +302,59 @@ class PiRpcClient
       @reader_running = false
       @agent_running = false
       @compacting = false
+      @active_tool_events.clear
       @busy = false
       @busy_since = nil
       @condition.broadcast
     end
   end
 
-  def store_response(response)
+  def store_response(response, serialized_bytesize:)
     @mutex.synchronize do
       if response["id"] && @pending_ids.delete(response["id"])
         @responses[response["id"]] = response
       else
         update_busy_state(response)
+        update_active_tool_events(response, serialized_bytesize)
         @event_sequence += 1
         @events << [@event_sequence, response]
         @events.shift while @events.length > @event_buffer_limit
       end
       @condition.broadcast
     end
+  end
+
+  def update_active_tool_events(response, serialized_bytesize)
+    if response["type"] == "agent_end"
+      @active_tool_events.clear
+      return
+    end
+
+    tool_call_id = response["toolCallId"]
+    return unless tool_call_id.is_a?(String) && tool_call_id.bytesize <= MAX_ACTIVE_TOOL_SNAPSHOT_ID_BYTES
+
+    if response["type"] == "tool_execution_end"
+      @active_tool_events.delete(tool_call_id)
+    elsif ["tool_execution_start", "tool_execution_update"].include?(response["type"]) && response["toolName"] == SNAPSHOT_TOOL_NAME
+      return if !@active_tool_events.key?(tool_call_id) && @active_tool_events.length >= MAX_ACTIVE_TOOL_SNAPSHOTS
+
+      snapshot = bounded_active_tool_event(response, serialized_bytesize)
+      @active_tool_events[tool_call_id] = snapshot if snapshot
+    end
+  end
+
+  def bounded_active_tool_event(response, serialized_bytesize)
+    return response if serialized_bytesize <= MAX_ACTIVE_TOOL_SNAPSHOT_BYTES
+
+    fallback = {
+      "type" => "tool_execution_update",
+      "toolCallId" => response["toolCallId"],
+      "toolName" => SNAPSHOT_TOOL_NAME,
+      "partialResult" => {
+        "content" => [{ "type" => "text", "text" => "Subagent is still running…" }]
+      }
+    }
+    fallback if JSON.generate(fallback).bytesize <= MAX_ACTIVE_TOOL_SNAPSHOT_BYTES
   end
 
   def update_busy_state(response)

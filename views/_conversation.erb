@@ -40,7 +40,8 @@
           <% end %>
 
           <% busy_since = rpc_clients.busy_since(@selected_session.path) %>
-          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h rpc_clients.event_sequence(@selected_session.path) %>" data-composer-state="<%= rpc_clients.busy?(@selected_session.path) ? "running" : "idle" %>" data-composer-state-since="<%= h(busy_since ? (busy_since.to_f * 1000).to_i : "") %>" data-agent-running="<%= rpc_clients.agent_running?(@selected_session.path) ? "true" : "false" %>"></section>
+          <% live_snapshot = rpc_clients.live_snapshot(@selected_session.path) %>
+          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h live_snapshot.fetch(:event_sequence) %>" data-active-tool-events="<%= h JSON.generate(live_snapshot.fetch(:active_tool_events)) %>" data-composer-state="<%= rpc_clients.busy?(@selected_session.path) ? "running" : "idle" %>" data-composer-state-since="<%= h(busy_since ? (busy_since.to_f * 1000).to_i : "") %>" data-agent-running="<%= rpc_clients.agent_running?(@selected_session.path) ? "true" : "false" %>"></section>
           <div class="jump-controls jump-controls--bottom">
             <button type="button" class="jump-button jump-to-latest" aria-label="Bottom">↓↓</button>
           </div>

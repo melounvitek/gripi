@@ -2156,6 +2156,19 @@
       if (entry) liveToolExecutions.set(event.toolCallId, entry);
     }
 
+    function restoreActiveToolExecutions() {
+      if (!liveOutput?.dataset.activeToolEvents) return;
+
+      const serializedEvents = liveOutput.dataset.activeToolEvents;
+      delete liveOutput.dataset.activeToolEvents;
+      try {
+        const events = JSON.parse(serializedEvents);
+        if (!Array.isArray(events)) return;
+        events.forEach((event) => renderToolExecutionEvent(event));
+      } catch (_error) {
+      }
+    }
+
     function removePendingCompactionMessage() {
       liveOutput?.querySelectorAll('[data-pending-compaction="true"]').forEach((entry) => entry.remove());
     }
@@ -4160,6 +4173,7 @@
         const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);
         liveAgentRunning = liveOutput.dataset.agentRunning === "true";
         if (initialComposerState === "running") setComposerState(initialComposerState, "Pi is running…", initialComposerStateSince);
+        restoreActiveToolExecutions();
         scheduleNextEventPoll(0);
         positionInitialConversationAtBottom();
         loadOlderConversationHistory(sessionViewGeneration).catch(() => {});

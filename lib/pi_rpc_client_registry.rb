@@ -40,6 +40,17 @@ class PiRpcClientRegistry
     client&.respond_to?(:event_sequence) ? client.event_sequence : 0
   end
 
+  def live_snapshot(session_path)
+    client = client_for(session_path)
+    return { event_sequence: 0, active_tool_events: [] } unless client
+    return client.live_snapshot if client.respond_to?(:live_snapshot)
+
+    {
+      event_sequence: client.respond_to?(:event_sequence) ? client.event_sequence : 0,
+      active_tool_events: []
+    }
+  end
+
   def busy?(session_path)
     client = client_for(session_path)
     client&.respond_to?(:busy?) ? client.busy? : false

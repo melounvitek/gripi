@@ -153,6 +153,105 @@ class PiRpcClientTest < Minitest::Test
     assert_includes error.message, "Pi RPC process exited before accepting command"
   end
 
+  def test_snapshots_latest_updates_for_running_tools_with_the_event_cursor
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    writer.puts JSON.generate({ type: "tool_execution_start", toolCallId: "call-1", toolName: "subagent", args: {} })
+    writer.puts JSON.generate({ type: "tool_execution_update", toolCallId: "call-1", toolName: "subagent", partialResult: { content: [{ type: "text", text: "first" }] } })
+    latest_update = { type: "tool_execution_update", toolCallId: "call-1", toolName: "subagent", partialResult: { content: [{ type: "text", text: "latest" }] } }
+    writer.puts JSON.generate(latest_update)
+    writer.puts JSON.generate({ type: "tool_execution_update", toolCallId: "call-2", toolName: "custom_tool", partialResult: { content: [{ type: "text", text: "unrelated progress" }] } })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+
+    assert_equal({ event_sequence: 4, active_tool_events: [JSON.parse(JSON.generate(latest_update))] }, client.live_snapshot)
+
+    writer.puts JSON.generate({ type: "tool_execution_end", toolCallId: "call-1", toolName: "subagent", result: { content: [{ type: "text", text: "done" }] } })
+    writer.puts JSON.generate({ id: "state-2", type: "state" })
+    client.request("get_state", id: "state-2")
+
+    assert_equal({ event_sequence: 5, active_tool_events: [] }, client.live_snapshot)
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_clears_running_tool_snapshots_when_the_agent_ends
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    writer.puts JSON.generate({ type: "tool_execution_start", toolCallId: "call-1", toolName: "subagent", args: {} })
+    writer.puts JSON.generate({ type: "agent_end" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+
+    assert_equal({ event_sequence: 2, active_tool_events: [] }, client.live_snapshot)
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_bounds_large_running_tool_snapshots
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+    request_thread = Thread.new { client.request("get_state", id: "state-1") }
+    Timeout.timeout(1) { sleep 0.01 until input.string.include?("get_state") }
+
+    writer.puts JSON.generate({
+      type: "tool_execution_update",
+      toolCallId: "call-1",
+      toolName: "subagent",
+      partialResult: { content: [{ type: "text", text: "x" * (PiRpcClient::MAX_ACTIVE_TOOL_SNAPSHOT_BYTES + 1) }] }
+    })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    request_thread.join(1)
+
+    event = client.live_snapshot.fetch(:active_tool_events).first
+    assert_operator JSON.generate(event).bytesize, :<=, PiRpcClient::MAX_ACTIVE_TOOL_SNAPSHOT_BYTES
+    assert_equal "Subagent is still running…", event.dig("partialResult", "content", 0, "text")
+  ensure
+    request_thread&.kill
+    writer&.close
+    reader&.close
+  end
+
+  def test_drops_running_tool_snapshots_with_oversized_ids
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+    oversized_id = "x" * (PiRpcClient::MAX_ACTIVE_TOOL_SNAPSHOT_ID_BYTES + 1)
+
+    writer.puts JSON.generate({ type: "tool_execution_start", toolCallId: oversized_id, toolName: "subagent", args: {} })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+
+    assert_empty client.live_snapshot.fetch(:active_tool_events)
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_limits_concurrent_running_tool_snapshots
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    (PiRpcClient::MAX_ACTIVE_TOOL_SNAPSHOTS + 1).times do |index|
+      writer.puts JSON.generate({ type: "tool_execution_start", toolCallId: "call-#{index}", toolName: "subagent", args: {} })
+    end
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+
+    assert_equal PiRpcClient::MAX_ACTIVE_TOOL_SNAPSHOTS, client.live_snapshot.fetch(:active_tool_events).length
+  ensure
+    writer&.close
+    reader&.close
+  end
+
   def test_reports_missed_events_when_cursor_precedes_buffer
     input = StringIO.new
     output = StringIO.new([
@@ -282,7 +381,10 @@ class PiRpcClientTest < Minitest::Test
 
   def test_clears_busy_state_when_reader_exits
     input = StringIO.new
-    output = StringIO.new(JSON.generate({ type: "turn_start" }) + "\n")
+    output = StringIO.new([
+      JSON.generate({ type: "turn_start" }),
+      JSON.generate({ type: "tool_execution_start", toolCallId: "call-1", toolName: "subagent", args: {} })
+    ].join("\n") + "\n")
     client = PiRpcClient.new(stdin: input, stdout: output)
 
     client.events_after(0)
@@ -290,6 +392,7 @@ class PiRpcClientTest < Minitest::Test
 
     refute client.busy?
     assert_nil client.busy_since
+    assert_empty client.live_snapshot.fetch(:active_tool_events)
   end
 
   def test_includes_payload_fields_in_command
