@@ -25,6 +25,10 @@ window.piGatewayDesktop.onAddGatewayRequested(() => {
   render();
 });
 
+window.piGatewayDesktop.onFindInSessionRequested(() => {
+  dispatchActiveGatewayEvent("pi:current-session-find-requested");
+});
+
 window.piGatewayDesktop.onGatewayActivationRequested(async (id) => {
   if (!config?.gateways.some((gateway) => gateway.id === id)) return;
   setupDraft = null;
@@ -47,6 +51,19 @@ window.piGatewayDesktop.onRemoveGatewayRequested(async () => {
 
 window.piGatewayDesktop.onRenameGatewayRequested(async () => {
   await renameActiveGateway();
+});
+
+window.piGatewayDesktop.onSearchSessionsRequested(async (gatewayId) => {
+  if (gatewayId && config?.gateways.some((gateway) => gateway.id === gatewayId)) {
+    setupDraft = null;
+    renameDraft = null;
+    if (gatewayId !== config.activeGatewayId) {
+      config = await window.piGatewayDesktop.activateGateway(gatewayId);
+    }
+    render();
+  }
+
+  dispatchActiveGatewayEvent("pi:session-search-requested");
 });
 
 loadConfig();
@@ -237,12 +254,18 @@ function activeGateway() {
 }
 
 function openActiveGatewayNewSessionModal() {
-  if (!config || setupDraft) return;
+  dispatchActiveGatewayEvent("pi:new-session-requested");
+}
 
-  const webview = webviews.get(activeGateway().id);
+function dispatchActiveGatewayEvent(eventName) {
+  if (!config || setupDraft || renameDraft) return;
+
+  const gateway = activeGateway();
+  const webview = gateway ? webviews.get(gateway.id) : null;
   if (!webview || webview.hidden) return;
 
-  webview.executeJavaScript('window.dispatchEvent(new CustomEvent("pi:new-session-requested"))', true).catch(() => {});
+  const script = `window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}))`;
+  webview.executeJavaScript(script, true).catch(() => {});
 }
 
 async function activateNextGateway() {

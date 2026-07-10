@@ -799,16 +799,56 @@
       return !!currentSessionFindBar && !currentSessionFindBar.hidden;
     }
 
+    function sessionSearchShortcut(event) {
+      if (String(event.key || "").toLowerCase() !== "f") return false;
+      if (event.altKey || !event.shiftKey) return false;
+      return !!(event.ctrlKey || event.metaKey);
+    }
+
+    function openSessionSearch() {
+      const sidebar = document.querySelector(".session-sidebar");
+      const form = sidebar?.querySelector(".sidebar-session-search");
+      const input = form?.querySelector('input[name="session_search"]');
+      const button = sidebar?.querySelector("[data-sidebar-search-toggle]");
+      if (!form || !input || !button) return false;
+
+      const mobileToggle = document.getElementById("mobile-session-toggle");
+      if (mobileToggle) mobileToggle.checked = true;
+      form.classList.add("is-open");
+      button.classList.add("is-active");
+      button.setAttribute("aria-expanded", "true");
+      input.focus({ preventScroll: true });
+      input.select();
+      return true;
+    }
+
+    function requestSessionSearch() {
+      if (modalIsOpen()) return false;
+      return openSessionSearch();
+    }
+
+    function handleSessionSearchShortcut(event) {
+      if (!sessionSearchShortcut(event) || !requestSessionSearch()) return false;
+      event.preventDefault();
+      return true;
+    }
+
     function currentSessionFindShortcut(event) {
       if (!currentSessionFindBar || String(event.key || "").toLowerCase() !== "f") return false;
       if (event.altKey || event.shiftKey) return false;
       return !!(event.ctrlKey || event.metaKey);
     }
 
+    function requestCurrentSessionFind() {
+      if (modalIsOpen() || !currentSessionFindBar || !currentSessionFindInput) return false;
+      openCurrentSessionFind().catch(() => {});
+      return true;
+    }
+
     function handleCurrentSessionFindShortcut(event) {
       if (!currentSessionFindShortcut(event)) return false;
       event.preventDefault();
-      openCurrentSessionFind().catch(() => {});
+      requestCurrentSessionFind();
       return true;
     }
 
@@ -4221,6 +4261,8 @@
     }
 
     window.addEventListener("pi:new-session-requested", () => openNewSessionModal());
+    window.addEventListener("pi:current-session-find-requested", requestCurrentSessionFind);
+    window.addEventListener("pi:session-search-requested", requestSessionSearch);
     window.addEventListener("pi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
     function handleNewSessionModalTab(event) {
@@ -4244,6 +4286,7 @@
       handleNewSessionModalTab(event);
       if (modalIsOpen()) return;
 
+      if (handleSessionSearchShortcut(event)) return;
       if (handleCurrentSessionFindShortcut(event)) return;
       if (event.key === "Escape" && currentSessionFindOpen()) {
         event.preventDefault();

@@ -167,12 +167,66 @@ function installAppMenu() {
         isMac ? { role: "close" } : { role: "quit" }
       ]
     },
-    { role: "editMenu" },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        {
+          label: "Find in Session…",
+          accelerator: "CmdOrCtrl+F",
+          click: (_menuItem, browserWindow) => {
+            routeGatewayShortcut(browserWindow, "gateway:find-in-session-requested", "pi:current-session-find-requested");
+          }
+        },
+        {
+          label: "Search Sessions…",
+          accelerator: "CmdOrCtrl+Shift+F",
+          click: (_menuItem, browserWindow) => {
+            routeSessionSearchShortcut(browserWindow);
+          }
+        },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
+        { type: "separator" },
+        { role: "selectAll" },
+        ...(isMac ? [{ type: "separator" }, { role: "startSpeaking" }, { role: "stopSpeaking" }] : [])
+      ]
+    },
     { role: "viewMenu" },
     { role: "windowMenu" }
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function routeGatewayShortcut(browserWindow, channel, eventName) {
+  if (browserWindow && browserWindow !== mainWindow && popupWindows.has(browserWindow)) {
+    const script = `window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}))`;
+    browserWindow.webContents.executeJavaScript(script, true).catch(() => {});
+    return;
+  }
+
+  if (mainWindow) mainWindow.webContents.send(channel);
+}
+
+function routeSessionSearchShortcut(browserWindow) {
+  if (browserWindow && browserWindow !== mainWindow && popupWindows.has(browserWindow)) {
+    const gatewayId = gatewayWebContents.get(browserWindow.webContents.id)?.gatewayId;
+    if (!mainWindow) return;
+
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send("gateway:search-sessions-requested", gatewayId);
+    return;
+  }
+
+  if (mainWindow) mainWindow.webContents.send("gateway:search-sessions-requested");
 }
 
 function installGatewayNavigationGuard(guestContents, allowedOrigin, partition) {

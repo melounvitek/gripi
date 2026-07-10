@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("piGatewayDesktop", {
   onAddGatewayRequested: (callback) => {
     ipcRenderer.on("gateway:add-requested", callback);
   },
+  onFindInSessionRequested: (callback) => {
+    ipcRenderer.on("gateway:find-in-session-requested", (_event) => callback());
+  },
   onGatewayActivationRequested: (callback) => {
     ipcRenderer.on("gateway:activate-requested", (_event, id) => callback(id));
   },
@@ -21,6 +24,9 @@ contextBridge.exposeInMainWorld("piGatewayDesktop", {
   },
   onRenameGatewayRequested: (callback) => {
     ipcRenderer.on("gateway:rename-requested", callback);
+  },
+  onSearchSessionsRequested: (callback) => {
+    ipcRenderer.on("gateway:search-sessions-requested", (_event, gatewayId) => callback(gatewayId));
   },
   removeGateway: (id) => ipcRenderer.invoke("gateway-config:remove-gateway", id),
   saveGateway: (gateway) => ipcRenderer.invoke("gateway-config:save-gateway", gateway)
