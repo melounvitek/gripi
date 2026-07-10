@@ -181,6 +181,20 @@ function installAppMenu() {
           }
         },
         {
+          label: "Find Next",
+          accelerator: "CmdOrCtrl+G",
+          click: (_menuItem, browserWindow) => {
+            routeGatewayShortcut(browserWindow, "gateway:find-in-session-navigation-requested", "pi:current-session-find-navigation-requested", 1);
+          }
+        },
+        {
+          label: "Find Previous",
+          accelerator: "CmdOrCtrl+Shift+G",
+          click: (_menuItem, browserWindow) => {
+            routeGatewayShortcut(browserWindow, "gateway:find-in-session-navigation-requested", "pi:current-session-find-navigation-requested", -1);
+          }
+        },
+        {
           label: "Search Sessions…",
           accelerator: "CmdOrCtrl+Shift+F",
           click: (_menuItem, browserWindow) => {
@@ -205,14 +219,14 @@ function installAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function routeGatewayShortcut(browserWindow, channel, eventName) {
+function routeGatewayShortcut(browserWindow, channel, eventName, detail) {
   if (browserWindow && browserWindow !== mainWindow && popupWindows.has(browserWindow)) {
-    const script = `window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}))`;
+    const script = `window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}, { detail: ${JSON.stringify(detail)} }))`;
     browserWindow.webContents.executeJavaScript(script, true).catch(() => {});
     return;
   }
 
-  if (mainWindow) mainWindow.webContents.send(channel);
+  if (mainWindow) mainWindow.webContents.send(channel, detail);
 }
 
 function routeSessionSearchShortcut(browserWindow) {

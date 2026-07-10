@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld("piGatewayDesktop", {
   onFindInSessionRequested: (callback) => {
     ipcRenderer.on("gateway:find-in-session-requested", (_event) => callback());
   },
+  onFindInSessionNavigationRequested: (callback) => {
+    ipcRenderer.on("gateway:find-in-session-navigation-requested", (_event, direction) => callback(direction));
+  },
   onGatewayActivationRequested: (callback) => {
     ipcRenderer.on("gateway:activate-requested", (_event, id) => callback(id));
   },

@@ -29,6 +29,10 @@ window.piGatewayDesktop.onFindInSessionRequested(() => {
   dispatchActiveGatewayEvent("pi:current-session-find-requested");
 });
 
+window.piGatewayDesktop.onFindInSessionNavigationRequested((direction) => {
+  dispatchActiveGatewayEvent("pi:current-session-find-navigation-requested", direction);
+});
+
 window.piGatewayDesktop.onGatewayActivationRequested(async (id) => {
   if (!config?.gateways.some((gateway) => gateway.id === id)) return;
   setupDraft = null;
@@ -257,14 +261,14 @@ function openActiveGatewayNewSessionModal() {
   dispatchActiveGatewayEvent("pi:new-session-requested");
 }
 
-function dispatchActiveGatewayEvent(eventName) {
+function dispatchActiveGatewayEvent(eventName, detail) {
   if (!config || setupDraft || renameDraft) return;
 
   const gateway = activeGateway();
   const webview = gateway ? webviews.get(gateway.id) : null;
   if (!webview || webview.hidden) return;
 
-  const script = `window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}))`;
+  const script = `window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}, { detail: ${JSON.stringify(detail)} }))`;
   webview.executeJavaScript(script, true).catch(() => {});
 }
 

@@ -144,13 +144,19 @@ test("desktop find shortcuts route through the shell and preserve standard editi
   assert.match(main, /label: "Find in Session…"/);
   assert.match(main, /accelerator: "CmdOrCtrl\+F"/);
   assert.match(main, /gateway:find-in-session-requested/);
+  assert.match(main, /label: "Find Next"/);
+  assert.match(main, /accelerator: "CmdOrCtrl\+G"/);
+  assert.match(main, /label: "Find Previous"/);
+  assert.match(main, /accelerator: "CmdOrCtrl\+Shift\+G"/);
+  assert.match(main, /gateway:find-in-session-navigation-requested/);
+  assert.match(main, /pi:current-session-find-navigation-requested/);
   assert.match(main, /label: "Search Sessions…"/);
   assert.match(main, /accelerator: "CmdOrCtrl\+Shift\+F"/);
   assert.match(main, /gateway:search-sessions-requested/);
   assert.match(main, /click: \(_menuItem, browserWindow\) => \{/);
   assert.match(main, /routeGatewayShortcut\(browserWindow, "gateway:find-in-session-requested", "pi:current-session-find-requested"\)/);
   assert.match(main, /routeSessionSearchShortcut\(browserWindow\)/);
-  assert.match(main, /function routeGatewayShortcut\(browserWindow, channel, eventName\)/);
+  assert.match(main, /function routeGatewayShortcut\(browserWindow, channel, eventName, detail\)/);
   assert.match(main, /popupWindows\.has\(browserWindow\)/);
   assert.match(main, /browserWindow\.webContents\.executeJavaScript/);
   for (const role of ["undo", "redo", "cut", "copy", "paste", "selectAll"]) {
@@ -159,14 +165,18 @@ test("desktop find shortcuts route through the shell and preserve standard editi
 
   assert.match(preload, /onFindInSessionRequested/);
   assert.match(preload, /ipcRenderer\.on\("gateway:find-in-session-requested", \(_event\) => callback\(\)\)/);
+  assert.match(preload, /onFindInSessionNavigationRequested/);
+  assert.match(preload, /ipcRenderer\.on\("gateway:find-in-session-navigation-requested", \(_event, direction\) => callback\(direction\)\)/);
   assert.match(preload, /onSearchSessionsRequested/);
   assert.match(preload, /ipcRenderer\.on\("gateway:search-sessions-requested", \(_event, gatewayId\) => callback\(gatewayId\)\)/);
 
   assert.match(shell, /onFindInSessionRequested/);
   assert.match(shell, /dispatchActiveGatewayEvent\("pi:current-session-find-requested"\)/);
+  assert.match(shell, /onFindInSessionNavigationRequested/);
+  assert.match(shell, /dispatchActiveGatewayEvent\("pi:current-session-find-navigation-requested", direction\)/);
   assert.match(shell, /onSearchSessionsRequested/);
   assert.match(shell, /dispatchActiveGatewayEvent\("pi:session-search-requested"\)/);
-  assert.match(shell, /function dispatchActiveGatewayEvent\(eventName\)/);
+  assert.match(shell, /function dispatchActiveGatewayEvent\(eventName, detail\)/);
   assert.match(shell, /if \(!config \|\| setupDraft \|\| renameDraft\) return;/);
   assert.match(shell, /if \(!webview \|\| webview\.hidden\) return;/);
   assert.match(shell, /window\.dispatchEvent\(new CustomEvent/);
@@ -214,6 +224,7 @@ test("popup find stays local while popup session search activates the shell gate
         getGatewayConfig: () => new Promise(() => {}),
         onAddGatewayRequested() {},
         onFindInSessionRequested() {},
+        onFindInSessionNavigationRequested(callback) { callbacks.navigation = callback; },
         onGatewayActivationRequested() {},
         onNewSessionRequested() {},
         onNextGatewayRequested() {},
@@ -232,15 +243,21 @@ test("popup find stays local while popup session search activates the shell gate
 
   vm.runInContext(`
     routeGatewayShortcut(popupWindow, "gateway:find-in-session-requested", "pi:current-session-find-requested");
+    routeGatewayShortcut(popupWindow, "gateway:find-in-session-navigation-requested", "pi:current-session-find-navigation-requested", -1);
     routeSessionSearchShortcut(popupWindow);
   `, mainContext);
   assert.match(popupCalls[0][0], /pi:current-session-find-requested/);
+  assert.match(popupCalls[1][0], /pi:current-session-find-navigation-requested/);
+  assert.match(popupCalls[1][0], /detail/);
   assert.equal(popupCalls[0][1], true);
+  assert.equal(popupCalls[1][1], true);
   assert.deepEqual(mainCalls, [
     ["show"],
     ["focus"],
     ["send", "gateway:search-sessions-requested", "popup"]
   ]);
+  vm.runInContext('routeGatewayShortcut(mainWindow, "gateway:find-in-session-navigation-requested", "pi:current-session-find-navigation-requested", 1);', mainContext);
+  assert.deepEqual(mainCalls.at(-1), ["send", "gateway:find-in-session-navigation-requested", 1]);
 
   mainCalls.length = 0;
   mainContext.gatewayWebContents.clear();
@@ -257,15 +274,19 @@ test("popup find stays local while popup session search activates the shell gate
   vm.runInContext(`
     config = { activeGatewayId: "first", gateways: [{ id: "first" }, { id: "popup" }] };
     render = () => order.push("render");
-    dispatchActiveGatewayEvent = (eventName) => order.push("dispatch:" + eventName);
+    dispatchActiveGatewayEvent = (eventName, detail) => order.push("dispatch:" + eventName + ":" + detail);
   `, context);
 
+  callbacks.navigation(-1);
+  assert.deepEqual(order, ["dispatch:pi:current-session-find-navigation-requested:-1"]);
+
+  order.length = 0;
   await callbacks.search("popup");
-  assert.deepEqual(order, ["activate:popup", "render", "dispatch:pi:session-search-requested"]);
+  assert.deepEqual(order, ["activate:popup", "render", "dispatch:pi:session-search-requested:undefined"]);
 
   order.length = 0;
   await callbacks.search();
-  assert.deepEqual(order, ["dispatch:pi:session-search-requested"]);
+  assert.deepEqual(order, ["dispatch:pi:session-search-requested:undefined"]);
 });
 
 test("desktop shortcuts separate new sessions from server management", () => {

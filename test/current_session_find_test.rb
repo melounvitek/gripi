@@ -36,6 +36,37 @@ class CurrentSessionFindTest < Minitest::Test
     assert_includes File.read(VIEW_PATH), 'openCurrentSessionFind().catch(() => {});'
   end
 
+  def test_find_navigation_shortcuts_move_only_an_open_find_bar
+    results = run_javascript(<<~JS)
+      const currentSessionFindBar = { hidden: false };
+      const currentSessionFindOpen = () => !currentSessionFindBar.hidden;
+      let modalOpen = false;
+      const modalIsOpen = () => modalOpen;
+      let moved = [];
+      const moveCurrentSessionFind = (direction) => moved.push(direction);
+      #{javascript_function("currentSessionFindNavigationShortcut")}
+      #{javascript_function("requestCurrentSessionFindNavigation")}
+      #{javascript_function("handleCurrentSessionFindNavigationShortcut")}
+      const events = [
+        { key: "g", ctrlKey: true },
+        { key: "G", metaKey: true, shiftKey: true },
+        { key: "g", ctrlKey: true, altKey: true },
+        { key: "g" }
+      ].map((event) => ({ ...event, prevented: false, preventDefault() { this.prevented = true; } }));
+      const handled = events.map((event) => handleCurrentSessionFindNavigationShortcut(event));
+      currentSessionFindBar.hidden = true;
+      const closed = handleCurrentSessionFindNavigationShortcut({ key: "g", ctrlKey: true, preventDefault() { throw new Error("must not handle"); } });
+      currentSessionFindBar.hidden = false;
+      modalOpen = true;
+      const modal = requestCurrentSessionFindNavigation(-1);
+      console.log(JSON.stringify([handled, events.map((event) => event.prevented), moved, closed, modal]));
+    JS
+
+    assert_equal [[true, true, false, false], [true, true, false, false], [1, -1], false, false], results
+    script = File.read(VIEW_PATH)
+    assert_includes script, "if (handleCurrentSessionFindNavigationShortcut(event)) return;"
+  end
+
   def test_concurrent_history_callers_share_the_complete_load
     results = run_javascript(<<~JS)
       let olderConversationLoadPromise = null;

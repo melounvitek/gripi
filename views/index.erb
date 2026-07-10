@@ -849,6 +849,25 @@
       return !!(event.ctrlKey || event.metaKey);
     }
 
+    function currentSessionFindNavigationShortcut(event) {
+      if (String(event.key || "").toLowerCase() !== "g") return null;
+      if (event.altKey || !(event.ctrlKey || event.metaKey)) return null;
+      return event.shiftKey ? -1 : 1;
+    }
+
+    function requestCurrentSessionFindNavigation(direction) {
+      if (modalIsOpen() || !currentSessionFindOpen()) return false;
+      moveCurrentSessionFind(direction === -1 ? -1 : 1);
+      return true;
+    }
+
+    function handleCurrentSessionFindNavigationShortcut(event) {
+      const direction = currentSessionFindNavigationShortcut(event);
+      if (direction === null || !requestCurrentSessionFindNavigation(direction)) return false;
+      event.preventDefault();
+      return true;
+    }
+
     function requestCurrentSessionFind() {
       if (modalIsOpen() || !currentSessionFindBar || !currentSessionFindInput) return false;
       openCurrentSessionFind().catch(() => {});
@@ -4276,6 +4295,7 @@
 
     window.addEventListener("pi:new-session-requested", () => openNewSessionModal());
     window.addEventListener("pi:current-session-find-requested", requestCurrentSessionFind);
+    window.addEventListener("pi:current-session-find-navigation-requested", (event) => requestCurrentSessionFindNavigation(event.detail));
     window.addEventListener("pi:session-search-requested", requestSessionSearch);
     window.addEventListener("pi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
@@ -4302,6 +4322,7 @@
 
       if (handleSessionSearchShortcut(event)) return;
       if (handleCurrentSessionFindShortcut(event)) return;
+      if (handleCurrentSessionFindNavigationShortcut(event)) return;
       if (event.key === "Escape" && currentSessionFindOpen()) {
         event.preventDefault();
         closeCurrentSessionFind();
