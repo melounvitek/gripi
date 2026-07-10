@@ -62,15 +62,103 @@ class CurrentSessionFindTest < Minitest::Test
       const second = loadOlderConversationHistory();
       const shared = first === second;
       finishFetch();
-      Promise.all([first, second]).then(() => {
-        console.log(JSON.stringify([shared, fetchCount, olderConversationLoadPromise === null, conversationScroll.dataset.hasOlderMessages]));
+      Promise.all([first, second]).then((statuses) => {
+        console.log(JSON.stringify([shared, fetchCount, olderConversationLoadPromise === null, conversationScroll.dataset.hasOlderMessages, statuses]));
       });
     JS
 
-    assert_equal [true, 1, true, "false"], results
+    assert_equal [true, 1, true, "false", ["complete", "complete"]], results
     script = File.read(VIEW_PATH)
     assert_includes script, 'await loadOlderConversationHistory(generation);'
     assert_includes script, 'refreshCurrentSessionFindMatches();'
+  end
+
+  def test_history_load_reports_network_failure_without_failing_a_cancelled_view
+    results = run_javascript(<<~JS)
+      let olderConversationLoadPromise = null;
+      let sessionViewGeneration = 3;
+      const conversationScroll = { dataset: { olderMessageCursor: "1", hasOlderMessages: "true" } };
+      const currentSessionPath = () => "/session";
+      const olderConversationUrl = () => "/older";
+      const prependOlderConversationHtml = () => {};
+      const finishConversationHistoryStatus = () => {};
+      let historyFailureCount = 0;
+      const failConversationHistoryStatus = () => { historyFailureCount += 1; };
+      let rejectNetwork = true;
+      let finishFetch;
+      const fetch = () => {
+        if (rejectNetwork) return Promise.reject(new Error("offline"));
+        return new Promise((resolve) => { finishFetch = () => resolve({ ok: false }); });
+      };
+      #{javascript_function("loadOlderConversationHistory")}
+      (async () => {
+        const failed = await loadOlderConversationHistory();
+        rejectNetwork = false;
+        const cancelledLoad = loadOlderConversationHistory();
+        sessionViewGeneration += 1;
+        finishFetch();
+        const cancelled = await cancelledLoad;
+        console.log(JSON.stringify([failed, cancelled, historyFailureCount]));
+      })();
+    JS
+
+    assert_equal ["failed", "cancelled", 1], results
+  end
+
+  def test_failed_history_load_keeps_find_incomplete_and_retries_when_reopened
+    results = run_javascript(<<~JS)
+      let olderConversationLoadPromise = null;
+      let currentSessionFindPreparationPromise = null;
+      let currentSessionFindHistoryStatus = "complete";
+      let currentSessionFindObserver = null;
+      let currentSessionFindMatches = [{ partial: true }];
+      let currentSessionFindIndex = 0;
+      let sessionViewGeneration = 3;
+      const currentSessionFindBar = { hidden: true };
+      const currentSessionFindInput = {
+        disabled: false,
+        focus() {},
+        select() {}
+      };
+      const currentSessionFindCount = { textContent: "0 / 0" };
+      const conversationScroll = { dataset: { olderMessageCursor: "1", hasOlderMessages: "true" } };
+      const currentSessionPath = () => "/session";
+      const olderConversationUrl = () => "/older";
+      const removeCurrentSessionFindHighlights = () => {};
+      const restoreCurrentSessionFindToolOutput = () => {};
+      const prependOlderConversationHtml = () => {};
+      const finishConversationHistoryStatus = () => {};
+      let historyFailureCount = 0;
+      const failConversationHistoryStatus = () => { historyFailureCount += 1; };
+      const loadingCounts = [];
+      let fetchCount = 0;
+      const fetch = async () => {
+        fetchCount += 1;
+        loadingCounts.push(currentSessionFindCount.textContent);
+        if (fetchCount === 1) return { ok: false };
+        return {
+          ok: true,
+          json: async () => ({ html: "", next_cursor: 0, has_older_messages: false, older_message_count: 0 })
+        };
+      };
+      let refreshCount = 0;
+      const refreshCurrentSessionFindMatches = () => {
+        refreshCount += 1;
+        currentSessionFindMatches = [{ complete: true }];
+        currentSessionFindCount.textContent = "1 / 1";
+      };
+      #{javascript_function("loadOlderConversationHistory")}
+      #{javascript_function("currentSessionFindOpen")}
+      #{javascript_function("openCurrentSessionFind")}
+      (async () => {
+        await openCurrentSessionFind();
+        const failedState = [refreshCount, currentSessionFindCount.textContent, currentSessionFindMatches.length, currentSessionFindInput.disabled];
+        await openCurrentSessionFind();
+        console.log(JSON.stringify([loadingCounts, fetchCount, historyFailureCount, failedState, refreshCount, currentSessionFindCount.textContent]));
+      })();
+    JS
+
+    assert_equal [["Loading…", "Loading…"], 2, 1, [0, "History incomplete", 0, false], 1, "1 / 1"], results
   end
 
   def test_literal_matching_is_case_insensitive_and_does_not_treat_query_as_a_pattern
@@ -157,7 +245,7 @@ class CurrentSessionFindTest < Minitest::Test
   private
 
   def javascript_function(name)
-    File.read(VIEW_PATH).match(/^    function #{Regexp.escape(name)}\b.*?^    }$/m)&.[](0) || flunk("Missing JavaScript function #{name}")
+    File.read(VIEW_PATH).match(/^    (?:async )?function #{Regexp.escape(name)}\b.*?^    }$/m)&.[](0) || flunk("Missing JavaScript function #{name}")
   end
 
   def run_javascript(source)

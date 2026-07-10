@@ -432,6 +432,7 @@
     let currentSessionFindObserver = null;
     let currentSessionFindRefreshFrame = null;
     let currentSessionFindPreparationPromise = null;
+    let currentSessionFindHistoryStatus = "complete";
     let currentSessionFindExpandedToolOutput = null;
     let topJumpControls = null;
     let bottomJumpControls = null;
@@ -759,20 +760,26 @@
     }
 
     function loadOlderConversationHistory(generation = sessionViewGeneration) {
-      if (!conversationScroll) return Promise.resolve();
+      if (!conversationScroll) return Promise.resolve("cancelled");
       if (olderConversationLoadPromise) return olderConversationLoadPromise;
       let cursor = Number(conversationScroll.dataset.olderMessageCursor || 0);
-      if (!cursor || conversationScroll.dataset.hasOlderMessages !== "true") return Promise.resolve();
+      if (!cursor || conversationScroll.dataset.hasOlderMessages !== "true") return Promise.resolve("complete");
 
       const scrollElement = conversationScroll;
       const sessionPath = currentSessionPath();
+      const currentViewIsUnchanged = () => generation === sessionViewGeneration && scrollElement === conversationScroll && sessionPath === currentSessionPath();
       const loadPromise = (async () => {
         try {
-          while (cursor > 0 && generation === sessionViewGeneration && scrollElement === conversationScroll && sessionPath === currentSessionPath()) {
+          while (cursor > 0) {
+            if (!currentViewIsUnchanged()) return "cancelled";
             const response = await fetch(olderConversationUrl(cursor), { headers: { "Accept": "application/json" } });
-            if (!response.ok || generation !== sessionViewGeneration || scrollElement !== conversationScroll || sessionPath !== currentSessionPath()) return;
+            if (!currentViewIsUnchanged()) return "cancelled";
+            if (!response.ok) {
+              failConversationHistoryStatus();
+              return "failed";
+            }
             const payload = await response.json();
-            if (generation !== sessionViewGeneration || scrollElement !== conversationScroll || sessionPath !== currentSessionPath()) return;
+            if (!currentViewIsUnchanged()) return "cancelled";
 
             prependOlderConversationHtml(payload.html || "");
             cursor = Number(payload.next_cursor || 0);
@@ -784,8 +791,11 @@
               break;
             }
           }
+          return "complete";
         } catch (_error) {
-          if (generation === sessionViewGeneration && scrollElement === conversationScroll) failConversationHistoryStatus();
+          if (!currentViewIsUnchanged()) return "cancelled";
+          failConversationHistoryStatus();
+          return "failed";
         }
       })();
       const sharedPromise = loadPromise.finally(() => {
@@ -1067,7 +1077,7 @@
     }
 
     function refreshCurrentSessionFindMatches({ resetIndex = false } = {}) {
-      if (!currentSessionFindOpen()) return;
+      if (!currentSessionFindOpen() || currentSessionFindHistoryStatus !== "complete") return;
       currentSessionFindObserver?.disconnect();
       removeCurrentSessionFindHighlights();
       const previousIndex = resetIndex ? 0 : currentSessionFindIndex;
@@ -1079,7 +1089,7 @@
     }
 
     function scheduleCurrentSessionFindRefresh() {
-      if (!currentSessionFindOpen() || currentSessionFindPreparationPromise || currentSessionFindRefreshFrame) return;
+      if (!currentSessionFindOpen() || currentSessionFindHistoryStatus !== "complete" || currentSessionFindPreparationPromise || currentSessionFindRefreshFrame) return;
       currentSessionFindRefreshFrame = requestAnimationFrame(() => {
         currentSessionFindRefreshFrame = null;
         refreshCurrentSessionFindMatches();
@@ -1101,13 +1111,25 @@
       currentSessionFindInput.select();
       if (currentSessionFindPreparationPromise) return currentSessionFindPreparationPromise;
 
+      currentSessionFindHistoryStatus = "loading";
+      if (currentSessionFindCount) currentSessionFindCount.textContent = "Loading…";
       const generation = sessionViewGeneration;
       const bar = currentSessionFindBar;
       const scrollElement = conversationScroll;
       const preparation = (async () => {
-        await loadOlderConversationHistory(generation);
+        const historyStatus = await loadOlderConversationHistory(generation);
         if (!currentSessionFindOpen() || generation !== sessionViewGeneration || bar !== currentSessionFindBar || scrollElement !== conversationScroll) return;
-        refreshCurrentSessionFindMatches();
+        currentSessionFindHistoryStatus = historyStatus;
+        if (historyStatus === "failed") {
+          currentSessionFindObserver?.disconnect();
+          removeCurrentSessionFindHighlights();
+          restoreCurrentSessionFindToolOutput();
+          currentSessionFindMatches = [];
+          currentSessionFindIndex = -1;
+          if (currentSessionFindCount) currentSessionFindCount.textContent = "History incomplete";
+          return;
+        }
+        if (historyStatus === "complete") refreshCurrentSessionFindMatches();
       })();
       currentSessionFindPreparationPromise = preparation;
       try {
@@ -1122,6 +1144,7 @@
       if (currentSessionFindRefreshFrame) cancelAnimationFrame(currentSessionFindRefreshFrame);
       currentSessionFindRefreshFrame = null;
       currentSessionFindPreparationPromise = null;
+      currentSessionFindHistoryStatus = "complete";
       removeCurrentSessionFindHighlights();
       restoreCurrentSessionFindToolOutput();
       currentSessionFindMatches = [];
