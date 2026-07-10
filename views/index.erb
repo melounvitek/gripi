@@ -815,20 +815,46 @@
       return !!(event.ctrlKey || event.metaKey);
     }
 
+    function setSessionSearchOpen(form, button, open) {
+      const input = form?.querySelector('input[name="session_search"]');
+      if (!form || !input || !button) return false;
+
+      const projectSelect = form.closest(".recent-sessions")?.querySelector("[data-sidebar-project-filter]");
+      form.classList.toggle("is-open", open);
+      button.classList.toggle("is-active", open || input.value.trim() !== "" || projectSelect?.value !== "");
+      button.setAttribute("aria-expanded", open ? "true" : "false");
+      return true;
+    }
+
     function openSessionSearch() {
       const sidebar = document.querySelector(".session-sidebar");
       const form = sidebar?.querySelector(".sidebar-session-search");
       const input = form?.querySelector('input[name="session_search"]');
       const button = sidebar?.querySelector("[data-sidebar-search-toggle]");
-      if (!form || !input || !button) return false;
+      if (!setSessionSearchOpen(form, button, true)) return false;
 
       const mobileToggle = document.getElementById("mobile-session-toggle");
       if (mobileToggle) mobileToggle.checked = true;
-      form.classList.add("is-open");
-      button.classList.add("is-active");
-      button.setAttribute("aria-expanded", "true");
       input.focus({ preventScroll: true });
       input.select();
+      return true;
+    }
+
+    function closeSessionSearch(event) {
+      if (event.key !== "Escape") return false;
+
+      const form = document.activeElement?.closest?.(".sidebar-session-search") || event.target?.closest?.(".sidebar-session-search");
+      if (!form?.classList.contains("is-open")) return false;
+
+      const button = form.closest(".session-sidebar")?.querySelector("[data-sidebar-search-toggle]");
+      if (!setSessionSearchOpen(form, button, false)) return false;
+
+      const mobileToggle = document.getElementById("mobile-session-toggle");
+      if (mobileToggle) mobileToggle.checked = false;
+      promptTextarea?.focus({ preventScroll: true });
+      event.preventDefault();
+      event.stopPropagation?.();
+      event.stopImmediatePropagation?.();
       return true;
     }
 
@@ -3560,8 +3586,16 @@
     function replaceSidebarHtml(html, { scrollTop = sidebarScrollContainer()?.scrollTop || 0, notify = true } = {}) {
       const previousAssistantCounts = sidebarAssistantResponseCounts();
       const notificationToggle = sessionSidebar.querySelector("[data-notification-toggle]");
+      const previousSearchForm = sessionSidebar.querySelector(".sidebar-session-search");
+      const previousSearchQuery = previousSearchForm?.querySelector('input[name="session_search"]')?.value;
+      const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
       sessionSidebar.outerHTML = html;
       sessionSidebar = document.querySelector(".session-sidebar");
+      const replacementSearchForm = sessionSidebar.querySelector(".sidebar-session-search");
+      const replacementSearchInput = replacementSearchForm?.querySelector('input[name="session_search"]');
+      const replacementSearchButton = sessionSidebar.querySelector("[data-sidebar-search-toggle]");
+      if (replacementSearchInput && previousSearchQuery !== undefined) replacementSearchInput.value = previousSearchQuery;
+      if (previousSearchOpen !== undefined) setSessionSearchOpen(replacementSearchForm, replacementSearchButton, previousSearchOpen);
       const replacementNotificationToggle = sessionSidebar.querySelector("[data-notification-toggle]");
       if (notificationToggle) replacementNotificationToggle?.replaceWith(notificationToggle);
       if (notify) notifyBackgroundFinalReplies(previousAssistantCounts);
@@ -4321,6 +4355,7 @@
       if (modalIsOpen()) return;
 
       if (handleSessionSearchShortcut(event)) return;
+      if (closeSessionSearch(event)) return;
       if (handleCurrentSessionFindShortcut(event)) return;
       if (handleCurrentSessionFindNavigationShortcut(event)) return;
       if (event.key === "Escape" && currentSessionFindOpen()) {
@@ -4393,13 +4428,10 @@
       const container = button.closest(".recent-sessions");
       const form = container?.querySelector(".sidebar-session-search");
       const input = form?.querySelector('input[name="session_search"]');
-      const projectSelect = container?.querySelector("[data-sidebar-project-filter]");
       if (!form || !input) return;
 
-      form.classList.toggle("is-open");
-      const open = form.classList.contains("is-open");
-      button.classList.toggle("is-active", open || input.value.trim() !== "" || projectSelect?.value !== "");
-      button.setAttribute("aria-expanded", open ? "true" : "false");
+      const open = !form.classList.contains("is-open");
+      if (!setSessionSearchOpen(form, button, open)) return;
       if (open) input.focus();
     });
 

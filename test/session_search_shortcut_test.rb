@@ -25,6 +25,8 @@ class SessionSearchShortcutTest < Minitest::Test
       const classes = (initial = []) => ({
         values: new Set(initial),
         add(value) { this.values.add(value); },
+        remove(value) { this.values.delete(value); },
+        toggle(value, force) { force ? this.add(value) : this.remove(value); },
         contains(value) { return this.values.has(value); }
       });
       const input = {
@@ -36,7 +38,8 @@ class SessionSearchShortcutTest < Minitest::Test
       };
       const form = {
         classList: classes(),
-        querySelector(selector) { return selector === 'input[name="session_search"]' ? input : null; }
+        querySelector(selector) { return selector === 'input[name="session_search"]' ? input : null; },
+        closest() { return null; }
       };
       const button = {
         classList: classes(),
@@ -57,6 +60,7 @@ class SessionSearchShortcutTest < Minitest::Test
       };
       const modalIsOpen = () => false;
       #{javascript_function("sessionSearchShortcut")}
+      #{javascript_function("setSessionSearchOpen")}
       #{javascript_function("openSessionSearch")}
       #{javascript_function("requestSessionSearch")}
       #{javascript_function("handleSessionSearchShortcut")}
@@ -84,12 +88,83 @@ class SessionSearchShortcutTest < Minitest::Test
     assert_equal [true, true, true, true, true, "true", true, true, "existing query"], results
   end
 
+  def test_escape_closes_open_session_search_without_clearing_active_filters
+    results = run_javascript(<<~JS)
+      const classes = (initial = []) => ({
+        values: new Set(initial),
+        add(value) { this.values.add(value); },
+        remove(value) { this.values.delete(value); },
+        toggle(value, force) { force ? this.add(value) : this.remove(value); },
+        contains(value) { return this.values.has(value); }
+      });
+      const input = { value: "existing query", closest(selector) { return selector === ".sidebar-session-search" ? form : null; } };
+      const projectSelect = { value: "" };
+      const form = {
+        classList: classes(["is-open"]),
+        querySelector(selector) { return selector === 'input[name="session_search"]' ? input : null; },
+        closest(selector) { return selector === ".recent-sessions" ? container : selector === ".session-sidebar" ? sidebar : null; }
+      };
+      const button = {
+        classList: classes(["is-active"]),
+        expanded: "true",
+        setAttribute(name, value) { if (name === "aria-expanded") this.expanded = value; }
+      };
+      const container = {
+        querySelector(selector) {
+          if (selector === "[data-sidebar-search-toggle]") return button;
+          if (selector === "[data-sidebar-project-filter]") return projectSelect;
+          return null;
+        }
+      };
+      const sidebar = { querySelector(selector) { return selector === "[data-sidebar-search-toggle]" ? button : null; } };
+      const mobileToggle = { checked: true };
+      const promptTextarea = { focusOptions: null, focus(options) { this.focusOptions = options; } };
+      const document = {
+        activeElement: input,
+        getElementById(id) { return id === "mobile-session-toggle" ? mobileToggle : null; }
+      };
+      #{javascript_function("setSessionSearchOpen")}
+      #{javascript_function("closeSessionSearch")}
+      const event = {
+        key: "Escape",
+        target: input,
+        prevented: false,
+        stopped: false,
+        immediatelyStopped: false,
+        preventDefault() { this.prevented = true; },
+        stopPropagation() { this.stopped = true; },
+        stopImmediatePropagation() { this.immediatelyStopped = true; }
+      };
+      const closed = closeSessionSearch(event);
+      console.log(JSON.stringify([
+        closed,
+        form.classList.contains("is-open"),
+        input.value,
+        button.expanded,
+        button.classList.contains("is-active"),
+        mobileToggle.checked,
+        promptTextarea.focusOptions?.preventScroll,
+        event.prevented,
+        event.stopped,
+        event.immediatelyStopped,
+        (() => {
+          form.classList.add("is-open");
+          document.activeElement = { closest() { return null; } };
+          return [closeSessionSearch({ key: "Escape", target: {}, preventDefault() {} }), form.classList.contains("is-open")];
+        })()
+      ]));
+    JS
+
+    assert_equal [true, false, "existing query", "false", true, false, true, true, true, true, [false, true]], results
+  end
+
   def test_session_search_is_a_safe_no_op_without_sidebar_controls
     results = run_javascript(<<~JS)
       const document = {
         querySelector() { return null; },
         getElementById() { return null; }
       };
+      #{javascript_function("setSessionSearchOpen")}
       #{javascript_function("openSessionSearch")}
       console.log(JSON.stringify(openSessionSearch()));
     JS
