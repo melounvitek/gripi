@@ -206,6 +206,149 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_formats_general_subagent_result_details
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        {
+          type: "message",
+          timestamp: "2026-07-10T19:42:00Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "subagent",
+            content: [{ type: "text", text: "Largest: `/home/vitek/.hermes` — **7.4G**." }],
+            details: {
+              task: "Find the largest directory",
+              cwd: "/home/vitek",
+              model: "openai-codex/gpt-5.6-sol",
+              status: "done",
+              tools: [
+                {
+                  id: "child-call-1",
+                  name: "bash",
+                  args: { command: "du -shx /home/vitek/.hermes", timeout: 120 },
+                  status: "done",
+                  output: "7.4G\t/home/vitek/.hermes\n"
+                }
+              ],
+              textItems: ["Largest: `/home/vitek/.hermes` — **7.4G**."],
+              streamingText: "",
+              usage: {
+                input: 6_523,
+                output: 332,
+                cacheRead: 1_536,
+                cacheWrite: 0,
+                cost: 0.043343,
+                contextTokens: 2_854,
+                turns: 3
+              }
+            },
+            isError: false
+          }
+        }
+      ])
+
+      message = PiSessionStore.new(root: dir).messages(path).first
+
+      assert_equal "subagent general", message.summary
+      assert_equal <<~TEXT.chomp, message.text
+        ✓ general
+        ✓ $ du -shx /home/vitek/.hermes
+          7.4G\t/home/vitek/.hermes
+
+        Largest: `/home/vitek/.hermes` — **7.4G**.
+
+        3 turns ↑6.5k ↓332 R1.5k $0.0433 ctx:2.9k openai-codex/gpt-5.6-sol
+      TEXT
+      assert_equal "subagent", message.tool_name
+      assert message.tool_transcript
+    end
+  end
+
+  def test_safely_formats_partial_general_subagent_details_and_unicode_arguments
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      unicode_value = "😀" * 101
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        {
+          type: "message",
+          timestamp: "2026-07-10T19:42:00Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "subagent",
+            content: [{ type: "text", text: "Still working" }],
+            details: {
+              tools: [
+                nil,
+                { name: "read", args: { path: "/tmp/file", offset: "Infinity", limit: {} }, output: nil },
+                { name: "custom", args: { value: unicode_value }, output: nil }
+              ],
+              textItems: {},
+              usage: { turns: "Infinity", input: {}, cost: "invalid" },
+              model: "provider/model"
+            },
+            isError: false
+          }
+        }
+      ])
+
+      message = PiSessionStore.new(root: dir).messages(path).first
+
+      assert message.text.valid_encoding?
+      assert_includes message.text, "⏳ general"
+      assert_includes message.text, "⏳ read /tmp/file"
+      assert_includes message.text, "⏳ custom"
+      assert_includes message.text, "Still working"
+      assert_includes message.text, "provider/model"
+    end
+  end
+
+  def test_safely_reads_non_finite_general_subagent_usage
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      File.write(path, [
+        JSON.generate(type: "session", id: "session-1", cwd: "/tmp/project"),
+        '{"type":"message","timestamp":"2026-07-10T19:42:00Z","message":{"role":"toolResult","toolCallId":"call-1","toolName":"subagent","content":[{"type":"text","text":"Done"}],"details":{"status":"done","tools":[],"textItems":["Done"],"usage":{"turns":1e10000}},"isError":false}}'
+      ].join("\n") + "\n")
+
+      message = PiSessionStore.new(root: dir).messages(path).first
+
+      assert_equal "✓ general\n\nDone", message.text
+      assert message.raw_details.valid_encoding?
+    end
+  end
+
+  def test_keeps_generic_subagent_output_for_unknown_detail_shapes
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        {
+          type: "message",
+          timestamp: "2026-07-10T19:42:00Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "subagent",
+            content: [{ type: "text", text: "Unknown implementation result" }],
+            details: { customProgress: 100 },
+            isError: false
+          }
+        }
+      ])
+
+      message = PiSessionStore.new(root: dir).messages(path).first
+
+      assert_equal "subagent", message.summary
+      assert_equal "Unknown implementation result", message.text
+      refute message.tool_transcript
+    end
+  end
+
   def test_rejects_non_subagent_and_invalid_tool_call_timestamps
     Dir.mktmpdir do |dir|
       path = File.join(dir, "session.jsonl")

@@ -4096,6 +4096,52 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_historical_general_subagent_result_renders_transcript_and_usage
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-07-10T19:42:00Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "subagent",
+            content: [{ type: "text", text: "Largest: `/home/vitek/.hermes` — **7.4G**." }],
+            details: {
+              task: "Find the largest directory",
+              cwd: "/home/vitek",
+              model: "openai-codex/gpt-5.6-sol",
+              status: "done",
+              tools: [{
+                id: "child-call-1",
+                name: "bash",
+                args: { command: "du -shx /home/vitek/.hermes", timeout: 120 },
+                status: "done",
+                output: "7.4G\t/home/vitek/.hermes\n"
+              }],
+              textItems: ["Largest: `/home/vitek/.hermes` — **7.4G**."],
+              streamingText: "",
+              usage: { input: 6_523, output: 332, cacheRead: 1_536, cacheWrite: 0, cost: 0.043343, contextTokens: 2_854, turns: 3 }
+            },
+            isError: false
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      card = document.css(".message--compact").find { |entry| entry.at_css(".compact-summary")&.text == "subagent general" }
+      refute_nil card
+      assert_includes card.at_css(".message-body").text, "✓ general"
+      assert_includes card.at_css(".message-body").text, "$ du -shx ~/.hermes"
+      assert_includes card.at_css(".message-body").text, "3 turns ↑6.5k ↓332 R1.5k $0.0433 ctx:2.9k openai-codex/gpt-5.6-sol"
+    end
+  end
+
   def test_live_event_script_supports_compact_tool_rendering
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -4190,13 +4236,23 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "function subagentDetailsFromEvent(event)"
-      assert_includes response.body, "function subagentDisplayText(details, fallback, running = false)"
+      assert_includes response.body, "function subagentDisplayText(details, fallback, running = false, preferFallback = false)"
+      assert_includes response.body, 'function generalSubagentDisplayText(details, fallback = "", preferFallback = false)'
+      assert_includes response.body, "function generalSubagentDetails(details)"
       assert_includes response.body, "function subagentResultRunning(details, result, index, running)"
       assert_includes response.body, 'if (result.stopReason === "stop") return false;'
       assert_includes response.body, 'if (event.toolName === "subagent")'
       refute_includes response.body, 'entry.details.open = subagentRunning(event);'
       refute_includes response.body, 'open: event.toolName === "subagent" && subagentRunning(event)'
       assert_includes response.body, 'if (event.toolName === "subagent") return subagentSummary(subagentDetailsFromEvent(event), subagentRunning(event));'
+      assert_includes response.body, 'if (generalSubagentDetails(details)) return generalSubagentDisplayText(details, running ? "" : fallback, preferFallback);'
+      assert_includes response.body, 'if (generalSubagentDetails(details)) return "subagent general";'
+      assert_includes response.body, 'const freshSubagentDetails = segment.toolName === "subagent" && richSubagentDetails(message.details);'
+      assert_includes response.body, 'const subagentDetails = segment.toolName === "subagent" ? retainSubagentDetails(toolExecutionEntry, message.details, message.isError ? "error" : "done") : null;'
+      assert_includes response.body, 'const resultText = subagentDetails ? subagentDisplayText(subagentDetails, segment.text, false, !freshSubagentDetails) : segment.text;'
+      assert_includes response.body, 'const resultSummary = subagentDetails ? subagentSummary(subagentDetails, false) : segment.summary;'
+      assert_includes response.body, "function retainSubagentDetails(entry, details, finalStatus = null)"
+      assert_includes response.body, "entry.subagentDetails"
       assert_includes response.body, 'if (part.type === "toolCall") return items.push(`→ ${formatToolCallPlain(part.name, part.arguments || {})}`);'
     end
   end

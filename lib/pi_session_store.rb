@@ -509,7 +509,8 @@ class PiSessionStore
     if role == "assistant"
       assistant_messages_from_entry(message, parse_time(entry["timestamp"]))
     else
-      text = tool_result_text(message)
+      general_subagent = general_subagent_details?(message)
+      text = general_subagent ? general_subagent_text(message) : tool_result_text(message)
       images = content_images(message["content"])
       return [] if text.empty? && images.empty?
 
@@ -519,14 +520,14 @@ class PiSessionStore
         timestamp: parse_time(entry["timestamp"]),
         entry_id: entry["id"],
         compact: compact_message?(message),
-        summary: compact_summary(message),
+        summary: general_subagent ? "subagent general" : compact_summary(message),
         expanded: role == "toolResult" ? false : message["isError"] == true,
         error: message["isError"] == true,
         tool_call_id: message["toolCallId"],
         tool_name: message["toolName"],
-        raw_details: compact_raw_details(message["content"]) || (compact_message?(message) ? JSON.pretty_generate(message) : nil),
+        raw_details: compact_raw_details(message["content"]) || (compact_message?(message) ? safe_pretty_generate(message) : nil),
         images: images,
-        tool_transcript: transcript_tool?(message["toolName"])
+        tool_transcript: general_subagent || transcript_tool?(message["toolName"])
       )]
     end
   end
@@ -564,6 +565,116 @@ class PiSessionStore
     return message.dig("details", "diff") if message["toolName"] == "edit" && message.dig("details", "diff").to_s != ""
 
     content_text(message["content"])
+  end
+
+  def general_subagent_details?(message)
+    details = message["details"]
+    message["toolName"] == "subagent" && details.is_a?(Hash) && details["tools"].is_a?(Array) && details["usage"].is_a?(Hash)
+  end
+
+  def general_subagent_text(message)
+    details = message["details"]
+    lines = ["#{general_subagent_status_icon(details["status"])} general"]
+
+    details["tools"].each do |tool|
+      next unless tool.is_a?(Hash)
+
+      lines << "#{general_subagent_status_icon(tool["status"])} #{general_subagent_tool_call(tool)}"
+      output = tool["output"].to_s.strip
+      lines.concat(output.lines(chomp: true).map { |line| "  #{line}" }) unless output.empty?
+    end
+
+    final_text = details["streamingText"].to_s
+    final_text = details["textItems"].last.to_s if final_text.empty? && details["textItems"].is_a?(Array)
+    final_text = content_text(message["content"]) if final_text.empty?
+    lines.concat(["", final_text]) unless final_text.empty?
+
+    usage = general_subagent_usage_text(details["usage"], details["model"])
+    lines.concat(["", usage]) unless usage.empty?
+    lines.join("\n")
+  end
+
+  def general_subagent_status_icon(status)
+    return "✓" if status == "done"
+    return "✗" if status == "error"
+
+    "⏳"
+  end
+
+  def general_subagent_tool_call(tool)
+    arguments = tool["args"].is_a?(Hash) ? tool["args"] : {}
+    name = tool["name"].to_s
+    path = arguments["path"] || arguments["file_path"]
+
+    case name
+    when "bash"
+      "$ #{arguments["command"] || "..."}"
+    when "read"
+      offset = integer_tool_argument(arguments["offset"])
+      limit = integer_tool_argument(arguments["limit"])
+      range = offset || limit ? ":#{offset || 1}#{limit ? "-#{(offset || 1) + limit - 1}" : ""}" : ""
+      "read #{path || "..."}#{range}"
+    when "write", "edit"
+      "#{name} #{path || "..."}"
+    when "grep"
+      "grep /#{arguments["pattern"]}/ in #{arguments["path"] || "."}"
+    when "find"
+      "find #{arguments["pattern"] || "*"} in #{arguments["path"] || "."}"
+    when "ls"
+      "ls #{arguments["path"] || "."}"
+    else
+      serialized = safe_json_generate(arguments)
+      "#{name.empty? ? "tool" : name} #{serialized.length > 100 ? "#{serialized[0, 100]}…" : serialized}"
+    end
+  end
+
+  def general_subagent_usage_text(usage, model)
+    values = Hash.new(0.0).merge(usage.transform_values { |value| numeric_usage_value(value) })
+    parts = []
+    turns = values["turns"].to_i
+    parts << "#{turns} turn#{turns == 1 ? "" : "s"}" if turns.positive?
+    parts << "↑#{compact_usage_number(values["input"])}" if values["input"].positive?
+    parts << "↓#{compact_usage_number(values["output"])}" if values["output"].positive?
+    parts << "R#{compact_usage_number(values["cacheRead"])}" if values["cacheRead"].positive?
+    parts << "W#{compact_usage_number(values["cacheWrite"])}" if values["cacheWrite"].positive?
+    parts << format("$%.4f", values["cost"]) if values["cost"].positive?
+    parts << "ctx:#{compact_usage_number(values["contextTokens"])}" if values["contextTokens"].positive?
+    parts << model if !model.to_s.empty?
+    parts.join(" ")
+  end
+
+  def integer_tool_argument(value)
+    Integer(value) unless value.nil?
+  rescue ArgumentError, TypeError, FloatDomainError
+    nil
+  end
+
+  def safe_json_generate(value)
+    JSON.generate(value)
+  rescue JSON::GeneratorError
+    value.inspect
+  end
+
+  def safe_pretty_generate(value)
+    JSON.pretty_generate(value)
+  rescue JSON::GeneratorError
+    value.inspect
+  end
+
+  def numeric_usage_value(value)
+    number = Float(value || 0)
+    number.finite? ? number : 0.0
+  rescue ArgumentError, TypeError
+    0.0
+  end
+
+  def compact_usage_number(value)
+    number = value.to_f
+    return number.round.to_s if number < 1_000
+    return format("%.1fk", number / 1_000) if number < 10_000
+    return "#{(number / 1_000).round}k" if number < 1_000_000
+
+    format("%.1fM", number / 1_000_000)
   end
 
   def paired_tool_text(call_message, result_message)
@@ -699,7 +810,7 @@ class PiSessionStore
     end
     return nil if details.empty?
 
-    details.map { |part| JSON.pretty_generate(part) }.join("\n\n")
+    details.map { |part| safe_pretty_generate(part) }.join("\n\n")
   end
 
   def thinking_text(part)

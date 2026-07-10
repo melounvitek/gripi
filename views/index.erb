@@ -2512,15 +2512,20 @@
       return items;
     }
 
-    function subagentUsageText(usage = {}, model = "") {
+    function subagentUsageText(usage = {}, model = "", costDigits = 3) {
+      const value = (key) => {
+        const number = Number(usage?.[key] ?? 0);
+        return Number.isFinite(number) && number > 0 ? number : 0;
+      };
       const parts = [];
-      if (usage.turns) parts.push(`${usage.turns} turns`);
-      if (usage.input) parts.push(`↑${compactUsageNumber(usage.input)}`);
-      if (usage.output) parts.push(`↓${compactUsageNumber(usage.output)}`);
-      if (usage.cacheRead) parts.push(`R${compactUsageNumber(usage.cacheRead)}`);
-      if (usage.cacheWrite) parts.push(`W${compactUsageNumber(usage.cacheWrite)}`);
-      if (usage.cost) parts.push(`$${Number(usage.cost).toFixed(3)}`);
-      if (usage.contextTokens) parts.push(`ctx:${compactUsageNumber(usage.contextTokens)}`);
+      const turns = value("turns");
+      if (turns) parts.push(`${turns} turn${turns === 1 ? "" : "s"}`);
+      if (value("input")) parts.push(`↑${compactUsageNumber(value("input"))}`);
+      if (value("output")) parts.push(`↓${compactUsageNumber(value("output"))}`);
+      if (value("cacheRead")) parts.push(`R${compactUsageNumber(value("cacheRead"))}`);
+      if (value("cacheWrite")) parts.push(`W${compactUsageNumber(value("cacheWrite"))}`);
+      if (value("cost")) parts.push(`$${value("cost").toFixed(costDigits)}`);
+      if (value("contextTokens")) parts.push(`ctx:${compactUsageNumber(value("contextTokens"))}`);
       if (model) parts.push(model);
       return parts.join(" ");
     }
@@ -2532,7 +2537,61 @@
       return `${(number / 1000000).toFixed(1)}M`;
     }
 
+    function generalSubagentDetails(details) {
+      return details && Array.isArray(details.tools) && details.usage && typeof details.usage === "object" && !Array.isArray(details.usage);
+    }
+
+    function generalSubagentStatusIcon(status) {
+      if (status === "done") return "✓";
+      if (status === "error") return "✗";
+      return "⏳";
+    }
+
+    function generalSubagentIntegerArgument(value) {
+      if (value === undefined || value === null) return null;
+      const number = Number(value);
+      return Number.isSafeInteger(number) ? number : null;
+    }
+
+    function generalSubagentToolCall(tool) {
+      const args = tool?.args && typeof tool.args === "object" ? tool.args : {};
+      const name = tool?.name || "tool";
+      if (name === "bash") return `$ ${args.command || "..."}`;
+      if (name === "read") {
+        const path = args.path || args.file_path || "...";
+        const offset = generalSubagentIntegerArgument(args.offset);
+        const limit = generalSubagentIntegerArgument(args.limit);
+        if (offset === null && limit === null) return `read ${path}`;
+        const start = offset ?? 1;
+        return `read ${path}:${start}${limit === null ? "" : `-${start + limit - 1}`}`;
+      }
+      if (["write", "edit"].includes(name)) return `${name} ${args.path || args.file_path || "..."}`;
+      if (name === "grep") return `grep /${args.pattern || ""}/ in ${args.path || "."}`;
+      if (name === "find") return `find ${args.pattern || "*"} in ${args.path || "."}`;
+      if (name === "ls") return `ls ${args.path || "."}`;
+      const serialized = JSON.stringify(args);
+      const characters = [...serialized];
+      return `${name} ${characters.length > 100 ? `${characters.slice(0, 100).join("")}…` : serialized}`;
+    }
+
+    function generalSubagentDisplayText(details, fallback = "", preferFallback = false) {
+      const lines = [`${generalSubagentStatusIcon(details.status)} general`];
+      details.tools.forEach((tool) => {
+        if (!tool || typeof tool !== "object" || Array.isArray(tool)) return;
+        lines.push(`${generalSubagentStatusIcon(tool.status)} ${generalSubagentToolCall(tool)}`);
+        const output = typeof tool.output === "string" ? tool.output.trim() : "";
+        if (output) lines.push(...output.split("\n").map((line) => `  ${line}`));
+      });
+      const detailsText = details.streamingText || (Array.isArray(details.textItems) ? details.textItems.at(-1) : "") || "";
+      const finalText = preferFallback ? fallback || detailsText : detailsText || fallback;
+      if (finalText) lines.push("", finalText);
+      const usage = subagentUsageText(details.usage, details.model, 4);
+      if (usage) lines.push("", usage);
+      return lines.join("\n");
+    }
+
     function subagentSummary(details, running = false) {
+      if (generalSubagentDetails(details)) return "subagent general";
       if (!details?.results?.length) return "subagent";
       if (details.mode === "single" && details.results.length === 1) return `subagent ${details.results[0].agent}`;
       const done = details.results.filter((result, index) => result.exitCode !== -1 && !subagentResultRunning(details, result, index, running)).length;
@@ -2540,7 +2599,8 @@
       return `subagent ${details.mode} ${done}/${total}`;
     }
 
-    function subagentDisplayText(details, fallback, running = false) {
+    function subagentDisplayText(details, fallback, running = false, preferFallback = false) {
+      if (generalSubagentDetails(details)) return generalSubagentDisplayText(details, running ? "" : fallback, preferFallback);
       if (!details?.results?.length) return fallback;
       const lines = [];
       details.results.forEach((result, index) => {
@@ -2557,6 +2617,20 @@
         if (usage) lines.push(usage);
       });
       return lines.join("\n");
+    }
+
+    function richSubagentDetails(details) {
+      return generalSubagentDetails(details) || Array.isArray(details?.results);
+    }
+
+    function retainSubagentDetails(entry, details, finalStatus = null) {
+      if (richSubagentDetails(details)) entry.subagentDetails = details;
+      let retained = entry.subagentDetails;
+      if (finalStatus && generalSubagentDetails(retained)) {
+        retained = { ...retained, status: finalStatus };
+        entry.subagentDetails = retained;
+      }
+      return retained;
     }
 
     function toolExecutionContentText(event) {
@@ -2584,8 +2658,18 @@
     }
 
     function updateLiveToolExecution(entry, event, shouldScroll) {
-      renderToolSummary(entry.summaryText, null, toolExecutionSummary(event));
-      renderToolTranscriptBody(entry.body, toolExecutionText(event), event.toolName || entry.toolName);
+      if (event.toolName === "subagent") {
+        const finalStatus = event.type === "tool_execution_end" ? (event.isError ? "error" : "done") : null;
+        const eventDetails = subagentDetailsFromEvent(event);
+        const freshDetails = richSubagentDetails(eventDetails);
+        const details = retainSubagentDetails(entry, eventDetails, finalStatus);
+        const fallback = toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
+        renderToolSummary(entry.summaryText, null, details ? subagentSummary(details, subagentRunning(event)) : toolExecutionSummary(event));
+        renderToolTranscriptBody(entry.body, details ? subagentDisplayText(details, fallback, subagentRunning(event), !freshDetails) : fallback, event.toolName);
+      } else {
+        renderToolSummary(entry.summaryText, null, toolExecutionSummary(event));
+        renderToolTranscriptBody(entry.body, toolExecutionText(event), event.toolName || entry.toolName);
+      }
       entry.article.classList.toggle("message--tool-error", event.isError === true);
       afterLiveOutputChange(shouldScroll);
       return entry;
@@ -2601,7 +2685,10 @@
       }
 
       const entry = appendCompactMessage("tool", toolExecutionSummary(event), toolExecutionText(event), true, true, shouldScroll, toolExecutionRawDetails(event), timestamp, { toolName: event.toolName, error: event.isError === true, timestampFallback });
-      if (entry) liveToolExecutions.set(event.toolCallId, entry);
+      if (entry) {
+        if (event.toolName === "subagent") retainSubagentDetails(entry, subagentDetailsFromEvent(event));
+        liveToolExecutions.set(event.toolCallId, entry);
+      }
     }
 
     function restoreActiveToolExecutions() {
@@ -2663,8 +2750,12 @@
           const toolExecutionEntry = segment.toolCallId && liveToolExecutions.get(segment.toolCallId);
           const bashCallEntry = ["bash", "read", "edit", "write"].includes(segment.toolName) && segment.toolCallId && liveBashToolCalls.get(segment.toolCallId);
           if (toolExecutionEntry && segment.isToolResult) {
-            renderToolTranscriptBody(toolExecutionEntry.body, segment.text, segment.toolName || toolExecutionEntry.toolName, { preview: segment.toolPreview === true });
-            renderToolSummary(toolExecutionEntry.summaryText, segment.summaryParts, segment.summary);
+            const freshSubagentDetails = segment.toolName === "subagent" && richSubagentDetails(message.details);
+            const subagentDetails = segment.toolName === "subagent" ? retainSubagentDetails(toolExecutionEntry, message.details, message.isError ? "error" : "done") : null;
+            const resultText = subagentDetails ? subagentDisplayText(subagentDetails, segment.text, false, !freshSubagentDetails) : segment.text;
+            const resultSummary = subagentDetails ? subagentSummary(subagentDetails, false) : segment.summary;
+            renderToolTranscriptBody(toolExecutionEntry.body, resultText, segment.toolName || toolExecutionEntry.toolName, { preview: segment.toolPreview === true });
+            renderToolSummary(toolExecutionEntry.summaryText, segment.summaryParts, resultSummary);
             toolExecutionEntry.article.classList.toggle("message--tool-error", segment.error === true);
             if (!markLiveEntryRendered(toolExecutionEntry, toolExecutionEntry.article.dataset.role || "toolResult", segment.text, timestamp)) return;
             afterLiveOutputChange(shouldScroll);
