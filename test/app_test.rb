@@ -4328,6 +4328,14 @@ class AppTest < Minitest::Test
       assert_includes response.body, "button.classList.add(\"is-loading\");"
       assert_includes response.body, "viewGeneration !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || sidebarGeneration !== sidebarUpdateGeneration"
       assert_includes response.body, "replaceSidebarHtml(html, { scrollTop: previousScrollTop });"
+      notification_capture = 'const notificationToggle = sessionSidebar.querySelector("[data-notification-toggle]");'
+      sidebar_replacement = "sessionSidebar.outerHTML = html;"
+      notification_reinsertion = 'replacementNotificationToggle?.replaceWith(notificationToggle);'
+      assert_includes response.body, notification_capture
+      assert_includes response.body, sidebar_replacement
+      assert_includes response.body, notification_reinsertion
+      assert_operator response.body.index(notification_capture), :<, response.body.index(sidebar_replacement)
+      assert_operator response.body.index(sidebar_replacement), :<, response.body.index(notification_reinsertion)
       assert_includes response.body, "if (sidebarControlActive() || recentlyInteractedWithSidebar()) {\n        scheduleSidebarRefresh(1000);\n        return;\n      }"
       assert_includes response.body, "fetch(sidebarFragmentUrl())"
       assert_includes response.body, "const previousScrollTop = sidebarScrollContainer()?.scrollTop || 0;"

@@ -3135,8 +3135,11 @@
 
     function replaceSidebarHtml(html, { scrollTop = sidebarScrollContainer()?.scrollTop || 0, notify = true } = {}) {
       const previousAssistantCounts = sidebarAssistantResponseCounts();
+      const notificationToggle = sessionSidebar.querySelector("[data-notification-toggle]");
       sessionSidebar.outerHTML = html;
       sessionSidebar = document.querySelector(".session-sidebar");
+      const replacementNotificationToggle = sessionSidebar.querySelector("[data-notification-toggle]");
+      if (notificationToggle) replacementNotificationToggle?.replaceWith(notificationToggle);
       if (notify) notifyBackgroundFinalReplies(previousAssistantCounts);
       const refreshedScrollContainer = sidebarScrollContainer();
       if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = scrollTop;
