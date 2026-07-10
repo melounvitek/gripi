@@ -4273,7 +4273,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_live_script_supports_ctrl_held_recent_session_shortcuts
+  def test_live_script_supports_platform_session_shortcuts
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       PiWebGateway.set :sessions_root, dir
@@ -4288,8 +4288,12 @@ class AppTest < Minitest::Test
       assert_includes response.body, "window.addEventListener(\"pi:new-session-requested\""
       assert_includes response.body, "window.addEventListener(\"pi:desktop-server-activated\""
       assert_includes response.body, "focusPromptAfterDesktopServerActivation"
-      assert_includes response.body, "event.key === \"Control\""
-      assert_includes response.body, "if (!event.ctrlKey) return;"
+      assert_includes response.body, "function sessionShortcutModifierKey()"
+      assert_includes response.body, "navigator.userAgentData?.platform || navigator.platform"
+      assert_includes response.body, 'return /mac|iphone|ipad|ipod/i.test(platform) ? "Meta" : "Control";'
+      assert_includes response.body, "event.key === sessionShortcutModifierKey()"
+      assert_includes response.body, "if (event.altKey || !sessionShortcutModifierHeld(event)) return;"
+      assert_includes response.body, "if (event.key === sessionShortcutModifierKey()) exitSessionShortcutMode();"
       assert_includes response.body, "function recentSessionShortcutFromEvent(event)"
       assert_includes response.body, "event.code.match(/^Digit([1-9])$/)"
       assert_includes response.body, "event.code.match(/^Numpad([1-9])$/)"
@@ -4302,6 +4306,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "window.addEventListener(\"blur\", exitSessionShortcutMode);"
       refute_includes response.body, "sessionShortcutTimer = setTimeout(exitSessionShortcutMode, 5000);"
       assert_includes response.body, "session-shortcuts-visible"
+      assert_includes response.body, "if (wasVisible) scheduleSidebarRefresh(0);"
     end
   end
 
@@ -4336,6 +4341,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, notification_reinsertion
       assert_operator response.body.index(notification_capture), :<, response.body.index(sidebar_replacement)
       assert_operator response.body.index(sidebar_replacement), :<, response.body.index(notification_reinsertion)
+      assert_includes response.body, "return sidebarProjectFilterActive() || sidebarSearchActive() || sessionShortcutsVisible();"
       assert_includes response.body, "if (sidebarControlActive() || recentlyInteractedWithSidebar()) {\n        scheduleSidebarRefresh(1000);\n        return;\n      }"
       assert_includes response.body, "fetch(sidebarFragmentUrl())"
       assert_includes response.body, "const previousScrollTop = sidebarScrollContainer()?.scrollTop || 0;"

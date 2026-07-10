@@ -3086,7 +3086,7 @@
     }
 
     function sidebarControlActive() {
-      return sidebarProjectFilterActive() || sidebarSearchActive();
+      return sidebarProjectFilterActive() || sidebarSearchActive() || sessionShortcutsVisible();
     }
 
     function setSidebarFiltering(filtering) {
@@ -3301,7 +3301,18 @@
     }
 
     function exitSessionShortcutMode() {
+      const wasVisible = sessionShortcutsVisible();
       document.body.classList.remove("session-shortcuts-visible");
+      if (wasVisible) scheduleSidebarRefresh(0);
+    }
+
+    function sessionShortcutModifierKey() {
+      const platform = navigator.userAgentData?.platform || navigator.platform || "";
+      return /mac|iphone|ipad|ipod/i.test(platform) ? "Meta" : "Control";
+    }
+
+    function sessionShortcutModifierHeld(event) {
+      return sessionShortcutModifierKey() === "Meta" ? event.metaKey : event.ctrlKey;
     }
 
     function currentSessionPath() {
@@ -3899,7 +3910,7 @@
 
       if (event.key === "Escape" && confirmOrStopRunningTask(event)) return;
 
-      if (event.key === "Control") {
+      if (event.key === sessionShortcutModifierKey()) {
         enterSessionShortcutMode();
         return;
       }
@@ -3911,7 +3922,7 @@
         return;
       }
 
-      if (!event.ctrlKey) return;
+      if (event.altKey || !sessionShortcutModifierHeld(event)) return;
       const shortcut = recentSessionShortcutFromEvent(event);
       if (shortcut) {
         event.preventDefault();
@@ -3920,7 +3931,7 @@
     });
 
     document.addEventListener("keyup", (event) => {
-      if (event.key === "Control") exitSessionShortcutMode();
+      if (event.key === sessionShortcutModifierKey()) exitSessionShortcutMode();
     });
 
     window.addEventListener("blur", exitSessionShortcutMode);
