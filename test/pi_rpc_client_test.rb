@@ -455,7 +455,11 @@ class PiRpcClientTest < Minitest::Test
       JSON.generate({ id: "clone-13", type: "response", command: "clone", success: true, data: { cancelled: false } }),
       JSON.generate({ id: "prompt-14", type: "response", command: "prompt", success: true }),
       JSON.generate({ id: "prompt-15", type: "response", command: "prompt", success: true }),
-      JSON.generate({ id: "follow_up-16", type: "response", command: "follow_up", success: true })
+      JSON.generate({ id: "follow_up-16", type: "response", command: "follow_up", success: true }),
+      JSON.generate({ id: "get_available_models-17", type: "response", command: "get_available_models", success: true, data: { models: [] } }),
+      JSON.generate({ id: "set_model-18", type: "response", command: "set_model", success: true, data: {} }),
+      JSON.generate({ id: "set_thinking_level-19", type: "response", command: "set_thinking_level", success: true }),
+      JSON.generate({ id: "cycle_thinking_level-20", type: "response", command: "cycle_thinking_level", success: true, data: { level: "high" } })
     ].join("\n") + "\n")
     client = PiRpcClient.new(stdin: input, stdout: output)
 
@@ -479,6 +483,10 @@ class PiRpcClientTest < Minitest::Test
       client.tree_leaf
     end
     client.follow_up("After done", [{ type: "image", data: "def", mimeType: "image/jpeg" }])
+    client.get_available_models
+    client.set_model("anthropic", "claude-sonnet-4")
+    client.set_thinking_level("high")
+    client.cycle_thinking_level
 
     assert_equal [
       { "id" => "get_state-1", "type" => "get_state" },
@@ -496,7 +504,11 @@ class PiRpcClientTest < Minitest::Test
       { "id" => "clone-13", "type" => "clone" },
       { "id" => "prompt-14", "type" => "prompt", "message" => "/pi_web_tree entry-2 abc123" },
       { "id" => "prompt-15", "type" => "prompt", "message" => "/pi_web_tree_leaf def456" },
-      { "id" => "follow_up-16", "type" => "follow_up", "message" => "After done", "images" => [{ "type" => "image", "data" => "def", "mimeType" => "image/jpeg" }] }
+      { "id" => "follow_up-16", "type" => "follow_up", "message" => "After done", "images" => [{ "type" => "image", "data" => "def", "mimeType" => "image/jpeg" }] },
+      { "id" => "get_available_models-17", "type" => "get_available_models" },
+      { "id" => "set_model-18", "type" => "set_model", "provider" => "anthropic", "modelId" => "claude-sonnet-4" },
+      { "id" => "set_thinking_level-19", "type" => "set_thinking_level", "level" => "high" },
+      { "id" => "cycle_thinking_level-20", "type" => "cycle_thinking_level" }
     ], input.string.lines.map { |line| JSON.parse(line) }
   end
 

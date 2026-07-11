@@ -128,6 +128,25 @@ module Web
         end
         halt error
       end
+
+      def halt_if_rpc_session_busy(session_path, client = nil)
+        busy = client ? client.respond_to?(:busy?) && client.busy? : rpc_clients.busy?(session_path)
+        return unless busy
+
+        status 409
+        content_type :json
+        halt JSON.generate(error: "Session is busy")
+      end
+
+      def halt_failed_rpc_setting(response)
+        return if response.is_a?(Hash) && response["success"] == true
+
+        error = response.is_a?(Hash) ? response["error"].to_s.strip : ""
+        error = "Setting could not be changed" if error.empty?
+        status 422
+        content_type :json
+        halt JSON.generate(success: false, error: error)
+      end
     end
 
     def self.registered(app)
@@ -152,7 +171,7 @@ module Web
           attachment_store.record_prompt(session_path, rpc_message, images.length, timestamp: submitted_at, paths: attachment_paths, mime_types: images.map { |image| image[:mimeType] })
         elsif slash_command&.type == :rename && slash_command.name
           with_rpc_client(session_path) { |client| client.set_session_name(slash_command.name) }
-        elsif slash_command&.type == :rename || [:fork, :tree].include?(slash_command&.type)
+        elsif slash_command&.type == :rename || [:fork, :tree, :model].include?(slash_command&.type)
           nil
         elsif slash_command&.type == :compact
           with_rpc_client(session_path) { |client| client.compact(slash_command.instructions) }
@@ -194,6 +213,67 @@ module Web
           status 422
           JSON.generate(valid: false, error: result.fetch(:error))
         end
+      end
+
+      app.get "/sessions/model_settings" do
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
+        state_response = with_rpc_client(session_path) { |client| client.get_state }
+        models_response = with_rpc_client(session_path) { |client| client.get_available_models }
+        state = state_response["data"] if state_response.is_a?(Hash) && state_response["success"] == true
+        models = models_response.dig("data", "models") if models_response.is_a?(Hash) && models_response["success"] == true
+        unless state.is_a?(Hash) && models.is_a?(Array)
+          status 502
+          content_type :json
+          halt JSON.generate(error: "Could not load model settings")
+        end
+
+        content_type :json
+        JSON.generate(state: state, models: models)
+      end
+
+      app.post "/sessions/model_settings" do
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
+        provider = params.fetch("provider").to_s.strip
+        model_id = params.fetch("model").to_s.strip
+        thinking_level = params.fetch("thinking").to_s.strip
+        halt 400, "Provider cannot be empty" if provider.empty?
+        halt 400, "Model cannot be empty" if model_id.empty?
+        halt 400, "Invalid thinking level" unless %w[off minimal low medium high xhigh max].include?(thinking_level)
+
+        state_response = with_rpc_client(session_path) do |client|
+          halt_if_rpc_session_busy(session_path, client)
+          halt_failed_rpc_setting(client.set_model(provider, model_id))
+          halt_failed_rpc_setting(client.set_thinking_level(thinking_level))
+          client.get_state
+        end
+        halt_failed_rpc_setting(state_response)
+        state = state_response["data"]
+        unless state.is_a?(Hash) && state["model"].is_a?(Hash) && state["thinkingLevel"].is_a?(String)
+          status 502
+          content_type :json
+          halt JSON.generate(error: "Could not confirm model settings")
+        end
+
+        content_type :json
+        JSON.generate(model: state["model"], thinking: state["thinkingLevel"])
+      end
+
+      app.post "/sessions/cycle_thinking" do
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
+        response = with_rpc_client(session_path) do |client|
+          halt_if_rpc_session_busy(session_path, client)
+          client.cycle_thinking_level
+        end
+        halt_failed_rpc_setting(response)
+        data = response["data"]
+        unless data.nil? || (data.is_a?(Hash) && %w[off minimal low medium high xhigh max].include?(data["level"]))
+          status 502
+          content_type :json
+          halt JSON.generate(error: "Could not change thinking level")
+        end
+
+        content_type :json
+        JSON.generate(thinking: data&.fetch("level"))
       end
 
       app.post "/sessions/new" do

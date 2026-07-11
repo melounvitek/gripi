@@ -88,6 +88,32 @@ class PiRpcClientRegistryTest < Minitest::Test
     assert_empty calls
   end
 
+  def test_serializes_rpc_operations_for_the_same_session
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeClient.new([]) })
+    first_started = Queue.new
+    release_first = Queue.new
+    second_started = Queue.new
+
+    first = Thread.new do
+      registry.with_client("/tmp/session.jsonl") do
+        first_started << true
+        release_first.pop
+      end
+    end
+    first_started.pop
+    second = Thread.new do
+      registry.with_client("/tmp/session.jsonl") { second_started << true }
+    end
+
+    refute second_started.pop(timeout: 0.05)
+    release_first << true
+    assert second_started.pop(timeout: 1)
+  ensure
+    release_first << true if first&.alive?
+    first&.join
+    second&.join
+  end
+
   def test_keeps_clients_currently_in_use
     now = Time.at(1_000)
     calls = []

@@ -76,6 +76,22 @@ class PiRpcClient
     request("get_messages", id: next_id("get_messages"))
   end
 
+  def get_available_models
+    request("get_available_models", id: next_id("get_available_models"))
+  end
+
+  def set_model(provider, model_id)
+    request("set_model", id: next_id("set_model"), provider: provider, modelId: model_id)
+  end
+
+  def set_thinking_level(level)
+    request("set_thinking_level", id: next_id("set_thinking_level"), level: level)
+  end
+
+  def cycle_thinking_level
+    request("cycle_thinking_level", id: next_id("cycle_thinking_level"))
+  end
+
   def prompt(message, images = [])
     payload = { message: message }
     payload[:images] = images unless images.empty?

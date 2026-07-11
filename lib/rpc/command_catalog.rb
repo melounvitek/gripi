@@ -7,7 +7,8 @@ module Rpc
       { "name" => "fork", "source" => "other", "description" => "Open the fork picker for this session" },
       { "name" => "tree", "source" => "other", "description" => "Navigate the current session tree" },
       { "name" => "clone", "source" => "other", "description" => "Clone this session and switch to the clone" },
-      { "name" => "new", "source" => "other", "description" => "Start a new session in this folder" }
+      { "name" => "new", "source" => "other", "description" => "Start a new session in this folder" },
+      { "name" => "model", "source" => "other", "description" => "Choose the model and thinking level" }
     ].freeze
     INTERNAL_COMMAND_NAMES = %w[pi_web_tree pi_web_tree_leaf].freeze
 

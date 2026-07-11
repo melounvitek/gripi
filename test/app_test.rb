@@ -593,6 +593,30 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_model_slash_command_returns_model_command_without_rpc
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/model" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_empty calls
+      payload = JSON.parse(response.body)
+      assert_equal path, payload.fetch("session")
+      assert_equal "model", payload.fetch("command")
+    end
+  end
+
   def test_tree_slash_command_returns_tree_command_without_rpc
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -789,8 +813,8 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_follow_up_prompt_treats_fork_tree_clone_and_new_slash_commands_as_messages
-    ["/fork", "/tree", "/clone", "/new"].each do |message|
+  def test_follow_up_prompt_treats_session_control_slash_commands_as_messages
+    ["/fork", "/tree", "/clone", "/new", "/model"].each do |message|
       Dir.mktmpdir do |dir|
         path = write_session(dir)
         calls = []
@@ -1787,7 +1811,7 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (6)"
+      assert_includes response.body, "Slash commands (7)"
       assert_includes response.body, "/review"
       assert_includes response.body, "Review code"
       assert_includes response.body, "/compact"
@@ -1795,6 +1819,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "/tree"
       assert_includes response.body, "/clone"
       assert_includes response.body, "/new"
+      assert_includes response.body, "/model"
       refute_includes response.body, "/sessions"
       refute_includes response.body, "/rename"
       refute_includes response.body, "pi_web_tree"
@@ -1822,12 +1847,13 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (5)"
+      assert_includes response.body, "Slash commands (6)"
       assert_includes response.body, "/compact"
       assert_includes response.body, "/fork"
       assert_includes response.body, "/tree"
       assert_includes response.body, "/clone"
       assert_includes response.body, "/new"
+      assert_includes response.body, "/model"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
     end
   end
@@ -1871,7 +1897,75 @@ class AppTest < Minitest::Test
       assert_includes response.body, "CTX"
       assert_includes response.body, "12.3k"
       assert_includes response.body, "openai-codex/gpt-5.5 (medium)"
+      document = Nokogiri::HTML(response.body)
+      model_status = document.at_css('button.session-status-item[data-status-key="model"][data-modal-open="model-settings-modal"]')
+      refute_nil model_status
+      assert_equal "Open model and thinking settings", model_status["aria-label"]
+      assert document.at_css('span.session-status-item[data-status-key="ctx"]')
       refute_includes response.body, "Thinking</span>"
+    end
+  end
+
+  def test_model_status_button_is_disabled_while_session_is_busy
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        { type: "model_change", provider: "anthropic", modelId: "claude-sonnet-4" }
+      ])
+      client = FakeRpcClient.new([])
+      def client.busy? = true
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      button = Nokogiri::HTML(response.body).at_css('button[data-status-key="model"]')
+      refute_nil button
+      assert button.key?("disabled")
+    end
+  end
+
+  def test_page_includes_accessible_lazy_model_settings_modal
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      modal = document.at_css('body > [data-modal="model-settings-modal"][role="dialog"][aria-modal="true"]')
+      refute_nil modal
+      assert_equal "model-settings-title", modal["aria-labelledby"]
+      assert modal.at_css('input[type="search"][data-model-search]')
+      assert modal.at_css('[data-model-list]')
+      assert modal.at_css('fieldset[data-thinking-options]')
+      assert modal.at_css('button[data-model-settings-apply]')
+      assert modal.at_css('button[data-modal-close]')
+      assert_includes response.body, 'fetch(`/sessions/model_settings?session=${encodeURIComponent(sessionPath)}`'
+      assert_includes response.body, 'fetch("/sessions/model_settings", { method: "POST"'
+    end
+  end
+
+  def test_model_settings_script_supports_picker_slash_command_and_thinking_shortcut
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, "function sessionModelSlashCommand(message)"
+      assert_includes response.body, 'if (payload?.command === "model")'
+      assert_includes response.body, "openModelSettingsModal();"
+      assert_includes response.body, "function supportedThinkingLevels(model)"
+      assert_includes response.body, "const THINKING_LEVELS = [\"off\", \"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", \"max\"];"
+      assert_includes response.body, "function cycleThinkingShortcut(event)"
+      assert_includes response.body, '"thinking_level_changed"'
+      assert_includes response.body, 'fetch("/sessions/cycle_thinking", { method: "POST"'
+      assert_includes response.body, "function handleModelSettingsModalTab(event)"
     end
   end
 
@@ -4793,7 +4887,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "const treeCommand = followUp ? null : sessionTreeSlashCommand(message);"
       assert_includes response.body, "const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);"
       assert_includes response.body, "const newCommand = followUp ? null : sessionNewSlashCommand(message);"
-      assert_includes response.body, "if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand) {"
+      assert_includes response.body, "const modelCommand = followUp ? null : sessionModelSlashCommand(message);"
+      assert_includes response.body, "if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {"
       assert_includes response.body, "if (!followUp) {\n          resetLiveAssistantTracking();\n          document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n          const optimisticImages = pendingImages.map"
       assert_includes response.body, "const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || \"Attached image\" }));\n          appendMessage(\"user\", message || `[${imageAttachmentLabel(submittedImageFiles.length)}]`, true, true, new Date(), { optimistic: true, optimisticText: message, images: optimisticImages });\n        }"
       assert_includes response.body, "resetEventPollBackoff();"
@@ -5636,6 +5731,197 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_model_settings_returns_current_rpc_state_and_available_models
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, FakeRpcClient.new(calls, [], path))
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/sessions/model_settings", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_equal({
+        "state" => {
+          "sessionFile" => path,
+          "model" => { "provider" => "anthropic", "id" => "claude-sonnet-4" },
+          "thinkingLevel" => "medium"
+        },
+        "models" => [{ "provider" => "anthropic", "id" => "claude-sonnet-4", "name" => "Claude Sonnet 4" }]
+      }, JSON.parse(response.body))
+      assert_equal [[:get_state], [:get_available_models]], calls
+    end
+  end
+
+  def test_applies_model_before_thinking_level_when_session_is_idle
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, FakeRpcClient.new(calls))
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/model_settings",
+        params: { "session" => path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }
+      )
+
+      assert_equal 200, response.status
+      assert_equal({
+        "model" => { "provider" => "openai", "id" => "gpt-5" },
+        "thinking" => "high"
+      }, JSON.parse(response.body))
+      assert_equal [[:set_model, "openai", "gpt-5"], [:set_thinking_level, "high"], [:get_state]], calls
+    end
+  end
+
+  def test_rejects_invalid_thinking_level_before_rpc
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, FakeRpcClient.new(calls))
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/model_settings",
+        params: { "session" => path, "provider" => "openai", "model" => "gpt-5", "thinking" => "unknown" }
+      )
+
+      assert_equal 400, response.status
+      assert_empty calls
+    end
+  end
+
+  def test_does_not_set_thinking_when_model_change_fails
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      def client.set_model(provider, model_id)
+        @calls << [:set_model, provider, model_id]
+        { "success" => false, "error" => "Model not found" }
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/model_settings",
+        params: { "session" => path, "provider" => "invalid", "model" => "missing", "thinking" => "high" }
+      )
+
+      assert_equal 422, response.status
+      assert_equal({ "success" => false, "error" => "Model not found" }, JSON.parse(response.body))
+      assert_equal [[:set_model, "invalid", "missing"]], calls
+    end
+  end
+
+  def test_returns_rpc_error_for_malformed_model_setting_response
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      client = FakeRpcClient.new([])
+      def client.set_model(_provider, _model_id) = nil
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/model_settings",
+        params: { "session" => path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }
+      )
+
+      assert_equal 422, response.status
+      assert_equal "Setting could not be changed", JSON.parse(response.body).fetch("error")
+    end
+  end
+
+  def test_rejects_model_settings_changes_while_session_is_busy
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      def client.busy? = true
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).post(
+        "/sessions/model_settings",
+        params: { "session" => path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }
+      )
+
+      assert_equal 409, response.status
+      assert_equal({ "error" => "Session is busy" }, JSON.parse(response.body))
+      assert_empty calls
+    end
+  end
+
+  def test_cycles_thinking_level_when_session_is_idle
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, FakeRpcClient.new(calls))
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).post("/sessions/cycle_thinking", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_equal({ "thinking" => "high" }, JSON.parse(response.body))
+      assert_equal [[:cycle_thinking_level]], calls
+    end
+  end
+
+  def test_returns_nil_when_thinking_cycle_is_unsupported
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      def client.cycle_thinking_level
+        @calls << [:cycle_thinking_level]
+        { "success" => true, "data" => nil }
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).post("/sessions/cycle_thinking", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_equal({ "thinking" => nil }, JSON.parse(response.body))
+      assert_equal [[:cycle_thinking_level]], calls
+    end
+  end
+
+  def test_rejects_thinking_cycle_while_session_is_busy
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      def client.busy? = true
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).post("/sessions/cycle_thinking", params: { "session" => path })
+
+      assert_equal 409, response.status
+      assert_equal({ "error" => "Session is busy" }, JSON.parse(response.body))
+      assert_empty calls
+    end
+  end
+
   def test_multi_user_direct_session_endpoints_reject_other_workspace_sessions
     Dir.mktmpdir do |dir|
       own_path, other_path = write_sessions(dir, count: 2)
@@ -5653,9 +5939,15 @@ class AppTest < Minitest::Test
 
       status_response = Rack::MockRequest.new(PiWebGateway).get("/status", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
       prompt_response = Rack::MockRequest.new(PiWebGateway).post("/prompt", params: { "session" => other_path, "message" => "Hello" }, "HTTP_COOKIE" => own_cookie)
+      model_settings_response = Rack::MockRequest.new(PiWebGateway).get("/sessions/model_settings", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
+      apply_model_response = Rack::MockRequest.new(PiWebGateway).post("/sessions/model_settings", params: { "session" => other_path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }, "HTTP_COOKIE" => own_cookie)
+      cycle_thinking_response = Rack::MockRequest.new(PiWebGateway).post("/sessions/cycle_thinking", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
 
       assert_equal 404, status_response.status
       assert_equal 404, prompt_response.status
+      assert_equal 404, model_settings_response.status
+      assert_equal 404, apply_model_response.status
+      assert_equal 404, cycle_thinking_response.status
       assert_empty calls
     end
   end
@@ -5741,6 +6033,8 @@ class AppTest < Minitest::Test
       @events = events_or_commands
       @commands = events_or_commands
       @session_file = session_file
+      @model = { "provider" => "anthropic", "id" => "claude-sonnet-4" }
+      @thinking_level = "medium"
     end
 
     def prompt(message, images = [])
@@ -5766,7 +6060,43 @@ class AppTest < Minitest::Test
 
     def get_state
       @calls << [:get_state]
-      { "type" => "response", "command" => "get_state", "success" => true, "data" => { "sessionFile" => @session_file } }
+      {
+        "type" => "response",
+        "command" => "get_state",
+        "success" => true,
+        "data" => {
+          "sessionFile" => @session_file,
+          "model" => @model,
+          "thinkingLevel" => @thinking_level
+        }
+      }
+    end
+
+    def get_available_models
+      @calls << [:get_available_models]
+      {
+        "type" => "response",
+        "command" => "get_available_models",
+        "success" => true,
+        "data" => { "models" => [{ "provider" => "anthropic", "id" => "claude-sonnet-4", "name" => "Claude Sonnet 4" }] }
+      }
+    end
+
+    def set_model(provider, model_id)
+      @calls << [:set_model, provider, model_id]
+      @model = { "provider" => provider, "id" => model_id }
+      { "success" => true }
+    end
+
+    def set_thinking_level(level)
+      @calls << [:set_thinking_level, level]
+      @thinking_level = level
+      { "success" => true }
+    end
+
+    def cycle_thinking_level
+      @calls << [:cycle_thinking_level]
+      { "type" => "response", "command" => "cycle_thinking_level", "success" => true, "data" => { "level" => "high" } }
     end
 
     def get_commands

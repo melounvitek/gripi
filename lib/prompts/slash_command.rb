@@ -6,7 +6,8 @@ module Prompts
       "/fork" => :fork,
       "/tree" => :tree,
       "/clone" => :clone,
-      "/new" => :new
+      "/new" => :new,
+      "/model" => :model
     }.freeze
 
     attr_reader :type, :name, :instructions, :error

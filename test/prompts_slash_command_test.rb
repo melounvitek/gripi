@@ -37,11 +37,13 @@ class PromptsSlashCommandTest < Minitest::Test
     assert_equal :tree, Prompts::SlashCommand.parse("/tree").type
     assert_equal :clone, Prompts::SlashCommand.parse("/clone").type
     assert_equal :new, Prompts::SlashCommand.parse("/new").type
+    assert_equal :model, Prompts::SlashCommand.parse("/model").type
   end
 
   def test_ignores_multiline_command_like_prompts
     assert_nil Prompts::SlashCommand.parse("/compact recent\nwork")
     assert_nil Prompts::SlashCommand.parse("/rename Useful\nname")
+    assert_nil Prompts::SlashCommand.parse("/model openai/gpt-5")
   end
 
   def test_ignores_regular_prompts

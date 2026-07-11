@@ -245,6 +245,9 @@
     .composer-controls:has(.session-status-bar:empty) { display: none; }
     .session-status-bar { display: flex; justify-content: flex-end; gap: 0.9rem; color: var(--muted-soft); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
     .session-status-item { display: inline-flex; gap: 0.25rem; white-space: nowrap; }
+    .model-settings-chip { justify-self: auto; min-height: 0; padding: 0.18rem 0.45rem; border: 1px solid rgba(138, 190, 183, 0.28); border-radius: 999px; background: rgba(138, 190, 183, 0.08); color: var(--text); font: inherit; }
+    .model-settings-chip:hover { border-color: var(--accent); background: rgba(138, 190, 183, 0.16); transform: none; }
+    .model-settings-chip:disabled, .model-settings-chip:disabled:hover { border-color: transparent; background: transparent; color: var(--muted-soft); }
     .session-status-label { color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
     .session-reconnect { display: none; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.65rem 0.75rem; border: 1px solid rgba(255, 255, 0, 0.28); border-radius: 0.65rem; background: rgba(255, 255, 0, 0.08); color: var(--text); font-size: 0.9rem; }
     .session-reconnect.is-visible { display: flex; }
@@ -307,6 +310,26 @@
     .project-select-option[aria-selected="true"] { color: var(--project-identity-fg, var(--accent)); font-weight: 800; }
     .project-select-option-label { min-width: 0; overflow-wrap: anywhere; }
     .project-select-neutral-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 1.95rem; height: 1.55rem; border: 1px solid var(--border); border-radius: 0.42rem; background: var(--panel-soft); color: var(--muted); font-size: 0.85rem; font-weight: 900; }
+    .model-settings-card { width: min(42rem, 100%); }
+    .model-settings-form { min-height: 0; display: grid; gap: 0.8rem; }
+    .model-settings-status { min-height: 1.2rem; margin: 0; color: var(--muted); font-size: 0.85rem; }
+    .model-settings-status.is-error { color: #ffb4b6; }
+    .model-settings-list { min-height: 5rem; max-height: 42dvh; overflow-y: auto; display: grid; gap: 0.85rem; padding-right: 0.2rem; }
+    .model-provider-group { display: grid; gap: 0.4rem; }
+    .model-provider-heading { margin: 0; color: var(--muted); font-size: 0.72rem; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+    .model-option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0.6rem; padding: 0.6rem 0.7rem; border: 1px solid var(--border); border-radius: 0.65rem; background: var(--panel-soft); cursor: pointer; }
+    .model-option:has(input:checked) { border-color: var(--accent); background: rgba(138, 190, 183, 0.1); }
+    .model-option input { margin: 0.22rem 0 0; }
+    .model-option-details { min-width: 0; display: grid; gap: 0.18rem; }
+    .model-option-id { color: var(--text); font-weight: 800; overflow-wrap: anywhere; }
+    .model-option-name, .model-option-meta { color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+    .model-current-badge { padding: 0.12rem 0.4rem; border-radius: 999px; background: rgba(138, 190, 183, 0.16); color: var(--accent); font-size: 0.65rem; font-weight: 900; text-transform: uppercase; }
+    .model-thinking-options { min-width: 0; margin: 0; padding: 0.7rem; border: 1px solid var(--border); border-radius: 0.65rem; }
+    .model-thinking-options legend { padding: 0 0.3rem; color: var(--muted); font-size: 0.8rem; font-weight: 800; }
+    .model-thinking-options [data-thinking-levels] { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+    .thinking-option { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 999px; background: var(--panel-soft); color: var(--text); font-size: 0.82rem; cursor: pointer; }
+    .thinking-option:has(input:checked) { border-color: var(--accent); background: rgba(138, 190, 183, 0.14); }
+    .thinking-option input { margin: 0; }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
     .fork-session-list { display: grid; gap: 0.55rem; }
     .fork-session-status { margin: 0; color: var(--muted); }
@@ -412,6 +435,7 @@
   </div>
   <%= erb :_new_session_modal, layout: false %>
   <%= erb :_fork_session_modal, layout: false %>
+  <%= erb :_model_settings_modal, layout: false %>
   <div class="session-switch-overlay" role="status" aria-live="polite" aria-label="Loading">
     <div class="session-switch-indicator"><span class="session-switch-spinner" aria-hidden="true"></span> Loading…</div>
   </div>
@@ -488,6 +512,12 @@
     let liveUserMessages = new Map();
     let liveStatusModel = null;
     let liveStatusThinking = null;
+    let modelSettingsModels = [];
+    let modelSettingsCurrentModel = null;
+    let modelSettingsCurrentThinking = "off";
+    let modelSettingsSelectedKey = null;
+    let modelSettingsOperationGeneration = 0;
+    let thinkingCyclePending = false;
     let pendingImages = [];
     let restorePromptFocusAfterSending = false;
     let escapeStopConfirmationExpiresAt = 0;
@@ -1361,9 +1391,15 @@
 
       let item = sessionStatusBar.querySelector(`[data-status-key="${key}"]`);
       if (!item) {
-        item = document.createElement("span");
-        item.className = "session-status-item";
+        item = document.createElement(key === "model" ? "button" : "span");
+        item.className = `session-status-item${key === "model" ? " model-settings-chip" : ""}`;
         item.dataset.statusKey = key;
+        if (key === "model") {
+          item.type = "button";
+          item.dataset.modalOpen = "model-settings-modal";
+          item.setAttribute("aria-label", "Open model and thinking settings");
+          item.disabled = ["running", "sending"].includes(composerState?.dataset.state);
+        }
         const labelElement = document.createElement("span");
         labelElement.className = "session-status-label";
         labelElement.textContent = label;
@@ -1388,6 +1424,206 @@
 
       setStatusItem("model", "Model", [liveStatusModel, liveStatusThinking ? `(${liveStatusThinking})` : null].filter(Boolean).join(" "));
       removeStatusItem("thinking");
+    }
+
+    const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+    function supportedThinkingLevels(model) {
+      if (!model?.reasoning) return ["off"];
+      const map = model.thinkingLevelMap || {};
+      return THINKING_LEVELS.filter((level) => {
+        if (["xhigh", "max"].includes(level)) return map[level] !== undefined && map[level] !== null;
+        return map[level] !== null;
+      });
+    }
+
+    function selectedThinkingLevel(model, currentLevel) {
+      const levels = supportedThinkingLevels(model);
+      if (levels.includes(currentLevel)) return currentLevel;
+      const currentIndex = THINKING_LEVELS.indexOf(currentLevel);
+      const higher = levels.find((level) => THINKING_LEVELS.indexOf(level) >= currentIndex);
+      if (higher) return higher;
+      const lower = levels.filter((level) => THINKING_LEVELS.indexOf(level) < currentIndex);
+      return lower[lower.length - 1] || levels[0] || "off";
+    }
+
+    function modelSettingsKey(model) {
+      return `${model.provider || ""}\u0000${model.id || ""}`;
+    }
+
+    function selectedSettingsModel() {
+      return modelSettingsModels.find((model) => modelSettingsKey(model) === modelSettingsSelectedKey) || null;
+    }
+
+    function setModelSettingsStatus(message, error = false) {
+      const status = document.querySelector("[data-model-settings-status]");
+      if (!status) return;
+      status.textContent = message;
+      status.classList.toggle("is-error", error);
+    }
+
+    function renderThinkingOptions(model, requestedLevel = null) {
+      const container = document.querySelector("[data-thinking-levels]");
+      const fieldset = document.querySelector("[data-thinking-options]");
+      if (!container || !fieldset || !model) return;
+      const level = selectedThinkingLevel(model, requestedLevel || modelSettingsCurrentThinking);
+      container.replaceChildren();
+      supportedThinkingLevels(model).forEach((thinkingLevel) => {
+        const label = document.createElement("label");
+        label.className = "thinking-option";
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = "thinking";
+        radio.value = thinkingLevel;
+        radio.checked = thinkingLevel === level;
+        label.append(radio, thinkingLevel);
+        container.append(label);
+      });
+      fieldset.hidden = false;
+    }
+
+    function modelMetadata(model) {
+      const metadata = [];
+      if (model.contextWindow) metadata.push(`${compactNumber(model.contextWindow)} context`);
+      if (model.maxTokens) metadata.push(`${compactNumber(model.maxTokens)} max output`);
+      if (Array.isArray(model.input) && model.input.includes("image")) metadata.push("images");
+      metadata.push(model.reasoning ? "reasoning" : "no reasoning");
+      return metadata.join(" · ");
+    }
+
+    function renderModelSettingsModels() {
+      const list = document.querySelector("[data-model-list]");
+      const search = document.querySelector("[data-model-search]")?.value.trim().toLowerCase() || "";
+      if (!list) return;
+      list.replaceChildren();
+      const matches = modelSettingsModels.filter((model) => [model.provider, model.id, model.name].some((value) => String(value || "").toLowerCase().includes(search)));
+      const providers = new Map();
+      matches.forEach((model) => {
+        const models = providers.get(model.provider || "Other") || [];
+        models.push(model);
+        providers.set(model.provider || "Other", models);
+      });
+      providers.forEach((models, provider) => {
+        const group = document.createElement("section");
+        group.className = "model-provider-group";
+        const heading = document.createElement("h3");
+        heading.className = "model-provider-heading";
+        heading.textContent = provider;
+        group.append(heading);
+        models.forEach((model) => {
+          const label = document.createElement("label");
+          label.className = "model-option";
+          const radio = document.createElement("input");
+          radio.type = "radio";
+          radio.name = "model";
+          radio.value = modelSettingsKey(model);
+          radio.checked = radio.value === modelSettingsSelectedKey;
+          radio.addEventListener("change", () => {
+            modelSettingsSelectedKey = radio.value;
+            renderThinkingOptions(model);
+          });
+          const details = document.createElement("span");
+          details.className = "model-option-details";
+          const id = document.createElement("span");
+          id.className = "model-option-id";
+          id.textContent = model.id || "Unknown model";
+          details.append(id);
+          if (model.name && model.name !== model.id) {
+            const name = document.createElement("span");
+            name.className = "model-option-name";
+            name.textContent = model.name;
+            details.append(name);
+          }
+          const metadata = document.createElement("span");
+          metadata.className = "model-option-meta";
+          metadata.textContent = modelMetadata(model);
+          details.append(metadata);
+          label.append(radio, details);
+          if (modelSettingsKey(model) === modelSettingsKey(modelSettingsCurrentModel || {})) {
+            const badge = document.createElement("span");
+            badge.className = "model-current-badge";
+            badge.textContent = "Current";
+            label.append(badge);
+          }
+          group.append(label);
+        });
+        list.append(group);
+      });
+      setModelSettingsStatus(matches.length ? `${matches.length} model${matches.length === 1 ? "" : "s"}` : "No matching models.");
+    }
+
+    async function loadModelSettings(modal, operation) {
+      const sessionPath = currentSessionPath();
+      const apply = modal?.querySelector("[data-model-settings-apply]");
+      const list = modal?.querySelector("[data-model-list]");
+      if (!modal || !sessionPath) return;
+      if (list) list.replaceChildren();
+      if (apply) apply.disabled = true;
+      setModelSettingsStatus("Loading models…");
+      try {
+        const response = await fetch(`/sessions/model_settings?session=${encodeURIComponent(sessionPath)}`, { headers: { "Accept": "application/json" } });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload) throw new Error(payload?.error || "Could not load models.");
+        if (operation !== modelSettingsOperationGeneration || modal.hidden || sessionPath !== currentSessionPath()) return;
+        modelSettingsModels = Array.isArray(payload.models) ? payload.models : [];
+        modelSettingsCurrentModel = payload.state?.model || null;
+        modelSettingsCurrentThinking = payload.state?.thinkingLevel || "off";
+        modelSettingsSelectedKey = modelSettingsKey(modelSettingsCurrentModel || {});
+        if (!modelSettingsModels.some((model) => modelSettingsKey(model) === modelSettingsSelectedKey)) {
+          modelSettingsSelectedKey = modelSettingsModels[0] ? modelSettingsKey(modelSettingsModels[0]) : null;
+        }
+        renderModelSettingsModels();
+        renderThinkingOptions(selectedSettingsModel());
+        if (apply) apply.disabled = !selectedSettingsModel() || ["running", "sending"].includes(composerState?.dataset.state);
+      } catch (error) {
+        if (operation === modelSettingsOperationGeneration && !modal.hidden && sessionPath === currentSessionPath()) {
+          setModelSettingsStatus(error.message || "Could not load models.", true);
+        }
+      }
+    }
+
+    function openModelSettingsModal() {
+      if (["running", "sending"].includes(composerState?.dataset.state)) return false;
+      const modal = document.querySelector('[data-modal="model-settings-modal"]');
+      const search = modal?.querySelector("[data-model-search]");
+      if (search) search.value = "";
+      const operation = ++modelSettingsOperationGeneration;
+      openModal(modal);
+      loadModelSettings(modal, operation).catch(() => {});
+      return !!modal;
+    }
+
+    async function applyModelSettings(form) {
+      const modal = form.closest("[data-modal]");
+      const sessionPath = currentSessionPath();
+      const operation = ++modelSettingsOperationGeneration;
+      const model = selectedSettingsModel();
+      const thinking = form.querySelector('input[name="thinking"]:checked')?.value;
+      const apply = form.querySelector("[data-model-settings-apply]");
+      if (!model || !thinking || !sessionPath) return;
+      const formData = new FormData();
+      formData.set("session", sessionPath);
+      formData.set("provider", model.provider || "");
+      formData.set("model", model.id || "");
+      formData.set("thinking", thinking);
+      if (apply) apply.disabled = true;
+      setModelSettingsStatus("Applying settings…");
+      try {
+        const response = await fetch("/sessions/model_settings", { method: "POST", body: formData, headers: { "Accept": "application/json" } });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error || "Could not apply model settings.");
+        if (operation !== modelSettingsOperationGeneration || modal.hidden || sessionPath !== currentSessionPath()) return;
+        const effectiveModel = payload?.model;
+        liveStatusModel = [effectiveModel?.provider, effectiveModel?.id].filter(Boolean).join("/");
+        liveStatusThinking = payload?.thinking;
+        renderModelStatus();
+        closeModal(modal);
+      } catch (error) {
+        if (operation === modelSettingsOperationGeneration && !modal.hidden && sessionPath === currentSessionPath()) {
+          setModelSettingsStatus(error.message || "Could not apply model settings.", true);
+          if (apply) apply.disabled = false;
+        }
+      }
     }
 
     function compactNumber(value) {
@@ -1557,7 +1793,7 @@
           renderModelStatus();
         }
       }
-      if (event.type === "thinking_level_change" || event.type === "thinking_level_select") {
+      if (["thinking_level_change", "thinking_level_changed", "thinking_level_select"].includes(event.type)) {
         liveStatusThinking = event.thinkingLevel || event.level;
         renderModelStatus();
       }
@@ -1640,6 +1876,10 @@
           if (shouldAutofocusPrompt()) promptTextarea.focus({ preventScroll: true });
         }
       }
+      const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]');
+      if (modelButton) modelButton.disabled = agentBusy;
+      const modelApply = document.querySelector('[data-modal="model-settings-modal"] [data-model-settings-apply]');
+      if (modelApply && !document.querySelector('[data-modal="model-settings-modal"]')?.hidden) modelApply.disabled = agentBusy || !selectedSettingsModel();
       const attachmentsDisabled = submitting;
       if (imageInput) imageInput.disabled = attachmentsDisabled;
       if (attachButton) {
@@ -1691,6 +1931,37 @@
 
     function sessionNewSlashCommand(message) {
       return /^\/new$/.test(message.trim());
+    }
+
+    function sessionModelSlashCommand(message) {
+      return /^\/model$/.test(message.trim());
+    }
+
+    function cycleThinkingShortcut(event) {
+      return event.key === "Tab" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey &&
+        document.activeElement === promptTextarea && composerState?.dataset.state === "idle" && !modalIsOpen();
+    }
+
+    async function cycleThinking() {
+      const sessionPath = currentSessionPath();
+      const generation = sessionViewGeneration;
+      if (!sessionPath || thinkingCyclePending) return;
+      thinkingCyclePending = true;
+      const formData = new FormData();
+      formData.set("session", sessionPath);
+      try {
+        const response = await fetch("/sessions/cycle_thinking", { method: "POST", body: formData, headers: { "Accept": "application/json" } });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error || "Could not change thinking level.");
+        if (generation !== sessionViewGeneration || sessionPath !== currentSessionPath()) return;
+        if (payload?.thinking) {
+          liveStatusThinking = payload.thinking;
+          renderModelStatus();
+        }
+      } catch (_error) {
+      } finally {
+        thinkingCyclePending = false;
+      }
     }
 
     function updateSessionHeaderName(name) {
@@ -3175,7 +3446,8 @@
       const treeCommand = followUp ? null : sessionTreeSlashCommand(message);
       const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);
       const newCommand = followUp ? null : sessionNewSlashCommand(message);
-      if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand) {
+      const modelCommand = followUp ? null : sessionModelSlashCommand(message);
+      if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {
         if (!followUp) {
           resetLiveAssistantTracking();
           document.querySelectorAll(".tree-position-banner").forEach((banner) => banner.remove());
@@ -3200,8 +3472,8 @@
       resetCommandSelection();
       resizePromptTextarea();
       if (shouldAutofocusPrompt()) promptTextarea.focus();
-      setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : followUp ? "Queueing follow-up…" : "Sending…");
-      showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : followUp ? "Queueing follow-up…" : "Sending…", true);
+      setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…");
+      showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…", true);
       if (cloneCommand || newCommand) showSessionSwitching();
 
       const restoreSubmittedComposerInput = () => {
@@ -3292,6 +3564,11 @@
           setComposerState("idle");
           showStatus("Choose a tree entry", true);
           openTreeSessionModal();
+          return;
+        }
+        if (payload?.command === "model") {
+          setComposerState("idle");
+          openModelSettingsModal();
           return;
         }
         if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {
@@ -3489,6 +3766,13 @@
           }
         }
 
+        if (event.key === "Tab" && event.shiftKey) {
+          if (cycleThinkingShortcut(event)) {
+            event.preventDefault();
+            cycleThinking().catch(() => {});
+          }
+          return;
+        }
         if (event.key === "Tab" && toggleConversationPromptFocus(event, conversationScroll)) return;
 
         if (event.key === "Enter" && !event.shiftKey && shouldAutofocusPrompt()) {
@@ -3635,6 +3919,10 @@
       hideReconnectBanner();
       olderConversationLoadPromise = null;
       clearAttachments();
+      const modelModal = document.querySelector('[data-modal="model-settings-modal"]');
+      if (modelModal) modelModal.hidden = true;
+      modelSettingsOperationGeneration += 1;
+      document.body.classList.toggle("modal-open", modalIsOpen());
     }
 
     function sidebarFragmentUrl(url = window.location.href) {
@@ -4271,6 +4559,7 @@
     function closeModal(modal) {
       if (!modal) return;
       modal.hidden = true;
+      if (modal.dataset.modal === "model-settings-modal") modelSettingsOperationGeneration += 1;
       document.body.classList.toggle("modal-open", modalIsOpen());
       if (!modalIsOpen() && !document.hidden) {
         scheduleNextEventPoll(0);
@@ -4282,7 +4571,12 @@
     }
 
     function focusPromptAfterModalClose(modal) {
-      if (modal?.dataset.modal === "new-session-modal" && shouldAutofocusPrompt()) promptTextarea?.focus({ preventScroll: true });
+      if (modal?.dataset.modal === "model-settings-modal") {
+        const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]:not(:disabled)');
+        (modelButton || conversationScroll)?.focus({ preventScroll: true });
+      } else if (modal?.dataset.modal === "new-session-modal" && shouldAutofocusPrompt()) {
+        promptTextarea?.focus({ preventScroll: true });
+      }
     }
 
     function setCwdValidationState(form, state, message) {
@@ -4540,6 +4834,10 @@
           openTreeSessionModal();
           return;
         }
+        if (opener.dataset.modalOpen === "model-settings-modal") {
+          openModelSettingsModal();
+          return;
+        }
         openModal(modal);
         return;
       }
@@ -4638,9 +4936,21 @@
     window.addEventListener("scroll", () => positionProjectSelect(openProjectSelectWrapper), true);
 
     document.addEventListener("input", (event) => {
+      const modelSearch = event.target.closest("[data-model-search]");
+      if (modelSearch) {
+        renderModelSettingsModels();
+        return;
+      }
       const input = event.target.closest("[data-new-session-cwd-input]");
       if (!input) return;
       validateNewSessionCwd(input.closest("form"));
+    });
+
+    document.addEventListener("submit", (event) => {
+      const form = event.target.closest("[data-model-settings-form]");
+      if (!form) return;
+      event.preventDefault();
+      applyModelSettings(form).catch(() => {});
     });
 
     document.addEventListener("change", (event) => {
@@ -4757,6 +5067,24 @@
     window.addEventListener("pi:session-search-requested", requestSessionSearch);
     window.addEventListener("pi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
+    function handleModelSettingsModalTab(event) {
+      if (event.key !== "Tab") return;
+      const modal = document.querySelector('[data-modal="model-settings-modal"]:not([hidden])');
+      if (!modal) return;
+      const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.closest("[hidden]"));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!focusable.includes(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+      } else if ((!event.shiftKey && document.activeElement === last) || (event.shiftKey && document.activeElement === first)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+    }
+
     function handleNewSessionModalTab(event) {
       if (event.key !== "Tab") return;
       const modal = document.querySelector('[data-modal="new-session-modal"]:not([hidden])');
@@ -4777,6 +5105,7 @@
         return;
       }
 
+      handleModelSettingsModalTab(event);
       handleNewSessionModalTab(event);
       if (modalIsOpen()) return;
 

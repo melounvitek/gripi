@@ -119,7 +119,11 @@
               <div class="composer-controls">
                 <div class="session-status-bar" id="session-status-bar" data-status-url="/status?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
                   <% session_status_items(@session_status).each do |label, value| %>
-                    <span class="session-status-item" data-status-key="<%= h label.downcase %>"><span class="session-status-label"><%= h label %></span> <span class="session-status-value"><%= h value %></span></span>
+                    <% if label == "Model" %>
+                      <button type="button" class="session-status-item model-settings-chip" data-status-key="model" data-modal-open="model-settings-modal" aria-label="Open model and thinking settings" <%= "disabled" if rpc_clients.busy?(@selected_session.path) %>><span class="session-status-label"><%= h label %></span> <span class="session-status-value"><%= h value %></span></button>
+                    <% else %>
+                      <span class="session-status-item" data-status-key="<%= h label.downcase %>"><span class="session-status-label"><%= h label %></span> <span class="session-status-value"><%= h value %></span></span>
+                    <% end %>
                   <% end %>
                 </div>
               </div>

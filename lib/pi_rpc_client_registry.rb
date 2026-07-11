@@ -1,7 +1,7 @@
 require "thread"
 
 class PiRpcClientRegistry
-  Entry = Struct.new(:client, :last_used_at, :active_requests, keyword_init: true)
+  Entry = Struct.new(:client, :last_used_at, :active_requests, :operation_mutex, keyword_init: true)
 
   def initialize(factory:, clock: -> { Time.now })
     @factory = factory
@@ -12,7 +12,7 @@ class PiRpcClientRegistry
 
   def ensure_client(session_path)
     @mutex.synchronize do
-      entry = @clients[session_path] ||= Entry.new(client: @factory.call(session_path), active_requests: 0)
+      entry = @clients[session_path] ||= new_entry(@factory.call(session_path))
       touch_entry(entry)
       entry.client
     end
@@ -22,7 +22,7 @@ class PiRpcClientRegistry
     old_client = nil
     @mutex.synchronize do
       old_client = @clients[session_path]&.client unless @clients[session_path]&.client.equal?(client)
-      @clients[session_path] = Entry.new(client: client, last_used_at: @clock.call, active_requests: 0)
+      @clients[session_path] = new_entry(client)
     end
     old_client&.close
   end
@@ -93,14 +93,14 @@ class PiRpcClientRegistry
   end
 
   def with_client(session_path)
-    client = @mutex.synchronize do
-      entry = @clients[session_path] ||= Entry.new(client: @factory.call(session_path), active_requests: 0)
-      entry.active_requests += 1
-      touch_entry(entry)
-      entry.client
+    entry = @mutex.synchronize do
+      existing_entry = @clients[session_path] ||= new_entry(@factory.call(session_path))
+      existing_entry.active_requests += 1
+      touch_entry(existing_entry)
+      existing_entry
     end
 
-    yield client
+    entry.operation_mutex.synchronize { yield entry.client }
   ensure
     end_use(session_path)
   end
@@ -157,6 +157,10 @@ class PiRpcClientRegistry
   end
 
   private
+
+  def new_entry(client)
+    Entry.new(client: client, last_used_at: @clock.call, active_requests: 0, operation_mutex: Mutex.new)
+  end
 
   def touch_entry(entry)
     entry.last_used_at = @clock.call
