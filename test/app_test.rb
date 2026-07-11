@@ -1574,6 +1574,94 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_browses_children_of_an_existing_new_session_cwd
+    Dir.mktmpdir do |dir|
+      %w[beta alpha].each { |name| FileUtils.mkdir_p(File.join(dir, name)) }
+      FileUtils.mkdir_p(File.join(dir, ".hidden"))
+      File.write(File.join(dir, "notes.txt"), "not a directory")
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sessions/browse_cwd",
+        params: { "cwd" => dir },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal true, payload.fetch("valid")
+      assert_equal File.realpath(dir), payload.fetch("cwd")
+      assert_equal %w[alpha beta].map { |name| File.join(dir, name) }, payload.fetch("directories")
+      assert_equal "no-store", response["cache-control"]
+    end
+  end
+
+  def test_browsing_new_session_cwds_skips_names_that_cannot_be_shown_in_json
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "visible"))
+      FileUtils.mkdir_p(File.join(dir.b, "invalid-\xff".b))
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sessions/browse_cwd",
+        params: { "cwd" => dir },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [File.join(dir, "visible")], JSON.parse(response.body).fetch("directories")
+    end
+  end
+
+  def test_browsing_new_session_cwds_rejects_malformed_path_encoding
+    response = Rack::MockRequest.new(PiWebGateway).get(
+      "/sessions/browse_cwd?cwd=%FF",
+      "HTTP_ACCEPT" => "application/json"
+    )
+
+    assert_equal 200, response.status
+    payload = JSON.parse(response.body)
+    assert_equal false, payload.fetch("valid")
+    assert_empty payload.fetch("directories")
+  end
+
+  def test_browses_new_session_cwds_by_the_typed_path_component
+    Dir.mktmpdir do |dir|
+      %w[alpha alpine beta .archive .config].each { |name| FileUtils.mkdir_p(File.join(dir, name)) }
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sessions/browse_cwd",
+        params: { "cwd" => File.join(dir, "al") },
+        "HTTP_ACCEPT" => "application/json"
+      )
+      hidden_response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sessions/browse_cwd",
+        params: { "cwd" => File.join(dir, ".a") },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      payload = JSON.parse(response.body)
+      assert_equal false, payload.fetch("valid")
+      assert_equal [File.join(dir, "alpha"), File.join(dir, "alpine")], payload.fetch("directories")
+      assert_equal [File.join(dir, ".archive")], JSON.parse(hidden_response.body).fetch("directories")
+    end
+  end
+
+  def test_limits_new_session_cwd_browser_results
+    Dir.mktmpdir do |dir|
+      35.times { |index| FileUtils.mkdir_p(File.join(dir, format("project-%02d", index))) }
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/sessions/browse_cwd",
+        params: { "cwd" => File.join(dir, "project-") },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      directories = JSON.parse(response.body).fetch("directories")
+      assert_equal 30, directories.length
+      assert_equal File.join(dir, "project-00"), directories.first
+      assert_equal File.join(dir, "project-29"), directories.last
+    end
+  end
+
   def test_creates_new_native_session_from_validated_cwd_as_json
     Dir.mktmpdir do |dir|
       cwd = File.join(dir, "new-project")
@@ -3068,7 +3156,20 @@ class AppTest < Minitest::Test
       assert_includes response.body, "abortEventPoll();"
       assert_includes response.body, "async function submitAbort(event)"
       assert_includes response.body, "if (modalIsOpen()) return;"
-      assert_includes response.body, "fetch(validationUrl"
+      modal = Nokogiri::HTML(response.body).at_css('[data-modal="new-session-modal"]')
+      cwd_form = modal.at_css("form.new-session-cwd-form")
+      cwd_input = modal.at_css("[data-new-session-cwd-input]")
+      assert_equal "/sessions/browse_cwd", cwd_form["data-cwd-browser-url"]
+      assert_equal "combobox", cwd_input["role"]
+      assert_equal "list", cwd_input["aria-autocomplete"]
+      assert_equal "new-session-cwd-suggestions", cwd_input["aria-controls"]
+      assert_equal "listbox", modal.at_css("#new-session-cwd-suggestions")["role"]
+      assert_includes response.body, "fetch(browserUrl"
+      assert_includes response.body, "function renderCwdSuggestions(form, directories)"
+      assert_includes response.body, "function selectCwdSuggestion(form, path)"
+      assert_includes response.body, "function handleCwdSuggestionKeydown(event)"
+      assert_includes response.body, 'document.addEventListener("focusin", (event) => {'
+      assert_includes response.body, 'event.key === "Escape" && modalIsOpen() && !event.defaultPrevented'
       refute_includes response.body, "input.value = resolvedCwd"
       assert_includes response.body, "function setNewSessionProjectMode(form)"
       assert_includes response.body, "function setNewSessionPathMode(form,"

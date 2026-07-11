@@ -331,6 +331,9 @@
     .thinking-option:has(input:checked) { border-color: var(--accent); background: rgba(138, 190, 183, 0.14); }
     .thinking-option input { margin: 0; }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
+    .cwd-suggestions { max-height: min(16rem, 36dvh); display: grid; gap: 0.2rem; overflow-y: auto; padding: 0.3rem; border: 1px solid var(--border); border-radius: 0.65rem; background: rgba(30, 30, 36, 0.99); }
+    .cwd-suggestion { width: 100%; min-width: 0; display: block; padding: 0.5rem 0.6rem; border-radius: 0.45rem; background: transparent; color: var(--text); text-align: left; font-family: inherit; font-weight: 600; overflow-wrap: anywhere; }
+    .cwd-suggestion:hover, .cwd-suggestion.is-active { background: var(--panel-softer); transform: none; }
     .fork-session-list { display: grid; gap: 0.55rem; }
     .fork-session-status { margin: 0; color: var(--muted); }
     .fork-session-option { width: 100%; justify-self: stretch; display: block; padding: 0.65rem 0.75rem; border: 1px solid var(--border); border-radius: 0.6rem; background: var(--panel-soft); color: var(--text); text-align: left; font-weight: 600; overflow-wrap: anywhere; }
@@ -4590,6 +4593,93 @@
       submit.disabled = state !== "valid";
     }
 
+    function clearCwdSuggestions(form) {
+      const input = form?.querySelector("[data-new-session-cwd-input]");
+      const list = form?.querySelector("[data-new-session-cwd-suggestions]");
+      if (!input || !list) return;
+      list.replaceChildren();
+      list.hidden = true;
+      delete list.dataset.activeIndex;
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+    }
+
+    function renderCwdSuggestions(form, directories) {
+      const input = form?.querySelector("[data-new-session-cwd-input]");
+      const list = form?.querySelector("[data-new-session-cwd-suggestions]");
+      if (!input || !list) return;
+
+      clearCwdSuggestions(form);
+      directories.forEach((path, index) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.id = `new-session-cwd-suggestion-${index}`;
+        option.className = "cwd-suggestion";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", "false");
+        option.tabIndex = -1;
+        option.dataset.cwdSuggestion = path;
+        option.textContent = path;
+        list.append(option);
+      });
+      if (list.children.length === 0) return;
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    }
+
+    function setActiveCwdSuggestion(form, index) {
+      const input = form?.querySelector("[data-new-session-cwd-input]");
+      const list = form?.querySelector("[data-new-session-cwd-suggestions]");
+      const options = Array.from(list?.querySelectorAll("[data-cwd-suggestion]") || []);
+      if (!input || !list || options.length === 0) return;
+
+      const activeIndex = (index + options.length) % options.length;
+      list.dataset.activeIndex = String(activeIndex);
+      options.forEach((option, optionIndex) => {
+        const active = optionIndex === activeIndex;
+        option.classList.toggle("is-active", active);
+        option.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      input.setAttribute("aria-activedescendant", options[activeIndex].id);
+      options[activeIndex].scrollIntoView({ block: "nearest" });
+    }
+
+    function selectCwdSuggestion(form, path) {
+      const input = form?.querySelector("[data-new-session-cwd-input]");
+      if (!input || !path) return;
+      input.value = path;
+      clearCwdSuggestions(form);
+      input.focus();
+      validateNewSessionCwd(form, { delay: 0 });
+    }
+
+    function handleCwdSuggestionKeydown(event) {
+      const input = event.target.closest("[data-new-session-cwd-input]");
+      const form = input?.closest("form");
+      const list = form?.querySelector("[data-new-session-cwd-suggestions]");
+      const options = Array.from(list?.querySelectorAll("[data-cwd-suggestion]") || []);
+      if (!input || !list || list.hidden || options.length === 0) return false;
+
+      const activeIndex = Number(list.dataset.activeIndex ?? -1);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const nextIndex = activeIndex < 0 && event.key === "ArrowUp" ? options.length - 1 : activeIndex + (event.key === "ArrowDown" ? 1 : -1);
+        setActiveCwdSuggestion(form, nextIndex);
+        return true;
+      }
+      if ((event.key === "Enter" || event.key === "Tab") && activeIndex >= 0) {
+        event.preventDefault();
+        selectCwdSuggestion(form, options[activeIndex].dataset.cwdSuggestion);
+        return true;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        clearCwdSuggestions(form);
+        return true;
+      }
+      return false;
+    }
+
     function firstNewSessionProjectOption(select) {
       return Array.from(select?.options || []).find((option) => option.value && !option.hasAttribute("data-new-session-new-path-option"));
     }
@@ -4611,6 +4701,7 @@
 
       clearTimeout(cwdValidationTimer);
       cwdValidationController?.abort();
+      clearCwdSuggestions(form);
       projectFields.hidden = false;
       pathFields.hidden = true;
       if (!select.value || select.selectedOptions[0]?.hasAttribute("data-new-session-new-path-option")) select.value = option.value;
@@ -4627,8 +4718,10 @@
       const hiddenCwd = form?.querySelector("[data-new-session-cwd-value]");
       if (!form || !projectFields || !pathFields || !input || !hiddenCwd) return;
 
+      const startingCwd = hiddenCwd.value;
       projectFields.hidden = true;
       pathFields.hidden = false;
+      if (startingCwd) input.value = startingCwd;
       hiddenCwd.value = "";
       validateNewSessionCwd(form, { delay: 0 });
       if (focus) input.focus();
@@ -4644,11 +4737,12 @@
     function validateNewSessionCwd(form, { delay = 250 } = {}) {
       const input = form?.querySelector("[data-new-session-cwd-input]");
       const hiddenCwd = form?.querySelector("[data-new-session-cwd-value]");
-      const validationEndpoint = form?.dataset.cwdValidationUrl;
-      if (!input || !hiddenCwd || !validationEndpoint) return;
+      const browserEndpoint = form?.dataset.cwdBrowserUrl;
+      if (!input || !hiddenCwd || !browserEndpoint) return;
 
       clearTimeout(cwdValidationTimer);
       cwdValidationController?.abort();
+      clearCwdSuggestions(form);
       hiddenCwd.value = "";
       const cwd = input.value.trim();
       if (!cwd) {
@@ -4661,19 +4755,25 @@
         const controller = new AbortController();
         cwdValidationController = controller;
         try {
-          const validationUrl = new URL(validationEndpoint, window.location.origin);
-          validationUrl.searchParams.set("cwd", cwd);
-          const response = await fetch(validationUrl, { headers: { "Accept": "application/json" }, signal: controller.signal });
+          const browserUrl = new URL(browserEndpoint, window.location.origin);
+          browserUrl.searchParams.set("cwd", cwd);
+          const response = await fetch(browserUrl, { headers: { "Accept": "application/json" }, signal: controller.signal });
           const payload = await response.json().catch(() => null);
           if (controller.signal.aborted || input.value.trim() !== cwd) return;
-          if (response.ok && payload?.valid) {
+          if (!response.ok || !payload) throw new Error("cwd browser failed");
+
+          const directories = Array.isArray(payload.directories) ? payload.directories : [];
+          renderCwdSuggestions(form, directories);
+          if (payload.valid) {
             hiddenCwd.value = payload.cwd || cwd;
             setCwdValidationState(form, "valid", "Directory exists.");
+          } else if (directories.length > 0) {
+            setCwdValidationState(form, "pending", "Choose a matching directory.");
           } else {
-            setCwdValidationState(form, "invalid", payload?.error || "Path must be an existing directory.");
+            setCwdValidationState(form, "invalid", payload.error || "Path must be an existing directory.");
           }
         } catch (_error) {
-          if (!controller.signal.aborted) setCwdValidationState(form, "invalid", "Could not validate this path.");
+          if (!controller.signal.aborted) setCwdValidationState(form, "invalid", "Could not browse this path.");
         } finally {
           if (cwdValidationController === controller) cwdValidationController = null;
         }
@@ -4946,6 +5046,22 @@
       validateNewSessionCwd(input.closest("form"));
     });
 
+    document.addEventListener("keydown", handleCwdSuggestionKeydown);
+
+    document.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-cwd-suggestion]");
+      if (!option) return;
+      event.preventDefault();
+      selectCwdSuggestion(option.closest("form"), option.dataset.cwdSuggestion);
+    });
+
+    document.addEventListener("focusin", (event) => {
+      const form = document.querySelector('.new-session-cwd-form');
+      const list = form?.querySelector("[data-new-session-cwd-suggestions]");
+      if (!list || list.hidden || event.target.closest("[data-new-session-cwd-input], [data-new-session-cwd-suggestions]")) return;
+      clearCwdSuggestions(form);
+    });
+
     document.addEventListener("submit", (event) => {
       const form = event.target.closest("[data-model-settings-form]");
       if (!form) return;
@@ -5086,22 +5202,37 @@
     }
 
     function handleNewSessionModalTab(event) {
-      if (event.key !== "Tab") return;
+      if (event.key !== "Tab" || event.defaultPrevented) return;
       const modal = document.querySelector('[data-modal="new-session-modal"]:not([hidden])');
       const select = modal?.querySelector("[data-new-session-known-cwd]");
       const projectTrigger = select?.closest("[data-project-select]")?.querySelector(".project-select-trigger");
-      const projectControl = projectTrigger || select;
-      const submit = modal?.querySelector("[data-new-session-submit]:not(:disabled)");
-      if (!modal || !projectControl || projectControl.closest("[hidden]") || !submit) return;
+      const controls = [
+        projectTrigger || select,
+        modal?.querySelector("[data-new-session-cwd-input]"),
+        modal?.querySelector("[data-new-session-project-mode]"),
+        modal?.querySelector("[data-new-session-submit]")
+      ].filter((control) => control && !control.disabled && !control.closest("[hidden]"));
+      if (!modal || controls.length === 0) return;
 
-      event.preventDefault();
-      (document.activeElement === projectControl ? submit : projectControl).focus();
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if ((!event.shiftKey && document.activeElement === last) || (event.shiftKey && document.activeElement === first)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
     }
 
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && modalIsOpen()) {
+      if (event.key === "Escape" && modalIsOpen() && !event.defaultPrevented) {
         event.preventDefault();
-        closeModal(document.querySelector("[data-modal]:not([hidden])"));
+        const openModalElement = document.querySelector("[data-modal]:not([hidden])");
+        const cwdForm = openModalElement?.querySelector(".new-session-cwd-form");
+        const cwdSuggestions = cwdForm?.querySelector("[data-new-session-cwd-suggestions]");
+        if (cwdSuggestions && !cwdSuggestions.hidden) {
+          clearCwdSuggestions(cwdForm);
+          return;
+        }
+        closeModal(openModalElement);
         return;
       }
 

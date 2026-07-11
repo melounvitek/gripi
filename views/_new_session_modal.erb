@@ -6,7 +6,7 @@
       </div>
       <% default_new_session_cwd = new_session_cwds.first %>
       <% new_path_option_value = "__new_path__" %>
-      <form class="new-session-cwd-form" method="post" action="/sessions/new_at_cwd" data-cwd-validation-url="/sessions/validate_cwd" data-new-session-new-path-value="<%= h new_path_option_value %>">
+      <form class="new-session-cwd-form" method="post" action="/sessions/new_at_cwd" data-cwd-browser-url="/sessions/browse_cwd" data-new-session-new-path-value="<%= h new_path_option_value %>">
         <% if selected_project_cwd %>
           <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
         <% end %>
@@ -31,8 +31,9 @@
         <div data-new-session-path-fields<%= default_new_session_cwd ? " hidden" : "" %>>
           <label class="modal-field">
             <span>Path</span>
-            <input type="text" autocomplete="off" placeholder="/home/alice/projects/project" data-new-session-cwd-input>
+            <input type="text" autocomplete="off" placeholder="/home/alice/projects/project" role="combobox" aria-autocomplete="list" aria-controls="new-session-cwd-suggestions" aria-expanded="false" data-new-session-cwd-input>
           </label>
+          <div id="new-session-cwd-suggestions" class="cwd-suggestions" role="listbox" data-new-session-cwd-suggestions hidden></div>
           <% if default_new_session_cwd %>
             <button type="button" class="secondary" data-new-session-project-mode>Choose existing project instead</button>
           <% end %>
