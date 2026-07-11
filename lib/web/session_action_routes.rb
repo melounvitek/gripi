@@ -8,6 +8,8 @@ require_relative "../pi_session_store"
 
 module Web
   module SessionActionRoutes
+    CWD_SUGGESTION_LIMIT = 30
+
     module Helpers
       private
 
@@ -78,8 +80,14 @@ module Web
         session_cwd(previous_session_path) || pending_rpc_cwd(previous_session_path) || File.dirname(previous_session_path)
       end
 
+      def normalized_session_cwd(raw_cwd)
+        cwd = raw_cwd.to_s
+        cwd.strip if cwd.valid_encoding?
+      end
+
       def validated_session_cwd(raw_cwd)
-        cwd = raw_cwd.to_s.strip
+        cwd = normalized_session_cwd(raw_cwd)
+        return { valid: false, error: "Path must be an existing directory." } unless cwd
         return { valid: false, error: "Enter an existing directory." } if cwd.empty?
 
         expanded_cwd = File.expand_path(cwd)
@@ -89,6 +97,36 @@ module Web
         { valid: true, cwd: File.realpath(expanded_cwd) }
       rescue ArgumentError, Errno::ENOENT, Errno::EACCES
         { valid: false, error: "Path must be an existing directory." }
+      end
+
+      def browsed_session_cwd(raw_cwd)
+        cwd = normalized_session_cwd(raw_cwd)
+        validation = validated_session_cwd(cwd)
+        return validation.merge(directories: []) if !cwd || cwd.empty?
+
+        expanded_cwd = File.expand_path(cwd)
+        parent, prefix = if File.directory?(expanded_cwd)
+          [expanded_cwd, ""]
+        else
+          [File.dirname(expanded_cwd), File.basename(expanded_cwd)]
+        end
+        return validation.merge(directories: []) unless File.readable?(parent) && File.executable?(parent)
+
+        directories = Dir.children(parent).sort.filter_map do |name|
+          name = name.dup.force_encoding(Encoding::UTF_8)
+          next unless name.valid_encoding?
+          next if name.start_with?(".") && !prefix.start_with?(".")
+          next unless name.start_with?(prefix)
+
+          path = File.join(parent, name)
+          path if File.directory?(path) && File.readable?(path) && File.executable?(path)
+        rescue SystemCallError
+          nil
+        end.first(CWD_SUGGESTION_LIMIT)
+
+        validation.merge(directories: directories)
+      rescue ArgumentError, SystemCallError
+        validation.merge(directories: [])
       end
 
       def prompt_images_from(upload_param)
@@ -213,6 +251,12 @@ module Web
           status 422
           JSON.generate(valid: false, error: result.fetch(:error))
         end
+      end
+
+      app.get "/sessions/browse_cwd" do
+        headers "Cache-Control" => "no-store"
+        content_type :json
+        JSON.generate(browsed_session_cwd(params["cwd"]))
       end
 
       app.get "/sessions/model_settings" do
