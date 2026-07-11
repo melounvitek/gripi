@@ -2256,6 +2256,13 @@ class AppTest < Minitest::Test
       assert_equal ["PW"], gateway_identities.map { |identity| identity.at_css(".session-project-monogram").text }.uniq
       assert_equal ["--project-identity-bg: #215f59; --project-identity-fg: #76cbbf"], gateway_identities.map { |identity| identity["style"] }.uniq
       assert_equal "AP", platform_identity.at_css(".session-project-monogram").text
+
+      filter = document.at_css("[data-project-select] select[data-sidebar-project-filter]")
+      gateway_options = filter.css("option").select { |option| option.text == "pi-web-gateway" }
+      assert_equal 2, gateway_options.length
+      assert_equal ["PW"], gateway_options.map { |option| option["data-project-monogram"] }.uniq
+      assert_equal ["#215f59"], gateway_options.map { |option| option["data-project-background"] }.uniq
+      refute filter.at_css('option[value=""]')["data-project-monogram"]
     end
   end
 
@@ -2796,6 +2803,10 @@ class AppTest < Minitest::Test
       modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
       project_options = modal.css('select[data-new-session-known-cwd] option').reject { |option| option["value"].to_s.empty? || option["data-new-session-new-path-option"] }
       assert_equal ["app — #{first_cwd}", "app — #{second_cwd}"], project_options.map(&:text)
+      assert_equal ["AP"], project_options.map { |option| option["data-project-monogram"] }.uniq
+      assert_equal 1, project_options.map { |option| option["data-project-background"] }.uniq.length
+      assert modal.at_css("[data-project-select]")
+      refute modal.at_css("option[data-new-session-new-path-option]")["data-project-monogram"]
     end
   end
 
@@ -2933,6 +2944,10 @@ class AppTest < Minitest::Test
       assert_includes response.body, "function modalIsOpen()"
       assert_includes response.body, "function focusPromptAfterModalClose(modal)"
       assert_includes response.body, "function handleNewSessionModalTab(event)"
+      assert_includes response.body, "function initializeProjectSelects(root = document)"
+      assert_includes response.body, "function openProjectSelect(wrapper)"
+      assert_includes response.body, "function selectProjectOption(wrapper, option)"
+      assert_includes response.body, "initializeProjectSelects();"
       assert_includes response.body, ".session-switch-overlay { position: fixed; inset: 0; z-index: 140;"
       assert_includes response.body, ".modal-overlay { place-items: end stretch; padding: 0; }"
       assert_includes response.body, "submit.textContent = \"Starting…\""
@@ -3321,8 +3336,10 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
       header = document.at_css(".session-header")
-      assert_equal "project", header.at_css(".session-header-project").text
-      assert_equal "project", header.at_css(".session-header-project")["title"]
+      project = header.at_css(".session-header-project")
+      assert_equal "project", project.at_css(".session-header-project-label").text
+      assert_equal "PR", project.at_css(".session-header-project-icon").text
+      assert_equal "project", project["title"]
       stop_button = header.at_css('button.composer-stop-button[form="abort-form"]')
       refute_nil stop_button
       assert_equal "Abort running Pi", stop_button["aria-label"]

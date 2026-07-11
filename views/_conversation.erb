@@ -4,9 +4,13 @@
           <% unless session_only? %>
             <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span><% if unread_sidebar_session_count.positive? %><span class="mobile-sessions-unread-badge" aria-label="<%= h unread_sidebar_session_aria_label %>" title="<%= h unread_sidebar_session_aria_label %>"><%= h unread_sidebar_session_count_label %></span><% end %></label>
           <% end %>
+          <% identity = project_identity(@selected_session.cwd) %>
           <div class="session-header-title" title="<%= h @selected_session.display_name %> · <%= h project_label(@selected_session) %>">
             <h1 class="session-header-name" title="<%= h @selected_session.display_name %>"><%= h @selected_session.display_name %></h1>
-            <div class="session-header-project" title="<%= h project_label(@selected_session) %>"><%= h project_label(@selected_session) %></div>
+            <div class="session-header-project" title="<%= h project_label(@selected_session) %>" style="--project-identity-bg: <%= h identity[:background] %>; --project-identity-fg: <%= h identity[:foreground] %>">
+              <span class="project-identity-icon session-header-project-icon" aria-hidden="true"><%= h identity[:monogram] %></span>
+              <span class="session-header-project-label"><%= h project_label(@selected_session) %></span>
+            </div>
             <% if session_parent(@selected_session) || session_children(@selected_session).any? %>
               <details class="session-relation-tree" aria-label="Related sessions">
                 <summary class="session-relation-tree-heading">Related sessions</summary>

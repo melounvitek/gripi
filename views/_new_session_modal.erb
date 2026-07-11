@@ -15,15 +15,18 @@
         <% end %>
         <input type="hidden" name="cwd" value="<%= h default_new_session_cwd.to_s %>" data-new-session-cwd-value>
         <div data-new-session-project-fields<%= default_new_session_cwd ? "" : " hidden" %>>
-          <label class="modal-field">
-            <span>Project</span>
-            <select name="known_cwd" data-new-session-known-cwd>
-              <% new_session_cwds.each do |cwd| %>
-                <option value="<%= h cwd %>"<%= cwd == default_new_session_cwd ? " selected" : "" %>><%= h new_session_cwd_label(cwd) %></option>
-              <% end %>
-              <option value="<%= h new_path_option_value %>" data-new-session-new-path-option>Add new path…</option>
-            </select>
-          </label>
+          <div class="modal-field">
+            <label id="new-session-project-label" for="new-session-known-cwd">Project</label>
+            <div class="project-select" data-project-select>
+              <select id="new-session-known-cwd" name="known_cwd" aria-labelledby="new-session-project-label" data-new-session-known-cwd>
+                <% new_session_cwds.each do |cwd| %>
+                  <% identity = project_identity(cwd) %>
+                  <option value="<%= h cwd %>" data-project-monogram="<%= h identity[:monogram] %>" data-project-background="<%= h identity[:background] %>" data-project-foreground="<%= h identity[:foreground] %>"<%= cwd == default_new_session_cwd ? " selected" : "" %>><%= h new_session_cwd_label(cwd) %></option>
+                <% end %>
+                <option value="<%= h new_path_option_value %>" data-project-option-kind="new" data-new-session-new-path-option>Add new path…</option>
+              </select>
+            </div>
+          </div>
         </div>
         <div data-new-session-path-fields<%= default_new_session_cwd ? " hidden" : "" %>>
           <label class="modal-field">

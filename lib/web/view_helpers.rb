@@ -139,8 +139,8 @@ module Web
       File.basename(session.cwd.to_s)
     end
 
-    def project_identity(session)
-      label = project_label(session).unicode_normalize(:nfc)
+    def project_identity(cwd)
+      label = File.basename(cwd.to_s).unicode_normalize(:nfc)
       words = label.scan(/[[:alnum:]]+/)
       monogram = if words.length > 1
         words.first(2).map { |word| word.upcase.scan(/\X/).first }.join

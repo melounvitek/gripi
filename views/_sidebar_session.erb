@@ -1,6 +1,6 @@
             <% compacting = rpc_clients.compacting?(session.path) %>
             <% parent_session = session_parent(session) %>
-            <% identity = project_identity(session) %>
+            <% identity = project_identity(session.cwd) %>
             <a class="<%= h session_classes(session, "session", "recent-session", compacting ? "compacting" : nil) %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>" data-latest-assistant-response-preview="<%= h session.latest_assistant_response_preview.to_s %>"<% if shortcut %> data-session-shortcut="<%= h shortcut %>"<% end %>>
               <div class="session-content">
                 <div class="session-title"><%= h session.display_name %></div>

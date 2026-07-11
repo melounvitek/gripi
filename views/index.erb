@@ -21,7 +21,9 @@
     .session-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.5rem 0.75rem; border-bottom: 1px solid var(--border); background: rgba(30, 30, 36, 0.96); backdrop-filter: blur(8px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
     .session-header-title { flex: 1 1 auto; min-width: 0; display: grid; gap: 0.15rem; }
     .session-header h1 { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .session-header-project { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.84rem; font-weight: 650; }
+    .session-header-project { min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: var(--project-identity-fg); font-size: 0.84rem; font-weight: 650; }
+    .session-header-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-header-project .session-header-project-icon { width: 1.55rem; min-width: 1.55rem; height: 1.25rem; border-radius: 0.34rem; font-size: 0.56rem; }
     .session-header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 0.45rem; }
     .session-header-actions form { margin: 0; }
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.82rem; }
@@ -65,7 +67,7 @@
     .sidebar-project-filter { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.84rem; font-weight: 700; background: rgba(40, 40, 50, 0.72); }
     .sidebar-filter-spinner { display: none; flex: 0 0 auto; width: 0.9rem; height: 0.9rem; border: 2px solid rgba(138, 190, 183, 0.24); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     .session-sidebar.is-filtering .sidebar-filter-spinner { display: inline-block; }
-    .session-sidebar.is-filtering .sidebar-project-filter, .session-sidebar.is-filtering .sidebar-filters-clear { opacity: 0.72; pointer-events: none; }
+    .session-sidebar.is-filtering .sidebar-project-filter, .session-sidebar.is-filtering .project-select-trigger, .session-sidebar.is-filtering .sidebar-filters-clear { opacity: 0.72; pointer-events: none; }
     .sidebar-filters-clear { flex: 0 0 auto; color: var(--muted); font-size: 0.76rem; font-weight: 800; text-decoration: none; white-space: nowrap; }
     .sidebar-filters-clear:hover { color: var(--text); text-decoration: underline; }
     .recent-sessions { margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid rgba(80, 80, 80, 0.7); }
@@ -103,7 +105,7 @@
     .sidebar-notification-toggle.is-disabled { color: var(--muted); }
     .sidebar-notification-toggle.is-blocked .sidebar-notification-state { border-color: rgba(204, 102, 102, 0.42); background: rgba(204, 102, 102, 0.12); color: #ffb4b6; }
     .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg); font-size: 0.72rem; font-weight: 800; line-height: 1.25; }
-    .session-project-monogram { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 1.95rem; height: 1.55rem; padding: 0 0.32rem; border-radius: 0.42rem; background: var(--project-identity-bg); color: #fff; font-size: 0.66rem; font-weight: 900; letter-spacing: 0.02em; }
+    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 1.95rem; height: 1.55rem; padding: 0 0.32rem; border-radius: 0.42rem; background: var(--project-identity-bg); color: #fff; font-size: 0.66rem; font-weight: 900; letter-spacing: 0.02em; }
     .session-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid rgba(138, 190, 183, 0.22); border-radius: 0.7rem; background: rgba(8, 13, 32, 0.42); color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
     .session-relation-tree-heading { cursor: pointer; color: #f0c7a4; font-size: 0.7rem; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; }
@@ -291,6 +293,20 @@
     .modal-close-button { width: 2rem; height: 2rem; padding: 0; border-radius: 999px; font-size: 1.2rem; line-height: 1; }
     .modal-field { display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.85rem; font-weight: 700; }
     .modal-field input, .modal-field select { width: 100%; min-width: 0; }
+    .project-select { min-width: 0; width: 100%; }
+    .sidebar-filter-row > .project-select { flex: 1 1 auto; }
+    .project-select-native-hidden { position: absolute !important; width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+    .project-select-trigger { width: 100%; min-width: 0; min-height: 2.45rem; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; padding: 0.42rem 0.55rem; border: 1px solid var(--border); background: rgba(40, 40, 50, 0.72); color: var(--text); text-align: left; }
+    .project-select-trigger:hover, .project-select-trigger[aria-expanded="true"] { border-color: var(--accent); background: var(--panel-soft); transform: none; }
+    .project-select-trigger:focus-visible { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(138, 190, 183, 0.2); }
+    .project-select-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-select-chevron { color: var(--muted); font-size: 0.72rem; }
+    .project-select-listbox { position: fixed; z-index: 180; display: grid; gap: 0.2rem; overflow-y: auto; padding: 0.35rem; border: 1px solid var(--border); border-radius: 0.65rem; background: rgba(30, 30, 36, 0.99); box-shadow: 0 16px 42px rgba(0, 0, 0, 0.48); }
+    .project-select-option { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.55rem; min-height: 2.65rem; padding: 0.45rem 0.55rem; border-radius: 0.48rem; color: var(--text); cursor: pointer; }
+    .project-select-option:hover, .project-select-option.is-active { background: var(--panel-softer); }
+    .project-select-option[aria-selected="true"] { color: var(--project-identity-fg, var(--accent)); font-weight: 800; }
+    .project-select-option-label { min-width: 0; overflow-wrap: anywhere; }
+    .project-select-neutral-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 1.95rem; height: 1.55rem; border: 1px solid var(--border); border-radius: 0.42rem; background: var(--panel-soft); color: var(--muted); font-size: 0.85rem; font-weight: 900; }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
     .fork-session-list { display: grid; gap: 0.55rem; }
     .fork-session-status { margin: 0; color: var(--muted); }
@@ -341,6 +357,9 @@
       .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.78rem; }
       .session-header h1 { font-size: 1rem; }
       .session-header-project { font-size: 0.76rem; }
+      .project-select-trigger { min-height: 2.75rem; font-size: 16px; }
+      .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.85rem; }
+      .project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       .conversation-scroll { padding: 0.75rem; }
       .jump-controls.is-visible { transition: opacity 140ms ease, visibility 140ms ease; }
@@ -477,6 +496,8 @@
     let eventPollTimer = null;
     let sidebarRefreshTimer = null;
     let sidebarUpdateGeneration = 0;
+    let openProjectSelectWrapper = null;
+    let projectSelectSerial = 0;
     let eventPollInFlight = false;
     let eventPollAbortController = null;
     let eventPollResumeTimer = null;
@@ -1679,7 +1700,7 @@
       headerName.textContent = name;
       headerName.title = name;
       const title = headerName.closest(".session-header-title");
-      const project = title?.querySelector(".session-header-project")?.textContent.trim();
+      const project = title?.querySelector(".session-header-project-label")?.textContent.trim();
       if (title) title.title = project ? `${name} · ${project}` : name;
       document.title = `${name} · Pi Web Gateway`;
     }
@@ -3688,8 +3709,234 @@
       return Date.now() - lastSidebarInteractionAt < 1000;
     }
 
+    function renderProjectSelectOption(container, option, includeChevron = false) {
+      container.replaceChildren();
+      if (option.dataset.projectForeground) container.style.setProperty("--project-identity-fg", option.dataset.projectForeground);
+      else container.style.removeProperty("--project-identity-fg");
+      const icon = document.createElement("span");
+      if (option.dataset.projectMonogram) {
+        icon.className = "project-identity-icon";
+        icon.textContent = option.dataset.projectMonogram;
+        icon.style.setProperty("--project-identity-bg", option.dataset.projectBackground);
+        icon.style.setProperty("--project-identity-fg", option.dataset.projectForeground);
+      } else {
+        icon.className = "project-select-neutral-icon";
+        icon.textContent = option.dataset.projectOptionKind === "new" ? "+" : "•";
+      }
+      icon.setAttribute("aria-hidden", "true");
+
+      const label = document.createElement("span");
+      label.className = includeChevron ? "project-select-trigger-label" : "project-select-option-label";
+      label.textContent = option.textContent;
+      container.append(icon, label);
+
+      if (includeChevron) {
+        const chevron = document.createElement("span");
+        chevron.className = "project-select-chevron";
+        chevron.setAttribute("aria-hidden", "true");
+        chevron.textContent = "▾";
+        container.append(chevron);
+      }
+    }
+
+    function syncProjectSelect(select) {
+      const state = select?.closest("[data-project-select]")?._projectSelectState;
+      const selectedOption = select?.selectedOptions[0];
+      if (!state || !selectedOption) return;
+
+      renderProjectSelectOption(state.trigger, selectedOption, true);
+      state.options.forEach((customOption, index) => {
+        const selected = index === select.selectedIndex;
+        customOption.setAttribute("aria-selected", selected ? "true" : "false");
+      });
+    }
+
+    function positionProjectSelect(wrapper) {
+      const state = wrapper?._projectSelectState;
+      if (!state || state.listbox.hidden || window.matchMedia("(max-width: 760px)").matches) return;
+
+      const rect = state.trigger.getBoundingClientRect();
+      const viewportPadding = 8;
+      const gap = 6;
+      const availableBelow = window.innerHeight - rect.bottom - viewportPadding - gap;
+      const availableAbove = rect.top - viewportPadding - gap;
+      const openBelow = availableBelow >= Math.min(240, availableAbove) || availableBelow >= availableAbove;
+      const maxHeight = Math.max(120, Math.min(320, openBelow ? availableBelow : availableAbove));
+      const width = Math.min(Math.max(rect.width, 240), window.innerWidth - viewportPadding * 2);
+      const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding);
+
+      state.listbox.style.width = `${width}px`;
+      state.listbox.style.maxHeight = `${maxHeight}px`;
+      state.listbox.style.left = `${left}px`;
+      state.listbox.style.top = openBelow ? `${rect.bottom + gap}px` : `${Math.max(viewportPadding, rect.top - Math.min(state.listbox.scrollHeight, maxHeight) - gap)}px`;
+    }
+
+    function setActiveProjectOption(wrapper, index) {
+      const state = wrapper?._projectSelectState;
+      if (!state || !state.options.length) return;
+      state.activeIndex = Math.max(0, Math.min(index, state.options.length - 1));
+      state.options.forEach((option, optionIndex) => option.classList.toggle("is-active", optionIndex === state.activeIndex));
+      const activeOption = state.options[state.activeIndex];
+      state.trigger.setAttribute("aria-activedescendant", activeOption.id);
+      activeOption.scrollIntoView({ block: "nearest" });
+    }
+
+    function closeProjectSelect(wrapper = openProjectSelectWrapper, { restoreFocus = false } = {}) {
+      const state = wrapper?._projectSelectState;
+      if (!state) return;
+      state.listbox.hidden = true;
+      state.trigger.setAttribute("aria-expanded", "false");
+      state.trigger.removeAttribute("aria-activedescendant");
+      state.options.forEach((option) => option.classList.remove("is-active"));
+      if (openProjectSelectWrapper === wrapper) openProjectSelectWrapper = null;
+      if (restoreFocus) state.trigger.focus();
+    }
+
+    function openProjectSelect(wrapper) {
+      const state = wrapper?._projectSelectState;
+      if (!state) return;
+      if (openProjectSelectWrapper && openProjectSelectWrapper !== wrapper) closeProjectSelect();
+      state.listbox.hidden = false;
+      state.trigger.setAttribute("aria-expanded", "true");
+      openProjectSelectWrapper = wrapper;
+      positionProjectSelect(wrapper);
+      setActiveProjectOption(wrapper, Math.max(0, state.select.selectedIndex));
+    }
+
+    function selectProjectOption(wrapper, option) {
+      const state = wrapper?._projectSelectState;
+      const index = state?.options.indexOf(option);
+      if (!state || index == null || index < 0) return;
+      state.select.selectedIndex = index;
+      syncProjectSelect(state.select);
+      closeProjectSelect(wrapper, { restoreFocus: true });
+      state.select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    function moveActiveProjectOption(wrapper, movement) {
+      const state = wrapper?._projectSelectState;
+      if (!state) return;
+      const lastIndex = state.options.length - 1;
+      if (movement === "first") return setActiveProjectOption(wrapper, 0);
+      if (movement === "last") return setActiveProjectOption(wrapper, lastIndex);
+      setActiveProjectOption(wrapper, (state.activeIndex + movement + state.options.length) % state.options.length);
+    }
+
+    function handleProjectSelectKeydown(event, wrapper) {
+      const state = wrapper._projectSelectState;
+      const open = !state.listbox.hidden;
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        event.preventDefault();
+        if (!open) openProjectSelect(wrapper);
+        if (event.key === "ArrowDown") moveActiveProjectOption(wrapper, 1);
+        if (event.key === "ArrowUp") moveActiveProjectOption(wrapper, -1);
+        if (event.key === "Home") moveActiveProjectOption(wrapper, "first");
+        if (event.key === "End") moveActiveProjectOption(wrapper, "last");
+        return;
+      }
+      if (["Enter", " ", "Spacebar"].includes(event.key)) {
+        event.preventDefault();
+        if (open) selectProjectOption(wrapper, state.options[state.activeIndex]);
+        else openProjectSelect(wrapper);
+        return;
+      }
+      if (event.key === "Escape" && open) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeProjectSelect(wrapper, { restoreFocus: true });
+        return;
+      }
+      if (event.key === "Tab" && open) {
+        closeProjectSelect(wrapper);
+        return;
+      }
+      if (event.key.length !== 1 || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!open) openProjectSelect(wrapper);
+
+      clearTimeout(state.typeaheadTimer);
+      state.typeahead = `${state.typeahead || ""}${event.key}`.toLocaleLowerCase();
+      const match = state.nativeOptions.findIndex((option) => option.textContent.trim().toLocaleLowerCase().startsWith(state.typeahead));
+      if (match >= 0) setActiveProjectOption(wrapper, match);
+      state.typeaheadTimer = setTimeout(() => { state.typeahead = ""; }, 600);
+    }
+
+    function initializeProjectSelects(root = document) {
+      root.querySelectorAll("[data-project-select]").forEach((wrapper) => {
+        if (wrapper._projectSelectState) return;
+        const select = wrapper.querySelector("select");
+        if (!select || !select.options.length) return;
+
+        const id = `project-select-${++projectSelectSerial}`;
+        const labelledBy = select.getAttribute("aria-labelledby");
+        const associatedLabel = labelledBy ? document.getElementById(labelledBy) : null;
+        const accessibleLabel = select.getAttribute("aria-label") || associatedLabel?.textContent || "Choose project";
+        const trigger = document.createElement("button");
+        trigger.type = "button";
+        trigger.id = `${id}-trigger`;
+        trigger.className = "project-select-trigger";
+        trigger.setAttribute("role", "combobox");
+        trigger.setAttribute("aria-haspopup", "listbox");
+        trigger.setAttribute("aria-expanded", "false");
+        trigger.setAttribute("aria-controls", `${id}-listbox`);
+        trigger.setAttribute("aria-owns", `${id}-listbox`);
+        trigger.setAttribute("aria-label", accessibleLabel.trim());
+        if (associatedLabel?.htmlFor === select.id) associatedLabel.htmlFor = trigger.id;
+
+        const listbox = document.createElement("div");
+        listbox.id = `${id}-listbox`;
+        listbox.className = "project-select-listbox";
+        listbox.setAttribute("role", "listbox");
+        listbox.setAttribute("aria-labelledby", trigger.id);
+        listbox.hidden = true;
+
+        const nativeOptions = Array.from(select.options);
+        const options = nativeOptions.map((nativeOption, index) => {
+          const option = document.createElement("div");
+          option.id = `${id}-option-${index}`;
+          option.className = "project-select-option";
+          option.setAttribute("role", "option");
+          option.setAttribute("aria-selected", index === select.selectedIndex ? "true" : "false");
+          if (nativeOption.dataset.projectForeground) option.style.setProperty("--project-identity-fg", nativeOption.dataset.projectForeground);
+          renderProjectSelectOption(option, nativeOption);
+          option.addEventListener("click", (event) => {
+            event.stopPropagation();
+            selectProjectOption(wrapper, option);
+          });
+          option.addEventListener("mousemove", () => setActiveProjectOption(wrapper, index));
+          listbox.append(option);
+          return option;
+        });
+
+        wrapper._projectSelectState = { select, trigger, listbox, nativeOptions, options, activeIndex: Math.max(0, select.selectedIndex), typeahead: "", typeaheadTimer: null };
+        select.classList.add("project-select-native-hidden");
+        select.tabIndex = -1;
+        select.setAttribute("aria-hidden", "true");
+        wrapper.append(trigger);
+        document.body.append(listbox);
+        syncProjectSelect(select);
+
+        trigger.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (listbox.hidden) openProjectSelect(wrapper);
+          else closeProjectSelect(wrapper);
+        });
+        trigger.addEventListener("keydown", (event) => handleProjectSelectKeydown(event, wrapper));
+      });
+    }
+
+    function destroyProjectSelects(root) {
+      root?.querySelectorAll("[data-project-select]").forEach((wrapper) => {
+        const state = wrapper._projectSelectState;
+        if (!state) return;
+        closeProjectSelect(wrapper);
+        clearTimeout(state.typeaheadTimer);
+        state.listbox.remove();
+        delete wrapper._projectSelectState;
+      });
+    }
+
     function sidebarProjectFilterActive() {
-      return document.activeElement?.matches("[data-sidebar-project-filter]");
+      return !!document.activeElement?.closest("[data-project-select]") || !!sessionSidebar?.querySelector('[data-project-select] .project-select-trigger[aria-expanded="true"]');
     }
 
     function sidebarSearchActive() {
@@ -3702,6 +3949,11 @@
 
     function setSidebarFiltering(filtering) {
       sessionSidebar?.classList.toggle("is-filtering", filtering);
+      const trigger = sessionSidebar?.querySelector("[data-sidebar-project-filter]")?.closest("[data-project-select]")?._projectSelectState?.trigger;
+      if (trigger) {
+        trigger.disabled = filtering;
+        trigger.setAttribute("aria-busy", filtering ? "true" : "false");
+      }
     }
 
     function syncMobileSessionsUnreadBadges() {
@@ -3734,7 +3986,9 @@
       const currentModal = document.querySelector('[data-modal="new-session-modal"]');
       if (!html || !currentModal) return;
 
+      destroyProjectSelects(currentModal);
       currentModal.outerHTML = html;
+      initializeProjectSelects(document.querySelector('[data-modal="new-session-modal"]'));
     }
 
     function replaceForkSessionModalHtml(html) {
@@ -3750,8 +4004,10 @@
       const previousSearchForm = sessionSidebar.querySelector(".sidebar-session-search");
       const previousSearchQuery = previousSearchForm?.querySelector('input[name="session_search"]')?.value;
       const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
+      destroyProjectSelects(sessionSidebar);
       sessionSidebar.outerHTML = html;
       sessionSidebar = document.querySelector(".session-sidebar");
+      initializeProjectSelects(sessionSidebar);
       const replacementSearchForm = sessionSidebar.querySelector(".sidebar-session-search");
       const replacementSearchInput = replacementSearchForm?.querySelector('input[name="session_search"]');
       const replacementSearchButton = sessionSidebar.querySelector("[data-sidebar-search-toggle]");
@@ -3895,6 +4151,7 @@
         const payload = await response.json();
         if (switchGeneration !== sessionSwitchGeneration) return false;
         resetSessionViewState();
+        destroyProjectSelects(sessionSidebar);
         if (sessionSidebar) sessionSidebar.outerHTML = payload.sidebar_html;
         conversationPanel.outerHTML = payload.conversation_html;
         replaceNewSessionModalHtml(payload.new_session_modal_html);
@@ -4064,6 +4321,7 @@
       pathFields.hidden = true;
       if (!select.value || select.selectedOptions[0]?.hasAttribute("data-new-session-new-path-option")) select.value = option.value;
       hiddenCwd.value = select.value;
+      syncProjectSelect(select);
       submit.disabled = !hiddenCwd.value;
       if (status) status.hidden = true;
     }
@@ -4375,6 +4633,10 @@
       if (modal) closeModal(modal);
     });
 
+    document.addEventListener("click", () => closeProjectSelect());
+    window.addEventListener("resize", () => positionProjectSelect(openProjectSelectWrapper));
+    window.addEventListener("scroll", () => positionProjectSelect(openProjectSelectWrapper), true);
+
     document.addEventListener("input", (event) => {
       const input = event.target.closest("[data-new-session-cwd-input]");
       if (!input) return;
@@ -4384,6 +4646,7 @@
     document.addEventListener("change", (event) => {
       const select = event.target.closest("[data-new-session-known-cwd]");
       if (!select) return;
+      syncProjectSelect(select);
       const form = select.closest("form");
       if (select.selectedOptions[0]?.hasAttribute("data-new-session-new-path-option")) {
         setNewSessionPathMode(form);
@@ -4498,11 +4761,13 @@
       if (event.key !== "Tab") return;
       const modal = document.querySelector('[data-modal="new-session-modal"]:not([hidden])');
       const select = modal?.querySelector("[data-new-session-known-cwd]");
+      const projectTrigger = select?.closest("[data-project-select]")?.querySelector(".project-select-trigger");
+      const projectControl = projectTrigger || select;
       const submit = modal?.querySelector("[data-new-session-submit]:not(:disabled)");
-      if (!modal || !select || select.closest("[hidden]") || !submit) return;
+      if (!modal || !projectControl || projectControl.closest("[hidden]") || !submit) return;
 
       event.preventDefault();
-      (document.activeElement === select ? submit : select).focus();
+      (document.activeElement === projectControl ? submit : projectControl).focus();
     }
 
     document.addEventListener("keydown", (event) => {
@@ -4567,6 +4832,7 @@
       const select = event.target.closest("[data-sidebar-project-filter]");
       if (!select) return;
 
+      syncProjectSelect(select);
       await changeSidebarProjectFilter(select).catch(() => select.form?.submit());
     });
 
@@ -4800,6 +5066,7 @@
     });
 
     function initializeSessionView({ focus = true } = {}) {
+      initializeProjectSelects();
       ensureNotificationWorker().catch(() => {});
       if (document.body.dataset.browserAccessEnabled === "true" && !browserAccessPollTimer) pollBrowserAccessRequests();
       if (document.body.dataset.workspaceAccessEnabled === "true" && !workspaceAccessPollTimer) pollWorkspaceAccessRequests();

@@ -50,12 +50,15 @@
               <input type="hidden" name="session_search" value="<%= h sidebar_session_search_query %>">
             <% end %>
             <div class="sidebar-filter-row">
-              <select class="sidebar-project-filter" name="project" aria-label="Filter sessions by project" data-sidebar-project-filter>
-                <option value="">All projects</option>
-                <% known_session_cwds.each do |cwd| %>
-                  <option value="<%= h cwd %>"<%= cwd == selected_project_cwd ? " selected" : "" %>><%= h File.basename(cwd) %></option>
-                <% end %>
-              </select>
+              <div class="project-select" data-project-select>
+                <select class="sidebar-project-filter" name="project" aria-label="Filter sessions by project" data-sidebar-project-filter>
+                  <option value="" data-project-option-kind="all">All projects</option>
+                  <% known_session_cwds.each do |cwd| %>
+                    <% identity = project_identity(cwd) %>
+                    <option value="<%= h cwd %>" data-project-monogram="<%= h identity[:monogram] %>" data-project-background="<%= h identity[:background] %>" data-project-foreground="<%= h identity[:foreground] %>"<%= cwd == selected_project_cwd ? " selected" : "" %>><%= h File.basename(cwd) %></option>
+                  <% end %>
+                </select>
+              </div>
               <span class="sidebar-filter-spinner" aria-hidden="true"></span>
               <% if sidebar_filters? %>
                 <a class="sidebar-filters-clear" href="<%= h sidebar_filters_clear_url %>" data-sidebar-filters-clear>Clear filters</a>
