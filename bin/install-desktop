@@ -54,6 +54,10 @@ install_mac() {
 }
 
 install_linux() {
+  if ! ruby -rfiddle -e 'Fiddle.dlopen("libfuse.so.2")' >/dev/null 2>&1; then
+    fail "Linux desktop app requires FUSE 2 (libfuse.so.2) to run AppImages. On Arch Linux, install it with: sudo pacman -S fuse2"
+  fi
+
   run_build desktop-dist-linux
 
   local appimage_path
