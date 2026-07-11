@@ -2,7 +2,7 @@
 
 Use your Pi sessions from the desktop app or a browser, locally or from another machine. Pi runs on the gateway machine with access to its filesystem, repositories, and credentials.
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/2738cf92-9ed4-483f-8bc7-849cb07a4e5f" />
+<img width="1426" height="1057" alt="image" src="https://github.com/user-attachments/assets/1fd88b11-4cc2-428c-b432-4a1fdd3dd7ae" />
 
 I have not really seen the code (this project is my first attempt to try real vibe-coding), but it works nicely!
 
