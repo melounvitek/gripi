@@ -3775,6 +3775,47 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_open_session_renders_images_from_read_results
+    Dir.mktmpdir do |dir|
+      image_data = Base64.strict_encode64("fake image data")
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "/tmp/screenshot.png" } }]
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:01Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "read-1",
+            toolName: "read",
+            content: [
+              { type: "text", text: "Read image file [image/png]" },
+              { type: "image", data: image_data, mimeType: "image/png" }
+            ],
+            isError: false
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      tool_card = compact_card_with_summary(document, "read /tmp/screenshot.png")
+      image = tool_card&.at_css(".message-images .message-image")
+      assert image
+      assert_equal "data:image/png;base64,#{image_data}", image["src"]
+    end
+  end
+
   def test_open_session_shortens_home_paths_in_tool_transcript_display
     Dir.mktmpdir do |dir|
       home_path = File.join(Dir.home, "Work", ".worktrees", "demo", "feature_branch")
@@ -4411,7 +4452,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'if (["bash", "read"].includes(part.name)) return "";'
       assert_includes response.body, 'if (["edit", "write"].includes(part.name)) return transcriptToolCallText(part.name, part.arguments || {});'
       assert_includes response.body, 'return editPreview;'
-      assert_includes response.body, '}).filter((segment) => segment.text || segment.compact);'
+      assert_includes response.body, '}).filter((segment) => segment.text || segment.compact || segment.images.length > 0);'
       assert_includes response.body, 'if (lines[lines.length - 1] === "") lines.pop();'
       assert_includes response.body, 'function renderToolTranscriptBody(body, text, toolName = "", options = {})'
       assert_includes response.body, 'body.dataset.rawText = text || "";'
@@ -4952,7 +4993,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "let liveErrorSeen = false;"
       assert_includes response.body, "liveErrorSeen = true;"
       assert_includes response.body, "appendMessage(\"error\", errorText, true, true, eventTimestamp(event));"
-      assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse });'
+      assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse, images: segment.images });'
       assert_includes response.body, 'function renderAssistantMarkdown(body, text, delay = 120)'
       assert_includes response.body, 'body.dataset.rendering = "pending";'
       assert_includes response.body, 'clearTimeout(body.markdownRenderTimeout);'

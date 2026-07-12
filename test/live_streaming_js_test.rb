@@ -1,4 +1,5 @@
 require "minitest/autorun"
+require "open3"
 
 class LiveStreamingJsTest < Minitest::Test
   VIEW_PATH = File.expand_path("../views/index.erb", __dir__)
@@ -25,6 +26,37 @@ class LiveStreamingJsTest < Minitest::Test
     assert_includes script, 'options.thinking ? "message-body message-body--thinking message-body--markdown"'
     assert_includes script, "if (roleName === \"assistant\") {\n        renderAssistantMarkdown(body, text);"
     assert_includes script, "if (roleName === \"assistant\") {\n          renderAssistantMarkdown(entry.body, segment.text);"
+  end
+
+  def test_live_read_results_preserve_supported_images
+    script = File.read(VIEW_PATH)
+    formatter_start = script.index("    function compactContentPart")
+    formatter_end = script.index("    function eventMessage", formatter_start)
+    formatter = script[formatter_start...formatter_end]
+    assertion = <<~JS
+      const segments = contentSegments([
+        { type: "text", text: "Read image file [image/png]" },
+        { type: "image", data: "cG5n", mimeType: "image/png" },
+        { type: "image", data: "c3Zn", mimeType: "image/svg+xml" }
+      ], { role: "toolResult", toolName: "read", toolCallId: "read-1" });
+      if (segments.length !== 1) process.exit(1);
+      if (segments[0].images.length !== 1) process.exit(2);
+      if (segments[0].images[0].src !== "data:image/png;base64,cG5n") process.exit(3);
+    JS
+
+    refute_nil formatter_start
+    refute_nil formatter_end
+    _stdout, stderr, status = Open3.capture3("node", stdin_data: "const HOME_DIR = '';\n" + formatter + assertion)
+
+    assert status.success?, stderr
+  end
+
+  def test_live_read_results_are_rendered_on_the_existing_tool_card
+    script = File.read(VIEW_PATH)
+    paired_result = script.index("else if (bashCallEntry && segment.isToolResult)")
+    next_branch = script.index("else if (roleName === \"user\"", paired_result)
+
+    assert_includes script[paired_result...next_branch], "replaceMessageImages(bashCallEntry.article, segment.images);"
   end
 
   def test_optimistic_user_message_can_render_uploaded_image_previews
