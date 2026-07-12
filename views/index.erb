@@ -191,11 +191,11 @@
     .message--assistant { margin-right: 10%; background: var(--panel); border-color: var(--border); color: var(--copy); }
     .message--thinking { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }
     .message--status { background: transparent; color: var(--muted); }
-    .message--tool, .message--tool-call { background: var(--tool-ok); border-color: #ffffff0f; color: var(--muted); }
-    .message--tool-transcript { background: var(--tool-ok); border-color: #ffffff0f; color: var(--muted); font-family: var(--mono); }
+    .message--tool, .message--tool-call { background: var(--tool-ok); border-color: #ffffff0f; color: var(--copy); }
+    .message--tool-transcript { background: var(--tool-ok); border-color: #ffffff0f; color: var(--copy); font-family: var(--mono); }
     .message--tool .role, .message--tool-call .role, .message--tool-transcript .role { color: var(--accent); }
     .message--tool-transcript .message-details-summary { color: var(--copy); }
-    .message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: var(--muted); font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
+    .message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
     .tool-diff-line { display: block; margin: 0 -0.25rem; padding: 0 0.25rem; border-left: 2px solid transparent; }
     .tool-diff-line--add { border-left-color: #b5bd68bf; background: #b5bd681f; color: #d8f0a0; }
     .tool-diff-line--remove { border-left-color: #cc6666cc; background: #cc66661f; color: #f0b0a8; }
@@ -306,6 +306,7 @@
     .abort-form { display: none; }
     input, select, textarea { box-sizing: border-box; font-family: var(--mono); font-size: 0.9rem; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; color: var(--text); background: var(--bg); outline: none; }
     input:focus, select:focus, textarea:focus { border-color: var(--accent-line-55); box-shadow: 0 0 0 2px var(--accent-tint-14); }
+    input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
     input::placeholder, textarea::placeholder { color: var(--muted-soft); }
     textarea { width: 100%; resize: none; min-height: 2.75rem; max-height: 12rem; line-height: 1.45; overflow-y: hidden; }
     .send-button, .composer-stop-button { display: none; }

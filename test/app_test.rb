@@ -2300,13 +2300,13 @@ class AppTest < Minitest::Test
       assert_includes response.body, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 0.84rem; }"
       assert_includes response.body, ".message--compact .message-details-summary:last-child { margin-bottom: 0; }"
       assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
-      assert_includes response.body, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: var(--muted); font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
+      assert_includes response.body, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
       assert_includes response.body, ".tool-diff-line { display: block; margin: 0 -0.25rem;"
       assert_includes response.body, "scrollbar-width: none"
       assert_includes response.body, ".message--user { margin-left: 10%; background: var(--user-msg); border-color: #ffffff14; color: var(--text); }"
       assert_includes response.body, ".message--assistant { margin-right: 10%; background: var(--panel); border-color: var(--border); color: var(--copy); }"
       assert_includes response.body, ".message--thinking { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }"
-      assert_includes response.body, ".message--tool, .message--tool-call { background: var(--tool-ok); border-color: #ffffff0f; color: var(--muted); }"
+      assert_includes response.body, ".message--tool, .message--tool-call { background: var(--tool-ok); border-color: #ffffff0f; color: var(--copy); }"
     end
   end
 
