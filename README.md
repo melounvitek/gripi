@@ -43,15 +43,12 @@ Start the gateway:
 PI_GATEWAY_HOST=127.0.0.1 mise run start
 ```
 
-The app connects to the running gateway and can switch between multiple gateway servers. You can also use the gateway directly at <http://localhost:4567>.
+The app `Pi Web Gateway` gets installed. It connects to the running gateway and can switch between multiple gateway servers. You can also use the gateway directly in browser at <http://localhost:4567>.
 
-There is no mobile app, but on iPhone, adding the gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow works nicely.
+There is no mobile app, but on iPhone, adding the gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow works nicely:
 
-## Updates
+<img width="804" height="362" alt="image" src="https://github.com/user-attachments/assets/37ab55d7-7b34-4cce-932e-566a6d415041" />
 
-When a newer commit is available on `origin/master`, the gateway shows an update control in the sidebar. It can fast-forward a clean `master` checkout, install Ruby dependencies, restart itself, and reload the complete page without relying on systemd.
-
-Start through `mise run start` or `bin/start` for automatic restart support. See [configuration](docs/configuration.md#self-updates) for update requirements and failure behavior.
 
 ## Remote access and configuration
 
