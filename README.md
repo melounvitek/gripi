@@ -49,6 +49,7 @@ There is no mobile app, but on iPhone, adding the gateway to the Home Screen wit
 
 <img width="804" height="362" alt="image" src="https://github.com/user-attachments/assets/37ab55d7-7b34-4cce-932e-566a6d415041" />
 
+<img width="360" alt="Pi Web Gateway running as an iPhone web app" src="docs/images/mobile-screenshot.png" />
 
 ## Remote access and configuration
 
