@@ -5,14 +5,11 @@ module Sessions
     RECENT_SESSION_LIMIT = 20
     SESSION_PAGE_SIZE = 20
 
-    attr_reader :current_session
-
     def initialize(groups:, selected_session:, params:, read_state_store:)
       @groups = groups
       @selected_session = selected_session
       @params = params
       @read_state_store = read_state_store
-      @current_session = selected_session
     end
 
     def selected?(session)
@@ -27,12 +24,8 @@ module Sessions
       @sorted_sessions ||= @groups.values.flatten.sort_by { |session| session.modified_at || Time.at(0) }.reverse
     end
 
-    def unread_sessions
-      @unread_sessions ||= sorted_sessions.reject { |session| selected?(session) }.select { |session| unread?(session) && matches_search?(session) }
-    end
-
     def unread_session_count
-      unread_sessions.length
+      @unread_session_count ||= sorted_sessions.count { |session| unread?(session) }
     end
 
     def unread_session_count_label
@@ -44,20 +37,12 @@ module Sessions
       "#{count} unread #{count == 1 ? "session" : "sessions"}"
     end
 
-    def regular_sessions
-      @regular_sessions ||= regular_session_pool.first(sessions_limit)
+    def sessions
+      @sessions ||= [*session_pool.first(sessions_limit), @selected_session].compact.sort_by { |session| session.modified_at || Time.at(0) }.reverse
     end
 
-    def regular_session_pool
-      @regular_session_pool ||= begin
-        sessions = sorted_sessions.reject { |session| selected?(session) || unread?(session) }
-        sessions = sessions.select { |session| session.cwd == selected_project_cwd } if selected_project_cwd
-        sessions.select { |session| matches_search?(session) }
-      end
-    end
-
-    def recent_sessions
-      [current_session, *unread_sessions, *regular_sessions].compact
+    def session_pool
+      @session_pool ||= sorted_sessions.reject { |session| selected?(session) }.select { |session| matches_filters?(session) }
     end
 
     def show_all_sessions?
@@ -65,7 +50,7 @@ module Sessions
     end
 
     def sessions_limit
-      return regular_session_pool.length if show_all_sessions?
+      return session_pool.length if show_all_sessions?
 
       [@params["sidebar_sessions_limit"].to_i, RECENT_SESSION_LIMIT].max
     end
@@ -77,15 +62,15 @@ module Sessions
     end
 
     def sessions_overflow?
-      regular_sessions.length < regular_session_pool.length
+      sessions_limit < session_pool.length
     end
 
     def next_sessions_limit
-      [sessions_limit + SESSION_PAGE_SIZE, regular_session_pool.length].min
+      [sessions_limit + SESSION_PAGE_SIZE, session_pool.length].min
     end
 
     def sessions_remaining_count
-      regular_session_pool.length - regular_sessions.length
+      session_pool.length - [sessions_limit, session_pool.length].min
     end
 
     def sessions_load_more_url
@@ -115,6 +100,10 @@ module Sessions
 
     def filters?
       search? || !!selected_project_cwd
+    end
+
+    def matches_filters?(session)
+      (!selected_project_cwd || session.cwd == selected_project_cwd) && matches_search?(session)
     end
 
     def matches_search?(session)

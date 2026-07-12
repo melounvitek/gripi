@@ -15,19 +15,6 @@
       <% else %>
         <section class="recent-sessions">
           <% shortcut_index = 0 %>
-          <% if sidebar_current_session %>
-            <%= erb :_sidebar_session, layout: false, locals: { session: sidebar_current_session, shortcut: nil } %>
-          <% end %>
-          <% if unread_sidebar_sessions.any? %>
-          <div class="recent-sessions-header">
-            <h2>Unread</h2>
-          </div>
-            <% unread_sidebar_sessions.each do |session| %>
-              <% shortcut_index += 1 %>
-              <% shortcut = shortcut_index <= 9 ? shortcut_index : nil %>
-              <%= erb :_sidebar_session, layout: false, locals: { session: session, shortcut: shortcut } %>
-            <% end %>
-          <% end %>
           <div class="recent-sessions-header">
             <h2>Sessions</h2>
             <button type="button" class="sidebar-icon-button sidebar-search-toggle<%= sidebar_filters? ? " is-active" : "" %>" title="Search sessions" aria-label="Search sessions" aria-expanded="<%= sidebar_filters? ? "true" : "false" %>" aria-controls="sidebar-session-search" data-sidebar-search-toggle>⌕</button>
@@ -65,12 +52,14 @@
               <% end %>
             </div>
           </form>
-          <% regular_sidebar_sessions.each do |session| %>
-            <% shortcut_index += 1 %>
-            <% shortcut = shortcut_index <= 9 ? shortcut_index : nil %>
+          <% sidebar_sessions.each do |session| %>
+            <% unless selected?(session) %>
+              <% shortcut_index += 1 %>
+            <% end %>
+            <% shortcut = !selected?(session) && shortcut_index <= 9 ? shortcut_index : nil %>
             <%= erb :_sidebar_session, layout: false, locals: { session: session, shortcut: shortcut } %>
           <% end %>
-          <% if sidebar_filters? && unread_sidebar_sessions.empty? && regular_sidebar_sessions.empty? && (!sidebar_current_session || !session_matches_sidebar_search?(sidebar_current_session)) %>
+          <% if sidebar_filters? && sidebar_session_pool.empty? && (!@selected_session || !session_matches_sidebar_filters?(@selected_session)) %>
             <p class="empty sidebar-search-empty">No sessions match these filters.</p>
           <% end %>
           <% if sidebar_sessions_overflow? %>

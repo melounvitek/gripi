@@ -2569,6 +2569,7 @@ class AppTest < Minitest::Test
       assert_equal 200, title_response.status
       assert_includes title_response.body, "Alpha refactor"
       refute_includes title_response.body, "Gamma cleanup"
+      refute_includes title_response.body, "No sessions match these filters."
       assert_equal 200, message_response.status
       assert_includes message_response.body, "Investigate webhook delivery"
       assert_equal 200, cwd_response.status
@@ -2751,7 +2752,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_sidebar_project_filter_keeps_current_and_unread_sessions_visible
+  def test_sidebar_project_filter_keeps_current_visible_and_filters_unread_sessions
     Dir.mktmpdir do |dir|
       selected_cwd = File.join(dir, "selected-project")
       unread_cwd = File.join(dir, "unread-project")
@@ -2790,11 +2791,12 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
-      assert_equal ["Unread", "Sessions"], document.css(".recent-sessions-header h2").map(&:text)
+      assert_equal ["Sessions"], document.css(".recent-sessions-header h2").map(&:text)
       session_titles = document.css(".recent-sessions a.session .session-title").map(&:text)
-      assert_equal ["Selected work", "Unread work", "Filtered work"], session_titles
+      assert_equal ["Filtered work", "Selected work"], session_titles
       assert document.at_css('.recent-sessions a.session[href*="selected.jsonl"]')["class"].include?("selected")
-      assert document.at_css('.recent-sessions a.session[href*="unread.jsonl"]')["class"].include?("unread")
+      refute document.at_css('.recent-sessions a.session[href*="unread.jsonl"]')
+      assert_equal "1", document.at_css(".session-sidebar")["data-unread-session-count"]
     end
   end
 
@@ -3220,7 +3222,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_sidebar_pins_current_session_before_sessions_without_header_or_shortcut
+  def test_sidebar_keeps_current_session_in_chronological_order_without_shortcut
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 3)
       PiWebGateway.set :sessions_root, dir
@@ -3228,21 +3230,21 @@ class AppTest < Minitest::Test
 
       response = Rack::MockRequest.new(PiWebGateway).get(
         "/sidebar",
-        params: { "session" => paths.first }
+        params: { "session" => paths[1] }
       )
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
       links = document.css(".recent-sessions a.session")
-      assert_equal ["Session 1", "Session 3", "Session 2"], links.map { |link| link.at_css(".session-title").text }
-      assert links.first["class"].include?("selected")
-      assert_nil links.first["data-session-shortcut"]
+      assert_equal ["Session 3", "Session 2", "Session 1"], links.map { |link| link.at_css(".session-title").text }
+      assert links[1]["class"].include?("selected")
+      assert_equal ["1", nil, "2"], links.map { |link| link["data-session-shortcut"] }
       assert_equal "Sessions", document.css(".recent-sessions-header h2").map(&:text).first
-      assert_operator response.body.index("Session 1"), :<, response.body.index("<h2>Sessions</h2>")
+      assert_operator response.body.index("<h2>Sessions</h2>"), :<, response.body.index("Session 1")
     end
   end
 
-  def test_sidebar_groups_unread_sessions_between_current_and_regular_sessions
+  def test_sidebar_keeps_unread_sessions_in_chronological_order
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 4)
       PiWebGateway.set :sessions_root, dir
@@ -3251,18 +3253,20 @@ class AppTest < Minitest::Test
       Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => paths.first })
       File.write(paths[1], JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Unread done" }] } }) + "\n", mode: "a")
       File.write(paths.first, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Current done" }] } }) + "\n", mode: "a")
+      [paths[3], paths[1], paths[2], paths[0]].each_with_index do |path, index|
+        FileUtils.touch(path, mtime: Time.now - (index + 1) * 10)
+      end
 
       response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => paths.first })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
-      assert_equal ["Unread", "Sessions"], document.css(".recent-sessions-header h2").map(&:text)
+      assert_equal ["Sessions"], document.css(".recent-sessions-header h2").map(&:text)
       links = document.css(".recent-sessions a.session")
-      assert_equal ["Session 1", "Session 2", "Session 4", "Session 3"], links.map { |link| link.at_css(".session-title").text }
-      assert_nil links[0]["data-session-shortcut"]
-      assert_equal ["1", "2", "3"], links[1..].map { |link| link["data-session-shortcut"] }
+      assert_equal ["Session 4", "Session 2", "Session 3", "Session 1"], links.map { |link| link.at_css(".session-title").text }
+      assert_equal ["1", "2", "3", nil], links.map { |link| link["data-session-shortcut"] }
       assert links[1]["class"].include?("unread")
-      refute links[0]["class"].include?("unread")
+      refute links.last["class"].include?("unread")
     end
   end
 
@@ -3301,7 +3305,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_sidebar_hides_unread_header_when_no_unread_sessions
+  def test_sidebar_uses_one_sessions_header
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 2)
       PiWebGateway.set :sessions_root, dir
@@ -3361,7 +3365,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_keeps_older_selected_session_visible_when_sidebar_is_trimmed
+  def test_keeps_older_selected_session_visible_in_chronological_order_when_sidebar_is_trimmed
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 42)
       PiWebGateway.set :sessions_root, dir
@@ -3376,9 +3380,9 @@ class AppTest < Minitest::Test
       document = Nokogiri::HTML(response.body)
       session_titles = document.css(".recent-sessions a.session .session-title").map(&:text)
       assert_equal 21, session_titles.length
-      assert_equal "Session 1", session_titles.first
-      assert_equal "Session 42", session_titles[1]
-      assert_equal "Session 23", session_titles.last
+      assert_equal "Session 42", session_titles.first
+      assert_equal "Session 23", session_titles[-2]
+      assert_equal "Session 1", session_titles.last
       assert_equal "Session 1", document.at_css(".recent-sessions a.session.selected .session-title").text
       assert_includes document.at_css(".sidebar-load-more")["href"], "sidebar_sessions_limit=40"
     end

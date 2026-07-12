@@ -5,11 +5,11 @@ require_relative "../lib/sessions/sidebar"
 class SessionsSidebarTest < Minitest::Test
   Session = Struct.new(:path, :cwd, :display_name, :first_user_message, :modified_at, keyword_init: true)
 
-  def test_groups_current_unread_and_filtered_regular_sessions
-    current = session("current", "current-project", "Current work", 40)
+  def test_lists_filtered_sessions_chronologically_while_always_including_current_session
+    current = session("current", "current-project", "Current work", 10)
     unread = session("unread", "unread-project", "Unread work", 30)
     matching = session("matching", "filtered-project", "Matching work", 20, first_user_message: "Webhook setup")
-    hidden = session("hidden", "other-project", "Hidden work", 50)
+    hidden = session("hidden", "other-project", "Hidden work", 40)
     sidebar = build_sidebar(
       groups: groups(current, unread, matching, hidden),
       selected_session: current,
@@ -17,22 +17,24 @@ class SessionsSidebarTest < Minitest::Test
       unread_paths: [unread.path]
     )
 
-    assert_equal [hidden.path, current.path, unread.path, matching.path], sidebar.sorted_sessions.map(&:path)
-    assert_equal [unread], sidebar.unread_sessions
-    assert_equal [matching], sidebar.regular_sessions
-    assert_equal [current, unread, matching], sidebar.recent_sessions
+    assert_equal [hidden.path, unread.path, matching.path, current.path], sidebar.sorted_sessions.map(&:path)
+    assert_equal [matching, current], sidebar.sessions
+    assert_equal 1, sidebar.unread_session_count
   end
 
-  def test_paginates_regular_sessions_and_builds_load_more_url
-    current = session("current", "project", "Current", 100)
+  def test_paginates_filtered_sessions_and_builds_load_more_url
+    current = session("current", "project", "Current", -1)
     regulars = 25.times.map { |index| session("regular-#{index}", "project", "Regular #{index}", index) }
     sidebar = build_sidebar(
       groups: groups(current, *regulars),
       selected_session: current,
-      params: { "project" => current.cwd, "session_search" => "regular" }
+      params: { "project" => current.cwd, "session_search" => "regular" },
+      unread_paths: [regulars.last.path]
     )
 
-    assert_equal 20, sidebar.regular_sessions.length
+    assert_equal 21, sidebar.sessions.length
+    assert_includes sidebar.sessions, regulars.last
+    assert_equal current, sidebar.sessions.last
     assert sidebar.sessions_overflow?
     assert_equal 25, sidebar.next_sessions_limit
     assert_equal 5, sidebar.sessions_remaining_count

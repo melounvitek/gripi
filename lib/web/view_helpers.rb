@@ -46,14 +46,6 @@ module Web
       @sidebar.sorted_sessions
     end
 
-    def sidebar_current_session
-      @sidebar.current_session
-    end
-
-    def unread_sidebar_sessions
-      @sidebar.unread_sessions
-    end
-
     def unread_sidebar_session_count
       @sidebar.unread_session_count
     end
@@ -66,16 +58,12 @@ module Web
       @sidebar.unread_session_aria_label
     end
 
-    def regular_sidebar_sessions
-      @sidebar.regular_sessions
+    def sidebar_sessions
+      @sidebar.sessions
     end
 
-    def regular_sidebar_session_pool
-      @sidebar.regular_session_pool
-    end
-
-    def recent_sidebar_sessions
-      @sidebar.recent_sessions
+    def sidebar_session_pool
+      @sidebar.session_pool
     end
 
     def show_all_sidebar_sessions?
@@ -172,8 +160,8 @@ module Web
       sidebar_session_search? || !!selected_project_cwd
     end
 
-    def session_matches_sidebar_search?(session)
-      @sidebar.matches_search?(session)
+    def session_matches_sidebar_filters?(session)
+      @sidebar.matches_filters?(session)
     end
 
     def sidebar_filters_clear_url
