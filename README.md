@@ -4,7 +4,7 @@ Use your Pi sessions from the desktop app or a browser, locally or from another 
 
 <img width="1426" height="1057" alt="image" src="https://github.com/user-attachments/assets/1fd88b11-4cc2-428c-b432-4a1fdd3dd7ae" />
 
-I have not really seen the code (this project is my first attempt to try real vibe-coding), but it works nicely!
+I have not really seen the code (this project is my first attempt to try real vibe-coding), but I do use it daily now, and it works really well for me.
 
 ## Install
 
