@@ -37,6 +37,7 @@ import { LiveMessageParser } from "./live_message_parser.js";
 import { LiveMessageRenderer } from "./live_message_renderer.js";
 import { ServerMarkdownRenderer } from "./server_markdown_renderer.js";
 import { enhanceMarkdownCodeBlocks } from "./dom.js";
+import { eventPollingDelay } from "./polling.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window);
 const browserAccessController = new BrowserAccessRequestController(document);
@@ -607,6 +608,7 @@ function stopWaitingForOutput() {
 }
 
 function setComposerState(state, label, since = null) {
+  const previousState = composerState?.dataset.state;
   if (state === "running" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());
   if (state !== "running") escapeStopConfirmationExpiresAt = 0;
   if (!["running", "sending"].includes(state)) stopWaitingForOutput();
@@ -640,6 +642,11 @@ function setComposerState(state, label, since = null) {
   if (modelButton) modelButton.disabled = agentBusy;
   const modelApply = document.querySelector('[data-modal="model-settings-modal"] [data-model-settings-apply]');
   if (modelApply && !document.querySelector('[data-modal="model-settings-modal"]')?.hidden) modelApply.disabled = agentBusy || !selectedSettingsModel();
+  if (composerState && state === "running" && previousState !== "running") {
+    resetEventPollBackoff();
+    scheduleNextEventPoll(0);
+    sidebarController.requestRefresh();
+  }
   const attachmentsDisabled = submitting;
   if (imageInput) imageInput.disabled = attachmentsDisabled;
   if (attachButton) {
@@ -854,11 +861,8 @@ function renderEvent(event) {
   renderErrorEvent(event);
 }
 
-function eventPollDelay() {
-  if (document.hidden) return 10000;
-  if (emptyEventPollCount >= 6) return 5000;
-  if (emptyEventPollCount >= 2) return 2000;
-  return 1000;
+function nextEventPollDelay(failed = false) {
+  return eventPollingDelay(document.hidden, composerState?.dataset.state, emptyEventPollCount, failed);
 }
 
 function resetEventPollBackoff() {
@@ -869,9 +873,10 @@ function resetEventCursor() {
   lastEventSeq = Number(liveOutput?.dataset.eventsAfter || 0);
 }
 
-function scheduleNextEventPoll(delay = eventPollDelay()) {
+function scheduleNextEventPoll(delay = nextEventPollDelay()) {
   if (!liveOutput) return;
   clearTimeout(eventPollTimer);
+  eventPollTimer = null;
   if (modalIsOpen()) return;
   eventPollTimer = setTimeout(() => pollEvents().catch(() => {}), delay);
 }
@@ -1000,6 +1005,7 @@ async function pollEvents() {
   const generation = sessionViewGeneration;
   const controller = new AbortController();
   const pollTimeout = setTimeout(() => controller.abort(), 12000);
+  let pollSucceeded = false;
   eventPollInFlight = true;
   eventPollAbortController = controller;
   try {
@@ -1011,6 +1017,7 @@ async function pollEvents() {
     const payload = await response.json();
     if (generation !== sessionViewGeneration) return;
     lastEventPollSuccessAt = Date.now();
+    pollSucceeded = true;
     hideReconnectBanner();
     if (payload.missed) {
       await refreshCurrentSessionPreservingComposer();
@@ -1034,7 +1041,7 @@ async function pollEvents() {
     if (eventPollAbortController === controller) eventPollAbortController = null;
     if (generation === sessionViewGeneration) {
       eventPollInFlight = false;
-      scheduleNextEventPoll();
+      scheduleNextEventPoll(nextEventPollDelay(!pollSucceeded));
     }
   }
 }

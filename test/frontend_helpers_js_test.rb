@@ -21,6 +21,24 @@ class FrontendHelpersJsTest < Minitest::Test
     assert_match(/\Atool:123:[0-9a-f]+\z/, results.last)
   end
 
+  def test_event_polling_is_fast_only_for_visible_running_sessions
+    results = run_javascript(<<~JS)
+      const { eventPollingDelay } = await import(#{module_url("polling.js").to_json});
+      console.log(JSON.stringify([
+        eventPollingDelay(false, "running", 0),
+        eventPollingDelay(false, "running", 20),
+        eventPollingDelay(true, "running", 0),
+        eventPollingDelay(false, "done", 0),
+        eventPollingDelay(false, "done", 2),
+        eventPollingDelay(false, "done", 6),
+        eventPollingDelay(false, "running", 0, true),
+        eventPollingDelay(true, "running", 0, true)
+      ]));
+    JS
+
+    assert_equal [250, 250, 10_000, 1_000, 2_000, 5_000, 2_000, 10_000], results
+  end
+
   def test_keyboard_scroll_keys_keep_legacy_spacebar_support
     results = run_javascript(<<~JS)
       const { keyboardScrollKey } = await import(#{module_url("shortcuts.js").to_json});

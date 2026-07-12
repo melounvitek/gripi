@@ -705,7 +705,124 @@ class FrontendControllersJsTest < Minitest::Test
       console.log(JSON.stringify(timers));
     JS
 
-    assert_equal [2500], results
+    assert_equal [10_000], results
+  end
+
+  def test_sidebar_controller_refreshes_more_often_while_a_session_is_active
+    results = run_javascript(<<~JS)
+      const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
+      let active = false;
+      const sidebar = {
+        dataset: {},
+        querySelector(selector) {
+          if (selector.includes("session-running-indicator")) return active ? {} : null;
+          return null;
+        },
+        querySelectorAll: () => []
+      };
+      const document = {
+        hidden: false, body: { classList: { contains: () => false } },
+        addEventListener() {}, querySelector: (selector) => selector === ".session-sidebar" ? sidebar : null,
+        querySelectorAll: () => [], createElement: () => ({}), getElementById: () => null
+      };
+      const window = { location: { href: "https://example.test/", origin: "https://example.test" } };
+      const timers = [];
+      globalThis.setTimeout = (_callback, delay) => { timers.push(delay); return timers.length; };
+      globalThis.clearTimeout = () => {};
+      const controller = new SidebarController(document, window, { initialize() {} }, { apply() {} }, () => {});
+      controller.bind();
+
+      controller.scheduleRefresh();
+      active = true;
+      controller.scheduleRefresh();
+      controller.requestRefresh();
+
+      console.log(JSON.stringify(timers));
+    JS
+
+    assert_equal [10_000, 2_500, 0], results
+  end
+
+  def test_marking_compaction_replaces_the_idle_refresh_schedule
+    results = run_javascript(<<~JS)
+      const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
+      let compactingIndicator = null;
+      const indicators = {
+        querySelector: (selector) => selector === ".session-compacting-indicator" ? compactingIndicator : null,
+        appendChild(indicator) { compactingIndicator = indicator; }
+      };
+      const link = {
+        classList: { add() {} },
+        querySelector: (selector) => selector === ".session-indicators" ? indicators : null
+      };
+      const sidebar = {
+        dataset: {},
+        querySelector(selector) {
+          if (selector.startsWith("a.session[data-session-path=")) return link;
+          if (selector.includes("session-compacting-indicator")) return compactingIndicator;
+          return null;
+        },
+        querySelectorAll: () => []
+      };
+      const document = {
+        hidden: false, body: { classList: { contains: () => false } },
+        addEventListener() {}, querySelector: (selector) => selector === ".session-sidebar" ? sidebar : null,
+        querySelectorAll: () => [], createElement: () => ({ setAttribute() {} }), getElementById: () => null
+      };
+      const window = { location: { href: "https://example.test/", origin: "https://example.test" } };
+      const timers = [];
+      globalThis.CSS = { escape: (value) => value };
+      globalThis.setTimeout = (_callback, delay) => { timers.push(delay); return timers.length; };
+      globalThis.clearTimeout = () => {};
+      const controller = new SidebarController(document, window, { initialize() {} }, { apply() {} }, () => {});
+      controller.bind();
+
+      controller.scheduleRefresh();
+      controller.markSessionCompacting("/session");
+
+      console.log(JSON.stringify({ timers, marked: compactingIndicator !== null }));
+    JS
+
+    assert_equal [10_000, 2_500], results.fetch("timers")
+    assert_equal true, results.fetch("marked")
+  end
+
+  def test_requested_sidebar_refresh_invalidates_an_in_flight_refresh
+    results = run_javascript(<<~JS)
+      const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
+      const sidebar = {
+        dataset: {}, replacements: 0,
+        querySelector: () => null, querySelectorAll: () => [],
+        set outerHTML(_html) { this.replacements += 1; }
+      };
+      const document = {
+        hidden: false, activeElement: null, body: { classList: { contains: () => false } },
+        addEventListener() {}, querySelector(selector) {
+          if (selector === ".session-sidebar") return sidebar;
+          if (selector === "[data-modal]:not([hidden])") return null;
+          return null;
+        },
+        querySelectorAll: () => [], createElement: () => ({}), getElementById: () => null
+      };
+      const window = { location: { href: "https://example.test/", origin: "https://example.test" } };
+      const timers = [];
+      globalThis.setTimeout = (_callback, delay) => { timers.push(delay); return timers.length; };
+      globalThis.clearTimeout = () => {};
+      let resolveRequest;
+      globalThis.fetch = () => new Promise((resolve) => { resolveRequest = resolve; });
+      const controller = new SidebarController(document, window, { initialize() {}, isActive: () => false }, { apply() {} }, () => {});
+      controller.bind();
+
+      const staleRefresh = controller.refresh();
+      controller.requestRefresh();
+      resolveRequest({ ok: true, text: async () => "stale html" });
+      await staleRefresh;
+
+      console.log(JSON.stringify({ timers, replacements: sidebar.replacements }));
+    JS
+
+    assert_equal [0], results.fetch("timers")
+    assert_equal 0, results.fetch("replacements")
   end
 
   def test_sidebar_controller_ignores_stale_refresh_responses_after_rebinding

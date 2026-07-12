@@ -104,13 +104,20 @@ export class SidebarController {
     return sidebarUrl;
   }
 
-  scheduleRefresh(delay = 2500) {
+  scheduleRefresh(delay = this.refreshDelay()) {
     clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
     if (!this.element || this.document.hidden || this.modalIsOpen()) return;
     this.refreshTimer = setTimeout(() => this.refresh().catch(() => {}), delay);
   }
 
+  refreshDelay() {
+    const active = this.element?.querySelector(".session-running-indicator, .session-compacting-indicator");
+    return active ? 2500 : 10000;
+  }
+
   requestRefresh(delay = 0) {
+    this.invalidate();
     this.refreshRequestVersion += 1;
     this.scheduleRefresh(delay);
   }
@@ -266,6 +273,7 @@ export class SidebarController {
     const link = this.element.querySelector(`a.session[data-session-path="${CSS.escape(sessionPath)}"]`);
     if (!link) return;
     link.classList.add("compacting");
+    this.scheduleRefresh(2500);
     const indicators = link.querySelector(".session-indicators");
     if (!indicators || indicators.querySelector(".session-compacting-indicator")) return;
     indicators.querySelector(".session-running-indicator")?.remove();
