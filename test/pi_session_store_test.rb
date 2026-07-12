@@ -53,6 +53,40 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_preserves_images_from_paired_read_results
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      image_data = Base64.strict_encode64("fake image data")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "/tmp/screenshot.png" } }]
+          }
+        },
+        {
+          type: "message",
+          message: {
+            role: "toolResult",
+            toolCallId: "read-1",
+            toolName: "read",
+            content: [
+              { type: "text", text: "Read image file [image/png]" },
+              { type: "image", data: image_data, mimeType: "image/png" }
+            ]
+          }
+        }
+      ])
+
+      message = PiSessionStore.new(root: dir).messages(path).first
+
+      assert_equal "read", message.tool_name
+      assert_equal [{ data: image_data, mime_type: "image/png" }], message.images
+    end
+  end
+
   def test_exposes_parent_session_path
     Dir.mktmpdir do |dir|
       session_dir = File.join(dir, "--project--")

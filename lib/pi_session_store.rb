@@ -87,6 +87,7 @@ class PiSessionStore
           call_message.expanded ||= message.expanded
           call_message.error ||= message.error
           call_message.tool_preview = false unless message.error
+          call_message.images = [*call_message.images, *message.images]
           next
         end
 

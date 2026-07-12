@@ -3775,6 +3775,47 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_open_session_renders_images_from_read_results
+    Dir.mktmpdir do |dir|
+      image_data = Base64.strict_encode64("fake image data")
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "/tmp/screenshot.png" } }]
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:01Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "read-1",
+            toolName: "read",
+            content: [
+              { type: "text", text: "Read image file [image/png]" },
+              { type: "image", data: image_data, mimeType: "image/png" }
+            ],
+            isError: false
+          }
+        }
+      ])
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      tool_card = compact_card_with_summary(document, "read /tmp/screenshot.png")
+      image = tool_card&.at_css(".message-images .message-image")
+      assert image
+      assert_equal "data:image/png;base64,#{image_data}", image["src"]
+    end
+  end
+
   def test_open_session_shortens_home_paths_in_tool_transcript_display
     Dir.mktmpdir do |dir|
       home_path = File.join(Dir.home, "Work", ".worktrees", "demo", "feature_branch")
@@ -4411,7 +4452,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'if (["bash", "read"].includes(part.name)) return "";'
       assert_includes response.body, 'if (["edit", "write"].includes(part.name)) return transcriptToolCallText(part.name, part.arguments || {});'
       assert_includes response.body, 'return editPreview;'
-      assert_includes response.body, '}).filter((segment) => segment.text || segment.compact);'
+      assert_includes response.body, '}).filter((segment) => segment.text || segment.compact || segment.images.length > 0);'
       assert_includes response.body, 'if (lines[lines.length - 1] === "") lines.pop();'
       assert_includes response.body, 'function renderToolTranscriptBody(body, text, toolName = "", options = {})'
       assert_includes response.body, 'body.dataset.rawText = text || "";'
@@ -4426,16 +4467,16 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'span.className = `tool-diff-line ${toolDiffLineClass(line, preview)}`;'
       assert_includes response.body, 'renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });'
       assert_includes response.body, 'toolPreview: toolPart?.type === "toolCall" && toolName === "edit"'
-      assert_includes response.body, 'bashCallEntry.body.classList.contains("message-body--edit-preview")'
+      assert_includes response.body, 'pairedToolCallEntry.body.classList.contains("message-body--edit-preview")'
       assert_includes response.body, 'segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text'
-      assert_includes response.body, '[bashCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\\n\\n")'
+      assert_includes response.body, '[pairedToolCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\\n\\n")'
       refute_includes response.body, 'details.open = options.open === true;'
       refute_includes response.body, 'collapseButton.textContent = "▴ Collapse details";'
       refute_includes response.body, 'event.target.closest("[data-collapse-details]")'
       assert_includes response.body, 'error: message.isError === true'
       refute_includes response.body, 'open: segment.expanded'
       assert_includes response.body, 'error: segment.error'
-      assert_includes response.body, '["bash", "read", "edit", "write"].includes(segment.toolName)'
+      assert_includes response.body, 'PAIRED_TOOL_NAMES.has(segment.toolName)'
       assert_includes response.body, "part.type === \"toolCall\""
       assert_includes response.body, "part.type === \"thinking\""
       assert_includes response.body, "function subagentToolCall(part)"
@@ -4466,8 +4507,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "renderToolTranscriptBody(entry.body, toolExecutionText(event), event.toolName || entry.toolName)"
       assert_includes response.body, "appendCompactMessage(\"tool\", toolExecutionSummary(event), toolExecutionText(event)"
       assert_includes response.body, "{ toolName: event.toolName, toolPrompt: event.toolName === \"subagent\" ? subagentPromptFromEvent(event, restoredPrompt) : \"\", error: event.isError === true, timestampFallback }"
-      assert_includes response.body, "if (!event.toolCallId || [\"bash\", \"read\", \"edit\", \"write\"].includes(event.toolName)) return;"
-      assert_includes response.body, "if (segment.toolCallId && !segment.isToolResult && ![\"bash\", \"read\", \"edit\", \"write\"].includes(segment.toolName)) liveToolExecutions.set(segment.toolCallId, entry);"
+      assert_includes response.body, "if (!event.toolCallId || PAIRED_TOOL_NAMES.has(event.toolName)) return;"
+      assert_includes response.body, "if (segment.toolCallId && !segment.isToolResult && !PAIRED_TOOL_NAMES.has(segment.toolName)) liveToolExecutions.set(segment.toolCallId, entry);"
       assert_includes response.body, 'if (["tool_execution_start", "tool_execution_update", "tool_execution_end"].includes(event.type))'
     end
   end
@@ -4572,8 +4613,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "entry.article.remove();"
       assert_includes response.body, "function forgetLiveEntry(entry)"
       assert_includes response.body, "if (storedEntry === entry) liveAssistantSegments.delete(key);"
-      assert_includes response.body, "if (storedEntry === entry) liveBashToolCalls.delete(key);"
-      assert_includes response.body, "markLiveEntryRendered(bashCallEntry, bashCallEntry.article.dataset.role || \"assistant\", mergedText)"
+      assert_includes response.body, "if (storedEntry === entry) livePairedToolCalls.delete(key);"
+      assert_includes response.body, "markLiveEntryRendered(pairedToolCallEntry, pairedToolCallEntry.article.dataset.role || \"assistant\", mergedText)"
       assert_includes response.body, "article.dataset.messageTimestamp = timestampKey;"
     end
   end
@@ -4973,7 +5014,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "let liveErrorSeen = false;"
       assert_includes response.body, "liveErrorSeen = true;"
       assert_includes response.body, "appendMessage(\"error\", errorText, true, true, eventTimestamp(event));"
-      assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse });'
+      assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse, images: segment.images });'
       assert_includes response.body, 'function renderAssistantMarkdown(body, text, delay = 120)'
       assert_includes response.body, 'body.dataset.rendering = "pending";'
       assert_includes response.body, 'clearTimeout(body.markdownRenderTimeout);'
