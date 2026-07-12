@@ -3,6 +3,7 @@
             <% identity = project_identity(session.cwd) %>
             <a class="<%= h session_classes(session, "session", "recent-session", compacting ? "compacting" : nil) %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>" data-latest-assistant-response-preview="<%= h session.latest_assistant_response_preview.to_s %>"<% if shortcut %> data-session-shortcut="<%= h shortcut %>"<% end %>>
               <div class="session-content">
+                <% if unread?(session) %><span class="visually-hidden">Unread: </span><% end %>
                 <div class="session-title"><%= h session.display_name %></div>
                 <div class="session-project" title="<%= h session.cwd %>" style="--project-identity-bg: <%= h identity[:background] %>; --project-identity-fg: <%= h identity[:foreground] %>">
                   <span class="session-project-monogram" aria-hidden="true"><%= h identity[:monogram] %></span>

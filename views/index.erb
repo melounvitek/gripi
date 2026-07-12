@@ -51,6 +51,7 @@
     html, body { height: 100%; }
     *, *::before, *::after { box-sizing: border-box; }
     ::selection { background: #8abeb73d; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     body { margin: 0; font-family: var(--sans); color: var(--text); background-color: var(--bg); background-image: linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px), linear-gradient(var(--grid-minor) 1px, transparent 1px), linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px); background-size: 96px 96px, 96px 96px, 12px 12px, 12px 12px; overflow: hidden; }
     .app-shell { display: grid; grid-template-columns: 22rem minmax(0, 1fr); height: 100vh; min-height: 0; }
     body.session-only .app-shell { grid-template-columns: minmax(0, 1fr); }
@@ -129,7 +130,7 @@
     a.session.selected { background: var(--panel-softer); border-color: var(--accent-line-35); }
     a.session.selected::before { content: ""; position: absolute; left: -1rem; top: 0.7rem; bottom: 0.7rem; width: 3px; background: var(--accent); }
     a.session.unread .session-title { color: var(--text); font-weight: 700; }
-    a.session.unread .session-indicators::before { content: "new"; padding: 0.12rem 0.35rem; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; color: var(--accent); background: var(--accent-tint-08); font-family: var(--mono); font-size: 0.58rem; font-weight: 600; line-height: 1; text-transform: uppercase; letter-spacing: 0.08em; }
+    a.session.unread .session-title::before { content: ""; display: inline-block; width: 0.42rem; height: 0.42rem; margin-right: 0.4rem; border-radius: 50%; background: var(--accent); vertical-align: 0.08rem; }
     .session-content { min-width: 0; }
     .session-indicators { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; min-width: 0.7rem; }
     .session-fork-indicator { display: inline-flex; align-items: center; justify-content: center; min-width: 1.15rem; height: 1.15rem; border: 1px solid #f0c67447; border-radius: 0.2rem; background: #f0c67414; color: var(--gold); font-size: 0.86rem; font-weight: 700; line-height: 1; }

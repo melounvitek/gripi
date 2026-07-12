@@ -5215,11 +5215,12 @@ class AppTest < Minitest::Test
 
       assert_includes unread_response.body, "class=\"session recent-session unread"
       assert_includes unread_response.body, "data-assistant-response-count=\"1\""
+      assert_equal "Unread:", Nokogiri::HTML(unread_response.body).at_css("a.session.unread .visually-hidden").text.strip
 
       page_response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => first_path })
-      assert_includes page_response.body, "a.session.unread .session-title"
-      assert_includes page_response.body, "a.session.unread .session-indicators::before"
-      assert_includes page_response.body, "content: \"new\""
+      assert_includes page_response.body, 'a.session.unread .session-title::before { content: "";'
+      refute_includes page_response.body, "a.session.unread .session-indicators::before"
+      refute_includes page_response.body, "content: \"new\""
       refute_includes page_response.body, "localStorage.getItem(\"piSidebarUnreadSessions\")"
 
       read_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => second_path })
