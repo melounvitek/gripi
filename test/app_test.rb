@@ -3222,14 +3222,14 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
       selected = document.at_css(".recent-sessions a.session.selected")
-      assert_nil selected["data-session-shortcut"]
-      assert_nil selected.at_css(".session-shortcut")
-      shortcuts = document.css(".recent-sessions a.session:not(.selected)").map { |link| [link["data-session-shortcut"], link.at_css(".session-shortcut")&.text] }
-      assert_equal (1..8).map { |number| [number.to_s, number.to_s] }, shortcuts
+      assert_equal "1", selected["data-session-shortcut"]
+      assert_equal "1", selected.at_css(".session-shortcut").text
+      shortcuts = document.css(".recent-sessions a.session").map { |link| [link["data-session-shortcut"], link.at_css(".session-shortcut")&.text] }
+      assert_equal (1..9).map { |number| [number.to_s, number.to_s] }, shortcuts
     end
   end
 
-  def test_sidebar_keeps_current_session_in_chronological_order_without_shortcut
+  def test_sidebar_numbers_current_session_in_chronological_order
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 3)
       PiWebGateway.set :sessions_root, dir
@@ -3245,7 +3245,7 @@ class AppTest < Minitest::Test
       links = document.css(".recent-sessions a.session")
       assert_equal ["Session 3", "Session 2", "Session 1"], links.map { |link| link.at_css(".session-title").text }
       assert links[1]["class"].include?("selected")
-      assert_equal ["1", nil, "2"], links.map { |link| link["data-session-shortcut"] }
+      assert_equal ["1", "2", "3"], links.map { |link| link["data-session-shortcut"] }
       assert_equal "Sessions", document.css(".recent-sessions-header h2").map(&:text).first
       assert_operator response.body.index("<h2>Sessions</h2>"), :<, response.body.index("Session 1")
     end
@@ -3271,7 +3271,7 @@ class AppTest < Minitest::Test
       assert_equal ["Sessions"], document.css(".recent-sessions-header h2").map(&:text)
       links = document.css(".recent-sessions a.session")
       assert_equal ["Session 4", "Session 2", "Session 3", "Session 1"], links.map { |link| link.at_css(".session-title").text }
-      assert_equal ["1", "2", "3", nil], links.map { |link| link["data-session-shortcut"] }
+      assert_equal ["1", "2", "3", "4"], links.map { |link| link["data-session-shortcut"] }
       assert links[1]["class"].include?("unread")
       refute links.last["class"].include?("unread")
     end
@@ -3386,7 +3386,9 @@ class AppTest < Minitest::Test
       assert_equal ["Current session", "Sessions"], document.css(".recent-sessions-header h2").map(&:text)
       assert_equal ["Session 1"], document.css(".current-session-section a.session .session-title").map(&:text)
       assert_equal (23..42).to_a.reverse.map { |index| "Session #{index}" }, document.css(".sessions-list a.session .session-title").map(&:text)
-      assert_nil document.at_css(".current-session-section a.session.selected")["data-session-shortcut"]
+      assert_equal "1", document.at_css(".current-session-section a.session.selected")["data-session-shortcut"]
+      assert_equal (2..9).map(&:to_s), document.css(".sessions-list a.session").first(8).map { |link| link["data-session-shortcut"] }
+      assert_nil document.css(".sessions-list a.session")[8]["data-session-shortcut"]
 
       loaded_response = request.get("/", params: { "session" => paths.first, "sidebar_sessions_limit" => "42" })
 

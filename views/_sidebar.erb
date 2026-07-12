@@ -17,11 +17,12 @@
           <% shortcut_index = 0 %>
           <% separate_current_session = sidebar_separate_current_session %>
           <% if separate_current_session %>
+            <% shortcut_index += 1 %>
             <section class="current-session-section">
               <div class="recent-sessions-header">
                 <h2>Current session</h2>
               </div>
-              <%= erb :_sidebar_session, layout: false, locals: { session: separate_current_session, shortcut: nil } %>
+              <%= erb :_sidebar_session, layout: false, locals: { session: separate_current_session, shortcut: shortcut_index } %>
             </section>
           <% end %>
           <div class="recent-sessions-header">
@@ -63,10 +64,8 @@
           </form>
           <div class="sessions-list">
             <% sidebar_sessions.each do |session| %>
-              <% unless selected?(session) %>
-                <% shortcut_index += 1 %>
-              <% end %>
-              <% shortcut = !selected?(session) && shortcut_index <= 9 ? shortcut_index : nil %>
+              <% shortcut_index += 1 %>
+              <% shortcut = shortcut_index <= 9 ? shortcut_index : nil %>
               <%= erb :_sidebar_session, layout: false, locals: { session: session, shortcut: shortcut } %>
             <% end %>
           </div>
