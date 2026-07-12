@@ -2297,16 +2297,16 @@ class AppTest < Minitest::Test
       assert_includes response.body, "updateConversationJumpControlsReveal();"
       assert_includes response.body, 'conversationScrollDirection === "up" && !autoScrollEnabled && !nearConversationTop()'
       assert_includes response.body, 'conversationScrollDirection === "down" && !nearConversationBottom()'
-      assert_includes response.body, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; }"
+      assert_includes response.body, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 0.84rem; }"
       assert_includes response.body, ".message--compact .message-details-summary:last-child { margin-bottom: 0; }"
       assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
-      assert_includes response.body, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); color: rgba(216, 222, 216, 0.62); font-size: 0.92rem; line-height: 1.35; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
+      assert_includes response.body, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
       assert_includes response.body, ".tool-diff-line { display: block; margin: 0 -0.25rem;"
       assert_includes response.body, "scrollbar-width: none"
-      assert_includes response.body, ".message--user { margin-left: 10%; background: #343541; border-color: rgba(69, 133, 255, 0.72); color: #d4d4d4; }"
-      assert_includes response.body, ".message--assistant { margin-right: 10%; background: #080d20; border-color: rgba(69, 133, 255, 0.32); color: #f0c7a4; }"
-      assert_includes response.body, ".message--thinking { margin-right: 16%; background: #080d20; border-color: rgba(69, 133, 255, 0.22); border-style: dashed; color: #7f7f88; box-shadow: none; }"
-      assert_includes response.body, ".message--tool, .message--tool-call { background: rgba(28, 38, 32, 0.82); border-color: rgba(138, 190, 183, 0.24); border-style: dashed; color: rgba(216, 222, 216, 0.74); box-shadow: none; }"
+      assert_includes response.body, ".message--user { margin-left: 10%; background: var(--user-msg); border-color: #ffffff14; color: var(--text); }"
+      assert_includes response.body, ".message--assistant { margin-right: 10%; background: var(--panel); border-color: var(--border); color: var(--copy); }"
+      assert_includes response.body, ".message--thinking { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }"
+      assert_includes response.body, ".message--tool, .message--tool-call { background: var(--tool-ok); border-color: #ffffff0f; color: var(--copy); }"
     end
   end
 
@@ -2436,14 +2436,14 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_equal 2, gateway_identities.length
       assert_equal ["PW"], gateway_identities.map { |identity| identity.at_css(".session-project-monogram").text }.uniq
-      assert_equal ["--project-identity-bg: #215f59; --project-identity-fg: #76cbbf"], gateway_identities.map { |identity| identity["style"] }.uniq
+      assert_equal ["--project-identity-bg: #215f5933; --project-identity-fg: #76cbbf"], gateway_identities.map { |identity| identity["style"] }.uniq
       assert_equal "AP", platform_identity.at_css(".session-project-monogram").text
 
       filter = document.at_css("[data-project-select] select[data-sidebar-project-filter]")
       gateway_options = filter.css("option").select { |option| option.text == "pi-web-gateway" }
       assert_equal 2, gateway_options.length
       assert_equal ["PW"], gateway_options.map { |option| option["data-project-monogram"] }.uniq
-      assert_equal ["#215f59"], gateway_options.map { |option| option["data-project-background"] }.uniq
+      assert_equal ["#215f5933"], gateway_options.map { |option| option["data-project-background"] }.uniq
       refute filter.at_css('option[value=""]')["data-project-monogram"]
     end
   end
