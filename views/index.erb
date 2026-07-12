@@ -530,6 +530,7 @@
     let eventPollTimer = null;
     let sidebarRefreshTimer = null;
     let sidebarUpdateGeneration = 0;
+    let sidebarRefreshRequestGeneration = 0;
     let openProjectSelectWrapper = null;
     let projectSelectSerial = 0;
     let eventPollInFlight = false;
@@ -3425,6 +3426,14 @@
       const generation = sessionViewGeneration;
       const switchGeneration = sessionSwitchGeneration;
       const submittedSession = promptSessionInput?.value;
+      const submittedViewChanged = () => generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value;
+      const stopHandlingChangedSubmittedView = () => {
+        if (!submittedViewChanged()) return false;
+
+        sidebarRefreshRequestGeneration += 1;
+        scheduleSidebarRefresh(0);
+        return true;
+      };
       const message = promptTextarea.value.trim();
       const submittedImageFiles = pendingImages.map((entry) => entry.file);
       if (!message && submittedImageFiles.length === 0) return;
@@ -3499,15 +3508,15 @@
       try {
         response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
       } catch (_error) {
-        if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
+        if (stopHandlingChangedSubmittedView()) return;
         showPromptFailure("Prompt failed to send");
         return;
       }
-      if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
+      if (stopHandlingChangedSubmittedView()) return;
 
       if (!response.ok && response.type !== "opaqueredirect") {
         const payload = await response.json().catch(() => null);
-        if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
+        if (stopHandlingChangedSubmittedView()) return;
         if (cloneCommand && payload?.cancelled) {
           restoreSubmittedComposerInput();
           setComposerState("idle");
@@ -3517,7 +3526,7 @@
         showPromptFailure(payload?.error || "Prompt failed to send");
       } else if (response.ok) {
         const payload = await response.json().catch(() => null);
-        if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;
+        if (stopHandlingChangedSubmittedView()) return;
         if (cloneCommand && payload?.cancelled) {
           restoreSubmittedComposerInput();
           setComposerState("idle");
@@ -4419,6 +4428,7 @@
       persistStoredComposerDraft();
       temporarySidebarSessionsLimit = null;
       const switchGeneration = ++sessionSwitchGeneration;
+      const refreshRequestGeneration = sidebarRefreshRequestGeneration;
       let navigatingAway = false;
       showSessionSwitching();
       resetSessionViewState();
@@ -4445,6 +4455,7 @@
         document.title = payload.title ? `${payload.title} · Pi Web Gateway` : "Pi Web Gateway";
         closeMobileSessionSidebar();
         initializeSessionView({ focus });
+        if (refreshRequestGeneration !== sidebarRefreshRequestGeneration) scheduleSidebarRefresh(0);
         return true;
       } catch (_error) {
         navigatingAway = true;

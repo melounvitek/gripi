@@ -4669,7 +4669,8 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes response.body, "function bindSessionDom()"
       assert_includes response.body, "function switchSession(url, { push = true, focus = true } = {})"
-      assert_includes response.body, "const switchGeneration = ++sessionSwitchGeneration;\n      let navigatingAway = false;\n      showSessionSwitching();\n      resetSessionViewState();"
+      assert_includes response.body, "const switchGeneration = ++sessionSwitchGeneration;\n      const refreshRequestGeneration = sidebarRefreshRequestGeneration;\n      let navigatingAway = false;\n      showSessionSwitching();\n      resetSessionViewState();"
+      assert_includes response.body, "if (refreshRequestGeneration !== sidebarRefreshRequestGeneration) scheduleSidebarRefresh(0);"
       assert_includes response.body, "fetch(sessionFragmentUrl(url), { headers: { \"Accept\": \"application/json\" } })"
       assert_includes response.body, "if (switchGeneration !== sessionSwitchGeneration) return false;"
       assert_includes response.body, "if (link.classList.contains(\"selected\")) {\n        closeMobileSessionSidebar();\n        return;\n      }"
@@ -4697,8 +4698,8 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "const generation = sessionViewGeneration;"
-      assert_includes response.body, "if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;"
-      assert_includes response.body, "const payload = await response.json().catch(() => null);\n        if (generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value) return;"
+      assert_includes response.body, "const submittedViewChanged = () => generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value;"
+      assert_includes response.body, "if (stopHandlingChangedSubmittedView()) return;"
       assert_includes response.body, "function refreshSessionStatus(generation = sessionViewGeneration)"
       assert_includes response.body, "function renderModelStatus()"
       assert_includes response.body, "[liveStatusModel, liveStatusThinking ? `(${liveStatusThinking})` : null]"
@@ -4733,6 +4734,26 @@ class AppTest < Minitest::Test
       assert_includes response.body, "lastEventSeq = 0;"
       assert_includes response.body, "autoScrollEnabled = true;"
       assert_includes response.body, "clearAttachments();"
+    end
+  end
+
+  def test_completed_prompt_refreshes_sidebar_after_switching_sessions
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      handler_start = response.body.index("const stopHandlingChangedSubmittedView = () => {")
+      handler_end = response.body.index("      };", handler_start)
+      handler = response.body[handler_start..handler_end]
+      assert_includes handler, "if (!submittedViewChanged()) return false;"
+      assert_includes handler, "sidebarRefreshRequestGeneration += 1;"
+      assert_includes handler, "scheduleSidebarRefresh(0);"
+      assert_includes handler, "return true;"
+      assert_operator response.body.scan("if (stopHandlingChangedSubmittedView()) return;").length, :>=, 3
     end
   end
 
