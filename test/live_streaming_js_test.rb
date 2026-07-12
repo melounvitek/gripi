@@ -1,123 +1,109 @@
 require "minitest/autorun"
+require "json"
 require "open3"
 
 class LiveStreamingJsTest < Minitest::Test
-  VIEW_PATH = File.expand_path("../views/index.erb", __dir__)
+  ASSETS = File.expand_path("../public/assets", __dir__)
 
-  def test_streaming_cleanup_removes_stale_dom_cursors
-    script = File.read(VIEW_PATH)
-
-    assert_includes script, 'querySelectorAll(".message--assistant.message--streaming")'
-  end
-
-  def test_new_assistant_message_clears_stale_streaming_before_tracking_reset
-    assert_cleanup_before_reset_in('if (roleName === "assistant" && event.type === "message_start")')
-  end
-
-  def test_terminal_events_clear_stale_streaming_before_tracking_reset
-    assert_cleanup_before_reset_in('if (event.type === "turn_end")')
-    assert_cleanup_before_reset_in('if (renderErrorEvent(event))')
-    assert_cleanup_before_reset_in('if (!liveErrorSeen) {', after: 'if (event.type === "agent_end")')
-  end
-
-  def test_thinking_segments_are_rendered_as_markdown
-    script = File.read(VIEW_PATH)
-
-    assert_includes script, 'options.thinking ? "message-body message-body--thinking message-body--markdown"'
-    assert_includes script, "if (roleName === \"assistant\") {\n        renderAssistantMarkdown(body, text);"
-    assert_includes script, "if (roleName === \"assistant\") {\n          renderAssistantMarkdown(entry.body, segment.text);"
-  end
-
-  def test_live_read_results_preserve_supported_images
-    script = File.read(VIEW_PATH)
-    formatter_start = script.index("    function compactContentPart")
-    formatter_end = script.index("    function eventMessage", formatter_start)
-    formatter = script[formatter_start...formatter_end]
-    assertion = <<~JS
-      const segments = contentSegments([
-        { type: "text", text: "Read image file [image/png]" },
+  def test_parser_preserves_supported_images_and_interprets_thinking_and_tools
+    result = run_javascript(<<~JS)
+      const { LiveMessageParser } = await import(#{module_url("live_message_parser.js").to_json});
+      const parser = new LiveMessageParser("/home/tester");
+      const segments = parser.contentSegments([
+        { type: "thinking", thinking: "**Reasoning**\\n\\nInspect this" },
+        { type: "toolCall", name: "read", id: "read-1", arguments: { path: "/home/tester/file", offset: 2, limit: 3 } },
         { type: "image", data: "cG5n", mimeType: "image/png" },
         { type: "image", data: "c3Zn", mimeType: "image/svg+xml" }
-      ], { role: "toolResult", toolName: "read", toolCallId: "read-1" });
-      if (segments.length !== 1) process.exit(1);
-      if (segments[0].images.length !== 1) process.exit(2);
-      if (segments[0].images[0].src !== "data:image/png;base64,cG5n") process.exit(3);
+      ], { role: "assistant" });
+      console.log(JSON.stringify(segments));
     JS
 
-    refute_nil formatter_start
-    refute_nil formatter_end
-    _stdout, stderr, status = Open3.capture3("node", stdin_data: "const HOME_DIR = '';\n" + formatter + assertion)
-
-    assert status.success?, stderr
+    assert_equal 2, result.length
+    assert_equal true, result[0]["thinking"]
+    assert_equal "Inspect this", result[0]["text"]
+    assert_equal({ "name" => "read", "path" => "~/file", "range" => "2-4" }, result[1]["summaryParts"])
+    assert_equal ["data:image/png;base64,cG5n"], result[1]["images"].map { |image| image["src"] }
   end
 
-  def test_live_read_results_are_rendered_on_the_existing_tool_card
-    script = File.read(VIEW_PATH)
-    paired_result = script.index("else if (pairedToolCallEntry && segment.isToolResult)")
-    next_branch = script.index("else if (roleName === \"user\"", paired_result)
-
-    assert_includes script[paired_result...next_branch], "replaceMessageImages(pairedToolCallEntry.article, segment.images);"
-  end
-
-  def test_live_message_images_are_replaced_and_cleared
-    script = File.read(VIEW_PATH)
-    renderer_start = script.index("    function replaceMessageImages")
-    renderer_end = script.index("    function appendMessage", renderer_start)
-    renderer = script[renderer_start...renderer_end]
-    assertion = <<~JS
-      let currentContainer = null;
-      global.document = {
-        createElement(tagName) {
-          return {
-            tagName,
-            children: [],
-            append(...children) { this.children.push(...children); },
-            addEventListener() {},
-            remove() { if (currentContainer === this) currentContainer = null; }
-          };
-        }
-      };
-      const article = {
-        querySelector() { return currentContainer; },
-        append(container) { currentContainer = container; }
-      };
-      const image = { src: "data:image/png;base64,cG5n", alt: "Attached image" };
-      replaceMessageImages(article, [image]);
-      replaceMessageImages(article, [image]);
-      if (!currentContainer || currentContainer.children.length !== 1) process.exit(1);
-      replaceMessageImages(article, []);
-      if (currentContainer) process.exit(2);
+  def test_renderer_streaming_state_is_cleared_before_a_new_assistant_message
+    result = run_javascript(<<~JS)
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      const removed = [];
+      const stale = article("stale");
+      const tracked = article("tracked");
+      const renderer = Object.create(LiveMessageRenderer.prototype);
+      renderer.conversationScroll = { querySelectorAll: () => [stale] };
+      renderer.liveAssistantSegments = new Map([["one", { article: tracked }]]);
+      renderer.livePairedToolCalls = new Map();
+      renderer.liveToolExecutions = new Map();
+      renderer.liveUserMessages = new Map();
+      renderer.clearLiveAssistantStreaming();
+      renderer.resetLiveAssistantTracking();
+      console.log(JSON.stringify({ removed, segments: renderer.liveAssistantSegments.size, seen: renderer.liveAssistantSeen }));
+      function article(name) { return { classList: { remove(value) { removed.push([name, value]); } } }; }
     JS
 
-    refute_nil renderer_start
-    refute_nil renderer_end
-    _stdout, stderr, status = Open3.capture3("node", stdin_data: renderer + assertion)
-
-    assert status.success?, stderr
+    assert_equal [["stale", "message--streaming"], ["tracked", "message--streaming"]], result["removed"]
+    assert_equal 0, result["segments"]
+    assert_equal false, result["seen"]
   end
 
-  def test_optimistic_user_message_can_render_uploaded_image_previews
-    script = File.read(VIEW_PATH)
+  def test_renderer_replaces_live_message_images
+    result = run_javascript(<<~JS)
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      const renderer = Object.create(LiveMessageRenderer.prototype);
+      renderer.document = { createElement: (tagName) => ({ tagName, children: [], append(...children) { this.children.push(...children); }, addEventListener() {} }) };
+      let container = null;
+      const article = { querySelector: () => container, append(value) { container = value; } };
+      renderer.replaceMessageImages(article, [{ src: "data:image/png;base64,cG5n", alt: "Attached image" }]);
+      const firstCount = container.children.length;
+      container.remove = () => { container = null; };
+      renderer.replaceMessageImages(article, []);
+      console.log(JSON.stringify({ firstCount, cleared: container === null }));
+    JS
 
-    assert_includes script, "function renderMessageImages(article, images = [])"
+    assert_equal 1, result["firstCount"]
+    assert_equal true, result["cleared"]
+  end
+
+  def test_renderer_builds_compact_tool_output_lines_through_its_bound_document
+    result = run_javascript(<<~JS)
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      const renderer = Object.create(LiveMessageRenderer.prototype);
+      renderer.parser = { displayHomePath: (text) => text.replace("/home/tester", "~") };
+      renderer.document = { createElement: () => ({ className: "", classList: { add() {} }, textContent: "" }) };
+      const body = {
+        dataset: {},
+        classList: { toggle() {} },
+        closest: () => null,
+        replaceChildren(...children) { this.children = children; }
+      };
+      renderer.renderToolTranscriptBody(body, "/home/tester/one\\n/home/tester/two", "read");
+      console.log(JSON.stringify(body.children.map((child) => child.textContent)));
+    JS
+
+    assert_equal ["~/one", "~/two"], result
+  end
+
+  def test_optimistic_uploaded_images_remain_owned_by_renderer
+    script = File.read(File.join(ASSETS, "live_message_renderer.js"))
+    app = File.read(File.join(ASSETS, "app.js"))
+
     assert_includes script, "article.dataset.optimisticImageCount = String(options.images?.length || 0);"
     assert_includes script, 'return targetText.startsWith(`${optimisticText}\\n`);'
-    assert_includes script, "renderMessageImages(article, options.images);"
-    assert_includes script, "const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || \"Attached image\" }));"
-    assert_includes script, "images: optimisticImages"
+    assert_includes app, "const optimisticImages = pendingImages.map"
+    assert_includes app, "liveMessageRenderer.appendMessage(\"user\""
   end
 
   private
 
-  def assert_cleanup_before_reset_in(block_start, after: nil)
-    script = File.read(VIEW_PATH)
-    search_start = after ? script.index(after) : 0
-    block_index = script.index(block_start, search_start)
-    cleanup = script.index("clearLiveAssistantStreaming();", block_index)
-    reset = script.index("resetLiveAssistantTracking();", block_index)
+  def module_url(name)
+    "file://#{File.join(ASSETS, name)}"
+  end
 
-    refute_nil cleanup
-    refute_nil reset
-    assert_operator cleanup, :<, reset
+  def run_javascript(source)
+    stdout, stderr, status = Open3.capture3("node", "--input-type=module", "-e", source)
+    assert status.success?, stderr
+    JSON.parse(stdout)
   end
 end

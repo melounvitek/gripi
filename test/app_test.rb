@@ -8,9 +8,13 @@ require "tmpdir"
 require "json"
 require "fileutils"
 require "base64"
+require "pathname"
 require_relative "../app"
 
 class AppTest < Minitest::Test
+  APP_JAVASCRIPT = Dir[File.expand_path("../public/assets/*.js", __dir__)].sort.map { |path| File.read(path) }.join("\n")
+  APP_STYLESHEET = File.read(File.expand_path("../public/assets/app.css", __dir__))
+
   def setup
     @attachments_root = Dir.mktmpdir
     @read_state_root = Dir.mktmpdir
@@ -194,9 +198,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'data-notification-toggle-state>Enable</span>'
       enabled_state = 'if (notificationsEnabled()) return { name: "enabled", label: "On"'
       blocked_state = 'if (!desktopNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied")'
-      assert_includes response.body, enabled_state
-      assert_includes response.body, blocked_state
-      assert_operator response.body.index(enabled_state), :<, response.body.index(blocked_state)
+      assert_includes APP_JAVASCRIPT, enabled_state
+      assert_includes APP_JAVASCRIPT, blocked_state
+      assert_operator APP_JAVASCRIPT.index(enabled_state), :<, APP_JAVASCRIPT.index(blocked_state)
       refute_includes response.body, ">Notifications</a>"
     end
   end
@@ -238,6 +242,76 @@ class AppTest < Minitest::Test
     assert_includes response.body, "self.registration.showNotification"
     assert_includes response.body, '["pi-notification", "pi-notification-test"].includes(data.type)'
     assert_includes response.body, "notificationclick"
+  end
+
+  def test_serves_public_frontend_assets_with_revalidation
+    PiWebGateway.set :gateway_admin_password, "secret"
+    request = Rack::MockRequest.new(PiWebGateway)
+
+    css_response = request.get("/assets/app.css")
+    js_response = request.get("/assets/app.js")
+
+    assert_equal 200, css_response.status
+    assert_equal "text/css", css_response.media_type
+    assert_equal "no-cache", css_response["Cache-Control"]
+    assert_includes css_response.body, ":root {"
+    assert_equal 200, js_response.status
+    assert_equal "text/javascript", js_response.media_type
+    assert_equal "no-cache", js_response["Cache-Control"]
+    assert_includes js_response.body, "function bindSessionDom()"
+
+    revalidated_response = request.get("/assets/app.js", "HTTP_IF_MODIFIED_SINCE" => js_response["Last-Modified"])
+
+    assert_equal 304, revalidated_response.status
+    assert_empty revalidated_response.body
+  end
+
+  def test_serves_every_relative_module_import_reachable_from_the_app_entrypoint
+    public_root = Pathname.new(PiWebGateway.settings.public_folder).expand_path
+    pending = [public_root.join("assets/app.js")]
+    visited = []
+    request = Rack::MockRequest.new(PiWebGateway)
+
+    until pending.empty?
+      module_path = pending.shift.cleanpath
+      next if visited.include?(module_path)
+
+      assert module_path.to_s.start_with?("#{public_root}/"), "module import escapes public root: #{module_path}"
+      assert module_path.file?, "module import does not resolve: #{module_path}"
+
+      asset_path = "/#{module_path.relative_path_from(public_root)}"
+      response = request.get(asset_path)
+      assert_equal 200, response.status, "#{asset_path} is not served"
+      assert_equal "text/javascript", response.media_type, "#{asset_path} is not served as JavaScript"
+      visited << module_path
+
+      relative_imports = response.body.scan(/^\s*(?:import|export)\s+(?:[^"']+?\s+from\s+)?["'](\.[^"']+)["']/m).flatten
+      relative_imports.concat(response.body.scan(/\bimport\(\s*["'](\.[^"']+)["']\s*\)/).flatten)
+      pending.concat(relative_imports.map { |specifier| module_path.dirname.join(specifier) })
+    end
+
+    assert_operator visited.length, :>, 1
+  end
+
+  def test_page_loads_frontend_assets_and_exposes_home_dir_as_data
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      document = Nokogiri::HTML(response.body)
+
+      assert_equal 200, response.status
+      asset_version = PiWebGateway.settings.gateway_instance_id
+      assert_equal "/assets/app.css?v=#{asset_version}", document.at_css('head link[rel="stylesheet"]')["href"]
+      assert_equal Dir.home, document.at_css("body")["data-home-dir"]
+      script = document.at_css("body > script:last-child")
+      assert_equal "/assets/app.js?v=#{asset_version}", script["src"]
+      assert_equal "module", script["type"]
+      refute_includes response.body, "const HOME_DIR"
+      refute_includes response.body, "<style"
+      refute_includes response.body, "<script>"
+    end
   end
 
   def test_unknown_browser_sees_access_gate_when_admin_password_is_configured
@@ -2032,8 +2106,8 @@ class AppTest < Minitest::Test
       assert modal.at_css('fieldset[data-thinking-options]')
       assert modal.at_css('button[data-model-settings-apply]')
       assert modal.at_css('button[data-modal-close]')
-      assert_includes response.body, 'fetch(`/sessions/model_settings?session=${encodeURIComponent(sessionPath)}`'
-      assert_includes response.body, 'fetch("/sessions/model_settings", { method: "POST"'
+      assert_includes APP_JAVASCRIPT, 'fetch(`/sessions/model_settings?session=${encodeURIComponent(sessionPath)}`'
+      assert_includes APP_JAVASCRIPT, 'fetch("/sessions/model_settings", { method: "POST"'
     end
   end
 
@@ -2045,15 +2119,15 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "function sessionModelSlashCommand(message)"
-      assert_includes response.body, 'if (payload?.command === "model")'
-      assert_includes response.body, "openModelSettingsModal();"
-      assert_includes response.body, "function supportedThinkingLevels(model)"
-      assert_includes response.body, "const THINKING_LEVELS = [\"off\", \"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", \"max\"];"
-      assert_includes response.body, "function cycleThinkingShortcut(event)"
-      assert_includes response.body, '"thinking_level_changed"'
-      assert_includes response.body, 'fetch("/sessions/cycle_thinking", { method: "POST"'
-      assert_includes response.body, "function handleModelSettingsModalTab(event)"
+      assert_includes APP_JAVASCRIPT, "function sessionModelSlashCommand(message)"
+      assert_includes APP_JAVASCRIPT, 'if (payload?.command === "model")'
+      assert_includes APP_JAVASCRIPT, "openModelSettingsModal();"
+      assert_includes APP_JAVASCRIPT, "function supportedThinkingLevels(model)"
+      assert_includes APP_JAVASCRIPT, "const THINKING_LEVELS = [\"off\", \"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", \"max\"];"
+      assert_includes APP_JAVASCRIPT, "function cycleThinkingShortcut(event)"
+      assert_includes APP_JAVASCRIPT, '"thinking_level_changed"'
+      assert_includes APP_JAVASCRIPT, 'fetch("/sessions/cycle_thinking", { method: "POST"'
+      assert_includes APP_JAVASCRIPT, "function handleModelSettingsModalTab(event)"
     end
   end
 
@@ -2243,8 +2317,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "conversation-scroll"
       assert_includes response.body, "composer"
       assert_includes response.body, "composer-controls"
-      assert_includes response.body, ".composer-state { display: none; align-items: center;"
-      refute_includes response.body, ".composer-state { position: absolute;"
+      assert_includes APP_STYLESHEET, ".composer-state { display: none; align-items: center;"
+      refute_includes APP_STYLESHEET, ".composer-state { position: absolute;"
       refute_includes response.body, "Ready"
       assert_includes response.body, "composer-input-row"
       assert_includes response.body, "Attach images"
@@ -2253,15 +2327,15 @@ class AppTest < Minitest::Test
       assert_includes response.body, "session-abort-button composer-stop-button"
       assert_includes response.body, "Loading…"
       refute_includes response.body, "Loading session…"
-      assert_includes response.body, "Send follow-up…"
-      assert_includes response.body, "[hidden] { display: none !important; }"
+      assert_includes APP_JAVASCRIPT, "Send follow-up…"
+      assert_includes APP_STYLESHEET, "[hidden] { display: none !important; }"
       assert_includes response.body, "Ask Pi… Enter to send, Shift+Enter for newline."
       refute_includes response.body, "autofocus"
       assert_includes response.body, "Abort running Pi"
       refute_includes response.body, "class=\"danger abort-button session-abort-button\" form=\"abort-form\""
       refute_includes response.body, "Optional compact instructions"
       refute_includes response.body, ">Compact</button>"
-      assert_includes response.body, "nearConversationBottom"
+      assert_includes APP_JAVASCRIPT, "nearBottom()"
       assert_includes response.body, "jump-controls--top"
       assert_includes response.body, "jump-controls--bottom"
       refute_includes response.body, "jump-controls--message-nav"
@@ -2283,30 +2357,30 @@ class AppTest < Minitest::Test
       assert_includes response.body, "hamburger-icon"
       assert_includes response.body, "session-sidebar-header"
       refute_includes response.body, "mobile-sessions-label\">Sessions"
-      assert_includes response.body, "scrollbar-gutter: stable"
-      assert_includes response.body, ".conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden;"
-      assert_includes response.body, ".jump-controls { position: sticky; z-index: 3; display: flex;"
-      assert_includes response.body, "min-height: 2rem; margin: 0.25rem auto; visibility: hidden; opacity: 0;"
-      assert_includes response.body, ".jump-button { display: none; align-items: center; justify-content: center; width: 2.75rem; height: 2rem; min-height: 0; padding: 0;"
-      assert_includes response.body, ".jump-controls.is-visible { visibility: visible; opacity: 1; }"
-      assert_includes response.body, "body:not(.is-conversation-scrolling) .jump-controls.is-visible { visibility: hidden; opacity: 0; pointer-events: none; }"
-      assert_includes response.body, "function updateConversationJumpControlsReveal()"
-      assert_includes response.body, "conversationScrollRevealDelayTimer = setTimeout"
-      assert_includes response.body, "Date.now() - lastConversationScrollRevealAt > 120"
-      assert_includes response.body, "}, 300);"
-      assert_includes response.body, "updateConversationJumpControlsReveal();"
-      assert_includes response.body, 'conversationScrollDirection === "up" && !autoScrollEnabled && !nearConversationTop()'
-      assert_includes response.body, 'conversationScrollDirection === "down" && !nearConversationBottom()'
-      assert_includes response.body, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 0.84rem; }"
-      assert_includes response.body, ".message--compact .message-details-summary:last-child { margin-bottom: 0; }"
-      assert_includes response.body, ".message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
-      assert_includes response.body, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
-      assert_includes response.body, ".tool-diff-line { display: block; margin: 0 -0.25rem;"
-      assert_includes response.body, "scrollbar-width: none"
-      assert_includes response.body, ".message--user { margin-left: 10%; background: var(--user-msg); border-color: #ffffff14; color: var(--text); }"
-      assert_includes response.body, ".message--assistant { margin-right: 10%; background: var(--panel); border-color: var(--border); color: var(--copy); }"
-      assert_includes response.body, ".message--thinking { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }"
-      assert_includes response.body, ".message--tool, .message--tool-call { background: var(--tool-ok); border-color: #ffffff0f; color: var(--copy); }"
+      assert_includes APP_STYLESHEET, "scrollbar-gutter: stable"
+      assert_includes APP_STYLESHEET, ".conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden;"
+      assert_includes APP_STYLESHEET, ".jump-controls { position: sticky; z-index: 3; display: flex;"
+      assert_includes APP_STYLESHEET, "min-height: 2rem; margin: 0.25rem auto; visibility: hidden; opacity: 0;"
+      assert_includes APP_STYLESHEET, ".jump-button { display: none; align-items: center; justify-content: center; width: 2.75rem; height: 2rem; min-height: 0; padding: 0;"
+      assert_includes APP_STYLESHEET, ".jump-controls.is-visible { visibility: visible; opacity: 1; }"
+      assert_includes APP_STYLESHEET, "body:not(.is-conversation-scrolling) .jump-controls.is-visible { visibility: hidden; opacity: 0; pointer-events: none; }"
+      assert_includes APP_JAVASCRIPT, "updateJumpControlsReveal()"
+      assert_includes APP_JAVASCRIPT, "this.revealDelayTimer = this.timeout"
+      assert_includes APP_JAVASCRIPT, "Date.now() - this.lastRevealAt > 120"
+      assert_includes APP_JAVASCRIPT, "}, 300);"
+      assert_includes APP_JAVASCRIPT, "this.updateJumpControlsReveal();"
+      assert_includes APP_JAVASCRIPT, 'this.scrollDirection === "up" && !this.autoScrollEnabled && !this.nearTop()'
+      assert_includes APP_JAVASCRIPT, 'this.scrollDirection === "down" && !this.nearBottom()'
+      assert_includes APP_STYLESHEET, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 0.84rem; }"
+      assert_includes APP_STYLESHEET, ".message--compact .message-details-summary:last-child { margin-bottom: 0; }"
+      assert_includes APP_STYLESHEET, ".message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
+      assert_includes APP_STYLESHEET, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
+      assert_includes APP_STYLESHEET, ".tool-diff-line { display: block; margin: 0 -0.25rem;"
+      assert_includes APP_STYLESHEET, "scrollbar-width: none"
+      assert_includes APP_STYLESHEET, ".message--user { margin-left: 10%; background: var(--user-msg); border-color: #ffffff14; color: var(--text); }"
+      assert_includes APP_STYLESHEET, ".message--assistant { margin-right: 10%; background: var(--panel); border-color: var(--border); color: var(--copy); }"
+      assert_includes APP_STYLESHEET, ".message--thinking { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }"
+      assert_includes APP_STYLESHEET, ".message--tool, .message--tool-call { background: var(--tool-ok); border-color: #ffffff0f; color: var(--copy); }"
     end
   end
 
@@ -2351,8 +2425,8 @@ class AppTest < Minitest::Test
       assert document.at_css('#live-output[data-events-url]')
       refute document.at_css(".session-sidebar")
       refute document.at_css(".mobile-sidebar-backdrop")
-      assert_includes response.body, 'if (new URLSearchParams(window.location.search).get("session_only") === "1") formData.set("session_only", "1");'
-      assert_includes response.body, "if (!sessionSidebar) return;"
+      assert_includes APP_JAVASCRIPT, 'if (new URLSearchParams(window.location.search).get("session_only") === "1") formData.set("session_only", "1");'
+      assert_includes APP_JAVASCRIPT, "if (!this.element || this.document.hidden || this.modalIsOpen()) return;"
       refute document.at_css('.session-header-actions a[aria-label="Open session in new window"]')
     end
   end
@@ -3130,41 +3204,40 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "function openModal(modal)"
-      assert_includes response.body, "function closeModal(modal)"
-      assert_includes response.body, "function modalIsOpen()"
-      assert_includes response.body, "function focusPromptAfterModalClose(modal)"
-      assert_includes response.body, "function handleNewSessionModalTab(event)"
-      assert_includes response.body, "function initializeProjectSelects(root = document)"
-      assert_includes response.body, "function openProjectSelect(wrapper)"
-      assert_includes response.body, "function selectProjectOption(wrapper, option)"
-      assert_includes response.body, "initializeProjectSelects();"
-      assert_includes response.body, ".session-switch-overlay { position: fixed; inset: 0; z-index: 140;"
-      assert_includes response.body, ".modal-overlay { place-items: end stretch; padding: 0; }"
-      assert_includes response.body, "submit.textContent = \"Starting…\""
-      assert_includes response.body, "function replaceNewSessionModalHtml(html)"
-      assert_includes response.body, "const [sidebarResponse, modalResponse] = await Promise.all(["
-      assert_includes response.body, "fetch(newSessionModalUrl(targetUrl.href))"
-      assert_includes response.body, "replaceNewSessionModalHtml(modalHtml);"
-      assert_includes response.body, "replaceNewSessionModalHtml(payload.new_session_modal_html);"
-      assert_includes response.body, "replaceForkSessionModalHtml(payload.fork_session_modal_html);"
+      assert_includes APP_JAVASCRIPT, "function openModal(modal)"
+      assert_includes APP_JAVASCRIPT, "function closeModal(modal)"
+      assert_includes APP_JAVASCRIPT, "function modalIsOpen()"
+      assert_includes APP_JAVASCRIPT, "function focusPromptAfterModalClose(modal)"
+      assert_includes APP_JAVASCRIPT, 'if (opener.dataset.modalOpen === "new-session-modal") {'
+      assert_includes APP_JAVASCRIPT, "export class ProjectSelectController"
+      assert_includes APP_JAVASCRIPT, "export class NewSessionFormController"
+      assert_includes APP_JAVASCRIPT, "sidebarController.initialize();"
+      assert_includes APP_JAVASCRIPT, "newSessionFormController.initialize();"
+      assert_includes APP_STYLESHEET, ".session-switch-overlay { position: fixed; inset: 0; z-index: 140;"
+      assert_includes APP_STYLESHEET, ".modal-overlay { place-items: end stretch; padding: 0; }"
+      assert_includes APP_JAVASCRIPT, "submit.textContent = \"Starting…\""
+      assert_includes APP_JAVASCRIPT, "function replaceNewSessionModalHtml(html)"
+      assert_includes APP_JAVASCRIPT, "const [sidebarResponse, modalResponse] = await Promise.all(["
+      assert_includes APP_JAVASCRIPT, "fetch(newSessionModalUrl(targetUrl.href))"
+      assert_includes APP_JAVASCRIPT, "replaceNewSessionModalHtml(event.detail.modalHtml);"
+      assert_includes APP_JAVASCRIPT, "replaceNewSessionModalHtml(payload.new_session_modal_html);"
+      assert_includes APP_JAVASCRIPT, "replaceForkSessionModalHtml(payload.fork_session_modal_html);"
       refute_includes response.body, "data-modal-open=\"fork-session-modal\""
       refute_includes response.body, "class=\"clone-session-form\""
-      assert_includes response.body, "function loadForkMessages(modal)"
-      assert_includes response.body, "fetch(\"/sessions/fork\", { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } })"
-      assert_includes response.body, "await switchToBranchedSession(payload);"
-      assert_includes response.body, "const originalForkText = forkOption.textContent;"
-      assert_includes response.body, "forkOption.textContent = originalForkText;"
-      assert_includes response.body, "showStatus(\"Could not fork this session\", true);"
-      assert_includes response.body, "modal.querySelector(\"[data-modal-default-focus]:not(:disabled)\")"
-      assert_includes response.body, "focusPromptAfterModalClose(modal);"
-      assert_includes response.body, "handleNewSessionModalTab(event);"
-      refute_includes response.body, "function makeForkButton(entryId)"
-      refute_includes response.body, "function forkEntryIdFromEvent(event, message)"
-      refute_includes response.body, "function scheduleResolveForkButton(entry, text)"
-      assert_includes response.body, "abortEventPoll();"
-      assert_includes response.body, "async function submitAbort(event)"
-      assert_includes response.body, "if (modalIsOpen()) return;"
+      assert_includes APP_JAVASCRIPT, "function loadForkMessages(modal)"
+      assert_includes APP_JAVASCRIPT, "fetch(\"/sessions/fork\", { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } })"
+      assert_includes APP_JAVASCRIPT, "await switchToBranchedSession(payload);"
+      assert_includes APP_JAVASCRIPT, "const originalForkText = forkOption.textContent;"
+      assert_includes APP_JAVASCRIPT, "forkOption.textContent = originalForkText;"
+      assert_includes APP_JAVASCRIPT, "showStatus(\"Could not fork this session\", true);"
+      assert_includes APP_JAVASCRIPT, "modal.querySelector(\"[data-modal-default-focus]:not(:disabled)\")"
+      assert_includes APP_JAVASCRIPT, "focusPromptAfterModalClose(modal);"
+      refute_includes APP_JAVASCRIPT, "function makeForkButton(entryId)"
+      refute_includes APP_JAVASCRIPT, "function forkEntryIdFromEvent(event, message)"
+      refute_includes APP_JAVASCRIPT, "function scheduleResolveForkButton(entry, text)"
+      assert_includes APP_JAVASCRIPT, "abortEventPoll();"
+      assert_includes APP_JAVASCRIPT, "async function submitAbort(event)"
+      assert_includes APP_JAVASCRIPT, "if (modalIsOpen()) return;"
       modal = Nokogiri::HTML(response.body).at_css('[data-modal="new-session-modal"]')
       cwd_form = modal.at_css("form.new-session-cwd-form")
       cwd_input = modal.at_css("[data-new-session-cwd-input]")
@@ -3173,38 +3246,35 @@ class AppTest < Minitest::Test
       assert_equal "list", cwd_input["aria-autocomplete"]
       assert_equal "new-session-cwd-suggestions", cwd_input["aria-controls"]
       assert_equal "listbox", modal.at_css("#new-session-cwd-suggestions")["role"]
-      assert_includes response.body, "fetch(browserUrl"
-      assert_includes response.body, "function renderCwdSuggestions(form, directories)"
-      assert_includes response.body, "function selectCwdSuggestion(form, path)"
-      assert_includes response.body, "function handleCwdSuggestionKeydown(event)"
-      assert_includes response.body, 'document.addEventListener("focusin", (event) => {'
-      assert_includes response.body, 'event.key === "Escape" && modalIsOpen() && !event.defaultPrevented'
-      refute_includes response.body, "input.value = resolvedCwd"
-      assert_includes response.body, "function setNewSessionProjectMode(form)"
-      assert_includes response.body, "function setNewSessionPathMode(form,"
-      assert_includes response.body, "function syncNewSessionSelectedCwd(form)"
+      assert_includes APP_JAVASCRIPT, "fetch(browserUrl"
+      assert_includes APP_JAVASCRIPT, "renderSuggestions(form, directories)"
+      assert_includes APP_JAVASCRIPT, "selectSuggestion(form, path)"
+      assert_includes APP_JAVASCRIPT, "handleKeydown(event, form)"
+      assert_includes APP_JAVASCRIPT, "focusout: (event) => this.handleFocusout(event, form)"
+      assert_includes APP_JAVASCRIPT, 'event.key === "Escape" && modalIsOpen() && !event.defaultPrevented'
+      refute_includes APP_JAVASCRIPT, "input.value = resolvedCwd"
+      assert_includes APP_JAVASCRIPT, "setProjectMode(form)"
+      assert_includes APP_JAVASCRIPT, "setPathMode(form,"
+      assert_includes APP_JAVASCRIPT, "newSessionFormController.sync(form)"
       assert_includes response.body, "data-new-session-new-path-option"
-      assert_includes response.body, "hasAttribute(\"data-new-session-new-path-option\")"
-      assert_includes response.body, "form.dataset.submitting === \"true\""
-      assert_includes response.body, "function addSessionViewFormParams(formData)"
-      assert_includes response.body, "form.action, { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } }"
-      assert_includes response.body, "const sessionSearch = activeSidebarSessionSearch();"
-      assert_includes response.body, "if (sessionSearch) formData.set(\"session_search\", sessionSearch);"
-      refute_includes response.body, "showAllSessionsActive"
-      refute_includes response.body, "activeSidebarSessionsLimit"
-      assert_includes response.body, "const currentProject = new URLSearchParams(window.location.search).get(\"project\");"
-      assert_includes response.body, "if (currentProject) url.searchParams.set(\"project\", currentProject);"
-      assert_includes response.body, "let temporarySidebarSessionsLimit = null;"
-      assert_includes response.body, "target.searchParams.set(\"sidebar_sessions_limit\", temporarySidebarSessionsLimit);"
-      assert_includes response.body, "temporarySidebarSessionsLimit = targetUrl.searchParams.get(\"sidebar_sessions_limit\")"
-      refute_includes response.body, "history.replaceState(history.state"
-      assert_includes response.body, "function sidebarProjectFilterActive()"
-      assert_includes response.body, "function sidebarSearchActive()"
-      assert_includes response.body, "function sidebarControlActive()"
-      assert_includes response.body, "if (sidebarControlActive() || recentlyInteractedWithSidebar())"
-      assert_includes response.body, "if (sidebarControlActive()) {\n        scheduleSidebarRefresh(1000);\n        return;\n      }"
-      assert_includes response.body, "async function changeSidebarProjectFilter(select)"
-      assert_includes response.body, "replaceSidebarHtml(html, { scrollTop: 0, notify: false });"
+      assert_includes APP_JAVASCRIPT, "hasAttribute(\"data-new-session-new-path-option\")"
+      assert_includes APP_JAVASCRIPT, "form.dataset.submitting === \"true\""
+      assert_includes APP_JAVASCRIPT, "function addSessionViewFormParams(formData)"
+      assert_includes APP_JAVASCRIPT, "form.action, { method: \"POST\", body: formData, headers: { \"Accept\": \"application/json\" } }"
+      assert_includes APP_JAVASCRIPT, "const sessionSearch = sidebarController.activeSearch();"
+      assert_includes APP_JAVASCRIPT, "if (sessionSearch) formData.set(\"session_search\", sessionSearch);"
+      refute_includes APP_JAVASCRIPT, "showAllSessionsActive"
+      refute_includes APP_JAVASCRIPT, "activeSidebarSessionsLimit"
+      assert_includes APP_JAVASCRIPT, "const currentProject = new URLSearchParams(location.search).get(\"project\");"
+      assert_includes APP_JAVASCRIPT, "if (currentProject) url.searchParams.set(\"project\", currentProject);"
+      assert_includes APP_JAVASCRIPT, "this.temporarySessionsLimit = null;"
+      assert_includes APP_JAVASCRIPT, "target.searchParams.set(\"sidebar_sessions_limit\", this.temporarySessionsLimit);"
+      assert_includes APP_JAVASCRIPT, "this.temporarySessionsLimit = targetUrl.searchParams.get(\"sidebar_sessions_limit\") || this.temporarySessionsLimit;"
+      refute_includes APP_JAVASCRIPT, "history.replaceState(history.state"
+      assert_includes APP_JAVASCRIPT, "controlsActive()"
+      assert_includes APP_JAVASCRIPT, "if (this.controlsActive() || this.recentlyInteracted())"
+      assert_includes APP_JAVASCRIPT, "async changeProjectFilter(select)"
+      assert_includes APP_JAVASCRIPT, "this.replace(html, { scrollTop: 0, notify: false });"
     end
   end
 
@@ -3294,7 +3364,7 @@ class AppTest < Minitest::Test
       badges = document.css(".mobile-sessions-unread-badge")
       assert_equal ["2", "2"], badges.map(&:text)
       assert badges.all? { |badge| badge["aria-label"] == "2 unread sessions" }
-      assert_includes response.body, ".mobile-sessions-unread-badge"
+      assert_includes APP_STYLESHEET, ".mobile-sessions-unread-badge"
     end
   end
 
@@ -3613,7 +3683,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "Hello &lt;Pi&gt;"
       assert_includes response.body, Time.parse("2026-06-13T10:00:00Z").localtime.strftime("%Y-%m-%d %H:%M")
       refute_includes response.body, "Hello <Pi>"
-      assert_includes response.body, "messageRoleKey"
+      assert_includes APP_JAVASCRIPT, "messageRoleKey"
     end
   end
 
@@ -3673,7 +3743,7 @@ class AppTest < Minitest::Test
       refute_includes response.body, "message-turn-nav"
       refute_includes response.body, "previousFinalAssistantResponse"
       refute_includes response.body, "nextFinalAssistantResponse"
-      refute_includes response.body, 'const turnButton = event.target.closest(".message-turn-button");'
+      refute_includes APP_JAVASCRIPT, 'const turnButton = event.target.closest(".message-turn-button");'
     end
   end
 
@@ -4464,49 +4534,49 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "function contentSegments(content, message = {})"
-      assert_includes response.body, "appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded"
-      assert_includes response.body, "segment.rawDetails"
+      assert_includes APP_JAVASCRIPT, "function contentSegments(content, message = {})"
+      assert_includes APP_JAVASCRIPT, "appendCompactMessage(roleName, segment.summary, segment.text, segment.expanded"
+      assert_includes APP_JAVASCRIPT, "segment.rawDetails"
       refute_includes response.body, "Raw details"
-      assert_includes response.body, "function renderToolSummary(container, parts, fallback)"
-      assert_includes response.body, "message--tool-transcript"
-      assert_includes response.body, "toolSummaryParts(toolName, toolPart?.arguments || {})"
-      assert_includes response.body, "function transcriptToolCallText(name, args = {})"
-      assert_includes response.body, 'if (["bash", "read"].includes(part.name)) return "";'
-      assert_includes response.body, 'if (["edit", "write"].includes(part.name)) return transcriptToolCallText(part.name, part.arguments || {});'
-      assert_includes response.body, 'return editPreview;'
-      assert_includes response.body, '}).filter((segment) => segment.text || segment.compact || segment.images.length > 0);'
-      assert_includes response.body, 'if (lines[lines.length - 1] === "") lines.pop();'
-      assert_includes response.body, 'function renderToolTranscriptBody(body, text, toolName = "", options = {})'
-      assert_includes response.body, 'body.dataset.rawText = text || "";'
-      assert_includes response.body, 'body.classList.toggle("message-body--edit-preview", preview);'
-      assert_includes response.body, 'const hasText = rawText !== "";'
-      assert_includes response.body, 'collapse.hidden = !hasText;'
-      assert_includes response.body, 'if (!hasText) {'
-      assert_includes response.body, 'const shouldCollapse = collapse.dataset.toolOutputCollapsible === "true" && lines.length > TOOL_OUTPUT_DESKTOP_TAIL_LINES;'
-      assert_includes response.body, 'fullTemplate?.content.replaceChildren(...toolOutputLineNodes(lines, toolName, preview, 0));'
-      assert_includes response.body, 'tailTemplate?.content.replaceChildren(...toolOutputLineNodes(tailLines, toolName, preview, desktopExtraCount));'
-      assert_includes response.body, 'control.hidden = true;'
-      assert_includes response.body, 'span.className = `tool-diff-line ${toolDiffLineClass(line, preview)}`;'
-      assert_includes response.body, 'renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });'
-      assert_includes response.body, 'toolPreview: toolPart?.type === "toolCall" && toolName === "edit"'
-      assert_includes response.body, 'pairedToolCallEntry.body.classList.contains("message-body--edit-preview")'
-      assert_includes response.body, 'segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text'
-      assert_includes response.body, '[pairedToolCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\\n\\n")'
-      refute_includes response.body, 'details.open = options.open === true;'
-      refute_includes response.body, 'collapseButton.textContent = "▴ Collapse details";'
-      refute_includes response.body, 'event.target.closest("[data-collapse-details]")'
-      assert_includes response.body, 'error: message.isError === true'
-      refute_includes response.body, 'open: segment.expanded'
-      assert_includes response.body, 'error: segment.error'
-      assert_includes response.body, 'PAIRED_TOOL_NAMES.has(segment.toolName)'
-      assert_includes response.body, "part.type === \"toolCall\""
-      assert_includes response.body, "part.type === \"thinking\""
-      assert_includes response.body, "function subagentToolCall(part)"
-      assert_includes response.body, "if (subagentToolCall(part)) return;"
-      assert_includes response.body, "function renderSubagentPrompt(entry, prompt)"
-      assert_includes response.body, "subagentPromptFromEvent(event)"
-      assert_includes response.body, "subagentPromptFromDetails(message.details)"
+      assert_includes APP_JAVASCRIPT, "renderToolSummary(container, parts, fallback)"
+      assert_includes APP_JAVASCRIPT, "message--tool-transcript"
+      assert_includes APP_JAVASCRIPT, "toolSummaryParts(toolName, toolPart?.arguments || {})"
+      assert_includes APP_JAVASCRIPT, "function transcriptToolCallText(name, args = {})"
+      assert_includes APP_JAVASCRIPT, 'if (["bash", "read"].includes(part.name)) return "";'
+      assert_includes APP_JAVASCRIPT, 'if (["edit", "write"].includes(part.name)) return transcriptToolCallText(part.name, part.arguments || {});'
+      assert_includes APP_JAVASCRIPT, 'return editPreview;'
+      assert_includes APP_JAVASCRIPT, '}).filter((segment) => segment.text || segment.compact || segment.images.length > 0);'
+      assert_includes APP_JAVASCRIPT, 'if (lines[lines.length - 1] === "") lines.pop();'
+      assert_includes APP_JAVASCRIPT, 'renderToolTranscriptBody(body, text, toolName = "", options = {})'
+      assert_includes APP_JAVASCRIPT, 'body.dataset.rawText = text || "";'
+      assert_includes APP_JAVASCRIPT, 'body.classList.toggle("message-body--edit-preview", preview);'
+      assert_includes APP_JAVASCRIPT, 'const hasText = rawText !== "";'
+      assert_includes APP_JAVASCRIPT, 'collapse.hidden = !hasText;'
+      assert_includes APP_JAVASCRIPT, 'if (!hasText) {'
+      assert_includes APP_JAVASCRIPT, 'const shouldCollapse = collapse.dataset.toolOutputCollapsible === "true" && lines.length > TOOL_OUTPUT_DESKTOP_TAIL_LINES;'
+      assert_includes APP_JAVASCRIPT, 'fullTemplate?.content.replaceChildren(...this.toolOutputLineNodes(lines, toolName, preview, 0));'
+      assert_includes APP_JAVASCRIPT, 'tailTemplate?.content.replaceChildren(...this.toolOutputLineNodes(tailLines, toolName, preview, desktopExtraCount));'
+      assert_includes APP_JAVASCRIPT, 'control.hidden = true;'
+      assert_includes APP_JAVASCRIPT, 'span.className = `tool-diff-line ${this.toolDiffLineClass(line, preview)}`;'
+      assert_includes APP_JAVASCRIPT, 'renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });'
+      assert_includes APP_JAVASCRIPT, 'toolPreview: toolPart?.type === "toolCall" && toolName === "edit"'
+      assert_includes APP_JAVASCRIPT, 'pairedToolCallEntry.body.classList.contains("message-body--edit-preview")'
+      assert_includes APP_JAVASCRIPT, 'segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text'
+      assert_includes APP_JAVASCRIPT, '[pairedToolCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\\n\\n")'
+      refute_includes APP_JAVASCRIPT, 'details.open = options.open === true;'
+      refute_includes APP_JAVASCRIPT, 'collapseButton.textContent = "▴ Collapse details";'
+      refute_includes APP_JAVASCRIPT, 'event.target.closest("[data-collapse-details]")'
+      assert_includes APP_JAVASCRIPT, 'error: message.isError === true'
+      refute_includes APP_JAVASCRIPT, 'open: segment.expanded'
+      assert_includes APP_JAVASCRIPT, 'error: segment.error'
+      assert_includes APP_JAVASCRIPT, 'PAIRED_TOOL_NAMES.has(segment.toolName)'
+      assert_includes APP_JAVASCRIPT, "part.type === \"toolCall\""
+      assert_includes APP_JAVASCRIPT, "part.type === \"thinking\""
+      assert_includes APP_JAVASCRIPT, "function subagentToolCall(part)"
+      assert_includes APP_JAVASCRIPT, "if (subagentToolCall(part)) return;"
+      assert_includes APP_JAVASCRIPT, "renderSubagentPrompt(entry, prompt)"
+      assert_includes APP_JAVASCRIPT, "subagentPromptFromEvent(event)"
+      assert_includes APP_JAVASCRIPT, "subagentPromptFromDetails(message.details)"
     end
   end
 
@@ -4522,17 +4592,10 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "let liveToolExecutions = new Map();"
-      assert_includes response.body, "function renderToolExecutionEvent(event, timestamp = eventTimestamp(event), timestampFallback = true, restoredPrompt = \"\")"
-      assert_includes response.body, "event.type === \"tool_execution_update\""
-      assert_includes response.body, "event.partialResult?.content"
-      assert_includes response.body, "updateLiveToolExecution(entry, event, shouldScroll)"
-      assert_includes response.body, "renderToolTranscriptBody(entry.body, toolExecutionText(event), event.toolName || entry.toolName)"
-      assert_includes response.body, "appendCompactMessage(\"tool\", toolExecutionSummary(event), toolExecutionText(event)"
-      assert_includes response.body, "{ toolName: event.toolName, toolPrompt: event.toolName === \"subagent\" ? subagentPromptFromEvent(event, restoredPrompt) : \"\", error: event.isError === true, timestampFallback }"
-      assert_includes response.body, "if (!event.toolCallId || PAIRED_TOOL_NAMES.has(event.toolName)) return;"
-      assert_includes response.body, "if (segment.toolCallId && !segment.isToolResult && !PAIRED_TOOL_NAMES.has(segment.toolName)) liveToolExecutions.set(segment.toolCallId, entry);"
-      assert_includes response.body, 'if (["tool_execution_start", "tool_execution_update", "tool_execution_end"].includes(event.type))'
+      assert_includes APP_JAVASCRIPT, "renderToolExecutionEvent(event, timestamp = eventTimestamp(event)"
+      assert_includes APP_JAVASCRIPT, "this.parser.toolExecutionText(event)"
+      assert_includes APP_JAVASCRIPT, "liveMessageRenderer.renderToolExecutionEvent(event);"
+      assert_includes APP_JAVASCRIPT, "if (!event.toolCallId || PAIRED_TOOL_NAMES.has(event.toolName)) return;"
     end
   end
 
@@ -4548,25 +4611,25 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "function subagentDetailsFromEvent(event)"
-      assert_includes response.body, "function subagentDisplayText(details, fallback, running = false, preferFallback = false)"
-      assert_includes response.body, 'function generalSubagentDisplayText(details, fallback = "", preferFallback = false)'
-      assert_includes response.body, "function generalSubagentDetails(details)"
-      assert_includes response.body, "function subagentResultRunning(details, result, index, running)"
-      assert_includes response.body, 'if (result.stopReason === "stop") return false;'
-      assert_includes response.body, 'if (event.toolName === "subagent")'
-      refute_includes response.body, 'entry.details.open = subagentRunning(event);'
-      refute_includes response.body, 'open: event.toolName === "subagent" && subagentRunning(event)'
-      assert_includes response.body, 'if (event.toolName === "subagent") return subagentSummary(subagentDetailsFromEvent(event), subagentRunning(event));'
-      assert_includes response.body, 'if (generalSubagentDetails(details)) return generalSubagentDisplayText(details, running ? "" : fallback, preferFallback);'
-      assert_includes response.body, 'if (generalSubagentDetails(details)) return "subagent general";'
-      assert_includes response.body, 'const freshSubagentDetails = segment.toolName === "subagent" && richSubagentDetails(message.details);'
-      assert_includes response.body, 'const subagentDetails = segment.toolName === "subagent" ? retainSubagentDetails(toolExecutionEntry, message.details, message.isError ? "error" : "done") : null;'
-      assert_includes response.body, 'const resultText = subagentDetails ? subagentDisplayText(subagentDetails, segment.text, false, !freshSubagentDetails) : segment.text;'
-      assert_includes response.body, 'const resultSummary = subagentDetails ? subagentSummary(subagentDetails, false) : segment.summary;'
-      assert_includes response.body, "function retainSubagentDetails(entry, details, finalStatus = null)"
-      assert_includes response.body, "entry.subagentDetails"
-      assert_includes response.body, 'if (part.type === "toolCall") return items.push(`→ ${formatToolCallPlain(part.name, part.arguments || {})}`);'
+      assert_includes APP_JAVASCRIPT, "function subagentDetailsFromEvent(event)"
+      assert_includes APP_JAVASCRIPT, "function subagentDisplayText(details, fallback, running = false, preferFallback = false)"
+      assert_includes APP_JAVASCRIPT, 'function generalSubagentDisplayText(details, fallback = "", preferFallback = false)'
+      assert_includes APP_JAVASCRIPT, "function generalSubagentDetails(details)"
+      assert_includes APP_JAVASCRIPT, "function subagentResultRunning(details, result, index, running)"
+      assert_includes APP_JAVASCRIPT, 'if (result.stopReason === "stop") return false;'
+      assert_includes APP_JAVASCRIPT, 'if (event.toolName === "subagent")'
+      refute_includes APP_JAVASCRIPT, 'entry.details.open = subagentRunning(event);'
+      refute_includes APP_JAVASCRIPT, 'open: event.toolName === "subagent" && subagentRunning(event)'
+      assert_includes APP_JAVASCRIPT, 'if (event.toolName === "subagent") return subagentSummary(subagentDetailsFromEvent(event), subagentRunning(event));'
+      assert_includes APP_JAVASCRIPT, 'if (generalSubagentDetails(details)) return generalSubagentDisplayText(details, running ? "" : fallback, preferFallback);'
+      assert_includes APP_JAVASCRIPT, 'if (generalSubagentDetails(details)) return "subagent general";'
+      assert_includes APP_JAVASCRIPT, 'const freshSubagentDetails = segment.toolName === "subagent" && this.parser.richSubagentDetails(message.details);'
+      assert_includes APP_JAVASCRIPT, 'const subagentDetails = segment.toolName === "subagent" ? this.retainSubagentDetails(toolExecutionEntry, message.details, message.isError ? "error" : "done") : null;'
+      assert_includes APP_JAVASCRIPT, 'const resultText = subagentDetails ? this.parser.subagentDisplayText(subagentDetails, segment.text, false, !freshSubagentDetails) : segment.text;'
+      assert_includes APP_JAVASCRIPT, 'const resultSummary = subagentDetails ? this.parser.subagentSummary(subagentDetails, false) : segment.summary;'
+      assert_includes APP_JAVASCRIPT, "retainSubagentDetails(entry, details, finalStatus = null)"
+      assert_includes APP_JAVASCRIPT, "entry.subagentDetails"
+      assert_includes APP_JAVASCRIPT, 'if (part.type === "toolCall") return items.push(`→ ${formatToolCallPlain(part.name, part.arguments || {})}`);'
     end
   end
 
@@ -4582,36 +4645,36 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "let autoScrollEnabled = true;"
-      assert_includes response.body, "let forceBottomAutoScroll = false;"
-      assert_includes response.body, "let followOversizedMessageBottom = false;"
-      assert_includes response.body, "let programmaticScroll = false;"
-      assert_includes response.body, "function nearConversationTop()"
-      assert_includes response.body, "function latestReadableAssistantMessageIsVisible()"
-      assert_includes response.body, "function applyAutoScroll(behavior = \"auto\")"
-      assert_includes response.body, "function positionInitialConversationAtBottom()"
-      assert_includes response.body, "function positionInitialConversationAtBottom() {\n      if (!conversationScroll) return;\n\n      autoScrollEnabled = true;"
-      assert_includes response.body, "positionInitialConversationAtBottom();\n        loadOlderConversationHistory(sessionViewGeneration).catch(() => {});\n        requestAnimationFrame(() => {"
-      assert_includes response.body, "requestAnimationFrame(() => requestAnimationFrame"
-      assert_includes response.body, "function latestReadableAssistantMessage()"
-      assert_includes response.body, "function latestMessageElement()"
-      assert_includes response.body, "if (!forceBottomAutoScroll && !followOversizedMessageBottom && latestAssistant && latestAssistant === latestMessageElement() && latestAssistant.offsetHeight > conversationScroll.clientHeight)"
-      assert_includes response.body, "autoScrollEnabled = nearConversationBottom();"
-      assert_includes response.body, "if (autoScrollEnabled && body.closest(\".message\") === latestReadableAssistantMessage()) scheduleAutoScroll();"
-      assert_includes response.body, "if (shouldScroll && autoScrollEnabled) scheduleAutoScroll();"
-      assert_includes response.body, "forceBottomAutoScroll = true;\n          followOversizedMessageBottom = true;\n          applyAutoScroll(\"auto\");\n          forceBottomAutoScroll = false;"
-      assert_includes response.body, "scrollToTop"
-      refute_includes response.body, "const turnButton = event.target.closest(\".message-turn-button\");"
-      refute_includes response.body, "turnButton.dataset.direction === \"previous\""
-      refute_includes response.body, "scrollToUserMessage(target);"
-      refute_includes response.body, "function topJumpControlsOffset()"
-      refute_includes response.body, "return remSize * 3.5;"
-      assert_includes response.body, "const latestOversizedAssistant = target === latestAssistant && target === latestMessageElement();"
-      assert_includes response.body, "autoScrollEnabled = latestOversizedAssistant;"
-      assert_includes response.body, "function scrollToBottom(behavior = \"auto\", { force = false } = {})"
-      assert_includes response.body, "autoScrollEnabled = true;"
-      assert_includes response.body, "forceBottomAutoScroll = force;"
-      assert_includes response.body, "if (jumpToLatestButton.dataset.jumpTarget === \"message\") scrollToMessageBottom();"
+      assert_includes APP_JAVASCRIPT, "this.autoScrollEnabled = true;"
+      assert_includes APP_JAVASCRIPT, "this.forceBottomAutoScroll = false;"
+      assert_includes APP_JAVASCRIPT, "this.followOversizedMessageBottom = false;"
+      assert_includes APP_JAVASCRIPT, "this.programmaticScroll = false;"
+      assert_includes APP_JAVASCRIPT, "nearTop()"
+      assert_includes APP_JAVASCRIPT, "latestReadableAssistantMessageIsVisible()"
+      assert_includes APP_JAVASCRIPT, "applyAutoScroll(behavior = \"auto\")"
+      assert_includes APP_JAVASCRIPT, "positionInitialAtBottom()"
+      assert_includes APP_JAVASCRIPT, "conversationController.positionInitialAtBottom();"
+      assert_includes APP_JAVASCRIPT, "conversationController.loadOlderHistory().catch(() => {});"
+      assert_includes APP_JAVASCRIPT, "this.frame(() => this.frame"
+      assert_includes APP_JAVASCRIPT, "latestReadableAssistantMessage()"
+      assert_includes APP_JAVASCRIPT, "latestMessageElement()"
+      assert_includes APP_JAVASCRIPT, "if (!this.forceBottomAutoScroll && !this.followOversizedMessageBottom && latestAssistant && latestAssistant === this.latestMessageElement() && latestAssistant.offsetHeight > this.element.clientHeight)"
+      assert_includes APP_JAVASCRIPT, "this.autoScrollEnabled = this.nearBottom();"
+      assert_includes APP_JAVASCRIPT, "if (this.conversationController.autoScrollEnabled && job.body.closest(\".message\") === this.conversationController.latestReadableAssistantMessage())"
+      assert_includes APP_JAVASCRIPT, "if (shouldScroll && this.autoScrollEnabled) this.scheduleAutoScroll();"
+      assert_includes APP_JAVASCRIPT, "forceInitialBottomFollow()"
+      assert_includes APP_JAVASCRIPT, "scrollToTop"
+      refute_includes APP_JAVASCRIPT, "const turnButton = event.target.closest(\".message-turn-button\");"
+      refute_includes APP_JAVASCRIPT, "turnButton.dataset.direction === \"previous\""
+      refute_includes APP_JAVASCRIPT, "scrollToUserMessage(target);"
+      refute_includes APP_JAVASCRIPT, "function topJumpControlsOffset()"
+      refute_includes APP_JAVASCRIPT, "return remSize * 3.5;"
+      assert_includes APP_JAVASCRIPT, "const latestOversizedAssistant = target === latestAssistant && target === this.latestMessageElement();"
+      assert_includes APP_JAVASCRIPT, "this.autoScrollEnabled = latestOversizedAssistant;"
+      assert_includes APP_JAVASCRIPT, "scrollToBottom(behavior = \"auto\", { force = false } = {})"
+      assert_includes APP_JAVASCRIPT, "this.autoScrollEnabled = true;"
+      assert_includes APP_JAVASCRIPT, "this.forceBottomAutoScroll = force;"
+      assert_includes APP_JAVASCRIPT, "if (this.jumpToLatestButton.dataset.jumpTarget === \"message\") this.scrollToMessageBottom();"
     end
   end
 
@@ -4628,17 +4691,17 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "data-message-fingerprint=\"assistant:"
-      assert_includes response.body, "function messageTimestampKey(timestamp)"
-      assert_includes response.body, "function messageFingerprint(roleName, text, timestampKey)"
-      assert_includes response.body, "function liveMessageAlreadyRendered(roleName, text, timestampKey)"
-      assert_includes response.body, "if (live && liveMessageAlreadyRendered(roleName, text, timestampKey)) return null;"
-      assert_includes response.body, "function markLiveEntryRendered(entry, roleName, text, timestamp = null)"
-      assert_includes response.body, "entry.article.remove();"
-      assert_includes response.body, "function forgetLiveEntry(entry)"
-      assert_includes response.body, "if (storedEntry === entry) liveAssistantSegments.delete(key);"
-      assert_includes response.body, "if (storedEntry === entry) livePairedToolCalls.delete(key);"
-      assert_includes response.body, "markLiveEntryRendered(pairedToolCallEntry, pairedToolCallEntry.article.dataset.role || \"assistant\", mergedText)"
-      assert_includes response.body, "article.dataset.messageTimestamp = timestampKey;"
+      assert_includes APP_JAVASCRIPT, "function messageTimestampKey(timestamp)"
+      assert_includes APP_JAVASCRIPT, "function messageFingerprint(roleName, text, timestampKey)"
+      assert_includes APP_JAVASCRIPT, "liveMessageAlreadyRendered(roleName, text, timestampKey)"
+      assert_includes APP_JAVASCRIPT, "if (live && this.liveMessageAlreadyRendered(roleName, text, timestampKey)) return null;"
+      assert_includes APP_JAVASCRIPT, "markLiveEntryRendered(entry, roleName, text, timestamp = null)"
+      assert_includes APP_JAVASCRIPT, "entry.article.remove();"
+      assert_includes APP_JAVASCRIPT, "forgetLiveEntry(entry)"
+      assert_includes APP_JAVASCRIPT, "this.liveAssistantSegments.delete(key);"
+      assert_includes APP_JAVASCRIPT, "this.livePairedToolCalls.delete(key);"
+      assert_includes APP_JAVASCRIPT, "this.markLiveEntryRendered(pairedToolCallEntry, pairedToolCallEntry.article.dataset.role || \"assistant\", mergedText)"
+      assert_includes APP_JAVASCRIPT, "article.dataset.messageTimestamp = timestampKey;"
     end
   end
 
@@ -4651,30 +4714,30 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "function enterSessionShortcutMode()"
-      assert_includes response.body, "function openNewSessionModal()"
-      assert_includes response.body, "isCtrlOrMetaShortcut(event, \"n\")"
-      assert_includes response.body, "window.addEventListener(\"pi:new-session-requested\""
-      assert_includes response.body, "window.addEventListener(\"pi:desktop-server-activated\""
-      assert_includes response.body, "focusPromptAfterDesktopServerActivation"
-      assert_includes response.body, 'event.key === "Control"'
-      assert_includes response.body, "if (event.altKey || !event.ctrlKey) return;"
-      assert_includes response.body, 'if (event.key === "Control") exitSessionShortcutMode();'
-      refute_includes response.body, "function sessionShortcutModifierKey()"
-      refute_includes response.body, "navigator.userAgentData?.platform || navigator.platform"
-      assert_includes response.body, "function recentSessionShortcutFromEvent(event)"
-      assert_includes response.body, "event.code.match(/^Digit([1-9])$/)"
-      assert_includes response.body, "event.code.match(/^Numpad([1-9])$/)"
-      assert_includes response.body, "openRecentSessionShortcut(shortcut)"
-      assert_includes response.body, "function currentSessionPath()"
-      assert_includes response.body, "window.location.href = link.href;"
-      refute_includes response.body, "clearUnreadSession(link.dataset.sessionPath)"
-      assert_includes response.body, "exitSessionShortcutMode();\n      if (!link || !normalLeftClick(event)) return;"
-      assert_includes response.body, "document.addEventListener(\"keyup\", (event) => {"
-      assert_includes response.body, "window.addEventListener(\"blur\", exitSessionShortcutMode);"
-      refute_includes response.body, "sessionShortcutTimer = setTimeout(exitSessionShortcutMode, 5000);"
-      assert_includes response.body, "session-shortcuts-visible"
-      assert_includes response.body, "if (wasVisible) scheduleSidebarRefresh(0);"
+      assert_includes APP_JAVASCRIPT, "function enterSessionShortcutMode()"
+      assert_includes APP_JAVASCRIPT, "function openNewSessionModal()"
+      assert_includes APP_JAVASCRIPT, "isCtrlOrMetaShortcut(event, \"n\")"
+      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"pi:new-session-requested\""
+      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"pi:desktop-server-activated\""
+      assert_includes APP_JAVASCRIPT, "focusPromptAfterDesktopServerActivation"
+      assert_includes APP_JAVASCRIPT, 'event.key === "Control"'
+      assert_includes APP_JAVASCRIPT, "if (event.altKey || !event.ctrlKey) return;"
+      assert_includes APP_JAVASCRIPT, 'if (event.key === "Control") exitSessionShortcutMode();'
+      refute_includes APP_JAVASCRIPT, "function sessionShortcutModifierKey()"
+      refute_includes APP_JAVASCRIPT, "navigator.userAgentData?.platform || navigator.platform"
+      assert_includes APP_JAVASCRIPT, "function recentSessionShortcutFromEvent(event)"
+      assert_includes APP_JAVASCRIPT, "event.code.match(/^Digit([1-9])$/)"
+      assert_includes APP_JAVASCRIPT, "event.code.match(/^Numpad([1-9])$/)"
+      assert_includes APP_JAVASCRIPT, "openRecentSessionShortcut(shortcut)"
+      assert_includes APP_JAVASCRIPT, "function currentSessionPath()"
+      assert_includes APP_JAVASCRIPT, "window.location.href = link.href;"
+      refute_includes APP_JAVASCRIPT, "clearUnreadSession(link.dataset.sessionPath)"
+      assert_includes APP_JAVASCRIPT, "exitSessionShortcutMode();\n  if (!link || !normalLeftClick(event)) return;"
+      assert_includes APP_JAVASCRIPT, "document.addEventListener(\"keyup\", (event) => {"
+      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"blur\", exitSessionShortcutMode);"
+      refute_includes APP_JAVASCRIPT, "sessionShortcutTimer = setTimeout(exitSessionShortcutMode, 5000);"
+      assert_includes APP_JAVASCRIPT, "session-shortcuts-visible"
+      assert_includes APP_JAVASCRIPT, "if (wasVisible) sidebarController.scheduleRefresh(0);"
     end
   end
 
@@ -4690,32 +4753,31 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "function sidebarFragmentUrl(url = window.location.href)"
-      assert_includes response.body, "function sidebarScrollContainer()"
-      assert_includes response.body, "function bindSidebarScrollTracking()"
-      assert_includes response.body, "function recentlyInteractedWithSidebar()"
-      assert_includes response.body, "async function refreshSidebar(generation = sessionViewGeneration)"
-      assert_includes response.body, "async function loadMoreSidebarSessions(button)"
-      assert_includes response.body, "let sidebarUpdateGeneration = 0;"
-      assert_includes response.body, "const sidebarGeneration = ++sidebarUpdateGeneration;"
-      assert_includes response.body, "button.classList.add(\"is-loading\");"
-      assert_includes response.body, "viewGeneration !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || sidebarGeneration !== sidebarUpdateGeneration"
-      assert_includes response.body, "replaceSidebarHtml(html, { scrollTop: previousScrollTop });"
-      notification_capture = 'const notificationToggle = sessionSidebar.querySelector("[data-notification-toggle]");'
-      sidebar_replacement = "sessionSidebar.outerHTML = html;"
-      notification_reinsertion = 'replacementNotificationToggle?.replaceWith(notificationToggle);'
-      assert_includes response.body, notification_capture
-      assert_includes response.body, sidebar_replacement
-      assert_includes response.body, notification_reinsertion
-      assert_operator response.body.index(notification_capture), :<, response.body.index(sidebar_replacement)
-      assert_operator response.body.index(sidebar_replacement), :<, response.body.index(notification_reinsertion)
-      assert_includes response.body, "return sidebarProjectFilterActive() || sidebarSearchActive() || sessionShortcutsVisible();"
-      assert_includes response.body, "if (sidebarControlActive() || recentlyInteractedWithSidebar()) {\n        scheduleSidebarRefresh(1000);\n        return;\n      }"
-      assert_includes response.body, "fetch(sidebarFragmentUrl())"
-      assert_includes response.body, "const previousScrollTop = sidebarScrollContainer()?.scrollTop || 0;"
-      assert_includes response.body, "const refreshedScrollContainer = sidebarScrollContainer();\n      if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = scrollTop;"
-      assert_includes response.body, "bindSidebarScrollTracking();"
-      assert_includes response.body, "setTimeout(() => refreshSidebar().catch(() => {}), delay)"
+      assert_includes APP_JAVASCRIPT, "export class SidebarController"
+      assert_includes APP_JAVASCRIPT, "fragmentUrl(url = this.window.location.href)"
+      assert_includes APP_JAVASCRIPT, "scrollContainer()"
+      assert_includes APP_JAVASCRIPT, "bindInteractionTracking()"
+      assert_includes APP_JAVASCRIPT, "recentlyInteracted()"
+      assert_includes APP_JAVASCRIPT, "async refresh()"
+      assert_includes APP_JAVASCRIPT, "async loadMore(button)"
+      assert_includes APP_JAVASCRIPT, "this.asyncEpoch = 0;"
+      assert_includes APP_JAVASCRIPT, "const epoch = ++this.asyncEpoch;"
+      assert_includes APP_JAVASCRIPT, "button.classList.add(\"is-loading\");"
+      assert_includes APP_JAVASCRIPT, "if (!this.current(epoch, boundElement)) return;"
+      assert_includes APP_JAVASCRIPT, "this.replace(html, { scrollTop: previousScrollTop });"
+      notification_capture = 'const notificationToggle = oldElement.querySelector("[data-notification-toggle]");'
+      sidebar_replacement = "oldElement.outerHTML = html;"
+      notification_reinsertion = 'this.element.querySelector("[data-notification-toggle]")?.replaceWith(notificationToggle);'
+      assert_includes APP_JAVASCRIPT, notification_capture
+      assert_includes APP_JAVASCRIPT, sidebar_replacement
+      assert_includes APP_JAVASCRIPT, notification_reinsertion
+      assert_operator APP_JAVASCRIPT.index(notification_capture), :<, APP_JAVASCRIPT.index(sidebar_replacement)
+      assert_operator APP_JAVASCRIPT.index(sidebar_replacement), :<, APP_JAVASCRIPT.index(notification_reinsertion)
+      assert_includes APP_JAVASCRIPT, "if (this.controlsActive() || this.recentlyInteracted())"
+      assert_includes APP_JAVASCRIPT, "fetch(this.fragmentUrl())"
+      assert_includes APP_JAVASCRIPT, "const refreshedScrollContainer = this.scrollContainer();"
+      assert_includes APP_JAVASCRIPT, "this.bindInteractionTracking();"
+      assert_includes APP_JAVASCRIPT, "setTimeout(() => this.refresh().catch(() => {}), delay)"
     end
   end
 
@@ -4731,21 +4793,21 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "function bindSessionDom()"
-      assert_includes response.body, "function switchSession(url, { push = true, focus = true } = {})"
-      assert_includes response.body, "const switchGeneration = ++sessionSwitchGeneration;\n      const refreshRequestGeneration = sidebarRefreshRequestGeneration;\n      let navigatingAway = false;\n      showSessionSwitching();\n      resetSessionViewState();"
-      assert_includes response.body, "if (refreshRequestGeneration !== sidebarRefreshRequestGeneration) scheduleSidebarRefresh(0);"
-      assert_includes response.body, "fetch(sessionFragmentUrl(url), { headers: { \"Accept\": \"application/json\" } })"
-      assert_includes response.body, "if (switchGeneration !== sessionSwitchGeneration) return false;"
-      assert_includes response.body, "if (link.classList.contains(\"selected\")) {\n        closeMobileSessionSidebar();\n        return;\n      }"
-      assert_includes response.body, "function closeMobileSessionSidebar()"
-      refute_includes response.body, "const previousSidebarScrollTop = sidebarScrollContainer()?.scrollTop || 0;"
-      assert_includes response.body, "sessionSidebar.outerHTML = payload.sidebar_html;"
-      assert_includes response.body, "conversationPanel.outerHTML = payload.conversation_html;"
-      refute_includes response.body, "if (refreshedSidebarScrollContainer) refreshedSidebarScrollContainer.scrollTop = previousSidebarScrollTop;"
-      assert_includes response.body, "history.pushState({ session: payload.session }"
-      assert_includes response.body, "window.addEventListener(\"popstate\""
-      assert_includes response.body, "closeMobileSessionSidebar();"
+      assert_includes APP_JAVASCRIPT, "function bindSessionDom()"
+      assert_includes APP_JAVASCRIPT, "function switchSession(url, { push = true, focus = true } = {})"
+      assert_includes APP_JAVASCRIPT, "const switchGeneration = ++sessionSwitchGeneration;\n  const refreshRequestVersion = sidebarController.refreshRequestVersion;\n  let navigatingAway = false;\n  showSessionSwitching();\n  resetSessionViewState();"
+      assert_includes APP_JAVASCRIPT, "if (refreshRequestVersion !== sidebarController.refreshRequestVersion) sidebarController.scheduleRefresh(0);"
+      assert_includes APP_JAVASCRIPT, "fetch(sessionFragmentUrl(url), { headers: { \"Accept\": \"application/json\" } })"
+      assert_includes APP_JAVASCRIPT, "if (switchGeneration !== sessionSwitchGeneration) return false;"
+      assert_includes APP_JAVASCRIPT, "if (link.classList.contains(\"selected\")) {\n    sidebarController.closeMobile();\n    return;\n  }"
+      assert_includes APP_JAVASCRIPT, "closeMobile()"
+      refute_includes APP_JAVASCRIPT, "const previousSidebarScrollTop = sidebarScrollContainer()?.scrollTop || 0;"
+      assert_includes APP_JAVASCRIPT, "sidebarController.replace(payload.sidebar_html, { notify: false });"
+      assert_includes APP_JAVASCRIPT, "conversationPanel.outerHTML = payload.conversation_html;"
+      refute_includes APP_JAVASCRIPT, "if (refreshedSidebarScrollContainer) refreshedSidebarScrollContainer.scrollTop = previousSidebarScrollTop;"
+      assert_includes APP_JAVASCRIPT, "history.pushState({ session: payload.session }"
+      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"popstate\""
+      assert_includes APP_JAVASCRIPT, "sidebarController.closeMobile();"
     end
   end
 
@@ -4761,43 +4823,43 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "const generation = sessionViewGeneration;"
-      assert_includes response.body, "const submittedViewChanged = () => generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value;"
-      assert_includes response.body, "if (stopHandlingChangedSubmittedView()) return;"
-      assert_includes response.body, "function refreshSessionStatus(generation = sessionViewGeneration)"
-      assert_includes response.body, "function renderModelStatus()"
-      assert_includes response.body, "[liveStatusModel, liveStatusThinking ? `(${liveStatusThinking})` : null]"
-      assert_includes response.body, "removeStatusItem(\"thinking\")"
-      assert_includes response.body, "if (!response.ok || generation !== sessionViewGeneration || statusBar !== sessionStatusBar) return;"
-      assert_includes response.body, "refreshSessionStatus(generation).catch(() => {});"
-      assert_includes response.body, "function resetSessionViewState()"
-      assert_includes response.body, "function markOptimisticUserMessageFailed(text)"
-      assert_includes response.body, "const previousWaitingForOutputSince = waitingForOutputSince;"
-      assert_includes response.body, "const submittedImageFiles = pendingImages.map((entry) => entry.file);"
-      assert_includes response.body, "submittedImageFiles.forEach((file) => formData.append(\"images[]\", file, file.name || \"image\"));"
-      assert_includes response.body, "if (cloneCommand && payload?.cancelled) {\n          restoreSubmittedComposerInput();\n          setComposerState(\"idle\");\n          showStatus(\"Clone cancelled\", true);\n          return;\n        }\n        showPromptFailure(payload?.error || \"Prompt failed to send\");"
-      assert_includes response.body, "function persistStoredComposerDraft()"
-      assert_includes response.body, "const restoreSubmittedComposerInput = () => {"
-      assert_includes response.body, "promptTextarea.value = message;\n          persistStoredComposerDraft();"
-      assert_includes response.body, "pendingImages = submittedImageFiles.map((file) => ({ file, url: URL.createObjectURL(file) }));"
-      assert_includes response.body, "renderAttachments();"
-      assert_includes response.body, "setComposerState(\"running\", \"Pi is running…\", previousWaitingForOutputSince);"
-      assert_includes response.body, "markOptimisticUserMessageFailed(message);"
-      assert_includes response.body, "message.hasAttribute(\"data-optimistic-text\") ? message.dataset.optimisticText : message.querySelector(\".message-body\")?.textContent"
-      assert_includes response.body, 'return targetText.startsWith(`${optimisticText}\\n`);'
-      assert_includes response.body, "appendMessage(\"assistant\", `Prompt failed to send:\\n\\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true });"
-      assert_includes response.body, "clearTimeout(eventPollTimer);"
-      assert_includes response.body, "eventPollInFlight = false;"
-      assert_includes response.body, "sessionViewGeneration += 1;"
-      assert_includes response.body, "if (!response.ok || generation !== sessionViewGeneration) return;"
-      assert_includes response.body, "if (generation === sessionViewGeneration) {"
-      assert_includes response.body, "scheduleNextEventPoll();"
-      assert_includes response.body, "resetLiveAssistantTracking();"
-      assert_includes response.body, "resetEventPollBackoff();"
-      assert_includes response.body, "stopWaitingForOutput();"
-      assert_includes response.body, "lastEventSeq = 0;"
-      assert_includes response.body, "autoScrollEnabled = true;"
-      assert_includes response.body, "clearAttachments();"
+      assert_includes APP_JAVASCRIPT, "const generation = sessionViewGeneration;"
+      assert_includes APP_JAVASCRIPT, "const submittedViewChanged = () => generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value;"
+      assert_includes APP_JAVASCRIPT, "if (stopHandlingChangedSubmittedView()) return;"
+      assert_includes APP_JAVASCRIPT, "function refreshSessionStatus(generation = sessionViewGeneration)"
+      assert_includes APP_JAVASCRIPT, "function renderModelStatus()"
+      assert_includes APP_JAVASCRIPT, "[liveStatusModel, liveStatusThinking ? `(${liveStatusThinking})` : null]"
+      assert_includes APP_JAVASCRIPT, "removeStatusItem(\"thinking\")"
+      assert_includes APP_JAVASCRIPT, "if (!response.ok || generation !== sessionViewGeneration || statusBar !== sessionStatusBar) return;"
+      assert_includes APP_JAVASCRIPT, "refreshSessionStatus(generation).catch(() => {});"
+      assert_includes APP_JAVASCRIPT, "function resetSessionViewState()"
+      assert_includes APP_JAVASCRIPT, "markOptimisticUserMessageFailed(text)"
+      assert_includes APP_JAVASCRIPT, "const previousWaitingForOutputSince = waitingForOutputSince;"
+      assert_includes APP_JAVASCRIPT, "const submittedImageFiles = pendingImages.map((entry) => entry.file);"
+      assert_includes APP_JAVASCRIPT, "submittedImageFiles.forEach((file) => formData.append(\"images[]\", file, file.name || \"image\"));"
+      assert_includes APP_JAVASCRIPT, "if (cloneCommand && payload?.cancelled) {\n      restoreSubmittedComposerInput();\n      setComposerState(\"idle\");\n      showStatus(\"Clone cancelled\", true);\n      return;\n    }\n    showPromptFailure(payload?.error || \"Prompt failed to send\");"
+      assert_includes APP_JAVASCRIPT, "function persistStoredComposerDraft()"
+      assert_includes APP_JAVASCRIPT, "const restoreSubmittedComposerInput = () => {"
+      assert_includes APP_JAVASCRIPT, "promptTextarea.value = message;\n      persistStoredComposerDraft();"
+      assert_includes APP_JAVASCRIPT, "pendingImages = submittedImageFiles.map((file) => ({ file, url: URL.createObjectURL(file) }));"
+      assert_includes APP_JAVASCRIPT, "renderAttachments();"
+      assert_includes APP_JAVASCRIPT, "setComposerState(\"running\", \"Pi is running…\", previousWaitingForOutputSince);"
+      assert_includes APP_JAVASCRIPT, "markOptimisticUserMessageFailed(message);"
+      assert_includes APP_JAVASCRIPT, "message.hasAttribute(\"data-optimistic-text\") ? message.dataset.optimisticText : message.querySelector(\".message-body\")?.textContent"
+      assert_includes APP_JAVASCRIPT, 'return targetText.startsWith(`${optimisticText}\\n`);'
+      assert_includes APP_JAVASCRIPT, "appendMessage(\"assistant\", `Prompt failed to send:\\n\\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true });"
+      assert_includes APP_JAVASCRIPT, "clearTimeout(eventPollTimer);"
+      assert_includes APP_JAVASCRIPT, "eventPollInFlight = false;"
+      assert_includes APP_JAVASCRIPT, "sessionViewGeneration += 1;"
+      assert_includes APP_JAVASCRIPT, "if (!response.ok || generation !== sessionViewGeneration) return;"
+      assert_includes APP_JAVASCRIPT, "if (generation === sessionViewGeneration) {"
+      assert_includes APP_JAVASCRIPT, "scheduleNextEventPoll();"
+      assert_includes APP_JAVASCRIPT, "resetLiveAssistantTracking();"
+      assert_includes APP_JAVASCRIPT, "resetEventPollBackoff();"
+      assert_includes APP_JAVASCRIPT, "stopWaitingForOutput();"
+      assert_includes APP_JAVASCRIPT, "lastEventSeq = 0;"
+      assert_includes APP_JAVASCRIPT, "autoScrollEnabled = true;"
+      assert_includes APP_JAVASCRIPT, "clearAttachments();"
     end
   end
 
@@ -4810,14 +4872,13 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
-      handler_start = response.body.index("const stopHandlingChangedSubmittedView = () => {")
-      handler_end = response.body.index("      };", handler_start)
-      handler = response.body[handler_start..handler_end]
+      handler_start = APP_JAVASCRIPT.index("const stopHandlingChangedSubmittedView = () => {")
+      handler_end = APP_JAVASCRIPT.index("      };", handler_start)
+      handler = APP_JAVASCRIPT[handler_start..handler_end]
       assert_includes handler, "if (!submittedViewChanged()) return false;"
-      assert_includes handler, "sidebarRefreshRequestGeneration += 1;"
-      assert_includes handler, "scheduleSidebarRefresh(0);"
+      assert_includes handler, "sidebarController.requestRefresh();"
       assert_includes handler, "return true;"
-      assert_operator response.body.scan("if (stopHandlingChangedSubmittedView()) return;").length, :>=, 3
+      assert_operator APP_JAVASCRIPT.scan("if (stopHandlingChangedSubmittedView()) return;").length, :>=, 3
     end
   end
 
@@ -4833,13 +4894,13 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "event.target.closest('form[action=\"/sessions/new\"]')"
-      assert_includes response.body, "headers: { \"Accept\": \"application/json\" }"
-      assert_includes response.body, "const switchGeneration = sessionSwitchGeneration;"
-      assert_includes response.body, "const viewGeneration = sessionViewGeneration;"
-      assert_includes response.body, "showSessionSwitching();"
-      assert_includes response.body, "if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;"
-      assert_includes response.body, "await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`"
+      assert_includes APP_JAVASCRIPT, "event.target.closest('form[action=\"/sessions/new\"]')"
+      assert_includes APP_JAVASCRIPT, "headers: { \"Accept\": \"application/json\" }"
+      assert_includes APP_JAVASCRIPT, "const switchGeneration = sessionSwitchGeneration;"
+      assert_includes APP_JAVASCRIPT, "const viewGeneration = sessionViewGeneration;"
+      assert_includes APP_JAVASCRIPT, "showSessionSwitching();"
+      assert_includes APP_JAVASCRIPT, "if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;"
+      assert_includes APP_JAVASCRIPT, "await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`"
     end
   end
 
@@ -4859,9 +4920,9 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes response.body, "data-events-after=\"1\""
-      assert_includes response.body, "function resetEventCursor()"
-      assert_includes response.body, "lastEventSeq = Number(liveOutput?.dataset.eventsAfter || 0);"
-      assert_includes response.body, "resetEventCursor();"
+      assert_includes APP_JAVASCRIPT, "function resetEventCursor()"
+      assert_includes APP_JAVASCRIPT, "lastEventSeq = Number(liveOutput?.dataset.eventsAfter || 0);"
+      assert_includes APP_JAVASCRIPT, "resetEventCursor();"
     end
   end
 
@@ -4905,10 +4966,10 @@ class AppTest < Minitest::Test
       assert_equal "call-1", JSON.parse(live_output["data-active-tool-events"]).first["toolCallId"]
       assert_equal({ "call-1" => "2026-06-13T10:00:00.000Z" }, JSON.parse(live_output["data-active-tool-timestamps"]))
       assert_equal({ "call-1" => "Review the diff" }, JSON.parse(live_output["data-active-tool-prompts"]))
-      assert_includes response.body, "function restoreActiveToolExecutions()"
-      assert_includes response.body, "restoreActiveToolExecutions();"
-      assert_includes response.body, "events.forEach((event) => renderToolExecutionEvent(event, timestamps[event.toolCallId], false, prompts[event.toolCallId]));"
-      assert_includes response.body, "formatTimestamp(timestamp, options.timestampFallback !== false)"
+      assert_includes APP_JAVASCRIPT, "restoreActiveToolExecutions()"
+      assert_includes APP_JAVASCRIPT, "restoreActiveToolExecutions();"
+      assert_includes APP_JAVASCRIPT, "events.forEach((event) => this.renderToolExecutionEvent(event, timestamps[event.toolCallId], false, prompts[event.toolCallId]));"
+      assert_includes APP_JAVASCRIPT, "formatTimestamp(timestamp, options.timestampFallback !== false)"
     end
   end
 
@@ -4924,48 +4985,48 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "let eventPollInFlight = false;"
-      assert_includes response.body, "let lastEventSeq = 0;"
-      assert_includes response.body, "let waitingForOutputSince = null;"
-      assert_includes response.body, "let emptyEventPollCount = 0;"
-      assert_includes response.body, "function scheduleNextEventPoll(delay = eventPollDelay())"
-      assert_includes response.body, "if (eventPollInFlight) return;"
-      assert_includes response.body, "eventPollInFlight = true;"
-      assert_includes response.body, "const eventsUrl = new URL(liveOutput.dataset.eventsUrl, window.location.origin);"
-      assert_includes response.body, "eventsUrl.searchParams.set(\"after\", lastEventSeq);"
-      assert_includes response.body, "lastEventSeq = payload.last_seq;"
-      assert_includes response.body, "if (payload.missed) {"
-      assert_includes response.body, "await refreshCurrentSessionPreservingComposer();"
-      assert_includes response.body, "eventPollInFlight = false;"
-      assert_includes response.body, "if (document.hidden) return 10000;"
-      assert_includes response.body, "if (emptyEventPollCount >= 6) return 5000;"
-      assert_includes response.body, "if (emptyEventPollCount >= 2) return 2000;"
-      assert_includes response.body, "emptyEventPollCount = payload.events.length > 0 ? 0 : emptyEventPollCount + 1;"
-      assert_includes response.body, "resetEventPollBackoff();"
-      assert_includes response.body, "startWaitingForOutput();"
-      assert_includes response.body, "stopWaitingForOutput();"
-      assert_includes response.body, "scheduleNextEventPoll(0);"
-      assert_includes response.body, "let eventPollAbortController = null;"
-      assert_includes response.body, "const pollTimeout = setTimeout(() => controller.abort(), 12000);"
-      assert_includes response.body, "updateWaitingForOutputStatus();"
-      assert_includes response.body, "signal: controller.signal"
-      assert_includes response.body, "const staleSessionRefreshAfterMs = 60 * 1000;"
-      assert_includes response.body, "let staleSessionRefreshInFlight = false;"
-      assert_includes response.body, "async function refreshStaleSessionAfterResume(hiddenDuration = 0)"
-      assert_includes response.body, "if (staleSessionRefreshInFlight) return true;"
-      assert_includes response.body, "const pollingGap = Date.now() - lastEventPollSuccessAt;"
-      assert_includes response.body, "if (hiddenDuration < staleSessionRefreshAfterMs && pollingGap < staleSessionRefreshAfterMs) return false;"
-      assert_includes response.body, "staleSessionRefreshInFlight = true;"
-      assert_includes response.body, "return await refreshCurrentSessionPreservingComposer();"
-      assert_includes response.body, "staleSessionRefreshInFlight = false;"
-      assert_includes response.body, "async function resumeEventPolling(hiddenDuration = 0)"
-      assert_includes response.body, "abortEventPoll();"
-      assert_includes response.body, "if (await refreshStaleSessionAfterResume(hiddenDuration)) return;"
-      assert_includes response.body, "window.addEventListener(\"pageshow\", () => resumeEventPolling().catch(() => {}));"
-      assert_includes response.body, "window.addEventListener(\"focus\", () => {"
-      assert_includes response.body, "resumeEventPolling().catch(() => {});"
-      assert_includes response.body, "window.addEventListener(\"online\", () => resumeEventPolling().catch(() => {}));"
-      refute_includes response.body, "setInterval(() => pollEvents()"
+      assert_includes APP_JAVASCRIPT, "let eventPollInFlight = false;"
+      assert_includes APP_JAVASCRIPT, "let lastEventSeq = 0;"
+      assert_includes APP_JAVASCRIPT, "let waitingForOutputSince = null;"
+      assert_includes APP_JAVASCRIPT, "let emptyEventPollCount = 0;"
+      assert_includes APP_JAVASCRIPT, "function scheduleNextEventPoll(delay = eventPollDelay())"
+      assert_includes APP_JAVASCRIPT, "if (eventPollInFlight) return;"
+      assert_includes APP_JAVASCRIPT, "eventPollInFlight = true;"
+      assert_includes APP_JAVASCRIPT, "const eventsUrl = new URL(liveOutput.dataset.eventsUrl, window.location.origin);"
+      assert_includes APP_JAVASCRIPT, "eventsUrl.searchParams.set(\"after\", lastEventSeq);"
+      assert_includes APP_JAVASCRIPT, "lastEventSeq = payload.last_seq;"
+      assert_includes APP_JAVASCRIPT, "if (payload.missed) {"
+      assert_includes APP_JAVASCRIPT, "await refreshCurrentSessionPreservingComposer();"
+      assert_includes APP_JAVASCRIPT, "eventPollInFlight = false;"
+      assert_includes APP_JAVASCRIPT, "if (document.hidden) return 10000;"
+      assert_includes APP_JAVASCRIPT, "if (emptyEventPollCount >= 6) return 5000;"
+      assert_includes APP_JAVASCRIPT, "if (emptyEventPollCount >= 2) return 2000;"
+      assert_includes APP_JAVASCRIPT, "emptyEventPollCount = payload.events.length > 0 ? 0 : emptyEventPollCount + 1;"
+      assert_includes APP_JAVASCRIPT, "resetEventPollBackoff();"
+      assert_includes APP_JAVASCRIPT, "startWaitingForOutput();"
+      assert_includes APP_JAVASCRIPT, "stopWaitingForOutput();"
+      assert_includes APP_JAVASCRIPT, "scheduleNextEventPoll(0);"
+      assert_includes APP_JAVASCRIPT, "let eventPollAbortController = null;"
+      assert_includes APP_JAVASCRIPT, "const pollTimeout = setTimeout(() => controller.abort(), 12000);"
+      assert_includes APP_JAVASCRIPT, "updateWaitingForOutputStatus();"
+      assert_includes APP_JAVASCRIPT, "signal: controller.signal"
+      assert_includes APP_JAVASCRIPT, "const STALE_SESSION_REFRESH_AFTER_MS = 60 * 1000;"
+      assert_includes APP_JAVASCRIPT, "let staleSessionRefreshInFlight = false;"
+      assert_includes APP_JAVASCRIPT, "async function refreshStaleSessionAfterResume(hiddenDuration = 0)"
+      assert_includes APP_JAVASCRIPT, "if (staleSessionRefreshInFlight) return true;"
+      assert_includes APP_JAVASCRIPT, "const pollingGap = Date.now() - lastEventPollSuccessAt;"
+      assert_includes APP_JAVASCRIPT, "if (hiddenDuration < STALE_SESSION_REFRESH_AFTER_MS && pollingGap < STALE_SESSION_REFRESH_AFTER_MS) return false;"
+      assert_includes APP_JAVASCRIPT, "staleSessionRefreshInFlight = true;"
+      assert_includes APP_JAVASCRIPT, "return await refreshCurrentSessionPreservingComposer();"
+      assert_includes APP_JAVASCRIPT, "staleSessionRefreshInFlight = false;"
+      assert_includes APP_JAVASCRIPT, "async function resumeEventPolling(hiddenDuration = 0)"
+      assert_includes APP_JAVASCRIPT, "abortEventPoll();"
+      assert_includes APP_JAVASCRIPT, "if (await refreshStaleSessionAfterResume(hiddenDuration)) return;"
+      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"pageshow\", () => resumeEventPolling().catch(() => {}));"
+      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"focus\", () => {"
+      assert_includes APP_JAVASCRIPT, "resumeEventPolling().catch(() => {});"
+      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"online\", () => resumeEventPolling().catch(() => {}));"
+      refute_includes APP_JAVASCRIPT, "setInterval(() => pollEvents()"
     end
   end
 
@@ -4983,20 +5044,20 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes response.body, "class=\"session-reconnect\""
       assert_includes response.body, "Session may be stale."
-      assert_includes response.body, "function showReconnectBanner()"
-      assert_includes response.body, "function hideReconnectBanner()"
-      assert_includes response.body, "function composerDraft()"
-      assert_includes response.body, "message: promptTextarea?.value || \"\""
-      assert_includes response.body, "images: pendingImages.map((entry) => entry.file)"
-      assert_includes response.body, "function restoreComposerDraft(draft)"
-      assert_includes response.body, "if (!draft || promptSessionInput?.value !== draft.session) return;"
-      assert_includes response.body, "if (draft.images.length > 0) addImageFiles(draft.images);"
-      assert_includes response.body, "function refreshCurrentSessionPreservingComposer()"
-      assert_includes response.body, "const refreshed = await switchSession(window.location.href, { push: false, focus: false });"
-      assert_includes response.body, "if (refreshed) restoreComposerDraft(draft);"
-      assert_includes response.body, "function reconnectSession()"
-      assert_includes response.body, "await refreshCurrentSessionPreservingComposer();"
-      assert_includes response.body, "reconnectButton?.addEventListener(\"click\", reconnectSession);"
+      assert_includes APP_JAVASCRIPT, "function showReconnectBanner()"
+      assert_includes APP_JAVASCRIPT, "function hideReconnectBanner()"
+      assert_includes APP_JAVASCRIPT, "function composerDraft()"
+      assert_includes APP_JAVASCRIPT, "message: promptTextarea?.value || \"\""
+      assert_includes APP_JAVASCRIPT, "images: pendingImages.map((entry) => entry.file)"
+      assert_includes APP_JAVASCRIPT, "function restoreComposerDraft(draft)"
+      assert_includes APP_JAVASCRIPT, "if (!draft || promptSessionInput?.value !== draft.session) return;"
+      assert_includes APP_JAVASCRIPT, "if (draft.images.length > 0) addImageFiles(draft.images);"
+      assert_includes APP_JAVASCRIPT, "function refreshCurrentSessionPreservingComposer()"
+      assert_includes APP_JAVASCRIPT, "const refreshed = await switchSession(window.location.href, { push: false, focus: false });"
+      assert_includes APP_JAVASCRIPT, "if (refreshed) restoreComposerDraft(draft);"
+      assert_includes APP_JAVASCRIPT, "function reconnectSession()"
+      assert_includes APP_JAVASCRIPT, "await refreshCurrentSessionPreservingComposer();"
+      assert_includes APP_JAVASCRIPT, "reconnectButton?.addEventListener(\"click\", reconnectSession);"
     end
   end
 
@@ -5012,109 +5073,110 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "let liveAssistantMessage = null;"
-      assert_includes response.body, "let liveAssistantSegments = new Map();"
-      assert_includes response.body, "let liveAssistantSeen = false;"
-      assert_includes response.body, "let liveUserMessages = new Map();"
-      assert_includes response.body, "let restorePromptFocusAfterSending = false;"
-      assert_includes response.body, "let escapeStopConfirmationExpiresAt = 0;"
-      assert_includes response.body, "const ESCAPE_STOP_CONFIRMATION_WINDOW_MS = 2000;"
-      assert_includes response.body, "function optimisticUserMessage(text)"
-      assert_includes response.body, "function upsertLiveUserSegment(event, segment, fallbackIndex, shouldScroll, timestamp)"
-      assert_includes response.body, 'if (live && roleName === "user" && !options.optimistic && optimisticUserMessageAlreadyRendered(text)) return null;'
-      assert_includes response.body, 'if (options.optimistic) {'
-      assert_includes response.body, "article.dataset.optimisticText = options.optimisticText ?? text;"
-      assert_includes response.body, "article.dataset.optimisticImageCount = String(options.images?.length || 0);"
-      assert_includes response.body, 'upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);'
-      assert_includes response.body, 'const displayText = roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text;'
-      assert_includes response.body, 'const entry = { article, body, compact: false, userDisplayText: body?.textContent || segment.text };'
-      assert_includes response.body, "function formatTimestamp(timestamp, fallbackToNow = true)"
-      assert_includes response.body, "date.getHours()"
-      refute_includes response.body, "date.getUTCHours()"
-      assert_includes response.body, "function eventTimestamp(event)"
-      assert_includes response.body, "function eventErrorText(event)"
-      assert_includes response.body, "renderErrorEvent(event)"
-      assert_includes response.body, "let liveErrorSeen = false;"
-      assert_includes response.body, "liveErrorSeen = true;"
-      assert_includes response.body, "appendMessage(\"error\", errorText, true, true, eventTimestamp(event));"
-      assert_includes response.body, 'appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse, images: segment.images });'
-      assert_includes response.body, 'function renderAssistantMarkdown(body, text, delay = 120)'
-      assert_includes response.body, 'body.dataset.rendering = "pending";'
-      assert_includes response.body, 'clearTimeout(body.markdownRenderTimeout);'
-      assert_includes response.body, 'fetch("/markdown", { method: "POST", body: formData })'
-      assert_includes response.body, 'if (["custom", "system", "status"].includes(role)) return "status";'
-      assert_includes response.body, "function showStatus(_text, _forceScroll = false) {}"
-      assert_includes response.body, "showStatus(eventStatusText(event));"
-      assert_includes response.body, "function renderCompactionEvent(event)"
-      assert_includes response.body, "appendCompactMessage(\"status\", \"Conversation compacted\", event.summary || \"Compaction completed\""
-      assert_includes response.body, "refreshSessionStatus().catch(() => {});"
-      assert_includes response.body, "if (event.type === \"compaction\") {\n        renderCompactionEvent(event);\n        return;\n      }"
-      assert_includes response.body, "if (event.type === \"compaction_start\") resetLiveCompactionTracking();"
-      assert_includes response.body, "if (event.type === \"compaction_end\") {\n          removePendingCompactionMessage();\n          if (!event.aborted && !liveCompactionRendered) renderCompactionEvent(event);\n          if (!liveAgentRunning) setComposerState(\"done\", event.aborted ? \"Compaction aborted\" : \"Done\");\n          if (!event.aborted) refreshSessionStatus().catch(() => {});\n          refreshSidebar().catch(() => {});\n        }"
-      assert_includes response.body, "if (/^\\/(?:name|rename)$/.test(trimmed)) return { valid: false };"
-      assert_includes response.body, "if (/^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(trimmed)) return { valid: true };"
-      assert_includes response.body, "function sessionNameSlashCommand(message)"
-      assert_includes response.body, "function sessionForkSlashCommand(message)"
-      assert_includes response.body, "function sessionTreeSlashCommand(message)"
-      assert_includes response.body, "function sessionCloneSlashCommand(message)"
-      assert_includes response.body, "function sessionNewSlashCommand(message)"
-      assert_includes response.body, "function updateSessionHeaderName(name)"
-      assert_includes response.body, "function sessionTitleFromEvent(event)"
-      assert_includes response.body, "if (event.type === \"session_info\") return event.name;"
-      assert_includes response.body, "if (event.type === \"custom\" && event.customType === \"pi-extensions-session-title\") return event.data?.title;"
-      assert_includes response.body, "if (event.type === \"custom_message\" && event.customType === \"session-title-update\")"
-      assert_includes response.body, "updateSessionHeaderName(sessionTitleFromEvent(event));"
-      assert_includes response.body, "function updateHeaderFromSelectedSidebarSession()"
-      assert_includes response.body, "const selectedTitle = sessionSidebar?.querySelector(\"a.session.selected .session-title\")?.textContent.trim();"
-      assert_includes response.body, "updateHeaderFromSelectedSidebarSession();"
-      assert_includes response.body, "updateNotificationToggle();"
-      assert_includes response.body, "const renameCommand = followUp ? null : sessionNameSlashCommand(message);"
-      assert_includes response.body, "const compactCommand = followUp ? null : sessionCompactSlashCommand(message);"
-      assert_includes response.body, "const forkCommand = followUp ? null : sessionForkSlashCommand(message);"
-      assert_includes response.body, "const treeCommand = followUp ? null : sessionTreeSlashCommand(message);"
-      assert_includes response.body, "const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);"
-      assert_includes response.body, "const newCommand = followUp ? null : sessionNewSlashCommand(message);"
-      assert_includes response.body, "const modelCommand = followUp ? null : sessionModelSlashCommand(message);"
-      assert_includes response.body, "if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {"
-      assert_includes response.body, "if (!followUp) {\n          resetLiveAssistantTracking();\n          document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n          const optimisticImages = pendingImages.map"
-      assert_includes response.body, "const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || \"Attached image\" }));\n          appendMessage(\"user\", message || `[${imageAttachmentLabel(submittedImageFiles.length)}]`, true, true, new Date(), { optimistic: true, optimisticText: message, images: optimisticImages });\n        }"
-      assert_includes response.body, "resetEventPollBackoff();"
-      assert_includes response.body, "scheduleNextEventPoll(0);"
-      assert_includes response.body, "if (payload?.command === \"rename\") {\n          if (payload.error) {\n            restoreSubmittedComposerInput();\n            setComposerState(\"error\", payload.error);\n            showStatus(payload.error, true);\n            return;\n          }\n          clearStoredComposerDraft(submittedSession);"
-      assert_includes response.body, "updateSessionHeaderName(payload.name);\n          setComposerState(\"done\", \"Renamed\");\n          showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);"
-      assert_includes response.body, "appendPendingCompactionMessage(new Date());"
-      assert_includes response.body, "markSidebarSessionCompacting(submittedSession);"
-      assert_includes response.body, "if (payload?.command === \"compact\") {\n          refreshSidebar().catch(() => {});\n          setComposerState(\"running\", \"Compacting…\");\n          showStatus(\"Compaction started\", true);\n          return;\n        }"
-      assert_includes response.body, "if (payload?.command === \"fork\") {\n          setComposerState(\"idle\");\n          showStatus(\"Choose a fork point\", true);\n          openForkSessionModal();\n          return;\n        }"
-      assert_includes response.body, "if (payload?.command === \"tree\") {\n          setComposerState(\"idle\");\n          showStatus(\"Choose a tree entry\", true);\n          openTreeSessionModal();\n          return;\n        }"
-      assert_includes response.body, "promptForm.requestSubmit();"
-      assert_includes response.body, "function resizePromptTextarea()"
-      assert_includes response.body, "commandList?.removeAttribute(\"open\");"
-      assert_includes response.body, "function filterCommandsFromPrompt()"
+      refute_includes APP_JAVASCRIPT, "this.liveAssistantMessage"
+      assert_includes APP_JAVASCRIPT, "this.liveAssistantSegments = new Map();"
+      assert_includes APP_JAVASCRIPT, "this.liveAssistantSeen = false;"
+      assert_includes APP_JAVASCRIPT, "this.liveUserMessages = new Map();"
+      assert_includes APP_JAVASCRIPT, "let restorePromptFocusAfterSending = false;"
+      assert_includes APP_JAVASCRIPT, "let escapeStopConfirmationExpiresAt = 0;"
+      assert_includes APP_JAVASCRIPT, "const ESCAPE_STOP_CONFIRMATION_WINDOW_MS = 2000;"
+      assert_includes APP_JAVASCRIPT, "optimisticUserMessage(text)"
+      assert_includes APP_JAVASCRIPT, "upsertLiveUserSegment(event, segment, fallbackIndex, shouldScroll, timestamp)"
+      assert_includes APP_JAVASCRIPT, 'if (live && roleName === "user" && !options.optimistic && this.optimisticUserMessageAlreadyRendered(text)) return null;'
+      assert_includes APP_JAVASCRIPT, 'if (options.optimistic) {'
+      assert_includes APP_JAVASCRIPT, "article.dataset.optimisticText = options.optimisticText ?? text;"
+      assert_includes APP_JAVASCRIPT, "article.dataset.optimisticImageCount = String(options.images?.length || 0);"
+      assert_includes APP_JAVASCRIPT, 'this.upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);'
+      assert_includes APP_JAVASCRIPT, 'const displayText = roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text;'
+      assert_includes APP_JAVASCRIPT, 'const entry = { article, body, compact: false, userDisplayText: body?.textContent || segment.text };'
+      assert_includes APP_JAVASCRIPT, "function formatTimestamp(timestamp, fallbackToNow = true)"
+      assert_includes APP_JAVASCRIPT, "date.getHours()"
+      refute_includes APP_JAVASCRIPT, "date.getUTCHours()"
+      assert_includes APP_JAVASCRIPT, "function eventTimestamp(event)"
+      assert_includes APP_JAVASCRIPT, "function eventErrorText(event)"
+      assert_includes APP_JAVASCRIPT, "renderErrorEvent(event)"
+      assert_includes APP_JAVASCRIPT, "let liveErrorSeen = false;"
+      assert_includes APP_JAVASCRIPT, "liveErrorSeen = true;"
+      assert_includes APP_JAVASCRIPT, "liveMessageRenderer.appendMessage(\"error\", errorText, true, true, eventTimestamp(event));"
+      assert_includes APP_JAVASCRIPT, 'this.appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse, images: segment.images });'
+      assert_includes APP_JAVASCRIPT, 'export class ServerMarkdownRenderer'
+      assert_includes APP_JAVASCRIPT, 'body.dataset.rendering = "pending";'
+      assert_includes APP_JAVASCRIPT, 'job.controller = new AbortController();'
+      assert_includes APP_JAVASCRIPT, 'fetch("/markdown", { method: "POST", body: formData, signal: job.controller.signal })'
+      assert_includes APP_JAVASCRIPT, 'if (["custom", "system", "status"].includes(role)) return "status";'
+      assert_includes APP_JAVASCRIPT, "function showStatus(_text, _forceScroll = false) {}"
+      assert_includes APP_JAVASCRIPT, "showStatus(eventStatusText(event));"
+      assert_includes APP_JAVASCRIPT, "renderCompactionEvent(event)"
+      assert_includes APP_JAVASCRIPT, "this.appendCompactMessage(\"status\", \"Conversation compacted\", event.summary || \"Compaction completed\""
+      assert_includes APP_JAVASCRIPT, "refreshSessionStatus().catch(() => {});"
+      assert_includes APP_JAVASCRIPT, "liveMessageRenderer.renderCompactionEvent(event);"
+      assert_includes APP_JAVASCRIPT, "if (event.type === \"compaction_start\") liveMessageRenderer.resetLiveCompactionTracking();"
+      assert_includes APP_JAVASCRIPT, "liveMessageRenderer.removePendingCompactionMessage();"
+      assert_includes APP_JAVASCRIPT, "if (!event.aborted && !liveMessageRenderer.liveCompactionRendered) liveMessageRenderer.renderCompactionEvent(event);"
+      assert_includes APP_JAVASCRIPT, "if (/^\\/(?:name|rename)$/.test(trimmed)) return { valid: false };"
+      assert_includes APP_JAVASCRIPT, "if (/^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(trimmed)) return { valid: true };"
+      assert_includes APP_JAVASCRIPT, "function sessionNameSlashCommand(message)"
+      assert_includes APP_JAVASCRIPT, "function sessionForkSlashCommand(message)"
+      assert_includes APP_JAVASCRIPT, "function sessionTreeSlashCommand(message)"
+      assert_includes APP_JAVASCRIPT, "function sessionCloneSlashCommand(message)"
+      assert_includes APP_JAVASCRIPT, "function sessionNewSlashCommand(message)"
+      assert_includes APP_JAVASCRIPT, "function updateSessionHeaderName(name)"
+      assert_includes APP_JAVASCRIPT, "function sessionTitleFromEvent(event)"
+      assert_includes APP_JAVASCRIPT, "if (event.type === \"session_info\") return event.name;"
+      assert_includes APP_JAVASCRIPT, "if (event.type === \"custom\" && event.customType === \"pi-extensions-session-title\") return event.data?.title;"
+      assert_includes APP_JAVASCRIPT, "if (event.type === \"custom_message\" && event.customType === \"session-title-update\")"
+      assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(sessionTitleFromEvent(event));"
+      assert_includes APP_JAVASCRIPT, 'new this.window.CustomEvent("pi:sidebar-selected-title", { detail: { title } })'
+      assert_includes APP_JAVASCRIPT, 'document.addEventListener("pi:sidebar-selected-title"'
+      assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(event.detail.title);"
+      assert_includes APP_JAVASCRIPT, "updateNotificationToggle();"
+      assert_includes APP_JAVASCRIPT, "const renameCommand = followUp ? null : sessionNameSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const compactCommand = followUp ? null : sessionCompactSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const forkCommand = followUp ? null : sessionForkSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const treeCommand = followUp ? null : sessionTreeSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const newCommand = followUp ? null : sessionNewSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const modelCommand = followUp ? null : sessionModelSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {"
+      assert_includes APP_JAVASCRIPT, "if (!followUp) {\n      liveMessageRenderer.resetLiveAssistantTracking();\n      document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n      const optimisticImages = pendingImages.map"
+      assert_includes APP_JAVASCRIPT, "const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || \"Attached image\" }));\n      liveMessageRenderer.appendMessage(\"user\", message || `[${imageAttachmentLabel(submittedImageFiles.length)}]`, true, true, new Date(), { optimistic: true, optimisticText: message, images: optimisticImages });\n    }"
+      assert_includes APP_JAVASCRIPT, "resetEventPollBackoff();"
+      assert_includes APP_JAVASCRIPT, "scheduleNextEventPoll(0);"
+      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"rename\") {\n      if (payload.error) {\n        restoreSubmittedComposerInput();\n        setComposerState(\"error\", payload.error);\n        showStatus(payload.error, true);\n        return;\n      }\n      clearStoredComposerDraft(submittedSession);"
+      assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(payload.name);\n      setComposerState(\"done\", \"Renamed\");\n      showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);"
+      assert_includes APP_JAVASCRIPT, "liveMessageRenderer.appendPendingCompactionMessage(new Date());"
+      assert_includes APP_JAVASCRIPT, "sidebarController.markSessionCompacting(submittedSession);"
+      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"compact\") {\n      sidebarController.refresh().catch(() => {});\n      setComposerState(\"running\", \"Compacting…\");\n      showStatus(\"Compaction started\", true);\n      return;\n    }"
+      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"fork\") {\n      setComposerState(\"idle\");\n      showStatus(\"Choose a fork point\", true);\n      openForkSessionModal();\n      return;\n    }"
+      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"tree\") {\n      setComposerState(\"idle\");\n      showStatus(\"Choose a tree entry\", true);\n      openTreeSessionModal();\n      return;\n    }"
+      assert_includes APP_JAVASCRIPT, "promptForm.requestSubmit();"
+      assert_includes APP_JAVASCRIPT, "function resizePromptTextarea()"
+      assert_includes APP_JAVASCRIPT, "commandList?.removeAttribute(\"open\");"
+      assert_includes APP_JAVASCRIPT, "function filterCommandsFromPrompt()"
       assert_includes response.body, "Slash commands are not supported in queued follow-up messages."
-      assert_includes response.body, "function composingFollowUp()"
-      assert_includes response.body, "if (composingFollowUp()) return showQueuedSlashCommandMessage();"
-      assert_includes response.body, "const query = promptTextarea.value.startsWith(\"/\") ? promptTextarea.value.slice(1).trim().toLowerCase() : \"\";"
-      assert_includes response.body, "function selectHighlightedCommand()"
-      assert_includes response.body, "setComposerState(\"running\", \"Pi is running…\");"
-      assert_includes response.body, "composerState.textContent = \"Press ESC again to stop current task\";"
-      assert_includes response.body, "composerStopButton = document.querySelector(\".session-header .composer-stop-button\") || null;"
-      assert_includes response.body, "const agentBusy = [\"running\", \"sending\"].includes(state);"
-      assert_includes response.body, "promptTextarea.disabled = submitting;"
-      assert_includes response.body, "if (!submitting && restorePromptFocusAfterSending)"
-      assert_includes response.body, "promptTextarea.focus({ preventScroll: true });"
-      assert_includes response.body, "composerStopButton.hidden = !agentBusy;"
-      assert_includes response.body, "if (followUp) formData.set(\"streaming_behavior\", \"follow_up\");"
-      assert_includes response.body, "const attachmentsDisabled = submitting;"
-      assert_includes response.body, "addImageFiles(files);"
-      assert_includes response.body, "function confirmOrStopRunningTask(event)"
-      assert_includes response.body, "if (composerState?.dataset.state !== \"running\") return false;"
-      assert_includes response.body, "if (event.repeat) return true;"
-      assert_includes response.body, "showStatus(\"Press ESC again to stop current task\", true);"
-      assert_includes response.body, "if (composerState) composerState.textContent = \"Stopping current task…\";"
-      assert_includes response.body, "abortForm.requestSubmit();"
-      assert_includes response.body, "if (event.key === \"Escape\" && confirmOrStopRunningTask(event)) return;"
-      assert_includes response.body, "Send follow-up…"
+      assert_includes APP_JAVASCRIPT, "function composingFollowUp()"
+      assert_includes APP_JAVASCRIPT, "if (composingFollowUp()) return showQueuedSlashCommandMessage();"
+      assert_includes APP_JAVASCRIPT, "const query = promptTextarea.value.startsWith(\"/\") ? promptTextarea.value.slice(1).trim().toLowerCase() : \"\";"
+      assert_includes APP_JAVASCRIPT, "function selectHighlightedCommand()"
+      assert_includes APP_JAVASCRIPT, "setComposerState(\"running\", \"Pi is running…\");"
+      assert_includes APP_JAVASCRIPT, "composerState.textContent = \"Press ESC again to stop current task\";"
+      assert_includes APP_JAVASCRIPT, "composerStopButton = document.querySelector(\".session-header .composer-stop-button\") || null;"
+      assert_includes APP_JAVASCRIPT, "const agentBusy = [\"running\", \"sending\"].includes(state);"
+      assert_includes APP_JAVASCRIPT, "promptTextarea.disabled = submitting;"
+      assert_includes APP_JAVASCRIPT, "if (!submitting && restorePromptFocusAfterSending)"
+      assert_includes APP_JAVASCRIPT, "promptTextarea.focus({ preventScroll: true });"
+      assert_includes APP_JAVASCRIPT, "composerStopButton.hidden = !agentBusy;"
+      assert_includes APP_JAVASCRIPT, "if (followUp) formData.set(\"streaming_behavior\", \"follow_up\");"
+      assert_includes APP_JAVASCRIPT, "const attachmentsDisabled = submitting;"
+      assert_includes APP_JAVASCRIPT, "addImageFiles(files);"
+      assert_includes APP_JAVASCRIPT, "function confirmOrStopRunningTask(event)"
+      assert_includes APP_JAVASCRIPT, "if (composerState?.dataset.state !== \"running\") return false;"
+      assert_includes APP_JAVASCRIPT, "if (event.repeat) return true;"
+      assert_includes APP_JAVASCRIPT, "showStatus(\"Press ESC again to stop current task\", true);"
+      assert_includes APP_JAVASCRIPT, "if (composerState) composerState.textContent = \"Stopping current task…\";"
+      assert_includes APP_JAVASCRIPT, "abortForm.requestSubmit();"
+      assert_includes APP_JAVASCRIPT, "if (event.key === \"Escape\" && confirmOrStopRunningTask(event)) return;"
+      assert_includes APP_JAVASCRIPT, "Send follow-up…"
     end
   end
 
@@ -5126,13 +5188,13 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "function notifyFinalAssistantReply(event)"
-      assert_includes response.body, "if (roleName !== \"assistant\" || event.type !== \"message_end\") return;"
-      assert_includes response.body, "if (sessionIsActivelyViewed(sessionPath)) return;"
-      assert_includes response.body, "const body = notificationReplyPreview(finalAssistantReplyText(message));"
-      assert_includes response.body, "if (notificationsDisabled()) return;"
-      assert_includes response.body, "showPiNotification(name, body, window.location.href, `pi-final-reply:${sessionPath}`)"
-      assert_includes response.body, "notifyFinalAssistantReply(event);"
+      assert_includes APP_JAVASCRIPT, "function notifyFinalAssistantReply(event)"
+      assert_includes APP_JAVASCRIPT, "if (roleName !== \"assistant\" || event.type !== \"message_end\") return;"
+      assert_includes APP_JAVASCRIPT, "if (sessionIsActivelyViewed(sessionPath)) return;"
+      assert_includes APP_JAVASCRIPT, "const body = notificationReplyPreview(liveMessageParser.finalAssistantReplyText(message));"
+      assert_includes APP_JAVASCRIPT, "if (notificationsDisabled()) return;"
+      assert_includes APP_JAVASCRIPT, "showPiNotification(name, body, window.location.href, `pi-final-reply:${sessionPath}`)"
+      assert_includes APP_JAVASCRIPT, "notifyFinalAssistantReply(event);"
     end
   end
 
@@ -5144,12 +5206,12 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "const previousAssistantCounts = sidebarAssistantResponseCounts();"
-      assert_includes response.body, "notifyBackgroundFinalReplies(previousAssistantCounts);"
-      assert_includes response.body, "if (sessionPath === currentSessionPath()) return;"
-      assert_includes response.body, "const key = [sessionPath, currentCount].join(\":\");"
-      assert_includes response.body, "const body = notificationReplyPreview(link.dataset.latestAssistantResponsePreview);"
-      assert_includes response.body, "showPiNotification(name, body, sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`)"
+      assert_includes APP_JAVASCRIPT, "const previousAssistantCounts = this.assistantResponseCounts(oldElement);"
+      assert_includes APP_JAVASCRIPT, "this.notifyBackgroundFinalReplies(previousAssistantCounts);"
+      assert_includes APP_JAVASCRIPT, "sessionPath === this.currentSessionPath()"
+      assert_includes APP_JAVASCRIPT, 'const key = `${sessionPath}:${currentCount}`;'
+      assert_includes APP_JAVASCRIPT, "notificationReplyPreview(link.dataset.latestAssistantResponsePreview)"
+      assert_includes APP_JAVASCRIPT, "this.notifyFinalReply(name,"
     end
   end
 
@@ -5165,19 +5227,19 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "function segmentIdentity(event, segment, fallbackIndex)"
-      assert_includes response.body, "event.assistantMessageEvent || {}"
-      assert_includes response.body, "segment.startIndex ?? update.contentIndex ?? fallbackIndex"
-      assert_includes response.body, "function upsertLiveAssistantSegment(event, roleName, segment, fallbackIndex, shouldScroll, timestamp)"
-      assert_includes response.body, "const existing = liveAssistantSegments.get(key);"
-      assert_includes response.body, "const updated = updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);"
-      assert_includes response.body, "liveAssistantSegments.set(key, entry);"
-      assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_start\") {\n        forceBottomAutoScroll = false;\n        followOversizedMessageBottom = false;\n        clearLiveAssistantStreaming();\n        resetLiveAssistantTracking();\n      }"
-      assert_includes response.body, "let liveAgentRunning = false;"
-      assert_includes response.body, "if (event.type === \"turn_end\") {"
-      assert_includes response.body, "if (!liveErrorSeen) {\n          if (liveAssistantSeen) showStatus(\"Done\");\n          if (!liveAgentRunning) setComposerState(\"done\", \"Done\");\n        }\n        clearLiveAssistantStreaming();\n        resetLiveAssistantTracking();"
-      assert_includes response.body, "if (event.type === \"agent_end\") {"
-      assert_includes response.body, "liveAgentRunning = false;\n        if (renderErrorEvent(event)) {\n          clearLiveAssistantStreaming();\n          resetLiveAssistantTracking();\n          return;\n        }\n        if (!liveErrorSeen) {\n          if (liveAssistantSeen) showStatus(\"Done\");\n          setComposerState(\"done\", \"Done\");\n        }\n        clearLiveAssistantStreaming();\n        resetLiveAssistantTracking();"
+      assert_includes APP_JAVASCRIPT, "segmentIdentity(event, segment, fallbackIndex)"
+      assert_includes APP_JAVASCRIPT, "event.assistantMessageEvent || {}"
+      assert_includes APP_JAVASCRIPT, "segment.startIndex ?? update.contentIndex ?? fallbackIndex"
+      assert_includes APP_JAVASCRIPT, "upsertLiveAssistantSegment(event, roleName, segment, fallbackIndex, shouldScroll, timestamp)"
+      assert_includes APP_JAVASCRIPT, "const existing = this.liveAssistantSegments.get(key);"
+      assert_includes APP_JAVASCRIPT, "const updated = this.updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);"
+      assert_includes APP_JAVASCRIPT, "this.liveAssistantSegments.set(key, entry);"
+      assert_includes APP_JAVASCRIPT, "this.conversationController.resetOversizedFollow();"
+      assert_includes APP_JAVASCRIPT, "this.clearLiveAssistantStreaming();"
+      assert_includes APP_JAVASCRIPT, "let liveAgentRunning = false;"
+      assert_includes APP_JAVASCRIPT, "if (event.type === \"turn_end\") {"
+      assert_includes APP_JAVASCRIPT, "liveMessageRenderer.resetLiveAssistantTracking();"
+      assert_includes APP_JAVASCRIPT, "if (event.type === \"agent_end\") {"
     end
   end
 
@@ -5217,10 +5279,10 @@ class AppTest < Minitest::Test
       assert_includes unread_response.body, "data-assistant-response-count=\"1\""
 
       page_response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => first_path })
-      assert_includes page_response.body, "a.session.unread .session-title"
-      assert_includes page_response.body, "a.session.unread .session-indicators::before"
-      assert_includes page_response.body, "content: \"new\""
-      refute_includes page_response.body, "localStorage.getItem(\"piSidebarUnreadSessions\")"
+      assert_includes APP_STYLESHEET, "a.session.unread .session-title"
+      assert_includes APP_STYLESHEET, "a.session.unread .session-indicators::before"
+      assert_includes APP_STYLESHEET, "content: \"new\""
+      refute_includes APP_JAVASCRIPT, "localStorage.getItem(\"piSidebarUnreadSessions\")"
 
       read_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => second_path })
       assert_empty Nokogiri::HTML(read_response.body).css("a.session.unread")
@@ -5234,9 +5296,9 @@ class AppTest < Minitest::Test
       PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
       initial_response = Rack::MockRequest.new(PiWebGateway).get("/")
-      assert_includes initial_response.body, "function sidebarFragmentUrl(url = window.location.href)"
-      assert_includes initial_response.body, "if (!sidebarUrl.searchParams.has(\"session\"))"
-      assert_includes initial_response.body, "a.session.selected[data-session-path]"
+      assert_includes APP_JAVASCRIPT, "fragmentUrl(url = this.window.location.href)"
+      assert_includes APP_JAVASCRIPT, "if (!sidebarUrl.searchParams.has(\"session\"))"
+      assert_includes APP_JAVASCRIPT, "a.session.selected[data-session-path]"
 
       File.write(first_path, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Background done" }] } }) + "\n", mode: "a")
       Rack::MockRequest.new(PiWebGateway).get("/sidebar")
@@ -5275,12 +5337,12 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path, "session_only" => "1" })
 
       assert_equal 200, response.status
-      assert_includes response.body, "function markCurrentSessionRead()"
-      assert_includes response.body, "fetch(\"/sessions/mark_read\""
-      assert_includes response.body, "if (roleName === \"assistant\" && event.type === \"message_end\") markCurrentSessionRead();"
-      assert_includes response.body, "if (document.hidden || !document.hasFocus())"
-      assert_includes response.body, "markReadAfterVisible = true;"
-      assert_includes response.body, "if (markReadAfterVisible) markCurrentSessionRead();"
+      assert_includes APP_JAVASCRIPT, "function markCurrentSessionRead()"
+      assert_includes APP_JAVASCRIPT, "fetch(\"/sessions/mark_read\""
+      assert_includes APP_JAVASCRIPT, "if (outcome.assistantEnded) markCurrentSessionRead();"
+      assert_includes APP_JAVASCRIPT, "if (document.hidden || !document.hasFocus())"
+      assert_includes APP_JAVASCRIPT, "markReadAfterVisible = true;"
+      assert_includes APP_JAVASCRIPT, "if (markReadAfterVisible) markCurrentSessionRead();"
     end
   end
 
@@ -5367,12 +5429,12 @@ class AppTest < Minitest::Test
       assert_includes response.body, "data-composer-state=\"running\""
       assert_includes response.body, "data-composer-state-since=\"1000000\""
       assert_includes response.body, "data-agent-running=\"true\""
-      assert_includes response.body, "const initialComposerState = liveOutput.dataset.composerState;"
-      assert_includes response.body, "const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);"
-      assert_includes response.body, "liveAgentRunning = liveOutput.dataset.agentRunning === \"true\";"
-      assert_includes response.body, "setComposerState(initialComposerState, \"Pi is running…\", initialComposerStateSince);"
-      assert_includes response.body, "if (state === \"running\" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());"
-      assert_includes response.body, "payload.events.length > 0 && composerState?.dataset.state === \"running\" && !waitingForOutputSince"
+      assert_includes APP_JAVASCRIPT, "const initialComposerState = liveOutput.dataset.composerState;"
+      assert_includes APP_JAVASCRIPT, "const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);"
+      assert_includes APP_JAVASCRIPT, "liveAgentRunning = liveOutput.dataset.agentRunning === \"true\";"
+      assert_includes APP_JAVASCRIPT, "setComposerState(initialComposerState, \"Pi is running…\", initialComposerStateSince);"
+      assert_includes APP_JAVASCRIPT, "if (state === \"running\" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());"
+      assert_includes APP_JAVASCRIPT, "payload.events.length > 0 && composerState?.dataset.state === \"running\" && !waitingForOutputSince"
     end
   end
 
@@ -5394,12 +5456,12 @@ class AppTest < Minitest::Test
       assert_includes scroll["data-older-messages-url"], "/conversation_older"
       status = scroll.at_css("[data-conversation-history-status]")
       assert_equal "Loading earlier messages…", status.text.strip
-      assert_includes response.body, ".conversation-history-status"
-      assert_includes response.body, "function finishConversationHistoryStatus()"
-      assert_includes response.body, "function failConversationHistoryStatus()"
-      assert_includes response.body, "loadOlderConversationHistory"
-      assert_includes response.body, "previousHeight"
-      assert_includes response.body, "conversationScroll.scrollTop = previousTop + (conversationScroll.scrollHeight - previousHeight)"
+      assert_includes APP_STYLESHEET, ".conversation-history-status"
+      assert_includes APP_JAVASCRIPT, "finishHistoryStatus()"
+      assert_includes APP_JAVASCRIPT, "failHistoryStatus()"
+      assert_includes APP_JAVASCRIPT, "loadOlderHistory()"
+      assert_includes APP_JAVASCRIPT, "previousHeight"
+      assert_includes APP_JAVASCRIPT, "this.element.scrollTop = previousTop + (this.element.scrollHeight - previousHeight)"
     end
   end
 
@@ -5574,22 +5636,22 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_includes response.body, "color-scheme: dark"
-      assert_includes response.body, "session-running-indicator"
+      assert_includes APP_STYLESHEET, "color-scheme: dark"
+      assert_includes APP_STYLESHEET, "session-running-indicator"
       refute_includes response.body, ">active</span>"
       assert_includes response.body, "copy-button"
-      assert_includes response.body, "code-block-copy-button"
+      assert_includes APP_JAVASCRIPT, "code-block-copy-button"
       assert_includes response.body, "data-copy-target"
-      assert_includes response.body, "enhanceMarkdownCodeBlocks(body)"
-      assert_includes response.body, 'button.dataset.copyTarget === "code-block"'
-      assert_includes response.body, "window.piGatewayElectron?.copyText"
-      assert_includes response.body, "navigator.clipboard.writeText"
-      assert_includes response.body, "window.isSecureContext"
-      assert_includes response.body, "catch (_error)"
-      assert_includes response.body, "document.execCommand(\"copy\")"
-      assert_includes response.body, "Copy failed"
-      assert_includes response.body, "empty-state"
-      assert_includes response.body, "button:hover"
+      assert_includes APP_JAVASCRIPT, "enhanceMarkdownCodeBlocks(job.body, this.document)"
+      assert_includes APP_JAVASCRIPT, 'button.dataset.copyTarget === "code-block"'
+      assert_includes APP_JAVASCRIPT, "window.piGatewayElectron?.copyText"
+      assert_includes APP_JAVASCRIPT, "navigator.clipboard.writeText"
+      assert_includes APP_JAVASCRIPT, "window.isSecureContext"
+      assert_includes APP_JAVASCRIPT, "catch (_error)"
+      assert_includes APP_JAVASCRIPT, "document.execCommand(\"copy\")"
+      assert_includes APP_JAVASCRIPT, "Copy failed"
+      assert_includes APP_STYLESHEET, "empty-state"
+      assert_includes APP_STYLESHEET, "button:hover"
     end
   end
 

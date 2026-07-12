@@ -3,12 +3,12 @@ require "json"
 require "open3"
 
 class ModelSettingsJsTest < Minitest::Test
-  VIEW_PATH = File.expand_path("../views/index.erb", __dir__)
+  ASSET_PATH = File.expand_path("../public/assets/app.js", __dir__)
+  MODEL_HELPERS_URL = "file://#{File.expand_path("../public/assets/model.js", __dir__)}"
 
   def test_supported_thinking_levels_follow_model_capabilities
     results = run_javascript(<<~JS)
-      const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-      #{javascript_function("supportedThinkingLevels")}
+      const { supportedThinkingLevels } = await import(#{MODEL_HELPERS_URL.to_json});
       console.log(JSON.stringify([
         supportedThinkingLevels({ reasoning: false, thinkingLevelMap: { off: null } }),
         supportedThinkingLevels({ reasoning: true }),
@@ -27,9 +27,7 @@ class ModelSettingsJsTest < Minitest::Test
 
   def test_unsupported_current_thinking_level_gets_a_visual_fallback
     results = run_javascript(<<~JS)
-      const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-      #{javascript_function("supportedThinkingLevels")}
-      #{javascript_function("selectedThinkingLevel")}
+      const { selectedThinkingLevel } = await import(#{MODEL_HELPERS_URL.to_json});
       console.log(JSON.stringify([
         selectedThinkingLevel({ reasoning: true }, "max"),
         selectedThinkingLevel({ reasoning: true, thinkingLevelMap: { minimal: null } }, "minimal"),
@@ -66,11 +64,11 @@ class ModelSettingsJsTest < Minitest::Test
   private
 
   def javascript_function(name)
-    File.read(VIEW_PATH).match(/^    function #{Regexp.escape(name)}\b.*?^    }$/m)&.[](0) || flunk("Missing JavaScript function #{name}")
+    File.read(ASSET_PATH).match(/^function #{Regexp.escape(name)}\b.*?^}$/m)&.[](0) || flunk("Missing JavaScript function #{name}")
   end
 
   def run_javascript(source)
-    stdout, stderr, status = Open3.capture3("node", "-e", source)
+    stdout, stderr, status = Open3.capture3("node", "--input-type=module", "-e", source)
     assert status.success?, stderr
     JSON.parse(stdout)
   end

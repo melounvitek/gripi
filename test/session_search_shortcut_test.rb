@@ -3,11 +3,12 @@ require "json"
 require "open3"
 
 class SessionSearchShortcutTest < Minitest::Test
-  VIEW_PATH = File.expand_path("../views/index.erb", __dir__)
+  ASSET_PATH = File.expand_path("../public/assets/app.js", __dir__)
+  SHORTCUT_HELPERS_URL = "file://#{File.expand_path("../public/assets/shortcuts.js", __dir__)}"
 
   def test_shift_find_shortcut_accepts_ctrl_or_command_and_ignores_alt
     results = run_javascript(<<~JS)
-      #{javascript_function("sessionSearchShortcut")}
+      const { sessionSearchShortcut } = await import(#{SHORTCUT_HELPERS_URL.to_json});
       console.log(JSON.stringify([
         sessionSearchShortcut({ key: "f", ctrlKey: true, shiftKey: true }),
         sessionSearchShortcut({ key: "F", metaKey: true, shiftKey: true }),
@@ -58,12 +59,15 @@ class SessionSearchShortcutTest < Minitest::Test
         querySelector(selector) { return selector === ".session-sidebar" ? sidebar : null; },
         getElementById(id) { return id === "mobile-session-toggle" ? mobileToggle : null; }
       };
-      const modalIsOpen = () => false;
-      #{javascript_function("sessionSearchShortcut")}
-      #{javascript_function("setSessionSearchOpen")}
-      #{javascript_function("openSessionSearch")}
-      #{javascript_function("requestSessionSearch")}
-      #{javascript_function("handleSessionSearchShortcut")}
+      const { SidebarController } = await import("file://#{File.expand_path("../public/assets/sidebar_controller.js", __dir__)}");
+      const { sessionSearchShortcut } = await import(#{SHORTCUT_HELPERS_URL.to_json});
+      const controller = new SidebarController(document, { location: { href: "https://example.test/", origin: "https://example.test" } }, { isActive() {} }, { apply() {} }, () => {});
+      controller.element = sidebar;
+      const handleSessionSearchShortcut = (event) => {
+        if (!sessionSearchShortcut(event) || !controller.openSearch()) return false;
+        event.preventDefault();
+        return true;
+      };
       const event = {
         key: "f",
         ctrlKey: true,
@@ -123,8 +127,14 @@ class SessionSearchShortcutTest < Minitest::Test
         activeElement: input,
         getElementById(id) { return id === "mobile-session-toggle" ? mobileToggle : null; }
       };
-      #{javascript_function("setSessionSearchOpen")}
-      #{javascript_function("closeSessionSearch")}
+      const { SidebarController } = await import("file://#{File.expand_path("../public/assets/sidebar_controller.js", __dir__)}");
+      const controller = new SidebarController(document, { location: { href: "https://example.test/", origin: "https://example.test" } }, { isActive() {} }, { apply() {} }, () => {});
+      controller.element = sidebar;
+      const closeSessionSearch = (event) => {
+        const closed = controller.closeSearch(event);
+        if (closed) promptTextarea.focus({ preventScroll: true });
+        return closed;
+      };
       const event = {
         key: "Escape",
         target: input,
@@ -164,9 +174,9 @@ class SessionSearchShortcutTest < Minitest::Test
         querySelector() { return null; },
         getElementById() { return null; }
       };
-      #{javascript_function("setSessionSearchOpen")}
-      #{javascript_function("openSessionSearch")}
-      console.log(JSON.stringify(openSessionSearch()));
+      const { SidebarController } = await import("file://#{File.expand_path("../public/assets/sidebar_controller.js", __dir__)}");
+      const controller = new SidebarController(document, { location: { href: "https://example.test/", origin: "https://example.test" } }, { isActive() {} }, { apply() {} }, () => {});
+      console.log(JSON.stringify(controller.openSearch()));
     JS
 
     assert_equal false, results
@@ -186,7 +196,7 @@ class SessionSearchShortcutTest < Minitest::Test
   end
 
   def test_keyboard_and_desktop_events_share_find_actions
-    script = File.read(VIEW_PATH)
+    script = File.read(ASSET_PATH)
 
     assert_includes script, "if (handleSessionSearchShortcut(event)) return;"
     assert_includes script, 'window.addEventListener("pi:current-session-find-requested", requestCurrentSessionFind);'
@@ -196,11 +206,11 @@ class SessionSearchShortcutTest < Minitest::Test
   private
 
   def javascript_function(name)
-    File.read(VIEW_PATH).match(/^    function #{Regexp.escape(name)}\b.*?^    }$/m)&.[](0) || flunk("Missing JavaScript function #{name}")
+    File.read(ASSET_PATH).match(/^function #{Regexp.escape(name)}\b.*?^}$/m)&.[](0) || flunk("Missing JavaScript function #{name}")
   end
 
   def run_javascript(source)
-    stdout, stderr, status = Open3.capture3("node", "-e", source)
+    stdout, stderr, status = Open3.capture3("node", "--input-type=module", "-e", source)
     assert status.success?, stderr
     JSON.parse(stdout)
   end

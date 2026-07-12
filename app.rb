@@ -30,6 +30,9 @@ class PiWebGateway < Sinatra::Base
   register Web::SessionActionRoutes
 
   set :root, File.dirname(__FILE__)
+  set :public_folder, File.join(root, "public")
+  set :static, true
+  set :static_cache_control, [:no_cache]
   set :sessions_root, ENV.fetch("PI_SESSIONS_ROOT", File.expand_path("~/.pi/agent/sessions"))
   set :attachments_root, ENV.fetch("PI_ATTACHMENTS_ROOT", File.expand_path("~/.pi/web-gateway/attachments"))
   GATEWAY_ENV_PATH = ENV.fetch("PI_GATEWAY_ENV_PATH", File.expand_path("~/.config/pi-web-gateway/env"))

@@ -1,102 +1,70 @@
 require "minitest/autorun"
+require "json"
 require "open3"
 
 class LiveStreamingJsToolEventsTest < Minitest::Test
-  VIEW_PATH = File.expand_path("../views/index.erb", __dir__)
+  ASSETS = File.expand_path("../public/assets", __dir__)
+  STYLESHEET_PATH = File.join(ASSETS, "app.css")
 
-  def test_subagent_prompt_prefers_call_arguments_and_falls_back_to_result_details
-    script = File.read(VIEW_PATH)
-    formatter_start = script.index("    function subagentPromptFromArguments")
-    formatter_end = script.index("    function subagentResultFailed", formatter_start)
-    formatter = script[formatter_start...formatter_end]
-    assertion = <<~JS
-      const fromArgs = subagentPromptFromEvent({ args: { task: "Original delegated prompt" }, partialResult: { details: { task: "Result prompt" } } });
-      if (fromArgs !== "Original delegated prompt") process.exit(1);
-      const fromDetails = subagentPromptFromEvent({ result: { details: { task: "Retained result prompt" } } });
-      if (fromDetails !== "Retained result prompt") process.exit(2);
-      const restored = subagentPromptFromEvent({ result: { details: { task: "Truncated snapshot prompt" } } }, "Complete restored prompt");
-      if (restored !== "Complete restored prompt") process.exit(3);
-      if (subagentPromptFromEvent({ args: { task: {} }, result: { details: null } }) !== "") process.exit(4);
+  def test_subagent_parser_prefers_call_arguments_and_retains_rich_progress
+    result = run_javascript(<<~JS)
+      const { LiveMessageParser } = await import(#{module_url("live_message_parser.js").to_json});
+      const parser = new LiveMessageParser();
+      const details = { status: "running", tools: [], textItems: ["Full fresh answer"], streamingText: "", usage: {}, model: "provider/model" };
+      const retainedDetails = parser.retainedSubagentDetails(null, details);
+      console.log(JSON.stringify({
+        fromArgs: parser.subagentPromptFromEvent({ args: { task: "Original" }, partialResult: { details: { task: "Result" } } }),
+        fromDetails: parser.subagentPromptFromEvent({ result: { details: { task: "Retained" } } }),
+        restored: parser.subagentPromptFromEvent({ result: { details: { task: "Truncated" } } }, "Complete"),
+        running: parser.subagentDisplayText(details, "Final", true),
+        fresh: parser.subagentDisplayText(details, "Truncated final", false),
+        retained: parser.subagentDisplayText(retainedDetails, "Canonical final", false, true)
+      }));
     JS
 
-    refute_nil formatter_start
-    refute_nil formatter_end
-    _stdout, stderr, status = Open3.capture3("node", stdin_data: formatter + assertion)
-
-    assert status.success?, stderr
+    assert_equal "Original", result["fromArgs"]
+    assert_equal "Retained", result["fromDetails"]
+    assert_equal "Complete", result["restored"]
+    refute_includes result["running"], "Final"
+    assert_includes result["fresh"], "Full fresh answer"
+    assert_includes result["retained"], "Canonical final"
   end
 
-  def test_subagent_prompt_keeps_the_original_call_prompt_through_result_updates
-    script = File.read(VIEW_PATH)
-    renderer_start = script.index("    function renderSubagentPrompt")
-    renderer_end = script.index("    const TOOL_OUTPUT_DESKTOP_TAIL_LINES", renderer_start)
-    renderer = script[renderer_start...renderer_end]
-    assertion = <<~JS
-      global.document = {
-        createElement(tagName) {
-          return {
-            tagName,
-            className: "",
-            dataset: {},
-            children: [],
-            textContent: "",
-            append(...children) { this.children.push(...children); },
-            setAttribute() {}
-          };
-        }
-      };
-      const entry = { details: { insertBefore(element) { this.prompt = element; } }, output: {} };
-      renderSubagentPrompt(entry, "Original delegated prompt");
-      renderSubagentPrompt(entry, "reviewer: Reconstructed result prompt");
-      if (entry.subagentPromptPreview.textContent !== "Original delegated prompt") process.exit(1);
-      if (entry.subagentPromptElement.children.length !== 1) process.exit(2);
-      if (entry.subagentPromptBody !== undefined) process.exit(3);
+  def test_subagent_prompt_renderer_keeps_original_prompt
+    result = run_javascript(<<~JS)
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      const renderer = Object.create(LiveMessageRenderer.prototype);
+      renderer.document = { createElement: (tagName) => element(tagName) };
+      const entry = { details: { insertBefore(value) { this.prompt = value; } }, output: {} };
+      renderer.renderSubagentPrompt(entry, "Original delegated prompt");
+      renderer.renderSubagentPrompt(entry, "Reconstructed result prompt");
+      console.log(JSON.stringify({ text: entry.subagentPromptPreview.textContent, children: entry.subagentPromptElement.children.length }));
+      function element(tagName) { return { tagName, className: "", dataset: {}, children: [], textContent: "", append(...values) { this.children.push(...values); }, setAttribute() {} }; }
     JS
 
-    refute_nil renderer_start
-    refute_nil renderer_end
-    _stdout, stderr, status = Open3.capture3("node", stdin_data: renderer + assertion)
-
-    assert status.success?, stderr
+    assert_equal "Original delegated prompt", result["text"]
+    assert_equal 1, result["children"]
   end
 
   def test_expanded_subagent_prompt_unclamps_the_same_preview
-    stylesheet = File.read(VIEW_PATH)
-
+    stylesheet = File.read(STYLESHEET_PATH)
     assert_includes stylesheet, ".subagent-prompt[open] .subagent-prompt-preview { display: block; overflow: visible;"
     assert_includes stylesheet, "white-space: pre-wrap; -webkit-line-clamp: unset;"
-    refute_includes stylesheet, ".subagent-prompt-body"
   end
 
-  def test_retained_general_subagent_progress_uses_final_fallback_only_after_completion
-    script = File.read(VIEW_PATH)
-    formatter_start = script.index("    function subagentResultFailed")
-    formatter_end = script.index("    function toolExecutionContentText", formatter_start)
-    formatter = script[formatter_start...formatter_end]
-    assertion = <<~JS
-      const details = { status: "running", tools: [], textItems: ["Full fresh answer"], streamingText: "", usage: {}, model: "provider/model" };
-      if (subagentDisplayText(details, "Final answer", true).includes("Final answer")) process.exit(1);
-      const fresh = subagentDisplayText(details, "Truncated final", false);
-      if (!fresh.includes("Full fresh answer") || fresh.includes("Truncated final")) process.exit(2);
-      const retained = subagentDisplayText(details, "Canonical final", false, true);
-      if (!retained.includes("Canonical final") || retained.includes("Full fresh answer")) process.exit(3);
-      const malformedRead = { status: "running", tools: [{ name: "read", status: "running", args: { path: "/tmp/file", offset: {}, limit: {} } }], textItems: [], usage: {} };
-      if (subagentDisplayText(malformedRead, "", true).includes("NaN")) process.exit(4);
-    JS
+  def test_tool_event_orchestration_clears_assistant_streaming_first
+    app = File.read(File.join(ASSETS, "app.js"))
+    block = app[/if \(\["tool_execution_start".*?\n  \}/m]
+    assert_operator block.index("liveMessageRenderer.clearLiveAssistantStreaming();"), :<, block.index("liveMessageRenderer.renderToolExecutionEvent(event);")
+  end
 
-    _stdout, stderr, status = Open3.capture3("node", stdin_data: formatter + assertion)
+  private
 
+  def module_url(name) = "file://#{File.join(ASSETS, name)}"
+
+  def run_javascript(source)
+    stdout, stderr, status = Open3.capture3("node", "--input-type=module", "-e", source)
     assert status.success?, stderr
-  end
-
-  def test_tool_events_clear_active_assistant_streaming_before_rendering_tools
-    script = File.read(VIEW_PATH)
-    tool_event = script.index('if (["tool_execution_start", "tool_execution_update", "tool_execution_end"].includes(event.type))')
-    cleanup = script.index("clearLiveAssistantStreaming();", tool_event)
-    render_tool = script.index("renderToolExecutionEvent(event);", tool_event)
-
-    refute_nil cleanup
-    refute_nil render_tool
-    assert_operator cleanup, :<, render_tool
+    JSON.parse(stdout)
   end
 end

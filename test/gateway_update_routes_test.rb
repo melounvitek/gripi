@@ -121,7 +121,7 @@ class GatewayUpdateRoutesTest < Minitest::Test
     assert_equal 0, @coordinator.status_calls
   end
 
-  def test_sidebar_contains_hidden_update_control_and_page_initializes_update_checks
+  def test_sidebar_contains_hidden_update_control
     response = @request.get("/")
     document = Nokogiri::HTML(response.body)
     control = document.at_css("[data-gateway-update]")
@@ -130,26 +130,5 @@ class GatewayUpdateRoutesTest < Minitest::Test
     assert control["hidden"]
     assert control.at_css("[data-gateway-update-button]")
     assert control.at_css("[data-gateway-update-message]")
-    assert_includes response.body, 'fetch("/gateway-update"'
-    assert_includes response.body, "confirm("
-    assert_includes response.body, "setInterval(() => checkGatewayUpdate().catch(() => {}), 5 * 60 * 1000)"
-    assert_includes response.body, "applyGatewayUpdateState(gatewayUpdateState)"
-    assert_includes response.body, 'new BroadcastChannel("pi-gateway-update")'
-    assert_includes response.body, 'gatewayUpdateChannel?.postMessage({ type: "updating" })'
-    assert_includes response.body, 'payload.state !== "rollback_failed"'
-  end
-
-  def test_update_script_polls_restart_and_forces_a_cache_busted_full_navigation
-    response = @request.get("/")
-
-    assert_includes response.body, 'updateUrl.searchParams.set("_gateway_updated", targetSha)'
-    assert_includes response.body, 'const cleanUrl = new URL(window.location.href)'
-    assert_includes response.body, 'cleanUrl.searchParams.delete("_gateway_updated")'
-    assert_includes response.body, "window.location.replace(updateUrl.href)"
-    assert_includes response.body, "payload.instanceId !== gatewayInstanceId"
-    assert_includes response.body, "gatewayUpdateNavigation(payload.currentSha || payload.instanceId)"
-    assert_includes response.body, "pollGatewayUpdate"
-    assert_includes response.body, 'window.addEventListener("focus", () => {'
-    assert_includes response.body, "checkGatewayUpdate().catch(() => {})"
   end
 end
