@@ -82,7 +82,6 @@ let modelSettingsSelectedKey = null;
 let modelSettingsOperationGeneration = 0;
 let thinkingCyclePending = false;
 let pendingImages = [];
-let restorePromptFocusAfterSending = false;
 let escapeStopConfirmationExpiresAt = 0;
 let eventPollTimer = null;
 let eventPollInFlight = false;
@@ -186,8 +185,15 @@ function handleCurrentSessionFindShortcut(event) {
   return true;
 }
 
-function shouldAutofocusPrompt() {
+function automaticComposerFocusEnabled() {
   return window.matchMedia?.("(pointer: fine)").matches !== false;
+}
+
+function syncComposerFocus(state = composerState?.dataset.state) {
+  if (!automaticComposerFocusEnabled() || modalIsOpen()) return;
+
+  const target = ["running", "sending"].includes(state) ? conversationScroll : promptTextarea;
+  target?.focus({ preventScroll: true });
 }
 
 function desktopConversationFocusEnabled() {
@@ -607,7 +613,7 @@ function stopWaitingForOutput() {
   waitingForOutputTimer = null;
 }
 
-function setComposerState(state, label, since = null) {
+function setComposerState(state, label = "", { since = null, focus = true } = {}) {
   const previousState = composerState?.dataset.state;
   if (state === "running" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());
   if (state !== "running") escapeStopConfirmationExpiresAt = 0;
@@ -630,14 +636,8 @@ function setComposerState(state, label, since = null) {
     composerStopButton.disabled = !agentBusy;
     composerStopButton.classList.toggle("is-visible", agentBusy);
   }
-  if (promptTextarea) {
-    if (submitting && document.activeElement === promptTextarea) restorePromptFocusAfterSending = true;
-    promptTextarea.disabled = submitting;
-    if (!submitting && restorePromptFocusAfterSending) {
-      restorePromptFocusAfterSending = false;
-      if (shouldAutofocusPrompt()) promptTextarea.focus({ preventScroll: true });
-    }
-  }
+  if (promptTextarea) promptTextarea.disabled = submitting;
+  if (focus && state !== previousState) syncComposerFocus(state);
   const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]');
   if (modelButton) modelButton.disabled = agentBusy;
   const modelApply = document.querySelector('[data-modal="model-settings-modal"] [data-model-settings-apply]');
@@ -811,9 +811,9 @@ function renderEvent(event) {
     if (promptTextarea) {
       promptTextarea.value = event.text || "";
       resizePromptTextarea();
-      if (shouldAutofocusPrompt()) promptTextarea.focus({ preventScroll: true });
     }
-    setComposerState("idle");
+    setComposerState("idle", "", { focus: false });
+    syncComposerFocus();
     showStatus("Tree position selected");
     return;
   }
@@ -1105,7 +1105,6 @@ async function submitPrompt(event) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
-  if (shouldAutofocusPrompt()) promptTextarea.focus();
   setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…");
   showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…", true);
   if (cloneCommand || newCommand) showSessionSwitching();
@@ -1124,7 +1123,7 @@ async function submitPrompt(event) {
   const showPromptFailure = (errorMessage) => {
     restoreSubmittedComposerInput();
     if (followUp) {
-      setComposerState("running", "Pi is running…", previousWaitingForOutputSince);
+      setComposerState("running", "Pi is running…", { since: previousWaitingForOutputSince });
       showStatus(errorMessage, true);
       return;
     }
@@ -1189,19 +1188,19 @@ async function submitPrompt(event) {
       return;
     }
     if (payload?.command === "fork") {
-      setComposerState("idle");
+      setComposerState("idle", "", { focus: false });
       showStatus("Choose a fork point", true);
       openForkSessionModal();
       return;
     }
     if (payload?.command === "tree") {
-      setComposerState("idle");
+      setComposerState("idle", "", { focus: false });
       showStatus("Choose a tree entry", true);
       openTreeSessionModal();
       return;
     }
     if (payload?.command === "model") {
-      setComposerState("idle");
+      setComposerState("idle", "", { focus: false });
       openModelSettingsModal();
       return;
     }
@@ -1417,7 +1416,7 @@ function bindSessionControls() {
     }
     if (event.key === "Tab" && toggleConversationPromptFocus(event, conversationScroll)) return;
 
-    if (event.key === "Enter" && !event.shiftKey && shouldAutofocusPrompt()) {
+    if (event.key === "Enter" && !event.shiftKey && automaticComposerFocusEnabled()) {
       event.preventDefault();
       promptForm.requestSubmit();
     }
@@ -1697,8 +1696,8 @@ function focusPromptAfterModalClose(modal) {
   if (modal?.dataset.modal === "model-settings-modal") {
     const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]:not(:disabled)');
     (modelButton || conversationScroll)?.focus({ preventScroll: true });
-  } else if (modal?.dataset.modal === "new-session-modal" && shouldAutofocusPrompt()) {
-    promptTextarea?.focus({ preventScroll: true });
+  } else if (modal?.dataset.modal === "new-session-modal") {
+    syncComposerFocus();
   }
 }
 
@@ -1826,7 +1825,7 @@ async function switchToBranchedSession(payload, { promptText = null } = {}) {
   if (switched && promptText !== null && promptTextarea) {
     promptTextarea.value = promptText;
     resizePromptTextarea();
-    promptTextarea.focus();
+    syncComposerFocus();
   }
   return switched;
 }
@@ -1927,10 +1926,10 @@ document.addEventListener("click", (event) => {
         if (treeOption.dataset.treeEditorText !== undefined && promptTextarea) {
           promptTextarea.value = treeOption.dataset.treeEditorText;
           resizePromptTextarea();
-          if (shouldAutofocusPrompt()) promptTextarea.focus({ preventScroll: true });
         }
         await refreshCurrentSessionPreservingComposer();
-        setComposerState("idle");
+        setComposerState("idle", "", { focus: false });
+        syncComposerFocus();
         showStatus("Tree position selected", true);
         scheduleNextEventPoll(0);
       })
@@ -2054,7 +2053,7 @@ document.addEventListener("submit", async (event) => {
 });
 
 function focusPromptAfterDesktopServerActivation() {
-  if (shouldAutofocusPrompt()) promptTextarea?.focus({ preventScroll: true });
+  syncComposerFocus();
 }
 
 window.addEventListener("pi:new-session-requested", () => openNewSessionModal());
@@ -2096,7 +2095,7 @@ document.addEventListener("keydown", (event) => {
 
   if (handleSessionSearchShortcut(event)) return;
   if (sidebarController.closeSearch(event)) {
-    promptTextarea?.focus({ preventScroll: true });
+    syncComposerFocus();
     return;
   }
   if (handleCurrentSessionFindShortcut(event)) return;
@@ -2237,6 +2236,7 @@ document.addEventListener("click", (event) => {
 });
 
 function initializeSessionView({ focus = true } = {}) {
+  const generation = sessionViewGeneration;
   projectSelectController.initialize(document.querySelector('[data-modal="new-session-modal"]'));
   newSessionFormController.initialize();
   ensureNotificationWorker().catch(() => {});
@@ -2248,16 +2248,17 @@ function initializeSessionView({ focus = true } = {}) {
     const initialComposerState = liveOutput.dataset.composerState;
     const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);
     liveAgentRunning = liveOutput.dataset.agentRunning === "true";
-    if (initialComposerState === "running") setComposerState(initialComposerState, "Pi is running…", initialComposerStateSince);
+    if (initialComposerState === "running") setComposerState(initialComposerState, "Pi is running…", { since: initialComposerStateSince, focus: false });
     liveMessageRenderer.restoreActiveToolExecutions();
     scheduleNextEventPoll(0);
     conversationController.positionInitialAtBottom();
     conversationController.loadOlderHistory().catch(() => {});
     requestAnimationFrame(() => {
+      if (generation !== sessionViewGeneration) return;
       loadStoredComposerDraft();
       updatePromptPlaceholder();
       resizePromptTextarea();
-      if (focus && shouldAutofocusPrompt()) promptTextarea?.focus();
+      if (focus) syncComposerFocus();
       conversationController.forceInitialBottomFollow();
     });
   }
@@ -2288,7 +2289,7 @@ window.addEventListener("focus", () => {
   resumeEventPolling().catch(() => {});
 });
 window.addEventListener("online", () => resumeEventPolling().catch(() => {}));
-window.addEventListener("popstate", () => switchSession(window.location.href, { push: false, focus: false }));
+window.addEventListener("popstate", () => switchSession(window.location.href, { push: false, focus: true }));
 
 function bootstrapPage() {
   gatewayUpdateController.cleanNavigation();

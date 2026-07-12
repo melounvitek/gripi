@@ -69,6 +69,61 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal 2, results.fetch("epoch")
   end
 
+  def test_composer_focus_follows_work_lifecycle_on_desktop
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction desktopConversationFocusEnabled)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let modalOpen = false;
+      const focused = [];
+      const focusTarget = (name) => ({ focus(options) { focused.push([name, options]); } });
+      const window = { matchMedia: () => ({ matches: true }) };
+      const modalIsOpen = () => modalOpen;
+      const promptTextarea = focusTarget("prompt");
+      const conversationScroll = focusTarget("conversation");
+      let composerState = { dataset: { state: "idle" } };
+      eval(#{(focus_source + "\nglobalThis.syncComposerFocusUnderTest = syncComposerFocus;").to_json});
+
+      globalThis.syncComposerFocusUnderTest();
+      globalThis.syncComposerFocusUnderTest("sending");
+      globalThis.syncComposerFocusUnderTest("running");
+      globalThis.syncComposerFocusUnderTest("done");
+      globalThis.syncComposerFocusUnderTest("error");
+      modalOpen = true;
+      globalThis.syncComposerFocusUnderTest("running");
+
+      console.log(JSON.stringify(focused));
+    JS
+
+    assert_equal [
+      ["prompt", { "preventScroll" => true }],
+      ["conversation", { "preventScroll" => true }],
+      ["conversation", { "preventScroll" => true }],
+      ["prompt", { "preventScroll" => true }],
+      ["prompt", { "preventScroll" => true }]
+    ], results
+  end
+
+  def test_composer_focus_remains_automatic_only_for_fine_pointers
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction desktopConversationFocusEnabled)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let focusCount = 0;
+      const window = { matchMedia: () => ({ matches: false }) };
+      const modalIsOpen = () => false;
+      const promptTextarea = { focus() { focusCount += 1; } };
+      const conversationScroll = { focus() { focusCount += 1; } };
+      const composerState = { dataset: { state: "running" } };
+      eval(#{(focus_source + "\nglobalThis.syncComposerFocusUnderTest = syncComposerFocus;").to_json});
+      globalThis.syncComposerFocusUnderTest();
+      globalThis.syncComposerFocusUnderTest("idle");
+      console.log(JSON.stringify({ focusCount }));
+    JS
+
+    assert_equal 0, results.fetch("focusCount")
+  end
+
   def test_stale_failed_session_switch_does_not_replace_a_newer_success
     app_source = File.read(File.join(ASSETS, "app.js"))
     switch_source = app_source.match(/async function switchSession\(.*?(?=\nfunction enterSessionShortcutMode)/m).to_s
