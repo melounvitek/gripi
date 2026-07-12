@@ -6,6 +6,12 @@ Use your Pi sessions from the desktop app or a browser, locally or from another 
 
 I have not really seen the code (this project is my first attempt to try real vibe-coding), but I do use it daily now, and it works really well for me.
 
+## Usage modes
+
+By default, the gateway runs in single-user mode and shows all Pi sessions to one trusted user. Optional multi-user mode gives each user a personal session key and shows only the sessions associated with that key.
+
+Multi-user mode is intended for trusted users. It does not provide OS-level process, filesystem, or credential isolation, and settings such as the selected model and thinking effort are currently shared between users. See [configuration](docs/configuration.md#common-options) to enable it.
+
 ## Install
 
 Requirements:
@@ -38,6 +44,8 @@ PI_GATEWAY_HOST=127.0.0.1 mise run start
 ```
 
 The app connects to the running gateway and can switch between multiple gateway servers. You can also use the gateway directly at <http://localhost:4567>.
+
+There is no mobile app, but on iPhone, adding the gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow works nicely.
 
 ## Updates
 
