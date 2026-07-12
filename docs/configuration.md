@@ -13,6 +13,29 @@ PI_GATEWAY_HOST=100.x.y.z PI_GATEWAY_PORT=4568 mise run start
 
 `PI_GATEWAY_HOST` and `PI_GATEWAY_PORT` choose where the gateway server listens. Set them in the command environment, not only in `~/.config/pi-web-gateway/env`.
 
+## Self-updates
+
+The gateway checks `origin/master` after the page loads and shows a sidebar control when newer commits are available. Anyone who can access the gateway can trigger an update. Updating interrupts active Pi work.
+
+An update is accepted only when the checkout:
+
+- is on `master`
+- has no tracked or untracked changes
+- has no local commits
+- can be fast-forwarded to `origin/master`
+
+The gateway fetches and fast-forwards the checkout, runs `bundle install`, then requests a restart. If dependency installation fails, it resets tracked files to the previous commit and keeps the existing server running. It does not automatically delete newly generated untracked files. The failure remains in the sidebar so any connected browser can see it and retry. If the rollback itself fails, the gateway requires manual checkout recovery instead of offering an unsafe automatic retry.
+
+Automatic restart requires the gateway to be launched through `mise run start` or `bin/start`. The launcher supervises the Rack process itself, so this works with or without systemd. A direct `bundle exec rackup` process can update its checkout but cannot start a replacement server after it exits.
+
+After the replacement server responds, the initiating page and sibling tabs navigate to a cache-busted copy of their current URL. Other open clients detect the replacement periodically or as soon as they regain focus. This performs a complete reload while preserving the selected session and other query state.
+
+The restart marker defaults to `~/.pi/web-gateway/restart-request`. Override it only when needed, and set the override in the launcher process environment—not only in the gateway env file loaded by Ruby:
+
+```sh
+PI_GATEWAY_RESTART_PATH=/path/to/restart-request mise run start
+```
+
 ## Common options
 
 ```sh

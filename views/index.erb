@@ -94,6 +94,11 @@
     .session-shortcut { display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid rgba(138, 190, 183, 0.55); border-radius: 999px; background: rgba(138, 190, 183, 0.14); color: var(--accent); font-size: 0.76rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
     body.session-shortcuts-visible .recent-session .session-shortcut { display: inline-flex; }
     .session-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-gateway-update { display: grid; gap: 0.35rem; margin-top: 1.25rem; }
+    .sidebar-gateway-update[hidden], .sidebar-gateway-update-button[hidden] { display: none; }
+    .sidebar-gateway-update-button { width: 100%; padding: 0.6rem 0.65rem; border-radius: 0.6rem; background: var(--accent); color: var(--button-text); font-size: 0.84rem; font-weight: 900; }
+    .sidebar-gateway-update-message { color: var(--muted); font-size: 0.76rem; line-height: 1.35; }
+    .sidebar-gateway-update.is-error .sidebar-gateway-update-message { color: #ffb4b6; }
     .sidebar-notification-toggle { width: 100%; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.55rem; margin-top: 1.25rem; padding: 0.6rem 0.65rem; border: 1px solid transparent; border-radius: 0.6rem; background: var(--panel-softer); color: var(--text); font-size: 0.84rem; font-weight: 800; text-align: left; }
     .sidebar-notification-toggle:hover { background: var(--border); }
     .sidebar-notification-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
@@ -427,7 +432,7 @@
     }
   </style>
 </head>
-<body class="<%= session_only? ? "session-only" : "" %>" data-browser-access-enabled="<%= browser_access_enabled? ? "true" : "false" %>" data-workspace-access-enabled="<%= multi_user_mode? ? "true" : "false" %>">
+<body class="<%= session_only? ? "session-only" : "" %>" data-browser-access-enabled="<%= browser_access_enabled? ? "true" : "false" %>" data-workspace-access-enabled="<%= multi_user_mode? ? "true" : "false" %>" data-gateway-instance-id="<%= h settings.gateway_instance_id %>">
   <div class="app-shell">
     <% unless session_only? %>
       <input type="checkbox" class="mobile-session-toggle" id="mobile-session-toggle">
@@ -569,6 +574,11 @@
     let cwdValidationTimer = null;
     let cwdValidationController = null;
     let notificationRegistration = null;
+    let gatewayUpdateState = null;
+    let gatewayUpdateInProgress = false;
+    const gatewayInstanceId = document.body.dataset.gatewayInstanceId;
+    const gatewayUpdateChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("pi-gateway-update") : null;
+    let gatewayUpdatePollTimer = null;
     const notifiedFinalReplyKeys = new Set();
     let olderConversationLoadPromise = null;
 
@@ -611,6 +621,7 @@
       updateNotificationToggle();
       bindSidebarScrollTracking();
       syncMobileSessionsUnreadBadges();
+      applyGatewayUpdateState(gatewayUpdateState);
     }
 
     function markSidebarInteraction() {
@@ -4338,6 +4349,7 @@
       updateNotificationToggle();
       bindSidebarScrollTracking();
       syncMobileSessionsUnreadBadges();
+      applyGatewayUpdateState(gatewayUpdateState);
     }
 
     async function refreshSidebar(generation = sessionViewGeneration) {
@@ -4424,6 +4436,96 @@
           if (currentLabel) currentLabel.textContent = originalLabel;
         }
       }
+    }
+
+    function applyGatewayUpdateState(payload) {
+      if (!payload) return;
+      gatewayUpdateState = payload;
+      const control = document.querySelector("[data-gateway-update]");
+      const button = control?.querySelector("[data-gateway-update-button]");
+      const message = control?.querySelector("[data-gateway-update-message]");
+      if (!control || !button || !message) return;
+
+      const available = payload.state === "available";
+      const progressing = ["updating", "restarting"].includes(payload.state);
+      const failed = ["error", "dependency_failed", "rollback_failed"].includes(payload.state);
+      const retryable = failed && payload.state !== "rollback_failed";
+      const blocked = payload.state === "blocked";
+      control.hidden = !(available || progressing || failed || blocked);
+      control.classList.toggle("is-error", failed || blocked);
+      button.hidden = !(available || retryable);
+      if (available || retryable) {
+        button.textContent = retryable ? "Retry update" : `Update to ${payload.targetSha || "latest"}`;
+        button.title = payload.summary || payload.message || "Update gateway";
+        message.textContent = payload.message || "Gateway update available";
+      } else {
+        message.textContent = payload.message || (payload.state === "restarting" ? "Restarting gateway…" : "Updating gateway…");
+      }
+    }
+
+    function gatewayUpdateNavigation(targetSha) {
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("_gateway_updated");
+      const updateUrl = new URL(cleanUrl.href);
+      updateUrl.searchParams.set("_gateway_updated", targetSha);
+      window.location.replace(updateUrl.href);
+    }
+
+    function cleanGatewayUpdateNavigation() {
+      const cleanUrl = new URL(window.location.href);
+      if (!cleanUrl.searchParams.has("_gateway_updated")) return;
+      cleanUrl.searchParams.delete("_gateway_updated");
+      window.history.replaceState(window.history.state, "", cleanUrl.href);
+    }
+
+    async function checkGatewayUpdate() {
+      const response = await fetch("/gateway-update", { headers: { "Accept": "application/json" }, cache: "no-store" });
+      if (!response.ok) throw new Error("Could not check for gateway updates");
+      const payload = await response.json();
+      if (payload.instanceId && payload.instanceId !== gatewayInstanceId) {
+        gatewayUpdateNavigation(payload.currentSha || payload.instanceId);
+        return payload;
+      }
+      if (gatewayUpdateInProgress && !["updating", "restarting"].includes(payload.state)) gatewayUpdateInProgress = false;
+      applyGatewayUpdateState(payload);
+      return payload;
+    }
+
+    function pollGatewayUpdate() {
+      clearTimeout(gatewayUpdatePollTimer);
+      gatewayUpdatePollTimer = setTimeout(async () => {
+        try {
+          await checkGatewayUpdate();
+        } catch (_error) {
+        }
+        if (gatewayUpdateInProgress) pollGatewayUpdate();
+      }, 1000);
+    }
+
+    async function startGatewayUpdate() {
+      const target = gatewayUpdateState?.targetSha || "the latest version";
+      if (!confirm(`Update gateway to ${target}? Active Pi work will be interrupted while the gateway restarts.`)) return;
+
+      gatewayUpdateInProgress = true;
+      gatewayUpdateChannel?.postMessage({ type: "updating" });
+      applyGatewayUpdateState({ ...gatewayUpdateState, state: "updating", message: "Updating gateway…" });
+      try {
+        const response = await fetch("/gateway-update", { method: "POST", headers: { "Accept": "application/json" } });
+        if (!response.ok) throw new Error("Could not start gateway update");
+        applyGatewayUpdateState(await response.json());
+        pollGatewayUpdate();
+      } catch (error) {
+        gatewayUpdateInProgress = false;
+        applyGatewayUpdateState({ state: "error", message: error.message });
+      }
+    }
+
+    if (gatewayUpdateChannel) {
+      gatewayUpdateChannel.addEventListener("message", (event) => {
+        if (event.data?.type !== "updating") return;
+        gatewayUpdateInProgress = true;
+        pollGatewayUpdate();
+      });
     }
 
     function sessionFragmentUrl(url) {
@@ -5349,6 +5451,10 @@
       if (open) input.focus();
     });
 
+    document.addEventListener("click", (event) => {
+      if (event.target.closest("[data-gateway-update-button]")) startGatewayUpdate();
+    });
+
     document.addEventListener("click", async (event) => {
       const button = event.target.closest("[data-sidebar-load-more]");
       if (!button || !normalLeftClick(event)) return;
@@ -5580,6 +5686,7 @@
         });
       }
       scheduleSidebarRefresh();
+      checkGatewayUpdate().catch(() => {});
     }
 
     window.addEventListener("resize", updatePromptPlaceholder);
@@ -5598,6 +5705,7 @@
       }
       if (markReadAfterVisible) markCurrentSessionRead();
       scheduleSidebarRefresh();
+      checkGatewayUpdate().catch(() => {});
     });
     window.addEventListener("pageshow", () => resumeEventPolling().catch(() => {}));
     window.addEventListener("focus", () => {
@@ -5605,11 +5713,16 @@
       resumeEventPolling().catch(() => {});
     });
     window.addEventListener("online", () => resumeEventPolling().catch(() => {}));
+    ["pageshow", "focus", "online"].forEach((eventName) => {
+      window.addEventListener(eventName, () => checkGatewayUpdate().catch(() => {}));
+    });
     window.addEventListener("popstate", () => switchSession(window.location.href, { push: false, focus: false }));
 
+    cleanGatewayUpdateNavigation();
     bindSessionDom();
     bindSessionControls();
     initializeSessionView();
+    setInterval(() => checkGatewayUpdate().catch(() => {}), 5 * 60 * 1000);
   </script>
 </body>
 </html>

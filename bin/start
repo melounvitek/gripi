@@ -4,4 +4,25 @@ set -euo pipefail
 host="${1:-${PI_GATEWAY_HOST:-0.0.0.0}}"
 port="${PI_GATEWAY_PORT:-4567}"
 
+if [[ -n "${PI_GATEWAY_RESTART_PATH:-}" ]]; then
+  restart_path="$PI_GATEWAY_RESTART_PATH"
+elif [[ -n "${HOME:-}" ]]; then
+  restart_path="$HOME/.pi/web-gateway/restart-request"
+else
+  printf 'HOME or PI_GATEWAY_RESTART_PATH must be set\n' >&2
+  exit 1
+fi
+
+rm -f -- "$restart_path"
+
+set +e
 RACK_ENV=production bundle exec rackup -o "$host" -p "$port"
+status=$?
+set -e
+
+if [[ -e "$restart_path" ]]; then
+  rm -- "$restart_path"
+  exec "${BASH_SOURCE[0]}" "$@"
+fi
+
+exit "$status"

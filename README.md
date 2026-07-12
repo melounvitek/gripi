@@ -39,6 +39,12 @@ PI_GATEWAY_HOST=127.0.0.1 mise run start
 
 The app connects to the running gateway and can switch between multiple gateway servers. You can also use the gateway directly at <http://localhost:4567>.
 
+## Updates
+
+When a newer commit is available on `origin/master`, the gateway shows an update control in the sidebar. It can fast-forward a clean `master` checkout, install Ruby dependencies, restart itself, and reload the complete page without relying on systemd.
+
+Start through `mise run start` or `bin/start` for automatic restart support. See [configuration](docs/configuration.md#self-updates) for update requirements and failure behavior.
+
 ## Remote access and configuration
 
 Do not expose the gateway directly to the public internet. Anyone with access can view sessions and start Pi processes with the gateway's filesystem and credential access.

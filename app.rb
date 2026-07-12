@@ -1,5 +1,6 @@
 require "sinatra/base"
 require "json"
+require "securerandom"
 require_relative "lib/rpc/pending_session_registry"
 require_relative "lib/sessions/session_family"
 require_relative "lib/sessions/sidebar"
@@ -12,14 +13,19 @@ require_relative "lib/web/rpc_helpers"
 require_relative "lib/web/browser_access"
 require_relative "lib/web/workspace_access"
 require_relative "lib/web/pwa_routes"
+require_relative "lib/web/gateway_update_routes"
 require_relative "lib/web/session_view_routes"
 require_relative "lib/web/session_action_routes"
 require_relative "lib/pi_rpc_client"
+require_relative "lib/gateway_updater"
+require_relative "lib/gateway_update_coordinator"
+require_relative "lib/request_gateway_restart"
 
 class PiWebGateway < Sinatra::Base
   register Web::BrowserAccess
   register Web::WorkspaceAccess
   register Web::PwaRoutes
+  register Web::GatewayUpdateRoutes
   register Web::SessionViewRoutes
   register Web::SessionActionRoutes
 
@@ -92,6 +98,11 @@ class PiWebGateway < Sinatra::Base
   set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path, command_prefix: pi_rpc_command_prefix) }]
   set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd, command_prefix: pi_rpc_command_prefix) }]
   set :rpc_client_registry, nil
+  set :gateway_instance_id, SecureRandom.hex(16)
+  set :gateway_update_coordinator, GatewayUpdateCoordinator.new(
+    updater: GatewayUpdater.new(root),
+    restarter: -> { RequestGatewayRestart.call(PiWebGateway.settings.rpc_client_registry) }
+  )
   set :pending_session_registry, Rpc::PendingSessionRegistry.new
   set :rpc_idle_timeout_seconds, ENV.fetch("PI_RPC_IDLE_TIMEOUT_SECONDS", "1800").to_i
 
