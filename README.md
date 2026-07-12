@@ -25,7 +25,6 @@ Requirements:
 ```sh
 git clone https://github.com/melounvitek/pi-web-gateway.git
 cd pi-web-gateway
-mise trust
 mise install
 mise run setup
 ```
