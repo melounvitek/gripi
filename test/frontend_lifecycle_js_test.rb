@@ -69,6 +69,55 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal 2, results.fetch("epoch")
   end
 
+  def test_expanding_tool_output_starts_at_its_internal_bottom_without_moving_the_conversation
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    handler_source = app_source.match(/document\.addEventListener\("click", \(event\) => \{\n  const button = event\.target\.closest\("\[data-tool-output-toggle\]"\);.*?\n\}\);/m).to_s
+
+    results = run_javascript(<<~JS)
+      const { activateToolOutputRegion } = await import(#{module_url("dom.js").to_json});
+      let clickHandler = null;
+      const document = { addEventListener(type, handler) { if (type === "click") clickHandler = handler; } };
+      eval(#{handler_source.to_json});
+
+      const conversation = { scrollTop: 70 };
+      let internalScrollTop = 12;
+      const body = {
+        scrollHeight: 120,
+        clientHeight: 100,
+        get scrollTop() { return internalScrollTop; },
+        set scrollTop(value) { internalScrollTop = Math.min(value, this.scrollHeight - this.clientHeight); },
+        setAttribute() {},
+        focus() {},
+        replaceChildren() { this.scrollHeight = 300; }
+      };
+      const fullTemplate = { content: { cloneNode: () => ({ childNodes: [] }) } };
+      const control = { hidden: false };
+      const collapse = {
+        dataset: { collapsed: "true" },
+        querySelector(selector) {
+          return {
+            "[data-tool-output-body]": body,
+            "[data-tool-output-full]": fullTemplate,
+            "[data-tool-output-collapse-control]": control
+          }[selector];
+        }
+      };
+      const button = {
+        closest: (selector) => selector === "[data-tool-output-collapse]" ? collapse : null,
+        setAttribute() {}
+      };
+
+      clickHandler({ target: { closest: (selector) => selector === "[data-tool-output-toggle]" ? button : null } });
+      const expandedScrollTop = body.scrollTop;
+      body.scrollTop = 25;
+      console.log(JSON.stringify({ expandedScrollTop, conversationScrollTop: conversation.scrollTop, userScrollTop: body.scrollTop }));
+    JS
+
+    assert_equal 200, results.fetch("expandedScrollTop")
+    assert_equal 70, results.fetch("conversationScrollTop")
+    assert_equal 25, results.fetch("userScrollTop")
+  end
+
   def test_composer_focus_follows_work_lifecycle_on_desktop_only_near_the_conversation_bottom
     app_source = File.read(File.join(ASSETS, "app.js"))
     focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction desktopConversationFocusEnabled)/m).to_s

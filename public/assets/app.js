@@ -2241,6 +2241,7 @@ document.addEventListener("click", (event) => {
   control.hidden = true;
   body.replaceChildren(...Array.from(fullTemplate.content.cloneNode(true).childNodes));
   activateToolOutputRegion(body, { focus: true });
+  body.scrollTop = body.scrollHeight;
 });
 
 document.addEventListener("click", async (event) => {
