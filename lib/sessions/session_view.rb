@@ -267,6 +267,9 @@ module Sessions
     def current_leaf_id_for(existing_conversation)
       @current_tree_leaf_known = existing_conversation && @rpc_clients.active?(@selected_session.path)
       active_session_tree_leaf(@selected_session.path) if @current_tree_leaf_known
+    rescue Errno::EPIPE, IOError
+      @current_tree_leaf_known = false
+      nil
     end
 
     def selected_existing_session?
@@ -278,12 +281,9 @@ module Sessions
     end
 
     def self.active_session_tree_leaf(rpc_clients, session_path)
-      client = rpc_clients.begin_use(session_path)
-      return unless client&.respond_to?(:tree_leaf)
-
-      client.tree_leaf
-    ensure
-      rpc_clients.end_use(session_path) if client
+      rpc_clients.with_active_client(session_path) do |client|
+        client.tree_leaf if client.respond_to?(:tree_leaf)
+      end
     end
   end
 end

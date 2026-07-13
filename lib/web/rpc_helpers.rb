@@ -42,6 +42,14 @@ module Web
       halt_session_sync_error(error)
     end
 
+    def with_synchronized_interrupt_rpc_client(session_path)
+      return with_interrupt_rpc_client(session_path) { |client| yield client } unless File.exist?(session_path)
+
+      session_synchronizer.with_interrupt_client(session_path) { |client| yield client }
+    rescue Sessions::SessionSynchronizer::BlockedError => error
+      halt_session_sync_error(error)
+    end
+
     def halt_if_session_sync_blocked(session_path)
       return unless File.exist?(session_path)
 
@@ -80,6 +88,11 @@ module Web
       rpc_clients.with_client(session_path) { |client| yield client }
     end
 
+    def with_interrupt_rpc_client(session_path)
+      session_path = canonical_rpc_session_path(session_path)
+      rpc_clients.with_interrupt_client(session_path) { |client| yield client }
+    end
+
     def canonical_rpc_session_path(session_path)
       remapped_path = remap_active_pending_rpc_client(session_path)
       return remapped_path if remapped_path
@@ -93,7 +106,8 @@ module Web
       return unless cwd && rpc_clients.active?(session_path)
       return if multi_user_mode? && !workspace_session_ownership_store.owned_by?(session_path, current_workspace_id)
 
-      real_path = session_file_from(rpc_clients.client_for(session_path).get_state)
+      state = rpc_clients.with_active_client(session_path) { |client| client.get_state }
+      real_path = session_file_from(state)
       return unless real_path && File.exist?(real_path) && session_cwd(real_path) == cwd
 
       rpc_clients.move(session_path, real_path)
@@ -121,7 +135,8 @@ module Web
         next unless rpc_clients.active?(pending_path)
         next unless session_cwd(session_path) == cwd
 
-        session_file_from(rpc_clients.client_for(pending_path).get_state) == session_path
+        state = rpc_clients.with_active_client(pending_path) { |client| client.get_state }
+        session_file_from(state) == session_path
       end&.first
     end
 

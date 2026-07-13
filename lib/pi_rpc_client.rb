@@ -62,6 +62,7 @@ class PiRpcClient
     @event_buffer_limit = event_buffer_limit
     @clock = clock
     @mutex = Mutex.new
+    @write_mutex = Mutex.new
     @condition = ConditionVariable.new
     @reader_running = false
     @busy = false
@@ -254,9 +255,11 @@ class PiRpcClient
     @mutex.synchronize { @pending_ids[id] = true }
     ensure_reader
     begin
-      @stdin.write(JSON.generate(command) + "\n")
-      @stdin.flush if @stdin.respond_to?(:flush)
-    rescue Errno::EPIPE
+      @write_mutex.synchronize do
+        @stdin.write(JSON.generate(command) + "\n")
+        @stdin.flush if @stdin.respond_to?(:flush)
+      end
+    rescue Errno::EPIPE, IOError
       @mutex.synchronize { @pending_ids.delete(id) }
       raise IOError, "Pi RPC process exited before accepting command"
     end
@@ -266,7 +269,7 @@ class PiRpcClient
         return @responses.delete(id) if @responses.key?(id)
         unless @reader_running
           @pending_ids.delete(id)
-          return nil
+          raise IOError, "Pi RPC process exited before responding to command"
         end
 
         @condition.wait(@mutex, 0.1)
@@ -283,7 +286,7 @@ class PiRpcClient
       loop do
         result = status_from_events(status_key)
         return result if result
-        return nil unless @reader_running
+        raise IOError, "Pi RPC process exited before reporting extension status" unless @reader_running
 
         remaining = deadline - @clock.call
         return nil unless remaining.positive?
@@ -317,8 +320,10 @@ class PiRpcClient
   end
 
   def next_id(type)
-    @request_sequence += 1
-    "#{type}-#{@request_sequence}"
+    @mutex.synchronize do
+      @request_sequence += 1
+      "#{type}-#{@request_sequence}"
+    end
   end
 
   def ensure_reader

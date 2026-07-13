@@ -73,6 +73,14 @@ class SessionSynchronizerTest < Minitest::Test
       yield @client
     end
 
+    def with_interrupt_client(path, &block)
+      with_client(path, &block)
+    end
+
+    def with_existing_interrupt_client(_path)
+      yield @client if @client
+    end
+
     def close_client_if_idle(_path)
       return false unless @client && !@client.busy?
 
@@ -95,6 +103,23 @@ class SessionSynchronizerTest < Minitest::Test
       assert_equal :managed, result.mode
       assert_equal "older", result.rpc_leaf_id
       assert_equal "persisted", result.persisted_leaf_id
+    end
+  end
+
+  def test_enters_external_follow_when_rpc_appends_and_exits_during_first_position_check
+    with_session do |root, path|
+      client = Object.new
+      client.define_singleton_method(:session_position) do |_cursor|
+        File.open(path, "a") { |file| file.puts(JSON.generate(type: "message", id: "external", parentId: nil, message: { role: "user", content: [] })) }
+        raise IOError, "Pi RPC process exited"
+      end
+      registry = FakeRegistry.new(client)
+      synchronizer = build_synchronizer(root, registry)
+
+      result = synchronizer.inspect(path)
+
+      assert_equal :external_follow, result.mode
+      assert_equal "external", result.append_cursor
     end
   end
 
@@ -262,6 +287,49 @@ class SessionSynchronizerTest < Minitest::Test
       assert_equal "external", result.rpc_leaf_id
       assert stale.closed
       refute fresh.closed
+    end
+  end
+
+  def test_interrupt_does_not_wait_for_synchronized_operation
+    with_session do |root, path|
+      client = FakeClient.new(positions: { nil => { known: true, leaf_id: nil, error: nil } })
+      synchronizer = build_synchronizer(root, FakeRegistry.new(client))
+      operation_started = Queue.new
+      release_operation = Queue.new
+      interrupted = Queue.new
+
+      operation = Thread.new do
+        synchronizer.with_mutable_client(path) do
+          operation_started << true
+          release_operation.pop
+        end
+      end
+      operation_started.pop
+
+      synchronizer.with_interrupt_client(path) { interrupted << true }
+
+      assert interrupted.pop(timeout: 1)
+    ensure
+      release_operation << true if operation&.alive?
+      operation&.join
+    end
+  end
+
+  def test_interrupt_fails_if_pi_cli_writes_during_rpc_verification
+    with_session do |root, path|
+      calls = 0
+      client = HookClient.new do
+        calls += 1
+        append(path, type: "message", id: "external", parentId: nil, message: { role: "user", content: [] }) if calls == 2
+      end
+      synchronizer = build_synchronizer(root, FakeRegistry.new(client))
+
+      error = assert_raises(Sessions::SessionSynchronizer::BlockedError) do
+        synchronizer.with_interrupt_client(path) { flunk "interrupt should not run" }
+      end
+
+      assert_equal :external_follow, error.mode
+      assert_includes error.message, "Pi CLI"
     end
   end
 

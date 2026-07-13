@@ -37,6 +37,8 @@ module Sessions
 
     def inspect(session_path, include_position: false)
       synchronize(session_path) { inspect_locked(session_path, include_position: include_position) }
+    rescue IOError, Errno::EPIPE
+      recover_from_rpc_exit(session_path)
     rescue SystemCallError => error
       conflict_result(session_path, "Session file could not be read: #{error.message}")
     end
@@ -45,27 +47,24 @@ module Sessions
       blocked_message(result.mode, result.error)
     end
 
-    def with_mutable_client(session_path)
-      synchronize(session_path) do
-        result = inspect_locked(session_path)
-        raise_blocked(result) if result.blocked?
+    def with_mutable_client(session_path, &block)
+      synchronize(session_path) { with_verified_client(session_path, :with_client, &block) }
+    end
 
-        before = state_for(session_path).snapshot
-        @rpc_clients.with_client(session_path) do |client|
-          position = position_for(client, before.append_cursor)
-          block_for_position_error!(session_path, before, position)
-          block_for_unknown_cursor!(session_path, before, position)
+    def with_interrupt_client(session_path)
+      lock = lock_for(session_path)
+      unless lock.try_lock
+        return @rpc_clients.with_existing_interrupt_client(session_path) { |client| yield client }
+      end
 
-          after = @store.file_snapshot(session_path)
-          unless same_file_revision?(before, after)
-            mode, error = external_or_conflict(before, after)
-            update_state(session_path, after, mode: mode, error: error)
-            raise BlockedError.new(blocked_message(mode, error), mode: mode)
-          end
-
-          update_state(session_path, after, mode: :managed, rpc_leaf_id: position[:leaf_id])
-          yield client
+      begin
+        if @rpc_clients.busy?(session_path)
+          return @rpc_clients.with_existing_interrupt_client(session_path) { |client| yield client }
         end
+
+        with_verified_client(session_path, :with_interrupt_client) { |client| yield client }
+      ensure
+        lock.unlock
       end
     end
 
@@ -102,6 +101,28 @@ module Sessions
     end
 
     private
+
+    def with_verified_client(session_path, registry_method)
+      result = inspect_locked(session_path)
+      raise_blocked(result) if result.blocked?
+
+      before = state_for(session_path).snapshot
+      @rpc_clients.public_send(registry_method, session_path) do |client|
+        position = position_for(client, before.append_cursor)
+        block_for_position_error!(session_path, before, position)
+        block_for_unknown_cursor!(session_path, before, position)
+
+        after = @store.file_snapshot(session_path)
+        unless same_file_revision?(before, after)
+          mode, error = external_or_conflict(before, after)
+          update_state(session_path, after, mode: mode, error: error)
+          raise BlockedError.new(blocked_message(mode, error), mode: mode)
+        end
+
+        update_state(session_path, after, mode: :managed, rpc_leaf_id: position[:leaf_id])
+        yield client
+      end
+    end
 
     def inspect_locked(session_path, include_position: false)
       snapshot = @store.file_snapshot(session_path)
@@ -146,6 +167,7 @@ module Sessions
       end
 
       if @rpc_clients.active?(session_path) && (include_position || state.mode != :managed)
+        update_state(session_path, snapshot, mode: state.mode || :available, rpc_leaf_id: state.rpc_leaf_id) unless state.snapshot
         position = nil
         @rpc_clients.with_existing_client(session_path, touch: false) { |client| position = position_for(client, snapshot.append_cursor) }
         return apply_position(session_path, state, snapshot, position)
@@ -207,16 +229,12 @@ module Sessions
       return { known: false, leaf_id: nil, entries: [], error: "Installed Pi does not support session synchronization." } unless client.respond_to?(:session_entries_after)
 
       client.session_entries_after(append_cursor)
-    rescue IOError, Errno::EPIPE => error
-      { known: false, leaf_id: nil, entries: [], error: "Pi RPC session synchronization failed: #{error.message}" }
     end
 
     def position_for(client, append_cursor)
       return { known: false, leaf_id: nil, error: "Installed Pi does not support session synchronization." } unless client.respond_to?(:session_position)
 
       client.session_position(append_cursor)
-    rescue IOError, Errno::EPIPE => error
-      { known: false, leaf_id: nil, error: "Pi RPC session synchronization failed: #{error.message}" }
     end
 
     def block_for_position_error!(session_path, snapshot, position)
@@ -255,6 +273,18 @@ module Sessions
         rpc_leaf_id: state.rpc_leaf_id,
         error: state.error
       )
+    end
+
+    def recover_from_rpc_exit(session_path)
+      synchronize(session_path) do
+        snapshot = @store.file_snapshot(session_path)
+        state = state_for(session_path)
+        mode = state.snapshot && !same_file_revision?(state.snapshot, snapshot) ? :external_follow : :available
+        update_state(session_path, snapshot, mode: mode)
+        result_for(state)
+      end
+    rescue SystemCallError => error
+      conflict_result(session_path, "Session file could not be read: #{error.message}")
     end
 
     def conflict_result(session_path, message)

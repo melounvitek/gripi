@@ -200,6 +200,52 @@ class PiRpcClientTest < Minitest::Test
     assert_includes error.message, "Pi RPC process exited before accepting command"
   end
 
+  def test_correlates_concurrent_requests_when_responses_arrive_out_of_order
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader)
+
+    state_thread = Thread.new { client.get_state }
+    state_command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
+    abort_thread = Thread.new { client.abort }
+    abort_command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
+
+    response_writer.puts JSON.generate({ id: abort_command.fetch("id"), type: "response", command: "abort", success: true })
+    response_writer.puts JSON.generate({ id: state_command.fetch("id"), type: "response", command: "get_state", success: true })
+
+    assert_equal "abort", Timeout.timeout(1) { abort_thread.value }.fetch("command")
+    assert_equal "get_state", Timeout.timeout(1) { state_thread.value }.fetch("command")
+    assert_equal ["get_state", "abort"], [state_command.fetch("type"), abort_command.fetch("type")]
+    refute_equal state_command.fetch("id"), abort_command.fetch("id")
+  ensure
+    state_thread&.kill
+    abort_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_raises_clear_error_when_pi_process_exits_before_responding
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader)
+
+    request_thread = Thread.new { client.get_state }
+    request_thread.report_on_exception = false
+    Timeout.timeout(1) { command_reader.gets }
+    response_writer.close
+
+    error = assert_raises(IOError) { Timeout.timeout(1) { request_thread.value } }
+    assert_includes error.message, "Pi RPC process exited before responding"
+  ensure
+    request_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close unless response_writer&.closed?
+  end
+
   def test_snapshots_latest_updates_for_running_tools_with_the_event_cursor
     input = StringIO.new
     reader, writer = IO.pipe
@@ -590,7 +636,8 @@ class PiRpcClientTest < Minitest::Test
 
   def test_navigate_tree_reports_failure_when_extension_bridge_does_not_confirm_navigation
     input = StringIO.new
-    output = StringIO.new(JSON.generate({ id: "prompt-1", type: "response", command: "prompt", success: true }) + "\n")
+    output, writer = IO.pipe
+    writer.puts JSON.generate({ id: "prompt-1", type: "response", command: "prompt", success: true })
     now = Time.at(0)
     client = PiRpcClient.new(stdin: input, stdout: output, clock: -> { value = now; now += 6; value })
 
@@ -600,6 +647,21 @@ class PiRpcClientTest < Minitest::Test
 
     assert_equal false, response.fetch("success")
     assert_includes response.fetch("error"), "did not complete"
+  ensure
+    writer&.close
+    output&.close
+  end
+
+  def test_tree_leaf_raises_when_pi_exits_before_extension_reports_status
+    input = StringIO.new
+    output = StringIO.new(JSON.generate({ id: "prompt-1", type: "response", command: "prompt", success: true }) + "\n")
+    client = PiRpcClient.new(stdin: input, stdout: output)
+
+    error = assert_raises(IOError) do
+      with_secure_random_hex("abc123") { client.tree_leaf }
+    end
+
+    assert_includes error.message, "Pi RPC process exited before reporting extension status"
   end
 
   def test_navigate_tree_reports_cancelled_status_from_extension_bridge
@@ -619,30 +681,23 @@ class PiRpcClientTest < Minitest::Test
   end
 
   def test_command_helpers_send_supported_rpc_commands
-    input = StringIO.new
-    output = StringIO.new([
-      JSON.generate({ id: "get_state-1", type: "state" }),
-      JSON.generate({ id: "get_messages-2", type: "messages" }),
-      JSON.generate({ id: "prompt-3", type: "accepted" }),
-      JSON.generate({ id: "steer-4", type: "response", command: "steer", success: true }),
-      JSON.generate({ id: "abort-5", type: "aborted" }),
-      JSON.generate({ id: "new_session-6", type: "response", command: "new_session", success: true, data: { cancelled: false } }),
-      JSON.generate({ id: "switch_session-7", type: "response", command: "switch_session", success: true, data: { cancelled: false } }),
-      JSON.generate({ id: "get_commands-8", type: "response", command: "get_commands", success: true, data: { commands: [] } }),
-      JSON.generate({ id: "compact-9", type: "response", command: "compact", success: true, data: {} }),
-      JSON.generate({ id: "set_session_name-10", type: "response", command: "set_session_name", success: true }),
-      JSON.generate({ id: "get_fork_messages-11", type: "response", command: "get_fork_messages", success: true, data: { messages: [] } }),
-      JSON.generate({ id: "fork-12", type: "response", command: "fork", success: true, data: { text: "Hello", cancelled: false } }),
-      JSON.generate({ id: "clone-13", type: "response", command: "clone", success: true, data: { cancelled: false } }),
-      JSON.generate({ id: "prompt-14", type: "response", command: "prompt", success: true }),
-      JSON.generate({ id: "prompt-15", type: "response", command: "prompt", success: true }),
-      JSON.generate({ id: "follow_up-16", type: "response", command: "follow_up", success: true }),
-      JSON.generate({ id: "get_available_models-17", type: "response", command: "get_available_models", success: true, data: { models: [] } }),
-      JSON.generate({ id: "set_model-18", type: "response", command: "set_model", success: true, data: {} }),
-      JSON.generate({ id: "set_thinking_level-19", type: "response", command: "set_thinking_level", success: true }),
-      JSON.generate({ id: "cycle_thinking_level-20", type: "response", command: "cycle_thinking_level", success: true, data: { level: "high" } })
-    ].join("\n") + "\n")
-    client = PiRpcClient.new(stdin: input, stdout: output)
+    commands = []
+    response_reader, response_writer = IO.pipe
+    input = Object.new
+    input.define_singleton_method(:write) do |payload|
+      command = JSON.parse(payload)
+      commands << command
+      message = command["message"].to_s
+      if message.start_with?("/pi_web_tree ")
+        response_writer.puts JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "pi_web_tree:abc123", statusText: "cancelled" })
+      elsif message.start_with?("/pi_web_tree_leaf ")
+        response_writer.puts JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "pi_web_tree_leaf:def456", statusText: "entry-9" })
+      end
+      response_writer.puts JSON.generate({ id: command.fetch("id"), type: "response", command: command.fetch("type"), success: true, data: {} })
+      payload.bytesize
+    end
+    input.define_singleton_method(:flush) {}
+    client = PiRpcClient.new(stdin: input, stdout: response_reader)
 
     client.get_state
     client.get_messages
@@ -690,7 +745,10 @@ class PiRpcClientTest < Minitest::Test
       { "id" => "set_model-18", "type" => "set_model", "provider" => "anthropic", "modelId" => "claude-sonnet-4" },
       { "id" => "set_thinking_level-19", "type" => "set_thinking_level", "level" => "high" },
       { "id" => "cycle_thinking_level-20", "type" => "cycle_thinking_level" }
-    ], input.string.lines.map { |line| JSON.parse(line) }
+    ], commands
+  ensure
+    response_reader&.close
+    response_writer&.close
   end
 
   private

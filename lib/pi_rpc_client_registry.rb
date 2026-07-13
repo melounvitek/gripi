@@ -77,54 +77,24 @@ class PiRpcClientRegistry
     client&.respond_to?(:agent_running?) ? client.agent_running? : false
   end
 
-  def begin_use(session_path, touch: true)
-    @mutex.synchronize do
-      entry = @clients[session_path]
-      return unless entry
-
-      entry.active_requests += 1
-      touch_entry(entry) if touch
-      entry.client
-    end
+  def with_existing_client(session_path, touch: true, &block)
+    with_entry(session_path, serialize: true, create: false, touch: touch, &block)
   end
 
-  def end_use(session_path, touch: true)
-    @mutex.synchronize do
-      entry = @clients[session_path]
-      return unless entry
-
-      entry.active_requests -= 1 if entry.active_requests.positive?
-      touch_entry(entry) if touch
-    end
+  def with_client(session_path, &block)
+    with_entry(session_path, serialize: true, &block)
   end
 
-  def with_existing_client(session_path, touch: true)
-    entry = @mutex.synchronize do
-      existing_entry = @clients[session_path]
-      next unless existing_entry
-
-      existing_entry.active_requests += 1
-      touch_entry(existing_entry) if touch
-      existing_entry
-    end
-    return unless entry
-
-    entry.operation_mutex.synchronize { yield entry.client }
-  ensure
-    end_use(session_path, touch: touch) if entry
+  def with_interrupt_client(session_path, &block)
+    with_entry(session_path, serialize: false, &block)
   end
 
-  def with_client(session_path)
-    entry = @mutex.synchronize do
-      existing_entry = @clients[session_path] ||= new_entry(@factory.call(session_path))
-      existing_entry.active_requests += 1
-      touch_entry(existing_entry)
-      existing_entry
-    end
+  def with_existing_interrupt_client(session_path, &block)
+    with_entry(session_path, serialize: false, create: false, &block)
+  end
 
-    entry.operation_mutex.synchronize { yield entry.client }
-  ensure
-    end_use(session_path)
+  def with_active_client(session_path, touch: true, &block)
+    with_entry(session_path, serialize: false, create: false, touch: touch, &block)
   end
 
   def move(old_path, new_path)
@@ -141,12 +111,7 @@ class PiRpcClientRegistry
   end
 
   def events_after(session_path, after_seq)
-    client = begin_use(session_path, touch: false)
-    return { events: [], last_seq: 0, missed: false } unless client
-
-    client.events_after(after_seq)
-  ensure
-    end_use(session_path, touch: false) if client
+    with_active_client(session_path, touch: false) { |client| client.events_after(after_seq) } || { events: [], last_seq: 0, missed: false }
   end
 
   def close_client_if_idle(session_path)
@@ -204,6 +169,49 @@ class PiRpcClientRegistry
   end
 
   private
+
+  def with_entry(session_path, serialize:, create: true, touch: true)
+    entry = acquire_entry(session_path, create: create, touch: touch)
+    return unless entry
+
+    if serialize
+      entry.operation_mutex.synchronize { yield entry.client }
+    else
+      yield entry.client
+    end
+  rescue Errno::EPIPE, IOError
+    discard_entry(entry) if entry
+    raise
+  ensure
+    release_entry(entry, touch: touch) if entry
+  end
+
+  def acquire_entry(session_path, create:, touch:)
+    @mutex.synchronize do
+      entry = @clients[session_path]
+      entry ||= @clients[session_path] = new_entry(@factory.call(session_path)) if create
+      return unless entry
+
+      entry.active_requests += 1
+      touch_entry(entry) if touch
+      entry
+    end
+  end
+
+  def release_entry(entry, touch:)
+    @mutex.synchronize do
+      entry.active_requests -= 1 if entry.active_requests.positive?
+      touch_entry(entry) if touch
+    end
+  end
+
+  def discard_entry(entry)
+    client = @mutex.synchronize do
+      session_path, current_entry = @clients.find { |_path, candidate| candidate.equal?(entry) }
+      @clients.delete(session_path)&.client if current_entry
+    end
+    client.close if client&.respond_to?(:close)
+  end
 
   def new_entry(client)
     Entry.new(client: client, last_used_at: @clock.call, active_requests: 0, operation_mutex: Mutex.new)

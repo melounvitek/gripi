@@ -9,6 +9,7 @@ require "json"
 require "fileutils"
 require "base64"
 require "pathname"
+require "timeout"
 require_relative "../app"
 
 class AppTest < Minitest::Test
@@ -1549,6 +1550,37 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_conversation_view_recovers_when_active_rpc_client_has_exited
+    Dir.mktmpdir do |dir|
+      path = write_session_with_messages(dir, [{ role: "user", text: "Persisted prompt" }])
+      calls = []
+      dead_client = FakeRpcClient.new(calls)
+      dead_client.define_singleton_method(:session_position) do |_append_cursor|
+        calls << [:session_position]
+        raise IOError, "Pi RPC process exited"
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      })
+      registry.register(path, dead_client)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      assert_includes response.body, "Persisted prompt"
+      refute registry.active?(path)
+      assert_equal [[:session_position], [:close]], calls
+
+      abort_response = Rack::MockRequest.new(PiWebGateway).post("/abort", params: { "session" => path })
+
+      assert_equal 303, abort_response.status
+      assert_equal [[:session_position], [:close], [:start, path], [:abort]], calls
+    end
+  end
+
   def test_conversation_views_follow_active_tree_leaf
     Dir.mktmpdir do |dir|
       path = write_session_with_raw_messages(dir, [
@@ -2314,6 +2346,44 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_equal({ "ok" => true, "session" => path }, JSON.parse(response.body))
       assert_equal [[ :start, path ], [ :abort ]], calls
+    end
+  end
+
+  def test_abort_does_not_wait_for_a_serialized_session_operation
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:busy?) { true }
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_registry, registry
+      operation_started = Queue.new
+      release_operation = Queue.new
+
+      operation_thread = Thread.new do
+        registry.with_client(path) do
+          operation_started << true
+          release_operation.pop
+        end
+      end
+      operation_started.pop
+      abort_thread = Thread.new do
+        Rack::MockRequest.new(PiWebGateway).post(
+          "/abort",
+          params: { "session" => path },
+          "HTTP_ACCEPT" => "application/json"
+        )
+      end
+
+      response = Timeout.timeout(1) { abort_thread.value }
+      assert_equal 200, response.status
+      assert_equal [[:abort]], calls
+    ensure
+      release_operation << true if operation_thread&.alive?
+      operation_thread&.join
+      abort_thread&.join
     end
   end
 

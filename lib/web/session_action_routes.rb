@@ -397,13 +397,7 @@ module Web
 
       app.post "/abort" do
         session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
-        sync_state = File.exist?(session_path) ? session_sync_state(session_path) : nil
-        if sync_state&.blocked?
-          halt_session_sync_error(Sessions::SessionSynchronizer::BlockedError.new(session_sync_error_message(sync_state), mode: sync_state.mode)) unless rpc_clients.busy?(session_path)
-          rpc_clients.with_existing_client(session_path) { |client| client.abort }
-        else
-          with_synchronized_rpc_client(session_path) { |client| client.abort }
-        end
+        with_synchronized_interrupt_rpc_client(session_path) { |client| client.abort }
         if json_request?
           content_type :json
           JSON.generate(ok: true, session: session_path)

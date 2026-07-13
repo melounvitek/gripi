@@ -175,21 +175,76 @@ class PiRpcClientRegistryTest < Minitest::Test
     second&.join
   end
 
+  def test_allows_concurrent_rpc_operation_while_serialized_operation_is_running
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeClient.new([]) })
+    first_started = Queue.new
+    release_first = Queue.new
+    concurrent_started = Queue.new
+
+    first = Thread.new do
+      registry.with_client("/tmp/session.jsonl") do
+        first_started << true
+        release_first.pop
+      end
+    end
+    first_started.pop
+    concurrent = Thread.new do
+      registry.with_interrupt_client("/tmp/session.jsonl") { concurrent_started << true }
+    end
+
+    assert concurrent_started.pop(timeout: 1)
+  ensure
+    release_first << true if first&.alive?
+    first&.join
+    concurrent&.join
+  end
+
+  def test_evicts_client_after_terminal_io_failure_and_recreates_it_later
+    calls = []
+    clients = [FakeClient.new(calls), FakeClient.new(calls)]
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { clients.shift })
+
+    first_client = registry.ensure_client("/tmp/session.jsonl")
+    assert_raises(IOError) do
+      registry.with_client("/tmp/session.jsonl") { raise IOError, "process exited" }
+    end
+
+    refute registry.active?("/tmp/session.jsonl")
+    assert_equal [:close], calls
+    refute_same first_client, registry.ensure_client("/tmp/session.jsonl")
+  end
+
+  def test_io_failure_does_not_evict_a_replacement_client
+    calls = []
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+    original = FakeClient.new(calls)
+    replacement = FakeClient.new(calls)
+    registry.register("/tmp/session.jsonl", original)
+
+    assert_raises(IOError) do
+      registry.with_client("/tmp/session.jsonl") do
+        registry.register("/tmp/session.jsonl", replacement)
+        raise IOError, "original process exited"
+      end
+    end
+
+    assert_same replacement, registry.client_for("/tmp/session.jsonl")
+  end
+
   def test_keeps_clients_currently_in_use
     now = Time.at(1_000)
     calls = []
     registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeClient.new(calls) }, clock: -> { now })
     registry.ensure_client("/tmp/session.jsonl")
 
-    registry.begin_use("/tmp/session.jsonl")
-    now = Time.at(2_801)
-    closed = registry.close_idle_clients(idle_timeout: 1_800)
+    registry.with_active_client("/tmp/session.jsonl") do
+      now = Time.at(2_801)
+      closed = registry.close_idle_clients(idle_timeout: 1_800)
 
-    assert_empty closed
-    assert registry.active?("/tmp/session.jsonl")
-    assert_empty calls
-  ensure
-    registry.end_use("/tmp/session.jsonl") if registry
+      assert_empty closed
+      assert registry.active?("/tmp/session.jsonl")
+      assert_empty calls
+    end
   end
 
   class FakeClient
