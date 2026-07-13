@@ -24,9 +24,10 @@ class GatewayReadStateStore
       state = read_state
       changed = false
       sessions.each do |session|
-        next if state.key?(session.path)
+        response_count = session.assistant_response_count.to_i
+        next if state.key?(session.path) && state[session.path] <= response_count
 
-        state[session.path] = session.assistant_response_count.to_i
+        state[session.path] = response_count
         changed = true
       end
       write_state(state) if changed

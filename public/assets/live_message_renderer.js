@@ -447,7 +447,7 @@ export class LiveMessageRenderer {
 
   upsertLiveAssistantSegment(event, roleName, segment, fallbackIndex, shouldScroll, timestamp) {
     const key = this.segmentIdentity(event, segment, fallbackIndex);
-    const finalAssistantResponse = event.type === "message_end" && !segment.compact && !segment.thinking;
+    const finalAssistantResponse = event.type === "message_end" && segment.finalAssistantResponse;
     const streamingAssistantResponse = event.type !== "message_end" && !segment.compact && !segment.thinking;
     const existing = this.liveAssistantSegments.get(key);
     if (existing) {
@@ -552,9 +552,10 @@ export class LiveMessageRenderer {
 
   renderMessageEvent(event) {
     const message = this.parser.eventMessage(event);
-    const segments = message?.content ? this.parser.contentSegments(message.content, message) : [{ text: this.parser.messageText(message), compact: false, summary: "", startIndex: 0, endIndex: 0, images: [] }].filter((segment) => segment.text);
+    const segments = message?.content ? this.parser.contentSegments(message.content, message) : [{ text: this.parser.messageText(message), compact: false, summary: "", startIndex: 0, endIndex: 0, finalAssistantResponse: true, images: [] }].filter((segment) => segment.text);
     const roleName = this.parser.liveEventRole(event, message);
-    const outcome = { roleName, assistantEnded: roleName === "assistant" && event.type === "message_end", rendered: segments.length > 0 };
+    const assistantEnded = roleName === "assistant" && event.type === "message_end";
+    const outcome = { roleName, assistantEnded, finalAssistantEnded: assistantEnded && this.parser.eventHasFinalAssistantText(event), rendered: segments.length > 0 };
 
     if (roleName === "assistant" && event.type === "message_start") {
       this.conversationController.resetOversizedFollow();

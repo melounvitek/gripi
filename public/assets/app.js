@@ -801,7 +801,7 @@ function renderEvent(event) {
 
   if (["message_start", "message_update", "message_end"].includes(event.type)) {
     const outcome = liveMessageRenderer.renderMessageEvent(event);
-    if (outcome.assistantEnded) markCurrentSessionRead();
+    if (outcome.finalAssistantEnded) markCurrentSessionRead();
     notifyFinalAssistantReply(event);
     return;
   }

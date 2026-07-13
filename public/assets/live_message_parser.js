@@ -14,6 +14,22 @@ export class LiveMessageParser {
       return part && typeof part === "object" && part.type === "thinking";
     }
 
+    function textPartPhase(part) {
+      if (!part || typeof part !== "object" || typeof part.textSignature !== "string" || !part.textSignature.startsWith("{")) return null;
+      try {
+        const signature = JSON.parse(part.textSignature);
+        if (!signature || typeof signature !== "object" || signature.v !== 1 || typeof signature.id !== "string") return null;
+        return ["commentary", "final_answer"].includes(signature.phase) ? signature.phase : null;
+      } catch (_error) {
+        return null;
+      }
+    }
+
+    function finalAssistantTextPart(part) {
+      if (typeof part === "string") return part.trim().length > 0;
+      return part && typeof part === "object" && part.type === "text" && String(part.text || "").trim().length > 0 && textPartPhase(part) !== "commentary";
+    }
+
     function stripThinkingHeading(text) {
       return String(text || "").replace(/^\s*\*\*[^\n*][^\n]*\*\*\s*\n{2,}/, "");
     }
@@ -155,6 +171,7 @@ export class LiveMessageParser {
           toolTranscript: ["read", "edit", "write"].includes(toolName),
           toolPreview: toolPart?.type === "toolCall" && toolName === "edit",
           toolPrompt: toolName === "subagent" ? subagentPromptFromDetails(message.details) : "",
+          finalAssistantResponse: !group.compact && group.parts.some(finalAssistantTextPart),
           images
         };
       }).filter((segment) => segment.text || segment.compact || segment.images.length > 0);
@@ -396,8 +413,14 @@ export class LiveMessageParser {
 
 
     function finalAssistantReplySegments(message) {
-      const segments = message?.content ? contentSegments(message.content, message) : [{ text: messageText(message), compact: false }];
-      return segments.filter((segment) => segment.text && !segment.compact && !segment.thinking);
+      if (!message?.content) {
+        const text = messageText(message);
+        return text ? [{ text }] : [];
+      }
+
+      return (Array.isArray(message.content) ? message.content : [message.content]).filter(finalAssistantTextPart).map((part) => ({
+        text: typeof part === "string" ? part : part.text
+      }));
     }
 
     this.contentSegments = contentSegments;

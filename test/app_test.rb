@@ -5268,6 +5268,43 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_sidebar_only_marks_final_answers_unread_when_text_phases_are_available
+    Dir.mktmpdir do |dir|
+      first_path, second_path = write_sessions(dir, count: 2)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      request = Rack::MockRequest.new(PiWebGateway)
+      signature = ->(id, phase) { JSON.generate(v: 1, id: id, phase: phase) }
+
+      request.get("/sidebar", params: { "session" => first_path })
+      File.write(second_path, JSON.generate({
+        type: "message",
+        message: { role: "assistant", content: [{ type: "text", text: "Still working", textSignature: signature.call("progress", "commentary") }] }
+      }) + "\n", mode: "a")
+
+      progress_response = request.get("/sidebar", params: { "session" => first_path })
+      progress_document = Nokogiri::HTML(progress_response.body)
+      progress_link = progress_document.at_css("a.session[data-session-path='#{second_path}']")
+
+      refute progress_link["class"].include?("unread")
+      assert_equal "0", progress_link["data-assistant-response-count"]
+      assert_equal "", progress_link["data-latest-assistant-response-preview"]
+
+      File.write(second_path, JSON.generate({
+        type: "message",
+        message: { role: "assistant", content: [{ type: "text", text: "Finished", textSignature: signature.call("answer", "final_answer") }] }
+      }) + "\n", mode: "a")
+
+      final_response = request.get("/sidebar", params: { "session" => first_path })
+      final_document = Nokogiri::HTML(final_response.body)
+      final_link = final_document.at_css("a.session[data-session-path='#{second_path}']")
+
+      assert final_link["class"].include?("unread")
+      assert_equal "1", final_link["data-assistant-response-count"]
+      assert_equal "Finished", final_link["data-latest-assistant-response-preview"]
+    end
+  end
+
   def test_sidebar_tracks_unread_sessions_globally
     Dir.mktmpdir do |dir|
       first_path, second_path = write_sessions(dir, count: 2)
@@ -5344,7 +5381,7 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes APP_JAVASCRIPT, "function markCurrentSessionRead()"
       assert_includes APP_JAVASCRIPT, "fetch(\"/sessions/mark_read\""
-      assert_includes APP_JAVASCRIPT, "if (outcome.assistantEnded) markCurrentSessionRead();"
+      assert_includes APP_JAVASCRIPT, "if (outcome.finalAssistantEnded) markCurrentSessionRead();"
       assert_includes APP_JAVASCRIPT, "if (document.hidden || !document.hasFocus())"
       assert_includes APP_JAVASCRIPT, "markReadAfterVisible = true;"
       assert_includes APP_JAVASCRIPT, "if (markReadAfterVisible) markCurrentSessionRead();"

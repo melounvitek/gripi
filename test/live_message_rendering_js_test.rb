@@ -89,6 +89,76 @@ class LiveMessageRenderingJsTest < Minitest::Test
     assert_equal({ "text" => "Network fallback", "pending" => nil }, result["network"])
   end
 
+  def test_parser_only_honors_phases_from_valid_v1_signatures
+    result = run_javascript(<<~JS)
+      const { LiveMessageParser } = await import(#{module_url("live_message_parser.js").to_json});
+      const parser = new LiveMessageParser();
+      const replyText = (text, textSignature) => parser.finalAssistantReplyText({
+        role: "assistant",
+        content: [{ type: "text", text, ...(textSignature === undefined ? {} : { textSignature }) }]
+      });
+      const signature = (id, phase) => JSON.stringify({ v: 1, id, ...(phase ? { phase } : {}) });
+      console.log(JSON.stringify({
+        commentary: replyText("Working", signature("progress", "commentary")),
+        final: replyText("Finished", signature("answer", "final_answer")),
+        unsigned: replyText("Unsigned"),
+        opaque: replyText("Opaque", "opaque-signature"),
+        unphased: replyText("Unphased", signature("unphased")),
+        malformed: replyText("Malformed", "{broken"),
+        missingId: replyText("Missing ID", JSON.stringify({ v: 1, phase: "commentary" })),
+        future: replyText("Future", JSON.stringify({ v: 2, id: "future", phase: "commentary" }))
+      }));
+    JS
+
+    assert_equal "", result["commentary"]
+    assert_equal "Finished", result["final"]
+    assert_equal "Unsigned", result["unsigned"]
+    assert_equal "Opaque", result["opaque"]
+    assert_equal "Unphased", result["unphased"]
+    assert_equal "Malformed", result["malformed"]
+    assert_equal "Missing ID", result["missingId"]
+    assert_equal "Future", result["future"]
+  end
+
+  def test_live_renderer_only_marks_final_answer_message_ends_as_final
+    result = run_javascript(<<~JS)
+      const { LiveMessageParser } = await import(#{module_url("live_message_parser.js").to_json});
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      const render = (phase) => {
+        const renderer = Object.create(LiveMessageRenderer.prototype);
+        renderer.parser = new LiveMessageParser();
+        renderer.conversationController = { followLiveOutput: () => true };
+        renderer.liveAssistantSegments = new Map();
+        renderer.livePairedToolCalls = new Map();
+        renderer.liveToolExecutions = new Map();
+        renderer.liveUserMessages = new Map();
+        renderer.clearLiveAssistantStreaming = () => {};
+        renderer.liveMessageAlreadyRendered = () => false;
+        renderer.appendMessage = (_role, _text, _live, _scroll, _timestamp, options) => ({
+          article: { classList: { toggle() {} }, dataset: {} },
+          options
+        });
+        renderer.updateLiveSegment = (entry) => entry;
+        const message = {
+          role: "assistant",
+          content: [{ type: "text", text: phase, textSignature: JSON.stringify({ v: 1, id: phase, phase }) }]
+        };
+        renderer.renderMessageEvent({ type: "message_update", message });
+        const outcome = renderer.renderMessageEvent({ type: "message_end", message });
+        const entry = [...renderer.liveAssistantSegments.values()][0];
+        return { outcome, marked: entry.article.dataset.finalAssistantResponse || null, streamingOption: entry.options.finalAssistantResponse };
+      };
+      console.log(JSON.stringify({ commentary: render("commentary"), final: render("final_answer") }));
+    JS
+
+    assert_equal false, result.dig("commentary", "outcome", "finalAssistantEnded")
+    assert_nil result.dig("commentary", "marked")
+    assert_equal false, result.dig("commentary", "streamingOption")
+    assert_equal true, result.dig("final", "outcome", "finalAssistantEnded")
+    assert_equal "true", result.dig("final", "marked")
+    assert_equal false, result.dig("final", "streamingOption")
+  end
+
   def test_parser_semantics_cover_representative_ssr_message_shapes
     result = run_javascript(<<~JS)
       const { LiveMessageParser } = await import(#{module_url("live_message_parser.js").to_json});

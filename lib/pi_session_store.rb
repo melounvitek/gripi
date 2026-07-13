@@ -469,9 +469,23 @@ class PiSessionStore
     parts.filter_map do |part|
       next part if part.is_a?(String)
       next unless part.is_a?(Hash) && part["type"] == "text"
+      next if assistant_text_phase(part) == "commentary"
 
       part["text"]
     end.join("\n").strip
+  end
+
+  def assistant_text_phase(part)
+    signature = part["textSignature"]
+    return unless signature.is_a?(String) && signature.start_with?("{")
+
+    parsed = JSON.parse(signature)
+    return unless parsed.is_a?(Hash) && parsed["v"] == 1 && parsed["id"].is_a?(String)
+
+    phase = parsed["phase"]
+    phase if %w[commentary final_answer].include?(phase)
+  rescue JSON::ParserError
+    nil
   end
 
   def response_preview(text)

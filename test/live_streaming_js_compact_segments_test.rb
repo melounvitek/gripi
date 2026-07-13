@@ -25,7 +25,7 @@ class LiveStreamingJsCompactSegmentsTest < Minitest::Test
     JS
 
     assert_equal ["clear", "upsert"], result["calls"]
-    assert_equal({ "roleName" => "assistant", "assistantEnded" => false, "rendered" => true }, result["outcome"])
+    assert_equal({ "roleName" => "assistant", "assistantEnded" => false, "finalAssistantEnded" => false, "rendered" => true }, result["outcome"])
   end
 
   private

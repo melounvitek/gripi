@@ -125,6 +125,35 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_only_valid_v1_commentary_is_excluded_from_assistant_responses
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      signature = ->(id, phase = nil) { JSON.generate({ v: 1, id: id, phase: phase }.compact) }
+      texts = [
+        ["Working on it", signature.call("progress", "commentary")],
+        ["Signed answer", signature.call("answer", "final_answer")],
+        ["Unsigned answer", nil],
+        ["Opaque legacy answer", "opaque-signature"],
+        ["Unphased answer", signature.call("unphased")],
+        ["Malformed signature answer", "{broken"],
+        ["Missing ID answer", JSON.generate(v: 1, phase: "commentary")],
+        ["Future signature answer", JSON.generate(v: 2, id: "future", phase: "commentary")]
+      ]
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        *texts.map { |text, text_signature| { type: "message", message: { role: "assistant", content: [{ type: "text", text: text, textSignature: text_signature }.compact] } } }
+      ])
+
+      store = PiSessionStore.new(root: dir)
+      session = store.sessions.first
+      messages = store.messages(path)
+
+      assert_equal 7, session.assistant_response_count
+      assert_equal "Future signature answer", session.latest_assistant_response_preview
+      assert_equal [false, true, true, true, true, true, true, true], messages.map(&:final_assistant_response)
+    end
+  end
+
   def test_exposes_latest_compaction_activity_preview
     Dir.mktmpdir do |dir|
       session_dir = File.join(dir, "--project--")
