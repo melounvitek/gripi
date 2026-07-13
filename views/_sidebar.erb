@@ -27,41 +27,43 @@
           <% end %>
           <div class="recent-sessions-header">
             <h2>Sessions</h2>
-            <button type="button" class="sidebar-icon-button sidebar-search-toggle<%= sidebar_filters? ? " is-active" : "" %>" title="Search sessions" aria-label="Search sessions" aria-expanded="<%= sidebar_filters? ? "true" : "false" %>" aria-controls="sidebar-session-search" data-sidebar-search-toggle>⌕</button>
-            <button type="button" class="sidebar-icon-button" title="New session" aria-label="New session" data-modal-open="new-session-modal">+</button>
+            <button type="button" class="sidebar-icon-button sidebar-new-session-button" data-modal-open="new-session-modal"><span aria-hidden="true">+</span> New session</button>
           </div>
-          <form id="sidebar-session-search" class="sidebar-session-search<%= sidebar_filters? ? " is-open" : "" %>" method="get" action="/" role="search">
-            <% if @selected_session %>
-              <input type="hidden" name="session" value="<%= h @selected_session.path %>">
-            <% end %>
-            <% if selected_project_cwd %>
-              <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
-            <% end %>
-            <input type="search" name="session_search" value="<%= h sidebar_session_search_query %>" placeholder="Search sessions" aria-label="Search sessions">
-          </form>
-          <form class="sidebar-project-filter-form" method="get" action="/">
-            <% if @selected_session %>
-              <input type="hidden" name="session" value="<%= h @selected_session.path %>">
-            <% end %>
-            <% if sidebar_session_search? %>
-              <input type="hidden" name="session_search" value="<%= h sidebar_session_search_query %>">
-            <% end %>
-            <div class="sidebar-filter-row">
-              <div class="project-select" data-project-select>
-                <select class="sidebar-project-filter" name="project" aria-label="Filter sessions by project" data-sidebar-project-filter>
-                  <option value="" data-project-option-kind="all">All projects</option>
-                  <% known_session_cwds.each do |cwd| %>
-                    <% identity = project_identity(cwd) %>
-                    <option value="<%= h cwd %>" data-project-monogram="<%= h identity[:monogram] %>" data-project-background="<%= h identity[:background] %>" data-project-foreground="<%= h identity[:foreground] %>"<%= cwd == selected_project_cwd ? " selected" : "" %>><%= h File.basename(cwd) %></option>
-                  <% end %>
-                </select>
-              </div>
-              <span class="sidebar-filter-spinner" aria-hidden="true"></span>
-              <% if sidebar_filters? %>
-                <a class="sidebar-filters-clear" href="<%= h sidebar_filters_clear_url %>" data-sidebar-filters-clear>Clear filters</a>
+          <div class="sidebar-filters">
+            <form class="sidebar-project-filter-form" method="get" action="/">
+              <% if @selected_session %>
+                <input type="hidden" name="session" value="<%= h @selected_session.path %>">
               <% end %>
-            </div>
-          </form>
+              <% if sidebar_session_search? %>
+                <input type="hidden" name="session_search" value="<%= h sidebar_session_search_query %>">
+              <% end %>
+              <div class="sidebar-filter-row">
+                <div class="project-select" data-project-select>
+                  <select class="sidebar-project-filter" name="project" aria-label="Filter sessions by project" data-sidebar-project-filter>
+                    <option value="" data-project-option-kind="all">All projects</option>
+                    <% known_session_cwds.each do |cwd| %>
+                      <% identity = project_identity(cwd) %>
+                      <option value="<%= h cwd %>" data-project-monogram="<%= h identity[:monogram] %>" data-project-background="<%= h identity[:background] %>" data-project-foreground="<%= h identity[:foreground] %>"<%= cwd == selected_project_cwd ? " selected" : "" %>><%= h File.basename(cwd) %></option>
+                    <% end %>
+                  </select>
+                </div>
+                <button type="button" class="sidebar-icon-button sidebar-search-toggle<%= sidebar_filters? ? " is-active" : "" %>" title="Search sessions" aria-label="Search sessions" aria-expanded="<%= sidebar_filters? ? "true" : "false" %>" aria-controls="sidebar-session-search" data-sidebar-search-toggle>⌕</button>
+                <span class="sidebar-filter-spinner" aria-hidden="true"></span>
+              </div>
+            </form>
+            <form id="sidebar-session-search" class="sidebar-session-search<%= sidebar_filters? ? " is-open" : "" %>" method="get" action="/" role="search">
+              <% if @selected_session %>
+                <input type="hidden" name="session" value="<%= h @selected_session.path %>">
+              <% end %>
+              <% if selected_project_cwd %>
+                <input type="hidden" name="project" value="<%= h selected_project_cwd %>">
+              <% end %>
+              <input type="search" name="session_search" value="<%= h sidebar_session_search_query %>" placeholder="Search sessions" aria-label="Search sessions">
+            </form>
+            <% if sidebar_filters? %>
+              <a class="sidebar-filters-clear" href="<%= h sidebar_filters_clear_url %>" data-sidebar-filters-clear>Clear filters</a>
+            <% end %>
+          </div>
           <div class="sessions-list">
             <% sidebar_sessions.each do |session| %>
               <% shortcut_index += 1 %>

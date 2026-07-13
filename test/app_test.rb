@@ -2299,6 +2299,26 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_sessions_header_renders_labeled_new_session_action
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      document = Nokogiri::HTML(response.body)
+      button = document.at_css('.recent-sessions-header [data-modal-open="new-session-modal"]')
+
+      assert_equal 200, response.status
+      assert button
+      assert_includes button["class"], "sidebar-new-session-button"
+      assert_equal "+ New session", button.text.strip.gsub(/\s+/, " ")
+      assert_equal "true", button.at_css("span")["aria-hidden"]
+      refute document.at_css(".recent-sessions-header [data-sidebar-search-toggle]")
+      refute document.at_css('.session-sidebar-header > [data-modal-open="new-session-modal"]')
+    end
+  end
+
   def test_renders_discord_like_scrolling_shell
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -2610,9 +2630,12 @@ class AppTest < Minitest::Test
       document = Nokogiri::HTML(response.body)
       toggle = document.at_css("[data-sidebar-search-toggle]")
       search_form = document.at_css(".sidebar-session-search")
+      assert_equal "button", toggle["type"]
       assert_equal "false", toggle["aria-expanded"]
       assert_equal "sidebar-session-search", toggle["aria-controls"]
       assert_equal "sidebar-session-search", search_form["id"]
+      assert_equal toggle, document.at_css(".sidebar-project-filter-form .sidebar-filter-row > [data-sidebar-search-toggle]")
+      assert_equal search_form, document.at_css(".sidebar-project-filter-form + .sidebar-session-search")
       refute_includes toggle["class"], "is-active"
       refute_includes search_form["class"], "is-open"
     end
@@ -2713,6 +2736,8 @@ class AppTest < Minitest::Test
       assert_includes toggle["class"], "is-active"
       assert_equal "true", toggle["aria-expanded"]
       assert_equal "Clear filters", clear.text
+      assert_equal clear, document.at_css(".sidebar-session-search + .sidebar-filters-clear")
+      refute document.at_css(".sidebar-filter-row .sidebar-filters-clear")
       assert_equal "", clear["data-sidebar-filters-clear"]
       assert_includes clear["href"], "session=#{Rack::Utils.escape(current_path)}"
       refute_includes clear["href"], "project="
@@ -3024,7 +3049,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_recent_sessions_include_new_session_modal
+  def test_page_includes_new_session_modal
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       PiWebGateway.set :sessions_root, dir
@@ -3034,9 +3059,6 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
-      button = document.at_css('.recent-sessions [data-modal-open="new-session-modal"]')
-      assert button
-      assert_equal "+", button.text.strip
       modal = document.at_css('body > [data-modal="new-session-modal"]')
       assert modal
       assert_equal "/sessions/new_at_cwd", modal.at_css('form.new-session-cwd-form')["action"]
