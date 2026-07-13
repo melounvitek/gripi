@@ -2371,7 +2371,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "}, 300);"
       assert_includes APP_JAVASCRIPT, "this.updateJumpControlsReveal();"
       assert_includes APP_JAVASCRIPT, 'this.scrollDirection === "up" && !this.autoScrollEnabled && !this.nearTop()'
-      assert_includes APP_JAVASCRIPT, 'this.scrollDirection === "down" && !this.nearBottom()'
+      assert_includes APP_JAVASCRIPT, 'expandedMessageBottom || (!this.nearBottom()'
       assert_includes APP_STYLESHEET, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 0.84rem; }"
       assert_includes APP_STYLESHEET, ".message--compact .message-details-summary:last-child { margin-bottom: 0; }"
       assert_includes APP_STYLESHEET, ".message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
@@ -4663,7 +4663,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "latestReadableAssistantMessage()"
       assert_includes APP_JAVASCRIPT, "latestMessageElement()"
       assert_includes APP_JAVASCRIPT, "if (!this.forceBottomAutoScroll && !this.followOversizedMessageBottom && latestAssistant && latestAssistant === this.latestMessageElement() && latestAssistant.offsetHeight > this.element.clientHeight)"
-      assert_includes APP_JAVASCRIPT, "this.autoScrollEnabled = this.nearBottom();"
+      assert_includes APP_JAVASCRIPT, "this.autoScrollEnabled = !this.expandedMessageAutoFollowPaused && this.nearBottom();"
       assert_includes APP_JAVASCRIPT, "if (this.conversationController.autoScrollEnabled && job.body.closest(\".message\") === this.conversationController.latestReadableAssistantMessage())"
       assert_includes APP_JAVASCRIPT, "if (shouldScroll && this.autoScrollEnabled) this.scheduleAutoScroll();"
       assert_includes APP_JAVASCRIPT, "forceInitialBottomFollow()"

@@ -17,6 +17,7 @@ export class ConversationController {
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
     this.followOversizedMessageBottom = false;
+    this.expandedMessageAutoFollowPaused = false;
     this.programmaticScroll = false;
     this.lastScrollTop = 0;
     this.scrollDirection = null;
@@ -43,6 +44,7 @@ export class ConversationController {
     this.lastScrollTop = this.element?.scrollTop || 0;
     this.scrollDirection = null;
     this.followOversizedMessageBottom = false;
+    this.expandedMessageAutoFollowPaused = false;
     if (!this.element) return;
 
     this.listen(this.element, "keydown", (event) => {
@@ -110,6 +112,7 @@ export class ConversationController {
     this.liveOutput = null;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
+    this.expandedMessageAutoFollowPaused = false;
   }
 
   listen(target, type, listener, options) {
@@ -182,7 +185,8 @@ export class ConversationController {
     if (!this.programmaticScroll) {
       if (currentScrollTop > this.lastScrollTop) this.scrollDirection = "down";
       if (currentScrollTop < this.lastScrollTop) this.scrollDirection = "up";
-      this.autoScrollEnabled = this.nearBottom();
+      if (this.scrollIntent !== "expansion") this.expandedMessageAutoFollowPaused = false;
+      this.autoScrollEnabled = !this.expandedMessageAutoFollowPaused && this.nearBottom();
       this.forceBottomAutoScroll = false;
       this.followOversizedMessageBottom = this.autoScrollEnabled;
       this.updateJumpControlsReveal();
@@ -190,6 +194,22 @@ export class ConversationController {
     this.lastScrollTop = currentScrollTop;
     this.updateJumpControls();
     if (this.nearTop()) this.loadOlderWindow().catch(() => {});
+  }
+
+  revealExpandedMessageBottom(message) {
+    if (!this.element || !message || !this.element.contains(message)) return;
+    const scrollRect = this.element.getBoundingClientRect();
+    const messageRect = message.getBoundingClientRect();
+    const tolerance = 2;
+    if (message.offsetHeight <= this.element.clientHeight + tolerance || messageRect.bottom <= scrollRect.bottom + tolerance || messageRect.top >= scrollRect.bottom - tolerance) return;
+
+    this.stopAutoFollow();
+    this.expandedMessageAutoFollowPaused = true;
+    this.recordScrollIntent("expansion");
+    this.scrollDirection = "down";
+    this.document.body.classList.add("is-conversation-scrolling");
+    this.updateJumpControls();
+    this.hideJumpControlsSoon();
   }
 
   updateJumpControlsReveal() {
@@ -239,7 +259,8 @@ export class ConversationController {
     const messageBottomTarget = this.scrollDirection === "down" ? this.oversizedMessageJumpTarget("down") : null;
     const allowJumpButtons = this.scrollIntent !== "keyboard";
     const showFirst = allowJumpButtons && this.scrollDirection === "up" && !this.autoScrollEnabled && !this.nearTop();
-    const showLatest = allowJumpButtons && this.scrollDirection === "down" && !this.nearBottom() && (!!messageBottomTarget || !this.latestReadableAssistantMessageIsVisible());
+    const expandedMessageBottom = this.scrollIntent === "expansion" && !!messageBottomTarget;
+    const showLatest = allowJumpButtons && this.scrollDirection === "down" && (expandedMessageBottom || (!this.nearBottom() && (!!messageBottomTarget || !this.latestReadableAssistantMessageIsVisible())));
     this.setJumpButton(this.jumpToFirstButton, messageTopTarget ? "message" : "conversation", messageTopTarget ? "↑" : "↑↑", messageTopTarget ? "Message top" : "Top");
     this.setJumpButton(this.jumpToLatestButton, messageBottomTarget ? "message" : "conversation", messageBottomTarget ? "↓" : "↓↓", messageBottomTarget ? "Message bottom" : "Bottom");
     this.jumpToFirstButton?.classList.toggle("is-visible", showFirst);
@@ -413,7 +434,7 @@ export class ConversationController {
   }
 
   applyAutoScroll(behavior = "auto") {
-    if (!this.element || !this.autoScrollEnabled) return;
+    if (!this.element || !this.autoScrollEnabled || this.expandedMessageAutoFollowPaused) return;
     this.withProgrammaticScroll(() => {
       const latestAssistant = this.latestReadableAssistantMessage();
       if (!this.forceBottomAutoScroll && !this.followOversizedMessageBottom && latestAssistant && latestAssistant === this.latestMessageElement() && latestAssistant.offsetHeight > this.element.clientHeight) {
@@ -426,7 +447,7 @@ export class ConversationController {
   }
 
   scheduleAutoScroll(behavior = "auto") {
-    if (!this.element || !this.autoScrollEnabled) return;
+    if (!this.element || !this.autoScrollEnabled || this.expandedMessageAutoFollowPaused) return;
     this.frames.forEach((frame) => cancelAnimationFrame(frame));
     this.frames.clear();
     this.frame(() => this.frame(() => this.applyAutoScroll(behavior)));
@@ -434,6 +455,7 @@ export class ConversationController {
 
   scrollToTop(behavior = "smooth") {
     if (!this.element) return;
+    this.expandedMessageAutoFollowPaused = false;
     this.autoScrollEnabled = false;
     this.forceBottomAutoScroll = false;
     this.followOversizedMessageBottom = false;
@@ -471,6 +493,7 @@ export class ConversationController {
   }
 
   scrollToMessageTop(behavior = "smooth") {
+    this.expandedMessageAutoFollowPaused = false;
     const target = this.oversizedMessageJumpTarget("up");
     if (!target) return this.scrollToTop(behavior);
     this.autoScrollEnabled = false;
@@ -481,6 +504,7 @@ export class ConversationController {
   }
 
   scrollToMessageBottom(behavior = "smooth") {
+    this.expandedMessageAutoFollowPaused = false;
     const target = this.oversizedMessageJumpTarget("down");
     if (!target) return this.scrollToBottom(behavior, { force: true });
     const latestAssistant = this.latestReadableAssistantMessage();
@@ -494,6 +518,7 @@ export class ConversationController {
 
   scrollToBottom(behavior = "auto", { force = false } = {}) {
     if (!this.element) return;
+    this.expandedMessageAutoFollowPaused = false;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = force;
     this.followOversizedMessageBottom = true;
@@ -502,6 +527,8 @@ export class ConversationController {
   }
 
   followLiveOutput(forceScroll = false) {
+    if (this.expandedMessageAutoFollowPaused && !forceScroll) return false;
+    if (forceScroll) this.expandedMessageAutoFollowPaused = false;
     const shouldScroll = forceScroll || this.autoScrollEnabled || this.nearBottom();
     if (shouldScroll) this.autoScrollEnabled = true;
     return shouldScroll;

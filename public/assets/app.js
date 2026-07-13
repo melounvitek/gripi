@@ -2209,6 +2209,7 @@ document.addEventListener("click", (event) => {
   button.setAttribute("aria-expanded", "true");
   control.hidden = true;
   body.replaceChildren(...Array.from(fullTemplate.content.cloneNode(true).childNodes));
+  conversationController.revealExpandedMessageBottom(collapse.closest(".message"));
 });
 
 document.addEventListener("click", async (event) => {
