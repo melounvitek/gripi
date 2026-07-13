@@ -72,6 +72,7 @@ let sessionStatusBar = null;
 let reconnectBanner = null;
 let reconnectButton = null;
 let liveAgentRunning = false;
+let liveBusySince = null;
 let liveErrorSeen = false;
 let liveStatusModel = null;
 let liveStatusThinking = null;
@@ -96,6 +97,7 @@ let lastEventPollSuccessAt = Date.now();
 let lastEventSeq = 0;
 let waitingForOutputSince = null;
 let waitingForOutputTimer = null;
+let waitingForOutputLabel = "Pi is running…";
 let emptyEventPollCount = 0;
 let sessionViewGeneration = 0;
 let sessionSwitchGeneration = 0;
@@ -597,7 +599,7 @@ function updateWaitingForOutputStatus() {
   }
 
   const elapsed = Date.now() - waitingForOutputSince;
-  composerState.textContent = `Pi is running… ${formatWaitDuration(elapsed)}`;
+  composerState.textContent = `${waitingForOutputLabel} ${formatWaitDuration(elapsed)}`;
 }
 
 function startWaitingForOutput(since = Date.now()) {
@@ -615,6 +617,7 @@ function stopWaitingForOutput() {
 
 function setComposerState(state, label = "", { since = null, focus = true } = {}) {
   const previousState = composerState?.dataset.state;
+  if (state === "running") waitingForOutputLabel = label || "Pi is running…";
   if (state === "running" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());
   if (state !== "running") escapeStopConfirmationExpiresAt = 0;
   if (!["running", "sending"].includes(state)) stopWaitingForOutput();
@@ -759,6 +762,12 @@ function clearAttachments() {
 
 function showStatus(_text, _forceScroll = false) {}
 
+function eventTimeMilliseconds(event) {
+  const value = eventTimestamp(event);
+  const timestamp = typeof value === "number" ? value : Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
 function renderErrorEvent(event) {
   const errorText = eventErrorText(event);
   if (!errorText) return false;
@@ -772,15 +781,17 @@ function renderErrorEvent(event) {
 function renderEvent(event) {
   if (event.type === "agent_start") {
     liveAgentRunning = true;
+    liveBusySince = eventTimeMilliseconds(event);
     liveErrorSeen = false;
-    setComposerState("running", "Pi is running…");
+    setComposerState("running", "Pi is running…", { since: liveBusySince });
     showStatus("Pi is thinking…");
     return;
   }
 
   if (event.type === "turn_start") {
+    liveBusySince ||= eventTimeMilliseconds(event);
     liveErrorSeen = false;
-    setComposerState("running", "Pi is running…");
+    setComposerState("running", "Pi is running…", { since: liveBusySince });
     showStatus("Pi is thinking…");
     return;
   }
@@ -801,7 +812,11 @@ function renderEvent(event) {
   if (event.type === "compaction") {
     liveMessageRenderer.renderCompactionEvent(event);
     showStatus("Compaction finished");
-    setComposerState("done", "Done");
+    if (liveAgentRunning) setComposerState("running", "Pi is running…", { since: liveBusySince });
+    else {
+      liveBusySince = null;
+      setComposerState("done", "Done");
+    }
     refreshSessionStatus().catch(() => {});
     sidebarController.refresh().catch(() => {});
     return;
@@ -821,11 +836,20 @@ function renderEvent(event) {
   if (["custom", "custom_message", "session_info", "queue_update", "compaction_start", "compaction_end"].includes(event.type)) {
     updateSessionHeaderName(sessionTitleFromEvent(event));
     showStatus(eventStatusText(event));
-    if (event.type === "compaction_start") liveMessageRenderer.resetLiveCompactionTracking();
+    if (event.type === "compaction_start") {
+      liveMessageRenderer.resetLiveCompactionTracking();
+      liveMessageRenderer.removePendingCompactionMessage();
+      liveMessageRenderer.appendPendingCompactionMessage(eventTimestamp(event));
+      setComposerState("running", "Compacting…", { since: eventTimeMilliseconds(event) });
+    }
     if (event.type === "compaction_end") {
       liveMessageRenderer.removePendingCompactionMessage();
       if (!event.aborted && !liveMessageRenderer.liveCompactionRendered) liveMessageRenderer.renderCompactionEvent(event);
-      if (!liveAgentRunning) setComposerState("done", event.aborted ? "Compaction aborted" : "Done");
+      if (liveAgentRunning) setComposerState("running", "Pi is running…", { since: liveBusySince });
+      else {
+        liveBusySince = null;
+        setComposerState("done", event.aborted ? "Compaction aborted" : "Done");
+      }
       if (!event.aborted) refreshSessionStatus().catch(() => {});
       sidebarController.refresh().catch(() => {});
     }
@@ -833,6 +857,7 @@ function renderEvent(event) {
   }
 
   if (event.type === "turn_end") {
+    if (!liveAgentRunning) liveBusySince = null;
     if (!liveErrorSeen) {
       if (liveMessageRenderer.liveAssistantSeen) showStatus("Done");
       if (!liveAgentRunning) setComposerState("done", "Done");
@@ -844,6 +869,7 @@ function renderEvent(event) {
 
   if (event.type === "agent_end") {
     liveAgentRunning = false;
+    liveBusySince = null;
     if (renderErrorEvent(event)) {
       liveMessageRenderer.clearLiveAssistantStreaming();
       liveMessageRenderer.resetLiveAssistantTracking();
@@ -1183,7 +1209,7 @@ async function submitPrompt(event) {
     clearStoredComposerDraft(submittedSession);
     if (payload?.command === "compact") {
       sidebarController.refresh().catch(() => {});
-      setComposerState("running", "Compacting…");
+      if (composerState?.dataset.state === "sending") setComposerState("running", "Compacting…");
       showStatus("Compaction started", true);
       return;
     }
@@ -1518,6 +1544,7 @@ function resetSessionViewState() {
   liveMessageRenderer.resetLiveAssistantTracking();
   liveMessageRenderer.resetLiveCompactionTracking();
   liveAgentRunning = false;
+  liveBusySince = null;
   liveErrorSeen = false;
   resetEventPollBackoff();
   stopWaitingForOutput();
@@ -2248,8 +2275,12 @@ function initializeSessionView({ focus = true } = {}) {
     resetEventCursor();
     const initialComposerState = liveOutput.dataset.composerState;
     const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);
+    const initialComposerCompacting = liveOutput.dataset.composerCompacting === "true";
+    liveBusySince = Number(liveOutput.dataset.composerBusySince || 0) || null;
+    const initialComposerLabel = initialComposerCompacting ? "Compacting…" : "Pi is running…";
     liveAgentRunning = liveOutput.dataset.agentRunning === "true";
-    if (initialComposerState === "running") setComposerState(initialComposerState, "Pi is running…", { since: initialComposerStateSince, focus: false });
+    if (initialComposerState === "running") setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });
+    if (initialComposerCompacting) liveMessageRenderer.appendPendingCompactionMessage(new Date(initialComposerStateSince || Date.now()));
     liveMessageRenderer.restoreActiveToolExecutions();
     scheduleNextEventPoll(0);
     conversationController.positionInitialAtBottom();

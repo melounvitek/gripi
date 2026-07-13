@@ -68,6 +68,7 @@ class PiRpcClient
     @busy_since = nil
     @agent_running = false
     @compacting = false
+    @compacting_since = nil
     @reader = nil
   end
 
@@ -130,13 +131,7 @@ class PiRpcClient
 
   def compact(custom_instructions = nil)
     payload = custom_instructions.to_s.empty? ? {} : { customInstructions: custom_instructions }
-    @mutex.synchronize { mark_compacting }
-    response = request("compact", id: next_id("compact"), **payload)
-    @mutex.synchronize { clear_compacting } if !response || response["success"] == false
-    response
-  rescue StandardError
-    @mutex.synchronize { clear_compacting }
-    raise
+    request("compact", id: next_id("compact"), **payload)
   end
 
   def get_fork_messages
@@ -181,10 +176,16 @@ class PiRpcClient
 
   def live_snapshot
     @mutex.synchronize do
-      {
+      snapshot = {
         event_sequence: @event_sequence,
         active_tool_events: @active_tool_events.values
       }
+      snapshot[:busy] = true if @busy
+      snapshot[:busy_since] = @busy_since if @busy_since
+      snapshot[:agent_running] = true if @agent_running
+      snapshot[:compacting] = true if @compacting
+      snapshot[:compacting_since] = @compacting_since if @compacting_since
+      snapshot
     end
   end
 
@@ -321,6 +322,7 @@ class PiRpcClient
       @reader_running = false
       @agent_running = false
       @compacting = false
+      @compacting_since = nil
       @active_tool_events.clear
       @busy = false
       @busy_since = nil
@@ -333,6 +335,9 @@ class PiRpcClient
       if response["id"] && @pending_ids.delete(response["id"])
         @responses[response["id"]] = response
       else
+        if ["agent_start", "turn_start", "compaction_start"].include?(response["type"])
+          response = response.merge("gatewayTimestamp" => (@clock.call.to_f * 1000).to_i)
+        end
         update_busy_state(response)
         update_active_tool_events(response, serialized_bytesize)
         @event_sequence += 1
@@ -458,12 +463,12 @@ class PiRpcClient
     when "agent_start"
       @agent_running = true
       @busy = true
-      @busy_since ||= @clock.call
+      @busy_since ||= gateway_event_time(response)
     when "compaction_start"
-      mark_compacting
+      mark_compacting(gateway_event_time(response))
     when "turn_start"
       @busy = true
-      @busy_since ||= @clock.call
+      @busy_since ||= gateway_event_time(response)
     when "turn_end"
       clear_busy_state unless @agent_running
     when "agent_end"
@@ -474,14 +479,20 @@ class PiRpcClient
     end
   end
 
-  def mark_compacting
+  def gateway_event_time(response)
+    Time.at(response.fetch("gatewayTimestamp") / 1000.0)
+  end
+
+  def mark_compacting(started_at)
     @compacting = true
+    @compacting_since ||= started_at
     @busy = true
-    @busy_since ||= @clock.call
+    @busy_since ||= @compacting_since
   end
 
   def clear_compacting
     @compacting = false
+    @compacting_since = nil
     clear_busy_state unless @agent_running
   end
 

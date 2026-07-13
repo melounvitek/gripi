@@ -45,10 +45,16 @@ class PiRpcClientRegistry
     return { event_sequence: 0, active_tool_events: [] } unless client
     return client.live_snapshot if client.respond_to?(:live_snapshot)
 
-    {
+    snapshot = {
       event_sequence: client.respond_to?(:event_sequence) ? client.event_sequence : 0,
       active_tool_events: []
     }
+    snapshot[:busy] = true if client.respond_to?(:busy?) && client.busy?
+    busy_since = client.busy_since if client.respond_to?(:busy_since)
+    snapshot[:busy_since] = busy_since if busy_since
+    snapshot[:agent_running] = true if client.respond_to?(:agent_running?) && client.agent_running?
+    snapshot[:compacting] = true if client.respond_to?(:compacting?) && client.compacting?
+    snapshot
   end
 
   def busy?(session_path)

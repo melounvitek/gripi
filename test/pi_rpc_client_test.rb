@@ -421,6 +421,9 @@ class PiRpcClientTest < Minitest::Test
     assert client.busy?
     assert client.compacting?
     assert_equal Time.at(1_000), client.busy_since
+    assert_equal true, client.live_snapshot[:compacting]
+    assert_equal Time.at(1_000), client.live_snapshot[:compacting_since]
+    assert_equal 1_000_000, client.events_after(0).fetch(:events).first["gatewayTimestamp"]
 
     writer.puts JSON.generate({ type: "compaction" })
     writer.puts JSON.generate({ id: "state-2", type: "state" })
@@ -429,6 +432,32 @@ class PiRpcClientTest < Minitest::Test
     refute client.busy?
     refute client.compacting?
     assert_nil client.busy_since
+    refute client.live_snapshot.key?(:compacting)
+    refute client.live_snapshot.key?(:compacting_since)
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_live_snapshot_tracks_compaction_start_separately_from_agent_start
+    now = Time.at(1_000)
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader, clock: -> { now })
+
+    writer.puts JSON.generate({ type: "agent_start" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+
+    now = Time.at(1_005)
+    writer.puts JSON.generate({ type: "compaction_start" })
+    writer.puts JSON.generate({ id: "state-2", type: "state" })
+    client.request("get_state", id: "state-2")
+
+    snapshot = client.live_snapshot
+    assert_equal Time.at(1_000), snapshot[:busy_since]
+    assert_equal Time.at(1_005), snapshot[:compacting_since]
+    assert_equal [1_000_000, 1_005_000], client.events_after(0).fetch(:events).map { |event| event["gatewayTimestamp"] }
   ensure
     writer&.close
     reader&.close
@@ -441,6 +470,7 @@ class PiRpcClientTest < Minitest::Test
 
     thread = Thread.new { client.compact }
     Timeout.timeout(1) { sleep 0.01 until input.string.include?("compact") }
+    refute client.compacting?
     writer.puts JSON.generate({ type: "compaction_start" })
     writer.puts JSON.generate({ id: "compact-1", type: "response", command: "compact", success: true })
     thread.join(1)

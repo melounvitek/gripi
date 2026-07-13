@@ -51,13 +51,16 @@
             <%= erb :_message_article, layout: false, locals: { message: message, attachment_count: @attachment_counts[message.object_id], attachment_images: @attachment_images[message.object_id] } %>
           <% end %>
 
-          <% busy_since = rpc_clients.busy_since(@selected_session.path) %>
           <% live_snapshot = rpc_clients.live_snapshot(@selected_session.path) %>
+          <% busy = live_snapshot.fetch(:busy, false) %>
+          <% busy_since = live_snapshot[:busy_since] %>
+          <% compacting = live_snapshot.fetch(:compacting, false) %>
+          <% composer_state_since = live_snapshot[:compacting_since] || busy_since %>
           <% active_tool_events = live_snapshot.fetch(:active_tool_events) %>
           <% active_tool_context = @store.subagent_tool_call_context(@selected_session.path, active_tool_events.filter_map { |event| event["toolCallId"] }) %>
           <% active_tool_timestamps = active_tool_context.filter_map { |tool_call_id, details| [tool_call_id, details[:timestamp]] if details[:timestamp] }.to_h %>
           <% active_tool_prompts = active_tool_context.filter_map { |tool_call_id, details| [tool_call_id, details[:prompt]] unless details[:prompt].to_s.empty? }.to_h %>
-          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h live_snapshot.fetch(:event_sequence) %>" data-active-tool-events="<%= h JSON.generate(active_tool_events) %>" data-active-tool-timestamps="<%= h JSON.generate(active_tool_timestamps) %>" data-active-tool-prompts="<%= h JSON.generate(active_tool_prompts) %>" data-composer-state="<%= rpc_clients.busy?(@selected_session.path) ? "running" : "idle" %>" data-composer-state-since="<%= h(busy_since ? (busy_since.to_f * 1000).to_i : "") %>" data-agent-running="<%= rpc_clients.agent_running?(@selected_session.path) ? "true" : "false" %>"></section>
+          <section id="live-output" data-events-url="/events?session=<%= h Rack::Utils.escape(@selected_session.path) %>" data-events-after="<%= h live_snapshot.fetch(:event_sequence) %>" data-active-tool-events="<%= h JSON.generate(active_tool_events) %>" data-active-tool-timestamps="<%= h JSON.generate(active_tool_timestamps) %>" data-active-tool-prompts="<%= h JSON.generate(active_tool_prompts) %>" data-composer-state="<%= busy ? "running" : "idle" %>" data-composer-state-since="<%= h(composer_state_since ? (composer_state_since.to_f * 1000).to_i : "") %>" data-composer-busy-since="<%= h(busy_since ? (busy_since.to_f * 1000).to_i : "") %>" data-composer-compacting="<%= compacting ? "true" : "false" %>" data-agent-running="<%= live_snapshot.fetch(:agent_running, false) ? "true" : "false" %>"></section>
           <div class="jump-controls jump-controls--bottom">
             <button type="button" class="jump-button jump-to-latest" aria-label="Bottom">↓↓</button>
           </div>
@@ -120,7 +123,7 @@
                 <div class="session-status-bar" id="session-status-bar" data-status-url="/status?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
                   <% session_status_items(@session_status).each do |label, value| %>
                     <% if label == "Model" %>
-                      <button type="button" class="session-status-item model-settings-chip" data-status-key="model" data-modal-open="model-settings-modal" aria-label="Open model and thinking settings" <%= "disabled" if rpc_clients.busy?(@selected_session.path) %>><span class="session-status-label"><%= h label %></span> <span class="session-status-value"><%= h value %></span></button>
+                      <button type="button" class="session-status-item model-settings-chip" data-status-key="model" data-modal-open="model-settings-modal" aria-label="Open model and thinking settings" <%= "disabled" if busy %>><span class="session-status-label"><%= h label %></span> <span class="session-status-value"><%= h value %></span></button>
                     <% else %>
                       <span class="session-status-item" data-status-key="<%= h label.downcase %>"><span class="session-status-label"><%= h label %></span> <span class="session-status-value"><%= h value %></span></span>
                     <% end %>

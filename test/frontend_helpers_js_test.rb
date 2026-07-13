@@ -21,6 +21,18 @@ class FrontendHelpersJsTest < Minitest::Test
     assert_match(/\Atool:123:[0-9a-f]+\z/, results.last)
   end
 
+  def test_event_timestamp_prefers_gateway_receipt_time
+    results = run_javascript(<<~JS)
+      const { eventTimestamp } = await import(#{module_url("formatting.js").to_json});
+      console.log(JSON.stringify([
+        eventTimestamp({ gatewayTimestamp: 1234, timestamp: "native" }),
+        eventTimestamp({ timestamp: "native" })
+      ]));
+    JS
+
+    assert_equal [1234, "native"], results
+  end
+
   def test_event_polling_is_fast_only_for_visible_running_sessions
     results = run_javascript(<<~JS)
       const { eventPollingDelay } = await import(#{module_url("polling.js").to_json});

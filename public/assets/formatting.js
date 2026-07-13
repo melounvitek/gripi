@@ -117,7 +117,7 @@ export function formatTimestamp(timestamp, fallbackToNow = true) {
 }
 
 export function eventTimestamp(event) {
-  return event?.timestamp || event?.message?.timestamp || event?.delta?.timestamp || event?.item?.timestamp;
+  return event?.gatewayTimestamp ?? event?.timestamp ?? event?.message?.timestamp ?? event?.delta?.timestamp ?? event?.item?.timestamp;
 }
 
 export function errorValueText(value) {

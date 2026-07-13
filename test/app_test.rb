@@ -5115,7 +5115,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "this.appendCompactMessage(\"status\", \"Conversation compacted\", event.summary || \"Compaction completed\""
       assert_includes APP_JAVASCRIPT, "refreshSessionStatus().catch(() => {});"
       assert_includes APP_JAVASCRIPT, "liveMessageRenderer.renderCompactionEvent(event);"
-      assert_includes APP_JAVASCRIPT, "if (event.type === \"compaction_start\") liveMessageRenderer.resetLiveCompactionTracking();"
+      assert_includes APP_JAVASCRIPT, "liveMessageRenderer.resetLiveCompactionTracking();"
       assert_includes APP_JAVASCRIPT, "liveMessageRenderer.removePendingCompactionMessage();"
       assert_includes APP_JAVASCRIPT, "if (!event.aborted && !liveMessageRenderer.liveCompactionRendered) liveMessageRenderer.renderCompactionEvent(event);"
       assert_includes APP_JAVASCRIPT, "if (/^\\/(?:name|rename)$/.test(trimmed)) return { valid: false };"
@@ -5151,7 +5151,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(payload.name);\n      setComposerState(\"done\", \"Renamed\");\n      showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);"
       assert_includes APP_JAVASCRIPT, "liveMessageRenderer.appendPendingCompactionMessage(new Date());"
       assert_includes APP_JAVASCRIPT, "sidebarController.markSessionCompacting(submittedSession);"
-      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"compact\") {\n      sidebarController.refresh().catch(() => {});\n      setComposerState(\"running\", \"Compacting…\");\n      showStatus(\"Compaction started\", true);\n      return;\n    }"
+      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"compact\") {\n      sidebarController.refresh().catch(() => {});\n      if (composerState?.dataset.state === \"sending\") setComposerState(\"running\", \"Compacting…\");\n      showStatus(\"Compaction started\", true);\n      return;\n    }"
       assert_includes APP_JAVASCRIPT, "if (payload?.command === \"fork\") {\n      setComposerState(\"idle\", \"\", { focus: false });\n      showStatus(\"Choose a fork point\", true);\n      openForkSessionModal();\n      return;\n    }"
       assert_includes APP_JAVASCRIPT, "if (payload?.command === \"tree\") {\n      setComposerState(\"idle\", \"\", { focus: false });\n      showStatus(\"Choose a tree entry\", true);\n      openTreeSessionModal();\n      return;\n    }"
       assert_includes APP_JAVASCRIPT, "promptForm.requestSubmit();"
@@ -5413,6 +5413,46 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_initializes_composer_compacting_state_for_active_compaction
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      PiWebGateway.set :sessions_root, dir
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      client = FakeRpcClient.new([])
+      def client.live_snapshot
+        {
+          event_sequence: 3,
+          active_tool_events: [],
+          busy: true,
+          busy_since: Time.at(1_000),
+          compacting: true,
+          compacting_since: Time.at(1_005)
+        }
+      end
+      registry.register(path, client)
+      PiWebGateway.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(PiWebGateway).get(
+        "/session_fragment",
+        params: { "session" => path, "session_only" => "1" }
+      )
+
+      assert_equal 200, response.status
+      conversation_html = JSON.parse(response.body).fetch("conversation_html")
+      assert_includes conversation_html, "data-events-after=\"3\""
+      assert_includes conversation_html, "data-composer-state=\"running\""
+      assert_includes conversation_html, "data-composer-state-since=\"1005000\""
+      assert_includes conversation_html, "data-composer-busy-since=\"1000000\""
+      assert_includes conversation_html, "data-composer-compacting=\"true\""
+      assert_includes APP_JAVASCRIPT, "const initialComposerCompacting = liveOutput.dataset.composerCompacting === \"true\";"
+      assert_includes APP_JAVASCRIPT, "const initialComposerLabel = initialComposerCompacting ? \"Compacting…\" : \"Pi is running…\";"
+      assert_includes APP_JAVASCRIPT, "setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });"
+      assert_includes APP_JAVASCRIPT, "if (initialComposerCompacting) liveMessageRenderer.appendPendingCompactionMessage(new Date(initialComposerStateSince || Date.now()));"
+      assert_includes APP_JAVASCRIPT, "composerState.textContent = `${waitingForOutputLabel} ${formatWaitDuration(elapsed)}`;"
+      assert_includes APP_JAVASCRIPT, "if (event.type === \"compaction_start\") {\n      liveMessageRenderer.resetLiveCompactionTracking();\n      liveMessageRenderer.removePendingCompactionMessage();\n      liveMessageRenderer.appendPendingCompactionMessage(eventTimestamp(event));\n      setComposerState(\"running\", \"Compacting…\", { since: eventTimeMilliseconds(event) });\n    }"
+    end
+  end
+
   def test_initializes_composer_busy_state_for_running_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -5437,7 +5477,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "const initialComposerState = liveOutput.dataset.composerState;"
       assert_includes APP_JAVASCRIPT, "const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);"
       assert_includes APP_JAVASCRIPT, "liveAgentRunning = liveOutput.dataset.agentRunning === \"true\";"
-      assert_includes APP_JAVASCRIPT, "setComposerState(initialComposerState, \"Pi is running…\", { since: initialComposerStateSince, focus: false });"
+      assert_includes APP_JAVASCRIPT, "setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });"
       assert_includes APP_JAVASCRIPT, "if (state === \"running\" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());"
       assert_includes APP_JAVASCRIPT, "payload.events.length > 0 && composerState?.dataset.state === \"running\" && !waitingForOutputSince"
     end
