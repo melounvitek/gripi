@@ -7,7 +7,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#18181e">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Pi Gateway">
+  <meta name="apple-mobile-web-app-title" content="GRIPi">
   <style>
     :root { color-scheme: dark; --bg: #18181e; --panel: #282832; --border: #505050; --text: #d4d4d4; --muted: #9a9a9a; --accent: #8abeb7; --danger: #cc6666; }
     * { box-sizing: border-box; }
@@ -45,7 +45,7 @@
     }
 
     function desktopNotificationAvailable() {
-      return Boolean(window.piGatewayElectron?.showNotification);
+      return Boolean(window.gripiElectron?.showNotification);
     }
 
     function webNotificationAvailable() {
@@ -119,14 +119,14 @@
           }
         }
         const payload = {
-          type: "pi-notification-test",
-          title: "Pi Web Gateway test",
+          type: "gripi-notification-test",
+          title: "GRIPi test",
           body: "If you can see this, local web notifications work here.",
-          tag: "pi-notification-test",
+          tag: "gripi-notification-test",
           url: "/notification-test"
         };
         if (desktopNotificationAvailable()) {
-          const result = await window.piGatewayElectron.showNotification(payload);
+          const result = await window.gripiElectron.showNotification(payload);
           if (!result?.ok) throw new Error("Desktop notification bridge did not accept the request.");
         } else if (worker.active) {
           worker.active.postMessage(payload);

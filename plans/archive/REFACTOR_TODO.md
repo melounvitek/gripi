@@ -1,4 +1,4 @@
-# Refactor TODO — Pi Web Gateway production hardening
+# Refactor TODO — GRIPi production hardening
 
 This file captures the current project audit and turns it into an ordered checklist for future sessions.
 
@@ -21,7 +21,7 @@ The agent should:
 
 ## Overall context
 
-Pi Web Gateway started as a Ruby/Sinatra proof of concept, but it is now a real daily-use app. The current state is healthier than a typical vibe-coded POC: the test suite passes, routes are understandable, browser access exists, and Pi RPC event polling has already received some resilience work.
+GRIPi started as a Ruby/Sinatra proof of concept, but it is now a real daily-use app. The current state is healthier than a typical vibe-coded POC: the test suite passes, routes are understandable, browser access exists, and Pi RPC event polling has already received some resilience work.
 
 Current audit snapshot:
 
@@ -274,7 +274,7 @@ Relevant files:
 Checklist:
 
 - [ ] Document what the app does.
-- [ ] Document required env vars, especially `PI_GATEWAY_ADMIN_PASSWORD` and `PI_GATEWAY_ENV_PATH`.
+- [ ] Document required env vars, especially `GRIPI_ADMIN_PASSWORD` and `GRIPI_ENV_PATH`.
 - [ ] Document optional paths: sessions root, attachments root, read-state path, browser-access path, RPC idle timeout.
 - [ ] Document local run command.
 - [ ] Document that the deployed dev server needs a restart to pick up code/frontend changes.

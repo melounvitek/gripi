@@ -18,7 +18,7 @@ class PiAttachmentStore
 
   Attachment = Struct.new(:message_hash, :timestamp, :count, :paths, :mime_types, keyword_init: true)
 
-  def initialize(root: File.expand_path("~/.pi/web-gateway/attachments"))
+  def initialize(root: File.expand_path("~/.pi/gripi/attachments"))
     @root = root
   end
 

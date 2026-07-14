@@ -1,4 +1,4 @@
-ENV["PI_GATEWAY_ADMIN_PASSWORD"] ||= "test-password"
+ENV["GRIPI_ADMIN_PASSWORD"] ||= "test-password"
 
 require "minitest/autorun"
 require "rack/mock"
@@ -21,21 +21,21 @@ class AppTest < Minitest::Test
     @read_state_root = Dir.mktmpdir
     @browser_access_root = Dir.mktmpdir
     @workspace_root = Dir.mktmpdir
-    PiWebGateway.set :attachments_root, @attachments_root
-    PiWebGateway.set :read_state_path, File.join(@read_state_root, "read-state.json")
-    PiWebGateway.set :browser_access_path, File.join(@browser_access_root, "browser-access.json")
-    PiWebGateway.set :browser_auth_disabled, false
-    PiWebGateway.set :multi_user_mode, false
-    PiWebGateway.set :workspace_secret_path, File.join(@workspace_root, "workspace-secret")
-    PiWebGateway.set :workspace_access_path, File.join(@workspace_root, "workspace-access.json")
-    PiWebGateway.set :workspace_ownership_path, File.join(@workspace_root, "session-owners.json")
-    PiWebGateway.set :gateway_admin_password, nil
-    PiWebGateway.set :session_cwds_path, nil
-    PiWebGateway.set :rpc_client_registry, nil
-    PiWebGateway.set :session_synchronizer, nil
-    PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new
-    PiWebGateway.set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
-    PiWebGateway.set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd) }]
+    Gripi.set :attachments_root, @attachments_root
+    Gripi.set :read_state_path, File.join(@read_state_root, "read-state.json")
+    Gripi.set :browser_access_path, File.join(@browser_access_root, "browser-access.json")
+    Gripi.set :browser_auth_disabled, false
+    Gripi.set :multi_user_mode, false
+    Gripi.set :workspace_secret_path, File.join(@workspace_root, "workspace-secret")
+    Gripi.set :workspace_access_path, File.join(@workspace_root, "workspace-access.json")
+    Gripi.set :workspace_ownership_path, File.join(@workspace_root, "session-owners.json")
+    Gripi.set :gateway_admin_password, nil
+    Gripi.set :session_cwds_path, nil
+    Gripi.set :rpc_client_registry, nil
+    Gripi.set :session_synchronizer, nil
+    Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new
+    Gripi.set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
+    Gripi.set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd) }]
   end
 
   def teardown
@@ -47,25 +47,25 @@ class AppTest < Minitest::Test
 
   def test_app_boot_fails_without_admin_password
     Dir.mktmpdir do |home|
-      env = ENV.to_h.merge("PI_GATEWAY_ENV_PATH" => File.join(home, "missing-env"), "PI_GATEWAY_ADMIN_PASSWORD" => nil)
+      env = ENV.to_h.merge("GRIPI_ENV_PATH" => File.join(home, "missing-env"), "GRIPI_ADMIN_PASSWORD" => nil)
 
       _stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'")
 
       refute status.success?
-      assert_includes stderr, "PI_GATEWAY_ADMIN_PASSWORD is required"
+      assert_includes stderr, "GRIPI_ADMIN_PASSWORD is required"
     end
   end
 
   def test_app_boot_allows_missing_admin_password_when_browser_auth_is_disabled_for_single_user
     Dir.mktmpdir do |home|
       env = ENV.to_h.merge(
-        "PI_GATEWAY_ENV_PATH" => File.join(home, "missing-env"),
-        "PI_GATEWAY_ADMIN_PASSWORD" => nil,
-        "PI_BROWSER_AUTH_DISABLED" => "1",
-        "PI_MULTI_USER_MODE" => nil
+        "GRIPI_ENV_PATH" => File.join(home, "missing-env"),
+        "GRIPI_ADMIN_PASSWORD" => nil,
+        "GRIPI_BROWSER_AUTH_DISABLED" => "1",
+        "GRIPI_MULTI_USER_MODE" => nil
       )
 
-      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.browser_auth_disabled")
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts Gripi.settings.browser_auth_disabled")
 
       assert status.success?, stderr
       assert_equal "true", stdout.strip
@@ -75,13 +75,13 @@ class AppTest < Minitest::Test
   def test_app_boot_allows_missing_admin_password_when_browser_auth_is_disabled_for_multi_user
     Dir.mktmpdir do |home|
       env = ENV.to_h.merge(
-        "PI_GATEWAY_ENV_PATH" => File.join(home, "missing-env"),
-        "PI_GATEWAY_ADMIN_PASSWORD" => nil,
-        "PI_BROWSER_AUTH_DISABLED" => "1",
-        "PI_MULTI_USER_MODE" => "1"
+        "GRIPI_ENV_PATH" => File.join(home, "missing-env"),
+        "GRIPI_ADMIN_PASSWORD" => nil,
+        "GRIPI_BROWSER_AUTH_DISABLED" => "1",
+        "GRIPI_MULTI_USER_MODE" => "1"
       )
 
-      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.multi_user_mode")
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts Gripi.settings.multi_user_mode")
 
       assert status.success?, stderr
       assert_equal "true", stdout.strip
@@ -91,10 +91,10 @@ class AppTest < Minitest::Test
   def test_app_boot_loads_admin_password_from_user_config
     Dir.mktmpdir do |home|
       env_path = File.join(home, "gateway-env")
-      File.write(env_path, "PI_GATEWAY_ADMIN_PASSWORD='from-file'\n")
-      env = ENV.to_h.merge("PI_GATEWAY_ENV_PATH" => env_path, "PI_GATEWAY_ADMIN_PASSWORD" => nil)
+      File.write(env_path, "GRIPI_ADMIN_PASSWORD='from-file'\n")
+      env = ENV.to_h.merge("GRIPI_ENV_PATH" => env_path, "GRIPI_ADMIN_PASSWORD" => nil)
 
-      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.gateway_admin_password")
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts Gripi.settings.gateway_admin_password")
 
       assert status.success?, stderr
       assert_equal "from-file", stdout.strip
@@ -105,10 +105,10 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |home|
       env_path = File.join(home, "gateway-env")
       session_cwds_path = File.join(home, "pinned-dirs")
-      File.write(env_path, "PI_GATEWAY_ADMIN_PASSWORD='from-file'\nPI_SESSION_CWDS_PATH=#{session_cwds_path}\n")
-      env = ENV.to_h.merge("PI_GATEWAY_ENV_PATH" => env_path, "PI_GATEWAY_ADMIN_PASSWORD" => nil, "PI_SESSION_CWDS_PATH" => nil)
+      File.write(env_path, "GRIPI_ADMIN_PASSWORD='from-file'\nGRIPI_SESSION_CWDS_PATH=#{session_cwds_path}\n")
+      env = ENV.to_h.merge("GRIPI_ENV_PATH" => env_path, "GRIPI_ADMIN_PASSWORD" => nil, "GRIPI_SESSION_CWDS_PATH" => nil)
 
-      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.session_cwds_path")
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts Gripi.settings.session_cwds_path")
 
       assert status.success?, stderr
       assert_equal session_cwds_path, stdout.strip
@@ -117,13 +117,13 @@ class AppTest < Minitest::Test
 
   def test_app_boot_configures_pi_rpc_command_from_node_and_pi_paths
     env = ENV.to_h.merge(
-      "PI_GATEWAY_ADMIN_PASSWORD" => "secret",
-      "PI_GATEWAY_ENV_PATH" => File.join(Dir.tmpdir, "missing-pi-web-gateway-env"),
-      "PI_GATEWAY_NODE" => "/opt/node",
-      "PI_GATEWAY_PI" => "/opt/pi"
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
+      "GRIPI_NODE" => "/opt/node",
+      "GRIPI_PI" => "/opt/pi"
     )
 
-    stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.pi_rpc_command_prefix.join(' ')")
+    stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts Gripi.settings.pi_rpc_command_prefix.join(' ')")
 
     assert status.success?, stderr
     assert_equal "/opt/node /opt/pi", stdout.strip
@@ -131,25 +131,25 @@ class AppTest < Minitest::Test
 
   def test_app_boot_rejects_partial_pi_rpc_command_config
     env = ENV.to_h.merge(
-      "PI_GATEWAY_ADMIN_PASSWORD" => "secret",
-      "PI_GATEWAY_ENV_PATH" => File.join(Dir.tmpdir, "missing-pi-web-gateway-env"),
-      "PI_GATEWAY_NODE" => "/opt/node",
-      "PI_GATEWAY_PI" => nil
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
+      "GRIPI_NODE" => "/opt/node",
+      "GRIPI_PI" => nil
     )
 
     _stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'")
 
     refute status.success?
-    assert_includes stderr, "PI_GATEWAY_NODE and PI_GATEWAY_PI must be set together"
+    assert_includes stderr, "GRIPI_NODE and GRIPI_PI must be set together"
   end
 
   def test_app_boot_prefers_process_env_over_user_config
     Dir.mktmpdir do |home|
       env_path = File.join(home, "gateway-env")
-      File.write(env_path, "PI_GATEWAY_ADMIN_PASSWORD='from-file'\n")
-      env = ENV.to_h.merge("PI_GATEWAY_ENV_PATH" => env_path, "PI_GATEWAY_ADMIN_PASSWORD" => "from-process")
+      File.write(env_path, "GRIPI_ADMIN_PASSWORD='from-file'\n")
+      env = ENV.to_h.merge("GRIPI_ENV_PATH" => env_path, "GRIPI_ADMIN_PASSWORD" => "from-process")
 
-      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts PiWebGateway.settings.gateway_admin_password")
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts Gripi.settings.gateway_admin_password")
 
       assert status.success?, stderr
       assert_equal "from-process", stdout.strip
@@ -157,8 +157,8 @@ class AppTest < Minitest::Test
   end
 
   def test_permitted_hosts_can_be_configured_from_env
-    with_env("PI_GATEWAY_PERMITTED_HOSTS" => "remote-workspace.tail8fd8b2.ts.net, example.test") do
-      hosts = PiWebGateway.settings.host_authorization.fetch(:permitted_hosts)
+    with_env("GRIPI_PERMITTED_HOSTS" => "remote-workspace.tail8fd8b2.ts.net, example.test") do
+      hosts = Gripi.settings.host_authorization.fetch(:permitted_hosts)
 
       assert_includes hosts, "remote-workspace.tail8fd8b2.ts.net"
       assert_includes hosts, "example.test"
@@ -167,17 +167,17 @@ class AppTest < Minitest::Test
 
   def test_configured_host_passes_host_authorization
     env = ENV.to_h.merge(
-      "PI_GATEWAY_ADMIN_PASSWORD" => "secret",
-      "PI_GATEWAY_ENV_PATH" => File.join(Dir.tmpdir, "missing-pi-web-gateway-env"),
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
       "RACK_ENV" => "development",
       "APP_ENV" => "development",
-      "PI_GATEWAY_PERMITTED_HOSTS" => "remote-workspace.tail8fd8b2.ts.net"
+      "GRIPI_PERMITTED_HOSTS" => "remote-workspace.tail8fd8b2.ts.net"
     )
 
     stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", <<~RUBY)
       require './app'
       require 'rack/mock'
-      response = Rack::MockRequest.new(PiWebGateway).get('/', 'HTTP_HOST' => 'remote-workspace.tail8fd8b2.ts.net')
+      response = Rack::MockRequest.new(Gripi).get('/', 'HTTP_HOST' => 'remote-workspace.tail8fd8b2.ts.net')
       puts response.status
       puts response.body
     RUBY
@@ -189,9 +189,9 @@ class AppTest < Minitest::Test
   def test_session_view_links_to_notification_test
     Dir.mktmpdir do |dir|
       session_path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => session_path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => session_path })
 
       assert_equal 200, response.status
       assert_includes response.body, 'data-notification-toggle'
@@ -210,15 +210,15 @@ class AppTest < Minitest::Test
   def test_serves_notification_test_page
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/notification-test")
+      response = Rack::MockRequest.new(Gripi).get("/notification-test")
 
       assert_equal 200, response.status
       assert_includes response.body, "Notification test"
       assert_includes response.body, "navigator.serviceWorker.register"
       assert_includes response.body, "Notification.requestPermission"
-      assert_includes response.body, "piGatewayElectron"
+      assert_includes response.body, "gripiElectron"
       assert_includes response.body, "worker.active.postMessage"
       refute_includes response.body, "iPhone"
       refute_includes response.body, "iOS"
@@ -226,29 +226,29 @@ class AppTest < Minitest::Test
   end
 
   def test_serves_web_app_manifest
-    response = Rack::MockRequest.new(PiWebGateway).get("/manifest.webmanifest")
+    response = Rack::MockRequest.new(Gripi).get("/manifest.webmanifest")
 
     assert_equal 200, response.status
     assert_equal "application/manifest+json", response.media_type
     manifest = JSON.parse(response.body)
-    assert_equal "Pi Web Gateway", manifest.fetch("name")
+    assert_equal "GRIPi", manifest.fetch("name")
     assert_equal "/", manifest.fetch("start_url")
     assert_equal "standalone", manifest.fetch("display")
   end
 
   def test_serves_service_worker
-    response = Rack::MockRequest.new(PiWebGateway).get("/service-worker.js")
+    response = Rack::MockRequest.new(Gripi).get("/service-worker.js")
 
     assert_equal 200, response.status
     assert_equal "application/javascript", response.media_type
     assert_includes response.body, "self.registration.showNotification"
-    assert_includes response.body, '["pi-notification", "pi-notification-test"].includes(data.type)'
+    assert_includes response.body, '["gripi-notification", "gripi-notification-test"].includes(data.type)'
     assert_includes response.body, "notificationclick"
   end
 
   def test_serves_public_frontend_assets_with_revalidation
-    PiWebGateway.set :gateway_admin_password, "secret"
-    request = Rack::MockRequest.new(PiWebGateway)
+    Gripi.set :gateway_admin_password, "secret"
+    request = Rack::MockRequest.new(Gripi)
 
     css_response = request.get("/assets/app.css")
     js_response = request.get("/assets/app.js")
@@ -269,10 +269,10 @@ class AppTest < Minitest::Test
   end
 
   def test_serves_every_relative_module_import_reachable_from_the_app_entrypoint
-    public_root = Pathname.new(PiWebGateway.settings.public_folder).expand_path
+    public_root = Pathname.new(Gripi.settings.public_folder).expand_path
     pending = [public_root.join("assets/app.js")]
     visited = []
-    request = Rack::MockRequest.new(PiWebGateway)
+    request = Rack::MockRequest.new(Gripi)
 
     until pending.empty?
       module_path = pending.shift.cleanpath
@@ -298,13 +298,13 @@ class AppTest < Minitest::Test
   def test_page_loads_frontend_assets_and_exposes_home_dir_as_data
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
       document = Nokogiri::HTML(response.body)
 
       assert_equal 200, response.status
-      asset_version = PiWebGateway.settings.gateway_instance_id
+      asset_version = Gripi.settings.gateway_instance_id
       assert_equal "/assets/app.css?v=#{asset_version}", document.at_css('head link[rel="stylesheet"]')["href"]
       assert_equal Dir.home, document.at_css("body")["data-home-dir"]
       script = document.at_css("body > script:last-child")
@@ -319,16 +319,16 @@ class AppTest < Minitest::Test
   def test_unknown_browser_sees_access_gate_when_admin_password_is_configured
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/")
+      response = Rack::MockRequest.new(Gripi).get("/")
 
       assert_equal 403, response.status
       assert_includes response.body, "Browser access required"
       assert_includes response.body, "Ask access"
       assert_includes response["Set-Cookie"], "max-age=31536000"
-      state = JSON.parse(File.read(PiWebGateway.settings.browser_access_path))
+      state = JSON.parse(File.read(Gripi.settings.browser_access_path))
       assert_equal 1, state.fetch("pending_requests").length
       refute state.fetch("pending_requests").first.fetch("requested")
     end
@@ -337,52 +337,52 @@ class AppTest < Minitest::Test
   def test_browser_auth_disabled_opens_single_user_gateway_without_browser_approval
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, nil
-      PiWebGateway.set :browser_auth_disabled, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, nil
+      Gripi.set :browser_auth_disabled, true
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/")
+      response = Rack::MockRequest.new(Gripi).get("/")
 
       assert_equal 200, response.status
-      assert_includes response.body, "Pi Web Gateway"
+      assert_includes response.body, "GRIPi"
       refute_includes response.body, "Browser access required"
-      refute File.exist?(PiWebGateway.settings.browser_access_path)
+      refute File.exist?(Gripi.settings.browser_access_path)
     end
   end
 
   def test_browser_can_request_access_and_approved_browser_can_allow_it
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      request = Rack::MockRequest.new(Gripi)
 
       blocked = request.get("/")
       cookie = Array(blocked["Set-Cookie"]).first.split(";", 2).first
       requested = request.post("/browser-access/request", "HTTP_COOKIE" => cookie)
 
       assert_equal 303, requested.status
-      state = JSON.parse(File.read(PiWebGateway.settings.browser_access_path))
+      state = JSON.parse(File.read(Gripi.settings.browser_access_path))
       pending = state.fetch("pending_requests").first
       assert pending.fetch("requested")
 
-      store = BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path)
+      store = BrowserAccessStore.new(path: Gripi.settings.browser_access_path)
       approved_token = "approved-token"
       store.approve_current_browser(approved_token, label: "test")
-      pending_response = request.get("/browser-access/pending", "HTTP_COOKIE" => "pi_gateway_browser=#{approved_token}")
+      pending_response = request.get("/browser-access/pending", "HTTP_COOKIE" => "gripi_browser=#{approved_token}")
       assert_equal 200, pending_response.status
       assert_equal pending.fetch("code"), JSON.parse(pending_response.body).fetch("requests").first.fetch("code")
 
       approve_response = request.post(
         "/browser-access/approve",
         params: { "code" => pending.fetch("code") },
-        "HTTP_COOKIE" => "pi_gateway_browser=#{approved_token}"
+        "HTTP_COOKIE" => "gripi_browser=#{approved_token}"
       )
       assert_equal 200, approve_response.status
 
       allowed = request.get("/", "HTTP_COOKIE" => cookie)
       assert_equal 200, allowed.status
-      assert_includes allowed.body, "Pi Web Gateway"
+      assert_includes allowed.body, "GRIPi"
       refute_includes allowed.body, "Browser access required"
     end
   end
@@ -390,7 +390,7 @@ class AppTest < Minitest::Test
   def test_stale_pending_browser_can_request_access_with_one_click
     old_time = (Time.now.utc - (31 * 24 * 60 * 60)).iso8601
     File.write(
-      PiWebGateway.settings.browser_access_path,
+      Gripi.settings.browser_access_path,
       JSON.pretty_generate(
         "approved_browsers" => [],
         "pending_requests" => [
@@ -398,13 +398,13 @@ class AppTest < Minitest::Test
         ]
       ) + "\n"
     )
-    PiWebGateway.set :gateway_admin_password, "secret"
-    request = Rack::MockRequest.new(PiWebGateway)
+    Gripi.set :gateway_admin_password, "secret"
+    request = Rack::MockRequest.new(Gripi)
 
-    response = request.post("/browser-access/request", "HTTP_COOKIE" => "pi_gateway_browser=stale-token")
+    response = request.post("/browser-access/request", "HTTP_COOKIE" => "gripi_browser=stale-token")
 
     assert_equal 303, response.status
-    state = JSON.parse(File.read(PiWebGateway.settings.browser_access_path))
+    state = JSON.parse(File.read(Gripi.settings.browser_access_path))
     pending = state.fetch("pending_requests").first
     assert_equal "stale-token", pending.fetch("token")
     assert pending.fetch("requested")
@@ -414,9 +414,9 @@ class AppTest < Minitest::Test
   def test_access_redirects_reject_external_return_targets
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      request = Rack::MockRequest.new(Gripi)
 
       blocked = request.get("/")
       cookie = Array(blocked["Set-Cookie"]).first.split(";", 2).first
@@ -438,15 +438,15 @@ class AppTest < Minitest::Test
 
   def test_approve_and_deny_require_code
     Dir.mktmpdir do |dir|
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      store = BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path)
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      store = BrowserAccessStore.new(path: Gripi.settings.browser_access_path)
       approved_token = "approved-token"
       store.approve_current_browser(approved_token, label: "test")
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
 
-      approve_response = request.post("/browser-access/approve", "HTTP_COOKIE" => "pi_gateway_browser=#{approved_token}")
-      deny_response = request.post("/browser-access/deny", "HTTP_COOKIE" => "pi_gateway_browser=#{approved_token}")
+      approve_response = request.post("/browser-access/approve", "HTTP_COOKIE" => "gripi_browser=#{approved_token}")
+      deny_response = request.post("/browser-access/deny", "HTTP_COOKIE" => "gripi_browser=#{approved_token}")
 
       assert_equal 400, approve_response.status
       assert_equal 400, deny_response.status
@@ -456,9 +456,9 @@ class AppTest < Minitest::Test
   def test_admin_password_approves_current_browser
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      request = Rack::MockRequest.new(Gripi)
 
       blocked = request.get("/")
       cookie = Array(blocked["Set-Cookie"]).first.split(";", 2).first
@@ -479,13 +479,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "Hello Pi" }
       )
@@ -500,13 +500,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "Hello Pi", "expanded_cwd" => [project_cwd(dir)], "show_all_sessions" => "1" },
         "HTTP_ACCEPT" => "application/json"
@@ -524,8 +524,8 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         client = FakeRpcClient.new(calls)
         client.define_singleton_method(:prompt) do |message, images = []|
@@ -535,7 +535,7 @@ class AppTest < Minitest::Test
         client
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "Hello Pi" },
         "HTTP_ACCEPT" => "application/json"
@@ -554,13 +554,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/name Useful name" },
         "HTTP_ACCEPT" => "application/json"
@@ -579,13 +579,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/rename Useful name" },
         "HTTP_ACCEPT" => "application/json"
@@ -603,13 +603,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/compact recent work" },
         "HTTP_ACCEPT" => "application/json"
@@ -627,13 +627,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/compact" },
         "HTTP_ACCEPT" => "application/json"
@@ -649,13 +649,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/fork" },
         "HTTP_ACCEPT" => "application/json"
@@ -673,13 +673,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/model" },
         "HTTP_ACCEPT" => "application/json"
@@ -697,13 +697,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/tree" },
         "HTTP_ACCEPT" => "application/json"
@@ -722,13 +722,13 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       new_path = File.join(File.dirname(path), "new-session.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :new_rpc_client_factory, [->(cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :new_rpc_client_factory, [->(cwd) {
         calls << [:start_new, cwd]
         FakeRpcClient.new(calls, [], new_path)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/new" },
         "HTTP_ACCEPT" => "application/json"
@@ -748,13 +748,13 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       cloned_path = File.join(File.dirname(path), "cloned.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls, [], cloned_path)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/clone" },
         "HTTP_ACCEPT" => "application/json"
@@ -772,14 +772,14 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, nil
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, nil
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/compact recent\nwork" },
         "HTTP_ACCEPT" => "application/json"
@@ -796,13 +796,13 @@ class AppTest < Minitest::Test
       Dir.mktmpdir do |dir|
         path = write_session(dir)
         calls = []
-        PiWebGateway.set :sessions_root, dir
-        PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        Gripi.set :sessions_root, dir
+        Gripi.set :rpc_client_factory, [->(session_path) {
           calls << [:start, session_path]
           FakeRpcClient.new(calls)
         }]
 
-        response = Rack::MockRequest.new(PiWebGateway).post(
+        response = Rack::MockRequest.new(Gripi).post(
           "/prompt",
           params: { "session" => path, "message" => message },
           "HTTP_ACCEPT" => "application/json"
@@ -823,14 +823,14 @@ class AppTest < Minitest::Test
       Dir.mktmpdir do |dir|
         path = write_session(dir)
         calls = []
-        PiWebGateway.set :sessions_root, dir
-        PiWebGateway.set :rpc_client_registry, nil
-        PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        Gripi.set :sessions_root, dir
+        Gripi.set :rpc_client_registry, nil
+        Gripi.set :rpc_client_factory, [->(session_path) {
           calls << [:start, session_path]
           FakeRpcClient.new(calls)
         }]
 
-        response = Rack::MockRequest.new(PiWebGateway).post(
+        response = Rack::MockRequest.new(Gripi).post(
           "/prompt",
           params: { "session" => path, "message" => message },
           "HTTP_ACCEPT" => "application/json"
@@ -847,13 +847,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "follow_up" },
         "HTTP_ACCEPT" => "application/json"
@@ -869,13 +869,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "/name keep steering", "streaming_behavior" => "follow_up" },
         "HTTP_ACCEPT" => "application/json"
@@ -894,14 +894,14 @@ class AppTest < Minitest::Test
       Dir.mktmpdir do |dir|
         path = write_session(dir)
         calls = []
-        PiWebGateway.set :sessions_root, dir
-        PiWebGateway.set :rpc_client_registry, nil
-        PiWebGateway.set :rpc_client_factory, [->(session_path) {
+        Gripi.set :sessions_root, dir
+        Gripi.set :rpc_client_registry, nil
+        Gripi.set :rpc_client_factory, [->(session_path) {
           calls << [:start, session_path]
           FakeRpcClient.new(calls)
         }]
 
-        response = Rack::MockRequest.new(PiWebGateway).post(
+        response = Rack::MockRequest.new(Gripi).post(
           "/prompt",
           params: { "session" => path, "message" => message, "streaming_behavior" => "follow_up" },
           "HTTP_ACCEPT" => "application/json"
@@ -922,14 +922,14 @@ class AppTest < Minitest::Test
       image_path = File.join(dir, "screenshot.png")
       File.binwrite(image_path, "fake image data")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
       upload = Rack::Multipart::UploadedFile.new(image_path, "image/png", true)
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "follow_up", "images[]" => upload },
         "HTTP_ACCEPT" => "application/json"
@@ -950,14 +950,14 @@ class AppTest < Minitest::Test
       image_path = File.join(dir, "screenshot.png")
       File.binwrite(image_path, "fake image data")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
       upload = Rack::Multipart::UploadedFile.new(image_path, "image/png", true)
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "What is this?", "images[]" => upload }
       )
@@ -976,14 +976,14 @@ class AppTest < Minitest::Test
       image_path = File.join(dir, "screenshot.png")
       File.binwrite(image_path, "fake image data")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
       upload = Rack::Multipart::UploadedFile.new(image_path, "image/png", true)
-      post_response = Rack::MockRequest.new(PiWebGateway).post(
+      post_response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "What is this?", "images[]" => upload }
       )
@@ -995,7 +995,7 @@ class AppTest < Minitest::Test
         ))
       end
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 303, post_response.status
       assert_equal 200, response.status
@@ -1004,7 +1004,7 @@ class AppTest < Minitest::Test
       refute_includes response.body, "📎 1 image attachment"
 
       attachment_url = response.body.match(%r{/attachments/[a-f0-9]{64}/[a-f0-9]{64}\.png})[0]
-      attachment_response = Rack::MockRequest.new(PiWebGateway).get(attachment_url)
+      attachment_response = Rack::MockRequest.new(Gripi).get(attachment_url)
       assert_equal 200, attachment_response.status
       assert_equal "fake image data", attachment_response.body
     end
@@ -1014,7 +1014,7 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       image_data = Base64.strict_encode64("fake image data")
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       File.open(path, "a") do |file|
         file.puts(JSON.generate(
           type: "message",
@@ -1023,7 +1023,7 @@ class AppTest < Minitest::Test
         ))
       end
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, "message-images"
@@ -1032,7 +1032,7 @@ class AppTest < Minitest::Test
   end
 
   def test_renders_markdown_endpoint_with_sanitization_for_live_messages
-    response = Rack::MockRequest.new(PiWebGateway).post(
+    response = Rack::MockRequest.new(Gripi).post(
       "/markdown",
       params: { "text" => "## Live\n\n<script>alert('x')</script><a href=\"javascript:alert(1)\">bad</a>" }
     )
@@ -1045,7 +1045,7 @@ class AppTest < Minitest::Test
   end
 
   def test_markdown_repeated_one_items_render_as_single_ordered_list
-    response = Rack::MockRequest.new(PiWebGateway).post(
+    response = Rack::MockRequest.new(Gripi).post(
       "/markdown",
       params: { "text" => "1. First\n1. Second\n1. Third" }
     )
@@ -1059,7 +1059,7 @@ class AppTest < Minitest::Test
   end
 
   def test_markdown_continues_ordered_lists_across_code_blocks
-    response = Rack::MockRequest.new(PiWebGateway).post(
+    response = Rack::MockRequest.new(Gripi).post(
       "/markdown",
       params: { "text" => "1. First\n1. Second\n1. Third\n\n```ruby\nputs :code\n```\n\n1. Fourth\n\n```ruby\nputs :more\n```\n\n1. Fifth" }
     )
@@ -1072,7 +1072,7 @@ class AppTest < Minitest::Test
   end
 
   def test_markdown_highlights_fenced_code_blocks_safely
-    response = Rack::MockRequest.new(PiWebGateway).post(
+    response = Rack::MockRequest.new(Gripi).post(
       "/markdown",
       params: { "text" => "```ruby\nputs :ok\n<script>alert('x')</script>\n```\n\n```unknown\n<bad>\n```" }
     )
@@ -1102,7 +1102,7 @@ class AppTest < Minitest::Test
       echo "$HOME"
       ```
     MARKDOWN
-    response = Rack::MockRequest.new(PiWebGateway).post("/markdown", params: { "text" => markdown })
+    response = Rack::MockRequest.new(Gripi).post("/markdown", params: { "text" => markdown })
 
     assert_equal 200, response.status
     html = JSON.parse(response.body).fetch("html")
@@ -1118,16 +1118,16 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       client = FakeRpcClient.new(calls, [{ "type" => "assistant_delta", "text" => "Hi" }])
       registry = PiRpcClientRegistry.new(factory: ->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       })
       registry.register(path, client)
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/events",
         params: { "session" => path, "after" => "0" }
       )
@@ -1143,13 +1143,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       client = FakeRpcClient.new(calls, [{ "type" => "assistant_delta", "text" => "Hi" }])
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :rpc_client_registry, registry
 
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
       first = request.get("/events", params: { "session" => path, "after" => "0" })
       second = request.get("/events", params: { "session" => path, "after" => "0" })
 
@@ -1163,16 +1163,16 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       other_path = File.join(File.dirname(path), "other-session.jsonl")
       registry = PiRpcClientRegistry.new(factory: ->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       })
       registry.register(other_path, FakeRpcClient.new(calls, [{ "type" => "stale" }]))
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/events",
         params: { "session" => path }
       )
@@ -1187,14 +1187,14 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 2)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
       paths.each do |path|
-        response = Rack::MockRequest.new(PiWebGateway).post(
+        response = Rack::MockRequest.new(Gripi).post(
           "/prompt",
           params: { "session" => path, "message" => "Hello #{File.basename(path)}" }
         )
@@ -1218,10 +1218,10 @@ class AppTest < Minitest::Test
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(paths.first, FakeRpcClient.new(calls, [{ "type" => "from-a" }]))
       registry.register(paths.last, FakeRpcClient.new(calls, [{ "type" => "from-b" }]))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
       response_a = request.get("/events", params: { "session" => paths.first })
       response_b = request.get("/events", params: { "session" => paths.last })
 
@@ -1238,14 +1238,14 @@ class AppTest < Minitest::Test
       parent_client = FakeRpcClient.new(calls)
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(parent_path, parent_client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :new_rpc_client_factory, [->(cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :new_rpc_client_factory, [->(cwd) {
         calls << [:start_new, cwd]
         FakeRpcClient.new(calls, [], new_path)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/new",
         params: { "session" => parent_path }
       )
@@ -1263,13 +1263,13 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       new_path = File.join(File.dirname(path), "new-session.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :new_rpc_client_factory, [->(cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :new_rpc_client_factory, [->(cwd) {
         calls << [:start_new, cwd]
         FakeRpcClient.new(calls, [], new_path)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/new",
         params: { "session" => path }
       )
@@ -1284,13 +1284,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 2)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :new_rpc_client_factory, [->(cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :new_rpc_client_factory, [->(cwd) {
         calls << [:start_new, cwd]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/new",
         params: { "session" => paths.first }
       )
@@ -1306,14 +1306,14 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       pending_path = File.join(dir, "pending-session.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
-      PiWebGateway.set :new_rpc_client_factory, [->(cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :new_rpc_client_factory, [->(cwd) {
         calls << [:start_new, cwd]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/new",
         params: { "session" => pending_path }
       )
@@ -1328,13 +1328,13 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       new_path = File.join(File.dirname(path), "new-session.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :new_rpc_client_factory, [->(cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :new_rpc_client_factory, [->(cwd) {
         calls << [:start_new, cwd]
         FakeRpcClient.new(calls, [], new_path)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/new",
         params: { "session" => path, "expanded_cwd" => [project_cwd(dir)], "show_all_sessions" => "1" },
         "HTTP_ACCEPT" => "application/json"
@@ -1355,13 +1355,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls, [{ "entryId" => "entry-1", "text" => "Try this" }])
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sessions/fork_messages",
         params: { "session" => path },
         "HTTP_ACCEPT" => "application/json"
@@ -1385,13 +1385,13 @@ class AppTest < Minitest::Test
         { type: "message", id: "user-2", parentId: "label-1", timestamp: "2026-06-13T10:02:00Z", message: { role: "user", content: [{ type: "text", text: "Alternate prompt" }] } }
       ])
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls, [], "tool-call-only-assistant")
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sessions/tree_entries",
         params: { "session" => path },
         "HTTP_ACCEPT" => "application/json"
@@ -1428,12 +1428,12 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session_with_messages(dir, [{ role: "user", text: "Hello" }])
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
 
       request.post("/sessions/tree", params: { "session" => path, "entry_id" => "entry-1" }, "HTTP_ACCEPT" => "application/json")
       response = request.get("/sidebar", params: { "session" => path })
@@ -1457,9 +1457,9 @@ class AppTest < Minitest::Test
       now = Time.at(1_000)
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { fresh_client }, clock: -> { now })
       registry.register(path, stale_client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      request = Rack::MockRequest.new(Gripi)
 
       initial = request.get("/", params: { "session" => path })
       assert_equal 200, initial.status
@@ -1564,17 +1564,17 @@ class AppTest < Minitest::Test
         FakeRpcClient.new(calls)
       })
       registry.register(path, dead_client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, "Persisted prompt"
       refute registry.active?(path)
       assert_equal [[:session_position], [:close]], calls
 
-      abort_response = Rack::MockRequest.new(PiWebGateway).post("/abort", params: { "session" => path })
+      abort_response = Rack::MockRequest.new(Gripi).post("/abort", params: { "session" => path })
 
       assert_equal 303, abort_response.status
       assert_equal [[:session_position], [:close], [:start, path], [:abort]], calls
@@ -1590,12 +1590,12 @@ class AppTest < Minitest::Test
         { type: "message", id: "assistant-2", parentId: "user-2", timestamp: "2026-06-13T10:03:00Z", message: { role: "assistant", content: [{ type: "text", text: "Later answer" }] } }
       ])
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
 
       request.post("/sessions/tree", params: { "session" => path, "entry_id" => "assistant-1" }, "HTTP_ACCEPT" => "application/json")
       fragment_response = request.get("/session_fragment", params: { "session" => path }, "HTTP_ACCEPT" => "application/json")
@@ -1629,13 +1629,13 @@ class AppTest < Minitest::Test
         { type: "message", id: "assistant-2", parentId: "assistant-1", timestamp: "2026-06-13T10:03:00Z", message: { role: "assistant", content: [{ type: "text", text: "Later answer" }] } }
       ])
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls, [], "assistant-1")
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sessions/tree_entries",
         params: { "session" => path },
         "HTTP_ACCEPT" => "application/json"
@@ -1653,13 +1653,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/tree",
         params: { "session" => path, "entry_id" => "entry-1" },
         "HTTP_ACCEPT" => "application/json"
@@ -1678,13 +1678,13 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       forked_path = File.join(File.dirname(path), "forked.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls, [], forked_path)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/fork",
         params: { "session" => path, "entry_id" => "entry-1", "show_all_sessions" => "1" },
         "HTTP_ACCEPT" => "application/json"
@@ -1705,21 +1705,21 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       forked_path = File.join(File.dirname(path), "pending-fork.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls, [], forked_path)
       }]
 
-      post_response = Rack::MockRequest.new(PiWebGateway).post(
+      post_response = Rack::MockRequest.new(Gripi).post(
         "/sessions/fork",
         params: { "session" => path, "entry_id" => "entry-1" },
         "HTTP_ACCEPT" => "application/json"
       )
       assert_equal forked_path, JSON.parse(post_response.body).fetch("session")
-      assert_equal project_cwd(dir), PiWebGateway.pending_session_registry.cwd_for(forked_path)
+      assert_equal project_cwd(dir), Gripi.pending_session_registry.cwd_for(forked_path)
 
-      fragment_response = Rack::MockRequest.new(PiWebGateway).get(
+      fragment_response = Rack::MockRequest.new(Gripi).get(
         "/session_fragment",
         params: { "session" => forked_path }
       )
@@ -1736,13 +1736,13 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       cloned_path = File.join(File.dirname(path), "cloned.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls, [], cloned_path)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/clone",
         params: { "session" => path },
         "HTTP_ACCEPT" => "application/json"
@@ -1760,7 +1760,7 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       cwd = File.join(dir, "project")
       FileUtils.mkdir_p(cwd)
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sessions/validate_cwd",
         params: { "cwd" => cwd },
         "HTTP_ACCEPT" => "application/json"
@@ -1776,7 +1776,7 @@ class AppTest < Minitest::Test
   def test_rejects_invalid_new_session_cwd_as_json
     Dir.mktmpdir do |dir|
       missing = File.join(dir, "missing")
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sessions/validate_cwd",
         params: { "cwd" => missing },
         "HTTP_ACCEPT" => "application/json"
@@ -1795,7 +1795,7 @@ class AppTest < Minitest::Test
       FileUtils.mkdir_p(File.join(dir, ".hidden"))
       File.write(File.join(dir, "notes.txt"), "not a directory")
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sessions/browse_cwd",
         params: { "cwd" => dir },
         "HTTP_ACCEPT" => "application/json"
@@ -1815,7 +1815,7 @@ class AppTest < Minitest::Test
       FileUtils.mkdir_p(File.join(dir, "visible"))
       FileUtils.mkdir_p(File.join(dir.b, "invalid-\xff".b))
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sessions/browse_cwd",
         params: { "cwd" => dir },
         "HTTP_ACCEPT" => "application/json"
@@ -1827,7 +1827,7 @@ class AppTest < Minitest::Test
   end
 
   def test_browsing_new_session_cwds_rejects_malformed_path_encoding
-    response = Rack::MockRequest.new(PiWebGateway).get(
+    response = Rack::MockRequest.new(Gripi).get(
       "/sessions/browse_cwd?cwd=%FF",
       "HTTP_ACCEPT" => "application/json"
     )
@@ -1842,12 +1842,12 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       %w[alpha alpine beta .archive .config].each { |name| FileUtils.mkdir_p(File.join(dir, name)) }
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sessions/browse_cwd",
         params: { "cwd" => File.join(dir, "al") },
         "HTTP_ACCEPT" => "application/json"
       )
-      hidden_response = Rack::MockRequest.new(PiWebGateway).get(
+      hidden_response = Rack::MockRequest.new(Gripi).get(
         "/sessions/browse_cwd",
         params: { "cwd" => File.join(dir, ".a") },
         "HTTP_ACCEPT" => "application/json"
@@ -1864,7 +1864,7 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       35.times { |index| FileUtils.mkdir_p(File.join(dir, format("project-%02d", index))) }
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sessions/browse_cwd",
         params: { "cwd" => File.join(dir, "project-") },
         "HTTP_ACCEPT" => "application/json"
@@ -1883,13 +1883,13 @@ class AppTest < Minitest::Test
       FileUtils.mkdir_p(cwd)
       new_path = File.join(dir, "new-session.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :new_rpc_client_factory, [->(started_cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :new_rpc_client_factory, [->(started_cwd) {
         calls << [:start_new, started_cwd]
         FakeRpcClient.new(calls, [], new_path)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/new_at_cwd",
         params: { "cwd" => cwd, "show_all_sessions" => "1" },
         "HTTP_ACCEPT" => "application/json"
@@ -1907,13 +1907,13 @@ class AppTest < Minitest::Test
   def test_rejects_new_session_from_invalid_cwd_as_json
     Dir.mktmpdir do |dir|
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :new_rpc_client_factory, [->(started_cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :new_rpc_client_factory, [->(started_cwd) {
         calls << [:start_new, started_cwd]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/new_at_cwd",
         params: { "cwd" => File.join(dir, "missing") },
         "HTTP_ACCEPT" => "application/json"
@@ -1933,11 +1933,11 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(pending_path, FakeRpcClient.new(calls, [{ "type" => "from-pending" }], real_path))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/events",
         params: { "session" => real_path }
       )
@@ -1946,7 +1946,7 @@ class AppTest < Minitest::Test
       assert_event_payload(response, events: [], last_seq: 0, mode: "available")
       refute registry.active?(real_path)
       assert registry.active?(pending_path)
-      assert_includes PiWebGateway.pending_session_registry.paths, pending_path
+      assert_includes Gripi.pending_session_registry.paths, pending_path
       assert_empty calls
     end
   end
@@ -1958,11 +1958,11 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => real_path, "message" => "Continue" }
       )
@@ -1970,7 +1970,7 @@ class AppTest < Minitest::Test
       assert_equal 303, response.status
       assert registry.active?(real_path)
       refute registry.active?(pending_path)
-      refute_includes PiWebGateway.pending_session_registry.paths, pending_path
+      refute_includes Gripi.pending_session_registry.paths, pending_path
       assert_equal [[:get_state], [:prompt, "Continue"]], calls
     end
   end
@@ -1982,11 +1982,11 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => pending_path, "message" => "Continue" }
       )
@@ -1996,7 +1996,7 @@ class AppTest < Minitest::Test
       refute_includes response["Location"], Rack::Utils.escape(pending_path)
       assert registry.active?(real_path)
       refute registry.active?(pending_path)
-      refute_includes PiWebGateway.pending_session_registry.paths, pending_path
+      refute_includes Gripi.pending_session_registry.paths, pending_path
       assert_equal [[:get_state], [:prompt, "Continue"]], calls
     end
   end
@@ -2008,11 +2008,11 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         "HTTP_ACCEPT" => "application/json",
         params: { "session" => pending_path, "message" => "Continue" }
@@ -2033,11 +2033,11 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         "HTTP_ACCEPT" => "application/json",
         params: { "session" => pending_path, "message" => "/rename Lovely session" }
@@ -2061,9 +2061,9 @@ class AppTest < Minitest::Test
       stale_path = File.join(stale_dir, "stale.jsonl")
       File.write(stale_path, JSON.generate({ type: "session", id: "stale", cwd: stale_cwd }) + "\n")
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      request = Rack::MockRequest.new(Gripi)
 
       response = request.get("/")
       search_response = request.get("/sidebar", params: { "session_search" => "stale" })
@@ -2087,13 +2087,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls, [{ "name" => "review", "source" => "skill", "description" => "Review code" }])
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -2110,19 +2110,19 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls, [
           { "name" => "review", "source" => "skill", "description" => "Review code" },
           { "name" => "sessions", "source" => "extension", "description" => "Switch, rename, or delete project sessions" },
           { "name" => "rename", "source" => "extension", "description" => "Rename the current session" },
-          { "name" => "pi_web_tree", "source" => "extension", "description" => "Internal bridge" },
-          { "name" => "pi_web_tree_leaf", "source" => "extension", "description" => "Internal bridge" }
+          { "name" => "gripi_tree", "source" => "extension", "description" => "Internal bridge" },
+          { "name" => "gripi_tree_leaf", "source" => "extension", "description" => "Internal bridge" }
         ])
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, "Slash commands (7)"
@@ -2136,8 +2136,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "/model"
       refute_includes response.body, "/sessions"
       refute_includes response.body, "/rename"
-      refute_includes response.body, "pi_web_tree"
-      refute_includes response.body, "pi_web_tree_leaf"
+      refute_includes response.body, "gripi_tree"
+      refute_includes response.body, "gripi_tree_leaf"
       refute_includes response.body, "command-filter"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
     end
@@ -2155,13 +2155,13 @@ class AppTest < Minitest::Test
         calls << [:get_commands]
         raise Errno::EPIPE
       end
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         broken_client
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, "Slash commands (6)"
@@ -2180,13 +2180,13 @@ class AppTest < Minitest::Test
       path = File.join(dir, "not-a-session.jsonl")
       File.write(path, "not a pi session")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/commands", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/commands", params: { "session" => path })
 
       assert_equal 404, response.status
       assert_empty calls
@@ -2201,13 +2201,13 @@ class AppTest < Minitest::Test
         { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Hi" }], usage: { totalTokens: 12_345 } } }
       ])
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, "session-status-bar"
@@ -2232,10 +2232,10 @@ class AppTest < Minitest::Test
       def client.busy? = true
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       button = Nokogiri::HTML(response.body).at_css('button[data-status-key="model"]')
@@ -2247,9 +2247,9 @@ class AppTest < Minitest::Test
   def test_page_includes_accessible_lazy_model_settings_modal
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -2269,9 +2269,9 @@ class AppTest < Minitest::Test
   def test_model_settings_script_supports_picker_slash_command_and_thinking_shortcut
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes APP_JAVASCRIPT, "function sessionModelSlashCommand(message)"
@@ -2293,9 +2293,9 @@ class AppTest < Minitest::Test
         { type: "thinking_level_change", thinkingLevel: "medium" },
         { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Hi" }], usage: { totalTokens: 12_345 } } }
       ])
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/status", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/status", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_equal({ "context" => "12.3k", "model" => "openai-codex/gpt-5.5", "thinking" => "medium" }, JSON.parse(response.body))
@@ -2309,9 +2309,9 @@ class AppTest < Minitest::Test
         { type: "message", id: "kept-entry", timestamp: "2026-06-13T10:01:00Z", message: { role: "user", content: [{ type: "text", text: "Retained text" }] } },
         { type: "compaction", timestamp: "2026-06-13T10:02:00Z", summary: "Summary text", firstKeptEntryId: "kept-entry" }
       ])
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/status", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/status", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_equal "≈7", JSON.parse(response.body).fetch("context")
@@ -2322,13 +2322,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/abort",
         params: { "session" => path }
       )
@@ -2342,13 +2342,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/abort",
         params: { "session" => path },
         "HTTP_ACCEPT" => "application/json"
@@ -2368,8 +2368,8 @@ class AppTest < Minitest::Test
       client.define_singleton_method(:busy?) { true }
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
       operation_started = Queue.new
       release_operation = Queue.new
 
@@ -2381,7 +2381,7 @@ class AppTest < Minitest::Test
       end
       operation_started.pop
       abort_thread = Thread.new do
-        Rack::MockRequest.new(PiWebGateway).post(
+        Rack::MockRequest.new(Gripi).post(
           "/abort",
           params: { "session" => path },
           "HTTP_ACCEPT" => "application/json"
@@ -2402,13 +2402,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/compact",
         params: { "session" => path, "instructions" => "recent work" }
       )
@@ -2422,13 +2422,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/rename",
         params: { "session" => path, "name" => "Useful name" }
       )
@@ -2451,11 +2451,11 @@ class AppTest < Minitest::Test
         }
       end
       registry.register(pending_path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => pending_path }
       )
@@ -2474,10 +2474,10 @@ class AppTest < Minitest::Test
       client = FakeRpcClient.new([], [], pending_path)
       client.define_singleton_method(:busy?) { true }
       registry.register(pending_path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      request = Rack::MockRequest.new(Gripi)
 
       fragment_response = request.get("/session_fragment", params: { "session" => selected_path })
 
@@ -2510,11 +2510,11 @@ class AppTest < Minitest::Test
       pending_path = File.join(File.dirname(real_path), "pending-session.jsonl")
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(pending_path, FakeRpcClient.new([], [], real_path))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => pending_path }
       )
@@ -2531,10 +2531,10 @@ class AppTest < Minitest::Test
   def test_sessions_header_renders_labeled_new_session_action
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
       document = Nokogiri::HTML(response.body)
       button = document.at_css('.recent-sessions-header [data-modal-open="new-session-modal"]')
 
@@ -2551,10 +2551,10 @@ class AppTest < Minitest::Test
   def test_renders_discord_like_scrolling_shell
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -2644,10 +2644,10 @@ class AppTest < Minitest::Test
   def test_selected_session_header_opens_session_only_view_in_new_window
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
       document = Nokogiri::HTML(response.body)
       link = document.at_css('.session-header-actions a[aria-label="Open session in new window"]')
 
@@ -2667,10 +2667,10 @@ class AppTest < Minitest::Test
   def test_session_only_view_renders_conversation_without_sidebar
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path, "session_only" => "1" })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path, "session_only" => "1" })
       document = Nokogiri::HTML(response.body)
 
       assert_equal 200, response.status
@@ -2691,10 +2691,10 @@ class AppTest < Minitest::Test
   def test_session_only_fragment_preserves_session_only_url
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/session_fragment", params: { "session" => path, "session_only" => "1" })
+      response = Rack::MockRequest.new(Gripi).get("/session_fragment", params: { "session" => path, "session_only" => "1" })
       payload = JSON.parse(response.body)
       query = Rack::Utils.parse_nested_query(URI.parse(payload.fetch("url")).query)
 
@@ -2727,10 +2727,10 @@ class AppTest < Minitest::Test
       ].join("\n") + "\n")
       FileUtils.touch(path_a, mtime: Time.now - 60)
       FileUtils.touch(path_b, mtime: Time.now)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path_b })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => path_b })
 
       assert_equal 200, response.status
       assert_includes response.body, "Sessions"
@@ -2745,7 +2745,7 @@ class AppTest < Minitest::Test
 
   def test_sidebar_gives_matching_project_names_the_same_visual_identity
     Dir.mktmpdir do |dir|
-      projects = [File.join(dir, "machine-a", "pi-web-gateway"), File.join(dir, "machine-b", "pi-web-gateway"), File.join(dir, "machine-b", "acme-platform")]
+      projects = [File.join(dir, "machine-a", "gripi"), File.join(dir, "machine-b", "gripi"), File.join(dir, "machine-b", "acme-platform")]
       projects.each_with_index do |cwd, index|
         FileUtils.mkdir_p(cwd)
         session_dir = File.join(dir, "sessions-#{index}")
@@ -2755,26 +2755,26 @@ class AppTest < Minitest::Test
           JSON.generate({ type: "session_info", name: "Session #{index}" })
         ].join("\n") + "\n")
       end
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar")
+      response = Rack::MockRequest.new(Gripi).get("/sidebar")
       document = Nokogiri::HTML(response.body)
       identities = document.css(".session-project")
-      gateway_identities = identities.select { |identity| identity.at_css(".session-project-label")&.text == "pi-web-gateway" }
+      gateway_identities = identities.select { |identity| identity.at_css(".session-project-label")&.text == "gripi" }
       platform_identity = identities.find { |identity| identity.at_css(".session-project-label")&.text == "acme-platform" }
 
       assert_equal 200, response.status
       assert_equal 2, gateway_identities.length
-      assert_equal ["PW"], gateway_identities.map { |identity| identity.at_css(".session-project-monogram").text }.uniq
-      assert_equal ["--project-identity-bg: #215f5933; --project-identity-fg: #76cbbf"], gateway_identities.map { |identity| identity["style"] }.uniq
+      assert_equal ["GR"], gateway_identities.map { |identity| identity.at_css(".session-project-monogram").text }.uniq
+      assert_equal ["--project-identity-bg: #3f477533; --project-identity-fg: #a5afe9"], gateway_identities.map { |identity| identity["style"] }.uniq
       assert_equal "AP", platform_identity.at_css(".session-project-monogram").text
 
       filter = document.at_css("[data-project-select] select[data-sidebar-project-filter]")
-      gateway_options = filter.css("option").select { |option| option.text == "pi-web-gateway" }
+      gateway_options = filter.css("option").select { |option| option.text == "gripi" }
       assert_equal 2, gateway_options.length
-      assert_equal ["PW"], gateway_options.map { |option| option["data-project-monogram"] }.uniq
-      assert_equal ["#215f5933"], gateway_options.map { |option| option["data-project-background"] }.uniq
+      assert_equal ["GR"], gateway_options.map { |option| option["data-project-monogram"] }.uniq
+      assert_equal ["#3f477533"], gateway_options.map { |option| option["data-project-background"] }.uniq
       refute filter.at_css('option[value=""]')["data-project-monogram"]
     end
   end
@@ -2794,10 +2794,10 @@ class AppTest < Minitest::Test
         JSON.generate({ type: "session", id: "child", cwd: project_cwd(dir), parentSession: parent_path }),
         JSON.generate({ type: "session_info", name: "Child session" })
       ].join("\n") + "\n")
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => parent_path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => parent_path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -2827,10 +2827,10 @@ class AppTest < Minitest::Test
         JSON.generate({ type: "session", id: "child", cwd: project_cwd(dir), parentSession: parent_path }),
         JSON.generate({ type: "session_info", name: "Child session" })
       ].join("\n") + "\n")
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => child_path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => child_path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -2851,10 +2851,10 @@ class AppTest < Minitest::Test
   def test_sidebar_search_is_collapsed_until_requested
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -2893,12 +2893,12 @@ class AppTest < Minitest::Test
         JSON.generate({ type: "session", id: "gamma", cwd: alpha_cwd }),
         JSON.generate({ type: "session_info", name: "Gamma cleanup" })
       ].join("\n") + "\n")
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      title_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => alpha_path, "session_search" => "refactor" })
-      message_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => alpha_path, "session_search" => "webhook" })
-      cwd_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => alpha_path, "session_search" => "beta-project" })
+      title_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => alpha_path, "session_search" => "refactor" })
+      message_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => alpha_path, "session_search" => "webhook" })
+      cwd_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => alpha_path, "session_search" => "beta-project" })
 
       assert_equal 200, title_response.status
       assert_includes title_response.body, "Alpha refactor"
@@ -2919,10 +2919,10 @@ class AppTest < Minitest::Test
   def test_sidebar_search_renders_empty_state_and_preserves_query_in_links
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 22)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => paths.last, "session_search" => "missing" })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => paths.last, "session_search" => "missing" })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -2950,10 +2950,10 @@ class AppTest < Minitest::Test
       filtered_path = File.join(session_dir, "filtered.jsonl")
       File.write(current_path, JSON.generate({ type: "session", id: "current", cwd: current_cwd }) + "\n")
       File.write(filtered_path, JSON.generate({ type: "session", id: "filtered", cwd: filtered_cwd }) + "\n")
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sidebar",
         params: { "session" => current_path, "project" => filtered_cwd, "session_search" => "filtered" }
       )
@@ -2978,10 +2978,10 @@ class AppTest < Minitest::Test
   def test_session_view_forms_preserve_sidebar_search
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path, "session_search" => "project" })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path, "session_search" => "project" })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -2995,10 +2995,10 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new(calls) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new(calls) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         params: { "session" => path, "message" => "hello", "session_search" => "project" },
         "HTTP_ACCEPT" => "application/json"
@@ -3014,11 +3014,11 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       new_path = File.join(dir, "--project--", "new-session.jsonl")
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :new_rpc_client_factory, [->(_cwd) { FakeRpcClient.new([], [], new_path) }]
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :new_rpc_client_factory, [->(_cwd) { FakeRpcClient.new([], [], new_path) }]
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/new_at_cwd",
         params: { "cwd" => project_cwd(dir), "session" => path, "session_search" => "project" },
         "HTTP_ACCEPT" => "application/json"
@@ -3038,13 +3038,13 @@ class AppTest < Minitest::Test
       FileUtils.mkdir_p(wholesale_cwd)
       new_path = File.join(dir, "new-session.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :new_rpc_client_factory, [->(started_cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :new_rpc_client_factory, [->(started_cwd) {
         calls << [:start_new, started_cwd]
         FakeRpcClient.new(calls, [], new_path)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/new_at_cwd",
         params: { "cwd" => wholesale_cwd, "project" => production_cwd },
         "HTTP_ACCEPT" => "application/json"
@@ -3080,10 +3080,10 @@ class AppTest < Minitest::Test
       ].join("\n") + "\n")
       FileUtils.touch(older_path, mtime: now)
       FileUtils.touch(newer_path, mtime: now - 120)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => newer_path, "project" => older_cwd })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => newer_path, "project" => older_cwd })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -3124,13 +3124,13 @@ class AppTest < Minitest::Test
       FileUtils.touch(selected_path, mtime: Time.now - 30)
       FileUtils.touch(unread_path, mtime: Time.now - 20)
       FileUtils.touch(filtered_path, mtime: Time.now - 10)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => selected_path })
+      Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => selected_path })
       File.write(unread_path, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Unread reply" }] } }) + "\n", mode: "a")
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sidebar",
         params: { "session" => selected_path, "project" => filtered_cwd }
       )
@@ -3149,10 +3149,10 @@ class AppTest < Minitest::Test
   def test_sidebar_project_filter_preserves_project_when_loading_more_sessions
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 41)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sidebar",
         params: { "session" => paths.last, "project" => project_cwd(dir) }
       )
@@ -3168,13 +3168,13 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/abort",
         params: { "session" => path, "project" => project_cwd(dir) }
       )
@@ -3187,10 +3187,10 @@ class AppTest < Minitest::Test
   def test_sidebar_uses_relative_time_formatter
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_equal "just now", Nokogiri::HTML(response.body).at_css(".session-meta").text.strip
@@ -3201,10 +3201,10 @@ class AppTest < Minitest::Test
   def test_sidebar_shows_server_origin_under_heading
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path }, "HTTP_HOST" => "pi.example.test:9292", "rack.url_scheme" => "https")
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => path }, "HTTP_HOST" => "pi.example.test:9292", "rack.url_scheme" => "https")
       document = Nokogiri::HTML(response.body)
 
       assert_equal 200, response.status
@@ -3215,10 +3215,10 @@ class AppTest < Minitest::Test
 
   def test_empty_session_page_prompts_for_existing_directory
     Dir.mktmpdir do |dir|
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/")
+      response = Rack::MockRequest.new(Gripi).get("/")
       document = Nokogiri::HTML(response.body)
 
       assert_equal 200, response.status
@@ -3241,11 +3241,11 @@ class AppTest < Minitest::Test
       File.write(config_path, "#{configured_cwd}\n#{missing_cwd}\n")
       sessions_root = File.join(dir, "sessions")
       FileUtils.mkdir_p(sessions_root)
-      PiWebGateway.set :sessions_root, sessions_root
-      PiWebGateway.set :session_cwds_path, config_path
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, sessions_root
+      Gripi.set :session_cwds_path, config_path
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/")
+      response = Rack::MockRequest.new(Gripi).get("/")
 
       assert_equal 200, response.status
       modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
@@ -3266,11 +3266,11 @@ class AppTest < Minitest::Test
       FileUtils.mkdir_p(configured_cwd)
       config_path = File.join(dir, "pinned-dirs")
       File.write(config_path, "#{cwd}\n#{configured_cwd}\n")
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :session_cwds_path, config_path
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :session_cwds_path, config_path
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
@@ -3282,10 +3282,10 @@ class AppTest < Minitest::Test
   def test_page_includes_new_session_modal
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path, "show_all_sessions" => "1" })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path, "show_all_sessions" => "1" })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -3320,10 +3320,10 @@ class AppTest < Minitest::Test
       second_path = File.join(session_dir, "second.jsonl")
       File.write(first_path, JSON.generate({ type: "session", id: "first", cwd: first_cwd }) + "\n")
       File.write(second_path, JSON.generate({ type: "session", id: "second", cwd: second_cwd }) + "\n")
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => first_path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => first_path })
 
       assert_equal 200, response.status
       modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
@@ -3350,10 +3350,10 @@ class AppTest < Minitest::Test
       File.write(newer_path, JSON.generate({ type: "session", id: "newer", timestamp: Time.now.utc.iso8601(3), cwd: newer_cwd }) + "\n")
       FileUtils.touch(older_path, mtime: Time.now - 60)
       FileUtils.touch(newer_path, mtime: Time.now)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => older_path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => older_path })
 
       assert_equal 200, response.status
       modal = Nokogiri::HTML(response.body).at_css('body > [data-modal="new-session-modal"]')
@@ -3385,10 +3385,10 @@ class AppTest < Minitest::Test
       FileUtils.touch(current_path, mtime: Time.now - 60)
       FileUtils.touch(filtered_path, mtime: Time.now - 30)
       FileUtils.touch(newer_path, mtime: Time.now)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => current_path, "project" => filtered_cwd }
       )
@@ -3414,10 +3414,10 @@ class AppTest < Minitest::Test
       filtered_path = File.join(session_dir, "filtered.jsonl")
       File.write(current_path, JSON.generate({ type: "session", id: "current", cwd: current_cwd }) + "\n")
       File.write(filtered_path, JSON.generate({ type: "session", id: "filtered", cwd: filtered_cwd }) + "\n")
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/session_fragment",
         params: { "session" => current_path, "project" => filtered_cwd }
       )
@@ -3440,10 +3440,10 @@ class AppTest < Minitest::Test
       FileUtils.mkdir_p(filtered_cwd)
       filtered_path = File.join(dir, "filtered.jsonl")
       File.write(filtered_path, JSON.generate({ type: "session", id: "filtered", cwd: filtered_cwd }) + "\n")
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/new_session_modal",
         params: { "session" => path, "project" => filtered_cwd }
       )
@@ -3459,10 +3459,10 @@ class AppTest < Minitest::Test
   def test_page_includes_generic_modal_and_new_session_cwd_scripts
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes APP_JAVASCRIPT, "function openModal(modal)"
@@ -3542,10 +3542,10 @@ class AppTest < Minitest::Test
   def test_recent_sessions_include_keyboard_shortcut_indices
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 9)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sidebar",
         params: { "session" => paths.last }
       )
@@ -3563,10 +3563,10 @@ class AppTest < Minitest::Test
   def test_sidebar_numbers_current_session_in_chronological_order
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 3)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sidebar",
         params: { "session" => paths[1] }
       )
@@ -3585,17 +3585,17 @@ class AppTest < Minitest::Test
   def test_sidebar_keeps_unread_sessions_in_chronological_order
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 4)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => paths.first })
+      Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => paths.first })
       now = Time.now
       File.write(paths[3], JSON.generate({ type: "message", timestamp: (now - 10).utc.iso8601(3), message: { role: "user", content: [{ type: "text", text: "Newest" }] } }) + "\n", mode: "a")
       File.write(paths[1], JSON.generate({ type: "message", timestamp: (now - 20).utc.iso8601(3), message: { role: "assistant", content: [{ type: "text", text: "Unread done" }] } }) + "\n", mode: "a")
       File.write(paths[2], JSON.generate({ type: "message", timestamp: (now - 30).utc.iso8601(3), message: { role: "user", content: [{ type: "text", text: "Older" }] } }) + "\n", mode: "a")
       File.write(paths.first, JSON.generate({ type: "message", timestamp: (now - 40).utc.iso8601(3), message: { role: "assistant", content: [{ type: "text", text: "Current done" }] } }) + "\n", mode: "a")
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => paths.first })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => paths.first })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -3611,14 +3611,14 @@ class AppTest < Minitest::Test
   def test_mobile_hamburger_shows_unread_session_count
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 4)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => paths.first })
+      Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => paths.first })
       File.write(paths[1], JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Unread two" }] } }) + "\n", mode: "a")
       File.write(paths[2], JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Unread three" }] } }) + "\n", mode: "a")
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => paths.first })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => paths.first })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -3632,10 +3632,10 @@ class AppTest < Minitest::Test
   def test_mobile_hamburger_hides_unread_session_count_when_none
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 2)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => paths.last })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => paths.last })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -3646,10 +3646,10 @@ class AppTest < Minitest::Test
   def test_sidebar_uses_one_sessions_header
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 2)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => paths.last })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => paths.last })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -3660,10 +3660,10 @@ class AppTest < Minitest::Test
   def test_sidebar_uses_one_flat_sessions_list_without_project_groups
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 11)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sidebar",
         params: { "session" => paths.last }
       )
@@ -3679,10 +3679,10 @@ class AppTest < Minitest::Test
   def test_trims_sidebar_sessions_to_latest_twenty_by_default
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 41)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => paths.last }
       )
@@ -3706,9 +3706,9 @@ class AppTest < Minitest::Test
   def test_moves_older_current_session_from_separate_section_into_loaded_page
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 42)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      request = Rack::MockRequest.new(Gripi)
 
       response = request.get("/", params: { "session" => paths.first })
 
@@ -3739,10 +3739,10 @@ class AppTest < Minitest::Test
   def test_loads_next_sidebar_session_page
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 41)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => paths.last, "sidebar_sessions_limit" => "40" }
       )
@@ -3765,10 +3765,10 @@ class AppTest < Minitest::Test
   def test_returns_sidebar_fragment_for_selected_session
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 7)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/sidebar",
         params: { "session" => paths.first, "expanded_cwd" => [project_cwd(dir)] }
       )
@@ -3784,10 +3784,10 @@ class AppTest < Minitest::Test
   def test_initial_session_render_exposes_latest_message_window
     Dir.mktmpdir do |dir|
       path = write_session_with_messages(dir, (1..180).map { |index| { role: "user", text: "Message #{index}" } })
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -3804,10 +3804,10 @@ class AppTest < Minitest::Test
   def test_session_fragment_exposes_latest_message_window
     Dir.mktmpdir do |dir|
       path = write_session_with_messages(dir, (1..180).map { |index| { role: "user", text: "Message #{index}" } })
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/session_fragment", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/session_fragment", params: { "session" => path })
 
       assert_equal 200, response.status
       html = JSON.parse(response.body).fetch("conversation_html")
@@ -3825,10 +3825,10 @@ class AppTest < Minitest::Test
   def test_returns_session_fragment_for_selected_session
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 7)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/session_fragment",
         params: { "session" => paths.first, "expanded_cwd" => [project_cwd(dir)] }
       )
@@ -3857,10 +3857,10 @@ class AppTest < Minitest::Test
         { type: "message", id: "user-entry-1", message: { role: "user", content: [{ type: "text", text: "Fork me" }] } },
         { type: "message", id: "assistant-entry-1", message: { role: "assistant", content: [{ type: "text", text: "No fork button" }] } }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -3874,10 +3874,10 @@ class AppTest < Minitest::Test
   def test_renders_selected_session_header_with_project_label
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -3901,10 +3901,10 @@ class AppTest < Minitest::Test
       path = write_session_with_raw_messages(dir, [
         { type: "compaction", timestamp: "2026-06-13T10:00:00Z", summary: "Important summary" }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, 'class="message message--status message--compact" data-role="status"'
@@ -3923,10 +3923,10 @@ class AppTest < Minitest::Test
         { role: "toolResult", text: "Tool output" },
         { role: "error", text: "Something failed" }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -3973,10 +3973,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -3991,10 +3991,10 @@ class AppTest < Minitest::Test
   def test_message_navigation_arrows_are_not_rendered
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4023,10 +4023,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4050,10 +4050,10 @@ class AppTest < Minitest::Test
         { role: "assistant", text: "## Plan\n\n- One\n- `two`\n\n```ruby\nputs :ok\n```\n\n<script>alert('x')</script><a href=\"javascript:alert(1)\">bad</a>" },
         { role: "user", text: "## Not markdown <script>alert('user')</script>" }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4106,10 +4106,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4156,10 +4156,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -4216,10 +4216,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, "$ cd ~/Work/.worktrees/demo/feature_branch &amp;&amp; cd ~ &amp;&amp; rg shipped app (timeout 30s)"
@@ -4255,10 +4255,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -4298,10 +4298,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -4329,10 +4329,10 @@ class AppTest < Minitest::Test
           message: { role: "assistant", content: [{ type: "text", text: long_text }] }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -4404,10 +4404,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -4453,10 +4453,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, 'message-body message-body--edit-preview'
@@ -4481,10 +4481,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, 'message--tool-transcript'
@@ -4573,10 +4573,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       refute_includes response.body, '<details class="message-details"'
@@ -4616,10 +4616,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4666,10 +4666,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4715,10 +4715,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4770,10 +4770,10 @@ class AppTest < Minitest::Test
           }
         }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -4790,10 +4790,10 @@ class AppTest < Minitest::Test
   def test_live_event_script_supports_compact_tool_rendering
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4849,10 +4849,10 @@ class AppTest < Minitest::Test
   def test_live_event_script_renders_tool_execution_updates
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4868,10 +4868,10 @@ class AppTest < Minitest::Test
   def test_live_event_script_renders_subagent_progress_open_while_running
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4902,10 +4902,10 @@ class AppTest < Minitest::Test
   def test_live_event_script_keeps_active_sessions_pinned_after_layout
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4947,10 +4947,10 @@ class AppTest < Minitest::Test
   def test_live_event_script_dedupes_events_already_rendered_from_history
     Dir.mktmpdir do |dir|
       path = write_session_with_messages(dir, [{ role: "assistant", text: "Already shown" }])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -4974,17 +4974,17 @@ class AppTest < Minitest::Test
   def test_live_script_supports_control_session_shortcuts
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes APP_JAVASCRIPT, "function enterSessionShortcutMode()"
       assert_includes APP_JAVASCRIPT, "function openNewSessionModal()"
       assert_includes APP_JAVASCRIPT, "isCtrlOrMetaShortcut(event, \"n\")"
-      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"pi:new-session-requested\""
-      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"pi:desktop-server-activated\""
+      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"gripi:new-session-requested\""
+      assert_includes APP_JAVASCRIPT, "window.addEventListener(\"gripi:desktop-server-activated\""
       assert_includes APP_JAVASCRIPT, "focusPromptAfterDesktopServerActivation"
       assert_includes APP_JAVASCRIPT, 'event.key === "Control"'
       assert_includes APP_JAVASCRIPT, "if (event.altKey || !event.ctrlKey) return;"
@@ -5010,10 +5010,10 @@ class AppTest < Minitest::Test
   def test_live_script_refreshes_sidebar_without_switching_sessions
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5050,10 +5050,10 @@ class AppTest < Minitest::Test
   def test_session_switching_script_replaces_session_regions
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5080,10 +5080,10 @@ class AppTest < Minitest::Test
   def test_session_switching_script_resets_polling_and_attachments
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5132,10 +5132,10 @@ class AppTest < Minitest::Test
   def test_completed_prompt_refreshes_sidebar_after_switching_sessions
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       handler_start = APP_JAVASCRIPT.index("const stopHandlingChangedSubmittedView = () => {")
@@ -5151,10 +5151,10 @@ class AppTest < Minitest::Test
   def test_session_switching_script_intercepts_new_session_forms
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5176,10 +5176,10 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, FakeRpcClient.new(calls, [{ "type" => "old" }]))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5220,10 +5220,10 @@ class AppTest < Minitest::Test
         }
       end
       registry.register(path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -5242,10 +5242,10 @@ class AppTest < Minitest::Test
   def test_live_event_script_schedules_non_overlapping_polls
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5300,10 +5300,10 @@ class AppTest < Minitest::Test
   def test_live_event_script_provides_manual_reconnect_fallback
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5331,10 +5331,10 @@ class AppTest < Minitest::Test
   def test_live_event_script_keeps_assistant_and_status_roles_separate
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5393,8 +5393,8 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "if (event.type === \"custom\" && event.customType === \"pi-extensions-session-title\") return event.data?.title;"
       assert_includes APP_JAVASCRIPT, "if (event.type === \"custom_message\" && event.customType === \"session-title-update\")"
       assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(sessionTitleFromEvent(event));"
-      assert_includes APP_JAVASCRIPT, 'new this.window.CustomEvent("pi:sidebar-selected-title", { detail: { title } })'
-      assert_includes APP_JAVASCRIPT, 'document.addEventListener("pi:sidebar-selected-title"'
+      assert_includes APP_JAVASCRIPT, 'new this.window.CustomEvent("gripi:sidebar-selected-title", { detail: { title } })'
+      assert_includes APP_JAVASCRIPT, 'document.addEventListener("gripi:sidebar-selected-title"'
       assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(event.detail.title);"
       assert_includes APP_JAVASCRIPT, "updateNotificationToggle();"
       assert_includes APP_JAVASCRIPT, "const renameCommand = followUp ? null : sessionNameSlashCommand(message);"
@@ -5450,9 +5450,9 @@ class AppTest < Minitest::Test
   def test_live_event_script_notifies_when_final_assistant_reply_arrives_outside_active_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes APP_JAVASCRIPT, "function notifyFinalAssistantReply(event)"
@@ -5460,7 +5460,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "if (sessionIsActivelyViewed(sessionPath)) return;"
       assert_includes APP_JAVASCRIPT, "const body = notificationReplyPreview(liveMessageParser.finalAssistantReplyText(message));"
       assert_includes APP_JAVASCRIPT, "if (notificationsDisabled()) return;"
-      assert_includes APP_JAVASCRIPT, "showPiNotification(name, body, window.location.href, `pi-final-reply:${sessionPath}`)"
+      assert_includes APP_JAVASCRIPT, "showGripiNotification(name, body, window.location.href, `gripi-final-reply:${sessionPath}`)"
       assert_includes APP_JAVASCRIPT, "notifyFinalAssistantReply(event);"
     end
   end
@@ -5468,9 +5468,9 @@ class AppTest < Minitest::Test
   def test_sidebar_refresh_notifies_for_background_final_replies
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes APP_JAVASCRIPT, "const previousAssistantCounts = this.assistantResponseCounts(oldElement);"
@@ -5485,10 +5485,10 @@ class AppTest < Minitest::Test
   def test_live_event_script_updates_streaming_segments_in_place
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5513,15 +5513,15 @@ class AppTest < Minitest::Test
   def test_sidebar_sessions_include_assistant_response_count_for_unread_tracking
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
       registry.register(path, FakeRpcClient.new([]))
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :rpc_client_registry, registry
       File.write(path, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "thinking", thinking: "not final" }] } }) + "\n", mode: "a")
       File.write(path, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { command: "echo hi" } }] } }) + "\n", mode: "a")
       File.write(path, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Final response" }] } }) + "\n", mode: "a")
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_includes response.body, "data-session-path=\"#{ERB::Util.html_escape(path)}\""
@@ -5533,9 +5533,9 @@ class AppTest < Minitest::Test
   def test_sidebar_only_marks_final_answers_unread_when_text_phases_are_available
     Dir.mktmpdir do |dir|
       first_path, second_path = write_sessions(dir, count: 2)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      request = Rack::MockRequest.new(Gripi)
       signature = ->(id, phase) { JSON.generate(v: 1, id: id, phase: phase) }
 
       request.get("/sidebar", params: { "session" => first_path })
@@ -5570,14 +5570,14 @@ class AppTest < Minitest::Test
   def test_sidebar_tracks_unread_sessions_globally
     Dir.mktmpdir do |dir|
       first_path, second_path = write_sessions(dir, count: 2)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      initial_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => first_path })
+      initial_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => first_path })
       assert_empty Nokogiri::HTML(initial_response.body).css("a.session.unread")
 
       File.write(second_path, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Done" }] } }) + "\n", mode: "a")
-      unread_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => first_path })
+      unread_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => first_path })
 
       assert_includes unread_response.body, "class=\"session recent-session unread"
       assert_includes unread_response.body, "data-assistant-response-count=\"1\""
@@ -5588,7 +5588,7 @@ class AppTest < Minitest::Test
       refute_includes APP_STYLESHEET, "content: \"new\""
       refute_includes APP_JAVASCRIPT, "localStorage.getItem(\"piSidebarUnreadSessions\")"
 
-      read_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => second_path })
+      read_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => second_path })
       assert_empty Nokogiri::HTML(read_response.body).css("a.session.unread")
     end
   end
@@ -5596,18 +5596,18 @@ class AppTest < Minitest::Test
   def test_sidebar_refresh_without_session_param_does_not_clear_background_unread
     Dir.mktmpdir do |dir|
       first_path, second_path = write_sessions(dir, count: 2)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      initial_response = Rack::MockRequest.new(PiWebGateway).get("/")
+      initial_response = Rack::MockRequest.new(Gripi).get("/")
       assert_includes APP_JAVASCRIPT, "fragmentUrl(url = this.window.location.href)"
       assert_includes APP_JAVASCRIPT, "if (!sidebarUrl.searchParams.has(\"session\"))"
       assert_includes APP_JAVASCRIPT, "a.session.selected[data-session-path]"
 
       File.write(first_path, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Background done" }] } }) + "\n", mode: "a")
-      Rack::MockRequest.new(PiWebGateway).get("/sidebar")
+      Rack::MockRequest.new(Gripi).get("/sidebar")
 
-      unread_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => second_path })
+      unread_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => second_path })
       assert_includes unread_response.body, "class=\"session recent-session unread"
     end
   end
@@ -5615,9 +5615,9 @@ class AppTest < Minitest::Test
   def test_mark_read_endpoint_clears_unread_session_from_other_windows
     Dir.mktmpdir do |dir|
       first_path, second_path = write_sessions(dir, count: 2)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      request = Rack::MockRequest.new(Gripi)
 
       request.get("/sidebar", params: { "session" => first_path })
       File.write(second_path, JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Read elsewhere" }] } }) + "\n", mode: "a")
@@ -5635,10 +5635,10 @@ class AppTest < Minitest::Test
   def test_session_only_live_script_marks_final_assistant_messages_read
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path, "session_only" => "1" })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path, "session_only" => "1" })
 
       assert_equal 200, response.status
       assert_includes APP_JAVASCRIPT, "function markCurrentSessionRead()"
@@ -5656,10 +5656,10 @@ class AppTest < Minitest::Test
         { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Older answer" }] } },
         { type: "compaction", timestamp: "2026-06-13T10:02:00Z", summary: "Important summary\nwith details" }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -5674,14 +5674,14 @@ class AppTest < Minitest::Test
   def test_sidebar_shows_compacting_state_for_active_compaction
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
       client = FakeRpcClient.new([])
       def client.compacting? = true
       registry.register(path, client)
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => path })
 
       assert_equal 200, response.status
       refute_includes response.body, "Compacting…"
@@ -5692,20 +5692,20 @@ class AppTest < Minitest::Test
   def test_sidebar_running_indicator_uses_busy_state
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
       idle_client = FakeRpcClient.new([])
       registry.register(path, idle_client)
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :rpc_client_registry, registry
 
-      idle_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+      idle_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => path })
       refute_includes idle_response.body, "RPC process running"
 
       busy_client = FakeRpcClient.new([])
       def busy_client.busy? = true
       registry.register(path, busy_client)
 
-      busy_response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => path })
+      busy_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => path })
       assert_includes busy_response.body, "Pi is working"
       assert_includes busy_response.body, "session-indicators"
       assert_includes busy_response.body, "session-running-indicator"
@@ -5715,7 +5715,7 @@ class AppTest < Minitest::Test
   def test_initializes_composer_compacting_state_for_active_compaction
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
       client = FakeRpcClient.new([])
       def client.live_snapshot
@@ -5729,9 +5729,9 @@ class AppTest < Minitest::Test
         }
       end
       registry.register(path, client)
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/session_fragment",
         params: { "session" => path, "session_only" => "1" }
       )
@@ -5755,16 +5755,16 @@ class AppTest < Minitest::Test
   def test_initializes_composer_busy_state_for_running_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
       client = FakeRpcClient.new([])
       def client.busy? = true
       def client.busy_since = Time.at(1_000)
       def client.agent_running? = true
       registry.register(path, client)
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5786,10 +5786,10 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       messages = (1..180).map { |index| { role: "user", text: "Message #{index}" } }
       path = write_session_with_messages(dir, messages)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -5813,10 +5813,10 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       messages = (1..180).map { |index| { role: "user", text: "Message #{index}" } }
       path = write_session_with_messages(dir, messages)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/conversation_older",
         params: { "session" => path, "cursor" => "30" }
       )
@@ -5836,10 +5836,10 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       messages = (1..220).map { |index| { role: "user", text: "Message #{index}" } }
       path = write_session_with_messages(dir, messages)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/conversation_older",
         params: { "session" => path, "cursor" => "170", "all" => "1" }
       )
@@ -5860,10 +5860,10 @@ class AppTest < Minitest::Test
       path = write_session_with_raw_messages(dir, [
         { type: "compaction", timestamp: "2026-06-13T10:00:00Z", summary: "Compacted", large: large_raw_details }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -5878,10 +5878,10 @@ class AppTest < Minitest::Test
       path = write_session_with_raw_messages(dir, [
         { type: "compaction", timestamp: "2026-06-13T10:00:00Z", summary: "Compacted", small: small_raw_details }
       ])
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
 
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
@@ -5898,10 +5898,10 @@ class AppTest < Minitest::Test
       end
       raw_entries << { type: "compaction", timestamp: "2026-06-13T10:10:00Z", summary: "Compacted", large: large_raw_details }
       path = write_session_with_raw_messages(dir, raw_entries)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/conversation_older",
         params: { "session" => path, "cursor" => "11" }
       )
@@ -5915,17 +5915,17 @@ class AppTest < Minitest::Test
   end
 
   def test_raw_details_endpoint_is_not_exposed
-    response = Rack::MockRequest.new(PiWebGateway).get("/message_raw_details")
+    response = Rack::MockRequest.new(Gripi).get("/message_raw_details")
 
     assert_equal 404, response.status
   end
 
   def test_older_conversation_window_handles_missing_session_silently
     Dir.mktmpdir do |dir|
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/conversation_older",
         params: { "session" => File.join(dir, "missing.jsonl"), "cursor" => "30" }
       )
@@ -5943,10 +5943,10 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       Dir.mktmpdir do |outside_dir|
         outside_path = write_session_with_messages(outside_dir, [{ role: "user", text: "Outside message" }])
-        PiWebGateway.set :sessions_root, dir
-        PiWebGateway.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+        Gripi.set :sessions_root, dir
+        Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
 
-        response = Rack::MockRequest.new(PiWebGateway).get(
+        response = Rack::MockRequest.new(Gripi).get(
           "/conversation_older",
           params: { "session" => outside_path, "cursor" => "1" }
         )
@@ -5962,12 +5962,12 @@ class AppTest < Minitest::Test
   def test_renders_visual_polish_affordances
     Dir.mktmpdir do |dir|
       path = write_session_with_messages(dir, [{ role: "assistant", text: "Copy me" }])
-      PiWebGateway.set :sessions_root, dir
+      Gripi.set :sessions_root, dir
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
       registry.register(path, FakeRpcClient.new([]))
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get(
+      response = Rack::MockRequest.new(Gripi).get(
         "/",
         params: { "session" => path }
       )
@@ -5981,7 +5981,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "data-copy-target"
       assert_includes APP_JAVASCRIPT, "enhanceMarkdownCodeBlocks(job.body, this.document)"
       assert_includes APP_JAVASCRIPT, 'button.dataset.copyTarget === "code-block"'
-      assert_includes APP_JAVASCRIPT, "window.piGatewayElectron?.copyText"
+      assert_includes APP_JAVASCRIPT, "window.gripiElectron?.copyText"
       assert_includes APP_JAVASCRIPT, "navigator.clipboard.writeText"
       assert_includes APP_JAVASCRIPT, "window.isSecureContext"
       assert_includes APP_JAVASCRIPT, "catch (_error)"
@@ -6017,12 +6017,12 @@ class AppTest < Minitest::Test
   def test_browser_auth_disabled_still_requires_user_token_in_multi_user_mode
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      PiWebGateway.set :browser_auth_disabled, true
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      Gripi.set :browser_auth_disabled, true
+      Gripi.set :multi_user_mode, true
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/")
+      response = Rack::MockRequest.new(Gripi).get("/")
 
       assert_equal 403, response.status
       assert_includes response.body, "User token"
@@ -6033,28 +6033,28 @@ class AppTest < Minitest::Test
   def test_browser_auth_disabled_auto_approves_new_user_token_in_multi_user_mode
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, nil
-      PiWebGateway.set :browser_auth_disabled, true
-      PiWebGateway.set :multi_user_mode, true
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, nil
+      Gripi.set :browser_auth_disabled, true
+      Gripi.set :multi_user_mode, true
+      request = Rack::MockRequest.new(Gripi)
 
       response = request.post("/workspace-key", params: { "workspace_key" => "piu_correct_horse_42" })
 
       workspace_cookie = Array(response["Set-Cookie"]).first.split(";", 2).first
       assert_equal 303, response.status
-      assert_includes workspace_cookie, "pi_gateway_workspace="
-      assert WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path).approved?(workspace_id_from_cookie(workspace_cookie))
+      assert_includes workspace_cookie, "gripi_workspace="
+      assert WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path).approved?(workspace_id_from_cookie(workspace_cookie))
     end
   end
 
   def test_multi_user_flow_uses_user_token_without_browser_approval
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      PiWebGateway.set :multi_user_mode, true
-      request = Rack::MockRequest.new(PiWebGateway)
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      Gripi.set :multi_user_mode, true
+      request = Rack::MockRequest.new(Gripi)
 
       blocked = request.get("/")
       assert_equal 403, blocked.status
@@ -6073,9 +6073,9 @@ class AppTest < Minitest::Test
       )
       assert_equal 403, wrong_admin_password.status
       assert_includes wrong_admin_password.body, "Admin password did not match"
-      assert_includes wrong_admin_password.body, PiWebGateway.settings.workspace_access_path
+      assert_includes wrong_admin_password.body, Gripi.settings.workspace_access_path
       assert_includes wrong_admin_password.body, "pending request"
-      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      store = WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path)
       assert_equal "pending", store.pending_status(workspace_id_for("piu_correct_horse_42"))
 
       key_response = request.post(
@@ -6084,56 +6084,56 @@ class AppTest < Minitest::Test
       )
       workspace_cookie = Array(key_response["Set-Cookie"]).first.split(";", 2).first
       assert_equal 303, key_response.status
-      assert_includes workspace_cookie, "pi_gateway_workspace="
-      assert WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path).approved?(workspace_id_from_cookie(workspace_cookie))
-      assert File.exist?(PiWebGateway.settings.workspace_secret_path)
+      assert_includes workspace_cookie, "gripi_workspace="
+      assert WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path).approved?(workspace_id_from_cookie(workspace_cookie))
+      assert File.exist?(Gripi.settings.workspace_secret_path)
     end
   end
 
   def test_multi_user_approved_user_token_opens_immediately_without_browser_approval
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      Gripi.set :multi_user_mode, true
       approved_workspace_id = workspace_id_for("piu_correct_horse_42")
-      WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path).approve_workspace(approved_workspace_id)
-      request = Rack::MockRequest.new(PiWebGateway)
+      WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path).approve_workspace(approved_workspace_id)
+      request = Rack::MockRequest.new(Gripi)
 
       response = request.post("/workspace-key", params: { "workspace_key" => "piu_correct_horse_42" })
 
       workspace_cookie = Array(response["Set-Cookie"]).first.split(";", 2).first
       assert_equal 303, response.status
-      assert_includes workspace_cookie, "pi_gateway_workspace=#{approved_workspace_id}"
+      assert_includes workspace_cookie, "gripi_workspace=#{approved_workspace_id}"
     end
   end
 
   def test_multi_user_unknown_user_token_waits_for_approval_without_browser_approval
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      Gripi.set :multi_user_mode, true
       approved_workspace_id = workspace_id_for("piu_correct_horse_42")
-      WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path).approve_workspace(approved_workspace_id)
-      request = Rack::MockRequest.new(PiWebGateway)
+      WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path).approve_workspace(approved_workspace_id)
+      request = Rack::MockRequest.new(Gripi)
 
       response = request.post("/workspace-key", params: { "workspace_key" => "piu_different_horse_42" })
 
       assert_equal 403, response.status
       assert_includes response.body, "Waiting for workspace approval"
       refute_includes response.body, "Admin password"
-      refute_includes Array(response["Set-Cookie"]).join("\n"), "pi_gateway_workspace="
-      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      refute_includes Array(response["Set-Cookie"]).join("\n"), "gripi_workspace="
+      store = WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path)
       assert_equal "pending", store.pending_status(workspace_id_for("piu_different_horse_42"))
     end
   end
 
   def test_multi_user_generates_user_token_once_for_copying
-    PiWebGateway.set :gateway_admin_password, "secret"
-    PiWebGateway.set :multi_user_mode, true
+    Gripi.set :gateway_admin_password, "secret"
+    Gripi.set :multi_user_mode, true
 
-    response = Rack::MockRequest.new(PiWebGateway).post("/workspace-token/generate")
+    response = Rack::MockRequest.new(Gripi).post("/workspace-token/generate")
 
     assert_equal 200, response.status
     assert_match(/piu_[A-Za-z0-9_-]{43}/, response.body)
@@ -6145,16 +6145,16 @@ class AppTest < Minitest::Test
   def test_approved_workspace_can_approve_pending_workspace_request
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      Gripi.set :multi_user_mode, true
       approver_cookie = workspace_cookie_for("Correct Horse 42")
-      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("approver", label: "test")
-      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      BrowserAccessStore.new(path: Gripi.settings.browser_access_path).approve_current_browser("approver", label: "test")
+      store = WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path)
       pending = store.request_access(workspace_id_for("Different Horse 42"), browser_token: "requester")
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
 
-      pending_response = request.get("/workspace-access/pending", "HTTP_COOKIE" => "pi_gateway_browser=approver; #{approver_cookie}")
+      pending_response = request.get("/workspace-access/pending", "HTTP_COOKIE" => "gripi_browser=approver; #{approver_cookie}")
       assert_equal 200, pending_response.status
       pending_payload = JSON.parse(pending_response.body).fetch("requests").first
       assert_equal pending.fetch("code"), pending_payload.fetch("code")
@@ -6164,7 +6164,7 @@ class AppTest < Minitest::Test
       approve_response = request.post(
         "/workspace-access/approve",
         params: { "code" => pending.fetch("code") },
-        "HTTP_COOKIE" => "pi_gateway_browser=approver; #{approver_cookie}"
+        "HTTP_COOKIE" => "gripi_browser=approver; #{approver_cookie}"
       )
       assert_equal 200, approve_response.status
       assert store.approved?(workspace_id_for("Different Horse 42"))
@@ -6174,80 +6174,80 @@ class AppTest < Minitest::Test
   def test_approved_workspace_status_cookie_is_only_set_for_requesting_browser
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      Gripi.set :multi_user_mode, true
       approver_cookie = workspace_cookie_for("Correct Horse 42")
-      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("approver", label: "test")
-      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("requester", label: "test")
-      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("other", label: "test")
-      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      BrowserAccessStore.new(path: Gripi.settings.browser_access_path).approve_current_browser("approver", label: "test")
+      BrowserAccessStore.new(path: Gripi.settings.browser_access_path).approve_current_browser("requester", label: "test")
+      BrowserAccessStore.new(path: Gripi.settings.browser_access_path).approve_current_browser("other", label: "test")
+      store = WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path)
       pending = store.request_access(workspace_id_for("Different Horse 42"), browser_token: "requester")
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
       request.post(
         "/workspace-access/approve",
         params: { "code" => pending.fetch("code") },
-        "HTTP_COOKIE" => "pi_gateway_browser=approver; #{approver_cookie}"
+        "HTTP_COOKIE" => "gripi_browser=approver; #{approver_cookie}"
       )
 
-      other_status = request.get("/workspace-access/status", params: { "code" => pending.fetch("code") }, "HTTP_COOKIE" => "pi_gateway_browser=other")
-      requester_status = request.get("/workspace-access/status", params: { "code" => pending.fetch("code") }, "HTTP_COOKIE" => "pi_gateway_browser=requester")
+      other_status = request.get("/workspace-access/status", params: { "code" => pending.fetch("code") }, "HTTP_COOKIE" => "gripi_browser=other")
+      requester_status = request.get("/workspace-access/status", params: { "code" => pending.fetch("code") }, "HTTP_COOKIE" => "gripi_browser=requester")
 
       assert_equal 200, other_status.status
       assert_equal "approved", JSON.parse(other_status.body).fetch("status")
-      refute_includes Array(other_status["Set-Cookie"]).join("\n"), "pi_gateway_workspace="
+      refute_includes Array(other_status["Set-Cookie"]).join("\n"), "gripi_workspace="
       assert_equal 200, requester_status.status
-      assert_includes Array(requester_status["Set-Cookie"]).join("\n"), "pi_gateway_workspace="
+      assert_includes Array(requester_status["Set-Cookie"]).join("\n"), "gripi_workspace="
     end
   end
 
   def test_repeated_workspace_requests_are_bound_to_each_requesting_browser
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      Gripi.set :multi_user_mode, true
       approver_cookie = workspace_cookie_for("Correct Horse 42")
-      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("approver", label: "test")
-      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("first", label: "test")
-      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("second", label: "test")
-      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      BrowserAccessStore.new(path: Gripi.settings.browser_access_path).approve_current_browser("approver", label: "test")
+      BrowserAccessStore.new(path: Gripi.settings.browser_access_path).approve_current_browser("first", label: "test")
+      BrowserAccessStore.new(path: Gripi.settings.browser_access_path).approve_current_browser("second", label: "test")
+      store = WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path)
       workspace_id = workspace_id_for("Different Horse 42")
       first_request = store.request_access(workspace_id, browser_token: "first")
       second_request = store.request_access(workspace_id, browser_token: "second")
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
       request.post(
         "/workspace-access/approve",
         params: { "code" => second_request.fetch("code") },
-        "HTTP_COOKIE" => "pi_gateway_browser=approver; #{approver_cookie}"
+        "HTTP_COOKIE" => "gripi_browser=approver; #{approver_cookie}"
       )
 
-      first_status = request.get("/workspace-access/status", params: { "code" => first_request.fetch("code") }, "HTTP_COOKIE" => "pi_gateway_browser=first")
-      second_status = request.get("/workspace-access/status", params: { "code" => second_request.fetch("code") }, "HTTP_COOKIE" => "pi_gateway_browser=second")
+      first_status = request.get("/workspace-access/status", params: { "code" => first_request.fetch("code") }, "HTTP_COOKIE" => "gripi_browser=first")
+      second_status = request.get("/workspace-access/status", params: { "code" => second_request.fetch("code") }, "HTTP_COOKIE" => "gripi_browser=second")
 
       refute_equal first_request.fetch("code"), second_request.fetch("code")
-      assert_includes Array(first_status["Set-Cookie"]).join("\n"), "pi_gateway_workspace="
-      assert_includes Array(second_status["Set-Cookie"]).join("\n"), "pi_gateway_workspace="
+      assert_includes Array(first_status["Set-Cookie"]).join("\n"), "gripi_workspace="
+      assert_includes Array(second_status["Set-Cookie"]).join("\n"), "gripi_workspace="
     end
   end
 
   def test_workspace_approval_requires_current_approved_workspace
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      Gripi.set :multi_user_mode, true
       workspace_cookie_for("Correct Horse 42")
-      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("approved-browser", label: "test")
-      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      BrowserAccessStore.new(path: Gripi.settings.browser_access_path).approve_current_browser("approved-browser", label: "test")
+      store = WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path)
       pending = store.request_access(workspace_id_for("Different Horse 42"), browser_token: "requester")
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
 
-      pending_response = request.get("/workspace-access/pending", "HTTP_COOKIE" => "pi_gateway_browser=approved-browser")
+      pending_response = request.get("/workspace-access/pending", "HTTP_COOKIE" => "gripi_browser=approved-browser")
       approve_response = request.post(
         "/workspace-access/approve",
         params: { "code" => pending.fetch("code") },
-        "HTTP_COOKIE" => "pi_gateway_browser=approved-browser"
+        "HTTP_COOKIE" => "gripi_browser=approved-browser"
       )
 
       assert_equal 403, pending_response.status
@@ -6259,20 +6259,20 @@ class AppTest < Minitest::Test
   def test_approved_workspace_can_deny_pending_workspace_request
     Dir.mktmpdir do |dir|
       write_session(dir)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :gateway_admin_password, "secret"
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :gateway_admin_password, "secret"
+      Gripi.set :multi_user_mode, true
       approver_cookie = workspace_cookie_for("Correct Horse 42")
-      BrowserAccessStore.new(path: PiWebGateway.settings.browser_access_path).approve_current_browser("approver", label: "test")
-      store = WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path)
+      BrowserAccessStore.new(path: Gripi.settings.browser_access_path).approve_current_browser("approver", label: "test")
+      store = WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path)
       workspace_id = workspace_id_for("Different Horse 42")
       pending = store.request_access(workspace_id, browser_token: "requester")
-      request = Rack::MockRequest.new(PiWebGateway)
+      request = Rack::MockRequest.new(Gripi)
 
       deny_response = request.post(
         "/workspace-access/deny",
         params: { "code" => pending.fetch("code") },
-        "HTTP_COOKIE" => "pi_gateway_browser=approver; #{approver_cookie}"
+        "HTTP_COOKIE" => "gripi_browser=approver; #{approver_cookie}"
       )
 
       assert_equal 200, deny_response.status
@@ -6283,15 +6283,15 @@ class AppTest < Minitest::Test
   def test_multi_user_session_list_hides_unowned_and_other_workspace_sessions
     Dir.mktmpdir do |dir|
       own_path, other_path, unowned_path = write_sessions(dir, count: 3)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :multi_user_mode, true
       own_cookie = workspace_cookie_for("Correct Horse 42")
       other_workspace_id = workspace_id_for("Different Horse 42")
-      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
       store.claim(own_path, workspace_id_from_cookie(own_cookie))
       store.claim(other_path, other_workspace_id)
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/", "HTTP_COOKIE" => own_cookie)
+      response = Rack::MockRequest.new(Gripi).get("/", "HTTP_COOKIE" => own_cookie)
 
       assert_equal 200, response.status
       assert_includes response.body, Rack::Utils.escape(own_path)
@@ -6303,13 +6303,13 @@ class AppTest < Minitest::Test
   def test_multi_user_mode_off_shows_sessions_even_if_ownership_file_exists
     Dir.mktmpdir do |dir|
       paths = write_sessions(dir, count: 2)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :multi_user_mode, false
-      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      Gripi.set :sessions_root, dir
+      Gripi.set :multi_user_mode, false
+      store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
       store.claim(paths.first, "workspace-a")
       store.claim(paths.last, "workspace-b")
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/")
+      response = Rack::MockRequest.new(Gripi).get("/")
 
       assert_equal 200, response.status
       assert_includes response.body, Rack::Utils.escape(paths.first)
@@ -6323,10 +6323,10 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, FakeRpcClient.new(calls, [], path))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sessions/model_settings", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).get("/sessions/model_settings", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_equal({
@@ -6347,10 +6347,10 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, FakeRpcClient.new(calls))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/model_settings",
         params: { "session" => path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }
       )
@@ -6370,10 +6370,10 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, FakeRpcClient.new(calls))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/model_settings",
         params: { "session" => path, "provider" => "openai", "model" => "gpt-5", "thinking" => "unknown" }
       )
@@ -6394,10 +6394,10 @@ class AppTest < Minitest::Test
       end
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/model_settings",
         params: { "session" => path, "provider" => "invalid", "model" => "missing", "thinking" => "high" }
       )
@@ -6415,10 +6415,10 @@ class AppTest < Minitest::Test
       def client.set_model(_provider, _model_id) = nil
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/model_settings",
         params: { "session" => path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }
       )
@@ -6436,10 +6436,10 @@ class AppTest < Minitest::Test
       def client.busy? = true
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).post(
+      response = Rack::MockRequest.new(Gripi).post(
         "/sessions/model_settings",
         params: { "session" => path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }
       )
@@ -6456,10 +6456,10 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, FakeRpcClient.new(calls))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).post("/sessions/cycle_thinking", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).post("/sessions/cycle_thinking", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_equal({ "thinking" => "high" }, JSON.parse(response.body))
@@ -6478,10 +6478,10 @@ class AppTest < Minitest::Test
       end
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).post("/sessions/cycle_thinking", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).post("/sessions/cycle_thinking", params: { "session" => path })
 
       assert_equal 200, response.status
       assert_equal({ "thinking" => nil }, JSON.parse(response.body))
@@ -6497,10 +6497,10 @@ class AppTest < Minitest::Test
       def client.busy? = true
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
 
-      response = Rack::MockRequest.new(PiWebGateway).post("/sessions/cycle_thinking", params: { "session" => path })
+      response = Rack::MockRequest.new(Gripi).post("/sessions/cycle_thinking", params: { "session" => path })
 
       assert_equal 409, response.status
       assert_equal({ "error" => "Session is busy" }, JSON.parse(response.body))
@@ -6512,22 +6512,22 @@ class AppTest < Minitest::Test
     Dir.mktmpdir do |dir|
       own_path, other_path = write_sessions(dir, count: 2)
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :multi_user_mode, true
-      PiWebGateway.set :rpc_client_factory, [->(session_path) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :multi_user_mode, true
+      Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
         FakeRpcClient.new(calls)
       }]
       own_cookie = workspace_cookie_for("Correct Horse 42")
-      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
       store.claim(own_path, workspace_id_from_cookie(own_cookie))
       store.claim(other_path, workspace_id_for("Different Horse 42"))
 
-      status_response = Rack::MockRequest.new(PiWebGateway).get("/status", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
-      prompt_response = Rack::MockRequest.new(PiWebGateway).post("/prompt", params: { "session" => other_path, "message" => "Hello" }, "HTTP_COOKIE" => own_cookie)
-      model_settings_response = Rack::MockRequest.new(PiWebGateway).get("/sessions/model_settings", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
-      apply_model_response = Rack::MockRequest.new(PiWebGateway).post("/sessions/model_settings", params: { "session" => other_path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }, "HTTP_COOKIE" => own_cookie)
-      cycle_thinking_response = Rack::MockRequest.new(PiWebGateway).post("/sessions/cycle_thinking", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
+      status_response = Rack::MockRequest.new(Gripi).get("/status", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
+      prompt_response = Rack::MockRequest.new(Gripi).post("/prompt", params: { "session" => other_path, "message" => "Hello" }, "HTTP_COOKIE" => own_cookie)
+      model_settings_response = Rack::MockRequest.new(Gripi).get("/sessions/model_settings", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
+      apply_model_response = Rack::MockRequest.new(Gripi).post("/sessions/model_settings", params: { "session" => other_path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }, "HTTP_COOKIE" => own_cookie)
+      cycle_thinking_response = Rack::MockRequest.new(Gripi).post("/sessions/cycle_thinking", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
 
       assert_equal 404, status_response.status
       assert_equal 404, prompt_response.status
@@ -6541,18 +6541,18 @@ class AppTest < Minitest::Test
   def test_multi_user_rejects_other_workspace_attachment_urls
     Dir.mktmpdir do |dir|
       own_path, other_path = write_sessions(dir, count: 2)
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :multi_user_mode, true
       cookie = workspace_cookie_for("Correct Horse 42")
-      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
       store.claim(own_path, workspace_id_from_cookie(cookie))
       store.claim(other_path, workspace_id_for("Different Horse 42"))
       other_hash = Digest::SHA256.hexdigest(other_path)
-      attachment_dir = File.join(PiWebGateway.settings.attachments_root, other_hash)
+      attachment_dir = File.join(Gripi.settings.attachments_root, other_hash)
       FileUtils.mkdir_p(attachment_dir)
       File.binwrite(File.join(attachment_dir, "#{"a" * 64}.png"), "image")
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/attachments/#{other_hash}/#{"a" * 64}.png", "HTTP_COOKIE" => cookie)
+      response = Rack::MockRequest.new(Gripi).get("/attachments/#{other_hash}/#{"a" * 64}.png", "HTTP_COOKIE" => cookie)
 
       assert_equal 404, response.status
     end
@@ -6566,20 +6566,20 @@ class AppTest < Minitest::Test
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(own_pending_path, FakeRpcClient.new([]))
       registry.register(other_pending_path, FakeRpcClient.new([]))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(
         own_pending_path => project_cwd(dir),
         other_pending_path => project_cwd(dir)
       )
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :multi_user_mode, true
       own_cookie = workspace_cookie_for("Correct Horse 42")
-      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
       store.claim(own_path, workspace_id_from_cookie(own_cookie))
       store.claim(own_pending_path, workspace_id_from_cookie(own_cookie))
       store.claim(other_pending_path, workspace_id_for("Different Horse 42"))
 
-      response = Rack::MockRequest.new(PiWebGateway).get("/sidebar", params: { "session" => own_path }, "HTTP_COOKIE" => own_cookie)
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => own_path }, "HTTP_COOKIE" => own_cookie)
 
       assert_equal 200, response.status
       assert_includes response.body, own_path
@@ -6595,21 +6595,21 @@ class AppTest < Minitest::Test
       calls = []
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :rpc_client_registry, registry
-      PiWebGateway.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
-      PiWebGateway.set :multi_user_mode, true
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :multi_user_mode, true
       own_cookie = workspace_cookie_for("Correct Horse 42")
-      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
       store.claim(pending_path, workspace_id_for("Different Horse 42"))
 
-      response = Rack::MockRequest.new(PiWebGateway).post("/prompt", params: { "session" => pending_path, "message" => "Hello" }, "HTTP_COOKIE" => own_cookie)
+      response = Rack::MockRequest.new(Gripi).post("/prompt", params: { "session" => pending_path, "message" => "Hello" }, "HTTP_COOKIE" => own_cookie)
 
       assert_equal 404, response.status
       assert_empty calls
       assert registry.active?(pending_path)
       refute registry.active?(real_path)
-      assert_includes PiWebGateway.pending_session_registry.paths, pending_path
+      assert_includes Gripi.pending_session_registry.paths, pending_path
     end
   end
 
@@ -6618,17 +6618,17 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       new_path = File.join(File.dirname(path), "new-session.jsonl")
       calls = []
-      PiWebGateway.set :sessions_root, dir
-      PiWebGateway.set :multi_user_mode, true
-      PiWebGateway.set :new_rpc_client_factory, [->(cwd) {
+      Gripi.set :sessions_root, dir
+      Gripi.set :multi_user_mode, true
+      Gripi.set :new_rpc_client_factory, [->(cwd) {
         calls << [:start_new, cwd]
         FakeRpcClient.new(calls, [], new_path)
       }]
       cookie = workspace_cookie_for("Correct Horse 42")
-      store = WorkspaceSessionOwnershipStore.new(path: PiWebGateway.settings.workspace_ownership_path)
+      store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
       store.claim(path, workspace_id_from_cookie(cookie))
 
-      response = Rack::MockRequest.new(PiWebGateway).post("/sessions/new", params: { "session" => path }, "HTTP_COOKIE" => cookie)
+      response = Rack::MockRequest.new(Gripi).post("/sessions/new", params: { "session" => path }, "HTTP_COOKIE" => cookie)
 
       assert_equal 303, response.status
       assert store.owned_by?(new_path, workspace_id_from_cookie(cookie))
@@ -6877,12 +6877,12 @@ class AppTest < Minitest::Test
 
   def workspace_cookie_for(key)
     workspace_id = workspace_id_for(key)
-    WorkspaceAccessStore.new(path: PiWebGateway.settings.workspace_access_path).approve_workspace(workspace_id)
-    "pi_gateway_workspace=#{workspace_id}"
+    WorkspaceAccessStore.new(path: Gripi.settings.workspace_access_path).approve_workspace(workspace_id)
+    "gripi_workspace=#{workspace_id}"
   end
 
   def workspace_id_for(key)
-    secret = WorkspaceSecretStore.new(path: PiWebGateway.settings.workspace_secret_path).secret
+    secret = WorkspaceSecretStore.new(path: Gripi.settings.workspace_secret_path).secret
     OpenSSL::HMAC.hexdigest("SHA256", secret, key.strip)
   end
 

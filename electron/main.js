@@ -27,7 +27,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: "Pi Web Gateway",
+    title: "GRIPi",
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -118,7 +118,7 @@ function registerGatewayConfigIpc() {
 }
 
 async function clearGatewaySession(id) {
-  const gatewaySession = session.fromPartition(`persist:pi-gateway-${id}`);
+  const gatewaySession = session.fromPartition(`persist:gripi-${id}`);
   await gatewaySession.clearStorageData();
   await gatewaySession.clearCache();
 }
@@ -177,21 +177,21 @@ function installAppMenu() {
           label: "Find in Session…",
           accelerator: "CmdOrCtrl+F",
           click: (_menuItem, browserWindow) => {
-            routeGatewayShortcut(browserWindow, "gateway:find-in-session-requested", "pi:current-session-find-requested");
+            routeGatewayShortcut(browserWindow, "gateway:find-in-session-requested", "gripi:current-session-find-requested");
           }
         },
         {
           label: "Find Next",
           accelerator: "CmdOrCtrl+G",
           click: (_menuItem, browserWindow) => {
-            routeGatewayShortcut(browserWindow, "gateway:find-in-session-navigation-requested", "pi:current-session-find-navigation-requested", 1);
+            routeGatewayShortcut(browserWindow, "gateway:find-in-session-navigation-requested", "gripi:current-session-find-navigation-requested", 1);
           }
         },
         {
           label: "Find Previous",
           accelerator: "CmdOrCtrl+Shift+G",
           click: (_menuItem, browserWindow) => {
-            routeGatewayShortcut(browserWindow, "gateway:find-in-session-navigation-requested", "pi:current-session-find-navigation-requested", -1);
+            routeGatewayShortcut(browserWindow, "gateway:find-in-session-navigation-requested", "gripi:current-session-find-navigation-requested", -1);
           }
         },
         {
@@ -306,8 +306,8 @@ function showGatewayNotification(event, payload) {
   if (!sameOrigin(event.senderFrame?.url, gateway.allowedOrigin)) return { ok: false };
   if (!Notification.isSupported()) return { ok: false };
 
-  const title = stringPayloadValue(payload?.title) || "Pi Web Gateway";
-  const body = stringPayloadValue(payload?.body) || "Notification from Pi Web Gateway.";
+  const title = stringPayloadValue(payload?.title) || "GRIPi";
+  const body = stringPayloadValue(payload?.body) || "Notification from GRIPi.";
   const url = resolveSameOriginUrl(payload?.url || "/", gateway.allowedOrigin);
   const notification = new Notification({ title, body, icon: path.join(__dirname, "assets", "icons", "1024x1024.png") });
   notification.on("click", () => {
@@ -323,7 +323,7 @@ function showGatewayNotification(event, payload) {
 }
 
 function gatewayIdFromPartition(partition) {
-  return partition?.match(/^persist:pi-gateway-(.+)$/)?.[1] || null;
+  return partition?.match(/^persist:gripi-(.+)$/)?.[1] || null;
 }
 
 function stringPayloadValue(value) {

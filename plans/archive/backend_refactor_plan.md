@@ -79,7 +79,7 @@ Preserve current behavior exactly while extracting clear backend concepts from `
 
 - [x] Add `Rpc::CommandCatalog` or equivalent.
 - [x] Move builtin command list and RPC command filtering there.
-- [x] Preserve `/commands` behavior, including hiding internal `pi_web_tree` commands.
+- [x] Preserve `/commands` behavior, including hiding internal `gripi_tree` commands.
 - [x] Run command tests.
 - [x] Refactor the extracted command catalog code for readability, simplicity, and obviousness.
 - [x] Run full suite.

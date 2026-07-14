@@ -6,8 +6,8 @@ module Web
       app.get "/manifest.webmanifest" do
         content_type "application/manifest+json"
         JSON.generate(
-          name: "Pi Web Gateway",
-          short_name: "Pi Gateway",
+          name: "GRIPi",
+          short_name: "GRIPi",
           start_url: "/",
           scope: "/",
           display: "standalone",
@@ -44,11 +44,11 @@ module Web
 
           self.addEventListener("message", (event) => {
             const data = event.data || {};
-            if (!["pi-notification", "pi-notification-test"].includes(data.type)) return;
+            if (!["gripi-notification", "gripi-notification-test"].includes(data.type)) return;
 
-            const defaultUrl = data.type === "pi-notification-test" ? "/notification-test" : "/";
-            const defaultTag = data.type === "pi-notification-test" ? "pi-notification-test" : "pi-notification";
-            event.waitUntil(self.registration.showNotification(data.title || "Pi Web Gateway", {
+            const defaultUrl = data.type === "gripi-notification-test" ? "/notification-test" : "/";
+            const defaultTag = data.type === "gripi-notification-test" ? "gripi-notification-test" : "gripi-notification";
+            event.waitUntil(self.registration.showNotification(data.title || "GRIPi", {
               body: data.body || "Notifications are working.",
               tag: data.tag || defaultTag,
               renotify: true,

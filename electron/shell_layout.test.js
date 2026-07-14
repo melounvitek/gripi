@@ -66,7 +66,7 @@ test("desktop gateway webviews install the notification bridge", () => {
   assert.match(main, /gatewayIdFromPartition/);
   assert.match(main, /gateway:activate-requested/);
   assert.match(main, /new Notification/);
-  assert.match(preload, /piGatewayElectron/);
+  assert.match(preload, /gripiElectron/);
   assert.match(preload, /gateway-notification:show/);
 });
 
@@ -111,7 +111,7 @@ test("desktop server management uses server wording", () => {
   assert.match(shell, /Rename Server/);
   assert.match(shell, /Server URL/);
   assert.match(shell, /Remove server/);
-  assert.match(shell, /setupDraft = null;\n  renameDraft = null;\n  config = await window\.piGatewayDesktop\.activateGateway\(id\);/);
+  assert.match(shell, /setupDraft = null;\n  renameDraft = null;\n  config = await window\.gripiDesktop\.activateGateway\(id\);/);
   assert.match(shell, /renameDraft = null;\n  setupDraft = \{ name: "", url: "http:\/\/localhost:4567\/" \};/);
   assert.match(shell, /const currentGateway = config\.gateways\.find\(\(existingGateway\) => existingGateway\.id === gateway\.id\);/);
   assert.doesNotMatch(shell, /window\.prompt/);
@@ -149,12 +149,12 @@ test("desktop find shortcuts route through the shell and preserve standard editi
   assert.match(main, /label: "Find Previous"/);
   assert.match(main, /accelerator: "CmdOrCtrl\+Shift\+G"/);
   assert.match(main, /gateway:find-in-session-navigation-requested/);
-  assert.match(main, /pi:current-session-find-navigation-requested/);
+  assert.match(main, /gripi:current-session-find-navigation-requested/);
   assert.match(main, /label: "Search Sessions…"/);
   assert.match(main, /accelerator: "CmdOrCtrl\+Shift\+F"/);
   assert.match(main, /gateway:search-sessions-requested/);
   assert.match(main, /click: \(_menuItem, browserWindow\) => \{/);
-  assert.match(main, /routeGatewayShortcut\(browserWindow, "gateway:find-in-session-requested", "pi:current-session-find-requested"\)/);
+  assert.match(main, /routeGatewayShortcut\(browserWindow, "gateway:find-in-session-requested", "gripi:current-session-find-requested"\)/);
   assert.match(main, /routeSessionSearchShortcut\(browserWindow\)/);
   assert.match(main, /function routeGatewayShortcut\(browserWindow, channel, eventName, detail\)/);
   assert.match(main, /popupWindows\.has\(browserWindow\)/);
@@ -171,11 +171,11 @@ test("desktop find shortcuts route through the shell and preserve standard editi
   assert.match(preload, /ipcRenderer\.on\("gateway:search-sessions-requested", \(_event, gatewayId\) => callback\(gatewayId\)\)/);
 
   assert.match(shell, /onFindInSessionRequested/);
-  assert.match(shell, /dispatchActiveGatewayEvent\("pi:current-session-find-requested"\)/);
+  assert.match(shell, /dispatchActiveGatewayEvent\("gripi:current-session-find-requested"\)/);
   assert.match(shell, /onFindInSessionNavigationRequested/);
-  assert.match(shell, /dispatchActiveGatewayEvent\("pi:current-session-find-navigation-requested", direction\)/);
+  assert.match(shell, /dispatchActiveGatewayEvent\("gripi:current-session-find-navigation-requested", direction\)/);
   assert.match(shell, /onSearchSessionsRequested/);
-  assert.match(shell, /dispatchActiveGatewayEvent\("pi:session-search-requested"\)/);
+  assert.match(shell, /dispatchActiveGatewayEvent\("gripi:session-search-requested"\)/);
   assert.match(shell, /function dispatchActiveGatewayEvent\(eventName, detail\)/);
   assert.match(shell, /if \(!config \|\| setupDraft \|\| renameDraft\) return;/);
   assert.match(shell, /if \(!webview \|\| webview\.hidden\) return;/);
@@ -216,7 +216,7 @@ test("popup find stays local while popup session search activates the shell gate
     order,
     window: {
       addEventListener() {},
-      piGatewayDesktop: {
+      gripiDesktop: {
         activateGateway: async (id) => {
           order.push(`activate:${id}`);
           return { activeGatewayId: id, gateways: [{ id: "first" }, { id }] };
@@ -242,12 +242,12 @@ test("popup find stays local while popup session search activates the shell gate
   vm.runInContext(routeFunctions.join("\n"), mainContext);
 
   vm.runInContext(`
-    routeGatewayShortcut(popupWindow, "gateway:find-in-session-requested", "pi:current-session-find-requested");
-    routeGatewayShortcut(popupWindow, "gateway:find-in-session-navigation-requested", "pi:current-session-find-navigation-requested", -1);
+    routeGatewayShortcut(popupWindow, "gateway:find-in-session-requested", "gripi:current-session-find-requested");
+    routeGatewayShortcut(popupWindow, "gateway:find-in-session-navigation-requested", "gripi:current-session-find-navigation-requested", -1);
     routeSessionSearchShortcut(popupWindow);
   `, mainContext);
-  assert.match(popupCalls[0][0], /pi:current-session-find-requested/);
-  assert.match(popupCalls[1][0], /pi:current-session-find-navigation-requested/);
+  assert.match(popupCalls[0][0], /gripi:current-session-find-requested/);
+  assert.match(popupCalls[1][0], /gripi:current-session-find-navigation-requested/);
   assert.match(popupCalls[1][0], /detail/);
   assert.equal(popupCalls[0][1], true);
   assert.equal(popupCalls[1][1], true);
@@ -256,7 +256,7 @@ test("popup find stays local while popup session search activates the shell gate
     ["focus"],
     ["send", "gateway:search-sessions-requested", "popup"]
   ]);
-  vm.runInContext('routeGatewayShortcut(mainWindow, "gateway:find-in-session-navigation-requested", "pi:current-session-find-navigation-requested", 1);', mainContext);
+  vm.runInContext('routeGatewayShortcut(mainWindow, "gateway:find-in-session-navigation-requested", "gripi:current-session-find-navigation-requested", 1);', mainContext);
   assert.deepEqual(mainCalls.at(-1), ["send", "gateway:find-in-session-navigation-requested", 1]);
 
   mainCalls.length = 0;
@@ -278,15 +278,15 @@ test("popup find stays local while popup session search activates the shell gate
   `, context);
 
   callbacks.navigation(-1);
-  assert.deepEqual(order, ["dispatch:pi:current-session-find-navigation-requested:-1"]);
+  assert.deepEqual(order, ["dispatch:gripi:current-session-find-navigation-requested:-1"]);
 
   order.length = 0;
   await callbacks.search("popup");
-  assert.deepEqual(order, ["activate:popup", "render", "dispatch:pi:session-search-requested:undefined"]);
+  assert.deepEqual(order, ["activate:popup", "render", "dispatch:gripi:session-search-requested:undefined"]);
 
   order.length = 0;
   await callbacks.search();
-  assert.deepEqual(order, ["dispatch:pi:session-search-requested:undefined"]);
+  assert.deepEqual(order, ["dispatch:gripi:session-search-requested:undefined"]);
 });
 
 test("desktop shortcuts separate new sessions from server management", () => {
@@ -310,5 +310,5 @@ test("desktop shortcuts separate new sessions from server management", () => {
   assert.match(shell, /activateNextGateway/);
   assert.match(shell, /focusActiveGatewayPrompt/);
   assert.match(shell, /webview\.focus\(\);/);
-  assert.match(shell, /window\.dispatchEvent\(new CustomEvent\("pi:desktop-server-activated"\)\)/);
+  assert.match(shell, /window\.dispatchEvent\(new CustomEvent\("gripi:desktop-server-activated"\)\)/);
 });

@@ -22,7 +22,7 @@ require_relative "lib/gateway_updater"
 require_relative "lib/gateway_update_coordinator"
 require_relative "lib/request_gateway_restart"
 
-class PiWebGateway < Sinatra::Base
+class Gripi < Sinatra::Base
   register Web::BrowserAccess
   register Web::WorkspaceAccess
   register Web::PwaRoutes
@@ -34,14 +34,14 @@ class PiWebGateway < Sinatra::Base
   set :public_folder, File.join(root, "public")
   set :static, true
   set :static_cache_control, [:no_cache]
-  set :sessions_root, ENV.fetch("PI_SESSIONS_ROOT", File.expand_path("~/.pi/agent/sessions"))
-  set :attachments_root, ENV.fetch("PI_ATTACHMENTS_ROOT", File.expand_path("~/.pi/web-gateway/attachments"))
-  GATEWAY_ENV_PATH = ENV.fetch("PI_GATEWAY_ENV_PATH", File.expand_path("~/.config/pi-web-gateway/env"))
+  set :sessions_root, ENV.fetch("GRIPI_SESSIONS_ROOT", File.expand_path("~/.pi/agent/sessions"))
+  set :attachments_root, ENV.fetch("GRIPI_ATTACHMENTS_ROOT", File.expand_path("~/.pi/gripi/attachments"))
+  GRIPI_ENV_PATH = ENV.fetch("GRIPI_ENV_PATH", File.expand_path("~/.config/gripi/env"))
 
   def self.load_gateway_env_file
-    return unless File.exist?(GATEWAY_ENV_PATH)
+    return unless File.exist?(GRIPI_ENV_PATH)
 
-    File.readlines(GATEWAY_ENV_PATH).each do |line|
+    File.readlines(GRIPI_ENV_PATH).each do |line|
       next if line.strip.empty? || line.strip.start_with?("#")
 
       key, value = line.split("=", 2)
@@ -53,7 +53,7 @@ class PiWebGateway < Sinatra::Base
   end
 
   def self.permitted_hosts_from_env
-    ENV.fetch("PI_GATEWAY_PERMITTED_HOSTS", "")
+    ENV.fetch("GRIPI_PERMITTED_HOSTS", "")
       .split(",")
       .map(&:strip)
       .reject(&:empty?)
@@ -70,7 +70,7 @@ class PiWebGateway < Sinatra::Base
   end
 
   load_gateway_env_file
-  set :session_cwds_path, ENV.fetch("PI_SESSION_CWDS_PATH", ConfiguredSessionCwds.default_path)
+  set :session_cwds_path, ENV.fetch("GRIPI_SESSION_CWDS_PATH", ConfiguredSessionCwds.default_path)
   set :host_authorization, lambda {
     configured_hosts = permitted_hosts_from_env
     if development?
@@ -82,22 +82,22 @@ class PiWebGateway < Sinatra::Base
     end
   }
 
-  browser_auth_disabled = ENV.fetch("PI_BROWSER_AUTH_DISABLED", "").match?(/\A(?:1|true|yes|on)\z/i)
-  multi_user_mode = ENV.fetch("PI_MULTI_USER_MODE", "").match?(/\A(?:1|true|yes|on)\z/i)
-  gateway_admin_password = ENV["PI_GATEWAY_ADMIN_PASSWORD"].to_s
+  browser_auth_disabled = ENV.fetch("GRIPI_BROWSER_AUTH_DISABLED", "").match?(/\A(?:1|true|yes|on)\z/i)
+  multi_user_mode = ENV.fetch("GRIPI_MULTI_USER_MODE", "").match?(/\A(?:1|true|yes|on)\z/i)
+  gateway_admin_password = ENV["GRIPI_ADMIN_PASSWORD"].to_s
   if gateway_admin_password.empty? && !browser_auth_disabled
-    raise "PI_GATEWAY_ADMIN_PASSWORD is required. Set it in #{GATEWAY_ENV_PATH} or in the gateway process environment."
+    raise "GRIPI_ADMIN_PASSWORD is required. Set it in #{GRIPI_ENV_PATH} or in the gateway process environment."
   end
 
-  set :read_state_path, ENV.fetch("PI_READ_STATE_PATH", File.expand_path("~/.pi/web-gateway/read-state.json"))
-  set :browser_access_path, ENV.fetch("PI_BROWSER_ACCESS_PATH", File.expand_path("~/.pi/web-gateway/browser-access.json"))
+  set :read_state_path, ENV.fetch("GRIPI_READ_STATE_PATH", File.expand_path("~/.pi/gripi/read-state.json"))
+  set :browser_access_path, ENV.fetch("GRIPI_BROWSER_ACCESS_PATH", File.expand_path("~/.pi/gripi/browser-access.json"))
   set :browser_auth_disabled, browser_auth_disabled
   set :multi_user_mode, multi_user_mode
-  set :workspace_secret_path, ENV.fetch("PI_WORKSPACE_SECRET_PATH", File.expand_path("~/.pi/web-gateway/workspace-secret"))
-  set :workspace_access_path, ENV.fetch("PI_WORKSPACE_ACCESS_PATH", File.expand_path("~/.pi/web-gateway/workspace-access.json"))
-  set :workspace_ownership_path, ENV.fetch("PI_WORKSPACE_OWNERSHIP_PATH", File.expand_path("~/.pi/web-gateway/session-owners.json"))
+  set :workspace_secret_path, ENV.fetch("GRIPI_WORKSPACE_SECRET_PATH", File.expand_path("~/.pi/gripi/workspace-secret"))
+  set :workspace_access_path, ENV.fetch("GRIPI_WORKSPACE_ACCESS_PATH", File.expand_path("~/.pi/gripi/workspace-access.json"))
+  set :workspace_ownership_path, ENV.fetch("GRIPI_WORKSPACE_OWNERSHIP_PATH", File.expand_path("~/.pi/gripi/session-owners.json"))
   set :gateway_admin_password, gateway_admin_password
-  pi_rpc_command_prefix = PiRpcClient.command_prefix(node_path: ENV["PI_GATEWAY_NODE"], pi_path: ENV["PI_GATEWAY_PI"])
+  pi_rpc_command_prefix = PiRpcClient.command_prefix(node_path: ENV["GRIPI_NODE"], pi_path: ENV["GRIPI_PI"])
   set :pi_rpc_command_prefix, pi_rpc_command_prefix
   set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path, command_prefix: pi_rpc_command_prefix) }]
   set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd, command_prefix: pi_rpc_command_prefix) }]
@@ -108,10 +108,10 @@ class PiWebGateway < Sinatra::Base
   set :gateway_instance_id, SecureRandom.hex(16)
   set :gateway_update_coordinator, GatewayUpdateCoordinator.new(
     updater: GatewayUpdater.new(root),
-    restarter: -> { RequestGatewayRestart.call(PiWebGateway.settings.rpc_client_registry) }
+    restarter: -> { RequestGatewayRestart.call(Gripi.settings.rpc_client_registry) }
   )
   set :pending_session_registry, Rpc::PendingSessionRegistry.new
-  set :rpc_idle_timeout_seconds, ENV.fetch("PI_RPC_IDLE_TIMEOUT_SECONDS", "1800").to_i
+  set :rpc_idle_timeout_seconds, ENV.fetch("GRIPI_RPC_IDLE_TIMEOUT_SECONDS", "1800").to_i
 
   RECENT_SIDEBAR_SESSION_LIMIT = Sessions::Sidebar::RECENT_SESSION_LIMIT
   SIDEBAR_SESSION_PAGE_SIZE = Sessions::Sidebar::SESSION_PAGE_SIZE

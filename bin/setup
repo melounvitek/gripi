@@ -5,4 +5,4 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 bundle install
 
-"$script_dir/gateway-password"
+"$script_dir/gripi-password"

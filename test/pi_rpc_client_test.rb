@@ -18,7 +18,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start("/tmp/session.jsonl", popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls.map { |args| args.drop(1) }
+    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls.map { |args| args.drop(1) }
   end
 
   def test_removes_gateway_ruby_environment_when_starting_pi
@@ -75,7 +75,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start("/tmp/session.jsonl", command_prefix: ["/opt/node", "/opt/pi"], popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls.map { |args| args.drop(1) }
+    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls.map { |args| args.drop(1) }
   end
 
   def test_starts_new_pi_rpc_process_in_cwd
@@ -90,7 +90,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start_in_cwd("/tmp/project", popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls.map { |args| args.drop(1) }
+    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls.map { |args| args.drop(1) }
   end
 
   def test_starts_new_pi_rpc_process_with_configured_node_and_pi_paths
@@ -105,7 +105,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start_in_cwd("/tmp/project", command_prefix: ["/opt/node", "/opt/pi"], popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GATEWAY_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls.map { |args| args.drop(1) }
+    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls.map { |args| args.drop(1) }
   end
 
   def test_command_prefix_defaults_to_pi
@@ -121,7 +121,7 @@ class PiRpcClientTest < Minitest::Test
       PiRpcClient.command_prefix(node_path: "/opt/node", pi_path: nil)
     end
 
-    assert_includes error.message, "PI_GATEWAY_NODE and PI_GATEWAY_PI must be set together"
+    assert_includes error.message, "GRIPI_NODE and GRIPI_PI must be set together"
   end
 
   def test_sends_jsonl_command_and_returns_matching_response
@@ -621,7 +621,7 @@ class PiRpcClientTest < Minitest::Test
   def test_tree_leaf_reports_current_leaf_from_extension_bridge
     input = StringIO.new
     output = StringIO.new([
-      JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "pi_web_tree_leaf:abc123", statusText: "entry-9" }),
+      JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "gripi_tree_leaf:abc123", statusText: "entry-9" }),
       JSON.generate({ id: "prompt-1", type: "response", command: "prompt", success: true })
     ].join("\n") + "\n")
     client = PiRpcClient.new(stdin: input, stdout: output)
@@ -631,7 +631,7 @@ class PiRpcClientTest < Minitest::Test
     end
 
     assert_equal "entry-9", leaf_id
-    assert_equal({ "id" => "prompt-1", "type" => "prompt", "message" => "/pi_web_tree_leaf abc123" }, JSON.parse(input.string))
+    assert_equal({ "id" => "prompt-1", "type" => "prompt", "message" => "/gripi_tree_leaf abc123" }, JSON.parse(input.string))
   end
 
   def test_navigate_tree_reports_failure_when_extension_bridge_does_not_confirm_navigation
@@ -667,7 +667,7 @@ class PiRpcClientTest < Minitest::Test
   def test_navigate_tree_reports_cancelled_status_from_extension_bridge
     input = StringIO.new
     output = StringIO.new([
-      JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "pi_web_tree:abc123", statusText: "cancelled" }),
+      JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "gripi_tree:abc123", statusText: "cancelled" }),
       JSON.generate({ id: "prompt-1", type: "response", command: "prompt", success: true })
     ].join("\n") + "\n")
     client = PiRpcClient.new(stdin: input, stdout: output)
@@ -677,7 +677,7 @@ class PiRpcClientTest < Minitest::Test
     end
 
     assert_equal true, response.fetch("data").fetch("cancelled")
-    assert_equal({ "id" => "prompt-1", "type" => "prompt", "message" => "/pi_web_tree entry-2 abc123" }, JSON.parse(input.string))
+    assert_equal({ "id" => "prompt-1", "type" => "prompt", "message" => "/gripi_tree entry-2 abc123" }, JSON.parse(input.string))
   end
 
   def test_command_helpers_send_supported_rpc_commands
@@ -688,10 +688,10 @@ class PiRpcClientTest < Minitest::Test
       command = JSON.parse(payload)
       commands << command
       message = command["message"].to_s
-      if message.start_with?("/pi_web_tree ")
-        response_writer.puts JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "pi_web_tree:abc123", statusText: "cancelled" })
-      elsif message.start_with?("/pi_web_tree_leaf ")
-        response_writer.puts JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "pi_web_tree_leaf:def456", statusText: "entry-9" })
+      if message.start_with?("/gripi_tree ")
+        response_writer.puts JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "gripi_tree:abc123", statusText: "cancelled" })
+      elsif message.start_with?("/gripi_tree_leaf ")
+        response_writer.puts JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "gripi_tree_leaf:def456", statusText: "entry-9" })
       end
       response_writer.puts JSON.generate({ id: command.fetch("id"), type: "response", command: command.fetch("type"), success: true, data: {} })
       payload.bytesize
@@ -738,8 +738,8 @@ class PiRpcClientTest < Minitest::Test
       { "id" => "get_fork_messages-11", "type" => "get_fork_messages" },
       { "id" => "fork-12", "type" => "fork", "entryId" => "entry-1" },
       { "id" => "clone-13", "type" => "clone" },
-      { "id" => "prompt-14", "type" => "prompt", "message" => "/pi_web_tree entry-2 abc123" },
-      { "id" => "prompt-15", "type" => "prompt", "message" => "/pi_web_tree_leaf def456" },
+      { "id" => "prompt-14", "type" => "prompt", "message" => "/gripi_tree entry-2 abc123" },
+      { "id" => "prompt-15", "type" => "prompt", "message" => "/gripi_tree_leaf def456" },
       { "id" => "follow_up-16", "type" => "follow_up", "message" => "After done", "images" => [{ "type" => "image", "data" => "def", "mimeType" => "image/jpeg" }] },
       { "id" => "get_available_models-17", "type" => "get_available_models" },
       { "id" => "set_model-18", "type" => "set_model", "provider" => "anthropic", "modelId" => "claude-sonnet-4" },

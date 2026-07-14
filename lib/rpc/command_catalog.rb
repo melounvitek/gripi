@@ -10,7 +10,7 @@ module Rpc
       { "name" => "new", "source" => "other", "description" => "Start a new session in this folder" },
       { "name" => "model", "source" => "other", "description" => "Choose the model and thinking level" }
     ].freeze
-    INTERNAL_COMMAND_NAMES = %w[pi_web_tree pi_web_tree_leaf].freeze
+    INTERNAL_COMMAND_NAMES = %w[gripi_tree gripi_tree_leaf].freeze
 
     def self.commands_from(response)
       new.commands_from(response)

@@ -14,7 +14,7 @@ const {
 } = require("./gateway_config");
 
 function withTempConfig(callback) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-gateway-desktop-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gripi-desktop-"));
   const file = path.join(dir, "config.json");
   let nextId = 1;
   const idGenerator = () => `id-${nextId++}`;

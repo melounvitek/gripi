@@ -49,7 +49,7 @@ const sidebarController = new SidebarController(
   window,
   projectSelectController,
   gatewayUpdateController,
-  (name, body, url, tag) => showPiNotification(name, body, url, tag).catch(() => {})
+  (name, body, url, tag) => showGripiNotification(name, body, url, tag).catch(() => {})
 );
 
 let conversationPanel = null;
@@ -454,7 +454,7 @@ function updateStatusFromMessage(message) {
 }
 
 function desktopNotificationAvailable() {
-  return Boolean(window.piGatewayElectron?.showNotification);
+  return Boolean(window.gripiElectron?.showNotification);
 }
 
 function notificationAvailable() {
@@ -462,7 +462,7 @@ function notificationAvailable() {
 }
 
 function notificationsDisabled() {
-  return localStorage.getItem("pi:notifications-disabled") === "true";
+  return localStorage.getItem("gripi:notifications-disabled") === "true";
 }
 
 function notificationsEnabled() {
@@ -492,12 +492,12 @@ function updateNotificationToggle() {
 
 async function toggleNotifications() {
   if (notificationsEnabled()) {
-    localStorage.setItem("pi:notifications-disabled", "true");
+    localStorage.setItem("gripi:notifications-disabled", "true");
     updateNotificationToggle();
     return;
   }
 
-  localStorage.removeItem("pi:notifications-disabled");
+  localStorage.removeItem("gripi:notifications-disabled");
   if (desktopNotificationAvailable()) {
     updateNotificationToggle();
     return;
@@ -519,18 +519,18 @@ async function ensureNotificationWorker() {
   return notificationRegistration;
 }
 
-async function showPiNotification(title, body, url, tag) {
+async function showGripiNotification(title, body, url, tag) {
   if (notificationsDisabled()) return;
 
   if (desktopNotificationAvailable()) {
-    await window.piGatewayElectron.showNotification({ type: "pi-notification", title, body, url, tag });
+    await window.gripiElectron.showNotification({ type: "gripi-notification", title, body, url, tag });
     return;
   }
 
   const worker = await ensureNotificationWorker();
   if (!worker) return;
   if (worker.active) {
-    worker.active.postMessage({ type: "pi-notification", title, body, url, tag });
+    worker.active.postMessage({ type: "gripi-notification", title, body, url, tag });
   } else {
     await worker.showNotification(title, { body, tag, renotify: true, icon: "/app-icon.svg", badge: "/app-icon.svg", data: { url } });
   }
@@ -561,7 +561,7 @@ function notifyFinalAssistantReply(event) {
   notifiedFinalReplyKeys.add(key);
   const name = document.querySelector(".session-header-name")?.textContent.trim() || "current session";
   const body = notificationReplyPreview(liveMessageParser.finalAssistantReplyText(message));
-  showPiNotification(name, body, window.location.href, `pi-final-reply:${sessionPath}`).catch(() => {});
+  showGripiNotification(name, body, window.location.href, `gripi-final-reply:${sessionPath}`).catch(() => {});
 }
 
 function updateStatusFromEvent(event) {
@@ -717,7 +717,7 @@ function updateSessionHeaderName(name) {
   const title = headerName.closest(".session-header-title");
   const project = title?.querySelector(".session-header-project-label")?.textContent.trim();
   if (title) title.title = project ? `${name} · ${project}` : name;
-  document.title = `${name} · Pi Web Gateway`;
+  document.title = `${name} · GRIPi`;
 }
 
 function renderAttachments() {
@@ -935,7 +935,7 @@ function abortEventPoll() {
 }
 
 function composerDraftStorageKey(session = promptSessionInput?.value || "") {
-  return session ? `pi-web-gateway:composer-draft:${session}` : null;
+  return session ? `gripi:composer-draft:${session}` : null;
 }
 
 function loadStoredComposerDraft() {
@@ -1529,8 +1529,8 @@ function copyTargetText(button) {
 }
 
 async function copyText(text) {
-  if (window.piGatewayElectron?.copyText) {
-    const result = await window.piGatewayElectron.copyText(text);
+  if (window.gripiElectron?.copyText) {
+    const result = await window.gripiElectron.copyText(text);
     if (result?.ok) return true;
   }
 
@@ -1652,7 +1652,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
     bindSessionDom();
     bindSessionControls();
     if (push) history.pushState({ session: payload.session }, payload.title || "", payload.url || url);
-    document.title = payload.title ? `${payload.title} · Pi Web Gateway` : "Pi Web Gateway";
+    document.title = payload.title ? `${payload.title} · GRIPi` : "GRIPi";
     sidebarController.closeMobile();
     initializeSessionView({ focus, scrollSnapshot });
     if (refreshRequestVersion !== sidebarController.refreshRequestVersion) sidebarController.scheduleRefresh(0);
@@ -2152,11 +2152,11 @@ function focusPromptAfterDesktopServerActivation() {
   syncComposerFocus();
 }
 
-window.addEventListener("pi:new-session-requested", () => openNewSessionModal());
-window.addEventListener("pi:current-session-find-requested", requestCurrentSessionFind);
-window.addEventListener("pi:current-session-find-navigation-requested", (event) => requestCurrentSessionFindNavigation(event.detail));
-window.addEventListener("pi:session-search-requested", requestSessionSearch);
-window.addEventListener("pi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
+window.addEventListener("gripi:new-session-requested", () => openNewSessionModal());
+window.addEventListener("gripi:current-session-find-requested", requestCurrentSessionFind);
+window.addEventListener("gripi:current-session-find-navigation-requested", (event) => requestCurrentSessionFindNavigation(event.detail));
+window.addEventListener("gripi:session-search-requested", requestSessionSearch);
+window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
 function handleModelSettingsModalTab(event) {
   if (event.key !== "Tab") return;
@@ -2241,11 +2241,11 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest(".session-sidebar")) exitSessionShortcutMode();
 });
 
-document.addEventListener("pi:sidebar-project-filtered", (event) => {
+document.addEventListener("gripi:sidebar-project-filtered", (event) => {
   replaceNewSessionModalHtml(event.detail.modalHtml);
 });
 
-document.addEventListener("pi:sidebar-selected-title", (event) => {
+document.addEventListener("gripi:sidebar-selected-title", (event) => {
   updateSessionHeaderName(event.detail.title);
 });
 

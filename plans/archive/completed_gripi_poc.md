@@ -1,4 +1,4 @@
-# Pi Web Gateway PoC Plan
+# GRIPi PoC Plan
 
 ## Goal
 

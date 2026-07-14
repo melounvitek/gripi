@@ -1,6 +1,6 @@
 class ConfiguredSessionCwds
-  DEFAULT_PATH = "~/.config/pi-web-gateway/pinned-dirs"
-  LEGACY_DEFAULT_PATH = "~/.config/pi-web-gateway/session-cwds.txt"
+  DEFAULT_PATH = "~/.config/gripi/pinned-dirs"
+  LEGACY_DEFAULT_PATH = "~/.config/gripi/session-cwds.txt"
 
   def self.default_path
     default_path = File.expand_path(DEFAULT_PATH)

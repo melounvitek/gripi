@@ -1,4 +1,4 @@
-# Pi Web Gateway
+# GRIPi
 
 Use your Pi sessions from the desktop app or a browser, locally or from another machine. Pi runs on the gateway machine with access to its filesystem, repositories, and credentials.
 
@@ -23,8 +23,8 @@ Requirements:
 - FUSE 2 for the Linux desktop app (`fuse2` on Arch Linux)
 
 ```sh
-git clone https://github.com/melounvitek/pi-web-gateway.git
-cd pi-web-gateway
+git clone https://github.com/melounvitek/gripi.git
+cd gripi
 mise install
 mise run setup
 ```
@@ -40,16 +40,16 @@ mise run desktop-install
 Start the gateway:
 
 ```sh
-PI_GATEWAY_HOST=127.0.0.1 mise run start
+GRIPI_HOST=127.0.0.1 mise run start
 ```
 
-The app `Pi Web Gateway` gets installed. It connects to the running gateway and can switch between multiple gateway servers. You can also use the gateway directly in browser at <http://localhost:4567>.
+The app `GRIPi` gets installed. It connects to the running gateway and can switch between multiple gateway servers. You can also use the gateway directly in browser at <http://localhost:4567>.
 
 There is no mobile app, but on iPhone, adding the gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow works nicely:
 
 <img width="804" height="362" alt="image" src="https://github.com/user-attachments/assets/37ab55d7-7b34-4cce-932e-566a6d415041" />
 
-<img width="360" alt="Pi Web Gateway running as an iPhone web app" src="docs/images/iphone-web-app-screenshot.png" />
+<img width="360" alt="GRIPi running as an iPhone web app" src="docs/images/iphone-web-app-screenshot.png" />
 
 ## Remote access and configuration
 

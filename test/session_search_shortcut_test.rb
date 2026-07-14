@@ -199,8 +199,8 @@ class SessionSearchShortcutTest < Minitest::Test
     script = File.read(ASSET_PATH)
 
     assert_includes script, "if (handleSessionSearchShortcut(event)) return;"
-    assert_includes script, 'window.addEventListener("pi:current-session-find-requested", requestCurrentSessionFind);'
-    assert_includes script, 'window.addEventListener("pi:session-search-requested", requestSessionSearch);'
+    assert_includes script, 'window.addEventListener("gripi:current-session-find-requested", requestCurrentSessionFind);'
+    assert_includes script, 'window.addEventListener("gripi:session-search-requested", requestSessionSearch);'
   end
 
   private

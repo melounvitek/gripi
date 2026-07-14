@@ -673,7 +673,7 @@ class FrontendControllersJsTest < Minitest::Test
     assert_equal 2, results.fetch("gatewayApplications")
     assert_equal 37, results.fetch("scrollTop")
     assert_equal true, results.fetch("reboundScroll")
-    assert_equal ["pi:sidebar-selected-title", { "title" => "New title" }], results.fetch("replacementEvent")
+    assert_equal ["gripi:sidebar-selected-title", { "title" => "New title" }], results.fetch("replacementEvent")
     assert_equal true, results.fetch("interactionTracked")
     assert_equal "3", results.fetch("badgeText")
   end

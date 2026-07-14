@@ -1,4 +1,4 @@
-ENV["PI_GATEWAY_ADMIN_PASSWORD"] ||= "test-password"
+ENV["GRIPI_ADMIN_PASSWORD"] ||= "test-password"
 
 require "minitest/autorun"
 require "rack/mock"
@@ -43,13 +43,13 @@ class GatewayUpdateRoutesTest < Minitest::Test
         summary: "target22 Improve updates"
       )
     )
-    PiWebGateway.set :sessions_root, @sessions_root
-    PiWebGateway.set :browser_auth_disabled, true
-    PiWebGateway.set :multi_user_mode, false
-    PiWebGateway.set :rpc_idle_timeout_seconds, 0
-    PiWebGateway.set :gateway_instance_id, "instance1"
-    PiWebGateway.set :gateway_update_coordinator, @coordinator
-    @request = Rack::MockRequest.new(PiWebGateway)
+    Gripi.set :sessions_root, @sessions_root
+    Gripi.set :browser_auth_disabled, true
+    Gripi.set :multi_user_mode, false
+    Gripi.set :rpc_idle_timeout_seconds, 0
+    Gripi.set :gateway_instance_id, "instance1"
+    Gripi.set :gateway_update_coordinator, @coordinator
+    @request = Rack::MockRequest.new(Gripi)
   end
 
   def teardown
@@ -86,8 +86,8 @@ class GatewayUpdateRoutesTest < Minitest::Test
   end
 
   def test_existing_browser_access_gate_rejects_update_requests
-    PiWebGateway.set :browser_auth_disabled, false
-    PiWebGateway.set :gateway_admin_password, "secret"
+    Gripi.set :browser_auth_disabled, false
+    Gripi.set :gateway_admin_password, "secret"
 
     get_response = @request.get("/gateway-update")
     post_response = @request.post("/gateway-update")
@@ -97,11 +97,11 @@ class GatewayUpdateRoutesTest < Minitest::Test
     assert_equal 0, @coordinator.status_calls
     assert_equal 0, @coordinator.start_calls
   ensure
-    PiWebGateway.set :browser_auth_disabled, true
+    Gripi.set :browser_auth_disabled, true
   end
 
   def test_existing_workspace_access_gate_rejects_update_requests
-    PiWebGateway.set :multi_user_mode, true
+    Gripi.set :multi_user_mode, true
 
     get_response = @request.get("/gateway-update")
     post_response = @request.post("/gateway-update")
@@ -111,7 +111,7 @@ class GatewayUpdateRoutesTest < Minitest::Test
     assert_equal 0, @coordinator.status_calls
     assert_equal 0, @coordinator.start_calls
   ensure
-    PiWebGateway.set :multi_user_mode, false
+    Gripi.set :multi_user_mode, false
   end
 
   def test_page_rendering_does_not_check_update_status

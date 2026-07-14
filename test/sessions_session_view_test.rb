@@ -1,4 +1,4 @@
-ENV["PI_GATEWAY_ADMIN_PASSWORD"] ||= "test-password"
+ENV["GRIPI_ADMIN_PASSWORD"] ||= "test-password"
 
 require "minitest/autorun"
 require "tmpdir"

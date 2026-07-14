@@ -19,61 +19,61 @@ window.addEventListener("unhandledrejection", (event) => {
   showFatalError(event.reason?.message || "Unexpected desktop shell error.");
 });
 
-window.piGatewayDesktop.onAddGatewayRequested(() => {
+window.gripiDesktop.onAddGatewayRequested(() => {
   renameDraft = null;
   setupDraft = { name: "", url: "http://localhost:4567/" };
   render();
 });
 
-window.piGatewayDesktop.onFindInSessionRequested(() => {
-  dispatchActiveGatewayEvent("pi:current-session-find-requested");
+window.gripiDesktop.onFindInSessionRequested(() => {
+  dispatchActiveGatewayEvent("gripi:current-session-find-requested");
 });
 
-window.piGatewayDesktop.onFindInSessionNavigationRequested((direction) => {
-  dispatchActiveGatewayEvent("pi:current-session-find-navigation-requested", direction);
+window.gripiDesktop.onFindInSessionNavigationRequested((direction) => {
+  dispatchActiveGatewayEvent("gripi:current-session-find-navigation-requested", direction);
 });
 
-window.piGatewayDesktop.onGatewayActivationRequested(async (id) => {
+window.gripiDesktop.onGatewayActivationRequested(async (id) => {
   if (!config?.gateways.some((gateway) => gateway.id === id)) return;
   setupDraft = null;
   renameDraft = null;
-  config = await window.piGatewayDesktop.activateGateway(id);
+  config = await window.gripiDesktop.activateGateway(id);
   render();
 });
 
-window.piGatewayDesktop.onNewSessionRequested(() => {
+window.gripiDesktop.onNewSessionRequested(() => {
   openActiveGatewayNewSessionModal();
 });
 
-window.piGatewayDesktop.onNextGatewayRequested(async () => {
+window.gripiDesktop.onNextGatewayRequested(async () => {
   await activateNextGateway();
 });
 
-window.piGatewayDesktop.onRemoveGatewayRequested(async () => {
+window.gripiDesktop.onRemoveGatewayRequested(async () => {
   await removeActiveGateway();
 });
 
-window.piGatewayDesktop.onRenameGatewayRequested(async () => {
+window.gripiDesktop.onRenameGatewayRequested(async () => {
   await renameActiveGateway();
 });
 
-window.piGatewayDesktop.onSearchSessionsRequested(async (gatewayId) => {
+window.gripiDesktop.onSearchSessionsRequested(async (gatewayId) => {
   if (gatewayId && config?.gateways.some((gateway) => gateway.id === gatewayId)) {
     setupDraft = null;
     renameDraft = null;
     if (gatewayId !== config.activeGatewayId) {
-      config = await window.piGatewayDesktop.activateGateway(gatewayId);
+      config = await window.gripiDesktop.activateGateway(gatewayId);
     }
     render();
   }
 
-  dispatchActiveGatewayEvent("pi:session-search-requested");
+  dispatchActiveGatewayEvent("gripi:session-search-requested");
 });
 
 loadConfig();
 
 async function loadConfig() {
-  config = await window.piGatewayDesktop.getGatewayConfig();
+  config = await window.gripiDesktop.getGatewayConfig();
   render();
 }
 
@@ -101,7 +101,7 @@ function renderTabs() {
     button.addEventListener("click", async () => {
       setupDraft = null;
       renameDraft = null;
-      config = await window.piGatewayDesktop.activateGateway(gateway.id);
+      config = await window.gripiDesktop.activateGateway(gateway.id);
       render();
     });
     tabs.append(button);
@@ -181,7 +181,7 @@ function ensureWebviews() {
     const webview = document.createElement("webview");
     loadingGateways.set(gateway.id, true);
     webview.setAttribute("allowpopups", "");
-    webview.partition = `persist:pi-gateway-${gateway.id}`;
+    webview.partition = `persist:gripi-${gateway.id}`;
     setGatewayUrl(webview, gateway.url);
     webview.addEventListener("did-attach", () => {
       loadingGateways.delete(gateway.id);
@@ -233,7 +233,7 @@ async function removeActiveGateway() {
   renameDraft = null;
   isRemovingGateway = true;
   try {
-    config = await window.piGatewayDesktop.removeGateway(gateway.id);
+    config = await window.gripiDesktop.removeGateway(gateway.id);
     offlineGateways.delete(gateway.id);
     loadingGateways.delete(gateway.id);
     unreadSessionCounts.delete(gateway.id);
@@ -258,7 +258,7 @@ function activeGateway() {
 }
 
 function openActiveGatewayNewSessionModal() {
-  dispatchActiveGatewayEvent("pi:new-session-requested");
+  dispatchActiveGatewayEvent("gripi:new-session-requested");
 }
 
 function dispatchActiveGatewayEvent(eventName, detail) {
@@ -278,7 +278,7 @@ async function activateNextGateway() {
   const currentIndex = Math.max(0, config.gateways.findIndex((gateway) => gateway.id === config.activeGatewayId));
   const nextGateway = config.gateways[(currentIndex + 1) % config.gateways.length];
   setupDraft = null;
-  config = await window.piGatewayDesktop.activateGateway(nextGateway.id);
+  config = await window.gripiDesktop.activateGateway(nextGateway.id);
   render();
   focusActiveGatewayPrompt();
 }
@@ -290,7 +290,7 @@ function focusActiveGatewayPrompt() {
   if (!webview || webview.hidden) return;
 
   webview.focus();
-  webview.executeJavaScript('window.dispatchEvent(new CustomEvent("pi:desktop-server-activated"))', true).catch(() => {});
+  webview.executeJavaScript('window.dispatchEvent(new CustomEvent("gripi:desktop-server-activated"))', true).catch(() => {});
 }
 
 function gatewayTabLabel(gateway) {
@@ -351,7 +351,7 @@ function setupPanel(draft) {
     saveLabel: "Add and Open",
     cancelLabel: config.gateways.length > 0 ? "Cancel" : null,
     onSave: async ({ name, url }) => {
-      config = await window.piGatewayDesktop.addGateway({ name, url });
+      config = await window.gripiDesktop.addGateway({ name, url });
       setupDraft = null;
       render();
     },
@@ -372,7 +372,7 @@ function renamePanel(gateway) {
     showUrl: false,
     onSave: async ({ name }) => {
       const currentGateway = config.gateways.find((existingGateway) => existingGateway.id === gateway.id);
-      if (currentGateway) config = await window.piGatewayDesktop.saveGateway({ ...currentGateway, name });
+      if (currentGateway) config = await window.gripiDesktop.saveGateway({ ...currentGateway, name });
       renameDraft = null;
       render();
     },
@@ -393,7 +393,7 @@ function offlinePanel(gateway, reason) {
     details: `${gateway.url} — ${reason}`,
     onSave: async ({ name, url }) => {
       const previousUrl = gateway.url;
-      config = await window.piGatewayDesktop.saveGateway({ id: gateway.id, name, url });
+      config = await window.gripiDesktop.saveGateway({ id: gateway.id, name, url });
       const savedGateway = config.gateways.find((existingGateway) => existingGateway.id === gateway.id) || gateway;
       offlineGateways.delete(gateway.id);
       render();

@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pi Web Gateway</title>
+  <title>GRIPi</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#18181e">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Pi Gateway">
+  <meta name="apple-mobile-web-app-title" content="GRIPi">
   <link rel="stylesheet" href="/assets/app.css?v=<%= h settings.gateway_instance_id %>">
 </head>
 <body class="<%= session_only? ? "session-only" : "" %>" data-browser-access-enabled="<%= browser_access_enabled? ? "true" : "false" %>" data-workspace-access-enabled="<%= multi_user_mode? ? "true" : "false" %>" data-gateway-instance-id="<%= h settings.gateway_instance_id %>" data-home-dir="<%= h Dir.home %>">

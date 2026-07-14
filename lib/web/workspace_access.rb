@@ -15,7 +15,7 @@ module Web
       /workspace-access/approve
       /workspace-access/deny
     ].freeze
-    WORKSPACE_COOKIE = "pi_gateway_workspace".freeze
+    WORKSPACE_COOKIE = "gripi_workspace".freeze
     STORE_CACHE = {}
     STORE_CACHE_MUTEX = Mutex.new
 

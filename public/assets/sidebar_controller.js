@@ -178,7 +178,7 @@ export class SidebarController {
     if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = scrollTop;
 
     const title = this.element.querySelector("a.session.selected .session-title")?.textContent.trim();
-    if (title) this.document.dispatchEvent(new this.window.CustomEvent("pi:sidebar-selected-title", { detail: { title } }));
+    if (title) this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-selected-title", { detail: { title } }));
     return title || null;
   }
 
@@ -203,7 +203,7 @@ export class SidebarController {
       if (this.notifiedFinalReplyKeys.has(key)) return;
       this.notifiedFinalReplyKeys.add(key);
       const name = link.querySelector(".session-title")?.textContent.trim() || "a background session";
-      this.notifyFinalReply(name, notificationReplyPreview(link.dataset.latestAssistantResponsePreview), sessionUrl(sessionPath), `pi-final-reply:${sessionPath}`);
+      this.notifyFinalReply(name, notificationReplyPreview(link.dataset.latestAssistantResponsePreview), sessionUrl(sessionPath), `gripi-final-reply:${sessionPath}`);
     });
   }
 
@@ -229,7 +229,7 @@ export class SidebarController {
     if (!this.current(epoch, boundElement)) return null;
 
     this.replace(html, { scrollTop: 0, notify: false });
-    this.document.dispatchEvent(new this.window.CustomEvent("pi:sidebar-project-filtered", { detail: { modalHtml } }));
+    this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-project-filtered", { detail: { modalHtml } }));
     this.window.history.pushState(this.window.history.state, "", targetUrl.href);
     this.scheduleRefresh();
     return modalHtml;

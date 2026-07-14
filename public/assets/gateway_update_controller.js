@@ -7,7 +7,7 @@ export class GatewayUpdateController {
     this.inProgress = false;
     this.pollTimer = null;
     this.checkInterval = null;
-    this.channel = typeof BroadcastChannelClass === "function" ? new BroadcastChannelClass("pi-gateway-update") : null;
+    this.channel = typeof BroadcastChannelClass === "function" ? new BroadcastChannelClass("gripi-update") : null;
 
     document.addEventListener("click", (event) => {
       if (event.target.closest("[data-gateway-update-button]")) this.start();

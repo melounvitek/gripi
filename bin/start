@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-host="${1:-${PI_GATEWAY_HOST:-0.0.0.0}}"
-port="${PI_GATEWAY_PORT:-4567}"
+host="${1:-${GRIPI_HOST:-0.0.0.0}}"
+port="${GRIPI_PORT:-4567}"
 
-if [[ -n "${PI_GATEWAY_RESTART_PATH:-}" ]]; then
-  restart_path="$PI_GATEWAY_RESTART_PATH"
+if [[ -n "${GRIPI_RESTART_PATH:-}" ]]; then
+  restart_path="$GRIPI_RESTART_PATH"
 elif [[ -n "${HOME:-}" ]]; then
-  restart_path="$HOME/.pi/web-gateway/restart-request"
+  restart_path="$HOME/.pi/gripi/restart-request"
 else
-  printf 'HOME or PI_GATEWAY_RESTART_PATH must be set\n' >&2
+  printf 'HOME or GRIPI_RESTART_PATH must be set\n' >&2
   exit 1
 fi
 

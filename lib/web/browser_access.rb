@@ -32,11 +32,11 @@ module Web
       def browser_token
         return @browser_token if defined?(@browser_token)
 
-        @browser_token = request.cookies["pi_gateway_browser"]
+        @browser_token = request.cookies["gripi_browser"]
         return @browser_token unless @browser_token.to_s.empty?
 
         @browser_token = SecureRandom.hex(32)
-        response.set_cookie("pi_gateway_browser", value: @browser_token, path: "/", httponly: true, same_site: :lax, max_age: 365 * 24 * 60 * 60)
+        response.set_cookie("gripi_browser", value: @browser_token, path: "/", httponly: true, same_site: :lax, max_age: 365 * 24 * 60 * 60)
         @browser_token
       end
 

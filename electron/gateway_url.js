@@ -3,7 +3,7 @@ const { normalizeGatewayUrl } = require("./gateway_config");
 const DEFAULT_GATEWAY_URL = "http://localhost:4567/";
 
 function gatewayUrl(env = process.env, argv = process.argv, configuredUrl = null) {
-  const candidate = urlFromArgs(argv) || env.PI_GATEWAY_DESKTOP_URL || configuredUrl || DEFAULT_GATEWAY_URL;
+  const candidate = urlFromArgs(argv) || env.GRIPI_DESKTOP_URL || configuredUrl || DEFAULT_GATEWAY_URL;
   return normalizeGatewayUrl(candidate) || DEFAULT_GATEWAY_URL;
 }
 

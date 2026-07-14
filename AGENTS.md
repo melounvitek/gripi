@@ -18,6 +18,6 @@ For changes affecting conversation/message rendering, check both server-rendered
 
 ## Local server
 
-The dev server runs as the user systemd service `pi-web-gateway.service`, logging to `/tmp/pi-web-gateway.log`.
+The dev server runs as the user systemd service `gripi.service`, logging to `/tmp/gripi.log`.
 
 Do not restart it unless explicitly asked; for code changes, tell the user a restart is needed. For design-only changes (CSS/markup presentation tweaks), a restart is not needed; a browser refresh is enough.

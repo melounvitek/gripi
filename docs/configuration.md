@@ -1,17 +1,17 @@
 # Configuration
 
-Pi Web Gateway reads most local settings from `~/.config/pi-web-gateway/env`.
+GRIPi reads most local settings from `~/.config/gripi/env`.
 
 ## Server address
 
 Pass the server host or port when starting the gateway:
 
 ```sh
-PI_GATEWAY_HOST=127.0.0.1 mise run start
-PI_GATEWAY_HOST=100.x.y.z PI_GATEWAY_PORT=4568 mise run start
+GRIPI_HOST=127.0.0.1 mise run start
+GRIPI_HOST=100.x.y.z GRIPI_PORT=4568 mise run start
 ```
 
-`PI_GATEWAY_HOST` and `PI_GATEWAY_PORT` choose where the gateway server listens. Set them in the command environment, not only in `~/.config/pi-web-gateway/env`.
+`GRIPI_HOST` and `GRIPI_PORT` choose where the gateway server listens. Set them in the command environment, not only in `~/.config/gripi/env`.
 
 ## Self-updates
 
@@ -30,38 +30,38 @@ Automatic restart requires the gateway to be launched through `mise run start` o
 
 After the replacement server responds, the initiating page and sibling tabs navigate to a cache-busted copy of their current URL. Other open clients detect the replacement periodically or as soon as they regain focus. This performs a complete reload while preserving the selected session and other query state.
 
-The restart marker defaults to `~/.pi/web-gateway/restart-request`. Override it only when needed, and set the override in the launcher process environment—not only in the gateway env file loaded by Ruby:
+The restart marker defaults to `~/.pi/gripi/restart-request`. Override it only when needed, and set the override in the launcher process environment—not only in the gateway env file loaded by Ruby:
 
 ```sh
-PI_GATEWAY_RESTART_PATH=/path/to/restart-request mise run start
+GRIPI_RESTART_PATH=/path/to/restart-request mise run start
 ```
 
 ## Common options
 
 ```sh
-PI_BROWSER_AUTH_DISABLED=1
-PI_MULTI_USER_MODE=1
+GRIPI_BROWSER_AUTH_DISABLED=1
+GRIPI_MULTI_USER_MODE=1
 ```
 
-`PI_BROWSER_AUTH_DISABLED=1` skips browser approval for trusted private URLs.
+`GRIPI_BROWSER_AUTH_DISABLED=1` skips browser approval for trusted private URLs.
 
-`PI_MULTI_USER_MODE=1` asks users for a personal session key before showing sessions. The same key on another browser shows the same sessions. This separates gateway session visibility for trusted users, but it is not OS-level process, filesystem, or credential isolation.
+`GRIPI_MULTI_USER_MODE=1` asks users for a personal session key before showing sessions. The same key on another browser shows the same sessions. This separates gateway session visibility for trusted users, but it is not OS-level process, filesystem, or credential isolation.
 
 ## Custom Pi runtime
 
 If Pi needs a different Node runtime than the one selected by mise, set both:
 
 ```sh
-PI_GATEWAY_NODE=/path/to/node
-PI_GATEWAY_PI=/path/to/pi
+GRIPI_NODE=/path/to/node
+GRIPI_PI=/path/to/pi
 ```
 
 ## Pinned session directories
 
-Add pinned session directories to `~/.config/pi-web-gateway/pinned-dirs` to keep them available in the New Session dialog:
+Add pinned session directories to `~/.config/gripi/pinned-dirs` to keep them available in the New Session dialog:
 
 ```txt
-/home/alice/projects/pi-web-gateway
+/home/alice/projects/gripi
 /home/alice/projects/another-project
 ```
 

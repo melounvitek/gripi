@@ -1,8 +1,8 @@
-# Pi Web Gateway Usability Plan
+# GRIPi Usability Plan
 
 ## Goal
 
-Turn the current Pi Web Gateway PoC into a usable personal browser UI for daily Pi sessions.
+Turn the current GRIPi PoC into a usable personal browser UI for daily Pi sessions.
 
 Keep the same core architecture:
 

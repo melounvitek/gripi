@@ -1,11 +1,11 @@
 {
-  "name": "pi-web-gateway-desktop",
+  "name": "gripi-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Thin Electron shell for Pi Web Gateway.",
-  "author": "Pi Web Gateway contributors",
+  "description": "Thin Electron shell for GRIPi.",
+  "author": "GRIPi contributors",
   "main": "electron/main.js",
-  "desktopName": "pi-web-gateway",
+  "desktopName": "gripi",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -21,8 +21,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "dev.pi-web-gateway.desktop",
-    "productName": "Pi Web Gateway",
+    "appId": "dev.gripi.desktop",
+    "productName": "GRIPi",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "files": [
       "electron/**/*",

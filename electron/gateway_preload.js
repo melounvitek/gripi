@@ -41,7 +41,7 @@ async function handleCopyClick(event) {
 
 document.addEventListener("click", handleCopyClick, true);
 
-contextBridge.exposeInMainWorld("piGatewayElectron", {
+contextBridge.exposeInMainWorld("gripiElectron", {
   copyText: (text) => ipcRenderer.invoke("gateway-clipboard:write", text),
   showNotification: (payload) => ipcRenderer.invoke("gateway-notification:show", payload)
 });

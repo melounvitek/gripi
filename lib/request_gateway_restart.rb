@@ -11,7 +11,7 @@ class RequestGatewayRestart
   end
 
   def call(rpc_client_registry = nil, env: ENV)
-    restart_path = env["PI_GATEWAY_RESTART_PATH"]
+    restart_path = env["GRIPI_RESTART_PATH"]
     restart_path = default_restart_path(env) if restart_path.nil? || restart_path.empty?
     create_marker(restart_path)
     cleanup_error = begin
@@ -34,9 +34,9 @@ class RequestGatewayRestart
 
   def default_restart_path(env)
     home = env["HOME"]
-    raise ArgumentError, "HOME or PI_GATEWAY_RESTART_PATH must be set" if home.nil? || home.empty?
+    raise ArgumentError, "HOME or GRIPI_RESTART_PATH must be set" if home.nil? || home.empty?
 
-    File.join(home, ".pi", "web-gateway", "restart-request")
+    File.join(home, ".pi", "gripi", "restart-request")
   end
 
   def create_marker(path)

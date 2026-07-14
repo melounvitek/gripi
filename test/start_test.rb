@@ -25,7 +25,7 @@ class StartTest < Minitest::Test
       exit 23
     SH
 
-    _stdout, _stderr, status = run_launcher("127.0.0.1", "PI_GATEWAY_PORT" => "5678")
+    _stdout, _stderr, status = run_launcher("127.0.0.1", "GRIPI_PORT" => "5678")
 
     assert_equal 23, status.exitstatus
     assert_equal ["exec rackup -o 127.0.0.1 -p 5678|production"], File.readlines(@calls_path, chomp: true)
@@ -105,13 +105,13 @@ class StartTest < Minitest::Test
 
   def test_default_restart_path_requires_home
     write_fake_bundle("exit 0\n")
-    env = base_env.reject { |key, _value| key == "PI_GATEWAY_RESTART_PATH" }
+    env = base_env.reject { |key, _value| key == "GRIPI_RESTART_PATH" }
     env["HOME"] = ""
 
     _stdout, stderr, status = Open3.capture3(env, @launcher)
 
     refute status.success?
-    assert_match(/HOME|PI_GATEWAY_RESTART_PATH/, stderr)
+    assert_match(/HOME|GRIPI_RESTART_PATH/, stderr)
     refute File.exist?(@calls_path)
   end
 
@@ -128,7 +128,7 @@ class StartTest < Minitest::Test
       "PATH" => "#{@bin_dir}:#{ENV.fetch("PATH")}",
       "CALLS_PATH" => @calls_path,
       "RESTART_PATH" => @restart_path,
-      "PI_GATEWAY_RESTART_PATH" => @restart_path
+      "GRIPI_RESTART_PATH" => @restart_path
     }
   end
 

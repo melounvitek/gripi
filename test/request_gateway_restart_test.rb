@@ -22,7 +22,7 @@ class RequestGatewayRestartTest < Minitest::Test
     registry.instance_variable_set(:@restart_path, @restart_path)
     requester = RequestGatewayRestart.new(shutdown: -> { calls << [:shutdown, File.exist?(@restart_path)] })
 
-    requester.call(registry, env: { "PI_GATEWAY_RESTART_PATH" => @restart_path })
+    requester.call(registry, env: { "GRIPI_RESTART_PATH" => @restart_path })
 
     assert_equal [[:close, true], [:shutdown, true]], calls
     assert File.file?(@restart_path)
@@ -33,7 +33,7 @@ class RequestGatewayRestartTest < Minitest::Test
     shutdowns = 0
     requester = RequestGatewayRestart.new(shutdown: -> { shutdowns += 1 })
 
-    requester.call(nil, env: { "PI_GATEWAY_RESTART_PATH" => @restart_path })
+    requester.call(nil, env: { "GRIPI_RESTART_PATH" => @restart_path })
 
     assert_equal 1, shutdowns
     assert File.file?(@restart_path)
@@ -46,7 +46,7 @@ class RequestGatewayRestartTest < Minitest::Test
     registry.define_singleton_method(:close_all) { calls << :close }
 
     assert_raises(Errno::EEXIST) do
-      requester.call(registry, env: { "PI_GATEWAY_RESTART_PATH" => File.join(__FILE__, "restart-request") })
+      requester.call(registry, env: { "GRIPI_RESTART_PATH" => File.join(__FILE__, "restart-request") })
     end
     assert_empty calls
   end
@@ -61,7 +61,7 @@ class RequestGatewayRestartTest < Minitest::Test
     requester = RequestGatewayRestart.new(shutdown: -> { calls << :shutdown })
 
     error = assert_raises(RuntimeError) do
-      requester.call(registry, env: { "PI_GATEWAY_RESTART_PATH" => @restart_path })
+      requester.call(registry, env: { "GRIPI_RESTART_PATH" => @restart_path })
     end
 
     assert_equal "close failed", error.message
@@ -73,7 +73,7 @@ class RequestGatewayRestartTest < Minitest::Test
     requester = RequestGatewayRestart.new(shutdown: -> { raise "shutdown failed" })
 
     error = assert_raises(RuntimeError) do
-      requester.call(nil, env: { "PI_GATEWAY_RESTART_PATH" => @restart_path })
+      requester.call(nil, env: { "GRIPI_RESTART_PATH" => @restart_path })
     end
 
     assert_equal "shutdown failed", error.message
@@ -86,8 +86,8 @@ class RequestGatewayRestartTest < Minitest::Test
 
     requester.call(nil, env: { "HOME" => home })
 
-    assert File.file?(File.join(home, ".pi", "web-gateway", "restart-request"))
+    assert File.file?(File.join(home, ".pi", "gripi", "restart-request"))
     error = assert_raises(ArgumentError) { requester.call(nil, env: {}) }
-    assert_match(/HOME|PI_GATEWAY_RESTART_PATH/, error.message)
+    assert_match(/HOME|GRIPI_RESTART_PATH/, error.message)
   end
 end

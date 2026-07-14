@@ -12,7 +12,7 @@ class PiRpcClient
   ACTIVE_TOOL_SNAPSHOT_OUTPUT_BYTES = 1_024
   ACTIVE_TOOL_SNAPSHOT_TEXT_BYTES = 4 * 1_024
   SNAPSHOT_TOOL_NAME = "subagent"
-  GATEWAY_EXTENSION_PATH = File.expand_path("../pi_extensions/pi-web-gateway-tree.ts", __dir__)
+  GRIPI_EXTENSION_PATH = File.expand_path("../pi_extensions/gripi-tree.ts", __dir__)
   RUBY_ENV_KEYS = %w[
     GEM_HOME
     GEM_PATH
@@ -21,12 +21,12 @@ class PiRpcClient
   ].freeze
 
   def self.start(session_path, command_prefix: ["pi"], popen: Open3.method(:popen3))
-    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GATEWAY_EXTENSION_PATH, "--session", session_path)
+    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GRIPI_EXTENSION_PATH, "--session", session_path)
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
   end
 
   def self.start_in_cwd(cwd, command_prefix: ["pi"], popen: Open3.method(:popen3))
-    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GATEWAY_EXTENSION_PATH, chdir: cwd)
+    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GRIPI_EXTENSION_PATH, chdir: cwd)
     new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
   end
 
@@ -42,7 +42,7 @@ class PiRpcClient
     return ["pi"] if node_path.empty? && pi_path.empty?
 
     if node_path.empty? || pi_path.empty?
-      raise ArgumentError, "PI_GATEWAY_NODE and PI_GATEWAY_PI must be set together to pin Pi to a specific Node runtime. Set both, or unset both to run pi from PATH."
+      raise ArgumentError, "GRIPI_NODE and GRIPI_PI must be set together to pin Pi to a specific Node runtime. Set both, or unset both to run pi from PATH."
     end
 
     [node_path, pi_path]
@@ -170,10 +170,10 @@ class PiRpcClient
 
   def navigate_tree(entry_id)
     request_id = SecureRandom.hex(8)
-    response = request("prompt", id: next_id("prompt"), message: "/pi_web_tree #{entry_id} #{request_id}")
+    response = request("prompt", id: next_id("prompt"), message: "/gripi_tree #{entry_id} #{request_id}")
     return response unless response&.fetch("success", true)
 
-    result = wait_for_status("pi_web_tree:#{request_id}")
+    result = wait_for_status("gripi_tree:#{request_id}")
     return response.merge("success" => false, "error" => "Tree navigation did not complete") unless result
 
     response.merge("data" => { "cancelled" => result == "cancelled" })
@@ -181,10 +181,10 @@ class PiRpcClient
 
   def tree_leaf
     request_id = SecureRandom.hex(8)
-    response = request("prompt", id: next_id("prompt"), message: "/pi_web_tree_leaf #{request_id}")
+    response = request("prompt", id: next_id("prompt"), message: "/gripi_tree_leaf #{request_id}")
     return unless response&.fetch("success", true)
 
-    result = wait_for_status("pi_web_tree_leaf:#{request_id}")
+    result = wait_for_status("gripi_tree_leaf:#{request_id}")
     result == "__root__" ? nil : result
   end
 

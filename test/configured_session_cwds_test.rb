@@ -9,7 +9,7 @@ class ConfiguredSessionCwdsTest < Minitest::Test
       previous_home = ENV["HOME"]
       ENV["HOME"] = home
 
-      assert_equal File.join(home, ".config/pi-web-gateway/pinned-dirs"), ConfiguredSessionCwds.default_path
+      assert_equal File.join(home, ".config/gripi/pinned-dirs"), ConfiguredSessionCwds.default_path
     ensure
       ENV["HOME"] = previous_home
     end
@@ -17,7 +17,7 @@ class ConfiguredSessionCwdsTest < Minitest::Test
 
   def test_default_path_falls_back_to_legacy_session_cwds_file
     Dir.mktmpdir do |home|
-      legacy_path = File.join(home, ".config/pi-web-gateway/session-cwds.txt")
+      legacy_path = File.join(home, ".config/gripi/session-cwds.txt")
       FileUtils.mkdir_p(File.dirname(legacy_path))
       File.write(legacy_path, "")
       previous_home = ENV["HOME"]
@@ -31,7 +31,7 @@ class ConfiguredSessionCwdsTest < Minitest::Test
 
   def test_default_path_prefers_pinned_dirs_when_both_default_files_exist
     Dir.mktmpdir do |home|
-      config_dir = File.join(home, ".config/pi-web-gateway")
+      config_dir = File.join(home, ".config/gripi")
       pinned_path = File.join(config_dir, "pinned-dirs")
       legacy_path = File.join(config_dir, "session-cwds.txt")
       FileUtils.mkdir_p(config_dir)
