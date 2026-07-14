@@ -1,7 +1,7 @@
     <aside class="session-sidebar" data-unread-session-count="<%= h unread_sidebar_session_count %>">
       <div class="session-sidebar-header">
         <div class="sidebar-title">
-          <h1>Pi Sessions</h1>
+          <h1><svg viewBox="0 0 1400 400" role="img" aria-label="GRIPi"><g style="fill: var(--accent)"><path d="M0 0H300V100H100V300H200V200H300V400H0Z"/><path fill-rule="evenodd" d="M400 0H700V200H600V300H500V400H400ZM500 100V200H600V100Z"/><path d="M600 300H700V400H600Z"/><path d="M800 0H900V400H800Z"/></g><g style="fill: var(--text)" transform="translate(1000 0)"><path fill-rule="evenodd" d="M0 0H300V200H200V300H100V400H0ZM100 100V200H200V100Z"/><path d="M300 200H400V400H300Z"/></g></svg></h1>
           <div class="sidebar-server-origin"><%= h request.base_url %></div>
         </div>
         <label for="mobile-session-toggle" class="mobile-sessions-button mobile-sessions-close-button" aria-label="Close sessions"><span class="hamburger-icon" aria-hidden="true"></span><% if unread_sidebar_session_count.positive? %><span class="mobile-sessions-unread-badge" aria-label="<%= h unread_sidebar_session_aria_label %>" title="<%= h unread_sidebar_session_aria_label %>"><%= h unread_sidebar_session_count_label %></span><% end %></label>

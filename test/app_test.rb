@@ -3209,7 +3209,7 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_equal "https://pi.example.test:9292", document.at_css(".sidebar-server-origin").text.strip
-      assert_operator response.body.index("<h1>Pi Sessions</h1>"), :<, response.body.index("sidebar-server-origin")
+      assert_operator response.body.index(%(aria-label="GRIPi")), :<, response.body.index("sidebar-server-origin")
     end
   end
 

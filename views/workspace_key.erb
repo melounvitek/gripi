@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GRIPi User Token</title>
   <style>
-    :root { color-scheme: dark; --bg: #18181e; --panel: #1e1e24; --border: #50505066; --border-strong: #505050b3; --text: #d4d4d4; --muted: #808080; --accent: #8abeb7; --cyan: #00d7ff; --danger: #cc6666; --danger-soft: #3c2828; --button-text: #18181e; --mono: "Commit Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace; }
+    :root { color-scheme: dark; --bg: #18181e; --panel: #1e1e24; --border: #50505066; --border-strong: #505050b3; --text: #d4d4d4; --muted: #808080; --accent: #ff5a1f; --accent-bright: #ff7a45; --danger: #cc6666; --danger-soft: #3c2828; --button-text: #18181e; --mono: "Commit Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace; }
     *, *::before, *::after { box-sizing: border-box; }
     body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 1rem; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background-color: var(--bg); background-image: linear-gradient(#ffffff08 1px, transparent 1px), linear-gradient(90deg, #ffffff08 1px, transparent 1px), linear-gradient(#ffffff04 1px, transparent 1px), linear-gradient(90deg, #ffffff04 1px, transparent 1px); background-size: 96px 96px, 96px 96px, 12px 12px, 12px 12px; }
     main { width: min(32rem, 100%); display: grid; gap: 1rem; padding: 1.25rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: var(--panel); box-shadow: 0 8px 26px #00000047; }
@@ -14,15 +14,15 @@
     p { margin: 0; color: var(--muted); line-height: 1.5; }
     form { display: grid; gap: 0.6rem; margin: 0; }
     input { width: 100%; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; color: var(--text); background: var(--bg); font-family: var(--mono); font-size: 0.9rem; }
-    input:focus { border-color: #8abeb78c; outline: none; box-shadow: 0 0 0 2px #8abeb726; }
+    input:focus { border-color: #ff5a1f8c; outline: none; box-shadow: 0 0 0 2px #ff5a1f26; }
     input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     button { justify-self: start; padding: 0.55rem 0.9rem; border: 1px solid transparent; border-radius: 0.3rem; background: var(--accent); color: var(--button-text); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
-    button:hover { background: var(--cyan); }
+    button:hover { background: var(--accent-bright); }
     .secondary { background: transparent; border-color: var(--border-strong); color: var(--text); }
-    .secondary:hover { background: #8abeb70f; border-color: #8abeb78c; }
+    .secondary:hover { background: #ff5a1f0f; border-color: #ff5a1f8c; }
     .error { padding: 0.7rem; border: 1px solid #cc666659; border-radius: 0.3rem; color: #e8a9a9; background: var(--danger-soft); }
     .muted { font-size: 0.9rem; }
-    .code { display: inline-flex; justify-content: center; padding: 0.8rem 1rem; border: 1px solid #8abeb759; border-radius: 0.3rem; background: #8abeb70f; color: var(--accent); font-family: var(--mono); font-size: 1.2rem; font-weight: 700; overflow-wrap: anywhere; word-break: break-all; }
+    .code { display: inline-flex; justify-content: center; padding: 0.8rem 1rem; border: 1px solid #ff5a1f59; border-radius: 0.3rem; background: #ff5a1f0f; color: var(--accent); font-family: var(--mono); font-size: 1.2rem; font-weight: 700; overflow-wrap: anywhere; word-break: break-all; }
     .warning { padding: 0.7rem; border: 1px solid #f0c67447; border-radius: 0.3rem; color: #f0c674; background: #3c3728; }
     .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
   </style>
