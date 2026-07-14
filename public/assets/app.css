@@ -221,9 +221,9 @@
     .message-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted-soft); }
     .message-details { min-width: 0; max-width: 100%; }
     .message-details-summary { margin-bottom: 0.5rem; font-weight: 550; color: var(--muted); }
-    .message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 0.84rem; }
+    .message--tool .message-details-summary, .message--tool-call .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 0.84rem; }
     .message--compact .message-details-summary:last-child { margin-bottom: 0; }
-    .message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }
+    .message--tool .message-body, .message--tool-call .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }
     .compact-summary { margin-left: 0.25rem; }
     .subagent-prompt { margin: 0 0 0.65rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 0.3rem; background: var(--panel); font-family: var(--sans); }
     .subagent-prompt-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0.45rem; cursor: pointer; list-style: none; }
