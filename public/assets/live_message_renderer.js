@@ -272,7 +272,7 @@ export class LiveMessageRenderer {
 
   toolOutputContentNode(lines, toolName, preview, desktopOnlyCount) {
     const content = this.document.createElement("span");
-    content.className = "tool-output-content";
+    content.className = `tool-output-content${["edit", "write"].includes(toolName) ? " tool-output-content--diff" : ""}`;
     content.append(...this.toolOutputLineNodes(lines, toolName, preview, desktopOnlyCount));
     return content;
   }

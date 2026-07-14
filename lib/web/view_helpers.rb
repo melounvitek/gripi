@@ -343,7 +343,8 @@ module Web
     end
 
     def render_compact_message_lines(message, lines, desktop_only_count)
-      rendered_lines = if message.tool_transcript && %w[edit write].include?(message.tool_name)
+      diff_output = message.tool_transcript && %w[edit write].include?(message.tool_name)
+      rendered_lines = if diff_output
         lines.map.with_index do |line, index|
           classes = ["tool-diff-line", tool_diff_line_class(line, message.tool_preview)]
           classes << "tool-output-tail-desktop-extra" if index < desktop_only_count
@@ -357,7 +358,8 @@ module Web
         end
       end
 
-      %(<span class="tool-output-content">#{rendered_lines.join}</span>)
+      classes = ["tool-output-content", ("tool-output-content--diff" if diff_output)].compact
+      %(<span class="#{classes.join(" ")}">#{rendered_lines.join}</span>)
     end
 
     def tool_diff_line_class(line, preview = false)

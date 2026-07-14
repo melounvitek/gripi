@@ -66,24 +66,32 @@ class LiveStreamingJsTest < Minitest::Test
     assert_equal true, result["cleared"]
   end
 
-  def test_renderer_builds_compact_tool_output_lines_through_its_bound_document
+  def test_renderer_limits_intrinsic_width_wrapper_to_diff_tool_outputs
     result = run_javascript(<<~JS)
       const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
       const renderer = Object.create(LiveMessageRenderer.prototype);
       renderer.parser = { displayHomePath: (text) => text.replace("/home/tester", "~") };
       renderer.document = { createElement: () => ({ className: "", children: [], classList: { add() {} }, textContent: "", append(...children) { this.children.push(...children); } }) };
-      const body = {
+      const body = () => ({
         dataset: {},
         classList: { toggle() {} },
         closest: () => null,
         replaceChildren(...children) { this.children = children; }
-      };
-      renderer.renderToolTranscriptBody(body, "/home/tester/one\\n/home/tester/two", "read");
-      console.log(JSON.stringify({ wrapperClass: body.children[0].className, lines: body.children[0].children.map((child) => child.textContent) }));
+      });
+      const readBody = body();
+      const editBody = body();
+      renderer.renderToolTranscriptBody(readBody, "/home/tester/one\\n/home/tester/two", "read");
+      renderer.renderToolTranscriptBody(editBody, "+one\\n-two", "edit");
+      console.log(JSON.stringify({
+        readWrapperClass: readBody.children[0].className,
+        readLines: readBody.children[0].children.map((child) => child.textContent),
+        editWrapperClass: editBody.children[0].className
+      }));
     JS
 
-    assert_equal "tool-output-content", result["wrapperClass"]
-    assert_equal ["~/one", "~/two"], result["lines"]
+    assert_equal "tool-output-content", result["readWrapperClass"]
+    assert_equal ["~/one", "~/two"], result["readLines"]
+    assert_equal "tool-output-content tool-output-content--diff", result["editWrapperClass"]
   end
 
   def test_optimistic_uploaded_images_remain_owned_by_renderer

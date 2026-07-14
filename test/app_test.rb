@@ -2628,7 +2628,8 @@ class AppTest < Minitest::Test
       assert_includes APP_STYLESHEET, ".message--compact .message-details-summary:last-child { margin-bottom: 0; }"
       assert_includes APP_STYLESHEET, ".message--tool .message-body, .message--tool-call .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
       assert_includes APP_STYLESHEET, ".message--tool-transcript .message-body { font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
-      assert_includes APP_STYLESHEET, ".tool-output-content { display: block; width: max-content; min-width: 100%; }"
+      assert_includes APP_STYLESHEET, ".tool-output-content { display: block; min-width: 100%; }"
+      assert_includes APP_STYLESHEET, ".tool-output-content--diff { width: max-content; }"
       assert_includes APP_STYLESHEET, ".tool-diff-line { display: block; margin: 0 -0.25rem;"
       assert_includes APP_STYLESHEET, '.tool-output-collapse[data-expanded="true"] [data-tool-output-body] { max-height: min(50dvh, 24rem); overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin;'
       assert_includes APP_STYLESHEET, '.tool-output-collapse[data-expanded="true"] [data-tool-output-body] { max-height: min(45dvh, 18rem); }'
@@ -4420,7 +4421,7 @@ class AppTest < Minitest::Test
       refute_includes response.body, '<details class="message-details"'
       refute_includes response.body, 'message-body message-body--edit-preview'
       diff_line = document.at_css(".tool-diff-line--add")
-      assert_equal "tool-output-content", diff_line.parent["class"]
+      assert_equal "tool-output-content tool-output-content--diff", diff_line.parent["class"]
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+71 assert_equal [true, false], messages.map(&amp;:thinking)</span>'
       refute_includes response.body, '545 assert_equal 200, response.status'
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+ done</span>'
@@ -4782,6 +4783,7 @@ class AppTest < Minitest::Test
       assert_equal "Find the largest directory", card.at_css("[data-subagent-prompt-preview]").text
       assert_nil card.at_css("[data-subagent-prompt-body]")
       assert_includes card.at_css(".message-body").text, "✓ general"
+      assert_equal "tool-output-content", card.at_css(".tool-output-line").parent["class"]
       assert_includes card.at_css(".message-body").text, "$ du -shx ~/.hermes"
       assert_includes card.at_css(".message-body").text, "3 turns ↑6.5k ↓332 R1.5k $0.0433 ctx:2.9k openai-codex/gpt-5.6-sol"
     end

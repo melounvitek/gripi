@@ -193,7 +193,8 @@
     .message--tool .role, .message--tool-call .role, .message--tool-transcript .role { color: var(--accent); }
     .message--tool-transcript .message-details-summary { color: var(--copy); }
     .message--tool-transcript .message-body { font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
-    .tool-output-content { display: block; width: max-content; min-width: 100%; }
+    .tool-output-content { display: block; min-width: 100%; }
+    .tool-output-content--diff { width: max-content; }
     .tool-diff-line { display: block; margin: 0 -0.25rem; padding: 0 0.25rem; border-left: 2px solid transparent; }
     .tool-diff-line--add { border-left-color: #b5bd68bf; background: #b5bd681f; color: #d8f0a0; }
     .tool-diff-line--remove { border-left-color: #cc6666cc; background: #cc66661f; color: #f0b0a8; }
