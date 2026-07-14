@@ -71,7 +71,7 @@ class LiveStreamingJsTest < Minitest::Test
       const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
       const renderer = Object.create(LiveMessageRenderer.prototype);
       renderer.parser = { displayHomePath: (text) => text.replace("/home/tester", "~") };
-      renderer.document = { createElement: () => ({ className: "", classList: { add() {} }, textContent: "" }) };
+      renderer.document = { createElement: () => ({ className: "", children: [], classList: { add() {} }, textContent: "", append(...children) { this.children.push(...children); } }) };
       const body = {
         dataset: {},
         classList: { toggle() {} },
@@ -79,10 +79,11 @@ class LiveStreamingJsTest < Minitest::Test
         replaceChildren(...children) { this.children = children; }
       };
       renderer.renderToolTranscriptBody(body, "/home/tester/one\\n/home/tester/two", "read");
-      console.log(JSON.stringify(body.children.map((child) => child.textContent)));
+      console.log(JSON.stringify({ wrapperClass: body.children[0].className, lines: body.children[0].children.map((child) => child.textContent) }));
     JS
 
-    assert_equal ["~/one", "~/two"], result
+    assert_equal "tool-output-content", result["wrapperClass"]
+    assert_equal ["~/one", "~/two"], result["lines"]
   end
 
   def test_optimistic_uploaded_images_remain_owned_by_renderer

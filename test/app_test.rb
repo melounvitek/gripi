@@ -2627,7 +2627,8 @@ class AppTest < Minitest::Test
       assert_includes APP_STYLESHEET, ".message--tool .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 0.84rem; }"
       assert_includes APP_STYLESHEET, ".message--compact .message-details-summary:last-child { margin-bottom: 0; }"
       assert_includes APP_STYLESHEET, ".message--tool .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }"
-      assert_includes APP_STYLESHEET, ".message--tool-transcript .message-body { display: grid; grid-template-columns: minmax(100%, max-content); font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
+      assert_includes APP_STYLESHEET, ".message--tool-transcript .message-body { font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }"
+      assert_includes APP_STYLESHEET, ".tool-output-content { display: block; width: max-content; min-width: 100%; }"
       assert_includes APP_STYLESHEET, ".tool-diff-line { display: block; margin: 0 -0.25rem;"
       assert_includes APP_STYLESHEET, '.tool-output-collapse[data-expanded="true"] [data-tool-output-body] { max-height: min(50dvh, 24rem); overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin;'
       assert_includes APP_STYLESHEET, '.tool-output-collapse[data-expanded="true"] [data-tool-output-body] { max-height: min(45dvh, 18rem); }'
@@ -4418,6 +4419,8 @@ class AppTest < Minitest::Test
       refute_includes response.body, 'details-collapse-button'
       refute_includes response.body, '<details class="message-details"'
       refute_includes response.body, 'message-body message-body--edit-preview'
+      diff_line = document.at_css(".tool-diff-line--add")
+      assert_equal "tool-output-content", diff_line.parent["class"]
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+71 assert_equal [true, false], messages.map(&amp;:thinking)</span>'
       refute_includes response.body, '545 assert_equal 200, response.status'
       assert_includes response.body, '<span class="tool-diff-line tool-diff-line--add">+ done</span>'
@@ -4827,8 +4830,8 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, 'collapse.hidden = !hasText;'
       assert_includes APP_JAVASCRIPT, 'if (!hasText) {'
       assert_includes APP_JAVASCRIPT, 'const shouldCollapse = collapse.dataset.toolOutputCollapsible === "true" && lines.length > TOOL_OUTPUT_DESKTOP_TAIL_LINES;'
-      assert_includes APP_JAVASCRIPT, 'fullTemplate?.content.replaceChildren(...this.toolOutputLineNodes(lines, toolName, preview, 0));'
-      assert_includes APP_JAVASCRIPT, 'tailTemplate?.content.replaceChildren(...this.toolOutputLineNodes(tailLines, toolName, preview, desktopExtraCount));'
+      assert_includes APP_JAVASCRIPT, 'fullTemplate?.content.replaceChildren(this.toolOutputContentNode(lines, toolName, preview, 0));'
+      assert_includes APP_JAVASCRIPT, 'tailTemplate?.content.replaceChildren(this.toolOutputContentNode(tailLines, toolName, preview, desktopExtraCount));'
       assert_includes APP_JAVASCRIPT, 'control.hidden = true;'
       assert_includes APP_JAVASCRIPT, 'span.className = `tool-diff-line ${this.toolDiffLineClass(line, preview)}`;'
       assert_includes APP_JAVASCRIPT, 'renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });'

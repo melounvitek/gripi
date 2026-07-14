@@ -262,7 +262,7 @@ export class LiveMessageRenderer {
     body.classList.toggle("message-body--edit-preview", preview);
 
     if (!collapse) {
-      body.replaceChildren(...this.toolOutputLineNodes(lines, toolName, preview, 0));
+      body.replaceChildren(this.toolOutputContentNode(lines, toolName, preview, 0));
       return;
     }
 
@@ -283,11 +283,11 @@ export class LiveMessageRenderer {
     const desktopCount = collapse.querySelector(".tool-output-hidden-count--desktop");
     const mobileCount = collapse.querySelector(".tool-output-hidden-count--mobile");
 
-    fullTemplate?.content.replaceChildren(...this.toolOutputLineNodes(lines, toolName, preview, 0));
+    fullTemplate?.content.replaceChildren(this.toolOutputContentNode(lines, toolName, preview, 0));
     if (shouldCollapse) {
       const tailLines = lines.slice(-TOOL_OUTPUT_DESKTOP_TAIL_LINES);
       const desktopExtraCount = Math.max(tailLines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0);
-      tailTemplate?.content.replaceChildren(...this.toolOutputLineNodes(tailLines, toolName, preview, desktopExtraCount));
+      tailTemplate?.content.replaceChildren(this.toolOutputContentNode(tailLines, toolName, preview, desktopExtraCount));
       if (desktopCount) desktopCount.textContent = `… (${Math.max(lines.length - TOOL_OUTPUT_DESKTOP_TAIL_LINES, 0)} earlier lines)`;
       if (mobileCount) mobileCount.textContent = `… (${Math.max(lines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0)} earlier lines)`;
     }
@@ -295,6 +295,13 @@ export class LiveMessageRenderer {
     control.hidden = !shouldCollapse;
     collapse.dataset.collapsed = shouldCollapse && !expanded ? "true" : "false";
     body.replaceChildren(...Array.from((shouldCollapse && !expanded ? tailTemplate : fullTemplate).content.cloneNode(true).childNodes));
+  }
+
+  toolOutputContentNode(lines, toolName, preview, desktopOnlyCount) {
+    const content = this.document.createElement("span");
+    content.className = "tool-output-content";
+    content.append(...this.toolOutputLineNodes(lines, toolName, preview, desktopOnlyCount));
+    return content;
   }
 
   toolOutputLineNodes(lines, toolName, preview, desktopOnlyCount) {
