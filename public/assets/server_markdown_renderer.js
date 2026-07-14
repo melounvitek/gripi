@@ -42,8 +42,7 @@ export class ServerMarkdownRenderer {
       enhanceMarkdownCodeBlocks(job.body, this.document);
       delete job.body.dataset.rendering;
       this.jobs.delete(job.body);
-      const latestAssistant = job.body.closest(".message") === this.conversationController.latestReadableAssistantMessage();
-      if (this.conversationController.autoScrollEnabled && (latestAssistant || job.body.matches?.("[data-subagent-answer]"))) {
+      if (this.conversationController.autoScrollEnabled && job.body.closest(".message") === this.conversationController.latestReadableAssistantMessage()) {
         this.conversationController.scheduleAutoScroll();
       }
     } catch (error) {

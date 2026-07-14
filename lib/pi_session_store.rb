@@ -22,7 +22,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :error, :tool_call_id, :tool_name, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :tool_prompt, :tool_progress, :tool_answer, :tool_usage, :final_assistant_response, :entry_id, :images, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :error, :tool_call_id, :tool_name, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :tool_prompt, :final_assistant_response, :entry_id, :images, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :context_estimated, :cost_total, keyword_init: true)
   Conversation = Struct.new(:messages, :latest_leaf_id, :status, keyword_init: true)
   FileSnapshot = Struct.new(:device, :inode, :size, :mtime_ns, :append_cursor, :persisted_leaf_id, :complete, keyword_init: true) do
@@ -674,25 +674,8 @@ class PiSessionStore
     if role == "assistant"
       assistant_messages_from_entry(message, parse_time(entry["timestamp"]))
     else
-      subagent = message["toolName"] == "subagent"
       general_subagent = general_subagent_details?(message)
-      legacy_subagent = legacy_subagent_details?(message)
-      tool_progress = if general_subagent
-        general_subagent_progress_text(message["details"])
-      elsif legacy_subagent
-        legacy_subagent_progress_text(message["details"])
-      else
-        ""
-      end
-      tool_answer = supported_subagent_result?(message) ? subagent_answer_text(message) : nil
-      tool_usage = if general_subagent
-        general_subagent_usage_text(message.dig("details", "usage"), message.dig("details", "model"))
-      elsif legacy_subagent
-        legacy_subagent_usage_text(message["details"])
-      else
-        ""
-      end
-      text = (general_subagent || legacy_subagent) ? [tool_progress, tool_answer, tool_usage].reject(&:empty?).join("\n\n") : tool_result_text(message)
+      text = general_subagent ? general_subagent_text(message) : tool_result_text(message)
       images = content_images(message["content"])
       return [] if text.empty? && images.empty?
 
@@ -707,11 +690,8 @@ class PiSessionStore
         tool_call_id: message["toolCallId"],
         tool_name: message["toolName"],
         images: images,
-        tool_prompt: subagent ? subagent_prompt(message["details"]) : nil,
-        tool_progress: tool_progress,
-        tool_answer: tool_answer,
-        tool_usage: tool_usage,
-        tool_transcript: general_subagent || legacy_subagent || transcript_tool?(message["toolName"])
+        tool_prompt: message["toolName"] == "subagent" ? subagent_prompt(message["details"]) : nil,
+        tool_transcript: general_subagent || transcript_tool?(message["toolName"])
       )]
     end
   end
@@ -754,36 +734,8 @@ class PiSessionStore
     message["toolName"] == "subagent" && details.is_a?(Hash) && details["tools"].is_a?(Array) && details["usage"].is_a?(Hash)
   end
 
-  def legacy_subagent_details?(message)
+  def general_subagent_text(message)
     details = message["details"]
-    results = details["results"] if message["toolName"] == "subagent" && details.is_a?(Hash) && details["mode"].is_a?(String)
-    results.is_a?(Array) && !results.empty? && results.all? do |result|
-      next false unless result.is_a?(Hash) && result["agent"].is_a?(String) && result["exitCode"].is_a?(Integer)
-      next false if result.key?("messages") && !result["messages"].is_a?(Array)
-
-      Array(result["messages"]).all? do |subagent_message|
-        next false unless subagent_message.is_a?(Hash)
-        next true unless subagent_message.key?("content")
-        next false unless subagent_message["content"].is_a?(Array)
-
-        subagent_message["content"].all? do |part|
-          part.is_a?(Hash) && (part["type"] != "text" || !part.key?("text") || part["text"].is_a?(String))
-        end
-      end
-    end
-  end
-
-  def supported_subagent_result?(message)
-    return false unless message["toolName"] == "subagent"
-
-    details = message["details"]
-    return true unless details.is_a?(Hash)
-    return true if general_subagent_details?(message) || legacy_subagent_details?(message)
-
-    (details.keys - %w[agent cwd model task]).empty?
-  end
-
-  def general_subagent_progress_text(details)
     lines = ["#{general_subagent_status_icon(details["status"])} general"]
 
     details["tools"].each do |tool|
@@ -794,69 +746,14 @@ class PiSessionStore
       lines.concat(output.lines(chomp: true).map { |line| "  #{line}" }) unless output.empty?
     end
 
+    final_text = details["streamingText"].to_s
+    final_text = details["textItems"].last.to_s if final_text.empty? && details["textItems"].is_a?(Array)
+    final_text = content_text(message["content"]) if final_text.empty?
+    lines.concat(["", final_text]) unless final_text.empty?
+
+    usage = general_subagent_usage_text(details["usage"], details["model"])
+    lines.concat(["", usage]) unless usage.empty?
     lines.join("\n")
-  end
-
-  def subagent_answer_text(message)
-    details = message["details"]
-    if general_subagent_details?(message)
-      answer = details["streamingText"].is_a?(String) ? details["streamingText"] : ""
-      latest_text_item = details["textItems"].last if details["textItems"].is_a?(Array)
-      answer = latest_text_item if answer.empty? && latest_text_item.is_a?(String)
-      return answer unless answer.empty?
-    elsif legacy_subagent_details?(message)
-      answer = details["results"].filter_map { |result| legacy_subagent_final_text_part(result["messages"])&.dig("text") }.join("\n\n")
-      return answer unless answer.empty?
-    end
-
-    content_text(message["content"])
-  end
-
-  def legacy_subagent_progress_text(details)
-    details["results"].map do |result|
-      final_part = legacy_subagent_final_text_part(result["messages"])
-      lines = ["#{legacy_subagent_status_icon(result)} #{result["agent"] || "agent"} (#{result["agentSource"] || "unknown"})"]
-      items = Array(result["messages"]).flat_map do |subagent_message|
-        next [] unless subagent_message.is_a?(Hash) && subagent_message["role"] == "assistant"
-
-        Array(subagent_message["content"]).filter_map do |part|
-          next unless part.is_a?(Hash) && !part.equal?(final_part)
-
-          if part["type"] == "text" && !part["text"].to_s.empty?
-            part["text"].to_s.lines(chomp: true).first(3).join("\n")
-          elsif part["type"] == "toolCall"
-            "→ #{general_subagent_tool_call("name" => part["name"], "args" => part["arguments"])}"
-          end
-        end
-      end
-      lines.concat(items.last(10))
-      lines << (result["errorMessage"] || result["stderr"]).to_s if final_part.nil? && (result["errorMessage"] || result["stderr"])
-      lines.join("\n")
-    end.join("\n\n")
-  end
-
-  def legacy_subagent_final_text_part(messages)
-    Array(messages).reverse_each do |subagent_message|
-      next unless subagent_message.is_a?(Hash) && subagent_message["role"] == "assistant"
-
-      part = Array(subagent_message["content"]).find { |item| item.is_a?(Hash) && item["type"] == "text" && !item["text"].to_s.empty? }
-      return part if part
-    end
-    nil
-  end
-
-  def legacy_subagent_status_icon(result)
-    return "⏳" if result["exitCode"] == -1
-    return "✗" if result["exitCode"].to_i != 0 || %w[error aborted].include?(result["stopReason"])
-
-    "✓"
-  end
-
-  def legacy_subagent_usage_text(details)
-    details["results"].filter_map do |result|
-      usage = result["usage"]
-      general_subagent_usage_text(usage, result["model"]) if usage.is_a?(Hash)
-    end.reject(&:empty?).join(" | ")
   end
 
   def general_subagent_status_icon(status)

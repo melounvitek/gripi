@@ -131,8 +131,7 @@ export class LiveMessageRenderer {
 
   appendCompactMessage(roleName, summary, text, live = true, forceScroll = false, timestamp = null, options = {}) {
     const timestampKey = messageTimestampKey(timestamp);
-    const fingerprintText = options.fingerprintText ?? text;
-    if (live && this.liveMessageAlreadyRendered(roleName, fingerprintText, timestampKey)) return null;
+    if (live && this.liveMessageAlreadyRendered(roleName, text, timestampKey)) return null;
 
     const shouldScroll = this.conversationController.followLiveOutput(forceScroll);
     const roleKey = messageRoleKey(roleName);
@@ -141,7 +140,7 @@ export class LiveMessageRenderer {
     article.className = `message message--${roleKey} message--compact${options.toolName && roleName === "assistant" ? " message--tool-call" : ""}${options.toolTranscript ? " message--tool-transcript" : ""}${options.error === true ? " message--tool-error" : ""}${live ? " message--live" : ""}`;
     article.dataset.role = roleName;
     article.dataset.messageTimestamp = timestampKey;
-    article.dataset.messageFingerprint = messageFingerprint(roleName, fingerprintText, timestampKey);
+    article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
 
     const header = this.document.createElement("header");
     header.className = "message-header";
@@ -195,7 +194,6 @@ export class LiveMessageRenderer {
     const entry = { article, details, output, body, summaryText, compact: true, toolName: options.toolName || "" };
     this.renderSubagentPrompt(entry, options.toolPrompt);
     article.append(header, details);
-    if (options.subagentDisplay) this.renderSubagentDisplay(entry, options.subagentDisplay);
     this.renderMessageImages(article, options.images);
     this.liveOutput.append(article);
     this.conversationController.afterLiveOutputChange(shouldScroll, live);
@@ -225,31 +223,6 @@ export class LiveMessageRenderer {
     entry.details.insertBefore(details, entry.output || null);
     entry.subagentPromptElement = details;
     entry.subagentPromptPreview = preview;
-  }
-
-  renderSubagentDisplay(entry, display) {
-    this.renderToolTranscriptBody(entry.body, display.progress, "subagent");
-
-    if (!entry.subagentAnswerElement) {
-      entry.subagentAnswerElement = this.document.createElement("div");
-      entry.subagentAnswerElement.className = "subagent-answer message-body message-body--markdown";
-      entry.subagentAnswerElement.dataset.subagentAnswer = "";
-      entry.details.append(entry.subagentAnswerElement);
-    }
-    entry.subagentAnswerElement.hidden = !display.answer;
-    if (display.answer && entry.subagentAnswerText !== display.answer) {
-      entry.subagentAnswerText = display.answer;
-      this.markdownRenderer.render(entry.subagentAnswerElement, display.answer);
-    }
-
-    if (!entry.subagentUsageElement) {
-      entry.subagentUsageElement = this.document.createElement("div");
-      entry.subagentUsageElement.className = "subagent-usage";
-      entry.subagentUsageElement.dataset.subagentUsage = "";
-      entry.details.append(entry.subagentUsageElement);
-    }
-    entry.subagentUsageElement.hidden = !display.usage;
-    entry.subagentUsageElement.textContent = display.usage;
   }
 
   renderToolTranscriptBody(body, text, toolName = "", options = {}) {
@@ -521,9 +494,9 @@ export class LiveMessageRenderer {
       const eventDetails = this.parser.subagentDetailsFromEvent(event);
       const freshDetails = this.parser.richSubagentDetails(eventDetails);
       const details = this.retainSubagentDetails(entry, eventDetails, finalStatus);
-      const fallback = this.parser.toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "" : "(running…)");
+      const fallback = this.parser.toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
       this.renderToolSummary(entry.summaryText, null, details ? this.parser.subagentSummary(details, this.parser.subagentRunning(event)) : this.parser.toolExecutionSummary(event));
-      this.renderSubagentDisplay(entry, this.parser.subagentDisplayParts(details, fallback, this.parser.subagentRunning(event), !freshDetails));
+      this.renderToolTranscriptBody(entry.body, details ? this.parser.subagentDisplayText(details, fallback, this.parser.subagentRunning(event), !freshDetails) : fallback, event.toolName);
     } else {
       this.renderToolSummary(entry.summaryText, null, this.parser.toolExecutionSummary(event));
       this.renderToolTranscriptBody(entry.body, this.parser.toolExecutionText(event), event.toolName || entry.toolName);
@@ -542,9 +515,7 @@ export class LiveMessageRenderer {
       return;
     }
 
-    const subagentDisplay = event.toolName === "subagent" ? this.parser.subagentDisplayParts(this.parser.subagentDetailsFromEvent(event), event.type === "tool_execution_end" ? this.parser.toolExecutionContentText(event) : "(running…)", this.parser.subagentRunning(event)) : null;
-    const text = subagentDisplay ? subagentDisplay.progress : this.parser.toolExecutionText(event);
-    const entry = this.appendCompactMessage("tool", this.parser.toolExecutionSummary(event), text, true, shouldScroll, timestamp, { toolName: event.toolName, toolPrompt: event.toolName === "subagent" ? this.parser.subagentPromptFromEvent(event, restoredPrompt) : "", subagentDisplay, fingerprintText: subagentDisplay?.answer || text, error: event.isError === true, timestampFallback });
+    const entry = this.appendCompactMessage("tool", this.parser.toolExecutionSummary(event), this.parser.toolExecutionText(event), true, shouldScroll, timestamp, { toolName: event.toolName, toolPrompt: event.toolName === "subagent" ? this.parser.subagentPromptFromEvent(event, restoredPrompt) : "", error: event.isError === true, timestampFallback });
     if (entry) {
       if (event.toolName === "subagent") this.retainSubagentDetails(entry, this.parser.subagentDetailsFromEvent(event));
       this.liveToolExecutions.set(event.toolCallId, entry);
@@ -611,18 +582,13 @@ export class LiveMessageRenderer {
         if (toolExecutionEntry && segment.isToolResult) {
           const freshSubagentDetails = segment.toolName === "subagent" && this.parser.richSubagentDetails(message.details);
           const subagentDetails = segment.toolName === "subagent" ? this.retainSubagentDetails(toolExecutionEntry, message.details, message.isError ? "error" : "done") : null;
-          const subagentDisplay = segment.toolName === "subagent" ? this.parser.subagentDisplayParts(subagentDetails, segment.text, false, !freshSubagentDetails) : null;
+          const resultText = subagentDetails ? this.parser.subagentDisplayText(subagentDetails, segment.text, false, !freshSubagentDetails) : segment.text;
           const resultSummary = subagentDetails ? this.parser.subagentSummary(subagentDetails, false) : segment.summary;
           this.renderSubagentPrompt(toolExecutionEntry, segment.toolPrompt || this.parser.subagentPromptFromDetails(message.details));
-          if (subagentDisplay) {
-            this.renderSubagentDisplay(toolExecutionEntry, subagentDisplay);
-          } else {
-            this.renderToolTranscriptBody(toolExecutionEntry.body, segment.text, segment.toolName || toolExecutionEntry.toolName, { preview: segment.toolPreview === true });
-          }
+          this.renderToolTranscriptBody(toolExecutionEntry.body, resultText, segment.toolName || toolExecutionEntry.toolName, { preview: segment.toolPreview === true });
           this.renderToolSummary(toolExecutionEntry.summaryText, segment.summaryParts, resultSummary);
           toolExecutionEntry.article.classList.toggle("message--tool-error", segment.error === true);
-          const fingerprintText = subagentDisplay?.answer || segment.text;
-          if (!this.markLiveEntryRendered(toolExecutionEntry, toolExecutionEntry.article.dataset.role || "toolResult", fingerprintText, timestamp)) return;
+          if (!this.markLiveEntryRendered(toolExecutionEntry, toolExecutionEntry.article.dataset.role || "toolResult", segment.text, timestamp)) return;
           this.replaceMessageImages(toolExecutionEntry.article, segment.images);
           this.conversationController.afterLiveOutputChange(shouldScroll);
         } else if (pairedToolCallEntry && segment.isToolResult) {
@@ -636,8 +602,7 @@ export class LiveMessageRenderer {
         } else if (roleName === "user" && !segment.compact) {
           this.upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);
         } else if (segment.compact) {
-          const subagentDisplay = segment.toolName === "subagent" ? this.parser.subagentDisplayParts(message.details, segment.text, false) : null;
-          this.appendCompactMessage(roleName, segment.summary, subagentDisplay ? subagentDisplay.progress : segment.text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, subagentDisplay, fingerprintText: subagentDisplay?.answer || segment.text, error: segment.error, images: segment.images });
+          this.appendCompactMessage(roleName, segment.summary, segment.text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, error: segment.error, images: segment.images });
         } else {
           this.appendMessage(roleName, segment.text, true, shouldScroll, timestamp, { images: segment.images });
         }

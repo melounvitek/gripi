@@ -258,10 +258,6 @@ module Web
       format_time(message.timestamp) if message.timestamp
     end
 
-    def message_fingerprint_text(message)
-      message.tool_answer.nil? ? message.text : message.tool_answer
-    end
-
     def message_fingerprint(role, text, timestamp)
       timestamp_key = message_timestamp_key(timestamp)
       return unless timestamp_key
@@ -314,10 +310,6 @@ module Web
       render_compact_message_lines(message, tool_output_lines(message), 0)
     end
 
-    def render_subagent_answer(message)
-      markdown_renderer.render(message.tool_answer.to_s)
-    end
-
     def collapsible_tool_output?(message)
       return false unless %w[assistant tool toolResult].include?(message.role)
       return false unless message.compact && !message.thinking && !message.final_assistant_response
@@ -326,13 +318,7 @@ module Web
     end
 
     def tool_output_lines(message)
-      compact_message_text(message).lines(chomp: true)
-    end
-
-    def compact_message_text(message)
-      return message.tool_progress.to_s unless message.tool_answer.nil?
-
-      message.text.to_s
+      message.text.to_s.lines(chomp: true)
     end
 
     def display_tool_output_line(message, line)

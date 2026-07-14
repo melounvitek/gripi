@@ -398,7 +398,7 @@ class PiSessionStoreTest < Minitest::Test
             role: "toolResult",
             toolCallId: "call-1",
             toolName: "subagent",
-            content: [{ type: "text", text: "Largest: `/home/vitek/.hermes`…" }],
+            content: [{ type: "text", text: "Largest: `/home/vitek/.hermes` — **7.4G**." }],
             details: {
               task: "Find the largest directory",
               cwd: "/home/vitek",
@@ -444,53 +444,6 @@ class PiSessionStoreTest < Minitest::Test
         3 turns ↑6.5k ↓332 R1.5k $0.0433 ctx:2.9k openai-codex/gpt-5.6-sol
       TEXT
       assert_equal "subagent", message.tool_name
-      assert_equal "✓ general\n✓ $ du -shx /home/vitek/.hermes\n  7.4G\t/home/vitek/.hermes", message.tool_progress
-      assert_equal "Largest: `/home/vitek/.hermes` — **7.4G**.", message.tool_answer
-      assert_equal "3 turns ↑6.5k ↓332 R1.5k $0.0433 ctx:2.9k openai-codex/gpt-5.6-sol", message.tool_usage
-      assert message.tool_transcript
-    end
-  end
-
-  def test_separates_legacy_subagent_progress_answer_and_usage
-    Dir.mktmpdir do |dir|
-      path = File.join(dir, "session.jsonl")
-      write_jsonl(path, [
-        { type: "session", id: "session-1", cwd: "/tmp/project" },
-        {
-          type: "message",
-          message: {
-            role: "toolResult",
-            toolName: "subagent",
-            content: [],
-            details: {
-              mode: "single",
-              results: [{
-                agent: "reviewer",
-                agentSource: "user",
-                exitCode: 0,
-                stopReason: "stop",
-                messages: [{
-                  role: "assistant",
-                  content: [
-                    { type: "toolCall", name: "read", arguments: { path: "/tmp/file" } },
-                    { type: "text", text: "## Complete result" }
-                  ]
-                }],
-                usage: { turns: 1 },
-                model: "provider/model"
-              }]
-            },
-            isError: false
-          }
-        }
-      ])
-
-      message = PiSessionStore.new(root: dir).messages(path).first
-
-      assert_includes message.tool_progress, "→ read /tmp/file"
-      refute_includes message.tool_progress, "Complete result"
-      assert_equal "## Complete result", message.tool_answer
-      assert_equal "1 turn provider/model", message.tool_usage
       assert message.tool_transcript
     end
   end
@@ -573,7 +526,6 @@ class PiSessionStoreTest < Minitest::Test
 
       assert_equal "subagent", message.summary
       assert_equal "Unknown implementation result", message.text
-      assert_nil message.tool_answer
       refute message.tool_transcript
     end
   end

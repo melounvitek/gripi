@@ -64,6 +64,19 @@ export class LiveMessageParser {
       return "";
     }
 
+    function toolSummaryPlain(name, args = {}) {
+      const path = args.path ? ` ${displayHomePath(args.path)}` : "";
+      const range = name === "read" && args.offset && args.limit ? `:${args.offset}-${Number(args.offset) + Number(args.limit) - 1}` : "";
+      return `${name}${path}${range}`;
+    }
+
+    function formatToolCallPlain(name, args = {}) {
+      if (name === "bash") return `$ ${args.command || ""}${args.timeout ? ` (timeout ${args.timeout}s)` : ""}`;
+      if (["read", "edit", "write"].includes(name)) return toolSummaryPlain(name, args);
+      if (name === "grep") return `grep /${args.pattern || ""}/ in ${args.path || "."}`;
+      return name || "tool";
+    }
+
     function transcriptToolCallText(name, args = {}) {
       if (name === "write") return previewText("+", args.content);
       if (name !== "edit") return "";
@@ -240,27 +253,23 @@ export class LiveMessageParser {
       return subagentResultFailed(result) ? "✗" : "✓";
     }
 
-    function subagentFinalTextPart(messages = []) {
-      const safeMessages = Array.isArray(messages) ? messages : [];
-      for (let index = safeMessages.length - 1; index >= 0; index -= 1) {
-        const message = safeMessages[index];
+    function subagentFinalOutput(messages = []) {
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
         if (message?.role !== "assistant") continue;
-        const content = Array.isArray(message.content) ? message.content : [];
-        const textPart = content.find((part) => part?.type === "text" && part.text);
-        if (textPart) return textPart;
+        const textPart = (message.content || []).find((part) => part?.type === "text" && part.text);
+        if (textPart) return textPart.text;
       }
-      return null;
+      return "";
     }
 
-    function subagentDisplayItems(messages = [], omittedPart = null) {
+    function subagentDisplayItems(messages = []) {
       const items = [];
-      if (!Array.isArray(messages)) return items;
       messages.forEach((message) => {
-        if (message?.role !== "assistant" || !Array.isArray(message.content)) return;
-        message.content.forEach((part) => {
-          if (part === omittedPart) return;
+        if (message?.role !== "assistant") return;
+        (message.content || []).forEach((part) => {
           if (part.type === "text" && part.text) items.push(part.text.split("\n").slice(0, 3).join("\n"));
-          if (part.type === "toolCall") return items.push(`→ ${generalSubagentToolCall({ name: part.name, args: part.arguments || {} })}`);
+          if (part.type === "toolCall") return items.push(`→ ${formatToolCallPlain(part.name, part.arguments || {})}`);
         });
       });
       return items;
@@ -293,25 +302,6 @@ export class LiveMessageParser {
 
     function generalSubagentDetails(details) {
       return details && Array.isArray(details.tools) && details.usage && typeof details.usage === "object" && !Array.isArray(details.usage);
-    }
-
-    function legacySubagentDetails(details) {
-      return typeof details?.mode === "string" && Array.isArray(details.results) && details.results.length > 0 && details.results.every((result) => {
-        if (!result || typeof result !== "object" || Array.isArray(result)) return false;
-        if (typeof result.agent !== "string" || !Number.isInteger(result.exitCode)) return false;
-        if (Object.hasOwn(result, "messages") && !Array.isArray(result.messages)) return false;
-        return (result.messages || []).every((message) => {
-          if (!message || typeof message !== "object" || Array.isArray(message)) return false;
-          if (!Object.hasOwn(message, "content")) return true;
-          if (!Array.isArray(message.content)) return false;
-          return message.content.every((part) => part && typeof part === "object" && !Array.isArray(part) && (part.type !== "text" || !Object.hasOwn(part, "text") || typeof part.text === "string"));
-        });
-      });
-    }
-
-    function genericSubagentDetails(details) {
-      if (!details || typeof details !== "object" || Array.isArray(details)) return true;
-      return Object.keys(details).every((key) => ["agent", "cwd", "model", "task"].includes(key));
     }
 
     function generalSubagentStatusIcon(status) {
@@ -347,7 +337,7 @@ export class LiveMessageParser {
       return `${name} ${characters.length > 100 ? `${characters.slice(0, 100).join("")}…` : serialized}`;
     }
 
-    function generalSubagentDisplayParts(details, fallback = "", preferFallback = false) {
+    function generalSubagentDisplayText(details, fallback = "", preferFallback = false) {
       const lines = [`${generalSubagentStatusIcon(details.status)} general`];
       details.tools.forEach((tool) => {
         if (!tool || typeof tool !== "object" || Array.isArray(tool)) return;
@@ -355,61 +345,49 @@ export class LiveMessageParser {
         const output = typeof tool.output === "string" ? tool.output.trim() : "";
         if (output) lines.push(...output.split("\n").map((line) => `  ${line}`));
       });
-      const streamingText = typeof details.streamingText === "string" ? details.streamingText : "";
-      const latestTextItem = Array.isArray(details.textItems) && typeof details.textItems.at(-1) === "string" ? details.textItems.at(-1) : "";
-      const detailsText = streamingText || latestTextItem;
-      return {
-        progress: lines.join("\n"),
-        answer: preferFallback ? fallback || detailsText : detailsText || fallback,
-        usage: subagentUsageText(details.usage, details.model, 4)
-      };
+      const detailsText = details.streamingText || (Array.isArray(details.textItems) ? details.textItems.at(-1) : "") || "";
+      const finalText = preferFallback ? fallback || detailsText : detailsText || fallback;
+      if (finalText) lines.push("", finalText);
+      const usage = subagentUsageText(details.usage, details.model, 4);
+      if (usage) lines.push("", usage);
+      return lines.join("\n");
     }
 
     function subagentSummary(details, running = false) {
       if (generalSubagentDetails(details)) return "subagent general";
-      if (!legacySubagentDetails(details)) return "subagent";
+      if (!details?.results?.length) return "subagent";
       if (details.mode === "single" && details.results.length === 1) return `subagent ${details.results[0].agent}`;
       const done = details.results.filter((result, index) => result.exitCode !== -1 && !subagentResultRunning(details, result, index, running)).length;
       const total = details.results.length;
       return `subagent ${details.mode} ${done}/${total}`;
     }
 
-    function subagentDisplayParts(details, fallback = "", running = false, preferFallback = false) {
-      if (generalSubagentDetails(details)) return generalSubagentDisplayParts(details, running ? "" : fallback, preferFallback);
-      if (!legacySubagentDetails(details)) {
-        if (genericSubagentDetails(details)) return { progress: running ? fallback : "", answer: running ? "" : fallback, usage: "" };
-        return { progress: fallback, answer: "", usage: "" };
-      }
-
+    function subagentDisplayText(details, fallback, running = false, preferFallback = false) {
+      if (generalSubagentDetails(details)) return generalSubagentDisplayText(details, running ? "" : fallback, preferFallback);
+      if (!details?.results?.length) return fallback;
       const lines = [];
-      const answers = [];
-      const usageItems = [];
       details.results.forEach((result, index) => {
         if (index > 0) lines.push("");
         const resultRunning = subagentResultRunning(details, result, index, running);
         lines.push(`${subagentResultIcon(result, resultRunning)} ${result.agent} (${result.agentSource || "unknown"})`);
-        const finalPart = subagentFinalTextPart(result.messages);
-        const items = subagentDisplayItems(result.messages, finalPart).slice(-10);
-        if (items.length > 0) lines.push(...items);
-        if (!finalPart && (result.errorMessage || result.stderr)) lines.push(result.errorMessage || result.stderr);
-        if (finalPart?.text) answers.push(finalPart.text);
-        const usage = subagentUsageText(result.usage, result.model, 4);
-        if (usage) usageItems.push(usage);
+        const items = subagentDisplayItems(result.messages).slice(-10);
+        if (items.length > 0) {
+          lines.push(...items);
+        } else {
+          lines.push(subagentFinalOutput(result.messages) || result.errorMessage || result.stderr || "(running…)");
+        }
+        const usage = subagentUsageText(result.usage, result.model);
+        if (usage) lines.push(usage);
       });
-      const detailsAnswer = answers.join("\n\n");
-      return {
-        progress: lines.join("\n"),
-        answer: preferFallback ? fallback || detailsAnswer : detailsAnswer || fallback,
-        usage: usageItems.join(" | ")
-      };
+      return lines.join("\n");
     }
 
     function richSubagentDetails(details) {
-      return generalSubagentDetails(details) || legacySubagentDetails(details);
+      return generalSubagentDetails(details) || Array.isArray(details?.results);
     }
 
     function retainedSubagentDetails(current, details, finalStatus = null) {
-      let retained = richSubagentDetails(details) ? details : current || details;
+      let retained = richSubagentDetails(details) ? details : current;
       if (finalStatus && generalSubagentDetails(retained)) retained = { ...retained, status: finalStatus };
       return retained;
     }
@@ -422,7 +400,9 @@ export class LiveMessageParser {
 
     function toolExecutionText(event) {
       if (event.type === "tool_execution_start") return "(running…)";
-      return toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
+      const fallback = toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
+      if (event.toolName === "subagent") return subagentDisplayText(subagentDetailsFromEvent(event), fallback, subagentRunning(event));
+      return fallback;
     }
 
     function toolExecutionSummary(event) {
@@ -456,7 +436,7 @@ export class LiveMessageParser {
     this.subagentDetailsFromEvent = subagentDetailsFromEvent;
     this.subagentRunning = subagentRunning;
     this.subagentSummary = subagentSummary;
-    this.subagentDisplayParts = subagentDisplayParts;
+    this.subagentDisplayText = subagentDisplayText;
     this.richSubagentDetails = richSubagentDetails;
     this.retainedSubagentDetails = retainedSubagentDetails;
     this.toolExecutionContentText = toolExecutionContentText;

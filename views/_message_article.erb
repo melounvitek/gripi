@@ -1,4 +1,4 @@
-            <article class="<%= h message_article_class(message) %>" data-role="<%= h message.role %>" data-message-fingerprint="<%= h message_fingerprint(message.role, message_fingerprint_text(message), message.timestamp) %>"<%= ' data-final-assistant-response="true"' if message.final_assistant_response %>>
+            <article class="<%= h message_article_class(message) %>" data-role="<%= h message.role %>" data-message-fingerprint="<%= h message_fingerprint(message.role, message.text, message.timestamp) %>"<%= ' data-final-assistant-response="true"' if message.final_assistant_response %>>
               <header class="message-header">
                 <div class="role"><%= h message_display_role_label(message) %></div>
                 <% if message_metadata(message) %>
@@ -24,7 +24,7 @@
                       </summary>
                     </details>
                   <% end %>
-                  <% if compact_message_text(message) != "" %>
+                  <% if message.text.to_s != "" %>
                     <% if collapsible_tool_output?(message) %>
                       <div class="tool-output-collapse" data-tool-output-collapse data-tool-output-collapsible="true" data-collapsed="true">
                         <div class="tool-output-collapse-control" data-tool-output-collapse-control>
@@ -37,14 +37,8 @@
                         <template data-tool-output-tail><%= render_tool_output_tail(message) %></template>
                       </div>
                     <% else %>
-                      <pre class="message-body<%= ' message-body--edit-preview' if message.tool_preview %>" data-tool-output-body><%= render_compact_message_body(message) %></pre>
+                      <pre class="message-body<%= ' message-body--edit-preview' if message.tool_preview %>"><%= render_compact_message_body(message) %></pre>
                     <% end %>
-                  <% end %>
-                  <% unless message.tool_answer.nil? || message.tool_answer.empty? %>
-                    <div class="subagent-answer message-body message-body--markdown" data-subagent-answer><%= render_subagent_answer(message) %></div>
-                  <% end %>
-                  <% unless message.tool_usage.nil? || message.tool_usage.empty? %>
-                    <div class="subagent-usage" data-subagent-usage><%= h message.tool_usage %></div>
                   <% end %>
                 </div>
               <% else %>

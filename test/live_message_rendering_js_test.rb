@@ -89,39 +89,6 @@ class LiveMessageRenderingJsTest < Minitest::Test
     assert_equal({ "text" => "Network fallback", "pending" => nil }, result["network"])
   end
 
-  def test_rendered_live_subagent_answer_preserves_auto_follow
-    result = run_javascript(<<~JS)
-      const { ServerMarkdownRenderer } = await import(#{module_url("server_markdown_renderer.js").to_json});
-      const timers = [];
-      let scrolls = 0;
-      globalThis.setTimeout = (callback) => { timers.push(callback); return timers.length; };
-      globalThis.clearTimeout = () => {};
-      globalThis.FormData = class { set() {} };
-      globalThis.fetch = async () => ({ ok: true, json: async () => ({ html: "<h3>Result</h3>" }) });
-      const body = {
-        dataset: {},
-        innerHTML: "",
-        closest: () => ({ role: "tool" }),
-        matches: (selector) => selector === "[data-subagent-answer]",
-        querySelectorAll: () => []
-      };
-      const controller = {
-        autoScrollEnabled: true,
-        latestReadableAssistantMessage: () => ({ role: "assistant" }),
-        scheduleAutoScroll: () => { scrolls += 1; }
-      };
-      const renderer = new ServerMarkdownRenderer({ createElement() {} }, controller);
-      renderer.bind();
-      renderer.render(body, "### Result", 0);
-      timers.shift()();
-      for (let index = 0; index < 4; index += 1) await Promise.resolve();
-      console.log(JSON.stringify({ html: body.innerHTML, scrolls }));
-    JS
-
-    assert_equal "<h3>Result</h3>", result["html"]
-    assert_equal 1, result["scrolls"]
-  end
-
   def test_parser_only_honors_phases_from_valid_v1_signatures
     result = run_javascript(<<~JS)
       const { LiveMessageParser } = await import(#{module_url("live_message_parser.js").to_json});
