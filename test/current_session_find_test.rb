@@ -32,6 +32,220 @@ class CurrentSessionFindTest < Minitest::Test
     assert_equal [[{"start" => 0, "end" => 5}, {"start" => 6, "end" => 11}], [{"start" => 13, "end" => 14}, {"start" => 19, "end" => 20}]], results
   end
 
+  def test_find_waits_for_three_characters_before_loading_complete_history
+    results = run_javascript(<<~JS)
+      const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});
+      const listeners = {};
+      const input = { value: "", addEventListener(type, listener) { listeners[type] = listener; }, focus() {}, select() {} };
+      const count = { textContent: "" };
+      const bar = {
+        hidden: true,
+        querySelector(selector) {
+          if (selector.includes("input]")) return input;
+          if (selector.includes("count]")) return count;
+          return { addEventListener() {} };
+        }
+      };
+      let loads = 0; let refreshes = 0;
+      const conversation = {
+        element: { querySelectorAll() { return []; } }, bindingEpoch: 1, olderHistoryLoading: false,
+        async loadOlderHistory() { loads += 1; return "complete"; }
+      };
+      const controller = new CurrentSessionFindController({ querySelector: () => bar }, conversation);
+      controller.refresh = () => { refreshes += 1; count.textContent = input.value; };
+      controller.bind();
+      await controller.show();
+      const opened = { loads, count: count.textContent };
+      input.value = "ab"; listeners.input(); await Promise.resolve();
+      const short = { loads, count: count.textContent };
+      input.value = "abc"; listeners.input(); await new Promise((resolve) => setTimeout(resolve, 0));
+      const ready = { loads, refreshes, count: count.textContent };
+      input.value = "ab"; listeners.input(); await Promise.resolve();
+      const shortAfterComplete = { loads, count: count.textContent };
+      input.value = "abc"; listeners.input(); await Promise.resolve();
+      console.log(JSON.stringify({ opened, short, ready, shortAfterComplete, readyAgain: { loads, refreshes, count: count.textContent } }));
+    JS
+
+    assert_equal({ "loads" => 0, "count" => "Type 3+ characters" }, results.fetch("opened"))
+    assert_equal({ "loads" => 0, "count" => "Type 3+ characters" }, results.fetch("short"))
+    assert_equal({ "loads" => 1, "refreshes" => 1, "count" => "abc" }, results.fetch("ready"))
+    assert_equal({ "loads" => 1, "count" => "Type 3+ characters" }, results.fetch("shortAfterComplete"))
+    assert_equal({ "loads" => 1, "refreshes" => 2, "count" => "abc" }, results.fetch("readyAgain"))
+  end
+
+  def test_reopening_find_loads_pending_history_but_reuses_complete_history
+    results = run_javascript(<<~JS)
+      const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});
+      const input = { value: "", addEventListener() {}, focus() {}, select() {} };
+      const count = { textContent: "" };
+      const bar = {
+        hidden: true,
+        querySelector(selector) {
+          if (selector.includes("input]")) return input;
+          if (selector.includes("count]")) return count;
+          return { addEventListener() {} };
+        }
+      };
+      let loads = 0; let refreshes = 0;
+      const conversation = {
+        element: { querySelectorAll() { return []; }, focus() {} }, bindingEpoch: 1, olderHistoryLoading: false,
+        async loadOlderHistory() { loads += 1; return "complete"; }
+      };
+      const controller = new CurrentSessionFindController({ querySelector: () => bar }, conversation);
+      controller.refresh = () => { refreshes += 1; };
+      controller.bind();
+      await controller.show();
+      controller.close();
+      input.value = "abc"; await controller.show();
+      const afterPending = { loads, refreshes };
+      controller.close();
+      await controller.show();
+      console.log(JSON.stringify({ afterPending, afterComplete: { loads, refreshes } }));
+    JS
+
+    assert_equal({ "loads" => 1, "refreshes" => 1 }, results.fetch("afterPending"))
+    assert_equal({ "loads" => 1, "refreshes" => 2 }, results.fetch("afterComplete"))
+  end
+
+  def test_shortening_find_query_clears_results_and_cancels_its_history_load
+    results = run_javascript(<<~JS)
+      const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});
+      async function scenario(shared) {
+        const listeners = {};
+        const input = { value: "abc", addEventListener(type, listener) { listeners[type] = listener; }, focus() {}, select() {} };
+        const count = { textContent: "" };
+        const bar = {
+          hidden: true,
+          querySelector(selector) {
+            if (selector.includes("input]")) return input;
+            if (selector.includes("count]")) return count;
+            return { addEventListener() {} };
+          }
+        };
+        let finish; let cancellations = 0; let refreshes = 0;
+        const conversation = {
+          element: { querySelectorAll() { return []; } }, bindingEpoch: 1, olderHistoryLoading: shared,
+          loadOlderHistory() { return new Promise((resolve) => { finish = resolve; }); },
+          cancelOlderHistory() { cancellations += 1; }
+        };
+        const controller = new CurrentSessionFindController({ querySelector: () => bar }, conversation);
+        controller.refresh = () => { refreshes += 1; };
+        controller.bind();
+        const loading = controller.show();
+        input.value = "ab"; listeners.input();
+        finish("cancelled"); await loading;
+        return { cancellations, refreshes, count: count.textContent, matches: controller.matches.length };
+      }
+      console.log(JSON.stringify({ owned: await scenario(false), shared: await scenario(true) }));
+    JS
+
+    expected = { "refreshes" => 0, "count" => "Type 3+ characters", "matches" => 0 }
+    assert_equal expected.merge("cancellations" => 1), results.fetch("owned")
+    assert_equal expected.merge("cancellations" => 0), results.fetch("shared")
+  end
+
+  def test_query_changed_during_history_loading_uses_latest_value
+    results = run_javascript(<<~JS)
+      const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});
+      const listeners = {};
+      const input = { value: "first", addEventListener(type, listener) { listeners[type] = listener; }, focus() {}, select() {} };
+      const count = { textContent: "" };
+      const bar = {
+        hidden: true,
+        querySelector(selector) {
+          if (selector.includes("input]")) return input;
+          if (selector.includes("count]")) return count;
+          return { addEventListener() {} };
+        }
+      };
+      let finish; const refreshedQueries = [];
+      const conversation = {
+        element: { querySelectorAll() { return []; } }, bindingEpoch: 1, olderHistoryLoading: false,
+        loadOlderHistory() { return new Promise((resolve) => { finish = resolve; }); }
+      };
+      const controller = new CurrentSessionFindController({ querySelector: () => bar }, conversation);
+      controller.refresh = () => refreshedQueries.push(input.value);
+      controller.bind();
+      const loading = controller.show();
+      input.value = "second"; listeners.input();
+      finish("complete"); await loading;
+      console.log(JSON.stringify(refreshedQueries));
+    JS
+
+    assert_equal ["second"], results
+  end
+
+  def test_cancelled_history_load_leaves_find_retryable
+    results = run_javascript(<<~JS)
+      const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});
+      const input = { value: "query", addEventListener() {}, focus() {}, select() {} };
+      const count = { textContent: "" };
+      const bar = {
+        hidden: true,
+        querySelector(selector) {
+          if (selector.includes("input]")) return input;
+          if (selector.includes("count]")) return count;
+          return { addEventListener() {} };
+        }
+      };
+      let loads = 0;
+      const conversation = {
+        element: { querySelectorAll() { return []; } }, bindingEpoch: 1, olderHistoryLoading: false,
+        async loadOlderHistory() { loads += 1; return loads === 1 ? "cancelled" : "complete"; }
+      };
+      const controller = new CurrentSessionFindController({ querySelector: () => bar }, conversation);
+      let refreshes = 0; controller.refresh = () => { refreshes += 1; };
+      controller.bind();
+      await controller.show();
+      const cancelled = { count: count.textContent, status: controller.historyStatus };
+      await controller.search();
+      console.log(JSON.stringify({ cancelled, loads, refreshes }));
+    JS
+
+    assert_equal({ "cancelled" => { "count" => "History incomplete", "status" => "pending" }, "loads" => 2, "refreshes" => 1 }, results)
+  end
+
+  def test_find_renders_only_the_active_match
+    results = run_javascript(<<~JS)
+      const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});
+      const controller = new CurrentSessionFindController({}, { element: {} });
+      controller.count = { textContent: "" };
+      controller.matches = [{ root: {} }, { root: {} }, { root: {} }];
+      controller.index = 0;
+      let removals = 0;
+      controller.removeHighlights = () => { removals += 1; };
+      controller.restoreToolOutput = () => {};
+      controller.revealToolOutput = () => false;
+      controller.observe = () => {};
+      controller.scrollMatchIntoView = () => {};
+      const highlights = [];
+      controller.highlight = () => highlights.push(controller.index);
+      controller.renderHighlights(); controller.updateCount();
+      const firstCount = controller.count.textContent;
+      controller.move(1);
+      console.log(JSON.stringify({ highlights, removals, firstCount, secondCount: controller.count.textContent }));
+    JS
+
+    assert_equal({ "highlights" => [0, 1], "removals" => 2, "firstCount" => "1 / 3", "secondCount" => "2 / 3" }, results)
+  end
+
+  def test_find_removes_only_the_active_highlights
+    results = run_javascript(<<~JS)
+      const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});
+      const conversation = { element: { querySelectorAll() { throw new Error("scanned conversation"); } } };
+      const controller = new CurrentSessionFindController({}, conversation);
+      let replacements = 0; let normalizations = 0;
+      const parent = { normalize() { normalizations += 1; } };
+      const mark = () => ({ parentNode: parent, childNodes: [{}], replaceWith() { replacements += 1; } });
+      const match = { elements: [mark(), mark()] };
+      controller.highlightedMatch = match;
+      controller.removeHighlights();
+      console.log(JSON.stringify({ replacements, normalizations, elements: match.elements.length, tracked: controller.highlightedMatch }));
+    JS
+
+    assert_equal({ "replacements" => 2, "normalizations" => 2, "elements" => 0, "tracked" => nil }, results)
+  end
+
   def test_prepend_older_history_preserves_viewport_anchor
     results = run_javascript(<<~JS)
       const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
@@ -280,7 +494,7 @@ class CurrentSessionFindTest < Minitest::Test
         const result = { name, hidden: true, querySelector(selector) { if (selector.includes("input]")) return input; if (selector.includes("count]")) return count; return field(); } };
         return { result, input, count };
       }
-      const first = bar("first"); const second = bar("second"); let current = first;
+      const first = bar("first"); const second = bar("second"); first.input.value = "first"; second.input.value = "second"; let current = first;
       const document = { querySelector: () => current.result };
       const requests = [];
       const conversationElement = () => ({ focus() {}, querySelectorAll() { return []; } });
@@ -312,7 +526,7 @@ class CurrentSessionFindTest < Minitest::Test
       const conversation = { element: { querySelectorAll: () => [], focus() {} }, cancelOlderHistory: () => { cancellations += 1; } };
       const controller = new CurrentSessionFindController({}, conversation);
       controller.preparationPromise = Promise.resolve();
-      controller.cancelHistoryOnClose = true;
+      controller.ownsHistoryLoad = true;
       controller.close({ restoreFocus: false });
       console.log(JSON.stringify({ cancellations, pending: controller.preparationPromise !== null }));
     JS
@@ -327,7 +541,7 @@ class CurrentSessionFindTest < Minitest::Test
       const conversation = { element: { querySelectorAll: () => [], focus() {} }, cancelOlderHistory: () => { cancellations += 1; } };
       const controller = new CurrentSessionFindController({}, conversation);
       controller.preparationPromise = Promise.resolve();
-      controller.cancelHistoryOnClose = false;
+      controller.ownsHistoryLoad = false;
       controller.close({ restoreFocus: false });
       console.log(JSON.stringify({ cancellations, pending: controller.preparationPromise !== null }));
     JS

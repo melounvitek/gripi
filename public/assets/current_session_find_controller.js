@@ -8,10 +8,11 @@ export class CurrentSessionFindController {
     this.bindingEpoch = 0;
     this.matches = [];
     this.index = -1;
+    this.highlightedMatch = null;
     this.observer = null;
     this.refreshFrame = null;
     this.preparationPromise = null;
-    this.cancelHistoryOnClose = false;
+    this.ownsHistoryLoad = false;
     this.preparationEpoch = 0;
     this.historyStatus = "complete";
     this.expandedToolOutput = null;
@@ -24,8 +25,9 @@ export class CurrentSessionFindController {
     this.input = this.bar?.querySelector("[data-current-session-find-input]") || null;
     this.count = this.bar?.querySelector("[data-current-session-find-count]") || null;
     this.conversationOnly = this.bar?.querySelector("[data-current-session-find-conversation-only]") || null;
+    this.historyStatus = "pending";
     this.input?.addEventListener("input", () => {
-      if (!this.preparationPromise) this.refresh({ resetIndex: true });
+      this.search({ resetIndex: true }).catch(() => {});
     });
     this.input?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
@@ -33,7 +35,7 @@ export class CurrentSessionFindController {
       this.move(event.shiftKey ? -1 : 1);
     });
     this.conversationOnly?.addEventListener("change", () => {
-      if (!this.preparationPromise) this.refresh({ resetIndex: true });
+      this.search({ resetIndex: true }).catch(() => {});
     });
     this.bar?.querySelector("[data-current-session-find-previous]")?.addEventListener("click", () => this.move(-1));
     this.bar?.querySelector("[data-current-session-find-next]")?.addEventListener("click", () => this.move(1));
@@ -103,11 +105,13 @@ export class CurrentSessionFindController {
   }
 
   removeHighlights() {
-    this.conversation.element?.querySelectorAll("[data-current-session-find-match]").forEach((mark) => {
+    this.highlightedMatch?.elements.forEach((mark) => {
       const parent = mark.parentNode;
       mark.replaceWith(...mark.childNodes);
       parent?.normalize();
     });
+    if (this.highlightedMatch) this.highlightedMatch.elements = [];
+    this.highlightedMatch = null;
   }
 
   restoreToolOutput(exceptCollapse = null) {
@@ -163,7 +167,7 @@ export class CurrentSessionFindController {
     return true;
   }
 
-  highlight(match, index) {
+  highlight(match) {
     const nodes = this.textNodes(match.root);
     const portions = [];
     let offset = 0;
@@ -179,9 +183,7 @@ export class CurrentSessionFindController {
       const length = portion.end - portion.start;
       if (length < selected.nodeValue.length) selected.splitText(length);
       const mark = this.document.createElement("mark");
-      mark.className = "current-session-find-match";
-      mark.dataset.currentSessionFindMatch = "";
-      mark.classList.toggle("is-active", index === this.index);
+      mark.className = "current-session-find-match is-active";
       selected.replaceWith(mark);
       mark.append(selected);
       match.elements.unshift(mark);
@@ -200,20 +202,13 @@ export class CurrentSessionFindController {
   renderHighlights() {
     this.observer?.disconnect();
     this.removeHighlights();
-    this.matches.forEach((match) => { match.elements = []; });
     const activeMatch = this.matches[this.index];
     this.restoreToolOutput(activeMatch?.collapse);
     this.revealToolOutput(activeMatch);
-    const matchesByRoot = new Map();
-    this.matches.forEach((match, index) => {
-      if (match.collapse?.dataset.collapsed === "true") return;
-      const matches = matchesByRoot.get(match.root) || [];
-      matches.push({ match, index });
-      matchesByRoot.set(match.root, matches);
-    });
-    matchesByRoot.forEach((matches) => {
-      matches.sort((left, right) => right.match.start - left.match.start).forEach(({ match, index }) => this.highlight(match, index));
-    });
+    if (activeMatch && activeMatch.collapse?.dataset.collapsed !== "true") {
+      this.highlight(activeMatch);
+      this.highlightedMatch = activeMatch;
+    }
     this.observer?.takeRecords();
     this.observe();
   }
@@ -276,12 +271,37 @@ export class CurrentSessionFindController {
     this.scrollMatchIntoView();
   }
 
-  async show() {
-    if (!this.available) return;
-    this.bar.hidden = false;
-    this.input.focus({ preventScroll: true });
-    this.input.select();
+  queryReady() {
+    return Array.from(this.input?.value || "").length >= 3;
+  }
+
+  clearMatches(message) {
+    this.observer?.disconnect();
+    this.removeHighlights();
+    this.restoreToolOutput();
+    this.matches = [];
+    this.index = -1;
+    if (this.count && message) this.count.textContent = message;
+    else this.updateCount();
+  }
+
+  async search({ resetIndex = false } = {}) {
+    if (!this.open) return;
+    if (!this.queryReady()) {
+      if (this.preparationPromise && this.ownsHistoryLoad) this.conversation.cancelOlderHistory?.();
+      this.preparationPromise = null;
+      this.ownsHistoryLoad = false;
+      this.preparationEpoch += 1;
+      if (this.historyStatus !== "complete") this.historyStatus = "pending";
+      this.clearMatches("Type 3+ characters");
+      return;
+    }
+    if (this.historyStatus === "complete") {
+      this.refresh({ resetIndex });
+      return;
+    }
     if (this.preparationPromise) return this.preparationPromise;
+
     this.historyStatus = "loading";
     if (this.count) this.count.textContent = "Loading…";
     const epoch = this.bindingEpoch;
@@ -289,21 +309,17 @@ export class CurrentSessionFindController {
     const bar = this.bar;
     const scroll = this.conversation.element;
     const conversationEpoch = this.conversation.bindingEpoch;
-    this.cancelHistoryOnClose = !this.conversation.olderHistoryLoading;
+    this.ownsHistoryLoad = !this.conversation.olderHistoryLoading;
     const preparation = (async () => {
       const historyStatus = await this.conversation.loadOlderHistory();
       if (!this.open || epoch !== this.bindingEpoch || preparationEpoch !== this.preparationEpoch || conversationEpoch !== this.conversation.bindingEpoch || bar !== this.bar || scroll !== this.conversation.element) return;
       this.historyStatus = historyStatus;
-      if (historyStatus === "failed") {
-        this.observer?.disconnect();
-        this.removeHighlights();
-        this.restoreToolOutput();
-        this.matches = [];
-        this.index = -1;
-        if (this.count) this.count.textContent = "History incomplete";
+      if (historyStatus === "failed" || historyStatus === "cancelled") {
+        this.historyStatus = "pending";
+        this.clearMatches("History incomplete");
         return;
       }
-      if (historyStatus === "complete") this.refresh();
+      if (historyStatus === "complete" && this.queryReady()) this.refresh({ resetIndex });
     })();
     this.preparationPromise = preparation;
     try {
@@ -311,20 +327,28 @@ export class CurrentSessionFindController {
     } finally {
       if (this.preparationPromise === preparation) {
         this.preparationPromise = null;
-        this.cancelHistoryOnClose = false;
+        this.ownsHistoryLoad = false;
       }
     }
   }
 
+  async show() {
+    if (!this.available) return;
+    this.bar.hidden = false;
+    this.input.focus({ preventScroll: true });
+    this.input.select();
+    return this.search({ resetIndex: true });
+  }
+
   close({ restoreFocus = true } = {}) {
     this.observer?.disconnect();
-    if (this.preparationPromise && this.cancelHistoryOnClose) this.conversation.cancelOlderHistory?.();
-    this.cancelHistoryOnClose = false;
+    if (this.preparationPromise && this.ownsHistoryLoad) this.conversation.cancelOlderHistory?.();
+    this.ownsHistoryLoad = false;
     if (this.refreshFrame) cancelAnimationFrame(this.refreshFrame);
     this.refreshFrame = null;
     this.preparationPromise = null;
     this.preparationEpoch += 1;
-    this.historyStatus = "complete";
+    if (this.historyStatus !== "complete") this.historyStatus = "pending";
     this.removeHighlights();
     this.restoreToolOutput();
     this.matches = [];
