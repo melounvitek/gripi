@@ -14,6 +14,7 @@ export class SidebarController {
     this.refreshRequestVersion = 0;
     this.lastInteractionAt = 0;
     this.temporarySessionsLimit = null;
+    this.pinOperationActive = false;
     this.notifiedFinalReplyKeys = new Set();
     this.listenersBound = false;
   }
@@ -124,14 +125,14 @@ export class SidebarController {
   }
 
   requestRefresh(delay = 0) {
-    this.invalidate();
+    if (!this.pinOperationActive) this.invalidate();
     this.refreshRequestVersion += 1;
     this.scheduleRefresh(delay);
   }
 
-  async refresh() {
-    if (!this.element || this.modalIsOpen()) return;
-    if (this.controlsActive() || this.recentlyInteracted()) {
+  async refresh({ force = false } = {}) {
+    if (!this.element || (!force && this.modalIsOpen())) return;
+    if (!force && (this.pinOperationActive || this.controlsActive() || this.recentlyInteracted())) {
       this.scheduleRefresh(1000);
       return;
     }
@@ -147,7 +148,7 @@ export class SidebarController {
       }
       const html = await response.text();
       if (!this.current(epoch, boundElement)) return;
-      if (this.controlsActive()) {
+      if (!force && this.controlsActive()) {
         this.scheduleRefresh(1000);
         return;
       }
@@ -281,8 +282,9 @@ export class SidebarController {
   }
 
   async togglePin(button) {
-    if (!button || button.disabled) return null;
+    if (!button || button.disabled || this.pinOperationActive) return null;
 
+    this.pinOperationActive = true;
     this.invalidate();
     const epoch = this.asyncEpoch;
     const boundElement = this.element;
@@ -307,24 +309,27 @@ export class SidebarController {
       if (!response.ok) throw new Error("Could not update pinned session");
 
       const payload = await response.json();
-      if (this.current(epoch, boundElement)) {
+      if (this.current(epoch, boundElement) && button.isConnected !== false) {
         const pinned = payload.pinned === true;
         idleLabel = pinned ? "Unpin session" : "Pin session";
         button.dataset.pinned = pinned ? "true" : "false";
         button.classList.toggle("is-pinned", pinned);
         button.setAttribute("aria-pressed", pinned ? "true" : "false");
       }
-      this.requestRefresh();
+      await this.refresh({ force: true });
       return payload;
     } catch (error) {
       if (this.current(epoch, boundElement)) this.scheduleRefresh();
       throw error;
     } finally {
-      button.disabled = false;
-      button.classList.remove("is-loading");
-      button.removeAttribute("aria-busy");
-      button.setAttribute("aria-label", idleLabel);
-      button.setAttribute("title", idleLabel);
+      this.pinOperationActive = false;
+      if (button.isConnected !== false) {
+        button.disabled = false;
+        button.classList.remove("is-loading");
+        button.removeAttribute("aria-busy");
+        button.setAttribute("aria-label", idleLabel);
+        button.setAttribute("title", idleLabel);
+      }
     }
   }
 

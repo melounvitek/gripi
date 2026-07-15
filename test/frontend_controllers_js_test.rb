@@ -756,6 +756,34 @@ class FrontendControllersJsTest < Minitest::Test
     assert_equal [10_000], results
   end
 
+  def test_sidebar_controller_defers_regular_refresh_after_recent_interaction
+    results = run_javascript(<<~JS)
+      const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
+      const sidebar = { dataset: {}, querySelector: () => null, querySelectorAll: () => [] };
+      const document = {
+        hidden: false, activeElement: null, body: { classList: { contains: () => false } },
+        addEventListener() {}, querySelector: (selector) => selector === ".session-sidebar" ? sidebar : null,
+        querySelectorAll: () => [], getElementById: () => null
+      };
+      const window = { location: { href: "https://example.test/", origin: "https://example.test", search: "" } };
+      const timers = [];
+      let requests = 0;
+      globalThis.setTimeout = (_callback, delay) => { timers.push(delay); return timers.length; };
+      globalThis.clearTimeout = () => {};
+      globalThis.fetch = async () => { requests += 1; return { ok: true }; };
+      const controller = new SidebarController(document, window, { initialize() {}, isActive: () => false }, { apply() {} }, () => {});
+      controller.bind();
+      controller.lastInteractionAt = Date.now();
+
+      await controller.refresh();
+
+      console.log(JSON.stringify({ timers, requests }));
+    JS
+
+    assert_equal [1_000], results.fetch("timers")
+    assert_equal 0, results.fetch("requests")
+  end
+
   def test_sidebar_controller_refreshes_more_often_while_a_session_is_active
     results = run_javascript(<<~JS)
       const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
@@ -803,27 +831,41 @@ class FrontendControllersJsTest < Minitest::Test
       const window = { location: { href: "https://example.test/", origin: "https://example.test", search: "" } };
       const timers = [];
       const requests = [];
+      const sidebarUrls = [];
+      let sidebarRequests = 0;
       globalThis.setTimeout = (_callback, delay) => { timers.push(delay); return timers.length; };
       globalThis.clearTimeout = () => {};
-      const controller = new SidebarController(document, window, { initialize() {}, isActive: () => false }, { apply() {} }, () => {});
+      const controller = new SidebarController(document, window, { initialize() {}, destroy() {}, isActive: () => false }, { apply() {} }, () => {});
       controller.bind();
+      controller.lastInteractionAt = Date.now();
 
       const pin = await toggle("false", true);
       const unpin = await toggle("true", false);
-      console.log(JSON.stringify({ requests, timers, pin, unpin }));
+      console.log(JSON.stringify({ requests, sidebarRequests, sidebarUrls, timers, pin, unpin }));
 
       async function toggle(initiallyPinned, resultingPinned) {
-        let resolveRequest;
+        let resolvePin;
+        let resolveSidebar;
         globalThis.fetch = (url, options) => {
-          requests.push([url, options.method, Object.fromEntries(options.body)]);
-          return new Promise((resolve) => { resolveRequest = () => resolve({ ok: true, json: async () => ({ session: "/session", pinned: resultingPinned }) }); });
+          if (String(url) === "/sessions/pin") {
+            requests.push([url, options.method, Object.fromEntries(options.body)]);
+            return new Promise((resolve) => { resolvePin = () => resolve({ ok: true, json: async () => ({ session: "/session", pinned: resultingPinned }) }); });
+          }
+          sidebarRequests += 1;
+          sidebarUrls.push(String(url));
+          return new Promise((resolve) => { resolveSidebar = () => resolve({ ok: true, text: async () => "<aside>refreshed</aside>" }); });
         };
         const button = pinButton(initiallyPinned);
         const pending = controller.togglePin(button);
         const loading = state(button);
-        resolveRequest();
+        await new Promise((resolve) => setImmediate(resolve));
+        resolvePin();
+        await new Promise((resolve) => setImmediate(resolve));
+        const awaitingSidebar = state(button);
+        const sidebarStarted = !!resolveSidebar;
+        resolveSidebar?.();
         const payload = await pending;
-        return { payload, loading, settled: state(button), pinned: button.dataset.pinned };
+        return { payload, loading, awaitingSidebar, sidebarStarted, settled: state(button), pinned: button.dataset.pinned };
       }
 
       function state(button) {
@@ -854,16 +896,22 @@ class FrontendControllersJsTest < Minitest::Test
       ["/sessions/pin", "POST", { "session" => "/session", "pinned" => "true" }],
       ["/sessions/pin", "POST", { "session" => "/session", "pinned" => "false" }]
     ], results.fetch("requests")
-    assert_equal [0, 0], results.fetch("timers")
+    assert_equal 2, results.fetch("sidebarRequests")
+    assert_equal ["https://example.test/sidebar", "https://example.test/sidebar"], results.fetch("sidebarUrls")
+    assert_equal [10_000, 10_000], results.fetch("timers")
     assert_equal({
       "payload" => { "session" => "/session", "pinned" => true },
       "loading" => { "disabled" => true, "className" => "session-pin-toggle is-loading", "busy" => "true", "label" => "Pinning session", "title" => "Pinning session", "pressed" => "false" },
+      "awaitingSidebar" => { "disabled" => true, "className" => "session-pin-toggle is-loading is-pinned", "busy" => "true", "label" => "Pinning session", "title" => "Pinning session", "pressed" => "true" },
+      "sidebarStarted" => true,
       "settled" => { "disabled" => false, "className" => "session-pin-toggle is-pinned", "label" => "Unpin session", "title" => "Unpin session", "pressed" => "true" },
       "pinned" => "true"
     }, results.fetch("pin"))
     assert_equal({
       "payload" => { "session" => "/session", "pinned" => false },
       "loading" => { "disabled" => true, "className" => "session-pin-toggle is-pinned is-loading", "busy" => "true", "label" => "Unpinning session", "title" => "Unpinning session", "pressed" => "true" },
+      "awaitingSidebar" => { "disabled" => true, "className" => "session-pin-toggle is-loading", "busy" => "true", "label" => "Unpinning session", "title" => "Unpinning session", "pressed" => "false" },
+      "sidebarStarted" => true,
       "settled" => { "disabled" => false, "className" => "session-pin-toggle", "label" => "Pin session", "title" => "Pin session", "pressed" => "false" },
       "pinned" => "false"
     }, results.fetch("unpin"))
@@ -910,6 +958,56 @@ class FrontendControllersJsTest < Minitest::Test
     assert_equal "true", results.fetch("pinned")
   end
 
+  def test_sidebar_refresh_failure_cleans_up_pin_operation
+    results = run_javascript(<<~JS)
+      const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
+      const sidebar = { dataset: {}, querySelector: () => null, querySelectorAll: () => [] };
+      const document = {
+        hidden: false, activeElement: null, body: { classList: { contains: () => false } },
+        addEventListener() {}, querySelector: (selector) => selector === ".session-sidebar" ? sidebar : null,
+        querySelectorAll: () => [], getElementById: () => null
+      };
+      const window = { location: { href: "https://example.test/", origin: "https://example.test", search: "" } };
+      const timers = [];
+      let postRequests = 0;
+      globalThis.setTimeout = (_callback, delay) => { timers.push(delay); return timers.length; };
+      globalThis.clearTimeout = () => {};
+      globalThis.fetch = async (url) => {
+        if (String(url) !== "/sessions/pin") return { ok: false };
+        postRequests += 1;
+        return { ok: true, json: async () => ({ session: "/session", pinned: true }) };
+      };
+      const controller = new SidebarController(document, window, { initialize() {}, isActive: () => false }, { apply() {} }, () => {});
+      controller.bind();
+
+      const firstButton = button();
+      await controller.togglePin(firstButton);
+      const secondButton = button();
+      await controller.togglePin(secondButton);
+
+      console.log(JSON.stringify({ postRequests, timers, firstLoading: firstButton.loading, secondLoading: secondButton.loading, operationActive: controller.pinOperationActive }));
+
+      function button() {
+        const classes = new Set();
+        return {
+          disabled: false, dataset: { sessionPath: "/session", pinned: "false" },
+          get loading() { return classes.has("is-loading"); },
+          classList: {
+            add: (name) => classes.add(name), remove: (name) => classes.delete(name),
+            toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name)
+          },
+          setAttribute() {}, removeAttribute() {}
+        };
+      }
+    JS
+
+    assert_equal 2, results.fetch("postRequests")
+    assert_equal [10_000, 10_000], results.fetch("timers")
+    assert_equal false, results.fetch("firstLoading")
+    assert_equal false, results.fetch("secondLoading")
+    assert_equal false, results.fetch("operationActive")
+  end
+
   def test_successful_pin_requests_refresh_a_replaced_sidebar
     results = run_javascript(<<~JS)
       const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
@@ -926,35 +1024,185 @@ class FrontendControllersJsTest < Minitest::Test
       globalThis.setTimeout = (_callback, delay) => { timers.push(delay); return timers.length; };
       globalThis.clearTimeout = () => {};
       let resolveRequest;
-      globalThis.fetch = () => new Promise((resolve) => { resolveRequest = () => resolve({ ok: true, json: async () => ({ session: "/session", pinned: true }) }); });
-      const controller = new SidebarController(document, window, { initialize() {}, isActive: () => false }, { apply() {} }, () => {});
+      globalThis.fetch = (url) => {
+        if (String(url) !== "/sessions/pin") return Promise.resolve({ ok: true, text: async () => "<aside>refreshed</aside>" });
+        return new Promise((resolve) => { resolveRequest = () => resolve({ ok: true, json: async () => ({ session: "/session", pinned: true }) }); });
+      };
+      const controller = new SidebarController(document, window, { initialize() {}, destroy() {}, isActive: () => false }, { apply() {} }, () => {});
       controller.bind();
       const classes = new Set();
       const successMutations = [];
       const button = {
         disabled: false, dataset: { sessionPath: "/session", pinned: "false" },
+        get className() { return [...classes].join(" "); },
         classList: {
-          add: (name) => classes.add(name), remove: (name) => classes.delete(name),
+          add: (name) => classes.add(name),
+          remove: (name) => { classes.delete(name); successMutations.push(["remove-class", name]); },
           toggle: (name, enabled) => successMutations.push(["class", name, enabled])
         },
-        setAttribute(name, value) { if (name === "aria-pressed") successMutations.push([name, value]); },
-        removeAttribute() {}
+        setAttribute(name, value) { successMutations.push(["attribute", name, value]); },
+        removeAttribute(name) { successMutations.push(["remove-attribute", name]); }
       };
 
       const pending = controller.togglePin(button);
       current = second;
       controller.bind();
+      button.isConnected = false;
+      successMutations.length = 0;
+      await new Promise((resolve) => setImmediate(resolve));
       resolveRequest();
       const payload = await pending;
 
-      console.log(JSON.stringify({ payload, timers, boundToReplacement: controller.element === second, successMutations, stalePinned: button.dataset.pinned }));
+      console.log(JSON.stringify({ payload, timers, boundToReplacement: controller.element === second, successMutations, stalePinned: button.dataset.pinned, staleDisabled: button.disabled, staleClassName: button.className }));
     JS
 
     assert_equal({ "session" => "/session", "pinned" => true }, results.fetch("payload"))
-    assert_equal [0], results.fetch("timers")
+    assert_equal [10_000], results.fetch("timers")
     assert_equal true, results.fetch("boundToReplacement")
     assert_empty results.fetch("successMutations")
     assert_equal "false", results.fetch("stalePinned")
+    assert_equal true, results.fetch("staleDisabled")
+    assert_equal "is-loading", results.fetch("staleClassName")
+  end
+
+  def test_pin_spinner_owns_refresh_until_sidebar_replacement
+    results = run_javascript(<<~JS)
+      const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
+      const sidebar = { dataset: {}, querySelector: () => null, querySelectorAll: () => [] };
+      const replacementSidebar = { dataset: {}, querySelector: () => null, querySelectorAll: () => [] };
+      let currentSidebar = sidebar;
+      const document = {
+        hidden: false, activeElement: null, body: { classList: { contains: () => false } },
+        addEventListener() {}, querySelector: (selector) => selector === ".session-sidebar" ? currentSidebar : null,
+        querySelectorAll: () => [], getElementById: () => null, dispatchEvent() {}
+      };
+      const window = {
+        location: { href: "https://example.test/", origin: "https://example.test", search: "" },
+        CustomEvent: class {}, addEventListener() {}
+      };
+      const timers = [];
+      const timerCallbacks = [];
+      globalThis.setTimeout = (callback, delay) => { timers.push(delay); timerCallbacks.push(callback); return timers.length; };
+      globalThis.clearTimeout = () => {};
+      const sidebarResolvers = [];
+      let resolvePin;
+      let sidebarRequests = 0;
+      globalThis.fetch = (url) => {
+        if (String(url) === "/sessions/pin") return new Promise((resolve) => { resolvePin = () => resolve({ ok: true, json: async () => ({ session: "/session", pinned: true }) }); });
+        sidebarRequests += 1;
+        return new Promise((resolve) => sidebarResolvers.push(() => resolve({ ok: true, text: async () => "<aside>refreshed</aside>" })));
+      };
+      const controller = new SidebarController(document, window, { initialize() {}, destroy() {}, isActive: () => false }, { apply() {} }, () => {});
+      controller.bind();
+      const classes = new Set();
+      const attributes = {};
+      const button = {
+        disabled: false, isConnected: true, dataset: { sessionPath: "/session", pinned: "false" },
+        get loading() { return classes.has("is-loading"); },
+        classList: {
+          add: (name) => classes.add(name), remove: (name) => classes.delete(name),
+          toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name)
+        },
+        setAttribute(name, value) { attributes[name] = String(value); },
+        removeAttribute(name) { delete attributes[name]; }
+      };
+      Object.defineProperty(sidebar, "outerHTML", { set() { currentSidebar = replacementSidebar; button.isConnected = false; } });
+
+      const pending = controller.togglePin(button);
+      controller.requestRefresh();
+      await timerCallbacks[0]();
+      resolvePin();
+      await new Promise((resolve) => setImmediate(resolve));
+      controller.requestRefresh();
+      await timerCallbacks[2]();
+      const loadingWhileRefreshPending = button.loading;
+      sidebarResolvers.shift()();
+      await pending;
+
+      console.log(JSON.stringify({
+        sidebarRequests, timers, loadingWhileRefreshPending, oldButtonStillLoading: button.loading,
+        oldButtonDetached: !button.isConnected, replacementBound: controller.element === replacementSidebar
+      }));
+    JS
+
+    assert_equal 1, results.fetch("sidebarRequests")
+    assert_equal [0, 1_000, 0, 1_000, 10_000], results.fetch("timers")
+    assert_equal true, results.fetch("loadingWhileRefreshPending")
+    assert_equal true, results.fetch("oldButtonStillLoading")
+    assert_equal true, results.fetch("oldButtonDetached")
+    assert_equal true, results.fetch("replacementBound")
+  end
+
+  def test_sidebar_controller_ignores_concurrent_pin_toggles
+    results = run_javascript(<<~JS)
+      const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
+      const sidebar = { dataset: {}, querySelector: () => null, querySelectorAll: () => [] };
+      const document = {
+        hidden: false, activeElement: null, body: { classList: { contains: () => false } },
+        addEventListener() {}, querySelector: (selector) => selector === ".session-sidebar" ? sidebar : null,
+        querySelectorAll: () => [], getElementById: () => null, dispatchEvent() {}
+      };
+      const window = {
+        location: { href: "https://example.test/", origin: "https://example.test", search: "" },
+        CustomEvent: class {}, addEventListener() {}
+      };
+      globalThis.setTimeout = () => 1;
+      globalThis.clearTimeout = () => {};
+      const postResolvers = [];
+      const postPaths = [];
+      let resolveSidebar;
+      let sidebarRequests = 0;
+      globalThis.fetch = (url, options) => {
+        if (String(url) !== "/sessions/pin") {
+          sidebarRequests += 1;
+          return new Promise((resolve) => { resolveSidebar = () => resolve({ ok: true, text: async () => "<aside>refreshed</aside>" }); });
+        }
+        const body = Object.fromEntries(options.body);
+        postPaths.push(body.session);
+        return new Promise((resolve) => postResolvers.push(() => resolve({ ok: true, json: async () => ({ session: body.session, pinned: true }) })));
+      };
+      const controller = new SidebarController(document, window, { initialize() {}, destroy() {}, isActive: () => false }, { apply() {} }, () => {});
+      controller.bind();
+      const firstButton = button("/first");
+      const secondButton = button("/second");
+      const thirdButton = button("/third");
+
+      const first = controller.togglePin(firstButton);
+      const second = controller.togglePin(secondButton);
+      const postsWhileFirstPending = postPaths.length;
+      const secondLoading = secondButton.loading;
+      postResolvers.shift()();
+      await new Promise((resolve) => setImmediate(resolve));
+      const third = controller.togglePin(thirdButton);
+      const postsWhileRefreshPending = postPaths.length;
+      const thirdLoading = thirdButton.loading;
+      resolveSidebar();
+      const [_firstResult, secondResult, thirdResult] = await Promise.all([first, second, third]);
+
+      console.log(JSON.stringify({ postPaths, postsWhileFirstPending, postsWhileRefreshPending, sidebarRequests, secondLoading, thirdLoading, secondResult, thirdResult }));
+
+      function button(path) {
+        const classes = new Set();
+        return {
+          disabled: false, dataset: { sessionPath: path, pinned: "false" },
+          get loading() { return classes.has("is-loading"); },
+          classList: {
+            add: (name) => classes.add(name), remove: (name) => classes.delete(name),
+            toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name)
+          },
+          setAttribute() {}, removeAttribute() {}
+        };
+      }
+    JS
+
+    assert_equal ["/first"], results.fetch("postPaths")
+    assert_equal 1, results.fetch("postsWhileFirstPending")
+    assert_equal 1, results.fetch("postsWhileRefreshPending")
+    assert_equal 1, results.fetch("sidebarRequests")
+    assert_equal false, results.fetch("secondLoading")
+    assert_equal false, results.fetch("thirdLoading")
+    assert_nil results["secondResult"]
+    assert_nil results["thirdResult"]
   end
 
   def test_marking_compaction_replaces_the_idle_refresh_schedule

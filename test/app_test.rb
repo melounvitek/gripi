@@ -3541,7 +3541,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "this.temporarySessionsLimit = targetUrl.searchParams.get(\"sidebar_sessions_limit\") || this.temporarySessionsLimit;"
       refute_includes APP_JAVASCRIPT, "history.replaceState(history.state"
       assert_includes APP_JAVASCRIPT, "controlsActive()"
-      assert_includes APP_JAVASCRIPT, "if (this.controlsActive() || this.recentlyInteracted())"
+      assert_includes APP_JAVASCRIPT, "if (!force && (this.pinOperationActive || this.controlsActive() || this.recentlyInteracted()))"
       assert_includes APP_JAVASCRIPT, "async changeProjectFilter(select)"
       assert_includes APP_JAVASCRIPT, "this.replace(html, { scrollTop: 0, notify: false });"
     end
@@ -5069,7 +5069,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "scrollContainer()"
       assert_includes APP_JAVASCRIPT, "bindInteractionTracking()"
       assert_includes APP_JAVASCRIPT, "recentlyInteracted()"
-      assert_includes APP_JAVASCRIPT, "async refresh()"
+      assert_includes APP_JAVASCRIPT, "async refresh({ force = false } = {})"
       assert_includes APP_JAVASCRIPT, "async loadMore(button)"
       assert_includes APP_JAVASCRIPT, "this.asyncEpoch = 0;"
       assert_includes APP_JAVASCRIPT, "const epoch = ++this.asyncEpoch;"
@@ -5084,7 +5084,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, notification_reinsertion
       assert_operator APP_JAVASCRIPT.index(notification_capture), :<, APP_JAVASCRIPT.index(sidebar_replacement)
       assert_operator APP_JAVASCRIPT.index(sidebar_replacement), :<, APP_JAVASCRIPT.index(notification_reinsertion)
-      assert_includes APP_JAVASCRIPT, "if (this.controlsActive() || this.recentlyInteracted())"
+      assert_includes APP_JAVASCRIPT, "if (!force && (this.pinOperationActive || this.controlsActive() || this.recentlyInteracted()))"
       assert_includes APP_JAVASCRIPT, "fetch(this.fragmentUrl())"
       assert_includes APP_JAVASCRIPT, "const refreshedScrollContainer = this.scrollContainer();"
       assert_includes APP_JAVASCRIPT, "this.bindInteractionTracking();"
