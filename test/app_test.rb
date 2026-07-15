@@ -2391,7 +2391,7 @@ class AppTest < Minitest::Test
         {
           "success" => true,
           "data" => {
-            "model" => { "provider" => "openai-codex", "id" => "gpt-5.6-sol", "contextWindow" => 200_000 },
+            "model" => { "provider" => "openai-codex", "id" => "gpt-5.6-sol", "contextWindow" => 372_000 },
             "thinkingLevel" => "high",
             "messageCount" => 4
           }
@@ -2399,7 +2399,7 @@ class AppTest < Minitest::Test
       end
       client.define_singleton_method(:get_session_stats) do
         calls << [:get_session_stats]
-        { "success" => true, "data" => { "contextUsage" => { "tokens" => 50_000, "contextWindow" => 200_000, "percent" => 25 } } }
+        { "success" => true, "data" => { "contextUsage" => { "tokens" => 8_597, "contextWindow" => 372_000, "percent" => 2.311021505376344 } } }
       end
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
@@ -2409,7 +2409,7 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(Gripi).get("/status", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_equal({ "context" => "25%/200.0k", "model" => "openai-codex/gpt-5.6-sol", "thinking" => "high" }, JSON.parse(response.body))
+      assert_equal({ "context" => "2.3%/372.0k", "model" => "openai-codex/gpt-5.6-sol", "thinking" => "high" }, JSON.parse(response.body))
       assert_equal [[:get_state], [:get_session_stats]], calls
     end
   end

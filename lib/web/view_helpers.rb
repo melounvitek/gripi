@@ -399,7 +399,7 @@ module Web
       return if status.context_tokens.nil? && status.context_limit.nil?
 
       usage = if status.context_limit
-        percent = status.context_tokens.nil? ? "?" : status.context_percent || ((status.context_tokens.to_f / status.context_limit) * 100).round(1)
+        percent = status.context_tokens.nil? ? "?" : (status.context_percent || (status.context_tokens.to_f / status.context_limit) * 100).round(1)
         "#{percent}%/#{compact_number(status.context_limit)}"
       else
         compact_number(status.context_tokens)
