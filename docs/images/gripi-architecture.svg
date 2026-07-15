@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" role="img" aria-labelledby="title description">
   <title id="title">GRIPi architecture</title>
-  <desc id="description">Desktop, browser, and mobile clients connect over a local or private network to the GRIPi gateway, which runs Pi on a machine with access to projects, sessions, and credentials.</desc>
+  <desc id="description">Desktop, browser, and mobile clients connect over a local network or VPN to the GRIPi gateway, which runs Pi on a machine with access to projects, sessions, and credentials.</desc>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
@@ -44,8 +44,8 @@
   </g>
 
   <path d="M382 274H492" fill="none" stroke="#F24405" stroke-width="4" marker-end="url(#arrow)"/>
-  <text x="437" y="226" class="small" text-anchor="middle">Local or</text>
-  <text x="437" y="249" class="small" text-anchor="middle">private network</text>
+  <text x="437" y="226" class="small" text-anchor="middle">Local network</text>
+  <text x="437" y="249" class="small" text-anchor="middle">or VPN</text>
 
   <g transform="translate(520 48)">
     <rect width="612" height="524" rx="22" fill="#202027" stroke="#4B4A55" stroke-width="2"/>
