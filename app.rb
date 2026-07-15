@@ -124,6 +124,11 @@ class Gripi < Sinatra::Base
   before do
     enforce_browser_access
     enforce_workspace_access
-    cleanup_idle_rpc_clients(except: request.path_info == "/events" ? [params["session"]] : [])
+    current_path = params["session"]
+    pending_session = pending_rpc_cwd(current_path)
+    current_session_owned = !multi_user_mode? || workspace_session_ownership_store.owned_by?(current_path, current_workspace_id)
+    rpc_clients.touch(current_path) if pending_session && current_session_owned
+    protect_current_session = request.path_info == "/events" && current_session_owned
+    cleanup_idle_rpc_clients(except: protect_current_session ? [current_path] : [])
   end
 end

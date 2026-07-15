@@ -31,6 +31,14 @@ class PiRpcClientRegistry
     @mutex.synchronize { @clients[session_path]&.client }
   end
 
+  def touch(session_path)
+    @mutex.synchronize do
+      entry = @clients[session_path]
+      touch_entry(entry) if entry
+      !!entry
+    end
+  end
+
   def active?(session_path)
     !!client_for(session_path)
   end
@@ -130,7 +138,7 @@ class PiRpcClientRegistry
     true
   end
 
-  def close_idle_clients(idle_timeout:, now: @clock.call, except: [])
+  def close_idle_clients(idle_timeout:, now: @clock.call, except: [], on_close: nil)
     candidates = @mutex.synchronize do
       @clients.filter_map do |session_path, entry|
         idle = now - entry_activity_at(entry) >= idle_timeout
@@ -150,6 +158,7 @@ class PiRpcClientRegistry
         if close
           clients_to_close << entry.client
           closed_paths << session_path
+          on_close&.call(session_path)
         end
         close
       end

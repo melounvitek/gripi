@@ -161,10 +161,11 @@ module Sessions
     def merge_pending_sessions
       known_paths = @groups.values.flatten.to_h { |session| [session.path, true] }
 
-      @pending_sessions.each do |path, cwd|
+      @pending_sessions.each do |path, cwd, created_at|
         next if known_paths[path] || File.exist?(path)
         next unless path == selected_session_path || @rpc_clients.active?(path)
 
+        activity_at = created_at || @now
         pending_session = PiSessionStore::Session.new(
           path: path,
           cwd: cwd,
@@ -172,9 +173,9 @@ module Sessions
           display_name: PENDING_SESSION_DISPLAY_NAME,
           first_user_message: nil,
           message_count: 0,
-          created_at: nil,
-          modified_at: @now,
-          conversation_activity_at: @now
+          created_at: activity_at,
+          modified_at: activity_at,
+          conversation_activity_at: activity_at
         )
         @groups[cwd] ||= []
         @groups[cwd].unshift(pending_session)

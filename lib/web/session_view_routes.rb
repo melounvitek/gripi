@@ -8,7 +8,7 @@ module Web
 
       def prepare_session_view(include_conversation: false)
         remap_selected_pending_session
-        pending_sessions = pending_rpc_cwd_entries
+        pending_sessions = pending_session_registry.entries_with_created_at
         Sessions::SessionView.build(
           sessions_root: settings.sessions_root,
           params: params,

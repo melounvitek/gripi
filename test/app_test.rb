@@ -1215,6 +1215,27 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_event_poll_closes_an_idle_persisted_client_after_reading_events
+    Dir.mktmpdir do |dir|
+      now = Time.at(1_000)
+      path = write_session(dir)
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+      registry.register(path, FakeRpcClient.new(calls, [{ "type" => "assistant_delta", "text" => "Hi" }], path))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :rpc_idle_timeout_seconds, 1_800
+
+      now = Time.at(2_801)
+      response = Rack::MockRequest.new(Gripi).get("/events", params: { "session" => path, "after" => "0" })
+
+      assert_equal 200, response.status
+      assert_equal [{ "type" => "assistant_delta", "text" => "Hi" }], JSON.parse(response.body).fetch("events")
+      refute registry.active?(path)
+      assert_includes calls, [:close]
+    end
+  end
+
   def test_returns_same_buffered_rpc_events_to_independent_cursors
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -1383,7 +1404,7 @@ class AppTest < Minitest::Test
       pending_path = File.join(dir, "pending-session.jsonl")
       calls = []
       Gripi.set :sessions_root, dir
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
       Gripi.set :new_rpc_client_factory, [->(cwd) {
         calls << [:start_new, cwd]
         FakeRpcClient.new(calls)
@@ -2010,7 +2031,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [{ "type" => "from-pending" }], real_path))
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
 
       response = Rack::MockRequest.new(Gripi).get(
         "/events",
@@ -2035,7 +2056,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
 
       response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
@@ -2059,7 +2080,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
 
       response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
@@ -2085,7 +2106,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
 
       response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
@@ -2110,7 +2131,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
 
       response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
@@ -2489,7 +2510,7 @@ class AppTest < Minitest::Test
       registry.register(path, client)
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ path => project_cwd(dir) })
 
       response = Rack::MockRequest.new(Gripi).get("/status", params: { "session" => path })
 
@@ -2636,7 +2657,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, client)
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
 
       response = Rack::MockRequest.new(Gripi).get(
         "/",
@@ -2659,7 +2680,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, client)
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
       request = Rack::MockRequest.new(Gripi)
 
       fragment_response = request.get("/session_fragment", params: { "session" => selected_path })
@@ -2686,6 +2707,101 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_idle_pending_session_expires_after_rpc_timeout
+    Dir.mktmpdir do |dir|
+      now = Time.at(1_000)
+      selected_path = write_session(dir)
+      pending_path = File.join(File.dirname(selected_path), "pending-session.jsonl")
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+      registry.register(pending_path, FakeRpcClient.new(calls))
+      pending_sessions = Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) }, clock: -> { now })
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, pending_sessions
+      Gripi.set :rpc_idle_timeout_seconds, 1_800
+
+      now = Time.at(2_801)
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => selected_path })
+
+      assert_equal 200, response.status
+      refute registry.active?(pending_path)
+      refute_includes pending_sessions.paths, pending_path
+      refute_includes response.body, pending_path
+      assert_equal [[:close]], calls
+    end
+  end
+
+  def test_busy_pending_session_does_not_expire
+    Dir.mktmpdir do |dir|
+      now = Time.at(1_000)
+      selected_path = write_session(dir)
+      pending_path = File.join(File.dirname(selected_path), "pending-session.jsonl")
+      client = FakeRpcClient.new([])
+      client.define_singleton_method(:busy?) { true }
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+      registry.register(pending_path, client)
+      pending_sessions = Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) }, clock: -> { now })
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, pending_sessions
+      Gripi.set :rpc_idle_timeout_seconds, 1_800
+
+      now = Time.at(2_801)
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => selected_path })
+
+      assert_equal 200, response.status
+      assert registry.active?(pending_path)
+      assert_includes pending_sessions.paths, pending_path
+      assert_includes response.body, pending_path
+    end
+  end
+
+  def test_selected_pending_session_does_not_expire_during_sidebar_refresh
+    Dir.mktmpdir do |dir|
+      now = Time.at(1_000)
+      pending_path = File.join(dir, "pending-session.jsonl")
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+      registry.register(pending_path, FakeRpcClient.new([]))
+      pending_sessions = Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) }, clock: -> { now })
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, pending_sessions
+      Gripi.set :rpc_idle_timeout_seconds, 1_800
+
+      now = Time.at(2_801)
+      response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => pending_path })
+
+      assert_equal 200, response.status
+      assert registry.active?(pending_path)
+      assert_includes pending_sessions.paths, pending_path
+      assert_includes response.body, pending_path
+    end
+  end
+
+  def test_polled_pending_session_does_not_expire
+    Dir.mktmpdir do |dir|
+      now = Time.at(1_000)
+      pending_path = File.join(dir, "pending-session.jsonl")
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+      registry.register(pending_path, FakeRpcClient.new(calls))
+      pending_sessions = Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) }, clock: -> { now })
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, pending_sessions
+      Gripi.set :rpc_idle_timeout_seconds, 1_800
+
+      now = Time.at(2_801)
+      response = Rack::MockRequest.new(Gripi).get("/events", params: { "session" => pending_path, "after" => "0" })
+
+      assert_equal 200, response.status
+      assert registry.active?(pending_path)
+      assert_includes pending_sessions.paths, pending_path
+      refute_includes calls, [:close]
+    end
+  end
+
   def test_session_view_remaps_active_pending_session_after_pi_persists_the_file
     Dir.mktmpdir do |dir|
       real_path = write_session(dir)
@@ -2695,7 +2811,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new([], [], real_path))
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
 
       response = Rack::MockRequest.new(Gripi).get(
         "/",
@@ -6898,10 +7014,10 @@ class AppTest < Minitest::Test
       registry.register(other_pending_path, FakeRpcClient.new([]))
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({
         own_pending_path => project_cwd(dir),
         other_pending_path => project_cwd(dir)
-      )
+      })
       Gripi.set :multi_user_mode, true
       own_cookie = workspace_cookie_for("Correct Horse 42")
       store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
@@ -6918,6 +7034,34 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_multi_user_event_poll_does_not_protect_other_workspace_pending_session
+    Dir.mktmpdir do |dir|
+      now = Time.at(1_000)
+      write_session(dir)
+      pending_path = File.join(dir, "pending-session.jsonl")
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+      registry.register(pending_path, FakeRpcClient.new(calls))
+      pending_sessions = Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) }, clock: -> { now })
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, pending_sessions
+      Gripi.set :rpc_idle_timeout_seconds, 1_800
+      Gripi.set :multi_user_mode, true
+      own_cookie = workspace_cookie_for("Correct Horse 42")
+      store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
+      store.claim(pending_path, workspace_id_for("Different Horse 42"))
+
+      now = Time.at(2_801)
+      response = Rack::MockRequest.new(Gripi).get("/events", params: { "session" => pending_path }, "HTTP_COOKIE" => own_cookie)
+
+      assert_equal 404, response.status
+      refute registry.active?(pending_path)
+      refute_includes pending_sessions.paths, pending_path
+      assert_equal [[:close]], calls
+    end
+  end
+
   def test_multi_user_rejects_other_workspace_pending_session_without_remapping
     Dir.mktmpdir do |dir|
       real_path = write_session(dir)
@@ -6927,7 +7071,7 @@ class AppTest < Minitest::Test
       registry.register(pending_path, FakeRpcClient.new(calls, [], real_path))
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new(pending_path => project_cwd(dir))
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
       Gripi.set :multi_user_mode, true
       own_cookie = workspace_cookie_for("Correct Horse 42")
       store = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)

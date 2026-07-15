@@ -198,10 +198,10 @@ class SessionsSessionViewTest < Minitest::Test
     end
   end
 
-  def test_pending_session_uses_current_time_for_conversation_activity
+  def test_pending_session_uses_its_stable_creation_time_for_conversation_activity
     Dir.mktmpdir do |dir|
       pending_path = File.join(dir, "pending.jsonl")
-      now = Time.iso8601("2026-06-13T10:00:00Z")
+      created_at = Time.iso8601("2026-06-13T10:00:00Z")
 
       view = Sessions::SessionView.build(
         sessions_root: dir,
@@ -211,11 +211,11 @@ class SessionsSessionViewTest < Minitest::Test
         attachment_store: PiAttachmentStore.new(root: File.join(dir, "attachments")),
         rpc_clients: inactive_rpc_clients,
         mark_selected_read: false,
-        pending_sessions: [[pending_path, dir]],
-        now: now
+        pending_sessions: [[pending_path, dir, created_at]],
+        now: created_at + 300
       )
 
-      assert_equal now, view.selected_session.conversation_activity_at
+      assert_equal created_at, view.selected_session.conversation_activity_at
     end
   end
 

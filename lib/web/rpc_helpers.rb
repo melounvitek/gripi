@@ -77,7 +77,8 @@ module Web
 
       rpc_clients.close_idle_clients(
         idle_timeout: timeout,
-        except: pending_rpc_cwd_paths + except.compact
+        except: except.compact,
+        on_close: ->(session_path) { forget_pending_rpc_cwd(session_path) }
       ) do |session_path|
         session_synchronizer.inspect(session_path) if File.exist?(session_path)
       end
@@ -142,10 +143,6 @@ module Web
 
     def pending_rpc_cwd(session_path)
       pending_session_registry.cwd_for(session_path)
-    end
-
-    def pending_rpc_cwd_paths
-      pending_session_registry.paths
     end
 
     def pending_rpc_cwd_entries
