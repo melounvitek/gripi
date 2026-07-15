@@ -461,7 +461,8 @@ class PiSessionStore
       when "session"
         session_entry ||= entry
       when "session_info"
-        latest_name = entry["name"] unless entry["name"].to_s.empty?
+        latest_name = entry["name"].to_s.strip
+        latest_name = nil if latest_name.empty?
       when "message"
         message = entry["message"] || {}
         message_count += 1 unless message["role"] == "toolResult"

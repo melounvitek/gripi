@@ -16,7 +16,7 @@ module Rpc
         }
       )
 
-      assert_equal ["compact", "fork", "tree", "clone", "new", "model", "review"], commands.map { |command| command["name"] }
+      assert_equal ["name", "compact", "fork", "tree", "clone", "new", "model", "review"], commands.map { |command| command["name"] }
     end
 
     def test_builtin_commands_win_when_rpc_command_has_same_name
@@ -26,14 +26,15 @@ module Rpc
         ]
       )
 
-      assert_equal "Manually compact context, optional custom instructions", commands.first["description"]
+      compact = commands.find { |command| command["name"] == "compact" }
+      assert_equal "Manually compact context, optional custom instructions", compact["description"]
       assert_equal 1, commands.count { |command| command["name"] == "compact" }
     end
 
     def test_returns_builtin_commands_for_malformed_rpc_response
       commands = CommandCatalog.commands_from("data" => { "commands" => "broken" })
 
-      assert_equal ["compact", "fork", "tree", "clone", "new", "model"], commands.map { |command| command["name"] }
+      assert_equal ["name", "compact", "fork", "tree", "clone", "new", "model"], commands.map { |command| command["name"] }
     end
   end
 end

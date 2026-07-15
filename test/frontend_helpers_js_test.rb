@@ -21,6 +21,28 @@ class FrontendHelpersJsTest < Minitest::Test
     assert_match(/\Atool:123:[0-9a-f]+\z/, results.last)
   end
 
+  def test_session_name_helpers_follow_native_pi_events_and_command
+    results = run_javascript(<<~JS)
+      const { sessionNameFromEvent, sessionNameSlashCommand } = await import(#{module_url("formatting.js").to_json});
+      console.log(JSON.stringify({
+        commands: [
+          sessionNameSlashCommand("/name Useful name"),
+          sessionNameSlashCommand("/name"),
+          sessionNameSlashCommand("/rename Useful name")
+        ],
+        names: [
+          sessionNameFromEvent({ type: "session_info", name: "Useful name" }),
+          sessionNameFromEvent({ type: "session_info_changed", name: "Changed name" }),
+          sessionNameFromEvent({ type: "custom", customType: "pi-extensions-session-title", data: { title: "Plugin title" } }),
+          sessionNameFromEvent({ type: "custom_message", customType: "session-title-update", content: "Session renamed to: `Plugin title`" })
+        ]
+      }));
+    JS
+
+    assert_equal [true, true, false], results.fetch("commands")
+    assert_equal ["Useful name", "Changed name", nil, nil], results.fetch("names")
+  end
+
   def test_event_timestamp_prefers_gateway_receipt_time
     results = run_javascript(<<~JS)
       const { eventTimestamp } = await import(#{module_url("formatting.js").to_json});

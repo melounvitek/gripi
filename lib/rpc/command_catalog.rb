@@ -3,6 +3,7 @@
 module Rpc
   class CommandCatalog
     BUILTIN_COMMANDS = [
+      { "name" => "name", "source" => "other", "description" => "Set session display name" },
       { "name" => "compact", "source" => "other", "description" => "Manually compact context, optional custom instructions" },
       { "name" => "fork", "source" => "other", "description" => "Open the fork picker for this session" },
       { "name" => "tree", "source" => "other", "description" => "Navigate the current session tree" },

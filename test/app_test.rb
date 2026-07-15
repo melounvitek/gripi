@@ -571,12 +571,39 @@ class AppTest < Minitest::Test
       assert_equal [[ :start, path ], [ :set_session_name, "Useful name" ]], calls
       payload = JSON.parse(response.body)
       assert_equal path, payload.fetch("session")
-      assert_equal "rename", payload.fetch("command")
+      assert_equal "name", payload.fetch("command")
       assert_equal "Useful name", payload.fetch("name")
     end
   end
 
-  def test_rename_slash_command_renames_selected_session
+  def test_name_slash_command_returns_rpc_failure
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:set_session_name) do |name|
+        calls << [:set_session_name, name]
+        { "success" => false, "error" => "Could not set session name" }
+      end
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        client
+      }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/name Useful name" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 422, response.status
+      assert_equal [[:start, path], [:set_session_name, "Useful name"]], calls
+      assert_equal "Could not set session name", JSON.parse(response.body).fetch("error")
+    end
+  end
+
+  def test_rename_is_sent_as_a_regular_prompt
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
@@ -593,10 +620,8 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_equal [[ :start, path ], [ :set_session_name, "Useful name" ]], calls
-      payload = JSON.parse(response.body)
-      assert_equal path, payload.fetch("session")
-      assert_equal "rename", payload.fetch("command")
+      assert_equal [[:start, path], [:prompt, "/rename Useful name"]], calls
+      refute JSON.parse(response.body).key?("command")
     end
   end
 
@@ -792,35 +817,85 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_bare_rename_slash_command_returns_usage_without_prompting
-    ["/name", "/rename"].each do |message|
-      Dir.mktmpdir do |dir|
-        path = write_session(dir)
-        calls = []
-        Gripi.set :sessions_root, dir
-        Gripi.set :rpc_client_factory, [->(session_path) {
-          calls << [:start, session_path]
-          FakeRpcClient.new(calls)
-        }]
+  def test_bare_name_slash_command_returns_usage_when_session_is_unnamed
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
 
-        response = Rack::MockRequest.new(Gripi).post(
-          "/prompt",
-          params: { "session" => path, "message" => message },
-          "HTTP_ACCEPT" => "application/json"
-        )
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/name" },
+        "HTTP_ACCEPT" => "application/json"
+      )
 
-        assert_equal 200, response.status
-        assert_empty calls
-        payload = JSON.parse(response.body)
-        assert_equal path, payload.fetch("session")
-        assert_equal "rename", payload.fetch("command")
-        assert_equal "Usage: #{message} <name>", payload.fetch("error")
-      end
+      assert_equal 200, response.status
+      assert_equal [[:start, path], [:get_state]], calls
+      payload = JSON.parse(response.body)
+      assert_equal path, payload.fetch("session")
+      assert_equal "name", payload.fetch("command")
+      assert_equal "Usage: /name <name>", payload.fetch("error")
     end
   end
 
-  def test_multiline_rename_like_prompt_is_sent_as_prompt
-    ["/rename Useful\nname", "/rename\nUseful name"].each do |message|
+  def test_bare_name_slash_command_returns_rpc_failure
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:get_state) do
+        calls << [:get_state]
+        { "success" => false, "error" => "Could not read session name" }
+      end
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        client
+      }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/name" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 422, response.status
+      assert_equal [[:start, path], [:get_state]], calls
+      assert_equal "Could not read session name", JSON.parse(response.body).fetch("error")
+    end
+  end
+
+  def test_bare_name_slash_command_returns_current_session_name
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, session_name: "Useful name")
+      }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/name" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[:start, path], [:get_state]], calls
+      payload = JSON.parse(response.body)
+      assert_equal "name", payload.fetch("command")
+      assert_equal "Useful name", payload.fetch("name")
+      assert_equal true, payload.fetch("current")
+    end
+  end
+
+  def test_multiline_name_like_prompt_is_sent_as_prompt
+    ["/name Useful\nname", "/name\nUseful name"].each do |message|
       Dir.mktmpdir do |dir|
         path = write_session(dir)
         calls = []
@@ -1524,7 +1599,6 @@ class AppTest < Minitest::Test
         [:post, "/sessions/fork", { "session" => path, "entry_id" => "user-1" }],
         [:post, "/sessions/clone", { "session" => path }],
         [:post, "/compact", { "session" => path }],
-        [:post, "/rename", { "session" => path, "name" => "Blocked rename" }],
         [:post, "/abort", { "session" => path }]
       ]
       blocked_requests.each do |method, endpoint, request_params|
@@ -2027,7 +2101,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_json_rename_with_pending_path_returns_real_session_redirect
+  def test_json_name_with_pending_path_returns_real_session_redirect
     Dir.mktmpdir do |dir|
       real_path = write_session(dir)
       pending_path = File.join(dir, "pending-session.jsonl")
@@ -2041,14 +2115,14 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(Gripi).post(
         "/prompt",
         "HTTP_ACCEPT" => "application/json",
-        params: { "session" => pending_path, "message" => "/rename Lovely session" }
+        params: { "session" => pending_path, "message" => "/name Lovely session" }
       )
       payload = JSON.parse(response.body)
 
       assert_equal 200, response.status
       assert_equal real_path, payload["session"]
       assert_includes payload["redirect"], Rack::Utils.escape(real_path)
-      assert_equal "rename", payload["command"]
+      assert_equal "name", payload["command"]
       assert_equal "Lovely session", payload["name"]
       assert_equal [[:get_state], [:set_session_name, "Lovely session"]], calls
     end
@@ -2126,7 +2200,7 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(Gripi).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (7)"
+      assert_includes response.body, "Slash commands (8)"
       assert_includes response.body, "/review"
       assert_includes response.body, "Review code"
       assert_includes response.body, "/compact"
@@ -2135,6 +2209,7 @@ class AppTest < Minitest::Test
       assert_includes response.body, "/clone"
       assert_includes response.body, "/new"
       assert_includes response.body, "/model"
+      assert_includes response.body, "/name"
       refute_includes response.body, "/sessions"
       refute_includes response.body, "/rename"
       refute_includes response.body, "gripi_tree"
@@ -2165,7 +2240,7 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(Gripi).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (6)"
+      assert_includes response.body, "Slash commands (7)"
       assert_includes response.body, "/compact"
       assert_includes response.body, "/fork"
       assert_includes response.body, "/tree"
@@ -2419,24 +2494,10 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_renames_selected_session
-    Dir.mktmpdir do |dir|
-      path = write_session(dir)
-      calls = []
-      Gripi.set :sessions_root, dir
-      Gripi.set :rpc_client_factory, [->(session_path) {
-        calls << [:start, session_path]
-        FakeRpcClient.new(calls)
-      }]
+  def test_rename_endpoint_is_not_available
+    response = Rack::MockRequest.new(Gripi).post("/rename")
 
-      response = Rack::MockRequest.new(Gripi).post(
-        "/rename",
-        params: { "session" => path, "name" => "Useful name" }
-      )
-
-      assert_equal 303, response.status
-      assert_equal [[ :start, path ], [ :set_session_name, "Useful name" ]], calls
-    end
+    assert_equal 404, response.status
   end
 
   def test_renders_pending_new_session_before_pi_persists_the_file
@@ -5148,7 +5209,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "const previousWaitingForOutputSince = waitingForOutputSince;"
       assert_includes APP_JAVASCRIPT, "const submittedImageFiles = pendingImages.map((entry) => entry.file);"
       assert_includes APP_JAVASCRIPT, "submittedImageFiles.forEach((file) => formData.append(\"images[]\", file, file.name || \"image\"));"
-      assert_includes APP_JAVASCRIPT, "if (cloneCommand && payload?.cancelled) {\n      restoreSubmittedComposerInput();\n      setComposerState(\"idle\");\n      showStatus(\"Clone cancelled\", true);\n      return;\n    }\n    showPromptFailure(payload?.error || \"Prompt failed to send\");"
+      assert_includes APP_JAVASCRIPT, "if (cloneCommand && payload?.cancelled) {\n      restoreSubmittedComposerInput();\n      setComposerState(\"idle\");\n      showStatus(\"Clone cancelled\", true);\n      return;\n    }"
       assert_includes APP_JAVASCRIPT, "function persistStoredComposerDraft()"
       assert_includes APP_JAVASCRIPT, "const restoreSubmittedComposerInput = () => {"
       assert_includes APP_JAVASCRIPT, "promptTextarea.value = message;\n      persistStoredComposerDraft();"
@@ -5425,37 +5486,39 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "liveMessageRenderer.resetLiveCompactionTracking();"
       assert_includes APP_JAVASCRIPT, "liveMessageRenderer.removePendingCompactionMessage();"
       assert_includes APP_JAVASCRIPT, "if (!event.aborted && !liveMessageRenderer.liveCompactionRendered) liveMessageRenderer.renderCompactionEvent(event);"
-      assert_includes APP_JAVASCRIPT, "if (/^\\/(?:name|rename)$/.test(trimmed)) return { valid: false };"
-      assert_includes APP_JAVASCRIPT, "if (/^\\/(?:name|rename)[ \\t]+[^\\r\\n]+$/.test(trimmed)) return { valid: true };"
+      assert_includes APP_JAVASCRIPT, "return /^\\/name(?:[ \\t]+[^\\r\\n]+)?$/.test(message.trim());"
       assert_includes APP_JAVASCRIPT, "function sessionNameSlashCommand(message)"
       assert_includes APP_JAVASCRIPT, "function sessionForkSlashCommand(message)"
       assert_includes APP_JAVASCRIPT, "function sessionTreeSlashCommand(message)"
       assert_includes APP_JAVASCRIPT, "function sessionCloneSlashCommand(message)"
       assert_includes APP_JAVASCRIPT, "function sessionNewSlashCommand(message)"
       assert_includes APP_JAVASCRIPT, "function updateSessionHeaderName(name)"
-      assert_includes APP_JAVASCRIPT, "function sessionTitleFromEvent(event)"
-      assert_includes APP_JAVASCRIPT, "if (event.type === \"session_info\") return event.name;"
-      assert_includes APP_JAVASCRIPT, "if (event.type === \"custom\" && event.customType === \"pi-extensions-session-title\") return event.data?.title;"
-      assert_includes APP_JAVASCRIPT, "if (event.type === \"custom_message\" && event.customType === \"session-title-update\")"
-      assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(sessionTitleFromEvent(event));"
+      assert_includes APP_JAVASCRIPT, "function sessionNameFromEvent(event)"
+      assert_includes APP_JAVASCRIPT, "return [\"session_info\", \"session_info_changed\"].includes(event.type) ? event.name : null;"
+      assert_includes APP_JAVASCRIPT, "[\"custom\", \"custom_message\", \"session_info\", \"session_info_changed\", \"queue_update\""
+      refute_includes APP_JAVASCRIPT, "pi-extensions-session-title"
+      refute_includes APP_JAVASCRIPT, "session-title-update"
+      assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(sessionNameFromEvent(event));"
+      assert_includes APP_JAVASCRIPT, "if ([\"session_info\", \"session_info_changed\"].includes(event.type)) sidebarController.refresh().catch(() => {});"
       assert_includes APP_JAVASCRIPT, 'new this.window.CustomEvent("gripi:sidebar-selected-title", { detail: { title } })'
       assert_includes APP_JAVASCRIPT, 'document.addEventListener("gripi:sidebar-selected-title"'
       assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(event.detail.title);"
       assert_includes APP_JAVASCRIPT, "updateNotificationToggle();"
-      assert_includes APP_JAVASCRIPT, "const renameCommand = followUp ? null : sessionNameSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const nameCommand = followUp ? null : sessionNameSlashCommand(message);"
       assert_includes APP_JAVASCRIPT, "const compactCommand = followUp ? null : sessionCompactSlashCommand(message);"
       assert_includes APP_JAVASCRIPT, "const forkCommand = followUp ? null : sessionForkSlashCommand(message);"
       assert_includes APP_JAVASCRIPT, "const treeCommand = followUp ? null : sessionTreeSlashCommand(message);"
       assert_includes APP_JAVASCRIPT, "const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);"
       assert_includes APP_JAVASCRIPT, "const newCommand = followUp ? null : sessionNewSlashCommand(message);"
       assert_includes APP_JAVASCRIPT, "const modelCommand = followUp ? null : sessionModelSlashCommand(message);"
-      assert_includes APP_JAVASCRIPT, "if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {"
+      assert_includes APP_JAVASCRIPT, "if (!nameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {"
       assert_includes APP_JAVASCRIPT, "if (!followUp) {\n      liveMessageRenderer.resetLiveAssistantTracking();\n      document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n      const optimisticImages = pendingImages.map"
       assert_includes APP_JAVASCRIPT, "const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || \"Attached image\" }));\n      liveMessageRenderer.appendMessage(\"user\", message || `[${imageAttachmentLabel(submittedImageFiles.length)}]`, true, true, new Date(), { optimistic: true, optimisticText: message, images: optimisticImages });\n    }"
       assert_includes APP_JAVASCRIPT, "resetEventPollBackoff();"
       assert_includes APP_JAVASCRIPT, "scheduleNextEventPoll(0);"
-      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"rename\") {\n      if (payload.error) {\n        restoreSubmittedComposerInput();\n        setComposerState(\"error\", payload.error);\n        showStatus(payload.error, true);\n        return;\n      }\n      clearStoredComposerDraft(submittedSession);"
-      assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(payload.name);\n      setComposerState(\"done\", \"Renamed\");\n      showStatus(eventStatusText({ type: \"session_info\", name: payload.name }), true);"
+      assert_includes APP_JAVASCRIPT, "if (nameCommand) {\n      restoreSubmittedComposerInput();\n      setComposerState(\"error\", payload?.error || \"Session name could not be changed\");"
+      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"name\") {\n      if (payload.error) {\n        restoreSubmittedComposerInput();\n        setComposerState(\"error\", payload.error);\n        showStatus(payload.error, true);\n        return;\n      }\n      clearStoredComposerDraft(submittedSession);"
+      assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(payload.name);\n      setComposerState(\"done\", payload.current ? \"Named\" : \"Name set\");"
       assert_includes APP_JAVASCRIPT, "liveMessageRenderer.appendPendingCompactionMessage(new Date());"
       assert_includes APP_JAVASCRIPT, "sidebarController.markSessionCompacting(submittedSession);"
       assert_includes APP_JAVASCRIPT, "if (payload?.command === \"compact\") {\n      sidebarController.refresh().catch(() => {});\n      if (composerState?.dataset.state === \"sending\") setComposerState(\"running\", \"Compacting…\");\n      showStatus(\"Compaction started\", true);\n      return;\n    }"
@@ -6795,11 +6858,12 @@ class AppTest < Minitest::Test
   end
 
   class FakeRpcClient
-    def initialize(calls, events_or_commands = [], session_file = nil)
+    def initialize(calls, events_or_commands = [], session_file = nil, session_name: nil)
       @calls = calls
       @events = events_or_commands
       @commands = events_or_commands
       @session_file = session_file
+      @session_name = session_name
       @model = { "provider" => "anthropic", "id" => "claude-sonnet-4" }
       @thinking_level = "medium"
     end
@@ -6833,9 +6897,10 @@ class AppTest < Minitest::Test
         "success" => true,
         "data" => {
           "sessionFile" => @session_file,
+          "sessionName" => @session_name,
           "model" => @model,
           "thinkingLevel" => @thinking_level
-        }
+        }.compact
       }
     end
 
@@ -6915,6 +6980,8 @@ class AppTest < Minitest::Test
 
     def set_session_name(name)
       @calls << [:set_session_name, name]
+      @session_name = name
+      { "type" => "response", "command" => "set_session_name", "success" => true }
     end
 
     def event_sequence

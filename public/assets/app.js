@@ -11,9 +11,9 @@ import {
   sessionCompactSlashCommand,
   sessionForkSlashCommand,
   sessionModelSlashCommand,
+  sessionNameFromEvent,
   sessionNameSlashCommand,
   sessionNewSlashCommand,
-  sessionTitleFromEvent,
   sessionTreeSlashCommand,
   stableTextHash
 } from "./formatting.js";
@@ -842,8 +842,9 @@ function renderEvent(event) {
     return;
   }
 
-  if (["custom", "custom_message", "session_info", "queue_update", "compaction_start", "compaction_end"].includes(event.type)) {
-    updateSessionHeaderName(sessionTitleFromEvent(event));
+  if (["custom", "custom_message", "session_info", "session_info_changed", "queue_update", "compaction_start", "compaction_end"].includes(event.type)) {
+    updateSessionHeaderName(sessionNameFromEvent(event));
+    if (["session_info", "session_info_changed"].includes(event.type)) sidebarController.refresh().catch(() => {});
     showStatus(eventStatusText(event));
     if (event.type === "compaction_start") {
       liveMessageRenderer.resetLiveCompactionTracking();
@@ -1126,14 +1127,14 @@ async function submitPrompt(event) {
   submittedImageFiles.forEach((file) => formData.append("images[]", file, file.name || "image"));
   if (followUp) formData.set("streaming_behavior", "follow_up");
 
-  const renameCommand = followUp ? null : sessionNameSlashCommand(message);
+  const nameCommand = followUp ? null : sessionNameSlashCommand(message);
   const compactCommand = followUp ? null : sessionCompactSlashCommand(message);
   const forkCommand = followUp ? null : sessionForkSlashCommand(message);
   const treeCommand = followUp ? null : sessionTreeSlashCommand(message);
   const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);
   const newCommand = followUp ? null : sessionNewSlashCommand(message);
   const modelCommand = followUp ? null : sessionModelSlashCommand(message);
-  if (!renameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {
+  if (!nameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {
     if (!followUp) {
       liveMessageRenderer.resetLiveAssistantTracking();
       document.querySelectorAll(".tree-position-banner").forEach((banner) => banner.remove());
@@ -1157,8 +1158,8 @@ async function submitPrompt(event) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
-  setComposerState("sending", renameCommand ? "Renaming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…");
-  showStatus(renameCommand ? "Renaming session…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…", true);
+  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…");
+  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…", true);
   if (cloneCommand || newCommand) showSessionSwitching();
 
   const restoreSubmittedComposerInput = () => {
@@ -1190,6 +1191,12 @@ async function submitPrompt(event) {
     response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
   } catch (_error) {
     if (stopHandlingChangedSubmittedView()) return;
+    if (nameCommand) {
+      restoreSubmittedComposerInput();
+      setComposerState("error", "Session name could not be changed");
+      showStatus("Session name could not be changed", true);
+      return;
+    }
     showPromptFailure("Prompt failed to send");
     return;
   }
@@ -1204,6 +1211,12 @@ async function submitPrompt(event) {
       showStatus("Clone cancelled", true);
       return;
     }
+    if (nameCommand) {
+      restoreSubmittedComposerInput();
+      setComposerState("error", payload?.error || "Session name could not be changed");
+      showStatus(payload?.error || "Session name could not be changed", true);
+      return;
+    }
     showPromptFailure(payload?.error || "Prompt failed to send");
   } else if (response.ok) {
     const payload = await response.json().catch(() => null);
@@ -1214,7 +1227,7 @@ async function submitPrompt(event) {
       showStatus("Clone cancelled", true);
       return;
     }
-    if (payload?.command === "rename") {
+    if (payload?.command === "name") {
       if (payload.error) {
         restoreSubmittedComposerInput();
         setComposerState("error", payload.error);
@@ -1227,8 +1240,8 @@ async function submitPrompt(event) {
         return;
       }
       updateSessionHeaderName(payload.name);
-      setComposerState("done", "Renamed");
-      showStatus(eventStatusText({ type: "session_info", name: payload.name }), true);
+      setComposerState("done", payload.current ? "Named" : "Name set");
+      showStatus(payload.current ? `Session name: “${payload.name}”` : eventStatusText({ type: "session_info", name: payload.name }), true);
       sidebarController.refresh().catch(() => {});
       return;
     }
