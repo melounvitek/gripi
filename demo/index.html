@@ -424,10 +424,45 @@
     .fork-session-status { margin: 0; color: var(--muted); }
     .fork-session-option { width: 100%; justify-self: stretch; display: block; padding: 0.65rem 0.75rem; border: 1px solid var(--border); border-radius: 0.3rem; background: var(--panel-soft); color: var(--text); text-align: left; font-family: var(--sans); font-size: 0.9rem; font-weight: 500; letter-spacing: normal; text-transform: none; overflow-wrap: anywhere; }
     .fork-session-option:hover { background: var(--panel-softer); border-color: var(--accent-line-55); }
-    .fork-session-option.is-current-tree-entry { border-color: #f0c67473; }
-    .tree-session-role { color: var(--muted); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
-    .tree-session-badge { display: inline-block; margin-left: 0.35rem; padding: 0.08rem 0.35rem; border-radius: 0.2rem; background: var(--accent-tint-08); color: var(--accent); font-family: var(--mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; vertical-align: middle; }
+    .tree-session-card { width: min(58rem, 100%); overflow: hidden; }
+    .tree-session-browser, .tree-session-summary, .tree-session-summary form { min-height: 0; display: grid; gap: 0.75rem; }
+    .tree-session-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(10rem, 0.38fr) auto; align-items: end; gap: 0.65rem; }
+    .tree-session-timestamp-toggle { display: flex; align-items: center; gap: 0.35rem; min-height: 2.25rem; color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+    .tree-session-timestamp-toggle input { margin: 0; }
+    .tree-session-status { min-height: 1.2rem; margin: 0; color: var(--muted); font-size: 0.82rem; }
+    .tree-session-status.is-error { color: var(--danger); }
+    .tree-session-list { min-height: 8rem; overflow: auto; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: var(--bg); scrollbar-gutter: stable; }
+    .tree-session-tree, .tree-session-children { margin: 0; padding: 0.3rem; list-style: none; }
+    .tree-session-tree { min-height: 8rem; max-height: min(44dvh, 29rem); overflow: auto; outline: none; }
+    .tree-session-children { position: relative; margin-left: 0.82rem; padding: 0 0 0 1rem; }
+    .tree-session-children::before { content: ""; position: absolute; top: 0; bottom: 0.5rem; left: 0.42rem; border-left: 1px solid var(--accent-line-35); }
+    .tree-session-node { position: relative; outline: none; }
+    .tree-session-node:focus > .tree-session-row { box-shadow: inset 0 0 0 2px var(--focus-ring); }
+    .tree-session-children > .tree-session-node::before { content: ""; position: absolute; top: 1.15rem; left: -0.58rem; width: 0.58rem; border-top: 1px solid var(--accent-line-35); }
+    .tree-session-row { min-width: 0; display: grid; grid-template-columns: 1.7rem minmax(0, 1fr); align-items: stretch; gap: 0.2rem; margin: 0.12rem 0; border: 1px solid transparent; border-radius: 0.3rem; }
+    .tree-session-row.is-active { border-color: var(--accent-line-55); background: var(--accent-tint-08); }
+    .tree-session-row.is-current:not(.is-active) { border-color: #f0c67447; }
+    .tree-session-fold { align-self: center; justify-self: stretch; width: 1.6rem; min-height: 1.6rem; padding: 0; border-color: transparent; font-size: 0.8rem; }
+    .tree-session-fold-spacer { width: 1.6rem; }
+    .tree-session-entry { min-width: 0; width: 100%; justify-self: stretch; display: grid; gap: 0.18rem; padding: 0.48rem 0.55rem; border: 0; background: transparent; color: var(--text); text-align: left; font-family: var(--sans); font-size: 0.86rem; font-weight: 500; letter-spacing: normal; text-transform: none; cursor: pointer; }
+    .tree-session-entry:hover { background: var(--accent-tint-04); color: var(--text); outline: none; }
+    .tree-session-entry-heading { min-width: 0; display: flex; align-items: baseline; gap: 0.45rem; }
+    .tree-session-role { flex: 0 0 auto; color: var(--muted); font-family: var(--mono); font-size: 0.61rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+    .tree-session-text { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tree-session-meta { color: var(--muted); font-family: var(--mono); font-size: 0.67rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tree-session-badge { flex: 0 0 auto; display: inline-block; padding: 0.08rem 0.32rem; border-radius: 0.2rem; background: var(--accent-tint-08); color: var(--accent); font-family: var(--mono); font-size: 0.56rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; }
     .tree-session-badge--current { background: #f0c67421; color: var(--gold); }
+    .tree-session-badge--latest { background: #b5bd681c; color: var(--success); }
+    .tree-session-badge--active { background: var(--accent-tint-14); color: var(--accent-bright); }
+    .tree-session-label-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 0.6rem; }
+    .tree-session-label-actions { display: flex; gap: 0.4rem; }
+    .tree-session-help { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; line-height: 1.45; }
+    .tree-session-help strong { color: var(--copy); }
+    .tree-session-summary-heading { margin: 0; color: var(--copy); }
+    .tree-session-summary-choices { display: grid; gap: 0.45rem; margin: 0; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.35rem; }
+    .tree-session-summary-choices legend { padding: 0 0.3rem; color: var(--muted); font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+    .tree-session-summary-choices label { display: flex; align-items: center; gap: 0.45rem; color: var(--copy); }
+    .tree-session-summary-choices input { margin: 0; }
     .tree-position-banner, .session-sync-banner { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.75rem; padding: 0.7rem 0.8rem; border: 1px solid #f0c67447; border-radius: 0.35rem; background: var(--info-bg); color: var(--text); font-size: 0.85rem; }
     .tree-position-banner strong, .session-sync-banner strong { color: var(--gold); }
     .tree-position-banner span, .session-sync-banner span { color: var(--muted); }
@@ -515,6 +550,11 @@
       .modal-overlay { place-items: end stretch; padding: 0; }
       .modal-card { width: 100%; max-height: min(82dvh, calc(100dvh - env(safe-area-inset-top) - 1rem)); padding: 1rem; padding-bottom: calc(1rem + env(safe-area-inset-bottom)); border-right: 0; border-bottom: 0; border-left: 0; border-radius: 0.5rem 0.5rem 0 0; }
       .modal-header h2 { font-size: 0.85rem; }
+      .tree-session-toolbar, .tree-session-label-form { grid-template-columns: minmax(0, 1fr); }
+      .tree-session-tree { max-height: 38dvh; }
+      .tree-session-label-actions { display: grid; grid-template-columns: 1fr 1fr; }
+      .tree-session-label-actions button { width: 100%; justify-self: stretch; }
+      .tree-session-help { font-size: 0.64rem; }
       .modal-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
       .modal-actions button { width: 100%; justify-self: stretch; padding: 0.8rem 0.75rem; }
       .session-sidebar-content, .conversation-scroll, .command-list { scrollbar-width: none; }

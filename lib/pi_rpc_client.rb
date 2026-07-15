@@ -1,4 +1,5 @@
 require "json"
+require "base64"
 require "open3"
 require "securerandom"
 require "thread"
@@ -81,6 +82,10 @@ class PiRpcClient
 
   def get_messages
     request("get_messages", id: next_id("get_messages"))
+  end
+
+  def get_tree
+    request("get_tree", id: next_id("get_tree"))
   end
 
   def get_session_stats
@@ -173,24 +178,19 @@ class PiRpcClient
     request("clone", id: next_id("clone"))
   end
 
-  def navigate_tree(entry_id)
-    request_id = SecureRandom.hex(8)
-    response = request("prompt", id: next_id("prompt"), message: "/gripi_tree #{entry_id} #{request_id}")
-    return response unless response&.fetch("success", true)
-
-    result = wait_for_status("gripi_tree:#{request_id}")
-    return response.merge("success" => false, "error" => "Tree navigation did not complete") unless result
-
-    response.merge("data" => { "cancelled" => result == "cancelled" })
+  def navigate_tree(entry_id, summary: "none", custom_instructions: nil)
+    payload = { entryId: entry_id, summary: summary }
+    payload[:customInstructions] = custom_instructions unless custom_instructions.to_s.empty?
+    extension_request("gripi_tree_navigate", payload)
   end
 
-  def tree_leaf
-    request_id = SecureRandom.hex(8)
-    response = request("prompt", id: next_id("prompt"), message: "/gripi_tree_leaf #{request_id}")
-    return unless response&.fetch("success", true)
+  def tree_settings
+    extension_request("gripi_tree_settings", {})
+  end
 
-    result = wait_for_status("gripi_tree_leaf:#{request_id}")
-    result == "__root__" ? nil : result
+  def set_tree_label(entry_id, label)
+    normalized_label = label.to_s.strip
+    extension_request("gripi_tree_label", entryId: entry_id, label: normalized_label.empty? ? nil : normalized_label)
   end
 
   def set_session_name(name)
@@ -280,6 +280,24 @@ class PiRpcClient
   end
 
   private
+
+  def extension_request(command, payload)
+    request_id = SecureRandom.hex(8)
+    encoded_payload = Base64.urlsafe_encode64(JSON.generate(payload), padding: false)
+    response = request("prompt", id: next_id("prompt"), message: "/#{command} #{request_id} #{encoded_payload}")
+    return response unless response&.fetch("success", true)
+
+    status = wait_for_status("#{command}:#{request_id}")
+    return response.merge("success" => false, "error" => "Extension command did not complete") unless status
+
+    result = JSON.parse(status)
+    return response.merge("success" => false, "error" => "Extension command returned an invalid response") unless result.is_a?(Hash)
+    return response.merge("success" => false, "error" => result["error"].to_s.empty? ? "Extension command failed" : result["error"]) unless result["ok"] == true
+
+    response.merge("data" => result.reject { |key, _value| key == "ok" })
+  rescue JSON::ParserError
+    response.merge("success" => false, "error" => "Extension command returned an invalid response")
+  end
 
   def wait_for_status(status_key, timeout: 5)
     deadline = @clock.call + timeout

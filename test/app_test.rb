@@ -1554,7 +1554,7 @@ class AppTest < Minitest::Test
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
-        FakeRpcClient.new(calls, [], "tool-call-only-assistant")
+        FakeRpcClient.new(calls, [], "tool-call-only-assistant", tree: native_tree_from_file(path))
       }]
 
       response = Rack::MockRequest.new(Gripi).get(
@@ -1564,14 +1564,47 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      entries = JSON.parse(response.body).fetch("entries")
+      payload = JSON.parse(response.body)
+      entries = payload.fetch("entries")
+      assert_equal "default", payload.fetch("filter")
+      assert_equal false, payload.dig("settings", "branchSummary", "skipPrompt")
+      assert_equal "checkpoint", entries.first.fetch("label")
       assert_equal ["user-1", "assistant-1", "tool-call-only-assistant", "tool-result-1", "user-2"], entries.map { |entry| entry.fetch("entryId") }
-      assert_equal [0, 1, 2, 2, 2], entries.map { |entry| entry.fetch("depth") }
+      assert_equal [0, 1, 2, 2, 1], entries.map { |entry| entry.fetch("depth") }
+      assert_equal [nil, "user-1", "assistant-1", "assistant-1", "user-1"], entries.map { |entry| entry["parentId"] }
       assert_equal ["user", "assistant", "assistant", "toolResult", "user"], entries.map { |entry| entry.fetch("role") }
       assert_equal "Alternate prompt", entries.last.fetch("text")
-      assert_equal "Alternate prompt", entries.last.fetch("editorText")
+      refute entries.last.key?("editorText")
       refute entries[1].key?("editorText")
-      assert_equal [[:start, path], [:tree_leaf]], calls
+      assert_equal [[:start, path], [:get_tree], [:tree_settings]], calls
+    end
+  end
+
+  def test_tree_entries_use_effective_pi_filter_and_summary_settings
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        { type: "message", id: "user-1", parentId: nil, timestamp: "2026-06-13T10:00:00Z", message: { role: "user", content: "Prompt" } },
+        { type: "message", id: "assistant-1", parentId: "user-1", timestamp: "2026-06-13T10:01:00Z", message: { role: "assistant", content: [{ type: "text", text: "Answer" }] } }
+      ])
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls, [], "assistant-1", tree: native_tree_from_file(path), tree_filter_mode: "user-only", branch_summary_skip_prompt: true)
+      }]
+
+      response = Rack::MockRequest.new(Gripi).get(
+        "/sessions/tree_entries",
+        params: { "session" => path },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal "user-only", payload.fetch("filter")
+      assert_equal true, payload.dig("settings", "branchSummary", "skipPrompt")
+      assert_equal ["user-1"], payload.fetch("entries").map { |entry| entry.fetch("entryId") }
+      assert_equal [[:start, path], [:get_tree], [:tree_settings]], calls
     end
   end
 
@@ -1605,7 +1638,7 @@ class AppTest < Minitest::Test
       response = request.get("/sidebar", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_equal [[:start, path], [:navigate_tree, "entry-1"]], calls
+      assert_equal [[:start, path], [:navigate_tree, "entry-1", "none", nil]], calls
     end
   end
 
@@ -1686,6 +1719,7 @@ class AppTest < Minitest::Test
         [:post, "/sessions/model_settings", { "session" => path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }],
         [:post, "/sessions/cycle_thinking", { "session" => path }],
         [:post, "/sessions/tree", { "session" => path, "entry_id" => "user-1" }],
+        [:post, "/sessions/tree/label", { "session" => path, "entry_id" => "user-1", "label" => "checkpoint" }],
         [:post, "/sessions/fork", { "session" => path, "entry_id" => "user-1" }],
         [:post, "/sessions/clone", { "session" => path }],
         [:post, "/compact", { "session" => path }],
@@ -1782,7 +1816,7 @@ class AppTest < Minitest::Test
       assert_includes page_conversation_text, "Viewing earlier tree point"
       refute_includes page_conversation_text, "Later prompt"
       refute_includes page_conversation_text, "Later answer"
-      assert_equal [[:start, path], [:navigate_tree, "assistant-1"]], calls
+      assert_equal [[:start, path], [:navigate_tree, "assistant-1", "none", nil]], calls
     end
   end
 
@@ -1797,7 +1831,7 @@ class AppTest < Minitest::Test
       Gripi.set :sessions_root, dir
       Gripi.set :rpc_client_factory, [->(session_path) {
         calls << [:start, session_path]
-        FakeRpcClient.new(calls, [], "assistant-1")
+        FakeRpcClient.new(calls, [], "assistant-1", tree: native_tree_from_file(path))
       }]
 
       response = Rack::MockRequest.new(Gripi).get(
@@ -1810,7 +1844,7 @@ class AppTest < Minitest::Test
       entries = JSON.parse(response.body).fetch("entries")
       assert_equal [false, true, false], entries.map { |entry| entry.fetch("current") }
       assert_equal [false, false, true], entries.map { |entry| entry.fetch("latest") }
-      assert_equal [[:start, path], [:tree_leaf]], calls
+      assert_equal [[:start, path], [:get_tree], [:tree_settings]], calls
     end
   end
 
@@ -1834,7 +1868,114 @@ class AppTest < Minitest::Test
       payload = JSON.parse(response.body)
       assert_equal path, payload.fetch("session")
       assert_includes payload.fetch("redirect"), Rack::Utils.escape(path)
-      assert_equal [[:start, path], [:navigate_tree, "entry-1"]], calls
+      assert_equal "Restored prompt", payload.fetch("editorText")
+      assert_equal [[:start, path], [:navigate_tree, "entry-1", "none", nil]], calls
+    end
+  end
+
+  def test_navigates_with_default_native_branch_summary
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/sessions/tree",
+        params: { "session" => path, "entry_id" => "entry-1", "summary_mode" => "default" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[:start, path], [:navigate_tree, "entry-1", "default", nil]], calls
+    end
+  end
+
+  def test_navigates_with_custom_native_branch_summary
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/sessions/tree",
+        params: { "session" => path, "entry_id" => "entry-1", "summary_mode" => "custom", "custom_instructions" => " Focus on tests " },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[:start, path], [:navigate_tree, "entry-1", "custom", "Focus on tests"]], calls
+    end
+  end
+
+  def test_rejects_invalid_or_oversized_tree_mutations_before_rpc
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) { calls << [:start, session_path]; FakeRpcClient.new(calls) }]
+      request = Rack::MockRequest.new(Gripi)
+      json = { "HTTP_ACCEPT" => "application/json" }
+
+      responses = [
+        request.post("/sessions/tree", params: { "session" => path, "entry_id" => "entry-1", "summary_mode" => "unexpected" }, **json),
+        request.post("/sessions/tree", params: { "session" => path, "entry_id" => "entry-1", "summary_mode" => "custom", "custom_instructions" => " " }, **json),
+        request.post("/sessions/tree", params: { "session" => path, "entry_id" => "x" * 1_025 }, **json),
+        request.post("/sessions/tree", params: { "session" => path, "entry_id" => "entry-1", "summary_mode" => "custom", "custom_instructions" => "x" * (64 * 1_024 + 1) }, **json),
+        request.post("/sessions/tree/label", params: { "session" => path, "entry_id" => "x" * 1_025, "label" => "label" }, **json),
+        request.post("/sessions/tree/label", params: { "session" => path, "entry_id" => "entry-1", "label" => "é" * 2_049 }, **json)
+      ]
+
+      assert_equal [400] * responses.length, responses.map(&:status)
+      assert_empty calls
+    end
+  end
+
+  def test_sets_and_clears_native_tree_labels
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+      request = Rack::MockRequest.new(Gripi)
+
+      set_response = request.post("/sessions/tree/label", params: { "session" => path, "entry_id" => "entry-1", "label" => " checkpoint " }, "HTTP_ACCEPT" => "application/json")
+      clear_response = request.post("/sessions/tree/label", params: { "session" => path, "entry_id" => "entry-1", "label" => "" }, "HTTP_ACCEPT" => "application/json")
+
+      assert_equal 200, set_response.status
+      assert_equal "checkpoint", JSON.parse(set_response.body).fetch("label")
+      assert_equal 200, clear_response.status
+      assert_nil JSON.parse(clear_response.body).fetch("label")
+      assert_equal [[:start, path], [:set_tree_label, "entry-1", "checkpoint"], [:set_tree_label, "entry-1", nil]], calls
+    end
+  end
+
+  def test_rejects_tree_mutations_while_session_is_busy
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:busy?) { true }
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) { calls << [:start, session_path]; client }]
+      request = Rack::MockRequest.new(Gripi)
+
+      navigation = request.post("/sessions/tree", params: { "session" => path, "entry_id" => "entry-1" }, "HTTP_ACCEPT" => "application/json")
+      label = request.post("/sessions/tree/label", params: { "session" => path, "entry_id" => "entry-1", "label" => "checkpoint" }, "HTTP_ACCEPT" => "application/json")
+
+      assert_equal 409, navigation.status
+      assert_equal 409, label.status
+      assert_equal [[:start, path]], calls
     end
   end
 
@@ -2282,8 +2423,9 @@ class AppTest < Minitest::Test
           { "name" => "review", "source" => "skill", "description" => "Review code" },
           { "name" => "sessions", "source" => "extension", "description" => "Switch, rename, or delete project sessions" },
           { "name" => "rename", "source" => "extension", "description" => "Rename the current session" },
-          { "name" => "gripi_tree", "source" => "extension", "description" => "Internal bridge" },
-          { "name" => "gripi_tree_leaf", "source" => "extension", "description" => "Internal bridge" }
+          { "name" => "gripi_tree_navigate", "source" => "extension", "description" => "Internal bridge" },
+          { "name" => "gripi_tree_settings", "source" => "extension", "description" => "Internal bridge" },
+          { "name" => "gripi_tree_label", "source" => "extension", "description" => "Internal bridge" }
         ])
       }]
 
@@ -2302,8 +2444,9 @@ class AppTest < Minitest::Test
       assert_includes response.body, "/name"
       assert_includes response.body, "/sessions"
       assert_includes response.body, "/rename"
-      refute_includes response.body, "gripi_tree"
-      refute_includes response.body, "gripi_tree_leaf"
+      refute_includes response.body, "gripi_tree_navigate"
+      refute_includes response.body, "gripi_tree_settings"
+      refute_includes response.body, "gripi_tree_label"
       refute_includes response.body, "command-filter"
       assert_equal [[ :start, path ], [ :get_commands ]], calls
     end
@@ -7061,12 +7204,14 @@ class AppTest < Minitest::Test
       model_settings_response = Rack::MockRequest.new(Gripi).get("/sessions/model_settings", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
       apply_model_response = Rack::MockRequest.new(Gripi).post("/sessions/model_settings", params: { "session" => other_path, "provider" => "openai", "model" => "gpt-5", "thinking" => "high" }, "HTTP_COOKIE" => own_cookie)
       cycle_thinking_response = Rack::MockRequest.new(Gripi).post("/sessions/cycle_thinking", params: { "session" => other_path }, "HTTP_COOKIE" => own_cookie)
+      tree_label_response = Rack::MockRequest.new(Gripi).post("/sessions/tree/label", params: { "session" => other_path, "entry_id" => "entry-1", "label" => "checkpoint" }, "HTTP_COOKIE" => own_cookie)
 
       assert_equal 404, status_response.status
       assert_equal 404, prompt_response.status
       assert_equal 404, model_settings_response.status
       assert_equal 404, apply_model_response.status
       assert_equal 404, cycle_thinking_response.status
+      assert_equal 404, tree_label_response.status
       assert_empty calls
     end
   end
@@ -7254,12 +7399,15 @@ class AppTest < Minitest::Test
   end
 
   class FakeRpcClient
-    def initialize(calls, events_or_commands = [], session_file = nil, session_name: nil)
+    def initialize(calls, events_or_commands = [], session_file = nil, session_name: nil, tree: [], tree_filter_mode: "default", branch_summary_skip_prompt: false)
       @calls = calls
       @events = events_or_commands
       @commands = events_or_commands
       @session_file = session_file
       @session_name = session_name
+      @tree = tree
+      @tree_filter_mode = tree_filter_mode
+      @branch_summary_skip_prompt = branch_summary_skip_prompt
       @model = { "provider" => "anthropic", "id" => "claude-sonnet-4" }
       @thinking_level = "medium"
     end
@@ -7278,6 +7426,16 @@ class AppTest < Minitest::Test
 
     def get_messages
       @calls << [:get_messages]
+    end
+
+    def get_tree
+      @calls << [:get_tree]
+      { "success" => true, "data" => { "tree" => @tree, "leafId" => @session_file } }
+    end
+
+    def tree_settings
+      @calls << [:tree_settings]
+      { "success" => true, "data" => { "settings" => { "treeFilterMode" => @tree_filter_mode, "branchSummary" => { "skipPrompt" => @branch_summary_skip_prompt } } } }
     end
 
     def new_session(parent_session = nil)
@@ -7355,15 +7513,15 @@ class AppTest < Minitest::Test
       { "type" => "response", "command" => "clone", "success" => true, "data" => { "cancelled" => false } }
     end
 
-    def navigate_tree(entry_id)
-      @calls << [:navigate_tree, entry_id]
+    def navigate_tree(entry_id, summary: "none", custom_instructions: nil)
+      @calls << [:navigate_tree, entry_id, summary, custom_instructions]
       @session_file = entry_id
-      { "type" => "response", "command" => "prompt", "success" => true, "data" => { "cancelled" => false } }
+      { "type" => "response", "command" => "prompt", "success" => true, "data" => { "cancelled" => false, "editorText" => "Restored prompt" } }
     end
 
-    def tree_leaf
-      @calls << [:tree_leaf]
-      @session_file
+    def set_tree_label(entry_id, label)
+      @calls << [:set_tree_label, entry_id, label]
+      { "success" => true, "data" => {} }
     end
 
     def abort
@@ -7393,6 +7551,33 @@ class AppTest < Minitest::Test
     def close
       @calls << [:close]
     end
+  end
+
+  def native_tree_from_file(path)
+    entries = File.readlines(path, chomp: true).filter_map do |line|
+      entry = JSON.parse(line)
+      entry unless entry["type"] == "session"
+    end
+    labels = {}
+    entries.each do |entry|
+      next unless entry["type"] == "label"
+
+      entry["label"].nil? ? labels.delete(entry["targetId"]) : labels[entry["targetId"]] = [entry["label"], entry["timestamp"]]
+    end
+    nodes = entries.to_h do |entry|
+      label, label_timestamp = labels[entry["id"]]
+      node = { "entry" => entry, "children" => [] }
+      node["label"] = label if label
+      node["labelTimestamp"] = label_timestamp if label_timestamp
+      [entry["id"], node]
+    end
+    roots = []
+    entries.each do |entry|
+      node = nodes.fetch(entry["id"])
+      parent = nodes[entry["parentId"]]
+      parent ? parent.fetch("children") << node : roots << node
+    end
+    roots
   end
 
   def write_session(root)

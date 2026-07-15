@@ -39,6 +39,7 @@ import { LiveMessageRenderer } from "./live_message_renderer.js";
 import { ServerMarkdownRenderer } from "./server_markdown_renderer.js";
 import { activateToolOutputRegion, enhanceMarkdownCodeBlocks } from "./dom.js";
 import { eventPollingDelay } from "./polling.js";
+import { TreeSessionController } from "./tree_session_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window);
 const browserAccessController = new BrowserAccessRequestController(document);
@@ -111,6 +112,25 @@ const currentSessionFindController = new CurrentSessionFindController(document, 
 const liveMessageParser = new LiveMessageParser(document.body.dataset.homeDir || "");
 const serverMarkdownRenderer = new ServerMarkdownRenderer(document, conversationController);
 const liveMessageRenderer = new LiveMessageRenderer(document, conversationController, liveMessageParser, serverMarkdownRenderer);
+const treeSessionController = new TreeSessionController(document, window, {
+  currentSessionPath: () => currentSessionPath(),
+  addSessionViewFormParams: (formData) => addSessionViewFormParams(formData),
+  openModal: (modal) => openModal(modal),
+  closeModal: (modal) => closeModal(modal),
+  showSessionSwitching: () => showSessionSwitching(),
+  hideSessionSwitching: () => hideSessionSwitching(),
+  navigate: async (payload) => {
+    if (promptTextarea && !promptTextarea.value && payload?.editorText !== undefined) {
+      promptTextarea.value = payload.editorText;
+      resizePromptTextarea();
+    }
+    await refreshCurrentSessionPreservingComposer();
+    setComposerState("idle", "", { focus: false });
+    syncComposerFocus();
+    showStatus("Tree position selected", true);
+    scheduleNextEventPoll(0);
+  }
+});
 
 function bindSessionDom() {
   conversationPanel = document.querySelector(".conversation-panel");
@@ -1629,10 +1649,15 @@ function replaceNewSessionModalHtml(html) {
 }
 
 function replaceForkSessionModalHtml(html) {
-  const currentModal = document.querySelector('[data-modal="fork-session-modal"]');
-  if (!html || !currentModal) return;
+  if (!html) return;
 
-  currentModal.outerHTML = html;
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  ["fork-session-modal", "tree-session-modal"].forEach((name) => {
+    const currentModal = document.querySelector(`[data-modal="${name}"]`);
+    const replacement = template.content.querySelector(`[data-modal="${name}"]`);
+    if (currentModal && replacement) currentModal.replaceWith(replacement.cloneNode(true));
+  });
 }
 
 function showSessionSwitching() {
@@ -1886,68 +1911,6 @@ async function loadForkMessages(modal) {
   }
 }
 
-function setTreeSessionStatus(modal, text) {
-  const list = modal?.querySelector("[data-tree-session-list]");
-  if (!list) return;
-  list.replaceChildren();
-  delete list.dataset.loaded;
-  const status = document.createElement("p");
-  status.className = "fork-session-status";
-  status.dataset.treeSessionStatus = "";
-  status.textContent = text;
-  list.append(status);
-}
-
-async function loadTreeEntries(modal) {
-  const list = modal?.querySelector("[data-tree-session-list]");
-  const url = list?.dataset.treeEntriesUrl;
-  if (!list || !url || list.dataset.loaded === "true" || list.dataset.loading === "true") return;
-
-  list.dataset.loading = "true";
-  setTreeSessionStatus(modal, "Loading session tree…");
-  try {
-    const response = await fetch(url, { headers: { "Accept": "application/json" } });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload) throw new Error("tree entries failed");
-    const entries = Array.isArray(payload.entries) ? payload.entries : [];
-    list.replaceChildren();
-    if (entries.length === 0) {
-      setTreeSessionStatus(modal, "No session tree entries are available.");
-      return;
-    }
-    entries.forEach((entry) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "fork-session-option";
-      button.classList.toggle("is-current-tree-entry", !!entry.current);
-      button.dataset.treeEntryId = entry.entryId || entry.entry_id || "";
-      if (entry.editorText !== undefined || entry.editor_text !== undefined) button.dataset.treeEditorText = entry.editorText ?? entry.editor_text ?? "";
-
-      const role = document.createElement("span");
-      role.className = "tree-session-role";
-      role.textContent = entry.role || entry.type || "entry";
-      const text = document.createElement("span");
-      text.textContent = ` ${entry.text || "Untitled entry"}`;
-      button.append(role, text);
-      if (entry.current) button.append(treeSessionBadge("Current", "current"));
-      if (entry.latest) button.append(treeSessionBadge("Latest", "latest"));
-      list.append(button);
-    });
-    list.dataset.loaded = "true";
-  } catch (_error) {
-    setTreeSessionStatus(modal, "Could not load session tree.");
-  } finally {
-    delete list.dataset.loading;
-  }
-}
-
-function treeSessionBadge(label, kind) {
-  const badge = document.createElement("span");
-  badge.className = `tree-session-badge tree-session-badge--${kind}`;
-  badge.textContent = label;
-  return badge;
-}
-
 function addSessionViewFormParams(formData) {
   const project = new URLSearchParams(window.location.search).get("project");
   if (project) formData.set("project", project);
@@ -1973,9 +1936,7 @@ function openForkSessionModal() {
 }
 
 function openTreeSessionModal() {
-  const modal = document.querySelector('[data-modal="tree-session-modal"]');
-  openModal(modal);
-  loadTreeEntries(modal).catch(() => {});
+  treeSessionController.open();
 }
 
 document.addEventListener("click", (event) => {
@@ -2061,50 +2022,6 @@ document.addEventListener("click", (event) => {
         if (errorOutput) {
           errorOutput.textContent = error.message;
           errorOutput.hidden = false;
-        }
-      });
-    return;
-  }
-
-  const treeOption = event.target.closest("[data-tree-entry-id]");
-  if (treeOption) {
-    event.preventDefault();
-    const modal = treeOption.closest("[data-modal]");
-    const originalTreeText = treeOption.textContent;
-    const formData = new FormData();
-    formData.set("session", currentSessionPath());
-    formData.set("entry_id", treeOption.dataset.treeEntryId);
-    addSessionViewFormParams(formData);
-    treeOption.disabled = true;
-    treeOption.textContent = "Switching…";
-    fetch("/sessions/tree", { method: "POST", body: formData, headers: { "Accept": "application/json" } })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => null);
-        if (!response.ok || !payload) throw new Error("tree failed");
-        if (payload.cancelled) {
-          treeOption.disabled = false;
-          treeOption.textContent = originalTreeText;
-          if (modal) setTreeSessionStatus(modal, "Tree navigation cancelled.");
-          return;
-        }
-        closeModal(modal);
-        if (treeOption.dataset.treeEditorText !== undefined && promptTextarea) {
-          promptTextarea.value = treeOption.dataset.treeEditorText;
-          resizePromptTextarea();
-        }
-        await refreshCurrentSessionPreservingComposer();
-        setComposerState("idle", "", { focus: false });
-        syncComposerFocus();
-        showStatus("Tree position selected", true);
-        scheduleNextEventPoll(0);
-      })
-      .catch(() => {
-        treeOption.disabled = false;
-        treeOption.textContent = originalTreeText;
-        if (modal) {
-          setTreeSessionStatus(modal, "Could not switch to this tree entry.");
-        } else {
-          showStatus("Could not switch session tree", true);
         }
       });
     return;

@@ -4,17 +4,25 @@ require_relative "../prompts/uploaded_images"
 require_relative "../rpc/branch_session"
 require_relative "../rpc/command_catalog"
 require_relative "../rpc/start_new_session"
+require_relative "../rpc/tree_projection"
 require_relative "../pi_session_store"
 
 module Web
   module SessionActionRoutes
     CWD_SUGGESTION_LIMIT = 30
+    TREE_ENTRY_ID_BYTES = 1_024
+    TREE_LABEL_BYTES = 4_096
+    TREE_CUSTOM_INSTRUCTIONS_BYTES = 64 * 1_024
 
     module Helpers
       private
 
       def json_request?
         request.env["HTTP_ACCEPT"].to_s.include?("application/json")
+      end
+
+      def halt_if_tree_value_too_long(value, byte_limit, message)
+        halt 400, message if value.to_s.bytesize > byte_limit
       end
 
       def redirect_to_new_session(new_session_path, command: nil)
@@ -406,24 +414,66 @@ module Web
 
       app.get "/sessions/tree_entries" do
         session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
-        current_leaf_id = with_synchronized_rpc_client(session_path) { |client| client.tree_leaf }
-        store = PiSessionStore.new(root: settings.sessions_root)
-        entries = store.tree_entries(session_path, current_leaf_id: current_leaf_id)
+        tree_response, settings_response = with_synchronized_rpc_client(session_path) do |client|
+          [client.get_tree, client.tree_settings]
+        end
+        halt_failed_rpc_setting(tree_response)
+        halt_failed_rpc_setting(settings_response)
+        tree_data = response_data(tree_response)
+        settings_data = response_data(settings_response)
+        tree_settings = settings_data["settings"] if settings_data.is_a?(Hash)
+        unless tree_data.is_a?(Hash) && tree_data["tree"].is_a?(Array) && tree_settings.is_a?(Hash)
+          status 502
+          content_type :json
+          halt JSON.generate(error: "Could not load session tree")
+        end
+
+        filter_mode = params["filter"].to_s
+        filter_mode = tree_settings["treeFilterMode"].to_s if filter_mode.empty?
+        halt 400, "Invalid tree filter" unless Rpc::TreeProjection::FILTER_MODES.include?(filter_mode)
+        projection = Rpc::TreeProjection.call(tree_data, filter_mode: filter_mode)
         content_type :json
-        JSON.generate(entries: entries)
+        JSON.generate(projection.merge(settings: tree_settings, filter: filter_mode))
       end
 
       app.post "/sessions/tree" do
         session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         entry_id = params.fetch("entry_id").to_s
         halt 400, "Tree entry cannot be empty" if entry_id.empty?
+        halt_if_tree_value_too_long(entry_id, TREE_ENTRY_ID_BYTES, "Tree entry id is too long")
+        summary = (params["summary_mode"] || params["summary"] || "none").to_s
+        halt 400, "Invalid summary mode" unless %w[none default custom].include?(summary)
+        custom_instructions = (params["custom_instructions"] || params["instructions"]).to_s.strip
+        halt 400, "Custom summary instructions cannot be empty" if summary == "custom" && custom_instructions.empty?
+        halt_if_tree_value_too_long(custom_instructions, TREE_CUSTOM_INSTRUCTIONS_BYTES, "Custom summary instructions are too long")
 
-        response = with_synchronized_rpc_client(session_path) { |client| client.navigate_tree(entry_id) }
+        response = with_synchronized_rpc_client(session_path) do |client|
+          halt_if_rpc_session_busy(session_path, client)
+          client.navigate_tree(entry_id, summary: summary, custom_instructions: summary == "custom" ? custom_instructions : nil)
+        end
         halt_failed_rpc_setting(response)
         data = response_data(response)
         payload = { session: session_path, redirect: session_redirect_path(session_path), cancelled: data.is_a?(Hash) ? data["cancelled"] || false : false }
+        payload[:editorText] = data["editorText"] if data.is_a?(Hash) && data["editorText"].is_a?(String)
         content_type :json
         JSON.generate(payload)
+      end
+
+      app.post "/sessions/tree/label" do
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
+        entry_id = params.fetch("entry_id").to_s
+        halt 400, "Tree entry cannot be empty" if entry_id.empty?
+        halt_if_tree_value_too_long(entry_id, TREE_ENTRY_ID_BYTES, "Tree entry id is too long")
+        label = params["label"].to_s.strip
+        halt_if_tree_value_too_long(label, TREE_LABEL_BYTES, "Label is too long")
+
+        response = with_synchronized_rpc_client(session_path) do |client|
+          halt_if_rpc_session_busy(session_path, client)
+          client.set_tree_label(entry_id, label.empty? ? nil : label)
+        end
+        halt_failed_rpc_setting(response)
+        content_type :json
+        JSON.generate(entryId: entry_id, label: label.empty? ? nil : label)
       end
 
       app.post "/sessions/fork" do

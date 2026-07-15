@@ -97,27 +97,6 @@ class PiSessionStore
     {}
   end
 
-  def tree_entries(path, current_leaf_id: nil)
-    persisted_latest_leaf_id = latest_leaf_id(path)
-    entries = read_entries(path).select { |entry| tree_node_entry?(entry) }
-    ids = entries.filter_map { |entry| entry["id"] }
-    children_by_parent = Hash.new { |hash, key| hash[key] = [] }
-    roots = []
-
-    entries.each do |entry|
-      parent_id = entry["parentId"]
-      if parent_id && ids.include?(parent_id)
-        children_by_parent[parent_id] << entry
-      else
-        roots << entry
-      end
-    end
-
-    flattened = []
-    visit_tree_entries(roots, children_by_parent, flattened, 0, current_leaf_id, persisted_latest_leaf_id)
-    flattened
-  end
-
   def latest_leaf_id(path)
     latest_leaf_id_from_entries(read_entries(path))
   end
@@ -307,93 +286,8 @@ class PiSessionStore
     entry["id"] && entry["type"] != "session"
   end
 
-  def tree_entry_visible?(entry, current_leaf_id)
-    return false if ["label", "custom", "model_change", "thinking_level_change", "session_info", "leaf"].include?(entry["type"])
-    return false if entry["id"] != current_leaf_id && assistant_tool_call_only_tree_entry?(entry)
-
-    true
-  end
-
-  def assistant_tool_call_only_tree_entry?(entry)
-    return false unless entry["type"] == "message" && entry.dig("message", "role") == "assistant"
-
-    message = entry["message"] || {}
-    return false if assistant_stop_reason_visible?(message["stopReason"])
-
-    !assistant_tree_entry_has_text_content?(message["content"])
-  end
-
-  def assistant_tree_entry_has_text_content?(content)
-    return content.strip.length.positive? if content.is_a?(String)
-    return false unless content.is_a?(Array)
-
-    content.any? do |part|
-      part.is_a?(Hash) && part["type"] == "text" && part["text"].to_s.strip.length.positive?
-    end
-  end
-
-  def assistant_stop_reason_visible?(stop_reason)
-    stop_reason && !["stop", "toolUse"].include?(stop_reason)
-  end
-
-  def visit_tree_entries(entries, children_by_parent, flattened, depth, current_leaf_id, latest_leaf_id)
-    entries.each do |entry|
-      flattened << tree_entry_payload(entry, depth, current_leaf_id, latest_leaf_id) if tree_entry_visible?(entry, current_leaf_id)
-      visit_tree_entries(children_by_parent[entry["id"]], children_by_parent, flattened, depth + 1, current_leaf_id, latest_leaf_id)
-    end
-  end
-
-  def tree_entry_payload(entry, depth, current_leaf_id, latest_leaf_id)
-    text = tree_entry_text(entry)
-    payload = {
-      entryId: entry["id"],
-      parentId: entry["parentId"],
-      depth: depth,
-      type: entry["type"],
-      role: tree_entry_role(entry),
-      text: response_preview(text),
-      timestamp: entry["timestamp"],
-      current: entry["id"] == current_leaf_id,
-      latest: entry["id"] == latest_leaf_id
-    }
-    payload[:editorText] = text if tree_entry_prefills_editor?(entry)
-    payload
-  end
-
   def leaf_id_after_entry(entry)
     entry["type"] == "leaf" ? entry["targetId"] : entry["id"]
-  end
-
-  def tree_entry_prefills_editor?(entry)
-    entry["type"] == "custom_message" || (entry["type"] == "message" && entry.dig("message", "role") == "user")
-  end
-
-  def tree_entry_role(entry)
-    case entry["type"]
-    when "message"
-      entry.dig("message", "role") || "message"
-    when "custom_message"
-      "custom"
-    when "branch_summary"
-      "summary"
-    when "compaction"
-      "compact"
-    else
-      entry["type"]
-    end
-  end
-
-  def tree_entry_text(entry)
-    case entry["type"]
-    when "message"
-      content_text(entry.dig("message", "content"))
-    when "custom_message"
-      content_text(entry["content"])
-    when "branch_summary", "compaction"
-      entry["summary"]
-    else
-      ""
-    end
   end
 
   def apply_usage(status, message)

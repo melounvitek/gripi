@@ -292,7 +292,9 @@ module Sessions
 
     def self.active_session_tree_leaf(rpc_clients, session_path)
       rpc_clients.with_active_client(session_path) do |client|
-        client.tree_leaf if client.respond_to?(:tree_leaf)
+        response = client.get_tree
+        data = response["data"] if response.is_a?(Hash) && response["success"] == true
+        data["leafId"] if data.is_a?(Hash)
       end
     end
   end
