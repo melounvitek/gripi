@@ -109,7 +109,8 @@ class Gripi < Sinatra::Base
   set :gateway_instance_id, SecureRandom.hex(16)
   set :gateway_update_coordinator, GatewayUpdateCoordinator.new(
     updater: GatewayUpdater.new(root),
-    restarter: -> { RequestGatewayRestart.call(Gripi.settings.rpc_client_registry) }
+    restarter: -> { RequestGatewayRestart.call(Gripi.settings.rpc_client_registry) },
+    active_session_count: -> { Gripi.settings.rpc_client_registry&.busy_session_count.to_i }
   )
   set :pending_session_registry, Rpc::PendingSessionRegistry.new
   set :rpc_idle_timeout_seconds, ENV.fetch("GRIPI_RPC_IDLE_TIMEOUT_SECONDS", "1800").to_i

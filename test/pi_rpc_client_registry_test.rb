@@ -147,6 +147,21 @@ class PiRpcClientRegistryTest < Minitest::Test
     assert_equal [:close], calls
   end
 
+  def test_counts_busy_sessions
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+    first = FakeClient.new([])
+    second = FakeClient.new([])
+    registry.register("/tmp/first.jsonl", first)
+    registry.register("/tmp/second.jsonl", second)
+
+    assert_equal 0, registry.busy_session_count
+    first.busy = true
+    second.busy = true
+    assert_equal 2, registry.busy_session_count
+    first.busy = false
+    assert_equal 1, registry.busy_session_count
+  end
+
   def test_reports_client_busy_state
     calls = []
     registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })

@@ -70,6 +70,12 @@ class PiRpcClientRegistry
     client&.respond_to?(:busy?) ? client.busy? : false
   end
 
+  def busy_session_count
+    @mutex.synchronize do
+      @clients.count { |_session_path, entry| entry.client.respond_to?(:busy?) && entry.client.busy? }
+    end
+  end
+
   def busy_since(session_path)
     client = client_for(session_path)
     client&.respond_to?(:busy_since) ? client.busy_since : nil

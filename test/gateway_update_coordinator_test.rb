@@ -49,6 +49,132 @@ class GatewayUpdateCoordinatorTest < Minitest::Test
     release_update << true if release_update
   end
 
+  def test_waits_for_busy_sessions_before_updating
+    active_session_count = 2
+    sleep_started = Queue.new
+    release_sleep = Queue.new
+    updater = FakeUpdater.new(nil, -> { status(:current) })
+    coordinator = GatewayUpdateCoordinator.new(
+      updater:,
+      restarter: -> {},
+      active_session_count: -> { active_session_count },
+      sleeper: ->(delay) do
+        if delay == 1
+          sleep_started << true
+          release_sleep.pop
+        end
+      end
+    )
+
+    initial = coordinator.start
+    sleep_started.pop
+
+    assert_equal :waiting, initial.state
+    assert_equal 2, initial.active_session_count
+    assert_equal "Waiting for 2 active Pi sessions to finish…", initial.message
+    assert_equal 0, updater.update_calls.to_i
+
+    active_session_count = 0
+    release_sleep << true
+    wait_until { updater.update_calls == 1 }
+  ensure
+    release_sleep << true if release_sleep&.empty?
+  end
+
+  def test_waits_again_when_work_starts_during_the_update
+    active_session_count = 0
+    update_started = Queue.new
+    release_update = Queue.new
+    wait_started = Queue.new
+    release_wait = Queue.new
+    restarted = Queue.new
+    result = GatewayUpdater::UpdateResult.new(
+      state: :updated,
+      status: status(:available, current_sha: "old", target_sha: "new"),
+      message: "Updated to new"
+    )
+    updater = FakeUpdater.new(nil, lambda {
+      update_started << true
+      release_update.pop
+      result
+    })
+    coordinator = GatewayUpdateCoordinator.new(
+      updater:,
+      restarter: -> { restarted << true },
+      active_session_count: -> { active_session_count },
+      restart_delay: 0,
+      sleeper: ->(delay) do
+        if delay == 1
+          wait_started << true
+          release_wait.pop
+        end
+      end
+    )
+
+    coordinator.start
+    update_started.pop
+    active_session_count = 1
+    release_update << true
+    wait_started.pop
+
+    snapshot = coordinator.status
+    assert_equal :waiting, snapshot.state
+    assert_equal 1, snapshot.active_session_count
+    assert restarted.empty?
+
+    active_session_count = 0
+    release_wait << true
+    wait_until { !restarted.empty? }
+  ensure
+    release_update << true if release_update&.empty?
+    release_wait << true if release_wait&.empty?
+  end
+
+  def test_waits_when_work_starts_during_the_restart_delay
+    active_session_count = 0
+    delay_started = Queue.new
+    release_delay = Queue.new
+    wait_started = Queue.new
+    release_wait = Queue.new
+    restarted = Queue.new
+    result = GatewayUpdater::UpdateResult.new(
+      state: :updated,
+      status: status(:available, current_sha: "old", target_sha: "new")
+    )
+    updater = FakeUpdater.new(nil, -> { result })
+    coordinator = GatewayUpdateCoordinator.new(
+      updater:,
+      restarter: -> { restarted << true },
+      active_session_count: -> { active_session_count },
+      restart_delay: 0.25,
+      sleeper: ->(delay) do
+        if delay == 0.25
+          delay_started << true
+          release_delay.pop
+        else
+          wait_started << true
+          release_wait.pop
+        end
+      end
+    )
+
+    coordinator.start
+    delay_started.pop
+    active_session_count = 1
+    release_delay << true
+    wait_started.pop
+
+    assert_equal :waiting, coordinator.status.state
+    assert restarted.empty?
+
+    active_session_count = 0
+    release_wait << true
+    wait_until { !restarted.empty? }
+  ensure
+    release_delay << true if release_delay&.empty?
+    release_wait << true if release_wait&.empty?
+  end
+
   def test_exposes_restarting_before_waiting_and_invoking_the_restarter
     sleep_started = Queue.new
     release_sleep = Queue.new

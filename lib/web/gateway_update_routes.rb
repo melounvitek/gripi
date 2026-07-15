@@ -14,7 +14,8 @@ module Web
           currentSha: snapshot.current_sha,
           targetSha: snapshot.target_sha,
           behindCount: snapshot.behind_count,
-          summary: snapshot.summary
+          summary: snapshot.summary,
+          activeSessionCount: snapshot.active_session_count
         )
       end
     end

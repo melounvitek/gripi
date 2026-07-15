@@ -1,3 +1,5 @@
+const PROGRESS_STATES = ["waiting", "updating", "restarting"];
+
 export class GatewayUpdateController {
   constructor(document, window, BroadcastChannelClass = globalThis.BroadcastChannel) {
     this.document = document;
@@ -34,7 +36,7 @@ export class GatewayUpdateController {
     if (!control || !button || !message) return;
 
     const available = payload.state === "available";
-    const progressing = ["updating", "restarting"].includes(payload.state);
+    const progressing = PROGRESS_STATES.includes(payload.state);
     const failed = ["error", "dependency_failed", "rollback_failed"].includes(payload.state);
     const retryable = failed && payload.state !== "rollback_failed";
     const blocked = payload.state === "blocked";
@@ -58,14 +60,14 @@ export class GatewayUpdateController {
       this.navigate(payload.currentSha || payload.instanceId);
       return payload;
     }
-    if (this.inProgress && !["updating", "restarting"].includes(payload.state)) this.inProgress = false;
+    if (this.inProgress && !PROGRESS_STATES.includes(payload.state)) this.inProgress = false;
     this.apply(payload);
     return payload;
   }
 
   async start() {
     const target = this.state?.targetSha || "the latest version";
-    if (!this.window.confirm(`Update gateway to ${target}? Active Pi work will be interrupted while the gateway restarts.`)) return;
+    if (!this.window.confirm(`Update gateway to ${target}? The gateway will wait for active Pi work before updating and restarting.`)) return;
 
     this.inProgress = true;
     this.channel?.postMessage({ type: "updating" });

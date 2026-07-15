@@ -8,7 +8,7 @@ require "fileutils"
 require_relative "../app"
 
 class GatewayUpdateRoutesTest < Minitest::Test
-  Snapshot = Struct.new(:state, :reason, :message, :current_sha, :target_sha, :behind_count, :summary, keyword_init: true)
+  Snapshot = Struct.new(:state, :reason, :message, :current_sha, :target_sha, :behind_count, :summary, :active_session_count, keyword_init: true)
 
   class FakeCoordinator
     attr_accessor :snapshot
@@ -70,11 +70,25 @@ class GatewayUpdateRoutesTest < Minitest::Test
         "currentSha" => "current1",
         "targetSha" => "target22",
         "behindCount" => 2,
-        "summary" => "target22 Improve updates"
+        "summary" => "target22 Improve updates",
+        "activeSessionCount" => nil
       },
       JSON.parse(response.body)
     )
     assert_equal 1, @coordinator.status_calls
+  end
+
+  def test_get_reports_sessions_delaying_an_update
+    @coordinator.snapshot = Snapshot.new(
+      state: :waiting,
+      message: "Waiting for 2 active Pi sessions to finish…",
+      active_session_count: 2
+    )
+
+    payload = JSON.parse(@request.get("/gateway-update").body)
+
+    assert_equal "waiting", payload.fetch("state")
+    assert_equal 2, payload.fetch("activeSessionCount")
   end
 
   def test_post_starts_the_update_and_returns_promptly_accepted_snapshot

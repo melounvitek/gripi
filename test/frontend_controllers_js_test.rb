@@ -35,13 +35,15 @@ class FrontendControllersJsTest < Minitest::Test
       const controller = new GatewayUpdateController(document, window, null);
       controller.apply({ state: "available", targetSha: "def456", summary: "Update summary", message: "Update ready" });
       const available = snapshot(control, button, message);
+      controller.apply({ state: "waiting", activeSessionCount: 2, message: "Waiting for 2 active Pi sessions to finish…" });
+      const waiting = snapshot(control, button, message);
       controller.apply({ state: "dependency_failed", message: "Install failed" });
       const failed = snapshot(control, button, message);
       controller.apply({ state: "rollback_failed", message: "Rollback failed" });
       const rollbackFailed = snapshot(control, button, message);
       await controller.check();
 
-      console.log(JSON.stringify({ available, failed, rollbackFailed, navigations }));
+      console.log(JSON.stringify({ available, waiting, failed, rollbackFailed, navigations }));
 
       function eventTarget(properties = {}) {
         return Object.assign({ addEventListener() {} }, properties);
@@ -81,6 +83,9 @@ class FrontendControllersJsTest < Minitest::Test
       "title" => "Update summary",
       "message" => "Update ready"
     }, results.fetch("available"))
+    assert_equal false, results.dig("waiting", "hidden")
+    assert_equal true, results.dig("waiting", "buttonHidden")
+    assert_equal "Waiting for 2 active Pi sessions to finish…", results.dig("waiting", "message")
     assert_equal true, results.dig("failed", "error")
     assert_equal "Retry update", results.dig("failed", "buttonText")
     assert_equal "Install failed", results.dig("failed", "message")
@@ -100,15 +105,16 @@ class FrontendControllersJsTest < Minitest::Test
         body: { dataset: { gatewayInstanceId: "instance" } },
         querySelector: () => control
       });
+      const confirmations = [];
       const window = eventTarget({
         location: { href: "https://example.test/", replace() {} },
         history: { state: null, replaceState() {} },
-        confirm: () => true
+        confirm: (message) => { confirmations.push(message); return true; }
       });
       const requests = [];
       globalThis.fetch = async (url, options = {}) => {
         requests.push([url, options.method || "GET"]);
-        return response({ state: "restarting", targetSha: "next" });
+        return response({ state: "waiting", targetSha: "next", activeSessionCount: 1, message: "Waiting for 1 active Pi session to finish…" });
       };
       const timers = [];
       globalThis.setTimeout = (callback, delay) => { timers.push({ callback, delay }); return timers.length; };
@@ -129,6 +135,7 @@ class FrontendControllersJsTest < Minitest::Test
       console.log(JSON.stringify({
         requests,
         messages: FakeBroadcastChannel.instance.messages,
+        confirmations,
         stateMessage: message.textContent,
         timerDelays: timers.map((timer) => timer.delay)
       }));
@@ -142,7 +149,8 @@ class FrontendControllersJsTest < Minitest::Test
 
     assert_equal [["/gateway-update", "POST"]], results.fetch("requests")
     assert_equal [{ "type" => "updating" }], results.fetch("messages")
-    assert_equal "Restarting gateway…", results.fetch("stateMessage")
+    assert_equal ["Update gateway to next? The gateway will wait for active Pi work before updating and restarting."], results.fetch("confirmations")
+    assert_equal "Waiting for 1 active Pi session to finish…", results.fetch("stateMessage")
     assert_equal [1000, 1000], results.fetch("timerDelays")
   end
 

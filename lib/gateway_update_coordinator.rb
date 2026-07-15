@@ -9,13 +9,16 @@ class GatewayUpdateCoordinator
     :target_sha,
     :behind_count,
     :summary,
+    :active_session_count,
     keyword_init: true
   )
 
-  def initialize(updater:, restarter:, restart_delay: 1, sleeper: ->(delay) { sleep(delay) }, thread_factory: ->(&block) { Thread.new(&block) })
+  def initialize(updater:, restarter:, active_session_count: -> { 0 }, restart_delay: 1, wait_interval: 1, sleeper: ->(delay) { sleep(delay) }, thread_factory: ->(&block) { Thread.new(&block) })
     @updater = updater
     @restarter = restarter
+    @active_session_count = active_session_count
     @restart_delay = restart_delay
+    @wait_interval = wait_interval
     @sleeper = sleeper
     @thread_factory = thread_factory
     @mutex = Mutex.new
@@ -42,8 +45,15 @@ class GatewayUpdateCoordinator
       @finished = false
       operation = @restart_pending ? :restart : :update
       action = operation == :restart ? method(:perform_restart) : method(:perform_update)
-      @snapshot = operation == :restart ? restarting_snapshot : progress_snapshot
       begin
+        active_session_count = @active_session_count.call
+        @snapshot = if active_session_count.positive?
+          waiting_snapshot(active_session_count)
+        elsif operation == :restart
+          restarting_snapshot
+        else
+          progress_snapshot
+        end
         @thread_factory.call { action.call }
       rescue StandardError => error
         @running = false
@@ -57,6 +67,8 @@ class GatewayUpdateCoordinator
   private
 
   def perform_update
+    wait_for_idle
+    @mutex.synchronize { @snapshot = progress_snapshot }
     result = @updater.update
     unless result&.state == :updated
       finish_with(snapshot_from_result(result))
@@ -82,10 +94,24 @@ class GatewayUpdateCoordinator
   end
 
   def perform_restart
+    wait_for_idle
+    @mutex.synchronize { @snapshot = restarting_snapshot }
     @sleeper.call(@restart_delay)
+    wait_for_idle
+    @mutex.synchronize { @snapshot = restarting_snapshot }
     @restarter.call
   rescue StandardError => error
     finish_with(failure_snapshot(error, :restart, @snapshot))
+  end
+
+  def wait_for_idle
+    loop do
+      active_session_count = @active_session_count.call
+      return unless active_session_count.positive?
+
+      @mutex.synchronize { @snapshot = waiting_snapshot(active_session_count) }
+      @sleeper.call(@wait_interval)
+    end
   end
 
   def finish_with(snapshot)
@@ -112,11 +138,25 @@ class GatewayUpdateCoordinator
     previous = @snapshot
     Snapshot.new(
       state: :restarting,
-      message: "Restarting gateway…",
+      message: previous&.state == :restarting ? previous.message : "Restarting gateway…",
       current_sha: previous&.current_sha,
       target_sha: previous&.target_sha,
       behind_count: previous&.behind_count,
       summary: previous&.summary
+    )
+  end
+
+  def waiting_snapshot(active_session_count)
+    previous = @snapshot
+    sessions = active_session_count == 1 ? "session" : "sessions"
+    Snapshot.new(
+      state: :waiting,
+      message: "Waiting for #{active_session_count} active Pi #{sessions} to finish…",
+      current_sha: previous&.current_sha,
+      target_sha: previous&.target_sha,
+      behind_count: previous&.behind_count,
+      summary: previous&.summary,
+      active_session_count: active_session_count
     )
   end
 
