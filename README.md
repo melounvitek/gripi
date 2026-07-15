@@ -41,7 +41,8 @@ mise run desktop-install
 
 The desktop app connects to the running gateway and can store and switch between multiple gateways.
 
-<img width="1470" height="929" alt="GRIPi desktop app showing Pi sessions and a project overview" src="https://github.com/user-attachments/assets/aa294528-0795-4a64-b04d-5fc923ad2f5d" />
+<img width="1468" height="930" alt="Screenshot 2026-07-15 at 19 23 37" src="https://github.com/user-attachments/assets/194b8d2a-5e1d-43c5-aae7-a8092e73b6f4" />
+
 
 There is no mobile app, but on iPhone, adding the gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow works nicely:
 
