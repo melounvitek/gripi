@@ -227,6 +227,53 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal 0, results.fetch("focusCount")
   end
 
+  def test_main_session_history_is_tab_local_and_preserves_the_previous_selection
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    history_source = app_source.match(/function readMainSessionHistory\(\).*?(?=\nasync function switchSession)/m).to_s
+
+    results = run_javascript(<<~JS)
+      const MAIN_SESSION_HISTORY_KEY = "gripi-main-session-history";
+      const stored = new Map();
+      const sessionStorage = {
+        getItem(key) { return stored.get(key) || null; },
+        setItem(key, value) { stored.set(key, value); }
+      };
+      const window = { location: { origin: "https://example.test", search: "" }, sessionStorage };
+      eval(#{(history_source + "\nglobalThis.remember = rememberMainSessionSelection; globalThis.fallbackUrl = detachedSessionFallbackUrl;").to_json});
+
+      globalThis.remember("first");
+      globalThis.remember("second");
+      const fallback = globalThis.fallbackUrl("second");
+      globalThis.remember("second");
+
+      console.log(JSON.stringify({ fallback, stored: JSON.parse(stored.get(MAIN_SESSION_HISTORY_KEY)) }));
+    JS
+
+    assert_equal "/?session=first&session_fallback_excluding=second", results.fetch("fallback")
+    assert_equal({ "current" => "second", "previous" => "first" }, results.fetch("stored"))
+  end
+
+  def test_detaching_switches_the_main_view_while_leaving_popup_navigation_to_the_native_link
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    detach_source = app_source.match(/function detachSession\(.*?\n\}/m).to_s
+    click_source = app_source.match(/document\.addEventListener\("click", \(event\) => \{\n  const link = event\.target\.closest\("\.session-header-window-action"\);.*?\n\}\);/m).to_s
+
+    results = run_javascript(<<~JS)
+      const calls = [];
+      const currentSessionPath = () => "detached";
+      const detachedSessionFallbackUrl = () => "/?session=previous&session_fallback_excluding=detached";
+      const switchSession = async (...args) => { calls.push(args); return true; };
+      eval(#{(detach_source + "\nglobalThis.detachSessionUnderTest = detachSession;").to_json});
+
+      const result = await globalThis.detachSessionUnderTest();
+      console.log(JSON.stringify({ calls, result }));
+    JS
+
+    assert_equal [["/?session=previous&session_fallback_excluding=detached", { "push" => true, "focus" => true }]], results.fetch("calls")
+    assert_equal true, results.fetch("result")
+    refute_includes click_source, "preventDefault"
+  end
+
   def test_opening_session_shortcut_keeps_shortcut_mode_visible
     app_source = File.read(File.join(ASSETS, "app.js"))
     shortcut_source = app_source.match(/async function openRecentSessionShortcut\(.*?(?=\nfunction sessionShortcutsVisible)/m).to_s
@@ -289,6 +336,7 @@ class FrontendLifecycleJsTest < Minitest::Test
       const replaceForkSessionModalHtml = () => {};
       const bindSessionDom = () => { currentSession = "newer"; };
       const bindSessionControls = () => {};
+      const rememberMainSessionSelection = () => {};
       const initializeSessionView = () => {};
       const currentSessionPath = () => currentSession;
       eval(#{(switch_source + "\n" + shortcut_source + "\nglobalThis.switchSessionUnderTest = switchSession; globalThis.openRecentSessionShortcutUnderTest = openRecentSessionShortcut;").to_json});

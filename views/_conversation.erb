@@ -157,8 +157,8 @@
         </header>
         <section class="conversation-scroll" id="conversation-scroll" tabindex="0">
           <div class="empty empty-state">
-            <div class="empty-state-title">No sessions yet</div>
-            <p>Choose an existing project directory to start your first Pi session.</p>
+            <div class="empty-state-title"><%= @all_sessions.any? ? "Select a session" : "No sessions yet" %></div>
+            <p><%= @all_sessions.any? ? "Choose a session from the sidebar or start a new Pi session." : "Choose an existing project directory to start your first Pi session." %></p>
             <div class="empty-state-actions">
               <button type="button" data-modal-open="new-session-modal">Choose directory</button>
             </div>

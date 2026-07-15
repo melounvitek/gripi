@@ -41,6 +41,7 @@ module Web
       def session_view_url
         query = {}
         query["session"] = @selected_session.path if @selected_session
+        query["no_session"] = "1" if !@selected_session && @all_sessions.any?
         query["project"] = selected_project_cwd if selected_project_cwd
         query["session_search"] = sidebar_session_search_query if sidebar_session_search?
         query["session_only"] = "1" if params["session_only"].to_s == "1"

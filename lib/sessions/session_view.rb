@@ -186,9 +186,15 @@ module Sessions
     end
 
     def find_selected_session
-      return @all_sessions.first if selected_session_path.empty?
+      return if @params["no_session"].to_s == "1"
 
-      @all_sessions.find { |session| session.path == selected_session_path } || @all_sessions.first
+      requested_session = @all_sessions.find { |session| session.path == selected_session_path }
+      return requested_session if requested_session
+
+      excluded_path = @params["session_fallback_excluding"].to_s
+      @all_sessions
+        .reject { |session| session.path == excluded_path }
+        .max_by { |session| session.conversation_activity_at || Time.at(0) }
     end
 
     def prepare_conversation

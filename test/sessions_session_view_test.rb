@@ -2,6 +2,7 @@ ENV["GRIPI_ADMIN_PASSWORD"] ||= "test-password"
 
 require "minitest/autorun"
 require "tmpdir"
+require "fileutils"
 require "json"
 require_relative "../lib/sessions/session_view"
 require_relative "../lib/sessions/sidebar"
@@ -37,6 +38,48 @@ class SessionsSessionViewTest < Minitest::Test
       assert_instance_of PiSessionStore::Status, assignments.fetch(:@session_status)
       refute assignments.fetch(:@current_tree_leaf_known)
       refute assignments.fetch(:@viewing_older_tree_leaf)
+    end
+  end
+
+  def test_explicit_empty_selection_does_not_default_to_the_most_recent_session
+    Dir.mktmpdir do |dir|
+      write_session(dir)
+
+      view = Sessions::SessionView.build(
+        sessions_root: dir,
+        params: { "no_session" => "1" },
+        include_conversation: true,
+        read_state_store: GatewayReadStateStore.new(path: File.join(dir, "read-state.json")),
+        attachment_store: PiAttachmentStore.new(root: File.join(dir, "attachments")),
+        rpc_clients: inactive_rpc_clients,
+        mark_selected_read: true
+      )
+
+      assert_nil view.selected_session
+      assert_empty view.messages
+    end
+  end
+
+  def test_fallback_selects_the_most_recent_other_session_across_projects
+    Dir.mktmpdir do |dir|
+      project_a = File.join(dir, "project-a")
+      project_b = File.join(dir, "project-b")
+      FileUtils.mkdir_p([project_a, project_b])
+      detached_path = write_session(dir, "detached", cwd: project_a, timestamp: "2026-06-13T10:03:00Z")
+      write_session(dir, "same-project-older", cwd: project_a, timestamp: "2026-06-13T10:01:00Z")
+      expected_path = write_session(dir, "other-project-newer", cwd: project_b, timestamp: "2026-06-13T10:02:00Z")
+
+      view = Sessions::SessionView.build(
+        sessions_root: dir,
+        params: { "session_fallback_excluding" => detached_path },
+        include_conversation: true,
+        read_state_store: GatewayReadStateStore.new(path: File.join(dir, "read-state.json")),
+        attachment_store: PiAttachmentStore.new(root: File.join(dir, "attachments")),
+        rpc_clients: inactive_rpc_clients,
+        mark_selected_read: true
+      )
+
+      assert_equal expected_path, view.selected_session.path
     end
   end
 
@@ -284,11 +327,11 @@ class SessionsSessionViewTest < Minitest::Test
     end.new
   end
 
-  def write_session(root)
-    path = File.join(root, "session.jsonl")
+  def write_session(root, id = "session", cwd: root, timestamp: nil)
+    path = File.join(root, "#{id}.jsonl")
     File.write(path, [
-      JSON.generate({ type: "session", id: "session", cwd: root }),
-      JSON.generate({ type: "message", message: { role: "user", content: [{ type: "text", text: "Hello" }] } })
+      JSON.generate({ type: "session", id: id, cwd: cwd, timestamp: timestamp }),
+      JSON.generate({ type: "message", timestamp: timestamp, message: { role: "user", content: [{ type: "text", text: "Hello" }] } })
     ].join("\n") + "\n")
     path
   end

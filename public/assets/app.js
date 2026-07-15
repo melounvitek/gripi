@@ -104,6 +104,7 @@ let sessionSwitchGeneration = 0;
 let sessionStatusRequestVersion = 0;
 let notificationRegistration = null;
 const notifiedFinalReplyKeys = new Set();
+const MAIN_SESSION_HISTORY_KEY = "gripi-main-session-history";
 const conversationController = new ConversationController(document, window);
 const currentSessionFindController = new CurrentSessionFindController(document, conversationController);
 const liveMessageParser = new LiveMessageParser(document.body.dataset.homeDir || "");
@@ -1643,6 +1644,41 @@ function conversationScrollSnapshot() {
   };
 }
 
+function readMainSessionHistory() {
+  try {
+    const history = JSON.parse(window.sessionStorage.getItem(MAIN_SESSION_HISTORY_KEY) || "{}");
+    return {
+      current: typeof history.current === "string" ? history.current : "",
+      previous: typeof history.previous === "string" ? history.previous : ""
+    };
+  } catch (_error) {
+    return { current: "", previous: "" };
+  }
+}
+
+function rememberMainSessionSelection(sessionPath) {
+  if (!sessionPath || new URLSearchParams(window.location.search).get("session_only") === "1") return;
+
+  const history = readMainSessionHistory();
+  if (history.current === sessionPath) return;
+  try {
+    window.sessionStorage.setItem(MAIN_SESSION_HISTORY_KEY, JSON.stringify({ current: sessionPath, previous: history.current }));
+  } catch (_error) {
+  }
+}
+
+function detachedSessionFallbackUrl(detachedSessionPath) {
+  const url = new URL("/", window.location.origin);
+  const previousSessionPath = readMainSessionHistory().previous;
+  if (previousSessionPath && previousSessionPath !== detachedSessionPath) url.searchParams.set("session", previousSessionPath);
+  url.searchParams.set("session_fallback_excluding", detachedSessionPath);
+  return `${url.pathname}${url.search}`;
+}
+
+function detachSession() {
+  return switchSession(detachedSessionFallbackUrl(currentSessionPath()), { push: true, focus: true });
+}
+
 async function switchSession(url, { push = true, focus = true, preserveScroll = false } = {}) {
   const scrollSnapshot = preserveScroll ? conversationScrollSnapshot() : null;
   persistStoredComposerDraft();
@@ -1670,6 +1706,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
     replaceForkSessionModalHtml(payload.fork_session_modal_html);
     bindSessionDom();
     bindSessionControls();
+    rememberMainSessionSelection(payload.session);
     if (push) history.pushState({ session: payload.session }, payload.title || "", payload.url || url);
     document.title = payload.title ? `${payload.title} · GRIPi` : "GRIPi";
     sidebarController.closeMobile();
@@ -2268,6 +2305,13 @@ document.addEventListener("gripi:sidebar-selected-title", (event) => {
   updateSessionHeaderName(event.detail.title);
 });
 
+document.addEventListener("click", (event) => {
+  const link = event.target.closest(".session-header-window-action");
+  if (!link || !normalLeftClick(event)) return;
+
+  detachSession().catch(() => {});
+});
+
 document.addEventListener("click", async (event) => {
   const link = event.target.closest(".session-sidebar a.session");
   exitSessionShortcutMode();
@@ -2434,6 +2478,7 @@ function bootstrapPage() {
   bindPageLifetimeControls();
   bindSessionDom();
   bindSessionControls();
+  rememberMainSessionSelection(currentSessionPath());
   initializeSessionView();
   gatewayUpdateController.resume();
 }

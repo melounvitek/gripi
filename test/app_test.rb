@@ -2854,6 +2854,40 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_explicit_empty_selection_keeps_sessions_in_sidebar_without_opening_one
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "no_session" => "1" })
+      document = Nokogiri::HTML(response.body)
+
+      assert_equal 200, response.status
+      assert document.at_css(".session-sidebar a.session[data-session-path='#{path}']")
+      refute document.at_css("a.session.selected")
+      assert_equal "Select a session", document.at_css(".empty-state-title").text.strip
+      refute document.at_css(".prompt-form")
+    end
+  end
+
+  def test_detach_fallback_fragment_returns_explicit_empty_selection_when_no_other_session_exists
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(Gripi).get("/session_fragment", params: { "session_fallback_excluding" => path })
+      payload = JSON.parse(response.body)
+      query = Rack::Utils.parse_nested_query(URI.parse(payload.fetch("url")).query)
+
+      assert_equal 200, response.status
+      assert_nil payload["session"]
+      assert_equal "1", query["no_session"]
+      assert_includes payload.fetch("sidebar_html"), "data-session-path=\"#{ERB::Util.html_escape(path)}\""
+    end
+  end
+
   def test_session_only_view_renders_conversation_without_sidebar
     Dir.mktmpdir do |dir|
       path = write_session(dir)
