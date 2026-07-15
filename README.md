@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-GRIPi is a desktop and web gateway for using your Pi sessions locally or from another machine. Pi runs on the gateway machine with access to its filesystem, repositories, and credentials.
+GRIPi is a desktop and web gateway for using your [Pi](https://pi.dev/) locally or from another machine. Pi runs on the gateway machine with access to its filesystem, repositories, and credentials.
 
 <img width="1467" height="956" alt="GRIPi desktop app showing Pi sessions and a project overview" src="docs/images/gripi-desktop-screenshot.png" />
 
