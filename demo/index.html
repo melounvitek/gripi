@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#18181e">
+  <title>Build responsive session sidebar · GRIPi demo</title>
+  <style></style>
+  <style data-production-styles>
+    :root {
+      color-scheme: dark;
+      --bg: #18181e;
+      --sidebar: #1e1e24;
+      --panel: #1e1e24;
+      --panel-soft: #282832;
+      --panel-softer: #3a3a4a;
+      --border: #50505066;
+      --border-strong: #505050b3;
+      --text: #d4d4d4;
+      --copy: #d4d4d4d9;
+      --muted: #808080;
+      --muted-soft: #666666;
+      --accent: #ff5a1f;
+      --accent-bright: #ff7a45;
+      --gold: #f0c674;
+      --success: #b5bd68;
+      --danger: #cc6666;
+      --danger-soft: #3c2828;
+      --warning: #ffff00;
+      --info-bg: #3c3728;
+      --code: #18181e;
+      --link: #81a2be;
+      --button-text: #18181e;
+      --user-msg: #343541;
+      --tool-ok: #1d211d;
+      --tool-copy: #d4d4d4b8;
+      --tool-pending: #282832;
+      --accent-tint-04: #ff5a1f0f;
+      --accent-tint-08: #ff5a1f1a;
+      --accent-tint-14: #ff5a1f26;
+      --accent-line-35: #ff5a1f59;
+      --accent-line-55: #ff5a1f8c;
+      --focus-ring: #ff5a1f99;
+      --grid-minor: #ffffff04;
+      --grid-major: #ffffff08;
+      --shadow-soft: 0 8px 26px #00000047;
+      --mono: "Commit Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    html, body { height: 100%; }
+    *, *::before, *::after { box-sizing: border-box; }
+    ::selection { background: #ff5a1f3d; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    body { margin: 0; font-family: var(--sans); color: var(--text); background-color: var(--bg); background-image: linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px), linear-gradient(var(--grid-minor) 1px, transparent 1px), linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px); background-size: 96px 96px, 96px 96px, 12px 12px, 12px 12px; overflow: hidden; }
+    .app-shell { display: grid; grid-template-columns: 22rem minmax(0, 1fr); height: 100vh; min-height: 0; }
+    body.session-only .app-shell { grid-template-columns: minmax(0, 1fr); }
+    .session-sidebar { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); padding: 1rem; overflow: hidden; background: var(--sidebar); }
+    .session-sidebar-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+    .session-sidebar-content { scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
+    .conversation-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: transparent; }
+    .session-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.5rem 0.75rem; border-bottom: 1px solid var(--border); background: #1e1e24f0; backdrop-filter: blur(8px); }
+    .session-header-title { flex: 1 1 auto; min-width: 0; display: grid; gap: 0.15rem; }
+    .session-header h1 { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-header-project { min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.76rem; font-weight: 500; }
+    .session-header-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-header-project .session-header-project-icon { width: 1.55rem; min-width: 1.55rem; height: 1.25rem; border-radius: 0.2rem; font-size: 0.56rem; }
+    .session-header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 0.45rem; }
+    .session-header-actions form { margin: 0; }
+    .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.7rem; }
+    .session-header-window-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; line-height: 1; text-decoration: none; }
+    .session-header-window-action:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
+    .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.5rem; }
+    .conversation-scroll:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-tint-14); }
+    .current-session-find { position: sticky; top: 0.4rem; z-index: 5; width: min(38rem, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto repeat(3, 2rem); align-items: center; gap: 0.4rem; margin: 0 0 0.75rem auto; padding: 0.55rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: #1e1e24fa; box-shadow: var(--shadow-soft); }
+    .current-session-find input[type="search"] { min-width: 0; padding: 0.5rem 0.65rem; }
+    .current-session-find-count { color: var(--muted); font-family: var(--mono); font-size: 0.74rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .current-session-find-button { width: 2rem; height: 2rem; min-height: 0; padding: 0; }
+    .current-session-find-conversation-only { grid-column: 1 / -1; justify-self: end; display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.8rem; }
+    .current-session-find-conversation-only input { margin: 0; }
+    .current-session-find-match { padding: 0; border-radius: 0.12rem; background: #f0c67447; color: inherit; }
+    .current-session-find-match.is-active { background: var(--gold); color: #18181e; box-shadow: 0 0 0 2px #f0c67452; }
+    .conversation-history-status { display: block; justify-self: stretch; width: 100%; min-height: 0; margin: 0 0 0.85rem; padding: 0; border: 0; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.76rem; font-weight: 400; letter-spacing: normal; text-align: center; text-transform: none; }
+    .conversation-history-status:disabled { cursor: default; opacity: 1; }
+    .composer { position: sticky; bottom: 0; padding: 0.75rem 1.5rem 1rem; border-top: 1px solid var(--border); background: #1e1e24f0; backdrop-filter: blur(8px); }
+    .composer-inner { display: grid; gap: 0.6rem; }
+    .attachment-tray { display: none; flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem; border: 1px dashed var(--border-strong); border-radius: 0.35rem; background: var(--panel-soft); }
+    .attachment-tray.has-attachments { display: flex; }
+    .attachment { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.4rem; border: 1px solid var(--border); border-radius: 0.3rem; background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 0.76rem; }
+    .attachment img { width: 2rem; height: 2rem; border-radius: 0.2rem; object-fit: cover; }
+    .attachment button { padding: 0.1rem 0.35rem; background: transparent; border: 1px solid var(--border); color: var(--muted); }
+    .attachment button:hover { color: var(--text); background: var(--panel-softer); transform: none; }
+    .composer-input-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; gap: 0.55rem; }
+    .image-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    .attach-button { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; }
+    .attach-button:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
+    h1 { font-size: 1.1rem; line-height: 1.25; margin: 0 0 1rem; font-weight: 650; letter-spacing: -0.01em; }
+    h2 { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; margin: 0; color: var(--gold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.14em; }
+    .session-sidebar-header { display: block; }
+    .sidebar-title { min-width: 0; }
+    .sidebar-title h1 { font-family: var(--mono); font-size: 0.95rem; font-weight: 700; letter-spacing: 0.02em; margin-bottom: 0.85rem; }
+    .sidebar-title h1::before { content: "❯ "; color: var(--accent); }
+    .sidebar-title h1 svg { height: 1rem; width: auto; vertical-align: -0.1rem; }
+    .sidebar-server-origin { margin: -0.55rem 0 1rem; color: var(--muted-soft); font-family: var(--mono); font-size: 0.7rem; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-filters { display: grid; gap: 0.5rem; margin-bottom: 0.65rem; }
+    .sidebar-session-search { display: none; align-items: center; gap: 0.4rem; margin: 0; }
+    .sidebar-session-search.is-open { display: flex; }
+    .sidebar-session-search input { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--text); font-size: 0.8rem; background: var(--bg); }
+    .sidebar-search-toggle { min-width: 1.65rem; padding: 0.2rem 0.45rem; font-size: 1rem; }
+    .sidebar-search-toggle.is-active { border: 1px solid var(--accent-line-55); background: var(--accent-tint-08); color: var(--accent); box-shadow: 0 0 0 2px var(--accent-tint-08); }
+    .sidebar-project-filter-form { margin: 0; }
+    .sidebar-filter-row { display: flex; align-items: center; gap: 0.45rem; }
+    .sidebar-project-filter { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.8rem; font-weight: 500; background: var(--bg); }
+    .sidebar-filter-spinner { display: none; flex: 0 0 auto; width: 0.9rem; height: 0.9rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
+    .session-sidebar.is-filtering .sidebar-filter-spinner { display: inline-block; }
+    .session-sidebar.is-filtering .sidebar-project-filter, .session-sidebar.is-filtering .project-select-trigger, .session-sidebar.is-filtering .sidebar-filters-clear { opacity: 0.72; pointer-events: none; }
+    .sidebar-filters-clear { justify-self: end; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; text-decoration: none; white-space: nowrap; }
+    .sidebar-filters-clear:hover { color: var(--text); text-decoration: underline; }
+    .recent-sessions { margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
+    .recent-sessions-header { display: flex; align-items: center; gap: 0.4rem; margin: 0.75rem 0 0.5rem; }
+    .recent-sessions-header h2 { flex: 1; min-width: 0; }
+    .cwd-header { display: flex; align-items: center; gap: 0.4rem; margin: 1.25rem 0 0.5rem; }
+    .cwd-header h2 { flex: 1; min-width: 0; }
+    .cwd-toggle { display: inline-block; margin: 0.35rem 0 0.5rem; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); text-decoration: none; }
+    .cwd-toggle:hover { color: var(--text); text-decoration: underline; }
+    .sidebar-load-more { display: flex; align-items: center; justify-content: center; gap: 0.45rem; margin: 0.7rem 0 0.5rem; padding: 0.6rem 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; text-decoration: none; }
+    .sidebar-load-more:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
+    .sidebar-load-more-spinner { display: none; width: 0.95rem; height: 0.95rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
+    .sidebar-load-more.is-loading { pointer-events: none; opacity: 0.82; }
+    .sidebar-load-more.is-loading .sidebar-load-more-spinner { display: inline-block; }
+    .session-row { position: relative; }
+    .session-row a.session { padding-right: 2.7rem; }
+    a.session { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; padding: 0.65rem 0.75rem; margin: 0.25rem 0; border-radius: 0.35rem; color: inherit; text-decoration: none; border: 1px solid transparent; transition: background 120ms ease, border-color 120ms ease; }
+    a.session:hover { background: var(--accent-tint-04); border-color: var(--border); }
+    .session-pin-toggle { position: absolute; z-index: 1; top: 0.55rem; right: 0.55rem; display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem; padding: 0.3rem; border: 1px solid transparent; border-radius: 0.25rem; background: transparent; color: var(--muted); opacity: 0; }
+    .session-pin-toggle svg { width: 100%; height: 100%; fill: currentColor; }
+    .session-row:hover .session-pin-toggle, .session-pin-toggle:focus-visible, .session-pin-toggle.is-pinned { opacity: 1; }
+    .session-pin-toggle:hover { border-color: var(--border-strong); background: var(--panel); color: var(--text); }
+    .session-pin-toggle.is-pinned { color: var(--gold); }
+    .session-pin-toggle:disabled { cursor: wait; opacity: 0.55; }
+    .session-pin-toggle.is-loading:disabled { opacity: 1; }
+    .session-pin-toggle.is-loading svg { visibility: hidden; }
+    .session-pin-toggle.is-loading::after { content: ""; position: absolute; width: 0.85rem; height: 0.85rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
+    a.session.selected { background: var(--panel-softer); border-color: var(--accent-line-35); }
+    a.session.selected::before { content: ""; position: absolute; left: -1rem; top: 0.7rem; bottom: 0.7rem; width: 3px; background: var(--accent); }
+    a.session.unread { background: var(--accent-tint-08); box-shadow: inset 3px 0 0 var(--accent); }
+    a.session.unread:hover { background: var(--accent-tint-14); }
+    a.session.unread .session-title { color: var(--text); font-weight: 700; }
+    .session-content { min-width: 0; }
+    .session-indicators { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; min-width: 0.7rem; }
+    .session-fork-indicator { display: inline-flex; align-items: center; justify-content: center; min-width: 1.15rem; height: 1.15rem; border: 1px solid #f0c67447; border-radius: 0.2rem; background: #f0c67414; color: var(--gold); font-size: 0.86rem; font-weight: 700; line-height: 1; }
+    .session-shortcut { display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; background: var(--accent-tint-08); color: var(--accent); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+    body.session-shortcuts-visible .recent-session .session-shortcut { display: inline-flex; }
+    .session-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-gateway-update { display: grid; gap: 0.35rem; margin-top: 1.25rem; }
+    .sidebar-gateway-update[hidden], .sidebar-gateway-update-button[hidden] { display: none; }
+    .sidebar-gateway-update-button { width: 100%; padding: 0.6rem 0.65rem; border-radius: 0.3rem; background: var(--accent); color: var(--button-text); font-size: 0.72rem; }
+    .sidebar-gateway-update-message { color: var(--muted); font-size: 0.76rem; line-height: 1.35; }
+    .sidebar-gateway-update.is-error .sidebar-gateway-update-message { color: var(--danger); }
+    .sidebar-notification-toggle { width: 100%; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.55rem; margin-top: 1.25rem; padding: 0.6rem 0.65rem; border: 1px solid var(--border); border-radius: 0.3rem; background: transparent; color: var(--copy); font-size: 0.8rem; font-weight: 550; text-align: left; text-transform: none; letter-spacing: 0; font-family: var(--sans); }
+    .sidebar-notification-toggle:hover { border-color: var(--accent-line-55); background: var(--accent-tint-04); }
+    .sidebar-notification-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+    .sidebar-notification-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-notification-state { min-width: 4.4rem; padding: 0.2rem 0.45rem; border: 1px solid var(--border-strong); border-radius: 0.2rem; background: #ffffff08; color: var(--muted); font-family: var(--mono); font-size: 0.62rem; font-weight: 600; line-height: 1.15; text-align: center; text-transform: uppercase; letter-spacing: 0.08em; }
+    .sidebar-notification-toggle.is-enabled { border-color: var(--accent-line-35); background: var(--accent-tint-04); }
+    .sidebar-notification-toggle.is-enabled .sidebar-notification-icon, .sidebar-notification-toggle.is-enabled .sidebar-notification-state { color: var(--accent); }
+    .sidebar-notification-toggle.is-enabled .sidebar-notification-state { border-color: var(--accent-line-35); background: var(--accent-tint-08); }
+    .sidebar-notification-toggle.is-disabled { color: var(--muted); }
+    .sidebar-notification-toggle.is-blocked .sidebar-notification-state { border-color: #cc666659; background: var(--danger-soft); color: var(--danger); }
+    .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.66rem; font-weight: 500; line-height: 1.25; }
+    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 1.95rem; height: 1.55rem; padding: 0 0.32rem; border: 1px solid color-mix(in srgb, var(--project-identity-fg, var(--accent)) 32%, transparent); border-radius: 0.2rem; background: var(--project-identity-bg); color: var(--project-identity-fg, var(--accent)); font-family: var(--mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; }
+    .session-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 0.74rem; line-height: 1.4; }
+    .session-relation-tree-heading { cursor: pointer; color: var(--gold); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
+    .session-relation-tree[open] .session-relation-tree-heading { margin-bottom: 0.35rem; }
+    .session-relation-tree-root, .session-relation-tree-children { margin: 0; padding: 0; list-style: none; }
+    .session-relation-tree-children { margin-left: 0.8rem; padding-left: 0.85rem; border-left: 1px solid var(--accent-line-35); }
+    .session-relation-tree-node { margin: 0.18rem 0; }
+    .session-relation-tree-item { min-width: 0; display: flex; align-items: center; gap: 0.4rem; }
+    .session-relation-tree-children > .session-relation-tree-node > .session-relation-tree-item::before { content: "└"; flex: 0 0 auto; color: var(--accent-line-55); font-weight: 400; }
+    .session-relation-tree-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--link); text-decoration: none; }
+    .session-relation-tree-title:hover { text-decoration: underline; }
+    .session-relation-tree-node.is-current > .session-relation-tree-item .session-relation-tree-title { color: var(--text); font-weight: 700; }
+    .session-relation-current-marker { flex: 0 0 auto; padding: 0.08rem 0.35rem; border-radius: 0.2rem; background: var(--accent-tint-08); color: var(--accent); font-size: 0.58rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+    .session-activity { margin-top: 0.24rem; color: var(--muted); font-size: 0.78rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .session-activity strong { color: var(--copy); font-weight: 650; }
+    .session-activity--running { color: var(--accent); font-weight: 600; }
+    .session-meta { font-family: var(--mono); font-size: 0.7rem; color: var(--muted-soft); margin-top: 0.24rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.55rem; border: 1px solid var(--border-strong); border-radius: 0.25rem; background: transparent; color: var(--muted); line-height: 1; }
+    .sidebar-icon-button:hover { background: var(--accent-tint-04); border-color: var(--accent-line-55); color: var(--text); }
+    .sidebar-new-session-button { display: inline-flex; align-items: center; gap: 0.3rem; border-color: var(--accent); background: var(--accent); color: var(--button-text); letter-spacing: 0.03em; text-transform: none; }
+    .sidebar-new-session-button span { font-size: 0.9rem; line-height: 1; }
+    .sidebar-new-session-button:hover { border-color: var(--accent-bright); background: var(--accent-bright); color: var(--button-text); }
+    .sidebar-new-session-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+    .session-running-indicator, .session-compacting-indicator { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--success); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; }
+    .session-running-indicator::before, .session-compacting-indicator::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 4px #b5bd6829; animation: progress-blink 1000ms ease-in-out infinite; }
+    .session-compacting-indicator::before { background: var(--warning); box-shadow: 0 0 0 4px #ffff0024; }
+    .empty { color: var(--muted); background: var(--panel); border: 1px solid var(--border); border-radius: 0.4rem; padding: 1rem; }
+    .empty-state { max-width: 34rem; margin: 2rem auto; text-align: center; }
+    .empty-state-title { margin: 0 0 0.45rem; color: var(--text); font-size: 1.2rem; font-weight: 650; }
+    .empty-state p { margin: 0; }
+    .empty-state-actions { display: flex; justify-content: center; margin-top: 1rem; }
+    .sidebar-empty { display: grid; gap: 0.85rem; }
+    .sidebar-empty-action { width: 100%; justify-self: stretch; }
+    .message { position: relative; min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 0.4rem; padding: 0.9rem; margin-bottom: 0.85rem; background: var(--panel); scroll-margin-top: 3.5rem; }
+    .message--user { margin-left: 10%; background: var(--user-msg); border-color: #ffffff14; color: var(--text); }
+    .message--assistant { margin-right: 10%; background: var(--panel); border-color: var(--border); color: var(--copy); }
+    .message--thinking { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }
+    .message--status { background: transparent; color: var(--muted); }
+    .message--tool, .message--tool-call, .message--tool-transcript { background: var(--tool-ok); border-color: #ffffff0a; color: var(--tool-copy); }
+    .message--tool-transcript { font-family: var(--mono); }
+    .message--tool .role, .message--tool-call .role, .message--tool-transcript .role { color: var(--accent); }
+    .message--tool-transcript .message-details-summary { color: var(--copy); }
+    .message--tool-transcript .message-body { font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
+    .tool-output-content { display: block; min-width: 100%; }
+    .tool-output-content--diff { width: max-content; }
+    .tool-diff-line { display: block; margin: 0 -0.25rem; padding: 0 0.25rem; border-left: 2px solid transparent; }
+    .tool-diff-line--add { border-left-color: #b5bd68bf; background: #b5bd681f; color: #d8f0a0; }
+    .tool-diff-line--remove { border-left-color: #cc6666cc; background: #cc66661f; color: #f0b0a8; }
+    .tool-diff-line--meta { color: var(--accent); font-weight: 600; }
+    .message-body--edit-preview .tool-diff-line--preview-heading { margin-top: 0.45rem; padding-top: 0.45rem; border-top: 1px solid var(--accent-tint-14); color: var(--accent); font-weight: 600; }
+    .message-body--edit-preview .tool-diff-line--preview-heading:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+    .message-body--edit-preview .tool-diff-line--preview-ellipsis { font-style: italic; opacity: 0.78; }
+    .tool-diff-line--context { color: var(--muted); }
+    .tool-command { color: var(--text); font-weight: 600; }
+    .tool-path { color: var(--accent); font-weight: 500; }
+    .tool-range { color: var(--warning); font-weight: 600; }
+    .message--error, .message--tool-error { background: var(--danger-soft); border-color: #cc666659; color: #e8a9a9; }
+    .message--compact { padding: 0.75rem 0.9rem; }
+    .message--live { box-shadow: 0 0 0 1px var(--accent-line-35) inset; }
+    .message--assistant.message--streaming { border-color: var(--accent-line-55); animation: streaming-bubble-pulse 1600ms ease-in-out infinite; }
+    .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after,
+    .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after,
+    .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after,
+    .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { content: ""; display: inline-block; width: 0.55em; height: 1.05em; margin-left: 0.15rem; background: var(--accent-bright); vertical-align: -0.15em; animation: streaming-caret-blink 1000ms steps(1) infinite; }
+    .message-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .message--user .message-header { margin-bottom: 0.75rem; }
+    .role { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); }
+    .message--user .role { color: var(--accent); }
+    .message--error .role { color: var(--danger); }
+    .message-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted-soft); }
+    .message-details { min-width: 0; max-width: 100%; }
+    .message-details-summary { margin-bottom: 0.5rem; font-weight: 550; color: var(--muted); }
+    .message--tool .message-details-summary, .message--tool-call .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; overflow-x: auto; white-space: nowrap; font-family: var(--mono); font-size: 0.84rem; }
+    .message--compact .message-details-summary:last-child { margin-bottom: 0; }
+    .message--tool .message-body, .message--tool-call .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }
+    .compact-summary { margin-left: 0.25rem; }
+    .compaction-details-summary { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0; cursor: pointer; list-style: none; }
+    .compaction-details-summary::-webkit-details-marker { display: none; }
+    .message-details--compaction[open] .compaction-details-summary { margin-bottom: 0.5rem; }
+    .compaction-details-action { color: var(--accent); font-family: var(--mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+    .compaction-details-action::before { content: "Show summary"; }
+    .message-details--compaction[open] .compaction-details-action::before { content: "Hide summary"; }
+    .subagent-prompt { margin: 0 0 0.65rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 0.3rem; background: var(--panel); font-family: var(--sans); }
+    .subagent-prompt-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0.45rem; cursor: pointer; list-style: none; }
+    .subagent-prompt-summary::-webkit-details-marker { display: none; }
+    .subagent-prompt-label { color: var(--accent); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
+    .subagent-prompt-preview { min-width: 0; display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 0.84rem; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .subagent-prompt[open] .subagent-prompt-preview { display: block; overflow: visible; color: var(--copy); white-space: pre-wrap; -webkit-line-clamp: unset; }
+    .subagent-prompt-action { color: var(--accent); font-family: var(--mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
+    .subagent-prompt-action::before { content: "Show"; }
+    .subagent-prompt[open] .subagent-prompt-action::before { content: "Hide"; }
+    .tool-output-collapse { display: grid; gap: 0.4rem; }
+    .tool-output-collapse[data-expanded="true"] [data-tool-output-body] { max-height: min(50dvh, 24rem); overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
+    .tool-output-collapse[data-expanded="true"] [data-tool-output-body]:focus-visible { outline: 2px solid var(--accent-line-55); outline-offset: -2px; }
+    .tool-output-collapse-control { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.76rem; font-family: var(--mono); }
+    .tool-output-toggle { justify-self: start; min-height: 0; padding: 0.18rem 0.45rem; border: 1px solid var(--accent-line-35); background: transparent; color: var(--accent); font-size: 0.66rem; }
+    .tool-output-toggle:hover { background: var(--accent-tint-08); color: var(--text); transform: none; }
+    .tool-output-hidden-count--mobile { display: none; }
+    .tool-output-line { display: block; min-height: 1.4em; }
+    @media (max-width: 720px) {
+      .tool-output-collapse[data-expanded="true"] [data-tool-output-body] { max-height: min(45dvh, 18rem); }
+      .tool-output-hidden-count--desktop, .tool-output-tail-desktop-extra { display: none; }
+      .tool-output-hidden-count--mobile { display: inline; }
+    }
+    .message-body--thinking { font-size: 0.95rem; font-style: italic; line-height: 1.5; color: var(--muted); }
+    .message-body--thinking.message-body--markdown h1, .message-body--thinking.message-body--markdown h2, .message-body--thinking.message-body--markdown h3 { color: inherit; font-size: 1em; }
+    .message-body--markdown { max-width: 100%; overflow-x: auto; line-height: 1.6; overflow-wrap: anywhere; }
+    .message-body--markdown[data-rendering="pending"]:empty::before { content: "…"; color: var(--muted); }
+    .message-body--markdown > :first-child { margin-top: 0; }
+    .message-body--markdown > :last-child { margin-bottom: 0; }
+    .message-body--markdown h1, .message-body--markdown h2, .message-body--markdown h3 { margin: 1rem 0 0.4rem; color: var(--gold); font-family: var(--sans); font-weight: 650; }
+    .message-body--markdown h1 { font-size: 1.25rem; }
+    .message-body--markdown h2 { font-size: 1.1rem; white-space: normal; overflow: visible; text-overflow: clip; text-transform: none; letter-spacing: 0; }
+    .message-body--markdown h3 { font-size: 1rem; }
+    .message-body--markdown ul, .message-body--markdown ol { padding-left: 1.4rem; }
+    .message-body--markdown blockquote { margin: 0.75rem 0; padding-left: 1rem; border-left: 3px solid #80808073; color: var(--muted); }
+    .message-body--markdown code { padding: 0.1rem 0.3rem; border: 1px solid var(--accent-tint-14); border-radius: 0.2rem; background: var(--accent-tint-04); color: var(--accent); font-family: var(--mono); font-size: 0.88em; }
+    .message-code-block { position: relative; }
+    .message-body--markdown pre { padding: 0.85rem; border-radius: 0.3rem; background: var(--code); color: var(--success); overflow-x: auto; white-space: pre; border: 1px solid var(--border-strong); }
+    .message-body--markdown pre code { padding: 0; border: 0; background: transparent; color: inherit; }
+    .message-body--markdown code.highlight { color: var(--text); }
+    .message-body--markdown code.highlight .syntax-comment { color: #6a9955; font-style: italic; }
+    .message-body--markdown code.highlight .syntax-keyword { color: #569cd6; }
+    .message-body--markdown code.highlight .syntax-string { color: #ce9178; }
+    .message-body--markdown code.highlight .syntax-number, .message-body--markdown code.highlight .syntax-symbol, .message-body--markdown code.highlight .syntax-literal { color: #b5cea8; }
+    .message-body--markdown code.highlight .syntax-function, .message-body--markdown code.highlight .syntax-key, .message-body--markdown code.highlight .syntax-variable { color: #9cdcfe; }
+    .code-block-copy-button { position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; background: #18181ee0; }
+    .message-body--markdown a { color: var(--link); }
+    .message-images { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.65rem; }
+    .message-image { max-width: min(100%, 28rem); max-height: 28rem; border-radius: 0.3rem; border: 1px solid var(--border); object-fit: contain; background: var(--panel-soft); }
+    .message-attachments { display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.6rem; padding: 0.25rem 0.45rem; border: 1px solid var(--accent-tint-14); border-radius: 0.2rem; background: var(--accent-tint-04); color: var(--muted); font-family: var(--mono); font-size: 0.74rem; font-weight: 500; }
+    .message--tool-error .message-details-summary { color: #e8a9a9; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
+    .prompt-form, .inline-form { display: grid; gap: 0.5rem; margin: 0; }
+    .command-list { display: none; border: 1px solid var(--border); border-radius: 0.4rem; padding: 0.75rem; scrollbar-gutter: stable; background: var(--panel); }
+    .command-list.is-visible { display: block; }
+    .command-list summary { cursor: pointer; font-size: 0.85rem; font-weight: 550; color: var(--muted); }
+    .command-list summary:hover { color: var(--text); }
+    .command-list h3 { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gold); margin: 0.75rem 0 0.25rem; }
+    .command-list h3:first-child { margin-top: 0.75rem; }
+    .command { font-size: 0.9rem; margin: 0.25rem 0; padding: 0.2rem 0.25rem; border-radius: 0.2rem; cursor: pointer; }
+    .command:hover, .command.is-highlighted { background: var(--panel-softer); }
+    .command-list-message { margin-top: 0.75rem; color: var(--muted); font-size: 0.9rem; }
+    .command code { font-family: var(--mono); font-weight: 600; color: var(--accent); }
+    .composer-state { display: none; align-items: center; gap: 0.4rem; min-height: 1.1rem; font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
+    .composer-state::before { content: ""; width: 0.48rem; height: 0.48rem; border-radius: 999px; background: var(--muted-soft); }
+    .composer-state[data-state="running"], .composer-state[data-state="sending"] { display: inline-flex; color: var(--accent); font-weight: 600; }
+    .composer-state[data-state="running"]::before, .composer-state[data-state="sending"]::before { background: var(--success); box-shadow: 0 0 0 4px #b5bd6826; }
+    .composer-state[data-state="error"] { display: inline-flex; color: var(--danger); }
+    .composer-state[data-state="error"]::before { background: var(--danger); }
+    .composer-controls { display: flex; justify-content: flex-end; }
+    .composer-controls:has(.session-status-bar:empty) { display: none; }
+    .session-status-bar { display: flex; align-items: center; justify-content: flex-end; gap: 0.9rem; color: var(--muted-soft); font-family: var(--mono); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
+    .session-status-item { display: inline-flex; align-items: center; gap: 0.25rem; line-height: 1; white-space: nowrap; }
+    .model-settings-chip { justify-self: auto; min-height: 0; padding: 0.2rem 0.45rem; border: 1px solid var(--accent-tint-14); border-radius: 0.2rem; background: var(--accent-tint-04); color: var(--copy); font: inherit; line-height: 1; letter-spacing: 0; text-transform: none; }
+    .model-settings-chip:hover { border-color: var(--accent-line-55); background: var(--accent-tint-08); transform: none; }
+    .model-settings-chip:disabled, .model-settings-chip:disabled:hover { border-color: transparent; background: transparent; color: var(--muted-soft); }
+    .session-status-label { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+    .session-reconnect { display: none; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.65rem 0.75rem; border: 1px solid #f0c67447; border-radius: 0.35rem; background: var(--info-bg); color: var(--text); font-size: 0.9rem; }
+    .session-reconnect.is-visible { display: flex; }
+    .reconnect-button { flex: 0 0 auto; padding: 0.35rem 0.6rem; font-size: 0.7rem; }
+    .abort-form { display: none; }
+    input, select, textarea { box-sizing: border-box; font-family: var(--mono); font-size: 0.9rem; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; color: var(--text); background: var(--bg); outline: none; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent-line-55); box-shadow: 0 0 0 2px var(--accent-tint-14); }
+    input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+    input::placeholder, textarea::placeholder { color: var(--muted-soft); }
+    textarea { width: 100%; resize: none; min-height: 2.75rem; max-height: 12rem; line-height: 1.45; overflow-y: hidden; }
+    .send-button, .composer-stop-button { display: none; }
+    .session-header .composer-stop-button.is-visible { position: relative; isolation: isolate; display: inline-flex; align-self: center; }
+    .composer-stop-button.is-visible:not(:disabled)::before { content: ""; position: absolute; inset: -0.34rem; z-index: -1; border: 2px solid #cc66668c; border-radius: inherit; animation: stop-button-pulse 1400ms ease-out infinite; pointer-events: none; }
+    .attach-button.is-disabled { opacity: 0.48; cursor: not-allowed; pointer-events: none; }
+    button { justify-self: end; padding: 0.55rem 0.9rem; border: 1px solid transparent; border-radius: 0.3rem; background: var(--accent); color: var(--button-text); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background 120ms ease, border-color 120ms ease, color 120ms ease; }
+    button:hover { background: var(--accent-bright); }
+    button:disabled { opacity: 0.48; cursor: not-allowed; }
+    button:disabled:hover { background: var(--accent); }
+    [hidden] { display: none !important; }
+    button.secondary { background: transparent; border-color: var(--border-strong); color: var(--copy); }
+    button.secondary:hover { background: var(--accent-tint-04); border-color: var(--accent-line-55); }
+    button.danger { background: var(--danger); color: #18181e; }
+    button.danger:hover { background: #e07a7a; }
+    button.danger:disabled:hover { background: var(--danger); }
+    .session-abort-button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 2.1rem; height: 2.1rem; padding: 0; border-radius: 0.3rem; font-size: 1rem; line-height: 1; }
+    .copy-button { margin-left: auto; padding: 0.2rem 0.5rem; font-size: 0.62rem; background: transparent; border: 1px solid var(--border-strong); color: var(--muted); }
+    .copy-button:hover { color: var(--text); background: var(--accent-tint-04); border-color: var(--accent-line-55); transform: none; }
+    .jump-controls { position: sticky; z-index: 3; display: flex; justify-content: center; gap: 0.35rem; min-height: 2rem; margin: 0.25rem auto; visibility: hidden; opacity: 0; pointer-events: none; }
+    .jump-controls.is-visible { visibility: visible; opacity: 1; }
+    .jump-controls--top { top: 0.75rem; }
+    .jump-controls--bottom { bottom: 0.75rem; }
+    .jump-button { display: none; align-items: center; justify-content: center; width: 2.75rem; height: 2rem; min-height: 0; padding: 0; box-shadow: var(--shadow-soft); pointer-events: auto; }
+    .jump-button.is-visible, .jump-button.is-loading { display: inline-flex; }
+    .jump-button.is-loading:disabled { position: relative; color: transparent; cursor: wait; opacity: 1; }
+    .jump-button.is-loading::after { content: ""; position: absolute; width: 0.85rem; height: 0.85rem; border: 2px solid var(--button-text); border-right-color: transparent; border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
+    .jump-controls.is-loading { visibility: visible; opacity: 1; pointer-events: auto; }
+    .session-switch-overlay { position: fixed; inset: 0; z-index: 140; display: none; place-items: center; background: #18181e80; backdrop-filter: blur(2px); }
+    body.session-switching .session-switch-overlay { display: grid; }
+    .session-switch-indicator { display: inline-flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: #1e1e24fa; color: var(--text); box-shadow: var(--shadow-soft); font-family: var(--mono); font-size: 0.85rem; font-weight: 600; }
+    .session-switch-spinner { width: 1.1rem; height: 1.1rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
+    .browser-access-overlay { position: fixed; inset: 0; z-index: 110; display: none; place-items: start center; padding: 1rem; background: #18181e61; pointer-events: none; }
+    .browser-access-overlay.is-visible { display: grid; }
+    .browser-access-card { width: min(38rem, 100%); display: grid; gap: 0.65rem; padding: 0.85rem 1rem; border: 1px solid var(--accent-line-55); border-radius: 0.4rem; background: #1e1e24fc; box-shadow: var(--shadow-soft); pointer-events: auto; }
+    .browser-access-title { font-weight: 650; }
+    .browser-access-meta { color: var(--muted); font-family: var(--mono); font-size: 0.78rem; overflow-wrap: anywhere; }
+    .browser-access-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+    .modal-overlay { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 1rem; background: #0000008c; backdrop-filter: blur(3px); }
+    .modal-card { width: min(34rem, 100%); max-height: calc(100dvh - 2rem); display: grid; gap: 1rem; overflow-y: auto; padding: 1rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: var(--panel); box-shadow: 0 18px 48px #00000073; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .modal-header h2 { color: var(--text); font-family: var(--mono); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
+    .modal-close-button { width: 2rem; height: 2rem; padding: 0; border-radius: 0.25rem; font-size: 1.2rem; line-height: 1; }
+    .modal-field { display: grid; gap: 0.35rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
+    .modal-field input, .modal-field select { width: 100%; min-width: 0; letter-spacing: normal; text-transform: none; }
+    .project-select { min-width: 0; width: 100%; }
+    .sidebar-filter-row > .project-select { flex: 1 1 auto; }
+    .project-select-native-hidden { position: absolute !important; width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+    .project-select-trigger { width: 100%; min-width: 0; min-height: 2.45rem; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; padding: 0.42rem 0.55rem; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); text-align: left; font-family: var(--mono); font-size: 0.8rem; font-weight: 500; letter-spacing: normal; text-transform: none; }
+    .project-select-trigger:hover, .project-select-trigger[aria-expanded="true"] { border-color: var(--accent-line-55); background: var(--bg); transform: none; }
+    .project-select-trigger:focus-visible { border-color: var(--accent-line-55); outline: none; box-shadow: 0 0 0 2px var(--accent-tint-14); }
+    .project-select-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-select-chevron { color: var(--muted); font-size: 0.72rem; }
+    .project-select-listbox { position: fixed; z-index: 180; display: grid; gap: 0.2rem; overflow-y: auto; padding: 0.35rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; box-shadow: 0 16px 42px #00000080; }
+    .project-select-option { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.55rem; min-height: 2.65rem; padding: 0.45rem 0.55rem; border-radius: 0.25rem; color: var(--text); cursor: pointer; }
+    .project-select-option:hover, .project-select-option.is-active { background: var(--panel-softer); }
+    .project-select-option[aria-selected="true"] { color: var(--project-identity-fg, var(--accent)); font-weight: 650; }
+    .project-select-option-label { min-width: 0; overflow-wrap: anywhere; }
+    .project-select-neutral-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 1.95rem; height: 1.55rem; border: 1px solid var(--border); border-radius: 0.2rem; background: var(--panel-soft); color: var(--muted); font-size: 0.85rem; font-weight: 700; }
+    .model-settings-card { width: min(42rem, 100%); }
+    .model-settings-form { min-height: 0; display: grid; gap: 0.8rem; }
+    .model-settings-status { min-height: 1.2rem; margin: 0; color: var(--muted); font-size: 0.85rem; }
+    .model-settings-status.is-error { color: var(--danger); }
+    .model-settings-list { min-height: 5rem; max-height: 42dvh; overflow-y: auto; display: grid; gap: 0.85rem; padding-right: 0.2rem; }
+    .model-provider-group { display: grid; gap: 0.4rem; }
+    .model-provider-heading { margin: 0; color: var(--gold); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
+    .model-option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0.6rem; padding: 0.6rem 0.7rem; border: 1px solid var(--border); border-radius: 0.3rem; background: var(--panel-soft); cursor: pointer; }
+    .model-option:has(input:checked) { border-color: var(--accent-line-55); background: var(--accent-tint-04); }
+    .model-option input { margin: 0.22rem 0 0; }
+    .model-option-details { min-width: 0; display: grid; gap: 0.18rem; }
+    .model-option-id { color: var(--text); font-family: var(--mono); font-size: 0.86rem; font-weight: 600; overflow-wrap: anywhere; }
+    .model-option-name, .model-option-meta { color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+    .model-current-badge { padding: 0.12rem 0.4rem; border-radius: 0.2rem; background: var(--accent-tint-08); color: var(--accent); font-family: var(--mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+    .model-thinking-options { min-width: 0; margin: 0; padding: 0.7rem; border: 1px solid var(--border); border-radius: 0.3rem; }
+    .model-thinking-options legend { padding: 0 0.3rem; color: var(--muted); font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+    .model-thinking-options [data-thinking-levels] { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+    .thinking-option { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 0.25rem; background: var(--panel-soft); color: var(--copy); font-family: var(--mono); font-size: 0.76rem; cursor: pointer; }
+    .thinking-option:has(input:checked) { border-color: var(--accent-line-55); background: var(--accent-tint-08); color: var(--text); }
+    .thinking-option input { margin: 0; }
+    .new-session-cwd-form { display: grid; gap: 0.75rem; }
+    .cwd-suggestions { max-height: min(16rem, 36dvh); display: grid; gap: 0.2rem; overflow-y: auto; padding: 0.3rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; }
+    .cwd-suggestion { width: 100%; min-width: 0; display: block; padding: 0.5rem 0.6rem; border-radius: 0.25rem; background: transparent; color: var(--text); text-align: left; font-family: var(--mono); font-size: 0.82rem; font-weight: 500; letter-spacing: normal; text-transform: none; overflow-wrap: anywhere; }
+    .cwd-suggestion:hover, .cwd-suggestion.is-active { background: var(--panel-softer); transform: none; }
+    .fork-session-list { display: grid; gap: 0.55rem; }
+    .fork-session-status { margin: 0; color: var(--muted); }
+    .fork-session-option { width: 100%; justify-self: stretch; display: block; padding: 0.65rem 0.75rem; border: 1px solid var(--border); border-radius: 0.3rem; background: var(--panel-soft); color: var(--text); text-align: left; font-family: var(--sans); font-size: 0.9rem; font-weight: 500; letter-spacing: normal; text-transform: none; overflow-wrap: anywhere; }
+    .fork-session-option:hover { background: var(--panel-softer); border-color: var(--accent-line-55); }
+    .fork-session-option.is-current-tree-entry { border-color: #f0c67473; }
+    .tree-session-role { color: var(--muted); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+    .tree-session-badge { display: inline-block; margin-left: 0.35rem; padding: 0.08rem 0.35rem; border-radius: 0.2rem; background: var(--accent-tint-08); color: var(--accent); font-family: var(--mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; vertical-align: middle; }
+    .tree-session-badge--current { background: #f0c67421; color: var(--gold); }
+    .tree-position-banner, .session-sync-banner { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.75rem; padding: 0.7rem 0.8rem; border: 1px solid #f0c67447; border-radius: 0.35rem; background: var(--info-bg); color: var(--text); font-size: 0.85rem; }
+    .tree-position-banner strong, .session-sync-banner strong { color: var(--gold); }
+    .tree-position-banner span, .session-sync-banner span { color: var(--muted); }
+    .session-sync-banner--conflict { border-color: #cc66666b; }
+    .session-sync-banner--conflict strong, .session-sync-error { color: var(--red); }
+    .session-sync-error { display: block; margin-top: 0.25rem; }
+    .command-list.is-disabled > summary { opacity: 0.48; cursor: not-allowed; pointer-events: none; }
+    .cwd-validation-message { min-height: 1.2rem; color: var(--muted); font-size: 0.85rem; }
+    .cwd-validation-message.is-valid { color: var(--success); }
+    .cwd-validation-message.is-invalid { color: var(--danger); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+    @keyframes session-switch-spin { to { transform: rotate(360deg); } }
+    @keyframes stop-button-pulse { 0% { transform: scale(0.82); opacity: 0.9; } 70%, 100% { transform: scale(1.28); opacity: 0; } }
+    @keyframes progress-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
+    @keyframes streaming-bubble-pulse { 0%, 100% { box-shadow: 0 0 0 1px #ff5a1f3d inset; } 50% { box-shadow: 0 0 0 2px #ff5a1f66 inset; } }
+    @keyframes streaming-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    .mobile-session-toggle, .mobile-sessions-button, .mobile-sidebar-backdrop { display: none; }
+    .hamburger-icon { position: relative; display: inline-block; width: 1.25rem; height: 0.9rem; border-top: 2px solid currentColor; border-bottom: 2px solid currentColor; }
+    .hamburger-icon::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid currentColor; transform: translateY(-50%); }
+    .mobile-sessions-unread-badge { position: absolute; top: -0.42rem; right: -0.42rem; min-width: 1.15rem; height: 1.15rem; display: inline-flex; align-items: center; justify-content: center; padding: 0 0.32rem; border: 2px solid var(--sidebar); border-radius: 999px; background: var(--accent); color: var(--button-text); font-size: 0.68rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+    @supports (height: 100dvh) { .app-shell { height: 100dvh; } }
+    @media (max-width: 760px) {
+      html, body { width: 100%; max-width: 100vw; overflow-x: hidden; }
+      .app-shell { display: block; width: 100%; max-width: 100vw; height: 100dvh; overflow-x: hidden; }
+      .session-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 10; display: flex; flex-direction: column; width: min(21rem, calc(100vw - 3rem)); max-height: none; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); border-right: 1px solid var(--border-strong); border-bottom: 0; transform: translateX(-105%); transition: transform 160ms ease; }
+      .session-row a.session { padding-right: 3.6rem; }
+      .session-pin-toggle { top: 0.35rem; right: 0.35rem; width: 2.75rem; height: 2.75rem; padding: 0.8rem; opacity: 0.7; }
+      .mobile-session-toggle:checked + .session-sidebar { transform: translateX(0); }
+      .mobile-sidebar-backdrop { position: fixed; inset: 0; z-index: 9; background: #00000073; }
+      .mobile-session-toggle:checked ~ .mobile-sidebar-backdrop { display: block; }
+      .mobile-sessions-button { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 2.4rem; height: 2.4rem; padding: 0; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); cursor: pointer; }
+      .session-sidebar-header { position: sticky; top: calc(-0.75rem - env(safe-area-inset-top)); z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: calc(-0.75rem - env(safe-area-inset-top)) -0.75rem 0.5rem; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem 0.5rem; background: #1e1e24f0; backdrop-filter: blur(8px); }
+      .mobile-sessions-close-button { margin-left: auto; }
+      .session-sidebar h1 { margin: 0; font-size: 1rem; }
+      .sidebar-server-origin { margin: 0.15rem 0 0; }
+      .cwd-header { margin: 0.85rem 0 0.4rem; }
+      a.session { padding: 0.55rem 0.65rem; }
+      a.session.selected::before { left: -0.75rem; }
+      .conversation-panel { width: 100%; max-width: 100vw; height: 100dvh; min-width: 0; min-height: 0; overflow-x: hidden; }
+      .session-header { width: 100%; max-width: 100vw; min-width: 0; padding: 0.75rem 1rem 0.6rem; gap: 0.75rem; overflow: hidden; }
+      .session-header-title { flex: 1 1 0; }
+      .session-header-actions { gap: 0.35rem; }
+      .session-header-window-action { display: none; }
+      .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.66rem; }
+      .session-header h1 { font-size: 1rem; }
+      .session-header-project { font-size: 0.7rem; }
+      .project-select-trigger { min-height: 2.75rem; font-size: 16px; }
+      .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.4rem; }
+      .project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }
+      .session-abort-button { width: 2.4rem; height: 2.4rem; }
+      .conversation-scroll { padding: 0.75rem; }
+      .jump-controls.is-visible { transition: opacity 140ms ease, visibility 140ms ease; }
+      body:not(.is-conversation-scrolling) .jump-controls.is-visible { visibility: hidden; opacity: 0; pointer-events: none; }
+      body:not(.is-conversation-scrolling) .jump-controls.is-loading { visibility: visible; opacity: 1; pointer-events: auto; }
+      .message { margin-bottom: 0.65rem; padding: 0.75rem; border-radius: 0.35rem; }
+      .message--user, .message--assistant { margin-left: 0; margin-right: 0; }
+      .message-header { flex-wrap: wrap; }
+      .copy-button { min-height: 2rem; padding: 0.3rem 0.65rem; }
+      .message-body--markdown { line-height: 1.5; }
+      .message-body--markdown pre { font-size: 0.82rem; }
+      .message, .message-body--markdown, .message--tool-transcript .message-body, pre { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+      .message--tool-transcript .message-body, pre { white-space: pre-wrap; }
+      .message--tool-transcript .message-body { white-space: pre; overflow-wrap: normal; word-break: normal; }
+      .composer, .composer-inner, .prompt-form, .composer-controls { width: 100%; max-width: 100%; min-width: 0; }
+      .composer { padding: 0.65rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); overflow-x: hidden; }
+      .composer-input-row { width: 100%; max-width: 100%; min-width: 0; grid-template-columns: 2.75rem minmax(0, 1fr) 3.25rem; gap: 0.4rem; }
+      .attach-button, .send-button { min-width: 0; width: 100%; min-height: 2.75rem; padding: 0; }
+      .attach-button { font-size: 1.3rem; }
+      .send-button { display: inline-flex; align-items: center; justify-content: center; font-size: 0; }
+      .send-button::before { content: "↑"; font-size: 1.35rem; line-height: 1; }
+      .command-list { max-height: 30dvh; overflow-y: auto; }
+      .composer-controls { justify-content: flex-start; }
+      .session-status-bar { width: 100%; max-width: 100%; min-width: 0; justify-content: center; text-align: center; flex-wrap: nowrap; gap: 0.45rem; overflow: hidden; font-size: 0.66rem; }
+      .session-status-item { min-width: 0; }
+      .session-status-item[data-status-key="ctx"] { flex: 0 0 auto; }
+      .model-settings-chip { flex: 0 1 auto; max-width: 100%; overflow: hidden; }
+      .model-settings-chip .session-status-label { display: none; }
+      .session-status-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      input, select, textarea { font-size: 16px; }
+      textarea { min-height: 2.75rem; max-height: 8rem; padding: 0.65rem 0.7rem; }
+      textarea::placeholder { font-size: 0.95rem; }
+      .attachment { max-width: 100%; }
+      .attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .modal-overlay { place-items: end stretch; padding: 0; }
+      .modal-card { width: 100%; max-height: min(82dvh, calc(100dvh - env(safe-area-inset-top) - 1rem)); padding: 1rem; padding-bottom: calc(1rem + env(safe-area-inset-bottom)); border-right: 0; border-bottom: 0; border-left: 0; border-radius: 0.5rem 0.5rem 0 0; }
+      .modal-header h2 { font-size: 0.85rem; }
+      .modal-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
+      .modal-actions button { width: 100%; justify-self: stretch; padding: 0.8rem 0.75rem; }
+      .session-sidebar-content, .conversation-scroll, .command-list { scrollbar-width: none; }
+      .session-sidebar-content::-webkit-scrollbar, .conversation-scroll::-webkit-scrollbar, .command-list::-webkit-scrollbar { display: none; }
+    }
+</style>
+</head>
+<body data-home-dir="/home/demo">
+  <div class="app-shell">
+    <input type="checkbox" class="mobile-session-toggle" id="mobile-session-toggle">
+    <aside class="session-sidebar" data-unread-session-count="0">
+      <div class="session-sidebar-header">
+        <div class="sidebar-title">
+          <h1><svg viewBox="0 0 1400 400" role="img" aria-label="GRIPi"><g style="fill: var(--accent)"><path d="M0 0H300V100H100V300H200V200H300V400H0Z"/><path fill-rule="evenodd" d="M400 0H700V200H600V300H500V400H400ZM500 100V200H600V100Z"/><path d="M600 300H700V400H600Z"/><path d="M800 0H900V400H800Z"/></g><g style="fill: var(--text)" transform="translate(1000 0)"><path fill-rule="evenodd" d="M0 0H300V200H200V300H100V400H0ZM100 100V200H200V100Z"/><path d="M300 200H400V400H300Z"/></g></svg></h1>
+          <div class="sidebar-server-origin">static demo · local browser</div>
+        </div>
+        <label for="mobile-session-toggle" class="mobile-sessions-button mobile-sessions-close-button" aria-label="Close sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
+      </div>
+      <div class="session-sidebar-content">
+        <section class="recent-sessions">
+          <section class="pinned-sessions-section">
+            <div class="recent-sessions-header"><h2>Pinned</h2></div>
+            <div class="pinned-sessions-list" id="pinned-sessions-list"></div>
+          </section>
+          <div class="recent-sessions-header"><h2>Sessions</h2><button type="button" class="sidebar-icon-button sidebar-new-session-button" data-modal-open="new-session-modal"><span aria-hidden="true">+</span> New session</button></div>
+          <div class="sidebar-filters">
+            <form class="sidebar-project-filter-form">
+              <div class="sidebar-filter-row">
+                <div class="project-select" data-project-select>
+                  <select class="sidebar-project-filter project-select-native-hidden" id="project-filter" aria-label="Filter sessions by project" data-sidebar-project-filter>
+                    <option value="" data-project-option-kind="all">All projects</option>
+                    <option value="gripi" data-project-monogram="GR">gripi</option>
+                    <option value="website" data-project-monogram="WE">website</option>
+                    <option value="storefront" data-project-monogram="ST">storefront</option>
+                  </select>
+                  <button type="button" class="project-select-trigger" id="project-select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="project-select-neutral-icon" aria-hidden="true">•</span><span class="project-select-trigger-label">All projects</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
+                  <div class="project-select-listbox" id="project-select-listbox" role="listbox" hidden>
+                    <div class="project-select-option is-active" role="option" aria-selected="true" data-project-value=""><span class="project-select-neutral-icon">•</span><span class="project-select-option-label">All projects</span></div>
+                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="gripi" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon">GR</span><span class="project-select-option-label">gripi</span></div>
+                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="website" style="--project-identity-bg:#1e334d;--project-identity-fg:#9fc5ff"><span class="project-identity-icon">WE</span><span class="project-select-option-label">website</span></div>
+                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="storefront" style="--project-identity-bg:#203c2b;--project-identity-fg:#b5e3b0"><span class="project-identity-icon">ST</span><span class="project-select-option-label">storefront</span></div>
+                  </div>
+                </div>
+                <button type="button" class="sidebar-icon-button sidebar-search-toggle" title="Search sessions" aria-label="Search sessions" aria-expanded="false" aria-controls="sidebar-session-search" data-sidebar-search-toggle>⌕</button>
+                <span class="sidebar-filter-spinner" aria-hidden="true"></span>
+              </div>
+            </form>
+            <form id="sidebar-session-search" class="sidebar-session-search" role="search"><input type="search" name="session_search" placeholder="Search sessions" aria-label="Search sessions"></form>
+            <a class="sidebar-filters-clear" href="#" data-sidebar-filters-clear hidden>Clear filters</a>
+          </div>
+          <div class="sessions-list" id="sessions-list"></div>
+          <p class="empty sidebar-search-empty" id="sidebar-empty" hidden>No sessions match these filters.</p>
+        </section>
+      </div>
+      <div class="sidebar-gateway-update" data-gateway-update hidden>
+        <button type="button" class="sidebar-gateway-update-button" data-demo-notice>Update GRIPi</button>
+        <span class="sidebar-gateway-update-message">A gateway update is available.</span>
+      </div>
+      <button type="button" class="sidebar-notification-toggle is-disabled" title="Enable demo notifications" data-notification-toggle>
+        <span class="sidebar-notification-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M18 16v-5a6 6 0 0 0-12 0v5l-1.5 2h15L18 16Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.5 20a2.7 2.7 0 0 0 5 0" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></span>
+        <span class="sidebar-notification-label">Notifications</span><span class="sidebar-notification-state" data-notification-toggle-state>Demo off</span>
+      </button>
+    </aside>
+    <label for="mobile-session-toggle" class="mobile-sidebar-backdrop" aria-label="Hide sessions"></label>
+
+    <main class="conversation-panel">
+      <header class="session-header">
+        <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
+        <div class="session-header-title" id="session-header-title">
+          <h1 class="session-header-name">Build responsive session sidebar</h1>
+          <div class="session-header-project" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon">GR</span><span class="session-header-project-label">gripi</span></div>
+          <details class="session-relation-tree" aria-label="Related sessions">
+            <summary class="session-relation-tree-heading">Related sessions</summary>
+            <ul class="session-relation-tree-root"><li class="session-relation-tree-node"><div class="session-relation-tree-item"><a class="session-relation-tree-title" href="#api-errors" data-session-id="api-errors">Improve gateway error handling</a></div><ul class="session-relation-tree-children"><li class="session-relation-tree-node is-current"><div class="session-relation-tree-item"><span class="session-relation-tree-title">Build responsive session sidebar</span><span class="session-relation-current-marker">Current</span></div></li></ul></li></ul>
+          </details>
+        </div>
+        <div class="session-header-actions">
+          <a class="session-header-action session-header-window-action" href="#" title="Open session in new window" aria-label="Open session in new window" data-demo-notice>↗</a>
+          <button type="button" class="danger abort-button session-abort-button composer-stop-button" id="stop-button" hidden disabled title="Abort running Pi"><span aria-hidden="true">⏹</span></button>
+        </div>
+      </header>
+
+      <section class="conversation-scroll" id="conversation-scroll" tabindex="0">
+        <div class="current-session-find" data-current-session-find hidden>
+          <input type="search" data-current-session-find-input aria-label="Find in conversation"><output class="current-session-find-count" data-current-session-find-count>0 / 0</output>
+          <button type="button" class="secondary current-session-find-button" data-current-session-find-previous aria-label="Previous match">↑</button><button type="button" class="secondary current-session-find-button" data-current-session-find-next aria-label="Next match">↓</button><button type="button" class="secondary current-session-find-button" data-current-session-find-close aria-label="Close find">×</button>
+          <label class="current-session-find-conversation-only"><input type="checkbox" data-current-session-find-conversation-only> Conversation only</label>
+        </div>
+        <div class="jump-controls jump-controls--top"><button type="button" class="jump-button jump-to-first" aria-label="Top">↑↑</button></div>
+        <button type="button" class="conversation-history-status" data-demo-notice>Earlier messages available in a connected gateway</button>
+        <section id="history-output">
+          <article class="message message--user" data-role="user"><header class="message-header"><div class="role">user</div><div class="message-meta">10:14</div></header><pre class="message-body">Can you make the session sidebar work well on mobile without changing the desktop layout?</pre></article>
+          <article class="message message--assistant message--thinking" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta">10:14</div></header><div class="message-body message-body--thinking message-body--markdown"><p>I’ll inspect the existing responsive rules and preserve the desktop grid.</p></div></article>
+          <article class="message message--assistant message--compact message--tool-call" data-role="assistant"><header class="message-header"><div class="role">tool</div><div class="message-meta">10:15</div></header><div class="message-details message-details--always-open"><div class="message-details-summary"><span class="compact-summary"><span class="tool-command">read</span> <span class="tool-path">public/assets/app.css</span><span class="tool-range">:1-240</span></span></div><div class="tool-output-collapse" data-tool-output-collapse data-expanded="false"><div class="tool-output-collapse-control"><span class="tool-output-hidden-count tool-output-hidden-count--desktop">… (3 earlier lines)</span><button type="button" class="tool-output-toggle" data-tool-output-toggle aria-expanded="false">Expand</button></div><pre class="message-body" data-tool-output-body>Checked focus and backdrop styles.
+Compared composer sizing at 390px.
+No production selectors need to diverge.</pre></div></div></article>
+          <article class="message message--assistant" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta">10:16</div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>Implemented the responsive sidebar as an off-canvas panel below 760px. The desktop grid remains unchanged.</p></div></article>
+          <article class="message message--status message--compact" data-role="status"><header class="message-header"><div class="role">status</div><div class="message-meta">10:17</div></header><details class="message-details message-details--compaction"><summary class="message-details-summary compaction-details-summary"><span class="compact-summary">Conversation compacted</span><span class="compaction-details-action" aria-hidden="true"></span></summary><pre class="message-body">The responsive sidebar request and implementation were summarized.</pre></details></article>
+          <article class="message message--error" data-role="error"><header class="message-header"><div class="role">error</div><div class="message-meta">10:17</div></header><pre class="message-body">Demo example: gateway errors appear here without leaving the composer spinning.</pre></article>
+        </section>
+        <section id="live-output"></section>
+        <div class="jump-controls jump-controls--bottom"><button type="button" class="jump-button jump-to-latest" aria-label="Bottom">↓↓</button></div>
+      </section>
+
+      <div class="composer"><div class="composer-inner">
+        <details class="command-list" id="command-list" data-loaded="true"><summary>Slash commands (5)</summary><h3>Gateway commands</h3><div class="command" data-command-name="new"><code>/new</code> — Start a new session</div><div class="command" data-command-name="fork"><code>/fork</code> — Fork this conversation</div><div class="command" data-command-name="tree"><code>/tree</code> — Open the session tree</div><div class="command" data-command-name="model"><code>/model</code> — Choose model and thinking</div><div class="command" data-command-name="compact"><code>/compact</code> — Compact context</div></details>
+        <div class="session-reconnect" id="demo-notice" role="status" aria-live="polite"><span>Static demo: prompts and settings stay in this browser; Pi and gateway-only actions are simulated.</span><button type="button" class="secondary reconnect-button" data-dismiss-notice>Dismiss</button></div>
+        <form class="prompt-form" id="prompt-form">
+          <div class="tree-position-banner" role="status" data-demo-secondary-state hidden><div><strong>Viewing earlier tree point.</strong> <span>Your next message will branch from here.</span></div><button type="button" class="secondary" data-demo-notice>Jump to latest</button></div>
+          <div class="session-sync-banner" role="status" data-demo-secondary-state hidden><div><strong>Session changed outside the gateway.</strong> <span>Finish using this session in Pi CLI before continuing here.</span></div><button type="button" class="secondary" data-demo-notice>Take over in gateway</button></div>
+          <span class="composer-state" data-state="idle" aria-live="polite"></span>
+          <div class="attachment-tray has-attachments" aria-live="polite"><span class="attachment"><span>architecture.png</span><button type="button" data-remove-attachment>Remove</button></span></div>
+          <div class="composer-input-row"><input class="image-input" id="image-input" type="file" accept="image/*" multiple><label for="image-input" class="attach-button" title="Attach images" aria-label="Attach images">＋</label><textarea name="message" rows="1" placeholder="Ask Pi… Enter to send, Shift+Enter for newline."></textarea><button type="submit" class="send-button">Send</button></div>
+          <div class="composer-controls"><div class="session-status-bar" id="session-status-bar"><span class="session-status-item" data-status-key="ctx"><span class="session-status-label">CTX</span> <span class="session-status-value">18%</span></span><button type="button" class="session-status-item model-settings-chip" data-status-key="model" data-modal-open="model-settings-modal"><span class="session-status-label">Model</span> <span class="session-status-value">anthropic/claude-sonnet-4 (high)</span></button></div></div>
+        </form>
+      </div></div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" data-modal="new-session-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="new-session-modal-title">
+      <div class="modal-header"><h2 id="new-session-modal-title">New session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div>
+      <form class="new-session-cwd-form">
+        <input type="hidden" name="cwd" value="/home/demo/Work/gripi" data-new-session-cwd-value>
+        <div data-new-session-project-fields>
+          <div class="modal-field">
+            <label id="new-session-project-label" for="new-session-known-cwd">Project</label>
+            <div class="project-select" data-project-select>
+              <select id="new-session-known-cwd" name="known_cwd" class="project-select-native-hidden" aria-labelledby="new-session-project-label" data-new-session-known-cwd>
+                <option value="gripi">gripi — /home/demo/Work/gripi</option><option value="website">website — /home/demo/Work/website</option><option value="storefront">storefront — /home/demo/Work/storefront</option><option value="__new_path__" data-project-option-kind="new">Add new path…</option>
+              </select>
+              <button type="button" class="project-select-trigger" data-new-session-project-trigger data-modal-default-focus aria-haspopup="listbox" aria-expanded="false"><span class="project-identity-icon" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73">GR</span><span class="project-select-trigger-label">gripi — /home/demo/Work/gripi</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
+              <div class="project-select-listbox" data-new-session-project-list role="listbox" hidden>
+                <div class="project-select-option is-active" role="option" aria-selected="true" data-new-project="gripi"><span class="project-identity-icon" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73">GR</span><span class="project-select-option-label">gripi — /home/demo/Work/gripi</span></div>
+                <div class="project-select-option" role="option" aria-selected="false" data-new-project="website"><span class="project-identity-icon" style="--project-identity-bg:#1e334d;--project-identity-fg:#9fc5ff">WE</span><span class="project-select-option-label">website — /home/demo/Work/website</span></div>
+                <div class="project-select-option" role="option" aria-selected="false" data-new-project="storefront"><span class="project-identity-icon" style="--project-identity-bg:#203c2b;--project-identity-fg:#b5e3b0">ST</span><span class="project-select-option-label">storefront — /home/demo/Work/storefront</span></div>
+                <div class="project-select-option" role="option" aria-selected="false" data-new-project="__new_path__"><span class="project-select-neutral-icon">+</span><span class="project-select-option-label">Add new path…</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div data-new-session-path-fields hidden><label class="modal-field"><span>Path</span><input type="text" autocomplete="off" placeholder="/home/demo/projects/project" data-new-session-cwd-input></label><div class="cwd-suggestions" role="listbox" hidden></div><button type="button" class="secondary" data-new-session-project-mode>Choose existing project instead</button></div>
+        <div class="cwd-validation-message" data-new-session-cwd-message>The static demo creates a representative local session.</div>
+        <div class="modal-actions"><button type="submit" data-new-session-submit>Start session</button></div>
+      </form>
+    </div>
+  </div>
+  <div class="modal-overlay" data-modal="fork-session-modal" hidden><div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="fork-session-modal-title"><div class="modal-header"><h2 id="fork-session-modal-title">Fork session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><div class="fork-session-list"><p class="fork-session-status">Choose a point to fork from:</p><button type="button" class="fork-session-option" data-demo-fork><span class="tree-session-role">Assistant</span><br>Implemented the responsive sidebar…</button><button type="button" class="fork-session-option" data-demo-fork><span class="tree-session-role">User</span><br>Nice. Please check the composer…</button></div><div class="modal-actions"><button type="button" class="secondary" data-modal-close>Cancel</button></div></div></div>
+  <div class="modal-overlay" data-modal="tree-session-modal" hidden><div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="tree-session-modal-title"><div class="modal-header"><h2 id="tree-session-modal-title">Session tree</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><div class="fork-session-list"><button type="button" class="fork-session-option" data-demo-tree><span class="tree-session-role">Root</span><br>Improve gateway error handling</button><button type="button" class="fork-session-option is-current-tree-entry" data-demo-tree><span class="tree-session-role">Assistant</span><span class="tree-session-badge tree-session-badge--current">Current</span><br>Build responsive session sidebar</button></div><div class="modal-actions"><button type="button" class="secondary" data-modal-close>Cancel</button></div></div></div>
+  <div class="modal-overlay" data-modal="model-settings-modal" hidden><div class="modal-card model-settings-card" role="dialog" aria-modal="true" aria-labelledby="model-settings-title"><div class="modal-header"><h2 id="model-settings-title">Model &amp; thinking</h2><button type="button" class="secondary modal-close-button" data-modal-close aria-label="Close model settings">×</button></div><form class="model-settings-form"><label class="modal-field">Search models<input type="search" data-model-search data-modal-default-focus placeholder="Provider, model, or display name"></label><p class="model-settings-status" role="status">2 models available in this demo</p><div class="model-settings-list"><section class="model-provider-group"><h3 class="model-provider-heading">Anthropic</h3><label class="model-option"><input type="radio" name="model" value="anthropic/claude-sonnet-4" checked><span class="model-option-details"><span class="model-option-id">claude-sonnet-4</span><span class="model-option-meta">200k context · images · reasoning</span></span><span class="model-current-badge">Current</span></label><label class="model-option"><input type="radio" name="model" value="anthropic/claude-opus-4"><span class="model-option-details"><span class="model-option-id">claude-opus-4</span><span class="model-option-meta">200k context · reasoning</span></span></label></section></div><fieldset class="model-thinking-options"><legend>Thinking</legend><div data-thinking-levels><label class="thinking-option"><input type="radio" name="thinking" value="off">off</label><label class="thinking-option"><input type="radio" name="thinking" value="high" checked>high</label></div></fieldset><div class="modal-actions"><button type="button" class="secondary" data-modal-close>Cancel</button><button type="submit">Apply</button></div></form></div></div>
+  <div class="session-switch-overlay" role="status" aria-live="polite" aria-label="Loading"><div class="session-switch-indicator"><span class="session-switch-spinner" aria-hidden="true"></span> Loading…</div></div>
+  <div class="browser-access-overlay" data-browser-access-overlay aria-live="polite"><div class="browser-access-card"><div class="browser-access-title">Browser access request</div><div class="browser-access-meta">A connected browser is requesting access.</div><div class="browser-access-actions"><button class="secondary" type="button" data-demo-notice>Deny</button><button type="button" data-demo-notice>Allow</button></div></div></div>
+  <div class="browser-access-overlay" data-workspace-access-overlay aria-live="polite"><div class="browser-access-card"><div class="browser-access-title">Workspace access request</div><div class="browser-access-meta">A trusted user is requesting this workspace.</div><div class="browser-access-actions"><button class="secondary" type="button" data-demo-notice>Deny</button><button type="button" data-demo-notice>Allow</button></div></div></div>
+  <script src="demo.js"></script>
+</body>
+</html>
