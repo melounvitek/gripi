@@ -8,6 +8,23 @@ class DemoTest < Minitest::Test
   HTML = File.join(ROOT, "demo/index.html")
   JAVASCRIPT = File.join(ROOT, "demo/demo.js")
   PRODUCTION_CSS = File.join(ROOT, "public/assets/app.css")
+  DEPLOY_WORKFLOW = File.join(ROOT, ".github/workflows/deploy_demo.yml")
+
+  def test_demo_deploys_to_github_pages_after_every_master_commit
+    assert_path_exists DEPLOY_WORKFLOW
+    workflow = File.read(DEPLOY_WORKFLOW)
+
+    assert_match(/push:\n\s+branches: \[master\]/, workflow)
+    assert_includes workflow, "workflow_dispatch:"
+    assert_includes workflow, "pages: write"
+    assert_includes workflow, "id-token: write"
+    assert_includes workflow, "uses: actions/configure-pages@v5"
+    refute_includes workflow, "enablement: true"
+    assert_includes workflow, "uses: actions/upload-pages-artifact@v4"
+    assert_includes workflow, "path: ./demo"
+    assert_includes workflow, "uses: actions/deploy-pages@v4"
+  end
+
   def test_demo_is_two_self_contained_portable_files
     assert_path_exists HTML
     assert_path_exists JAVASCRIPT
