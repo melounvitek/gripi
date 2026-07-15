@@ -28,7 +28,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: "GRIPi",
+    title: process.platform === "darwin" ? "" : "GRIPi",
     icon: WINDOW_ICON_PATH,
     autoHideMenuBar: true,
     webPreferences: {
@@ -39,6 +39,10 @@ function createWindow() {
       webviewTag: true
     }
   });
+
+  if (process.platform === "darwin") {
+    mainWindow.on("page-title-updated", (event) => event.preventDefault());
+  }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openExternalUrl(url);
