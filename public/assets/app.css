@@ -134,8 +134,9 @@
     .session-pin-toggle.is-loading::after { content: ""; position: absolute; width: 0.85rem; height: 0.85rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     a.session.selected { background: var(--panel-softer); border-color: var(--accent-line-35); }
     a.session.selected::before { content: ""; position: absolute; left: -1rem; top: 0.7rem; bottom: 0.7rem; width: 3px; background: var(--accent); }
+    a.session.unread { background: var(--accent-tint-08); box-shadow: inset 3px 0 0 var(--accent); }
+    a.session.unread:hover { background: var(--accent-tint-14); }
     a.session.unread .session-title { color: var(--text); font-weight: 700; }
-    a.session.unread .session-title::before { content: ""; display: inline-block; width: 0.42rem; height: 0.42rem; margin-right: 0.4rem; border-radius: 50%; background: var(--accent); vertical-align: 0.08rem; }
     .session-content { min-width: 0; }
     .session-indicators { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; min-width: 0.7rem; }
     .session-fork-indicator { display: inline-flex; align-items: center; justify-content: center; min-width: 1.15rem; height: 1.15rem; border: 1px solid #f0c67447; border-radius: 0.2rem; background: #f0c67414; color: var(--gold); font-size: 0.86rem; font-weight: 700; line-height: 1; }

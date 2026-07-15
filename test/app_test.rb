@@ -5696,8 +5696,10 @@ class AppTest < Minitest::Test
       assert_includes unread_response.body, "data-assistant-response-count=\"1\""
       assert_equal "Unread:", Nokogiri::HTML(unread_response.body).at_css("a.session.unread .visually-hidden").text.strip
 
-      assert_includes APP_STYLESHEET, 'a.session.unread .session-title::before { content: "";'
-      refute_includes APP_STYLESHEET, "a.session.unread .session-indicators::before"
+      assert_includes APP_STYLESHEET, "a.session.unread { background: var(--accent-tint-08); box-shadow: inset 3px 0 0 var(--accent); }"
+      assert_includes APP_STYLESHEET, "a.session.unread:hover { background: var(--accent-tint-14); }"
+      assert_includes APP_STYLESHEET, "a.session.unread .session-title { color: var(--text); font-weight: 700; }"
+      refute_includes APP_STYLESHEET, "a.session.unread .session-title::before"
       refute_includes APP_STYLESHEET, "content: \"new\""
       refute_includes APP_JAVASCRIPT, "localStorage.getItem(\"piSidebarUnreadSessions\")"
 
