@@ -96,7 +96,6 @@ class DemoTest < Minitest::Test
     assert_equal [
       "Welcome to GRIPi",
       "New to Pi? Start here",
-      "Use subagents from GRIPi",
       "What isn’t supported in GRIPi?",
       "Run GRIPi on an always-on computer",
       "Access GRIPi remotely with Tailscale",
@@ -109,9 +108,8 @@ class DemoTest < Minitest::Test
 
     body = Nokogiri::HTML5(File.read(HTML)).at_css("body")
     javascript = File.read(JAVASCRIPT)
-    refute_includes javascript, 'gripi:static-demo:v4'
-    assert_includes javascript, 'gripi:static-demo:v5'
-    assert_includes javascript, "Use the general subagent to independently review this change."
+    refute_includes javascript, 'gripi:static-demo:v5'
+    assert_includes javascript, 'gripi:static-demo:v6'
     assert_includes javascript, "Custom TUI components, overlays, widgets, editors"
     assert_includes javascript, "Never expose GRIPi through a public IP or public reverse proxy."
     assert_includes javascript, 'switchSession(button.dataset.demoTreeTarget)'

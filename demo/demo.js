@@ -20,15 +20,6 @@
       ]
     },
     {
-      id: "subagents", name: "Use subagents from GRIPi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "Pi feature", pinned: false,
-      messages: [
-        { role: "user", text: "Can I use my Pi subagents through GRIPi?", time: "Guide" },
-        { role: "assistant", text: "Yes. GRIPi does not implement a separate subagent system—it renders the tools exposed by Pi on the gateway. My usual handoff is: “Use the general subagent to independently review this change. Focus on correctness, possible simplifications, and missing regression coverage. Do not modify files.”", time: "Guide" },
-        { role: "tool", title: "subagent general", text: "✓ general\n✓ read changed files\n✓ run focused tests\n✓ review correctness and simplifications\n\nNo high-severity findings. Suggested one smaller regression test.\nclaude-sonnet · 18.4k tokens", time: "Guide" },
-        { role: "assistant", text: "Custom Pi tools that work in RPC mode can generally be used here too. Tools that depend on terminal-only interaction are the important exception.", time: "Guide" }
-      ]
-    },
-    {
       id: "unsupported", name: "What isn’t supported in GRIPi?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "Compatibility", pinned: false,
       messages: [
         { role: "user", text: "Does GRIPi support everything an extension can do in Pi’s terminal UI?", time: "Guide" },
@@ -174,7 +165,7 @@
   global.GripiDemo = { playScript, responseScript, safeIdentityColor, safeGuideLink, jumpControlVisibility, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
   if (typeof document === "undefined") return;
 
-  const storageKey = "gripi:static-demo:v5";
+  const storageKey = "gripi:static-demo:v6";
   let sessions = initialSessions;
   let currentId = defaultSessionId;
   let streamController = null;
