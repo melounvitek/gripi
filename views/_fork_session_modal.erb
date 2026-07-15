@@ -21,50 +21,55 @@
     <div class="modal-card tree-session-card" role="dialog" aria-modal="true" aria-labelledby="tree-session-modal-title">
       <div class="modal-header">
         <h2 id="tree-session-modal-title">Session tree</h2>
-        <button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>&times;</button>
+        <button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close data-modal-default-focus>&times;</button>
       </div>
       <% if @selected_session %>
         <section class="tree-session-browser" data-tree-browser-step>
-          <div class="tree-session-toolbar">
-            <label class="modal-field">
-              Search
-              <input type="search" placeholder="Search tree…" autocomplete="off" data-tree-search data-modal-default-focus>
-            </label>
-            <label class="modal-field">
-              Filter
-              <select data-tree-filter>
-                <option value="default">Default</option>
-                <option value="no-tools">No tools</option>
-                <option value="user-only">User only</option>
-                <option value="labeled-only">Labeled only</option>
-                <option value="all">All entries</option>
-              </select>
-            </label>
-            <label class="tree-session-timestamp-toggle">
-              <input type="checkbox" data-tree-label-timestamps>
-              Label times
-            </label>
-          </div>
+          <details class="tree-session-options" data-tree-options>
+            <summary>Search &amp; options</summary>
+            <div class="tree-session-options-content">
+              <div class="tree-session-toolbar">
+                <label class="modal-field">
+                  Search
+                  <input type="search" placeholder="Search tree…" autocomplete="off" data-tree-search>
+                </label>
+                <label class="modal-field">
+                  Filter
+                  <select data-tree-filter>
+                    <option value="default">Default</option>
+                    <option value="no-tools">No tools</option>
+                    <option value="user-only">User only</option>
+                    <option value="labeled-only">Labeled only</option>
+                    <option value="all">All entries</option>
+                  </select>
+                </label>
+                <label class="tree-session-timestamp-toggle">
+                  <input type="checkbox" data-tree-label-timestamps>
+                  Label times
+                </label>
+              </div>
+              <form class="tree-session-label-form" action="/sessions/tree/label" method="post" data-tree-label-form>
+                <label class="modal-field">
+                  Selected entry label
+                  <input type="text" maxlength="1024" placeholder="Optional label" data-tree-label-input>
+                </label>
+                <div class="tree-session-label-actions">
+                  <button type="button" class="secondary" data-tree-label-clear disabled>Clear</button>
+                  <button type="submit" class="secondary" data-tree-label-save disabled>Save label</button>
+                </div>
+              </form>
+              <p class="tree-session-help" data-tree-help>
+                <strong>Badges:</strong> Current is open, Latest is newest when different.<br>
+                <strong>Keyboard:</strong> ↑/↓ select · ←/→ fold or move · Home/End/Page move · Enter navigate · Esc close · / or Ctrl+F search · Ctrl+O filter · Shift+L label
+              </p>
+            </div>
+          </details>
           <p class="tree-session-status" data-tree-session-status aria-live="polite">Loading session tree…</p>
           <div class="tree-session-list" data-tree-session-list data-tree-entries-url="/sessions/tree_entries?session=<%= h Rack::Utils.escape(@selected_session.path) %>">
             <ul class="tree-session-tree" role="tree" aria-label="Session entries" data-tree-viewport></ul>
           </div>
-          <form class="tree-session-label-form" action="/sessions/tree/label" method="post" data-tree-label-form>
-            <label class="modal-field">
-              Selected entry label
-              <input type="text" maxlength="1024" placeholder="Optional label" data-tree-label-input>
-            </label>
-            <div class="tree-session-label-actions">
-              <button type="button" class="secondary" data-tree-label-clear disabled>Clear</button>
-              <button type="submit" class="secondary" data-tree-label-save disabled>Save label</button>
-            </div>
-          </form>
-          <p class="tree-session-help" data-tree-help>
-            <strong>Badges:</strong> Active is selected, Current is open, Latest is newest.<br>
-            <strong>Keyboard:</strong> ↑/↓ select · ←/→ fold or move · Home/End/Page move · Enter navigate · Esc close · / or Ctrl+F search · Ctrl+O filter · Shift+L label
-          </p>
           <div class="modal-actions">
-            <button type="button" class="secondary" data-modal-close>Cancel</button>
+            <button type="button" class="secondary" data-modal-close>Close</button>
             <button type="button" data-tree-navigate disabled>Navigate</button>
           </div>
         </section>

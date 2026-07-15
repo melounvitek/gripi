@@ -1,11 +1,13 @@
 require "minitest/autorun"
 require "json"
 require "open3"
+require "nokogiri"
 
 class TreeSessionControllerJsTest < Minitest::Test
   ASSET_URL = "file://#{File.expand_path("../public/assets/tree_session_controller.js", __dir__)}"
   VIEW_PATH = File.expand_path("../views/_fork_session_modal.erb", __dir__)
   APP_PATH = File.expand_path("../public/assets/app.js", __dir__)
+  CSS_PATH = File.expand_path("../public/assets/app.css", __dir__)
 
   def test_tree_model_searches_case_insensitive_and_tokens_and_reparents_matches
     result = run_javascript(<<~JS)
@@ -73,6 +75,61 @@ class TreeSessionControllerJsTest < Minitest::Test
     assert_empty result
   end
 
+  def test_visual_indentation_only_grows_around_visible_forks
+    result = run_javascript(<<~JS)
+      const { TreeSessionModel } = await import(#{ASSET_URL.to_json});
+      const model = new TreeSessionModel([
+        { entryId: "root", parentId: null, text: "Root match" },
+        { entryId: "branch-a", parentId: "root", text: "Branch A match" },
+        { entryId: "a-child", parentId: "branch-a", text: "A child match" },
+        { entryId: "a-grandchild", parentId: "a-child", text: "A grandchild match" },
+        { entryId: "branch-b", parentId: "root", text: "Branch B" }
+      ]);
+      const before = Object.fromEntries([...model.visibleStructure().visual].map(([id, value]) => [id, value.indent]));
+      model.setSearch("match");
+      const after = Object.fromEntries([...model.visibleStructure().visual].map(([id, value]) => [id, value.indent]));
+      console.log(JSON.stringify({ before, after }));
+    JS
+
+    assert_equal({ "root" => 0, "branch-a" => 1, "a-child" => 2, "a-grandchild" => 2, "branch-b" => 1 }, result.fetch("before"))
+    assert_equal({ "root" => 0, "branch-a" => 0, "a-child" => 0, "a-grandchild" => 0 }, result.fetch("after"))
+  end
+
+  def test_multiple_visible_roots_share_pi_cli_virtual_fork_indentation
+    result = run_javascript(<<~JS)
+      const { TreeSessionModel } = await import(#{ASSET_URL.to_json});
+      const model = new TreeSessionModel([
+        { entryId: "first-root", parentId: null },
+        { entryId: "first-child", parentId: "first-root" },
+        { entryId: "first-grandchild", parentId: "first-child" },
+        { entryId: "second-root", parentId: null }
+      ]);
+      const visual = model.visibleStructure().visual;
+      console.log(JSON.stringify(Object.fromEntries([...visual].map(([id, value]) => [id, value.indent]))));
+    JS
+
+    assert_equal({ "first-root" => 0, "first-child" => 1, "first-grandchild" => 1, "second-root" => 0 }, result)
+  end
+
+  def test_visual_structure_keeps_connectors_for_the_nearest_visible_fork
+    result = run_javascript(<<~JS)
+      const { TreeSessionModel } = await import(#{ASSET_URL.to_json});
+      const model = new TreeSessionModel([
+        { entryId: "root", parentId: null },
+        { entryId: "first", parentId: "root" },
+        { entryId: "first-child", parentId: "first" },
+        { entryId: "second", parentId: "root" }
+      ]);
+      const visual = model.visibleStructure().visual;
+      console.log(JSON.stringify(Object.fromEntries([...visual].map(([id, value]) => [id, value]))));
+    JS
+
+    assert_equal true, result.dig("first", "showConnector")
+    assert_equal false, result.dig("first", "isLast")
+    assert_equal [{ "position" => 0, "show" => true }], result.dig("first-child", "gutters")
+    assert_equal true, result.dig("second", "isLast")
+  end
+
   def test_controller_renders_treeitems_from_the_visible_structure
     result = run_javascript(<<~JS)
       const { TreeSessionController, TreeSessionModel } = await import(#{ASSET_URL.to_json});
@@ -99,6 +156,38 @@ class TreeSessionControllerJsTest < Minitest::Test
     assert_equal 1, result.fetch("count")
     assert_equal "treeitem", result.fetch("role")
     assert_equal "true", result.fetch("selected")
+  end
+
+  def test_controller_only_shows_current_and_distinct_latest_badges
+    result = run_javascript(<<~JS)
+      const { TreeSessionController, TreeSessionModel } = await import(#{ASSET_URL.to_json});
+      const makeNode = (tag) => ({
+        tag, children: [], dataset: {}, attributes: {}, textContent: "", tabIndex: null,
+        classList: { toggle() {} },
+        setAttribute(name, value) { this.attributes[name] = value; },
+        append(...children) { this.children.push(...children); },
+        replaceChildren(...children) { this.children = children; }
+      });
+      const viewport = makeNode("ul");
+      const modal = {
+        querySelector: (selector) => selector === "[data-tree-viewport]" ? viewport : null,
+        querySelectorAll: () => []
+      };
+      const document = { addEventListener() {}, querySelector: () => modal, createElement: makeNode };
+      const controller = new TreeSessionController(document, {});
+      controller.model = new TreeSessionModel([
+        { entryId: "current", parentId: null, text: "Current entry", current: true, latest: true },
+        { entryId: "latest", parentId: null, text: "Latest entry", latest: true }
+      ]);
+      controller.render();
+      const text = (node) => [node.textContent, ...node.children.flatMap((child) => text(child))];
+      console.log(JSON.stringify(viewport.children.map((item) => text(item).filter(Boolean))));
+    JS
+
+    assert_includes result[0], "Current"
+    refute_includes result[0], "Latest"
+    refute result.flatten.include?("Active")
+    assert_includes result[1], "Latest"
   end
 
   def test_loading_a_different_session_resets_stale_selection
@@ -239,11 +328,70 @@ class TreeSessionControllerJsTest < Minitest::Test
     assert_equal 2, result.fetch("reloads")
   end
 
-  def test_ctrl_o_cycles_to_the_next_filter
+  def test_opening_starts_with_closed_inactive_options
+    result = run_javascript(<<~JS)
+      const { TreeSessionController, TreeSessionModel } = await import(#{ASSET_URL.to_json});
+      const options = { open: true };
+      const search = { value: "stale query" };
+      const labelTimestamps = { checked: true };
+      const browser = { hidden: true };
+      const summary = { hidden: false };
+      const controls = {
+        "[data-tree-options]": options,
+        "[data-tree-search]": search,
+        "[data-tree-label-timestamps]": labelTimestamps,
+        "[data-tree-browser-step]": browser,
+        "[data-tree-summary-step]": summary
+      };
+      const modal = { querySelector: (selector) => controls[selector] || null };
+      const document = { addEventListener() {}, querySelector: () => modal };
+      const controller = new TreeSessionController(document, {}, { openModal() {} });
+      controller.model = new TreeSessionModel([{ entryId: "visible", text: "Visible" }, { entryId: "hidden", text: "Hidden" }]);
+      controller.model.setSearch("visible");
+      let renders = 0;
+      controller.render = () => { renders += 1; };
+      controller.open();
+      console.log(JSON.stringify({ optionsOpen: options.open, search: search.value, modelQuery: controller.model.query, labelTimestamps: labelTimestamps.checked, browserHidden: browser.hidden, summaryHidden: summary.hidden, renders }));
+    JS
+
+    assert_equal false, result.fetch("optionsOpen")
+    assert_equal "", result.fetch("search")
+    assert_equal "", result.fetch("modelQuery")
+    assert_equal 1, result.fetch("renders")
+    assert_equal false, result.fetch("labelTimestamps")
+    assert_equal false, result.fetch("browserHidden")
+    assert_equal true, result.fetch("summaryHidden")
+  end
+
+  def test_search_and_label_shortcuts_reveal_options_before_focusing
+    result = run_javascript(<<~JS)
+      const { TreeSessionController } = await import(#{ASSET_URL.to_json});
+      const details = { open: false };
+      const focusOrder = [];
+      const control = (name) => ({ focus() { focusOrder.push(`${name}:${details.open}`); } });
+      const controls = { "[data-tree-search]": control("search"), "[data-tree-label-input]": control("label"), "[data-tree-options]": details };
+      const modal = { hidden: false, querySelector: (selector) => controls[selector] || null };
+      const document = { addEventListener() {}, querySelector: () => modal };
+      const controller = new TreeSessionController(document, {});
+      const event = (key, extras = {}) => ({
+        key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+        preventDefault() {}, target: { closest() { return null; } }, ...extras
+      });
+      controller.handleKeydown(event("/"));
+      details.open = false;
+      controller.handleKeydown(event("L", { shiftKey: true }));
+      console.log(JSON.stringify(focusOrder));
+    JS
+
+    assert_equal ["search:true", "label:true"], result
+  end
+
+  def test_ctrl_o_reveals_options_and_cycles_to_the_next_filter
     result = run_javascript(<<~JS)
       const { TreeSessionController } = await import(#{ASSET_URL.to_json});
       const filter = { value: "default" };
-      const modal = { hidden: false, querySelector: (selector) => selector === "[data-tree-filter]" ? filter : null };
+      const details = { open: false };
+      const modal = { hidden: false, querySelector: (selector) => ({ "[data-tree-filter]": filter, "[data-tree-options]": details })[selector] || null };
       const document = { addEventListener() {}, querySelector: () => modal };
       const controller = new TreeSessionController(document, {});
       let changes = 0;
@@ -254,15 +402,16 @@ class TreeSessionControllerJsTest < Minitest::Test
         preventDefault() { prevented = true; },
         target: { closest() { return null; } }
       });
-      console.log(JSON.stringify({ value: filter.value, changes, prevented }));
+      console.log(JSON.stringify({ value: filter.value, changes, prevented, optionsOpen: details.open }));
     JS
 
     assert_equal "no-tools", result.fetch("value")
     assert_equal 1, result.fetch("changes")
     assert result.fetch("prevented")
+    assert result.fetch("optionsOpen")
   end
 
-  def test_tree_navigation_keys_do_not_override_modal_buttons
+  def test_tree_navigation_keys_do_not_override_native_disclosure_controls
     result = run_javascript(<<~JS)
       const { TreeSessionController, TreeSessionModel } = await import(#{ASSET_URL.to_json});
       const modal = { hidden: false, querySelector: () => null };
@@ -270,16 +419,18 @@ class TreeSessionControllerJsTest < Minitest::Test
       const controller = new TreeSessionController(document, {});
       controller.model = new TreeSessionModel([{ entryId: "entry-1", current: true }]);
       let navigations = 0;
+      let prevented = false;
       controller.requestNavigation = () => { navigations += 1; };
       controller.handleKeydown({
         key: "Enter", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
-        preventDefault() {},
-        target: { closest() { return null; } }
+        preventDefault() { prevented = true; },
+        target: { closest(selector) { return selector === "summary" ? this : null; } }
       });
-      console.log(JSON.stringify({ navigations }));
+      console.log(JSON.stringify({ navigations, prevented }));
     JS
 
     assert_equal 0, result.fetch("navigations")
+    assert_equal false, result.fetch("prevented")
   end
 
   def test_filter_and_summary_choices_are_complete_and_exact
@@ -292,14 +443,32 @@ class TreeSessionControllerJsTest < Minitest::Test
     assert_equal ["No summary", "Summarize", "Summarize with custom instructions"], result.fetch("summaries").map { |choice| choice.fetch("label") }
   end
 
-  def test_modal_exposes_tree_controls_label_actions_and_two_navigation_steps
-    view = File.read(VIEW_PATH)
+  def test_modal_keeps_secondary_controls_in_a_closed_options_disclosure
+    document = Nokogiri::HTML.fragment(File.read(VIEW_PATH))
+    options = document.at_css("details[data-tree-options]")
 
-    %w[data-tree-search data-tree-filter data-tree-label-timestamps data-tree-viewport data-tree-label-input data-tree-label-save data-tree-label-clear data-tree-navigate data-tree-summary-step data-tree-summary-submit data-tree-help].each do |attribute|
-      assert_includes view, attribute
+    refute_nil options
+    assert_nil options["open"]
+    assert_equal "Search & options", options.at_css("summary").text.strip
+    assert document.at_css('[data-modal="tree-session-modal"] [data-modal-default-focus][data-modal-close]')
+    %w[data-tree-search data-tree-filter data-tree-label-timestamps data-tree-label-input data-tree-label-save data-tree-label-clear data-tree-help].each do |attribute|
+      assert options.at_css("[#{attribute}]")
     end
-    assert_includes view, "/sessions/tree/label"
-    assert_includes view, "Summarize with custom instructions"
+    %w[data-tree-viewport data-tree-navigate data-tree-summary-step data-tree-summary-submit].each do |attribute|
+      assert document.at_css("[#{attribute}]")
+    end
+    assert_includes document.text, "Summarize with custom instructions"
+  end
+
+  def test_tree_modal_css_prioritizes_vertical_tree_scrolling_and_caps_mobile_indentation
+    css = File.read(CSS_PATH)
+
+    assert_includes css, "grid-template-rows: minmax(0, auto) auto minmax(0, 1fr) auto"
+    assert_includes css, ".tree-session-list { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden;"
+    assert_includes css, ".tree-session-connector-level:nth-last-child(n + 9)"
+    assert_includes css, ".tree-session-connector-level:nth-last-child(n + 4)"
+    assert_includes css, ".tree-session-summary { overflow-y: auto; }"
+    assert_includes css, "env(safe-area-inset-bottom)"
   end
 
   def test_app_only_prefills_an_empty_composer_after_navigation

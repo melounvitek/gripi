@@ -90,7 +90,43 @@ export class TreeSessionModel {
       siblings.push(entry);
       children.set(parent.entryId, siblings);
     });
-    return { entries, children, roots };
+    const visual = new Map();
+    // Pi keeps linear chains flat and adds a visual level only at a fork and its first generation; multiple roots share a virtual fork.
+    const multipleRoots = roots.length > 1;
+    const stack = [];
+    for (let index = roots.length - 1; index >= 0; index -= 1) {
+      stack.push({
+        entry: roots[index], indent: multipleRoots ? 1 : 0,
+        justBranched: multipleRoots, showConnector: multipleRoots,
+        isLast: index === roots.length - 1, gutters: [], virtualRootChild: multipleRoots
+      });
+    }
+    while (stack.length) {
+      const current = stack.pop();
+      const displayIndent = multipleRoots ? Math.max(0, current.indent - 1) : current.indent;
+      visual.set(current.entry.entryId, {
+        indent: displayIndent,
+        showConnector: current.showConnector && !current.virtualRootChild,
+        isLast: current.isLast,
+        gutters: current.gutters
+      });
+      const visibleChildren = children.get(current.entry.entryId) || [];
+      const branched = visibleChildren.length > 1;
+      const childIndent = branched || (current.justBranched && current.indent > 0) ? current.indent + 1 : current.indent;
+      const connectorPosition = Math.max(0, displayIndent - 1);
+      const childGutters = current.showConnector && !current.virtualRootChild
+        ? [...current.gutters, { position: connectorPosition, show: !current.isLast }]
+        : current.gutters;
+      for (let index = visibleChildren.length - 1; index >= 0; index -= 1) {
+        stack.push({
+          entry: visibleChildren[index], indent: childIndent,
+          justBranched: branched, showConnector: branched,
+          isLast: index === visibleChildren.length - 1, gutters: childGutters,
+          virtualRootChild: false
+        });
+      }
+    }
+    return { entries, children, roots, visual };
   }
 
   move(direction) {
@@ -157,6 +193,16 @@ export class TreeSessionController {
     const modal = this.modal();
     if (!modal) return false;
     this.filterChosen = false;
+    const options = modal.querySelector("[data-tree-options]");
+    if (options) options.open = false;
+    const search = modal.querySelector("[data-tree-search]");
+    if (search) search.value = "";
+    const labelTimestamps = modal.querySelector("[data-tree-label-timestamps]");
+    if (labelTimestamps) labelTimestamps.checked = false;
+    if (this.model) {
+      this.model.setSearch("");
+      this.render();
+    }
     this.showTreeStep(modal);
     this.callbacks.openModal?.(modal);
     this.load(modal).catch(() => {});
@@ -245,6 +291,20 @@ export class TreeSessionController {
         row.classList.toggle("is-active", entry.entryId === this.model.selectedId);
         row.classList.toggle("is-current", !!entry.current);
 
+        const visual = structure.visual.get(entry.entryId);
+        const leading = this.document.createElement("span");
+        leading.className = "tree-session-connectors";
+        leading.setAttribute("aria-hidden", "true");
+        for (let level = 0; level < visual.indent; level += 1) {
+          const connector = this.document.createElement("span");
+          connector.className = "tree-session-connector-level";
+          const gutter = visual.gutters.find((candidate) => candidate.position === level);
+          if (gutter?.show) connector.textContent = "│";
+          if (visual.showConnector && level === visual.indent - 1) connector.textContent = visual.isLast ? "└" : "├";
+          leading.append(connector);
+        }
+        row.append(leading);
+
         const allChildren = this.model.children.get(entry.entryId) || [];
         const children = structure.children.get(entry.entryId) || [];
         if (allChildren.length) {
@@ -277,9 +337,8 @@ export class TreeSessionController {
         text.className = "tree-session-text";
         text.textContent = entry.text || "Untitled entry";
         heading.append(role, text);
-        if (entry.entryId === this.model.selectedId) heading.append(this.badge("Active", "active"));
         if (entry.current) heading.append(this.badge("Current", "current"));
-        if (entry.latest) heading.append(this.badge("Latest", "latest"));
+        if (entry.latest && !entry.current) heading.append(this.badge("Latest", "latest"));
         button.append(heading);
 
         const metadata = this.document.createElement("span");
@@ -483,6 +542,11 @@ export class TreeSessionController {
     }
   }
 
+  revealOptions(modal = this.modal()) {
+    const options = modal?.querySelector("[data-tree-options]");
+    if (options) options.open = true;
+  }
+
   handleKeydown(event) {
     const modal = this.document.querySelector('[data-modal="tree-session-modal"]:not([hidden])');
     if (!modal) return;
@@ -491,11 +555,13 @@ export class TreeSessionController {
       (key.toLowerCase() === "f" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey);
     if (searchShortcut) {
       event.preventDefault();
+      this.revealOptions(modal);
       modal.querySelector("[data-tree-search]")?.focus();
       return;
     }
     if (key.toLowerCase() === "o" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
       event.preventDefault();
+      this.revealOptions(modal);
       const filter = modal.querySelector("[data-tree-filter]");
       if (filter) {
         const index = TREE_FILTERS.findIndex((choice) => choice.value === filter.value);
@@ -506,6 +572,7 @@ export class TreeSessionController {
     }
     if (key.toLowerCase() === "l" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();
+      this.revealOptions(modal);
       modal.querySelector("[data-tree-label-input]")?.focus();
       return;
     }
