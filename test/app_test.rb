@@ -5519,6 +5519,11 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "if (nameCommand) {\n      restoreSubmittedComposerInput();\n      setComposerState(\"error\", payload?.error || \"Session name could not be changed\");"
       assert_includes APP_JAVASCRIPT, "if (payload?.command === \"name\") {\n      if (payload.error) {\n        restoreSubmittedComposerInput();\n        setComposerState(\"error\", payload.error);\n        showStatus(payload.error, true);\n        return;\n      }\n      clearStoredComposerDraft(submittedSession);"
       assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(payload.name);\n      setComposerState(\"done\", payload.current ? \"Named\" : \"Name set\");"
+      assert_includes APP_JAVASCRIPT, "function appendSessionNameFeedback(payload)"
+      assert_includes APP_JAVASCRIPT, 'const delimiter = "`".repeat(Math.max(1, ...backtickRuns.map((run) => run.length + 1)));'
+      assert_includes APP_JAVASCRIPT, 'liveMessageRenderer.appendMessage("status", `Session renamed to: ${delimiter}${payload.name}${delimiter}`, true, true, new Date(), { markdown: true });'
+      assert_includes APP_JAVASCRIPT, "if (switched) appendSessionNameFeedback(payload);"
+      assert_includes APP_JAVASCRIPT, 'const markdownMessage = ["assistant", "custom"].includes(roleName) || options.markdown;'
       assert_includes APP_JAVASCRIPT, "liveMessageRenderer.appendPendingCompactionMessage(new Date());"
       assert_includes APP_JAVASCRIPT, "sidebarController.markSessionCompacting(submittedSession);"
       assert_includes APP_JAVASCRIPT, "if (payload?.command === \"compact\") {\n      sidebarController.refresh().catch(() => {});\n      if (composerState?.dataset.state === \"sending\") setComposerState(\"running\", \"Compacting…\");\n      showStatus(\"Compaction started\", true);\n      return;\n    }"

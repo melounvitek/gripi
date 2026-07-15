@@ -708,6 +708,13 @@ async function cycleThinking() {
   }
 }
 
+function appendSessionNameFeedback(payload) {
+  if (payload.current) return;
+  const backtickRuns = String(payload.name).match(/`+/g) || [];
+  const delimiter = "`".repeat(Math.max(1, ...backtickRuns.map((run) => run.length + 1)));
+  liveMessageRenderer.appendMessage("status", `Session renamed to: ${delimiter}${payload.name}${delimiter}`, true, true, new Date(), { markdown: true });
+}
+
 function updateSessionHeaderName(name) {
   if (!name) return;
   const headerName = document.querySelector(".session-header-name");
@@ -1236,12 +1243,14 @@ async function submitPrompt(event) {
       }
       clearStoredComposerDraft(submittedSession);
       if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {
-        await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
+        const switched = await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
+        if (switched) appendSessionNameFeedback(payload);
         return;
       }
       updateSessionHeaderName(payload.name);
       setComposerState("done", payload.current ? "Named" : "Name set");
       showStatus(payload.current ? `Session name: “${payload.name}”` : eventStatusText({ type: "session_info", name: payload.name }), true);
+      appendSessionNameFeedback(payload);
       sidebarController.refresh().catch(() => {});
       return;
     }

@@ -106,7 +106,7 @@ export class LiveMessageRenderer {
     role.className = "role";
     role.textContent = options.customType ? `[${options.customType}]` : messageRoleLabel(roleName);
 
-    const markdownMessage = ["assistant", "custom"].includes(roleName);
+    const markdownMessage = ["assistant", "custom"].includes(roleName) || options.markdown;
     const body = this.document.createElement(markdownMessage ? "div" : "pre");
     body.className = options.thinking ? "message-body message-body--thinking message-body--markdown" : (markdownMessage ? "message-body message-body--markdown" : "message-body");
     if (markdownMessage) {

@@ -69,6 +69,34 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal 2, results.fetch("epoch")
   end
 
+  def test_session_name_feedback_is_visible_only_after_setting_a_name
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    helper_source = app_source.match(/function appendSessionNameFeedback\(payload\) \{.*?\n\}/m).to_s
+      .sub("function appendSessionNameFeedback(payload)", "globalThis.appendSessionNameFeedback = function(payload)")
+
+    results = run_javascript(<<~JS)
+      const appended = [];
+      const liveMessageRenderer = {
+        appendMessage(...args) { appended.push(args); }
+      };
+      eval(#{helper_source.to_json});
+
+      appendSessionNameFeedback({ name: "Useful name" });
+      appendSessionNameFeedback({ name: "API `v2` work" });
+      appendSessionNameFeedback({ name: "Useful name", current: true });
+      const [role, text, live, forceScroll, _timestamp, options] = appended[0];
+      console.log(JSON.stringify({ count: appended.length, role, text, backtickText: appended[1][1], live, forceScroll, options }));
+    JS
+
+    assert_equal 2, results.fetch("count")
+    assert_equal "status", results.fetch("role")
+    assert_equal "Session renamed to: `Useful name`", results.fetch("text")
+    assert_equal "Session renamed to: ``API `v2` work``", results.fetch("backtickText")
+    assert_equal true, results.fetch("live")
+    assert_equal true, results.fetch("forceScroll")
+    assert_equal({ "markdown" => true }, results.fetch("options"))
+  end
+
   def test_expanding_tool_output_starts_at_its_internal_bottom_without_moving_the_conversation
     app_source = File.read(File.join(ASSETS, "app.js"))
     handler_source = app_source.match(/document\.addEventListener\("click", \(event\) => \{\n  const button = event\.target\.closest\("\[data-tool-output-toggle\]"\);.*?\n\}\);/m).to_s
