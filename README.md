@@ -5,12 +5,11 @@
   </picture>
 </p>
 
-GRIPi is a desktop and web gateway for using your [Pi](https://pi.dev/) locally or from another machine. Pi runs on the gateway machine with access to its filesystem, repositories, and credentials.
+**GRIPi is a desktop and web portal for [Pi](https://pi.dev/), powered by a self-hosted gateway.** Run the gateway on a development machine or home server with Pi CLI installed, then access your coding-agent sessions locally or over a private network.
+
+<a href="docs/images/gripi-architecture.svg"><img alt="Desktop, browser, and mobile clients connect over a local or private network to the GRIPi gateway, which runs Pi with access to the gateway machine's projects, sessions, and credentials" src="docs/images/gripi-architecture.svg" /></a>
 
 <img width="1467" height="956" alt="GRIPi desktop app showing Pi sessions and a project overview" src="docs/images/gripi-desktop-screenshot.png" />
-
-
-I have not really seen the code (this project is my first attempt to try real vibe-coding), but I do use it daily now, and it works really well for me.
 
 ## Usage modes
 

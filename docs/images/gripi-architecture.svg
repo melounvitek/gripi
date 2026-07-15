@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" role="img" aria-labelledby="title description">
+  <title id="title">GRIPi architecture</title>
+  <desc id="description">Desktop, browser, and mobile clients connect over a local or private network to the GRIPi gateway, which runs Pi on a machine with access to projects, sessions, and credentials.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10Z" fill="#F24405"/>
+    </marker>
+    <style>
+      .label { fill: #A8A7B0; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 15px; font-weight: 600; letter-spacing: 2px; }
+      .heading { fill: #F7F5F2; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 22px; font-weight: 600; }
+      .detail { fill: #A8A7B0; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 16px; }
+      .small { fill: #D6D4D0; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 16px; font-weight: 600; }
+      .icon { fill: none; stroke: #D6D4D0; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="620" rx="28" fill="#18181E"/>
+
+  <text x="68" y="64" class="label">YOUR DEVICES</text>
+
+  <g transform="translate(68 92)">
+    <rect width="282" height="108" rx="16" fill="#24242C" stroke="#3B3A44"/>
+    <rect x="24" y="25" width="60" height="42" rx="4" class="icon"/>
+    <path d="M44 82H64M54 67V82" class="icon"/>
+    <text x="108" y="49" class="heading">Desktop app</text>
+    <text x="108" y="75" class="detail">macOS or Linux</text>
+  </g>
+
+  <g transform="translate(68 220)">
+    <rect width="282" height="108" rx="16" fill="#24242C" stroke="#3B3A44"/>
+    <rect x="24" y="24" width="60" height="54" rx="5" class="icon"/>
+    <path d="M24 39H84M34 31H35M43 31H44" class="icon"/>
+    <text x="108" y="49" class="heading">Web browser</text>
+    <text x="108" y="75" class="detail">Any computer</text>
+  </g>
+
+  <g transform="translate(68 348)">
+    <rect width="282" height="108" rx="16" fill="#24242C" stroke="#3B3A44"/>
+    <rect x="35" y="17" width="39" height="70" rx="7" class="icon"/>
+    <path d="M49 77H60" class="icon"/>
+    <text x="108" y="49" class="heading">Phone or tablet</text>
+    <text x="108" y="75" class="detail">Web app</text>
+  </g>
+
+  <path d="M382 274H492" fill="none" stroke="#F24405" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="437" y="226" class="small" text-anchor="middle">Local or</text>
+  <text x="437" y="249" class="small" text-anchor="middle">private network</text>
+
+  <g transform="translate(520 48)">
+    <rect width="612" height="524" rx="22" fill="#202027" stroke="#4B4A55" stroke-width="2"/>
+    <text x="36" y="50" class="label">GATEWAY MACHINE · PI RUNS HERE</text>
+
+    <g transform="translate(36 82)">
+      <rect width="250" height="142" rx="18" fill="#2B292C" stroke="#F24405" stroke-width="2"/>
+      <rect x="24" y="27" width="42" height="42" rx="7" fill="#F24405"/>
+      <path d="M35 38H55V45H42V57H49V50H56V64H35Z" fill="#18181E"/>
+      <text x="84" y="50" class="heading">GRIPi</text>
+      <text x="84" y="76" class="detail">gateway</text>
+      <text x="24" y="112" class="detail">Web UI and Pi control</text>
+    </g>
+
+    <path d="M304 153H358" fill="none" stroke="#F24405" stroke-width="4" marker-end="url(#arrow)"/>
+
+    <g transform="translate(376 82)">
+      <rect width="200" height="142" rx="18" fill="#2B292C" stroke="#62616C"/>
+      <path d="M24 27H66V55H52V69H38V83H24ZM38 41V55H52V41ZM66 55H80V83H66Z" fill="#F7F5F2"/>
+      <text x="96" y="50" class="heading">Pi</text>
+      <text x="96" y="76" class="detail">coding agent</text>
+      <text x="24" y="112" class="detail">Pi CLI via RPC</text>
+    </g>
+
+    <path d="M476 240V286" fill="none" stroke="#777681" stroke-width="3"/>
+    <path d="M125 286H476" fill="none" stroke="#777681" stroke-width="3"/>
+    <path d="M125 286V318M300 286V318M476 286V318" fill="none" stroke="#777681" stroke-width="3"/>
+
+    <g transform="translate(36 318)">
+      <rect width="178" height="132" rx="16" fill="#292930"/>
+      <path d="M24 36H50L58 45H78V76H24Z" class="icon"/>
+      <text x="24" y="102" class="small">Projects &amp; files</text>
+    </g>
+
+    <g transform="translate(225 318)">
+      <rect width="178" height="132" rx="16" fill="#292930"/>
+      <path d="M26 31H73V76H26ZM35 42H64M35 52H64M35 62H55" class="icon"/>
+      <text x="24" y="102" class="small">Pi sessions</text>
+    </g>
+
+    <g transform="translate(414 318)">
+      <rect width="162" height="132" rx="16" fill="#292930"/>
+      <circle cx="48" cy="49" r="18" class="icon"/>
+      <path d="M66 49H91M82 49V59M73 49V56" class="icon"/>
+      <text x="24" y="102" class="small">Credentials</text>
+    </g>
+  </g>
+</svg>
