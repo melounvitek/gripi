@@ -112,8 +112,9 @@
                   <div>
                     <strong>Viewing earlier tree point.</strong>
                     <span>Your next message will branch from here.</span>
+                    <span class="tree-position-error" data-tree-latest-error aria-live="polite" hidden></span>
                   </div>
-                  <button type="button" class="secondary" data-tree-entry-id="<%= h @latest_tree_leaf_id %>" data-tree-latest-entry-id="<%= h @latest_tree_leaf_id %>">Jump to latest</button>
+                  <button type="button" class="secondary" data-tree-latest-entry-id="<%= h @latest_tree_leaf_id %>">Jump to latest</button>
                 </div>
               <% end %>
               <input type="hidden" name="session" value="<%= h @selected_session.path %>">

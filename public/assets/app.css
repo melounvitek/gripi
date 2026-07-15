@@ -458,6 +458,7 @@
     .tree-position-banner, .session-sync-banner { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.75rem; padding: 0.7rem 0.8rem; border: 1px solid #f0c67447; border-radius: 0.35rem; background: var(--info-bg); color: var(--text); font-size: 0.85rem; }
     .tree-position-banner strong, .session-sync-banner strong { color: var(--gold); }
     .tree-position-banner span, .session-sync-banner span { color: var(--muted); }
+    .tree-position-banner .tree-position-error { display: block; margin-top: 0.25rem; color: var(--danger); }
     .session-sync-banner--conflict { border-color: #cc66666b; }
     .session-sync-banner--conflict strong, .session-sync-error { color: var(--red); }
     .session-sync-error { display: block; margin-top: 0.25rem; }

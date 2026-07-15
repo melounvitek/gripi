@@ -425,16 +425,24 @@ export class TreeSessionController {
     if (summary) summary.hidden = true;
   }
 
-  async navigate(summaryMode, customInstructions) {
+  navigate(summaryMode, customInstructions) {
     const entry = this.selectedEntry();
-    if (!entry || this.navigating) return;
-    const modal = this.modal();
+    if (!entry) return;
+    return this.navigateEntry(entry, summaryMode, customInstructions, { modal: this.modal() });
+  }
+
+  async navigateEntry(entry, summaryMode, customInstructions, { modal = null, button = null, errorRegion = null } = {}) {
+    if (!entry?.entryId || this.navigating) return;
     const submit = modal?.querySelector("[data-tree-summary-submit]");
     const navigateButton = modal?.querySelector("[data-tree-navigate]");
     if (summaryMode === "custom" && !customInstructions.trim()) {
       this.setStatus("Custom summary instructions cannot be empty.", true);
       modal?.querySelector("[data-tree-custom-instructions]")?.focus();
       return;
+    }
+    if (errorRegion) {
+      errorRegion.textContent = "";
+      errorRegion.hidden = true;
     }
     const formData = new FormData();
     formData.set("session", this.callbacks.currentSessionPath?.() || "");
@@ -445,20 +453,28 @@ export class TreeSessionController {
     this.navigating = true;
     if (submit) submit.disabled = true;
     if (navigateButton) navigateButton.disabled = true;
+    if (button) button.disabled = true;
     this.callbacks.showSessionSwitching?.();
     try {
       const response = await fetch("/sessions/tree", { method: "POST", body: formData, headers: { "Accept": "application/json" } });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload || payload.cancelled) throw new Error(payload?.error || "Could not navigate the session tree.");
-      this.callbacks.closeModal?.(modal);
+      if (modal) this.callbacks.closeModal?.(modal);
       await this.callbacks.navigate?.(payload, entry);
     } catch (error) {
-      this.showTreeStep(modal);
-      this.setStatus(error.message || "Could not navigate the session tree.", true);
+      const message = error.message || "Could not navigate the session tree.";
+      if (errorRegion) {
+        errorRegion.textContent = message;
+        errorRegion.hidden = false;
+      } else {
+        this.showTreeStep(modal);
+        this.setStatus(message, true);
+      }
     } finally {
       this.navigating = false;
       if (submit) submit.disabled = false;
       if (navigateButton) navigateButton.disabled = !this.selectedEntry();
+      if (button) button.disabled = false;
       this.callbacks.hideSessionSwitching?.();
     }
   }
@@ -487,6 +503,12 @@ export class TreeSessionController {
   }
 
   handleClick(event) {
+    const latest = event.target.closest?.("[data-tree-latest-entry-id]");
+    if (latest) {
+      event.preventDefault();
+      const errorRegion = latest.closest(".tree-position-banner")?.querySelector("[data-tree-latest-error]");
+      return this.navigateEntry({ entryId: latest.dataset.treeLatestEntryId }, "none", "", { button: latest, errorRegion });
+    }
     const modal = event.target.closest?.('[data-modal="tree-session-modal"]');
     if (!modal) return;
     const fold = event.target.closest("[data-tree-fold]");

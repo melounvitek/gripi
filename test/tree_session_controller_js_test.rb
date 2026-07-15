@@ -6,6 +6,7 @@ require "nokogiri"
 class TreeSessionControllerJsTest < Minitest::Test
   ASSET_URL = "file://#{File.expand_path("../public/assets/tree_session_controller.js", __dir__)}"
   VIEW_PATH = File.expand_path("../views/_fork_session_modal.erb", __dir__)
+  CONVERSATION_VIEW_PATH = File.expand_path("../views/_conversation.erb", __dir__)
   APP_PATH = File.expand_path("../public/assets/app.js", __dir__)
   CSS_PATH = File.expand_path("../public/assets/app.css", __dir__)
 
@@ -291,6 +292,178 @@ class TreeSessionControllerJsTest < Minitest::Test
     assert_equal false, result.fetch("submitDisabled")
   end
 
+  def test_shared_navigation_keeps_modal_validation_and_failure_feedback
+    result = run_javascript(<<~JS)
+      const { TreeSessionController, TreeSessionModel } = await import(#{ASSET_URL.to_json});
+      const browser = { hidden: true };
+      const summary = { hidden: false };
+      const instructions = { focused: false, focus() { this.focused = true; } };
+      const status = { textContent: "", classList: { toggle(_name, active) { this.error = active; } } };
+      const submit = { disabled: false };
+      const navigateButton = { disabled: false };
+      const controls = {
+        "[data-tree-browser-step]": browser,
+        "[data-tree-summary-step]": summary,
+        "[data-tree-custom-instructions]": instructions,
+        "[data-tree-session-status]": status,
+        "[data-tree-summary-submit]": submit,
+        "[data-tree-navigate]": navigateButton
+      };
+      const modal = { hidden: false, querySelector: (selector) => controls[selector] || null };
+      const document = { addEventListener() {}, querySelector: () => modal };
+      let requests = 0;
+      globalThis.fetch = async () => {
+        requests += 1;
+        return { ok: false, json: async () => ({ error: "Navigation failed." }) };
+      };
+      const controller = new TreeSessionController(document, {}, { currentSessionPath: () => "/session" });
+      controller.model = new TreeSessionModel([{ entryId: "entry-1", current: true }]);
+
+      await controller.navigate("custom", "");
+      const validation = { message: status.textContent, focused: instructions.focused, requests };
+      status.textContent = "";
+      await controller.navigate("none", "");
+      console.log(JSON.stringify({ validation, failure: { message: status.textContent, error: status.classList.error, browserHidden: browser.hidden, summaryHidden: summary.hidden, submitDisabled: submit.disabled, navigateDisabled: navigateButton.disabled }, requests }));
+    JS
+
+    assert_equal({ "message" => "Custom summary instructions cannot be empty.", "focused" => true, "requests" => 0 }, result.fetch("validation"))
+    assert_equal "Navigation failed.", result.dig("failure", "message")
+    assert_equal true, result.dig("failure", "error")
+    assert_equal false, result.dig("failure", "browserHidden")
+    assert_equal true, result.dig("failure", "summaryHidden")
+    assert_equal false, result.dig("failure", "submitDisabled")
+    assert_equal false, result.dig("failure", "navigateDisabled")
+    assert_equal 1, result.fetch("requests")
+  end
+
+  def test_jump_to_latest_click_posts_direct_navigation_and_runs_success_callbacks
+    result = run_javascript(<<~JS)
+      const { TreeSessionController } = await import(#{ASSET_URL.to_json});
+      const error = { hidden: true, textContent: "" };
+      const banner = { querySelector: (selector) => selector === "[data-tree-latest-error]" ? error : null };
+      const button = {
+        disabled: false,
+        dataset: { treeLatestEntryId: "latest-entry" },
+        closest(selector) {
+          if (selector === "[data-tree-latest-entry-id]") return this;
+          if (selector === ".tree-position-banner") return banner;
+          return null;
+        }
+      };
+      let clickListener;
+      const document = {
+        addEventListener(type, listener) { if (type === "click") clickListener = listener; },
+        querySelector() { return null; }
+      };
+      const requests = [];
+      const events = [];
+      globalThis.fetch = async (url, options) => {
+        requests.push({ url, method: options.method, body: Object.fromEntries(options.body), disabledDuringRequest: button.disabled });
+        return { ok: true, json: async () => ({ session: "/session", redirect: "/" }) };
+      };
+      new TreeSessionController(document, {}, {
+        currentSessionPath: () => "/session",
+        addSessionViewFormParams: (body) => { events.push("params"); body.set("project", "demo"); },
+        showSessionSwitching: () => events.push("show"),
+        hideSessionSwitching: () => events.push("hide"),
+        navigate: async (_payload, entry) => events.push(`navigated:${entry.entryId}`)
+      });
+
+      let prevented = false;
+      await clickListener({ target: button, preventDefault() { prevented = true; } });
+      console.log(JSON.stringify({ requests, events, prevented, disabled: button.disabled, error }));
+    JS
+
+    assert_equal [{
+      "url" => "/sessions/tree", "method" => "POST",
+      "body" => { "session" => "/session", "entry_id" => "latest-entry", "summary_mode" => "none", "project" => "demo" },
+      "disabledDuringRequest" => true
+    }], result.fetch("requests")
+    assert_equal ["params", "show", "navigated:latest-entry", "hide"], result.fetch("events")
+    assert result.fetch("prevented")
+    assert_equal false, result.fetch("disabled")
+    assert_equal true, result.dig("error", "hidden")
+  end
+
+  def test_jump_to_latest_ignores_a_second_click_while_navigation_is_pending
+    result = run_javascript(<<~JS)
+      const { TreeSessionController } = await import(#{ASSET_URL.to_json});
+      const error = { hidden: true, textContent: "" };
+      const banner = { querySelector: () => error };
+      const button = {
+        disabled: false,
+        dataset: { treeLatestEntryId: "latest-entry" },
+        closest(selector) {
+          if (selector === "[data-tree-latest-entry-id]") return this;
+          if (selector === ".tree-position-banner") return banner;
+          return null;
+        }
+      };
+      let clickListener;
+      const document = {
+        addEventListener(type, listener) { if (type === "click") clickListener = listener; },
+        querySelector() { return null; }
+      };
+      let finishRequest;
+      let requests = 0;
+      globalThis.fetch = () => {
+        requests += 1;
+        return new Promise((resolve) => { finishRequest = () => resolve({ ok: true, json: async () => ({ session: "/session" }) }); });
+      };
+      new TreeSessionController(document, {}, { currentSessionPath: () => "/session", navigate: async () => {} });
+      const event = { target: button, preventDefault() {} };
+      const first = clickListener(event);
+      await Promise.resolve();
+      const disabledWhilePending = button.disabled;
+      await clickListener(event);
+      finishRequest();
+      await first;
+      console.log(JSON.stringify({ requests, disabledWhilePending, disabledAfter: button.disabled }));
+    JS
+
+    assert_equal 1, result.fetch("requests")
+    assert_equal true, result.fetch("disabledWhilePending")
+    assert_equal false, result.fetch("disabledAfter")
+  end
+
+  def test_jump_to_latest_failure_stays_on_page_and_shows_inline_error
+    result = run_javascript(<<~JS)
+      const { TreeSessionController } = await import(#{ASSET_URL.to_json});
+      const error = { hidden: true, textContent: "" };
+      const banner = { querySelector: () => error };
+      const button = {
+        disabled: false,
+        dataset: { treeLatestEntryId: "latest-entry" },
+        closest(selector) {
+          if (selector === "[data-tree-latest-entry-id]") return this;
+          if (selector === ".tree-position-banner") return banner;
+          return null;
+        }
+      };
+      let clickListener;
+      const document = {
+        addEventListener(type, listener) { if (type === "click") clickListener = listener; },
+        querySelector() { return null; }
+      };
+      const events = [];
+      globalThis.fetch = async () => ({ ok: false, json: async () => ({ error: "Latest entry is unavailable." }) });
+      new TreeSessionController(document, {}, {
+        currentSessionPath: () => "/session",
+        showSessionSwitching: () => events.push("show"),
+        hideSessionSwitching: () => events.push("hide"),
+        navigate: async () => events.push("navigated")
+      });
+
+      await clickListener({ target: button, preventDefault() {} });
+      console.log(JSON.stringify({ events, disabled: button.disabled, error }));
+    JS
+
+    assert_equal ["show", "hide"], result.fetch("events")
+    assert_equal false, result.fetch("disabled")
+    assert_equal false, result.dig("error", "hidden")
+    assert_equal "Latest entry is unavailable.", result.dig("error", "textContent")
+  end
+
   def test_label_set_and_clear_post_the_selected_entry_and_update_the_model
     result = run_javascript(<<~JS)
       const { TreeSessionController, TreeSessionModel } = await import(#{ASSET_URL.to_json});
@@ -458,6 +631,17 @@ class TreeSessionControllerJsTest < Minitest::Test
       assert document.at_css("[#{attribute}]")
     end
     assert_includes document.text, "Summarize with custom instructions"
+  end
+
+  def test_jump_to_latest_banner_has_an_inline_live_error_region
+    document = Nokogiri::HTML.fragment(File.read(CONVERSATION_VIEW_PATH))
+    button = document.at_css(".tree-position-banner [data-tree-latest-entry-id]")
+    error = document.at_css(".tree-position-banner [data-tree-latest-error]")
+
+    refute_nil button
+    refute_nil error
+    assert_equal "polite", error["aria-live"]
+    assert error.key?("hidden")
   end
 
   def test_tree_modal_css_prioritizes_vertical_tree_scrolling_and_caps_mobile_indentation
