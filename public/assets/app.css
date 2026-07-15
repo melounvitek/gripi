@@ -129,6 +129,9 @@
     .session-pin-toggle:hover { border-color: var(--border-strong); background: var(--panel); color: var(--text); }
     .session-pin-toggle.is-pinned { color: var(--gold); }
     .session-pin-toggle:disabled { cursor: wait; opacity: 0.55; }
+    .session-pin-toggle.is-loading:disabled { opacity: 1; }
+    .session-pin-toggle.is-loading svg { visibility: hidden; }
+    .session-pin-toggle.is-loading::after { content: ""; position: absolute; width: 0.85rem; height: 0.85rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     a.session.selected { background: var(--panel-softer); border-color: var(--accent-line-35); }
     a.session.selected::before { content: ""; position: absolute; left: -1rem; top: 0.7rem; bottom: 0.7rem; width: 3px; background: var(--accent); }
     a.session.unread .session-title { color: var(--text); font-weight: 700; }
@@ -426,7 +429,7 @@
     @keyframes progress-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
     @keyframes streaming-bubble-pulse { 0%, 100% { box-shadow: 0 0 0 1px #ff5a1f3d inset; } 50% { box-shadow: 0 0 0 2px #ff5a1f66 inset; } }
     @keyframes streaming-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     .mobile-session-toggle, .mobile-sessions-button, .mobile-sidebar-backdrop { display: none; }
     .hamburger-icon { position: relative; display: inline-block; width: 1.25rem; height: 0.9rem; border-top: 2px solid currentColor; border-bottom: 2px solid currentColor; }
     .hamburger-icon::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid currentColor; transform: translateY(-50%); }

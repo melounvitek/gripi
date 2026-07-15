@@ -286,11 +286,18 @@ export class SidebarController {
     this.invalidate();
     const epoch = this.asyncEpoch;
     const boundElement = this.element;
+    const currentlyPinned = button.dataset.pinned === "true";
+    let idleLabel = currentlyPinned ? "Unpin session" : "Pin session";
+    const loadingLabel = currentlyPinned ? "Unpinning session" : "Pinning session";
     button.disabled = true;
+    button.classList.add("is-loading");
+    button.setAttribute("aria-busy", "true");
+    button.setAttribute("aria-label", loadingLabel);
+    button.setAttribute("title", loadingLabel);
     try {
       const body = new URLSearchParams({
         session: button.dataset.sessionPath,
-        pinned: button.dataset.pinned === "true" ? "false" : "true"
+        pinned: currentlyPinned ? "false" : "true"
       });
       const response = await fetch("/sessions/pin", {
         method: "POST",
@@ -298,10 +305,15 @@ export class SidebarController {
         headers: { "Accept": "application/json" }
       });
       if (!response.ok) throw new Error("Could not update pinned session");
-      if (!this.current(epoch, boundElement)) return null;
 
       const payload = await response.json();
-      if (!this.current(epoch, boundElement)) return null;
+      if (this.current(epoch, boundElement)) {
+        const pinned = payload.pinned === true;
+        idleLabel = pinned ? "Unpin session" : "Pin session";
+        button.dataset.pinned = pinned ? "true" : "false";
+        button.classList.toggle("is-pinned", pinned);
+        button.setAttribute("aria-pressed", pinned ? "true" : "false");
+      }
       this.requestRefresh();
       return payload;
     } catch (error) {
@@ -309,6 +321,10 @@ export class SidebarController {
       throw error;
     } finally {
       button.disabled = false;
+      button.classList.remove("is-loading");
+      button.removeAttribute("aria-busy");
+      button.setAttribute("aria-label", idleLabel);
+      button.setAttribute("title", idleLabel);
     }
   }
 

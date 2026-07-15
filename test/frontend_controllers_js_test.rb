@@ -791,14 +791,13 @@ class FrontendControllersJsTest < Minitest::Test
     assert_equal [10_000, 2_500, 0], results
   end
 
-  def test_sidebar_controller_pins_a_session_and_requests_an_immediate_refresh
+  def test_sidebar_controller_shows_loading_state_while_toggling_pins
     results = run_javascript(<<~JS)
       const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
       const sidebar = { dataset: {}, querySelector: () => null, querySelectorAll: () => [] };
       const document = {
         hidden: false, activeElement: null, body: { classList: { contains: () => false } },
-        addEventListener() {},
-        querySelector: (selector) => selector === ".session-sidebar" ? sidebar : null,
+        addEventListener() {}, querySelector: (selector) => selector === ".session-sidebar" ? sidebar : null,
         querySelectorAll: () => [], getElementById: () => null
       };
       const window = { location: { href: "https://example.test/", origin: "https://example.test", search: "" } };
@@ -806,23 +805,68 @@ class FrontendControllersJsTest < Minitest::Test
       const requests = [];
       globalThis.setTimeout = (_callback, delay) => { timers.push(delay); return timers.length; };
       globalThis.clearTimeout = () => {};
-      globalThis.fetch = async (url, options) => {
-        requests.push([url, options.method, Object.fromEntries(options.body)]);
-        return { ok: true, json: async () => ({ session: "/session", pinned: true }) };
-      };
       const controller = new SidebarController(document, window, { initialize() {}, isActive: () => false }, { apply() {} }, () => {});
       controller.bind();
-      const button = { disabled: false, dataset: { sessionPath: "/session", pinned: "false" } };
 
-      const payload = await controller.togglePin(button);
+      const pin = await toggle("false", true);
+      const unpin = await toggle("true", false);
+      console.log(JSON.stringify({ requests, timers, pin, unpin }));
 
-      console.log(JSON.stringify({ requests, timers, payload, disabled: button.disabled }));
+      async function toggle(initiallyPinned, resultingPinned) {
+        let resolveRequest;
+        globalThis.fetch = (url, options) => {
+          requests.push([url, options.method, Object.fromEntries(options.body)]);
+          return new Promise((resolve) => { resolveRequest = () => resolve({ ok: true, json: async () => ({ session: "/session", pinned: resultingPinned }) }); });
+        };
+        const button = pinButton(initiallyPinned);
+        const pending = controller.togglePin(button);
+        const loading = state(button);
+        resolveRequest();
+        const payload = await pending;
+        return { payload, loading, settled: state(button), pinned: button.dataset.pinned };
+      }
+
+      function state(button) {
+        return {
+          disabled: button.disabled, className: button.className, busy: button.attributes["aria-busy"],
+          label: button.attributes["aria-label"], title: button.attributes.title, pressed: button.attributes["aria-pressed"]
+        };
+      }
+
+      function pinButton(pinned) {
+        const idleLabel = pinned === "true" ? "Unpin session" : "Pin session";
+        const classes = new Set(["session-pin-toggle", ...(pinned === "true" ? ["is-pinned"] : [])]);
+        return {
+          disabled: false, dataset: { sessionPath: "/session", pinned },
+          attributes: { "aria-label": idleLabel, "aria-pressed": pinned, title: idleLabel },
+          get className() { return [...classes].join(" "); },
+          classList: {
+            add: (name) => classes.add(name), remove: (name) => classes.delete(name),
+            toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name)
+          },
+          setAttribute(name, value) { this.attributes[name] = String(value); },
+          removeAttribute(name) { delete this.attributes[name]; }
+        };
+      }
     JS
 
-    assert_equal [["/sessions/pin", "POST", { "session" => "/session", "pinned" => "true" }]], results.fetch("requests")
-    assert_equal [0], results.fetch("timers")
-    assert_equal({ "session" => "/session", "pinned" => true }, results.fetch("payload"))
-    assert_equal false, results.fetch("disabled")
+    assert_equal [
+      ["/sessions/pin", "POST", { "session" => "/session", "pinned" => "true" }],
+      ["/sessions/pin", "POST", { "session" => "/session", "pinned" => "false" }]
+    ], results.fetch("requests")
+    assert_equal [0, 0], results.fetch("timers")
+    assert_equal({
+      "payload" => { "session" => "/session", "pinned" => true },
+      "loading" => { "disabled" => true, "className" => "session-pin-toggle is-loading", "busy" => "true", "label" => "Pinning session", "title" => "Pinning session", "pressed" => "false" },
+      "settled" => { "disabled" => false, "className" => "session-pin-toggle is-pinned", "label" => "Unpin session", "title" => "Unpin session", "pressed" => "true" },
+      "pinned" => "true"
+    }, results.fetch("pin"))
+    assert_equal({
+      "payload" => { "session" => "/session", "pinned" => false },
+      "loading" => { "disabled" => true, "className" => "session-pin-toggle is-pinned is-loading", "busy" => "true", "label" => "Unpinning session", "title" => "Unpinning session", "pressed" => "true" },
+      "settled" => { "disabled" => false, "className" => "session-pin-toggle", "label" => "Pin session", "title" => "Pin session", "pressed" => "false" },
+      "pinned" => "false"
+    }, results.fetch("unpin"))
   end
 
   def test_sidebar_controller_resumes_periodic_refresh_after_pin_failure
@@ -841,15 +885,76 @@ class FrontendControllersJsTest < Minitest::Test
       globalThis.fetch = async () => ({ ok: false });
       const controller = new SidebarController(document, window, { initialize() {}, isActive: () => false }, { apply() {} }, () => {});
       controller.bind();
-      const button = { disabled: false, dataset: { sessionPath: "/session", pinned: "false" } };
+      const classes = new Set(["session-pin-toggle", "is-pinned"]);
+      const button = {
+        disabled: false, dataset: { sessionPath: "/session", pinned: "true" },
+        attributes: { "aria-label": "Unpin session", "aria-pressed": "true", title: "Unpin session" },
+        get className() { return [...classes].join(" "); },
+        classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name) },
+        setAttribute(name, value) { this.attributes[name] = String(value); },
+        removeAttribute(name) { delete this.attributes[name]; }
+      };
 
       try { await controller.togglePin(button); } catch (_error) {}
 
-      console.log(JSON.stringify({ timers, disabled: button.disabled }));
+      console.log(JSON.stringify({ timers, disabled: button.disabled, className: button.className, busy: button.attributes["aria-busy"], label: button.attributes["aria-label"], title: button.attributes.title, pressed: button.attributes["aria-pressed"], pinned: button.dataset.pinned }));
     JS
 
     assert_equal [10_000], results.fetch("timers")
     assert_equal false, results.fetch("disabled")
+    assert_equal "session-pin-toggle is-pinned", results.fetch("className")
+    assert_nil results["busy"]
+    assert_equal "Unpin session", results.fetch("label")
+    assert_equal "Unpin session", results.fetch("title")
+    assert_equal "true", results.fetch("pressed")
+    assert_equal "true", results.fetch("pinned")
+  end
+
+  def test_successful_pin_requests_refresh_a_replaced_sidebar
+    results = run_javascript(<<~JS)
+      const { SidebarController } = await import(#{module_url("sidebar_controller.js").to_json});
+      const first = { dataset: {}, querySelector: () => null, querySelectorAll: () => [] };
+      const second = { dataset: {}, querySelector: () => null, querySelectorAll: () => [] };
+      let current = first;
+      const document = {
+        hidden: false, activeElement: null, body: { classList: { contains: () => false } },
+        addEventListener() {}, querySelector: (selector) => selector === ".session-sidebar" ? current : null,
+        querySelectorAll: () => [], getElementById: () => null
+      };
+      const window = { location: { href: "https://example.test/", origin: "https://example.test", search: "" } };
+      const timers = [];
+      globalThis.setTimeout = (_callback, delay) => { timers.push(delay); return timers.length; };
+      globalThis.clearTimeout = () => {};
+      let resolveRequest;
+      globalThis.fetch = () => new Promise((resolve) => { resolveRequest = () => resolve({ ok: true, json: async () => ({ session: "/session", pinned: true }) }); });
+      const controller = new SidebarController(document, window, { initialize() {}, isActive: () => false }, { apply() {} }, () => {});
+      controller.bind();
+      const classes = new Set();
+      const successMutations = [];
+      const button = {
+        disabled: false, dataset: { sessionPath: "/session", pinned: "false" },
+        classList: {
+          add: (name) => classes.add(name), remove: (name) => classes.delete(name),
+          toggle: (name, enabled) => successMutations.push(["class", name, enabled])
+        },
+        setAttribute(name, value) { if (name === "aria-pressed") successMutations.push([name, value]); },
+        removeAttribute() {}
+      };
+
+      const pending = controller.togglePin(button);
+      current = second;
+      controller.bind();
+      resolveRequest();
+      const payload = await pending;
+
+      console.log(JSON.stringify({ payload, timers, boundToReplacement: controller.element === second, successMutations, stalePinned: button.dataset.pinned }));
+    JS
+
+    assert_equal({ "session" => "/session", "pinned" => true }, results.fetch("payload"))
+    assert_equal [0], results.fetch("timers")
+    assert_equal true, results.fetch("boundToReplacement")
+    assert_empty results.fetch("successMutations")
+    assert_equal "false", results.fetch("stalePinned")
   end
 
   def test_marking_compaction_replaces_the_idle_refresh_schedule
