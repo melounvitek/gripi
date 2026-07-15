@@ -75,6 +75,20 @@ class DemoTest < Minitest::Test
     assert_equal "pi", body.at_css(".message--assistant:not(.message--thinking):not(.message--tool-call) .role").text
   end
 
+  def test_intro_session_is_open_by_default_with_installation_and_repository_link
+    body = Nokogiri::HTML5(File.read(HTML)).at_css("body")
+    repository_link = body.at_css('#history-output a[href="https://github.com/melounvitek/gripi"]')
+    result = run_javascript("console.log(JSON.stringify({ defaultSessionId: GripiDemo.defaultSessionId }));")
+
+    assert_equal "Welcome to GRIPi · GRIPi demo", body.document.at_css("title").text
+    assert_equal "Welcome to GRIPi", body.at_css(".session-header-name").text
+    assert_equal "welcome", result.fetch("defaultSessionId")
+    assert_includes body.at_css("#history-output").text, "mise run setup"
+    refute_nil repository_link
+    refute repository_link.attribute("target")
+    assert_includes File.read(JAVASCRIPT), 'gripi:static-demo:v4'
+  end
+
   def test_demo_notice_links_to_the_repository_in_the_same_tab
     body = Nokogiri::HTML5(File.read(HTML)).at_css("body")
     link = body.at_css('#demo-notice a[href="https://github.com/melounvitek/gripi"]')

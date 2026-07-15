@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#18181e">
-  <title>Build responsive session sidebar · GRIPi demo</title>
+  <title>Welcome to GRIPi · GRIPi demo</title>
   <style>
     .demo-repository-link { color: var(--text); font-weight: 700; white-space: nowrap; text-underline-offset: 0.15em; }
     .demo-repository-link:hover { color: #fff; }
@@ -584,11 +584,11 @@
       <header class="session-header">
         <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
         <div class="session-header-title" id="session-header-title">
-          <h1 class="session-header-name">Build responsive session sidebar</h1>
+          <h1 class="session-header-name">Welcome to GRIPi</h1>
           <div class="session-header-project" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon">GR</span><span class="session-header-project-label">gripi</span></div>
           <details class="session-relation-tree" aria-label="Related sessions">
             <summary class="session-relation-tree-heading">Related sessions</summary>
-            <ul class="session-relation-tree-root"><li class="session-relation-tree-node"><div class="session-relation-tree-item"><a class="session-relation-tree-title" href="#api-errors" data-session-id="api-errors">Improve gateway error handling</a></div><ul class="session-relation-tree-children"><li class="session-relation-tree-node is-current"><div class="session-relation-tree-item"><span class="session-relation-tree-title">Build responsive session sidebar</span><span class="session-relation-current-marker">Current</span></div></li></ul></li></ul>
+            <ul class="session-relation-tree-root"><li class="session-relation-tree-node is-current"><div class="session-relation-tree-item"><span class="session-relation-tree-title">Welcome to GRIPi</span><span class="session-relation-current-marker">Current</span></div><ul class="session-relation-tree-children"><li class="session-relation-tree-node"><div class="session-relation-tree-item"><a class="session-relation-tree-title" href="#demo-ui" data-session-id="demo-ui">Build responsive session sidebar</a></div></li></ul></li></ul>
           </details>
         </div>
         <div class="session-header-actions">
@@ -606,14 +606,16 @@
         <div class="jump-controls jump-controls--top"><button type="button" class="jump-button jump-to-first" aria-label="Top">↑↑</button></div>
         <button type="button" class="conversation-history-status" data-demo-notice>Earlier messages available in a connected gateway</button>
         <section id="history-output">
-          <article class="message message--user" data-role="user"><header class="message-header"><div class="role">user</div><div class="message-meta">10:14</div></header><pre class="message-body">Can you make the session sidebar work well on mobile without changing the desktop layout?</pre></article>
-          <article class="message message--assistant message--thinking" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta">10:14</div></header><div class="message-body message-body--thinking message-body--markdown"><p>I’ll inspect the existing responsive rules and preserve the desktop grid.</p></div></article>
-          <article class="message message--assistant message--compact message--tool-call" data-role="assistant"><header class="message-header"><div class="role">tool</div><div class="message-meta">10:15</div></header><div class="message-details message-details--always-open"><div class="message-details-summary"><span class="compact-summary"><span class="tool-command">read</span> <span class="tool-path">public/assets/app.css</span><span class="tool-range">:1-240</span></span></div><div class="tool-output-collapse" data-tool-output-collapse data-expanded="false"><div class="tool-output-collapse-control"><span class="tool-output-hidden-count tool-output-hidden-count--desktop">… (3 earlier lines)</span><button type="button" class="tool-output-toggle" data-tool-output-toggle aria-expanded="false">Expand</button></div><pre class="message-body" data-tool-output-body>Checked focus and backdrop styles.
-Compared composer sizing at 390px.
-No production selectors need to diverge.</pre></div></div></article>
-          <article class="message message--assistant" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta">10:16</div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>Implemented the responsive sidebar as an off-canvas panel below 760px. The desktop grid remains unchanged.</p></div></article>
-          <article class="message message--status message--compact" data-role="status"><header class="message-header"><div class="role">status</div><div class="message-meta">10:17</div></header><details class="message-details message-details--compaction"><summary class="message-details-summary compaction-details-summary"><span class="compact-summary">Conversation compacted</span><span class="compaction-details-action" aria-hidden="true"></span></summary><pre class="message-body">The responsive sidebar request and implementation were summarized.</pre></details></article>
-          <article class="message message--error" data-role="error"><header class="message-header"><div class="role">error</div><div class="message-meta">10:17</div></header><pre class="message-body">Demo example: gateway errors appear here without leaving the composer spinning.</pre></article>
+          <article class="message message--user" data-role="user"><header class="message-header"><div class="role">user</div><div class="message-meta">Welcome</div></header><pre class="message-body">What is GRIPi, and how can I get started?</pre></article>
+          <article class="message message--assistant message--thinking" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta">Welcome</div></header><div class="message-body message-body--thinking message-body--markdown"><p>I’ll give you a quick tour and the shortest path to a local installation.</p></div></article>
+          <article class="message message--assistant" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta">Welcome</div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>GRIPi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.</p><p>This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated.</p></div></article>
+          <article class="message message--assistant message--compact message--tool-call" data-role="assistant"><header class="message-header"><div class="role">tool</div><div class="message-meta">Welcome</div></header><div class="message-details message-details--always-open"><div class="message-details-summary"><span class="compact-summary">Installation requirements</span></div><div class="tool-output-collapse" data-tool-output-collapse data-expanded="false"><div class="tool-output-collapse-control"><span class="tool-output-hidden-count tool-output-hidden-count--desktop">… (3 earlier lines)</span><button type="button" class="tool-output-toggle" data-tool-output-toggle aria-expanded="false">Expand</button></div><pre class="message-body" data-tool-output-body>mise
+Pi CLI available on PATH</pre></div></div></article>
+          <article class="message message--assistant" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta">Welcome</div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>Clone and start GRIPi with these commands. Setup prints the admin password used to approve your browser, then GRIPi is available at http://localhost:4567.</p><pre><code>git clone https://github.com/melounvitek/gripi.git
+cd gripi
+mise install
+mise run setup
+GRIPI_HOST=127.0.0.1 mise run start</code></pre><p><a href="https://github.com/melounvitek/gripi">View GRIPi on GitHub →</a></p></div></article>
         </section>
         <section id="live-output"></section>
         <div class="jump-controls jump-controls--bottom"><button type="button" class="jump-button jump-to-latest" aria-label="Bottom">↓↓</button></div>
