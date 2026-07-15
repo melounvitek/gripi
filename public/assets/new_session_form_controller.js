@@ -252,14 +252,17 @@ export class NewSessionFormController {
       return;
     }
     const button = event.target.closest?.("[data-new-session-project-mode]");
-    if (!button) return;
-    event.preventDefault();
-    this.setProjectMode(form);
+    if (button) {
+      event.preventDefault();
+      this.setProjectMode(form);
+      return;
+    }
+    if (event.target.closest?.("[data-new-session-submit]")) this.clearSuggestions(form);
   }
 
   handleFocusout(event, form) {
     const next = event.relatedTarget;
-    if (next?.closest?.("[data-new-session-cwd-input], [data-new-session-cwd-suggestions]")) return;
+    if (next?.closest?.("[data-new-session-cwd-input], [data-new-session-cwd-suggestions], [data-new-session-project-mode], [data-new-session-submit]")) return;
     this.clearSuggestions(form);
   }
 

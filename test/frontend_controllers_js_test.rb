@@ -459,6 +459,42 @@ class FrontendControllersJsTest < Minitest::Test
     assert_equal 1, results.fetch("windowResizes")
   end
 
+  def test_new_session_form_controller_keeps_suggestions_until_submit_click
+    results = run_javascript(<<~JS)
+      const { NewSessionFormController } = await import(#{module_url("new_session_form_controller.js").to_json});
+      #{dom_fakes}
+
+      const document = new FakeDocument();
+      const window = new FakeEventTarget();
+      const form = new FakeElement("form", [".new-session-cwd-form"]);
+      const input = new FakeElement("input", ["[data-new-session-cwd-input]"]);
+      const submit = new FakeElement("button", ["[data-new-session-submit]"]);
+      const list = new FakeElement("div", ["[data-new-session-cwd-suggestions]"]);
+      const suggestion = new FakeElement("button");
+      suggestion.dataset.cwdSuggestion = "/project/child";
+      list.append(suggestion);
+      input.setAttribute("aria-expanded", "true");
+      form.append(input, list, submit);
+      document.body.append(form);
+
+      const controller = new NewSessionFormController(document, window, { sync() {} });
+      controller.initialize(form);
+      const focusout = form.listeners.get("focusout")[0];
+      const click = form.listeners.get("click")[0];
+
+      focusout({ relatedTarget: submit });
+      const hiddenBeforeClick = list.hidden;
+      let prevented = false;
+      click({ target: submit, preventDefault() { prevented = true; } });
+
+      console.log(JSON.stringify({ hiddenBeforeClick, hiddenAfterClick: list.hidden, prevented }));
+    JS
+
+    assert_equal false, results.fetch("hiddenBeforeClick")
+    assert_equal true, results.fetch("hiddenAfterClick")
+    assert_equal false, results.fetch("prevented")
+  end
+
   def test_new_session_form_controller_cancels_pending_work_and_ignores_stale_responses
     results = run_javascript(<<~JS)
       const { NewSessionFormController } = await import(#{module_url("new_session_form_controller.js").to_json});
