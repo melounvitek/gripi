@@ -18,10 +18,7 @@ export function imageAttachmentLabel(count) {
 }
 
 export function sessionNameSlashCommand(message) {
-  const trimmed = message.trim();
-  if (/^\/(?:name|rename)$/.test(trimmed)) return { valid: false };
-  if (/^\/(?:name|rename)[ \t]+[^\r\n]+$/.test(trimmed)) return { valid: true };
-  return null;
+  return /^\/name(?:[ \t]+[^\r\n]+)?$/.test(message.trim());
 }
 
 export function sessionCompactSlashCommand(message) {
@@ -48,13 +45,8 @@ export function sessionModelSlashCommand(message) {
   return /^\/model$/.test(message.trim());
 }
 
-export function sessionTitleFromEvent(event) {
-  if (event.type === "session_info") return event.name;
-  if (event.type === "custom" && event.customType === "pi-extensions-session-title") return event.data?.title;
-  if (event.type === "custom_message" && event.customType === "session-title-update") {
-    return String(event.content || "").match(/^Session renamed to: `(.+)`$/)?.[1];
-  }
-  return null;
+export function sessionNameFromEvent(event) {
+  return ["session_info", "session_info_changed"].includes(event.type) ? event.name : null;
 }
 
 export function notificationReplyPreview(text) {
@@ -100,7 +92,7 @@ export function messageRoleLabel(roleName) {
 }
 
 export function eventStatusText(event) {
-  if (event.type === "session_info" && event.name) return `Session renamed to “${event.name}”`;
+  if (["session_info", "session_info_changed"].includes(event.type) && event.name) return `Session renamed to “${event.name}”`;
   if (event.type === "custom_message" && event.content) return event.content;
   if (event.type === "custom" && event.customType) return `${event.customType} updated`;
   if (event.type === "queue_update") return "Queued follow-up work updated";

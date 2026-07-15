@@ -2,20 +2,18 @@ require "minitest/autorun"
 require_relative "../lib/prompts/slash_command"
 
 class PromptsSlashCommandTest < Minitest::Test
-  def test_parses_rename_commands
+  def test_parses_name_command
     command = Prompts::SlashCommand.parse("/name Useful name")
 
-    assert_equal :rename, command.type
+    assert_equal :name, command.type
     assert_equal "Useful name", command.name
-    assert_nil command.error
   end
 
-  def test_parses_bare_rename_as_usage_error
-    command = Prompts::SlashCommand.parse("/rename")
+  def test_parses_bare_name_command
+    command = Prompts::SlashCommand.parse("/name")
 
-    assert_equal :rename, command.type
+    assert_equal :name, command.type
     assert_nil command.name
-    assert_equal "Usage: /rename <name>", command.error
   end
 
   def test_parses_compact_commands
@@ -42,7 +40,8 @@ class PromptsSlashCommandTest < Minitest::Test
 
   def test_ignores_multiline_command_like_prompts
     assert_nil Prompts::SlashCommand.parse("/compact recent\nwork")
-    assert_nil Prompts::SlashCommand.parse("/rename Useful\nname")
+    assert_nil Prompts::SlashCommand.parse("/name Useful\nname")
+    assert_nil Prompts::SlashCommand.parse("/rename Useful name")
     assert_nil Prompts::SlashCommand.parse("/model openai/gpt-5")
   end
 

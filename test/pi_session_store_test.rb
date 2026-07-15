@@ -34,6 +34,22 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_empty_latest_session_name_restores_first_message_fallback
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", timestamp: "2026-06-13T10:00:00Z", cwd: "/tmp/project" },
+        { type: "message", message: { role: "user", content: [{ type: "text", text: "First prompt" }] } },
+        { type: "session_info", name: "Named session" },
+        { type: "session_info", name: "" }
+      ])
+
+      session = PiSessionStore.new(root: dir).sessions.first
+
+      assert_equal "First prompt", session.display_name
+    end
+  end
+
   def test_conversation_activity_ignores_non_conversation_session_writes
     Dir.mktmpdir do |dir|
       path = File.join(dir, "session.jsonl")

@@ -200,6 +200,7 @@ module Web
         follow_up_prompt = params["streaming_behavior"].to_s == "follow_up"
         slash_command = follow_up_prompt ? nil : Prompts::SlashCommand.parse(message)
         branch_response = nil
+        name_response = nil
         if follow_up_prompt
           submitted_at = Time.now
           attachment_paths = []
@@ -211,9 +212,16 @@ module Web
           end
           halt_failed_rpc_prompt(response)
           attachment_store.record_prompt(session_path, rpc_message, images.length, timestamp: submitted_at, paths: attachment_paths, mime_types: images.map { |image| image[:mimeType] })
-        elsif slash_command&.type == :rename && slash_command.name
-          with_synchronized_rpc_client(session_path) { |client| client.set_session_name(slash_command.name) }
-        elsif slash_command&.type == :rename || [:fork, :tree, :model].include?(slash_command&.type)
+        elsif slash_command&.type == :name && slash_command.name
+          response = with_synchronized_rpc_client(session_path) { |client| client.set_session_name(slash_command.name) }
+          halt_failed_rpc_setting(response)
+        elsif slash_command&.type == :name
+          state_response = with_synchronized_rpc_client(session_path) { |client| client.get_state }
+          halt_failed_rpc_setting(state_response)
+          state = response_data(state_response)
+          current_name = state.is_a?(Hash) ? state["sessionName"].to_s : ""
+          name_response = current_name.empty? ? { error: "Usage: /name <name>" } : { name: current_name, current: true }
+        elsif [:fork, :tree, :model].include?(slash_command&.type)
           nil
         elsif slash_command&.type == :compact
           with_synchronized_rpc_client(session_path) { |client| client.compact(slash_command.instructions) }
@@ -244,7 +252,7 @@ module Web
           if slash_command
             payload[:command] = slash_command.type.to_s
             payload[:name] = slash_command.name if slash_command.name
-            payload[:error] = slash_command.error if slash_command.error
+            payload.merge!(name_response) if name_response
           end
           JSON.generate(payload)
         else
@@ -410,15 +418,6 @@ module Web
         session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         instructions = params["instructions"].to_s.strip
         with_synchronized_rpc_client(session_path) { |client| client.compact(instructions.empty? ? nil : instructions) }
-        redirect session_redirect_path(session_path)
-      end
-
-      app.post "/rename" do
-        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
-        name = params.fetch("name").to_s.strip
-        halt 400, "Name cannot be empty" if name.empty?
-
-        with_synchronized_rpc_client(session_path) { |client| client.set_session_name(name) }
         redirect session_redirect_path(session_path)
       end
 

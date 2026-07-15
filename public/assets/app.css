@@ -182,10 +182,6 @@
     .sidebar-new-session-button span { font-size: 0.9rem; line-height: 1; }
     .sidebar-new-session-button:hover { border-color: var(--accent-bright); background: var(--accent-bright); color: var(--button-text); }
     .sidebar-new-session-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-    .session-rename { display: none; gap: 0.35rem; grid-template-columns: minmax(0, 1fr) auto; margin: 0.3rem 0 0.55rem; }
-    a.session.selected + .session-rename { display: grid; }
-    .session-rename input { min-width: 0; padding: 0.45rem 0.55rem; font-size: 0.8rem; }
-    .session-rename button { padding: 0.45rem 0.6rem; font-size: 0.7rem; }
     .session-running-indicator, .session-compacting-indicator { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--success); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; }
     .session-running-indicator::before, .session-compacting-indicator::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 4px #b5bd6829; animation: progress-blink 1000ms ease-in-out infinite; }
     .session-compacting-indicator::before { background: var(--warning); box-shadow: 0 0 0 4px #ffff0024; }
