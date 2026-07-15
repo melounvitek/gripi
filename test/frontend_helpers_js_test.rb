@@ -43,6 +43,27 @@ class FrontendHelpersJsTest < Minitest::Test
     assert_equal ["Useful name", "Changed name", nil, nil], results.fetch("names")
   end
 
+  def test_extension_ui_notices_explain_cancelled_dialogs_and_notifications
+    results = run_javascript(<<~JS)
+      const { extensionUiRequestNotice } = await import(#{module_url("formatting.js").to_json});
+      console.log(JSON.stringify([
+        extensionUiRequestNotice({ type: "extension_ui_request", method: "select" }),
+        extensionUiRequestNotice({ type: "extension_ui_request", method: "notify", message: "Review finished", notifyType: "info" }),
+        extensionUiRequestNotice({ type: "extension_ui_request", method: "notify", message: "Review needs attention", notifyType: "warning" }),
+        extensionUiRequestNotice({ type: "extension_ui_request", method: "notify", message: "Review failed", notifyType: "error" }),
+        extensionUiRequestNotice({ type: "extension_ui_request", method: "setStatus" }),
+        extensionUiRequestNotice({ type: "message_end" })
+      ]));
+    JS
+
+    assert_equal({ "role" => "status", "text" => "This extension requested interactive UI that GRIPi does not support yet. The request was cancelled." }, results[0])
+    assert_equal({ "role" => "status", "text" => "Review finished" }, results[1])
+    assert_equal({ "role" => "status", "text" => "Warning: Review needs attention" }, results[2])
+    assert_equal({ "role" => "error", "text" => "Review failed" }, results[3])
+    assert_nil results[4]
+    assert_nil results[5]
+  end
+
   def test_event_timestamp_prefers_gateway_receipt_time
     results = run_javascript(<<~JS)
       const { eventTimestamp } = await import(#{module_url("formatting.js").to_json});

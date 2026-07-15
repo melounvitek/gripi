@@ -620,7 +620,7 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_equal [[:start, path], [:prompt, "/rename Useful name"]], calls
+      assert_equal [[:start, path], [:prompt, "/rename Useful name"], [:get_state]], calls
       refute JSON.parse(response.body).key?("command")
     end
   end
@@ -916,6 +916,33 @@ class AppTest < Minitest::Test
         assert_equal [[ :start, path ], [ :prompt, message ]], calls
         refute JSON.parse(response.body).key?("command")
       end
+    end
+  end
+
+  def test_reports_when_a_synchronous_extension_command_has_finished
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:get_state) do
+        calls << [:get_state]
+        { "success" => true, "data" => { "isStreaming" => false } }
+      end
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        client
+      }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/review" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[:start, path], [:prompt, "/review"], [:get_state]], calls
+      assert_equal false, JSON.parse(response.body).fetch("running")
     end
   end
 
@@ -2263,7 +2290,7 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(Gripi).get("/commands", params: { "session" => path })
 
       assert_equal 200, response.status
-      assert_includes response.body, "Slash commands (8)"
+      assert_includes response.body, "Slash commands (10)"
       assert_includes response.body, "/review"
       assert_includes response.body, "Review code"
       assert_includes response.body, "/compact"
@@ -2273,8 +2300,8 @@ class AppTest < Minitest::Test
       assert_includes response.body, "/new"
       assert_includes response.body, "/model"
       assert_includes response.body, "/name"
-      refute_includes response.body, "/sessions"
-      refute_includes response.body, "/rename"
+      assert_includes response.body, "/sessions"
+      assert_includes response.body, "/rename"
       refute_includes response.body, "gripi_tree"
       refute_includes response.body, "gripi_tree_leaf"
       refute_includes response.body, "command-filter"
@@ -5810,6 +5837,10 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, 'if (["custom", "system", "status"].includes(role)) return "status";'
       assert_includes APP_JAVASCRIPT, "function showStatus(_text, _forceScroll = false) {}"
       assert_includes APP_JAVASCRIPT, "showStatus(eventStatusText(event));"
+      assert_includes APP_JAVASCRIPT, "const notice = extensionUiRequestNotice(event);"
+      assert_includes APP_JAVASCRIPT, "liveMessageRenderer.appendMessage(notice.role, notice.text, true, true, eventTimestamp(event));"
+      assert_includes APP_JAVASCRIPT, "if (payload?.running === false) {"
+      assert_includes APP_JAVASCRIPT, "setComposerState(\"done\", \"Done\");"
       assert_includes APP_JAVASCRIPT, "renderCompactionEvent(event)"
       assert_includes APP_JAVASCRIPT, "refreshSessionStatus().catch(() => {});"
       assert_includes APP_JAVASCRIPT, "liveMessageRenderer.renderCompactionEvent(event);"

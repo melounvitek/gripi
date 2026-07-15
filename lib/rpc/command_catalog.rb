@@ -32,7 +32,7 @@ module Rpc
     private
 
     def visible_rpc_commands(response)
-      rpc_commands(response).reject { |command| INTERNAL_COMMAND_NAMES.include?(command["name"]) || command["source"] == "extension" }
+      rpc_commands(response).reject { |command| INTERNAL_COMMAND_NAMES.include?(command["name"]) }
     end
 
     def rpc_commands(response)

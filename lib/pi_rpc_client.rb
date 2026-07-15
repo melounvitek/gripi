@@ -12,6 +12,7 @@ class PiRpcClient
   ACTIVE_TOOL_SNAPSHOT_OUTPUT_BYTES = 1_024
   ACTIVE_TOOL_SNAPSHOT_TEXT_BYTES = 4 * 1_024
   SNAPSHOT_TOOL_NAME = "subagent"
+  CANCELLED_EXTENSION_DIALOG_METHODS = %w[select confirm input editor].freeze
   GRIPI_EXTENSION_PATH = File.expand_path("../pi_extensions/gripi-tree.ts", __dir__)
   RUBY_ENV_KEYS = %w[
     GEM_HOME
@@ -259,10 +260,7 @@ class PiRpcClient
     @mutex.synchronize { @pending_ids[id] = true }
     ensure_reader
     begin
-      @write_mutex.synchronize do
-        @stdin.write(JSON.generate(command) + "\n")
-        @stdin.flush if @stdin.respond_to?(:flush)
-      end
+      write_command(command)
     rescue Errno::EPIPE, IOError
       @mutex.synchronize { @pending_ids.delete(id) }
       raise IOError, "Pi RPC process exited before accepting command"
@@ -344,7 +342,9 @@ class PiRpcClient
       next if line.strip.empty?
 
       begin
-        store_response(JSON.parse(line), serialized_bytesize: line.bytesize)
+        response = JSON.parse(line)
+        store_response(response, serialized_bytesize: line.bytesize)
+        cancel_unsupported_extension_dialog(response)
       rescue JSON::ParserError
         next
       end
@@ -361,6 +361,21 @@ class PiRpcClient
       @busy = false
       @busy_since = nil
       @condition.broadcast
+    end
+  end
+
+  def cancel_unsupported_extension_dialog(response)
+    return unless response["type"] == "extension_ui_request"
+    return unless CANCELLED_EXTENSION_DIALOG_METHODS.include?(response["method"])
+    return if response["id"].to_s.empty?
+
+    write_command(type: "extension_ui_response", id: response["id"], cancelled: true)
+  end
+
+  def write_command(command)
+    @write_mutex.synchronize do
+      @stdin.write(JSON.generate(command) + "\n")
+      @stdin.flush if @stdin.respond_to?(:flush)
     end
   end
 

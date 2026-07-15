@@ -4,6 +4,7 @@ import {
   eventErrorText,
   eventStatusText,
   eventTimestamp,
+  extensionUiRequestNotice,
   formatWaitDuration,
   imageAttachmentLabel,
   notificationReplyPreview,
@@ -837,15 +838,22 @@ function renderEvent(event) {
     return;
   }
 
-  if (event.type === "extension_ui_request" && event.method === "set_editor_text") {
-    if (promptTextarea) {
-      promptTextarea.value = event.text || "";
-      resizePromptTextarea();
+  if (event.type === "extension_ui_request") {
+    if (event.method === "set_editor_text") {
+      if (promptTextarea) {
+        promptTextarea.value = event.text || "";
+        resizePromptTextarea();
+      }
+      syncComposerFocus();
+      showStatus("Extension updated the editor");
+      return;
     }
-    setComposerState("idle", "", { focus: false });
-    syncComposerFocus();
-    showStatus("Tree position selected");
-    return;
+
+    const notice = extensionUiRequestNotice(event);
+    if (notice) {
+      liveMessageRenderer.appendMessage(notice.role, notice.text, true, true, eventTimestamp(event));
+      return;
+    }
   }
 
   if (["custom", "custom_message", "session_info", "session_info_changed", "queue_update", "compaction_start", "compaction_end"].includes(event.type)) {
@@ -1281,8 +1289,13 @@ async function submitPrompt(event) {
       return;
     }
     if (cloneCommand || newCommand) hideSessionSwitching();
-    setComposerState("running", "Pi is running…");
-    if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
+    if (payload?.running === false) {
+      setComposerState("done", "Done");
+      showStatus("Done");
+    } else {
+      setComposerState("running", "Pi is running…");
+      if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
+    }
   } else {
     clearStoredComposerDraft(submittedSession);
     setComposerState("running", "Pi is running…");

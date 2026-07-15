@@ -232,6 +232,7 @@ module Web
         slash_command = follow_up_prompt ? nil : Prompts::SlashCommand.parse(message)
         branch_response = nil
         name_response = nil
+        prompt_running = nil
         if follow_up_prompt
           submitted_at = Time.now
           attachment_paths = []
@@ -268,7 +269,12 @@ module Web
           response = with_synchronized_rpc_client(session_path) do |client|
             attachment_paths = attachment_store.persist_prompt_images(session_path, images)
             rpc_message = message_with_attachment_paths(message, attachment_paths)
-            client.prompt(rpc_message, images)
+            prompt_response = client.prompt(rpc_message, images)
+            if message.strip.start_with?("/") && !message.match?(/[\r\n]/)
+              state = response_data(client.get_state)
+              prompt_running = state["isStreaming"] if state.is_a?(Hash) && [true, false].include?(state["isStreaming"])
+            end
+            prompt_response
           end
           halt_failed_rpc_prompt(response)
           attachment_store.record_prompt(session_path, rpc_message, images.length, timestamp: submitted_at, paths: attachment_paths, mime_types: images.map { |image| image[:mimeType] })
@@ -280,6 +286,7 @@ module Web
           content_type :json
           payload = { session: session_path, redirect: redirect_path }
           payload[:follow_up] = true if follow_up_prompt && !slash_command
+          payload[:running] = prompt_running unless prompt_running.nil?
           if slash_command
             payload[:command] = slash_command.type.to_s
             payload[:name] = slash_command.name if slash_command.name

@@ -16,7 +16,7 @@ module Rpc
         }
       )
 
-      assert_equal ["name", "compact", "fork", "tree", "clone", "new", "model", "review"], commands.map { |command| command["name"] }
+      assert_equal ["name", "compact", "fork", "tree", "clone", "new", "model", "review", "sessions", "rename"], commands.map { |command| command["name"] }
     end
 
     def test_builtin_commands_win_when_rpc_command_has_same_name

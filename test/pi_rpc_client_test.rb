@@ -629,6 +629,40 @@ class PiRpcClientTest < Minitest::Test
     assert_equal({ "id" => "prompt-1", "type" => "prompt", "message" => "Hello", "images" => [{ "type" => "image", "data" => "abc", "mimeType" => "image/png" }] }, JSON.parse(input.string))
   end
 
+  def test_cancels_unsupported_extension_dialogs_without_discarding_the_events
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader)
+
+    request_thread = Thread.new { client.get_state }
+    state_command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
+    %w[select confirm input editor].each_with_index do |method, index|
+      response_writer.puts JSON.generate({ type: "extension_ui_request", id: "dialog-#{index}", method: method })
+      cancellation = JSON.parse(Timeout.timeout(1) { command_reader.gets })
+      assert_equal({ "type" => "extension_ui_response", "id" => "dialog-#{index}", "cancelled" => true }, cancellation)
+    end
+    fire_and_forget_methods = %w[notify setStatus setWidget setTitle set_editor_text]
+    fire_and_forget_methods.each_with_index do |method, index|
+      response_writer.puts JSON.generate({ type: "extension_ui_request", id: "notice-#{index}", method: method })
+    end
+    Timeout.timeout(1) do
+      sleep 0.01 until client.events_after(0).fetch(:events).length == 9
+    end
+    refute IO.select([command_reader], nil, nil, 0.05), "fire-and-forget UI requests should not receive responses"
+
+    response_writer.puts JSON.generate({ id: state_command.fetch("id"), type: "response", command: "get_state", success: true })
+
+    assert_equal true, Timeout.timeout(1) { request_thread.value }.fetch("success")
+    events = client.events_after(0).fetch(:events)
+    assert_equal %w[select confirm input editor] + fire_and_forget_methods, events.map { |event| event["method"] }
+  ensure
+    request_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
   def test_tree_leaf_reports_current_leaf_from_extension_bridge
     input = StringIO.new
     output = StringIO.new([

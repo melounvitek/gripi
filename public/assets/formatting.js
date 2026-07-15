@@ -91,6 +91,18 @@ export function messageRoleLabel(roleName) {
   return roleName || "status";
 }
 
+export function extensionUiRequestNotice(event) {
+  if (event?.type !== "extension_ui_request") return null;
+  if (["select", "confirm", "input", "editor"].includes(event.method)) {
+    return { role: "status", text: "This extension requested interactive UI that GRIPi does not support yet. The request was cancelled." };
+  }
+  if (event.method === "notify" && event.message) {
+    if (event.notifyType === "error") return { role: "error", text: event.message };
+    return { role: "status", text: event.notifyType === "warning" ? `Warning: ${event.message}` : event.message };
+  }
+  return null;
+}
+
 export function eventStatusText(event) {
   if (["session_info", "session_info_changed"].includes(event.type) && event.name) return `Session renamed to “${event.name}”`;
   if (event.type === "custom_message" && event.content) return event.content;
