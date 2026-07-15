@@ -9,14 +9,6 @@
 
 <a href="docs/images/gripi-architecture.svg"><img alt="Desktop, browser, and mobile clients connect over a local or private network to the GRIPi gateway, which runs Pi with access to the gateway machine's projects, sessions, and credentials" src="docs/images/gripi-architecture.svg" /></a>
 
-<img width="1467" height="956" alt="GRIPi desktop app showing Pi sessions and a project overview" src="docs/images/gripi-desktop-screenshot.png" />
-
-## Usage modes
-
-By default, the gateway runs in single-user mode and shows all Pi sessions to one trusted user. Optional multi-user mode gives each user a personal session key and shows only the sessions associated with that key.
-
-Multi-user mode is intended for trusted users. It does not provide OS-level process, filesystem, or credential isolation, and settings such as the selected model and thinking effort are currently shared between users. See [configuration](docs/configuration.md#common-options) to enable it.
-
 ## Install
 
 Requirements:
@@ -49,11 +41,19 @@ GRIPI_HOST=127.0.0.1 mise run start
 
 The app `GRIPi` gets installed. It connects to the running gateway and can switch between multiple gateway servers. You can also use the gateway directly in browser at <http://localhost:4567>.
 
+<img width="1467" height="956" alt="GRIPi desktop app showing Pi sessions and a project overview" src="docs/images/gripi-desktop-screenshot.png" />
+
 There is no mobile app, but on iPhone, adding the gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow works nicely:
 
 <img width="804" height="362" alt="image" src="https://github.com/user-attachments/assets/37ab55d7-7b34-4cce-932e-566a6d415041" />
 
 <img width="360" alt="GRIPi running as an iPhone web app" src="docs/images/gripi-mobile-screenshot.png" />
+
+## Usage modes
+
+By default, the gateway runs in single-user mode and shows all Pi sessions to one trusted user. Optional multi-user mode gives each user a personal session key and shows only the sessions associated with that key.
+
+Multi-user mode is intended for trusted users. It does not provide OS-level process, filesystem, or credential isolation, and settings such as the selected model and thinking effort are currently shared between users. See [configuration](docs/configuration.md#common-options) to enable it.
 
 ## Remote access and configuration
 
