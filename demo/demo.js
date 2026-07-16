@@ -187,9 +187,10 @@
     return true;
   }
 
+  const toolOutputTailLines = 3;
   const defaultSessionId = "welcome";
   const sessionCatalog = initialSessions.map(({ id, name, project, pinned }) => ({ id, name, project, pinned }));
-  global.GripiDemo = { playScript, responseScript, safeIdentityColor, safeGuideLink, jumpControlVisibility, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
+  global.GripiDemo = { playScript, responseScript, safeIdentityColor, safeGuideLink, jumpControlVisibility, toolDiffLineClass, toolOutputModel, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
   if (typeof document === "undefined") return;
 
   const storageKey = "gripi:static-demo:v10";
@@ -266,6 +267,62 @@
     return button;
   }
 
+  function toolNameFromTitle(title) {
+    return String(title || "").trim().split(/\s+/, 1)[0];
+  }
+
+  function toolDiffLineClass(line) {
+    if (line.startsWith("+")) return "tool-diff-line--add";
+    if (line.startsWith("-")) return "tool-diff-line--remove";
+    if (/^(Edit \d+|write\b|Wrote\b)/.test(line)) return "tool-diff-line--meta";
+    return "tool-diff-line--context";
+  }
+
+  function toolOutputModel(title, text, expanded = false) {
+    const toolName = toolNameFromTitle(title);
+    const lines = String(text || "").split("\n");
+    if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+    const isNativeTool = ["bash", "read", "edit", "write"].includes(toolName);
+    const isDiff = ["edit", "write"].includes(toolName);
+    const shouldCollapse = isNativeTool && lines.length > toolOutputTailLines;
+    const visibleLines = shouldCollapse && !expanded ? lines.slice(-toolOutputTailLines) : lines;
+    return {
+      toolName,
+      isNativeTool,
+      isDiff,
+      shouldCollapse,
+      hiddenCount: shouldCollapse ? Math.max(lines.length - toolOutputTailLines, 0) : 0,
+      visibleLines,
+      lineClasses: isDiff ? visibleLines.map(toolDiffLineClass) : []
+    };
+  }
+
+  function toolOutputContentNode(model) {
+    const content = document.createElement("span");
+    content.className = `tool-output-content${model.isDiff ? " tool-output-content--diff" : ""}`;
+    model.visibleLines.forEach((line, index) => {
+      const span = document.createElement("span");
+      span.className = model.isDiff ? `tool-diff-line ${model.lineClasses[index]}` : "tool-output-line";
+      span.textContent = line;
+      content.append(span);
+    });
+    return content;
+  }
+
+  function renderToolOutput(collapse, body, title, text, expanded = false) {
+    body.dataset.toolTitle = String(title || "");
+    body.dataset.rawText = String(text || "");
+    const model = toolOutputModel(title, text, expanded);
+    const control = collapse.querySelector("[data-tool-output-collapse-control]");
+    const count = collapse.querySelector(".tool-output-hidden-count");
+    collapse.dataset.expanded = String(expanded && model.shouldCollapse);
+    collapse.dataset.collapsed = String(model.shouldCollapse && !expanded);
+    if (control) control.hidden = !model.shouldCollapse;
+    if (count) count.textContent = `… (${model.hiddenCount} earlier lines)`;
+    body.classList.toggle("message-body--edit-preview", model.toolName === "edit");
+    body.replaceChildren(toolOutputContentNode(model));
+  }
+
   function messageArticle(message, live) {
     const article = document.createElement("article");
     const role = message.role;
@@ -299,9 +356,9 @@
       collapse.dataset.expanded = "false";
       const control = document.createElement("div");
       control.className = "tool-output-collapse-control";
+      control.dataset.toolOutputCollapseControl = "";
       const count = document.createElement("span");
       count.className = "tool-output-hidden-count tool-output-hidden-count--desktop";
-      count.textContent = "… (3 earlier lines)";
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "tool-output-toggle";
@@ -312,8 +369,8 @@
       const body = document.createElement("pre");
       body.className = "message-body";
       body.dataset.toolOutputBody = "";
-      body.textContent = message.text || "Running…";
       collapse.append(control, body);
+      renderToolOutput(collapse, body, message.title, message.text || "Running…");
       details.append(summary, collapse);
       article.append(details);
       article.toolBody = body;
@@ -465,7 +522,7 @@
       activeToolEntry.article.classList.remove("message--live");
       if (activeToolEntry.message.text === "Running…") {
         activeToolEntry.message.text = "Stopped before the simulated tool completed.";
-        activeToolEntry.body.textContent = activeToolEntry.message.text;
+        renderToolOutput(activeToolEntry.body.closest("[data-tool-output-collapse]"), activeToolEntry.body, activeToolEntry.message.title, activeToolEntry.message.text);
       }
     }
     streamingEntry = null; activeToolEntry = null;
@@ -482,7 +539,7 @@
       const message = { role: "tool", title: event.title, text: "Running…", time: timeLabel() }; session.messages.push(message);
       const article = messageArticle(message, true); article.classList.add("message--live"); element.live.append(article); activeToolEntry = { article, body: article.toolBody, message }; setRunning(true, "Using tools…");
     }
-    if (event.type === "tool_end" && activeToolEntry) { activeToolEntry.message.text = event.text; activeToolEntry.body.textContent = event.text; activeToolEntry.article.classList.remove("message--live"); setRunning(true, "Pi is responding…"); }
+    if (event.type === "tool_end" && activeToolEntry) { activeToolEntry.message.text = event.text; renderToolOutput(activeToolEntry.body.closest("[data-tool-output-collapse]"), activeToolEntry.body, activeToolEntry.message.title, event.text); activeToolEntry.article.classList.remove("message--live"); setRunning(true, "Pi is responding…"); }
     if (event.type === "assistant_start") {
       const message = { role: "assistant", text: "", time: timeLabel() }; session.messages.push(message);
       const article = messageArticle(message, true); article.classList.add("message--streaming"); element.live.append(article);
@@ -597,7 +654,7 @@
     const open = event.target.closest("[data-modal-open]"); if (open) { openModal(open.dataset.modalOpen); return; }
     const close = event.target.closest("[data-modal-close]"); if (close) { closeModal(close.closest("[data-modal]")); return; }
     const command = event.target.closest("[data-command-name]"); if (command) { handleSlash(command.dataset.commandName); element.prompt.value = ""; persistDraft(); element.commands.classList.remove("is-visible"); return; }
-    const toggle = event.target.closest("[data-tool-output-toggle]"); if (toggle) { const collapse = toggle.closest("[data-tool-output-collapse]"); const expanded = collapse.dataset.expanded !== "true"; collapse.dataset.expanded = String(expanded); toggle.textContent = expanded ? "Collapse" : "Expand"; toggle.setAttribute("aria-expanded", String(expanded)); return; }
+    const toggle = event.target.closest("[data-tool-output-toggle]"); if (toggle) { const collapse = toggle.closest("[data-tool-output-collapse]"); const body = collapse?.querySelector("[data-tool-output-body]"); if (!body) return; const expanded = collapse.dataset.expanded !== "true"; renderToolOutput(collapse, body, body.dataset.toolTitle, body.dataset.rawText, expanded); toggle.textContent = expanded ? "Collapse" : "Expand"; toggle.setAttribute("aria-expanded", String(expanded)); return; }
     const copy = event.target.closest("[data-copy-target]"); if (copy) {
       const text = copy.closest(".message").querySelector(".message-body")?.textContent || "";
       const fallback = () => { const textarea = document.createElement("textarea"); textarea.value = text; textarea.className = "visually-hidden"; document.body.append(textarea); textarea.select(); const copied = document.execCommand("copy"); textarea.remove(); return copied; };
