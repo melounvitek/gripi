@@ -112,8 +112,8 @@ class DemoTest < Minitest::Test
 
     body = Nokogiri::HTML5(File.read(HTML)).at_css("body")
     javascript = File.read(JAVASCRIPT)
-    refute_includes javascript, 'gripi:static-demo:v8'
-    assert_includes javascript, 'gripi:static-demo:v9'
+    refute_includes javascript, 'gripi:static-demo:v9'
+    assert_includes javascript, 'gripi:static-demo:v10'
     assert_includes javascript, "does not alter Pi’s system prompt"
     assert_includes javascript, "Custom TUI components, overlays, widgets, editors"
     assert_includes javascript, "Never expose Gripi through a public IP or public reverse proxy."
@@ -124,6 +124,40 @@ class DemoTest < Minitest::Test
     ["Build responsive session sidebar", "Improve gateway error handling", "Fix streamed markdown rendering", "Add session keyboard shortcuts"].each do |removed_title|
       refute_includes source, removed_title
     end
+
+    assert_includes javascript, 'title: "write content/app/releases.md"'
+    assert_includes javascript, 'title: "edit app/views/checkouts/show.html.erb"'
+    assert_includes javascript, 'title: "bash bin/rails test test/system/checkout_test.rb"'
+    assert_includes javascript, 'title: "read .github/workflows/test.yml"'
+  end
+
+  def test_demo_project_sessions_show_native_tool_activity
+    javascript = File.read(JAVASCRIPT)
+
+    [
+      'title: "bash git status --short && git diff --stat origin/main...HEAD"',
+      'title: "read app/components/sidebar/search.tsx"',
+      'title: "write content/app/releases.md"',
+      'title: "edit test/system/checkout_test.rb"',
+      'title: "bash bin/rails test test/system/checkout_test.rb"',
+      'title: "write docs/setup.md"',
+      'title: "edit app/views/checkouts/show.html.erb"',
+      'title: "read .github/workflows/test.yml"',
+      'title: "edit .github/workflows/test.yml"'
+    ].each do |tool_title|
+      assert_includes javascript, tool_title
+    end
+
+    assert_includes javascript, "Files changed"
+    refute_includes javascript.split('{ id: "release-notes"', 2).last.downcase, "subagent"
+  end
+
+  def test_guide_sessions_do_not_use_native_tool_transcripts
+    javascript = File.read(JAVASCRIPT)
+    guide_sample = javascript[/const initialSessions = \[.*?\n    \{ id: "release-notes"/m]
+
+    refute_nil guide_sample
+    refute_match(/title: "(?:bash|read|write|edit)\b/, guide_sample)
   end
 
   def test_guide_links_are_restricted_to_trusted_destinations

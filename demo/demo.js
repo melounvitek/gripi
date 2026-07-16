@@ -67,25 +67,46 @@
     },
     { id: "release-notes", name: "Draft release notes", project: "website", monogram: "WE", color: "#9fc5ff", background: "#1e334d", age: "Monday", pinned: false, messages: [
       { role: "user", text: "Draft concise release notes from the changes in this branch.", time: "Monday" },
-      { role: "assistant", text: "What’s new\n\n• Find sessions faster with sidebar search.\n• Enjoy a cleaner composer on mobile screens.\n• Keep unsent drafts when reconnecting.", time: "Monday" }
+      { role: "thinking", text: "I’ll inspect the branch diff, then turn the user-facing parts into short release notes.", time: "Monday" },
+      { role: "tool", title: "bash git status --short && git diff --stat origin/main...HEAD", text: " M app/components/sidebar/search.tsx\n M app/components/composer/index.tsx\n M app/lib/drafts.ts\n\n app/components/sidebar/search.tsx | 42 ++++++++++++++++++++++----\n app/components/composer/index.tsx | 18 +++++++----\n app/lib/drafts.ts                 | 27 +++++++++++++++--\n 3 files changed, 73 insertions(+), 14 deletions(-)", time: "Monday" },
+      { role: "tool", title: "read app/components/sidebar/search.tsx", text: "export function SessionSearch({ sessions }) {\n  const [query, setQuery] = useState(\"\");\n  const visibleSessions = filterSessions(sessions, query);\n  return <SearchList sessions={visibleSessions} />;\n}", time: "Monday" },
+      { role: "tool", title: "write content/app/releases.md", text: "Wrote release note draft with three bullets and a short upgrade note.", time: "Monday" },
+      { role: "assistant", text: "Drafted concise release notes in `content/app/releases.md`.\n\nWhat’s new\n\n• Find sessions faster with sidebar search.\n• Enjoy a cleaner composer on mobile screens.\n• Keep unsent drafts when reconnecting.", time: "Monday" }
     ] },
     { id: "billing-spec", name: "Investigate flaky checkout spec", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "Last week", pinned: false, messages: [
       { role: "user", text: "The checkout browser spec fails about one run in twenty. Can you investigate without weakening its assertions?", time: "Last week" },
-      { role: "thinking", text: "I’ll reproduce it repeatedly and compare browser state on failed runs.", time: "Last week" },
-      { role: "tool", title: "bash mise run test", text: "148 runs, 612 assertions, 0 failures, 0 errors", time: "Last week" },
-      { role: "assistant", text: "The assertion sometimes ran before the redirect completed. I used the framework’s waiting navigation assertion.", time: "Last week" }
+      { role: "thinking", text: "I’ll reproduce it repeatedly and compare browser state on failed runs before changing the spec.", time: "Last week" },
+      { role: "tool", title: "bash bin/rails test test/system/checkout_test.rb TESTOPTS='--seed 18422'", text: "Run options: --seed 18422\n\n# Running:\n\nF\n\nFailure:\nCheckoutTest#test_customer_can_pay_for_cart:\nExpected to find text \"Order confirmed\" in \"Redirecting…\"", time: "Last week" },
+      { role: "tool", title: "read test/system/checkout_test.rb", text: "click_button \"Pay now\"\nassert_text \"Order confirmed\"\nassert_text order.number", time: "Last week" },
+      { role: "tool", title: "edit test/system/checkout_test.rb", text: "- assert_text \"Order confirmed\"\n+ assert_current_path order_path(order), wait: 5\n+ assert_text \"Order confirmed\"", time: "Last week" },
+      { role: "tool", title: "bash bin/rails test test/system/checkout_test.rb", text: "20 runs, 86 assertions, 0 failures, 0 errors, 0 skips", time: "Last week" },
+      { role: "assistant", text: "The assertion sometimes ran before the payment redirect completed. I kept the same user-visible assertions and added an explicit wait for the order page navigation.\n\nFiles changed\n\n• `test/system/checkout_test.rb`", time: "Last week" }
     ] },
     { id: "docs-navigation", name: "Simplify documentation navigation", project: "website", monogram: "WE", color: "#9fc5ff", background: "#1e334d", age: "Last month", pinned: false, messages: [
       { role: "user", text: "Can you reorganize the setup and configuration guides?", time: "Last month" },
-      { role: "assistant", text: "Reorganized the guides around installation, local use, and remote access.", time: "Last month" }
+      { role: "thinking", text: "I’ll map the current docs first so the new navigation follows existing content instead of inventing new sections.", time: "Last month" },
+      { role: "tool", title: "bash find docs -maxdepth 2 -type f | sort", text: "docs/configuration.md\ndocs/deployment.md\ndocs/getting-started.md\ndocs/troubleshooting.md", time: "Last month" },
+      { role: "tool", title: "read docs/getting-started.md", text: "# Getting started\n\nInstall dependencies, copy the example environment file, then start the local server.", time: "Last month" },
+      { role: "tool", title: "write docs/setup.md", text: "Created a setup guide with sections for installation, local development, and common first-run problems.", time: "Last month" },
+      { role: "tool", title: "edit docs/configuration.md", text: "- See deployment.md for hosting details.\n+ See setup.md for local setup and deployment.md for hosting details.", time: "Last month" },
+      { role: "assistant", text: "Reorganized the guides around installation, local use, and remote access. I kept the existing content, moved setup steps into `docs/setup.md`, and added cross-links from configuration and deployment.", time: "Last month" }
     ] },
     { id: "checkout-copy", name: "Polish checkout confirmation copy", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "Last month", pinned: false, messages: [
       { role: "user", text: "Make the confirmation screen clearer without adding more steps.", time: "Last month" },
-      { role: "assistant", text: "Shortened the heading and surfaced the delivery estimate next to the order number.", time: "Last month" }
+      { role: "thinking", text: "I’ll keep the checkout flow unchanged and only adjust the confirmation page copy/layout.", time: "Last month" },
+      { role: "tool", title: "read app/views/checkouts/show.html.erb", text: "<h1>Thank you for completing checkout</h1>\n<p>Your order is being prepared.</p>\n<p>Order <%= @order.number %></p>", time: "Last month" },
+      { role: "tool", title: "edit app/views/checkouts/show.html.erb", text: "- <h1>Thank you for completing checkout</h1>\n+ <h1>Your order is confirmed</h1>\n  <p>Your order is being prepared.</p>\n- <p>Order <%= @order.number %></p>\n+ <p>Order <%= @order.number %> · Arrives <%= @order.delivery_window %></p>", time: "Last month" },
+      { role: "tool", title: "bash bin/rails test test/system/checkout_test.rb", text: "20 runs, 89 assertions, 0 failures, 0 errors, 0 skips", time: "Last month" },
+      { role: "assistant", text: "Shortened the heading and surfaced the delivery estimate next to the order number. No checkout steps changed.\n\nFiles changed\n\n• `app/views/checkouts/show.html.erb`", time: "Last month" }
     ] },
     { id: "ci-cache", name: "Speed up CI dependency caching", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "2 months ago", pinned: false, messages: [
       { role: "user", text: "The test workflow spends too long installing unchanged dependencies.", time: "2 months ago" },
-      { role: "assistant", text: "Updated the cache key to include only the relevant lockfiles and runtime version.", time: "2 months ago" }
+      { role: "thinking", text: "I’ll check which dependency managers are used and keep the cache key tied to lockfiles, not unrelated source changes.", time: "2 months ago" },
+      { role: "tool", title: "read .github/workflows/test.yml", text: "- uses: actions/cache@v4\n  with:\n    path: vendor/bundle\n    key: bundle-${{ github.sha }}", time: "2 months ago" },
+      { role: "tool", title: "read Gemfile.lock", text: "BUNDLED WITH\n   2.5.6", time: "2 months ago" },
+      { role: "tool", title: "edit .github/workflows/test.yml", text: "- key: bundle-${{ github.sha }}\n+ key: bundle-${{ runner.os }}-ruby-${{ hashFiles('Gemfile.lock') }}\n+ restore-keys: |\n+   bundle-${{ runner.os }}-ruby-", time: "2 months ago" },
+      { role: "tool", title: "bash git diff --check", text: "No whitespace errors detected", time: "2 months ago" },
+      { role: "assistant", text: "Updated the cache key to include the OS and `Gemfile.lock`, with a restore prefix for older compatible bundles. This avoids reinstalling dependencies on source-only changes.", time: "2 months ago" }
     ] }
   ];
 
@@ -171,7 +192,7 @@
   global.GripiDemo = { playScript, responseScript, safeIdentityColor, safeGuideLink, jumpControlVisibility, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
   if (typeof document === "undefined") return;
 
-  const storageKey = "gripi:static-demo:v9";
+  const storageKey = "gripi:static-demo:v10";
   const introSeenKey = "gripi:static-demo:intro-seen";
   let sessions = initialSessions;
   let currentId = defaultSessionId;
