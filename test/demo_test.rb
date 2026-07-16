@@ -84,6 +84,7 @@ class DemoTest < Minitest::Test
     assert_equal "Welcome to Gripi", body.at_css(".session-header-name").text
     assert_equal "welcome", result.fetch("defaultSessionId")
     assert_includes body.at_css("#history-output").text, "mise run setup"
+    assert_includes body.at_css("#history-output").text, "Pi stays Pi"
     refute_includes body.at_css("#history-output").text, "Installation requirements"
     refute_includes File.read(JAVASCRIPT), 'title: "Installation requirements"'
     refute_nil repository_link
@@ -97,6 +98,7 @@ class DemoTest < Minitest::Test
 
     assert_equal [
       "Welcome to Gripi",
+      "Does Gripi change Pi?",
       "New to Pi? Start here",
       "What isn’t supported in Gripi?",
       "Run Gripi on an always-on computer",
@@ -110,8 +112,9 @@ class DemoTest < Minitest::Test
 
     body = Nokogiri::HTML5(File.read(HTML)).at_css("body")
     javascript = File.read(JAVASCRIPT)
-    refute_includes javascript, 'gripi:static-demo:v7'
-    assert_includes javascript, 'gripi:static-demo:v8'
+    refute_includes javascript, 'gripi:static-demo:v8'
+    assert_includes javascript, 'gripi:static-demo:v9'
+    assert_includes javascript, "does not alter Pi’s system prompt"
     assert_includes javascript, "Custom TUI components, overlays, widgets, editors"
     assert_includes javascript, "Never expose Gripi through a public IP or public reverse proxy."
     assert_includes javascript, 'switchSession(button.dataset.demoTreeTarget)'
@@ -147,6 +150,7 @@ class DemoTest < Minitest::Test
     assert modal.key?("hidden")
     assert_equal "Welcome to Gripi", body.at_css("#demo-intro-title").text
     assert_includes dialog.text, "web and desktop interface for Pi"
+    assert_includes dialog.text, "Pi stays Pi"
     assert_includes dialog.text, "simulated"
     assert_includes dialog.text, "stay in this browser"
     explore_action = dialog.at_css('button[data-modal-close][data-modal-default-focus]')

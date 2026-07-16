@@ -7,8 +7,15 @@
       messages: [
         { role: "user", text: "What is Gripi, and how can I get started?", time: "Welcome" },
         { role: "thinking", text: "I’ll give you a quick tour and the shortest path to a local installation.", time: "Welcome" },
-        { role: "assistant", text: "Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.\n\nThis static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated.", time: "Welcome" },
+        { role: "assistant", text: "Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.\n\nPi stays Pi: Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated.", time: "Welcome" },
         { role: "assistant", text: "Clone and start Gripi with these commands. Setup prints the admin password used to approve your browser, then Gripi is available at http://localhost:4567.", code: "git clone https://github.com/melounvitek/gripi.git\ncd gripi\nmise install\nmise run setup\nGRIPI_HOST=127.0.0.1 mise run start", link: { href: "https://github.com/melounvitek/gripi", label: "View Gripi on GitHub →" }, time: "Welcome" }
+      ]
+    },
+    {
+      id: "pi-stays-pi", name: "Does Gripi change Pi?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "Trust", pinned: false,
+      messages: [
+        { role: "user", text: "Does Gripi change how Pi behaves?", time: "Guide" },
+        { role: "assistant", text: "No. Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It starts and connects to Pi through a gateway, while Pi remains responsible for the actual agent runtime, tools, models, and session data.", time: "Guide" }
       ]
     },
     {
@@ -164,7 +171,7 @@
   global.GripiDemo = { playScript, responseScript, safeIdentityColor, safeGuideLink, jumpControlVisibility, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
   if (typeof document === "undefined") return;
 
-  const storageKey = "gripi:static-demo:v8";
+  const storageKey = "gripi:static-demo:v9";
   const introSeenKey = "gripi:static-demo:intro-seen";
   let sessions = initialSessions;
   let currentId = defaultSessionId;
