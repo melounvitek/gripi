@@ -24,7 +24,7 @@ class PiSessionStore
 
   Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :error, :tool_call_id, :tool_name, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :tool_prompt, :final_assistant_response, :entry_id, :images, :custom_type, :compaction, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :context_estimated, :cost_total, keyword_init: true)
-  Conversation = Struct.new(:messages, :latest_leaf_id, :status, keyword_init: true)
+  Conversation = Struct.new(:messages, :latest_stable_tree_position_id, :current_stable_tree_position_id, :status, keyword_init: true)
   FileSnapshot = Struct.new(:device, :inode, :size, :mtime_ns, :append_cursor, :persisted_leaf_id, :complete, keyword_init: true) do
     def revision
       [device, inode, size, mtime_ns, append_cursor, persisted_leaf_id, complete ? 1 : 0].join(":")
@@ -68,7 +68,8 @@ class PiSessionStore
     entries = read_entries(path)
     Conversation.new(
       messages: messages_from_entries(session_entries(entries, current_leaf_id: current_leaf_id)),
-      latest_leaf_id: latest_leaf_id_from_entries(entries),
+      latest_stable_tree_position_id: stable_tree_position_id(entries, latest_leaf_id_from_entries(entries)),
+      current_stable_tree_position_id: stable_tree_position_id(entries, current_leaf_id),
       status: status_from_entries(entries)
     )
   end
@@ -97,8 +98,9 @@ class PiSessionStore
     {}
   end
 
-  def latest_leaf_id(path)
-    latest_leaf_id_from_entries(read_entries(path))
+  def latest_stable_tree_position_id(path)
+    entries = read_entries(path)
+    stable_tree_position_id(entries, latest_leaf_id_from_entries(entries))
   end
 
   def file_snapshot(path)
@@ -195,6 +197,16 @@ class PiSessionStore
     entries.each_with_object({ leaf_id: nil }) do |entry, state|
       state[:leaf_id] = leaf_id_after_entry(entry) if tree_node_entry?(entry)
     end.fetch(:leaf_id)
+  end
+
+  def stable_tree_position_id(entries, leaf_id)
+    entries_by_id = entries.filter_map { |entry| [entry["id"], entry] if entry["id"] }.to_h
+    entry = entries_by_id[leaf_id]
+    while entry && (entry["type"] == "custom_message" || entry.dig("message", "role") == "user")
+      leaf_id = entry["parentId"]
+      entry = entries_by_id[leaf_id]
+    end
+    leaf_id
   end
 
   def status_from_entries(entries)

@@ -204,6 +204,24 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_maps_trailing_editable_entries_to_their_stable_tree_position
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        { type: "message", id: "assistant-1", parentId: nil, message: { role: "assistant", content: [{ type: "text", text: "Answer" }] } },
+        { type: "message", id: "user-1", parentId: "assistant-1", message: { role: "user", content: [{ type: "text", text: "Follow-up" }] } },
+        { type: "custom_message", id: "custom-1", parentId: "user-1", customType: "session-title-update", content: "Session renamed", display: true }
+      ])
+
+      conversation = PiSessionStore.new(root: dir).conversation(path, current_leaf_id: "custom-1")
+
+      assert_equal "assistant-1", conversation.latest_stable_tree_position_id
+      assert_equal "assistant-1", conversation.current_stable_tree_position_id
+      assert_equal ["Answer", "Follow-up", "Session renamed"], conversation.messages.map(&:text)
+    end
+  end
+
   def test_preserves_image_blocks_and_image_only_user_messages
     Dir.mktmpdir do |dir|
       session_dir = File.join(dir, "--project--")

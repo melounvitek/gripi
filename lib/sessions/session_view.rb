@@ -230,8 +230,8 @@ module Sessions
         @conversation_tree_leaf_id = current_leaf_id_for(true)
       end
       conversation = @store.conversation(@selected_session.path, current_leaf_id: @conversation_tree_leaf_id)
-      @latest_tree_leaf_id = conversation.latest_leaf_id
-      @viewing_older_tree_leaf = @current_tree_leaf_known && @conversation_tree_leaf_id != @latest_tree_leaf_id
+      @latest_tree_leaf_id = conversation.latest_stable_tree_position_id
+      @viewing_older_tree_leaf = @current_tree_leaf_known && conversation.current_stable_tree_position_id != @latest_tree_leaf_id
       @messages = latest_conversation_window(conversation.messages)
       @conversation_start_index = conversation.messages.length - @messages.length
       @conversation_older_message_count = @conversation_start_index

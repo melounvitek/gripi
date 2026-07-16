@@ -1813,7 +1813,8 @@ class AppTest < Minitest::Test
         { type: "message", id: "user-1", parentId: nil, timestamp: "2026-06-13T10:00:00Z", message: { role: "user", content: [{ type: "text", text: "First prompt" }] } },
         { type: "message", id: "assistant-1", parentId: "user-1", timestamp: "2026-06-13T10:01:00Z", message: { role: "assistant", content: [{ type: "text", text: "First answer" }] } },
         { type: "message", id: "user-2", parentId: "assistant-1", timestamp: "2026-06-13T10:02:00Z", message: { role: "user", content: [{ type: "text", text: "Later prompt" }] } },
-        { type: "message", id: "assistant-2", parentId: "user-2", timestamp: "2026-06-13T10:03:00Z", message: { role: "assistant", content: [{ type: "text", text: "Later answer" }] } }
+        { type: "message", id: "assistant-2", parentId: "user-2", timestamp: "2026-06-13T10:03:00Z", message: { role: "assistant", content: [{ type: "text", text: "Later answer" }] } },
+        { type: "custom_message", id: "title-1", parentId: "assistant-2", timestamp: "2026-06-13T10:04:00Z", customType: "session-title-update", content: "Session renamed", display: true }
       ])
       calls = []
       Gripi.set :sessions_root, dir
