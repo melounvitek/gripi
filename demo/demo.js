@@ -166,6 +166,7 @@
   if (typeof document === "undefined") return;
 
   const storageKey = "gripi:static-demo:v7";
+  const introSeenKey = "gripi:static-demo:intro-seen";
   let sessions = initialSessions;
   let currentId = defaultSessionId;
   let streamController = null;
@@ -203,6 +204,12 @@
   };
 
   function currentSession() { return sessions.find((session) => session.id === currentId) || sessions[0]; }
+  function introSeen() {
+    try { return localStorage.getItem(introSeenKey) === "true"; } catch (_error) { return false; }
+  }
+  function markIntroSeen() {
+    try { localStorage.setItem(introSeenKey, "true"); } catch (_error) {}
+  }
   function persist() {
     try { localStorage.setItem(storageKey, JSON.stringify({ sessions, currentId })); } catch (_error) {}
   }
@@ -481,12 +488,13 @@
     await playScript(responseScript(prompt), { signal: streamController.signal, onEvent: (event) => appendStreamEvent(event, streamSession) });
   }
 
-  function openModal(name) {
+  function modalIsOpen() { return !!document.querySelector("[data-modal]:not([hidden])"); }
+  function openModal(name, returnFocus = document.activeElement) {
     const modal = document.querySelector(`[data-modal="${name}"]`); if (!modal) return;
-    previousModalFocus = document.activeElement; modal.hidden = false;
+    previousModalFocus = returnFocus; modal.hidden = false; document.querySelector(".app-shell").inert = true;
     (modal.querySelector("[data-modal-default-focus]") || modal.querySelector("button, input, select"))?.focus();
   }
-  function closeModal(modal) { if (!modal) return; modal.hidden = true; previousModalFocus?.focus(); previousModalFocus = null; }
+  function closeModal(modal) { if (!modal) return; modal.hidden = true; document.querySelector(".app-shell").inert = false; if (modal.dataset.modal === "demo-intro-modal") markIntroSeen(); previousModalFocus?.focus(); previousModalFocus = null; }
   function handleSlash(command) {
     const modals = { new: "new-session-modal", fork: "fork-session-modal", tree: "tree-session-modal", model: "model-settings-modal" };
     if (modals[command]) openModal(modals[command]);
@@ -618,7 +626,7 @@
   document.querySelector("[data-current-session-find-next]").addEventListener("click", () => moveFind(1));
   document.querySelector("[data-current-session-find-close]").addEventListener("click", () => resetFind(true));
   document.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") { event.preventDefault(); const find = document.querySelector("[data-current-session-find]"); find.hidden = false; find.querySelector("input").focus(); }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); const find = document.querySelector("[data-current-session-find]"); find.hidden = false; find.querySelector("input").focus(); }
     if (event.key === "Escape") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (modal) closeModal(modal); else if (!element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); element.projectTrigger.focus(); } }
     if (event.key === "Tab") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (!modal) return; const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")]; if (!focusable.length) return; const first = focusable[0], last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
@@ -685,4 +693,5 @@
   document.querySelector("[data-model-search]").addEventListener("input", (event) => { const query = event.target.value.toLowerCase(); document.querySelectorAll(".model-option").forEach((option) => { option.hidden = !option.textContent.toLowerCase().includes(query); }); });
 
   renderHeader(); renderConversation(); renderSidebar(); loadDraft();
+  if (!introSeen()) openModal("demo-intro-modal", element.prompt);
 })(globalThis);

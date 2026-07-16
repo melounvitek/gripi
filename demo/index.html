@@ -8,6 +8,11 @@
   <style>
     .demo-repository-link { color: var(--text); font-weight: 700; white-space: nowrap; text-underline-offset: 0.15em; }
     .demo-repository-link:hover { color: #fff; }
+    .demo-about-button { width: 100%; margin-top: 0.5rem; padding: 0.35rem; border: 0; background: transparent; color: var(--copy); text-transform: none; letter-spacing: 0; }
+    .demo-about-button:hover { background: transparent; color: var(--text); text-decoration: underline; }
+    .demo-about-button:focus-visible { color: var(--text); outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+    .demo-intro-copy { display: grid; gap: 0.75rem; line-height: 1.55; }
+    .demo-intro-copy p { margin: 0; }
   </style>
   <style data-production-styles>
     :root {
@@ -624,6 +629,7 @@
         <span class="sidebar-notification-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M18 16v-5a6 6 0 0 0-12 0v5l-1.5 2h15L18 16Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.5 20a2.7 2.7 0 0 0 5 0" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></span>
         <span class="sidebar-notification-label">Notifications</span><span class="sidebar-notification-state" data-notification-toggle-state>Demo off</span>
       </button>
+      <button type="button" class="demo-about-button" data-modal-open="demo-intro-modal">About this demo</button>
     </aside>
     <label for="mobile-session-toggle" class="mobile-sidebar-backdrop" aria-label="Hide sessions"></label>
 
@@ -679,6 +685,17 @@ GRIPI_HOST=127.0.0.1 mise run start</code></pre><p><a href="https://github.com/m
     </main>
   </div>
 
+  <div class="modal-overlay" data-modal="demo-intro-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="demo-intro-title">
+      <div class="modal-header"><h2 id="demo-intro-title">Welcome to Gripi</h2><button type="button" class="modal-close-button secondary" aria-label="Close introduction" data-modal-close>×</button></div>
+      <div class="demo-intro-copy">
+        <p><strong>Gripi is a web and desktop interface for Pi.</strong> It lets you use your existing Pi projects and sessions through a self-hosted gateway.</p>
+        <p>This static demo is simulated: no gateway, model, or real tools are connected. Prompts and settings stay in this browser.</p>
+        <p><a class="demo-repository-link" href="https://github.com/melounvitek/gripi">View Gripi on GitHub →</a></p>
+      </div>
+      <div class="modal-actions"><button type="button" data-modal-close data-modal-default-focus>Explore demo</button></div>
+    </div>
+  </div>
   <div class="modal-overlay" data-modal="new-session-modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="new-session-modal-title">
       <div class="modal-header"><h2 id="new-session-modal-title">New session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div>

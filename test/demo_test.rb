@@ -135,6 +135,40 @@ class DemoTest < Minitest::Test
     assert_nil result.fetch("unsafe")
   end
 
+  def test_demo_has_an_accessible_first_visit_intro
+    body = Nokogiri::HTML5(File.read(HTML)).at_css("body")
+    modal = body.at_css('[data-modal="demo-intro-modal"]')
+    dialog = modal&.at_css('[role="dialog"][aria-modal="true"][aria-labelledby="demo-intro-title"]')
+    repository_link = modal&.at_css('a[href="https://github.com/melounvitek/gripi"]')
+
+    refute_nil dialog
+    assert modal.key?("hidden")
+    assert_equal "Welcome to Gripi", body.at_css("#demo-intro-title").text
+    assert_includes dialog.text, "web and desktop interface for Pi"
+    assert_includes dialog.text, "simulated"
+    assert_includes dialog.text, "stay in this browser"
+    explore_action = dialog.at_css('button[data-modal-close][data-modal-default-focus]')
+    assert explore_action, "Expected an Explore demo action"
+    assert_equal "Explore demo", explore_action.text.strip
+    refute_nil repository_link
+    refute repository_link.attribute("target")
+    assert body.at_css('[data-modal-open="demo-intro-modal"]'), "Expected an About this demo reopen control"
+  end
+
+  def test_demo_intro_is_remembered_independently_of_versioned_session_state
+    javascript = File.read(JAVASCRIPT)
+
+    assert_includes javascript, 'const introSeenKey = "gripi:static-demo:intro-seen";'
+    assert_includes javascript, 'localStorage.getItem(introSeenKey) === "true"'
+    assert_includes javascript, 'localStorage.setItem(introSeenKey, "true")'
+    assert_includes javascript, 'if (!introSeen()) openModal("demo-intro-modal", element.prompt);'
+    assert_includes javascript, 'if (modal.dataset.modal === "demo-intro-modal") markIntroSeen();'
+    assert_includes javascript, 'document.querySelector(".app-shell").inert = true'
+    assert_includes javascript, 'document.querySelector(".app-shell").inert = false'
+    assert_includes javascript, '&& !modalIsOpen()'
+    refute_match(/gripi:static-demo:v\d+:intro-seen/, javascript)
+  end
+
   def test_demo_notice_links_to_the_repository_in_the_same_tab
     body = Nokogiri::HTML5(File.read(HTML)).at_css("body")
     link = body.at_css('#demo-notice a[href="https://github.com/melounvitek/gripi"]')
