@@ -7,6 +7,8 @@
 
 **Gripi is a desktop and web portal for [Pi](https://pi.dev/), powered by a self-hosted gateway.** Run the gateway on a development machine or home server with Pi CLI installed, then use Pi from the desktop app or any web browser—locally or over a private network.
 
+> Gripi is currently an alpha / early preview project. Expect rough edges, missing features, and behavior that may change quickly.
+
 **Pi stays Pi.** Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It is a gateway and UI layer for accessing the Pi environment you already run.
 
 <p align="center">
