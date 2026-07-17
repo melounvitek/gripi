@@ -394,10 +394,31 @@ class DemoTest < Minitest::Test
     assert_includes javascript, 'details.className = "message-details message-details--always-open"'
     assert_includes javascript, 'summary.className = "message-details-summary"'
     assert_includes javascript, 'compact.className = "compact-summary"'
+    assert_includes javascript, 'span.className = part.type === "command" ? "tool-command" : "tool-path"'
     refute_includes javascript, "dataToolOutputBody"
     refute_includes javascript, "dataToolOutputToggle"
     refute_includes javascript, "tool-output-content--diff"
     refute_includes javascript, "toolOutputModel"
+  end
+
+  def test_demo_tool_summaries_match_production_compact_markup_semantics
+    result = run_javascript(<<~JS)
+      console.log(JSON.stringify({
+        bash: GripiDemo.toolSummaryParts("bash git diff --check"),
+        read: GripiDemo.toolSummaryParts("read app/components/sidebar/search.tsx"),
+        edit: GripiDemo.toolSummaryParts("edit test/system/checkout_test.rb"),
+        write: GripiDemo.toolSummaryParts("write content/app/releases.md"),
+        bareBash: GripiDemo.toolSummaryParts("bash"),
+        guide: GripiDemo.toolSummaryParts("Safer deployment checklist")
+      }));
+    JS
+
+    assert_equal [{ "type" => "text", "text" => "$ git diff --check" }], result.fetch("bash")
+    assert_equal [{ "type" => "command", "text" => "read" }, { "type" => "path", "text" => "app/components/sidebar/search.tsx" }], result.fetch("read")
+    assert_equal [{ "type" => "command", "text" => "edit" }, { "type" => "path", "text" => "test/system/checkout_test.rb" }], result.fetch("edit")
+    assert_equal [{ "type" => "command", "text" => "write" }, { "type" => "path", "text" => "content/app/releases.md" }], result.fetch("write")
+    assert_equal [{ "type" => "text", "text" => "bash" }], result.fetch("bareBash")
+    assert_equal [{ "type" => "text", "text" => "Safer deployment checklist" }], result.fetch("guide")
   end
 
   private

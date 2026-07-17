@@ -198,7 +198,7 @@
 
   const defaultSessionId = "welcome";
   const sessionCatalog = initialSessions.map(({ id, name, project, age, pinned }) => ({ id, name, project, age, pinned }));
-  global.GripiDemo = { playScript, responseScript, safeIdentityColor, safeGuideLink, inlineCodeParts, formatDemoTimestamp: timeLabel, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
+  global.GripiDemo = { playScript, responseScript, safeIdentityColor, safeGuideLink, inlineCodeParts, toolSummaryParts, formatDemoTimestamp: timeLabel, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
   if (typeof document === "undefined") return;
 
   const storageKey = "gripi:static-demo:v12";
@@ -286,6 +286,30 @@
     });
   }
 
+  function toolSummaryParts(title) {
+    const text = String(title || "Tool activity").trim();
+    const match = text.match(/^(bash|read|edit|write)\b(?:\s+(.+))?$/);
+    if (!match) return [{ type: "text", text }];
+    const command = match[1];
+    const argument = (match[2] || "").trim();
+    if (command === "bash") return [{ type: "text", text: argument ? `$ ${argument}` : "bash" }];
+    return [{ type: "command", text: command }, ...(argument ? [{ type: "path", text: argument }] : [])];
+  }
+
+  function appendToolSummary(target, title) {
+    toolSummaryParts(title).forEach((part, index) => {
+      if (index > 0) target.append(document.createTextNode(" "));
+      if (part.type === "text") {
+        target.append(document.createTextNode(part.text));
+        return;
+      }
+      const span = document.createElement("span");
+      span.className = part.type === "command" ? "tool-command" : "tool-path";
+      span.textContent = part.text;
+      target.append(span);
+    });
+  }
+
   function messageArticle(message, live) {
     const article = document.createElement("article");
     const role = message.role;
@@ -311,7 +335,7 @@
       summary.className = "message-details-summary";
       const compact = document.createElement("span");
       compact.className = "compact-summary";
-      compact.textContent = message.title || "Tool activity";
+      appendToolSummary(compact, message.title || "Tool activity");
       summary.append(compact);
       details.append(summary);
       article.append(details);
