@@ -11,6 +11,7 @@ require_relative "lib/configured_session_cwds"
 require_relative "lib/web/view_helpers"
 require_relative "lib/web/store_helpers"
 require_relative "lib/web/rpc_helpers"
+require_relative "lib/web/request_origin_protection"
 require_relative "lib/web/browser_access"
 require_relative "lib/web/workspace_access"
 require_relative "lib/web/pwa_routes"
@@ -23,6 +24,7 @@ require_relative "lib/gateway_update_coordinator"
 require_relative "lib/request_gateway_restart"
 
 class Gripi < Sinatra::Base
+  register Web::RequestOriginProtection
   register Web::BrowserAccess
   register Web::WorkspaceAccess
   register Web::PwaRoutes
