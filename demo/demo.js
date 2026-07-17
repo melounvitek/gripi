@@ -453,13 +453,11 @@
   }
   function programmaticScrollTo(options) {
     programmaticScroll = true;
-    setJumpControls(false, false);
     element.scroll.scrollTo(options);
     finishProgrammaticScrollSoon();
   }
   function programmaticScrollIntoView(target) {
     programmaticScroll = true;
-    setJumpControls(false, false);
     target.scrollIntoView({ block: "center" });
     finishProgrammaticScrollSoon();
   }
@@ -624,7 +622,7 @@
 
   element.scroll.addEventListener("scroll", () => {
     const current = element.scroll.scrollTop;
-    if (programmaticScroll) { lastScrollTop = current; setJumpControls(false, false); finishProgrammaticScrollSoon(); return; }
+    if (programmaticScroll) { lastScrollTop = current; finishProgrammaticScrollSoon(); return; }
     const maximum = Math.max(0, element.scroll.scrollHeight - element.scroll.clientHeight);
     autoScrollEnabled = maximum - current < 120;
     const visible = jumpControlVisibility(lastScrollTop, current, maximum);

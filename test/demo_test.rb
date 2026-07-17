@@ -161,6 +161,14 @@ class DemoTest < Minitest::Test
     assert_equal "2026-06-17", ages.fetch("Simplify documentation navigation")
   end
 
+  def test_demo_jump_controls_do_not_hide_during_programmatic_scroll
+    javascript = File.read(JAVASCRIPT)
+
+    assert_includes javascript, 'function programmaticScrollTo(options) {'
+    refute_includes javascript, 'programmaticScroll = true;\n    setJumpControls(false, false);\n    element.scroll.scrollTo(options);'
+    refute_includes javascript, 'if (programmaticScroll) { lastScrollTop = current; setJumpControls(false, false); finishProgrammaticScrollSoon(); return; }'
+  end
+
   def test_demo_sidebar_preserves_scroll_when_rerendering_sessions
     javascript = File.read(JAVASCRIPT)
 
