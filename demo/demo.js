@@ -238,7 +238,7 @@
   } catch (_error) {}
 
   const element = {
-    history: document.getElementById("history-output"), live: document.getElementById("live-output"), scroll: document.getElementById("conversation-scroll"),
+    history: document.getElementById("history-output"), live: document.getElementById("live-output"), scroll: document.getElementById("conversation-scroll"), sidebarScroll: document.querySelector(".session-sidebar-content"),
     pinned: document.getElementById("pinned-sessions-list"), sessions: document.getElementById("sessions-list"), empty: document.getElementById("sidebar-empty"),
     project: document.getElementById("project-filter"), projectTrigger: document.getElementById("project-select-trigger"), projectList: document.getElementById("project-select-listbox"),
     searchForm: document.getElementById("sidebar-session-search"), search: document.querySelector('#sidebar-session-search input[type="search"]'), clearFilters: document.querySelector("[data-sidebar-filters-clear]"),
@@ -386,12 +386,14 @@
   }
 
   function renderSidebar() {
+    const scrollTop = element.sidebarScroll?.scrollTop || 0;
     element.pinned.replaceChildren(); element.sessions.replaceChildren();
     const visible = filteredSessions();
     visible.filter((session) => session.pinned).forEach((session) => element.pinned.append(sessionRow(session)));
     visible.filter((session) => !session.pinned).forEach((session) => element.sessions.append(sessionRow(session)));
     element.empty.hidden = visible.length > 0;
     element.clearFilters.hidden = !element.project.value && !element.search.value;
+    if (element.sidebarScroll) element.sidebarScroll.scrollTop = scrollTop;
   }
 
   function setJumpControls(top, bottom) {

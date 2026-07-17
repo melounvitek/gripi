@@ -149,6 +149,14 @@ class DemoTest < Minitest::Test
     assert_equal "2026-07-17 16:36", result.fetch("formatted")
   end
 
+  def test_demo_sidebar_preserves_scroll_when_rerendering_sessions
+    javascript = File.read(JAVASCRIPT)
+
+    assert_includes javascript, 'sidebarScroll: document.querySelector(".session-sidebar-content")'
+    assert_includes javascript, 'const scrollTop = element.sidebarScroll?.scrollTop || 0;'
+    assert_includes javascript, 'if (element.sidebarScroll) element.sidebarScroll.scrollTop = scrollTop;'
+  end
+
   def test_demo_project_sessions_show_native_tool_activity
     javascript = File.read(JAVASCRIPT)
 
