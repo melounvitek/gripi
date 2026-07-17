@@ -122,7 +122,7 @@ class DemoTest < Minitest::Test
     assert_includes javascript, 'gripi:static-demo:v13'
     assert_includes javascript, "does not alter Pi’s system prompt"
     assert_includes javascript, "not as polished here as they are in the real app"
-    assert_includes javascript, "Custom TUI components, overlays, widgets, editors"
+    assert_includes javascript, "Custom TUI components, overlays, widgets backed by terminal rendering"
     assert_includes javascript, "Never expose Gripi through a public IP or public reverse proxy."
     assert_includes javascript, 'switchSession(button.dataset.demoTreeTarget)'
     assert body.at_css('[data-demo-tree-target="new-to-pi"]')

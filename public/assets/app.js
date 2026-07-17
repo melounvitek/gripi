@@ -110,10 +110,15 @@ let extensionUiInput = null;
 let extensionUiEditorField = null;
 let extensionUiEditor = null;
 let extensionUiSubmit = null;
+let extensionWidgetsAboveContainer = null;
+let extensionWidgetsBelowContainer = null;
 let activeExtensionUiRequest = null;
 let extensionUiControlsBound = false;
 let extensionStatuses = new Map();
+let extensionWidgets = new Map();
 let baseDocumentTitle = document.title;
+let extensionDocumentTitle = null;
+let lastBoundSessionPath = null;
 let emptyEventPollCount = 0;
 let sessionViewGeneration = 0;
 let sessionSwitchGeneration = 0;
@@ -162,6 +167,8 @@ function bindSessionDom() {
   extensionUiEditorField = extensionUiModal?.querySelector("[data-extension-ui-editor-field]") || null;
   extensionUiEditor = extensionUiModal?.querySelector("[data-extension-ui-editor]") || null;
   extensionUiSubmit = extensionUiModal?.querySelector("[data-extension-ui-submit]") || null;
+  extensionWidgetsAboveContainer = document.querySelector("[data-extension-widgets-above]");
+  extensionWidgetsBelowContainer = document.querySelector("[data-extension-widgets-below]");
   promptSessionInput = promptForm?.querySelector('input[name="session"]') || null;
   sendButton = promptForm?.querySelector(".send-button") || null;
   composerStopButton = document.querySelector(".session-header .composer-stop-button") || null;
@@ -177,9 +184,16 @@ function bindSessionDom() {
   liveMessageRenderer.bind();
   currentSessionFindController.bind();
   sessionStatusBar = document.getElementById("session-status-bar");
-  extensionStatuses.clear();
+  const boundSessionPath = currentSessionPath();
+  if (boundSessionPath !== lastBoundSessionPath) {
+    lastBoundSessionPath = boundSessionPath;
+    extensionStatuses.clear();
+    extensionWidgets.clear();
+    baseDocumentTitle = document.title;
+    extensionDocumentTitle = null;
+  }
   renderExtensionStatuses();
-  document.title = baseDocumentTitle;
+  renderExtensionWidgets();
   const existingModelStatus = sessionStatusBar?.querySelector('[data-status-key="model"] .session-status-value')?.textContent || "";
   const existingModelMatch = existingModelStatus.match(/^(.*?)(?:\s+\(([^)]*)\))?$/);
   liveStatusModel = existingModelMatch?.[1] || null;
@@ -770,7 +784,12 @@ function updateSessionHeaderName(name) {
   const title = headerName.closest(".session-header-title");
   const project = title?.querySelector(".session-header-project-label")?.textContent.trim();
   if (title) title.title = project ? `${name} · ${project}` : name;
-  document.title = `${name} · Gripi`;
+  if (typeof baseDocumentTitle !== "undefined") {
+    baseDocumentTitle = `${name} · Gripi`;
+    renderDocumentTitle();
+  } else {
+    document.title = `${name} · Gripi`;
+  }
 }
 
 function renderAttachments() {
@@ -985,6 +1004,37 @@ function renderExtensionStatuses() {
   });
 }
 
+function renderDocumentTitle() {
+  document.title = extensionDocumentTitle ?? baseDocumentTitle;
+}
+
+function updateExtensionWidget(event) {
+  if (!event.widgetKey) return;
+  if (!Array.isArray(event.widgetLines)) extensionWidgets.delete(event.widgetKey);
+  else extensionWidgets.set(event.widgetKey, { lines: event.widgetLines.map((line) => String(line)), placement: event.widgetPlacement || "aboveEditor" });
+  renderExtensionWidgets();
+}
+
+function renderExtensionWidgets() {
+  if (!extensionWidgetsAboveContainer || !extensionWidgetsBelowContainer) return;
+  extensionWidgetsAboveContainer.replaceChildren();
+  extensionWidgetsBelowContainer.replaceChildren();
+  extensionWidgets.forEach((widget, key) => {
+    const block = document.createElement("div");
+    block.className = "extension-widget";
+    block.dataset.extensionWidgetKey = key;
+    const title = document.createElement("span");
+    title.className = "extension-widget-title";
+    title.textContent = key;
+    const body = document.createElement("div");
+    body.textContent = widget.lines.join("\n");
+    block.append(title, body);
+    (widget.placement === "belowEditor" ? extensionWidgetsBelowContainer : extensionWidgetsAboveContainer).append(block);
+  });
+  extensionWidgetsAboveContainer.hidden = extensionWidgetsAboveContainer.children.length === 0;
+  extensionWidgetsBelowContainer.hidden = extensionWidgetsBelowContainer.children.length === 0;
+}
+
 function eventTimeMilliseconds(event) {
   const value = eventTimestamp(event);
   const timestamp = typeof value === "number" ? value : Date.parse(value);
@@ -1060,7 +1110,12 @@ function renderEvent(event) {
       return;
     }
     if (event.method === "setTitle") {
-      document.title = event.title || baseDocumentTitle;
+      extensionDocumentTitle = event.title == null ? null : event.title;
+      renderDocumentTitle();
+      return;
+    }
+    if (event.method === "setWidget") {
+      updateExtensionWidget(event);
       return;
     }
 
@@ -1947,7 +2002,13 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
     bindSessionControls();
     rememberMainSessionSelection(payload.session);
     if (push) history.pushState({ session: payload.session }, payload.title || "", payload.url || url);
-    document.title = payload.title ? `${payload.title} · Gripi` : "Gripi";
+    if (typeof baseDocumentTitle !== "undefined") {
+      baseDocumentTitle = payload.title ? `${payload.title} · Gripi` : "Gripi";
+      extensionDocumentTitle = null;
+      renderDocumentTitle();
+    } else {
+      document.title = payload.title ? `${payload.title} · Gripi` : "Gripi";
+    }
     sidebarController.closeMobile();
     initializeSessionView({ focus, scrollSnapshot });
     if (refreshRequestVersion !== sidebarController.refreshRequestVersion) sidebarController.scheduleRefresh(0);

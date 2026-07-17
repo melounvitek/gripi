@@ -75,6 +75,9 @@
     .conversation-history-status:disabled { cursor: default; opacity: 1; }
     .composer { position: sticky; bottom: 0; padding: 0.75rem 1.5rem 1rem; border-top: 1px solid var(--border); background: #1e1e24f0; backdrop-filter: blur(8px); }
     .composer-inner { display: grid; gap: 0.6rem; }
+    .extension-widgets { display: grid; gap: 0.45rem; }
+    .extension-widget { padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel-soft); color: var(--copy); font-family: var(--mono); font-size: 0.76rem; white-space: pre-wrap; }
+    .extension-widget-title { display: block; margin-bottom: 0.25rem; color: var(--gold); font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
     .attachment-tray { display: none; flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem; border: 1px dashed var(--border-strong); border-radius: 0.35rem; background: var(--panel-soft); }
     .attachment-tray.has-attachments { display: flex; }
     .attachment { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.4rem; border: 1px solid var(--border); border-radius: 0.3rem; background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 0.76rem; }
