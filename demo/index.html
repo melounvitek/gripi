@@ -575,8 +575,12 @@
       .session-sidebar-content::-webkit-scrollbar, .conversation-scroll::-webkit-scrollbar, .command-list::-webkit-scrollbar { display: none; }
     }
 </style>
-<style>
+<style data-demo-mobile-overrides>
   @media (max-width: 760px) {
+    html, body { height: 100%; overflow: hidden; }
+    /* Demo-only guard for mobile browsers that root-pan static pages as URL bars resize. */
+    .app-shell { position: fixed; inset: 0; height: auto; overflow: hidden; }
+    .conversation-panel { height: 100%; }
     .composer { padding: 0.55rem 0.75rem calc(0.6rem + env(safe-area-inset-bottom)); }
     .composer-inner { gap: 0.45rem; }
     .composer-input-row { grid-template-columns: 2.5rem minmax(0, 1fr) 2.75rem; align-items: stretch; gap: 0.45rem; }

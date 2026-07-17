@@ -281,6 +281,9 @@ class DemoTest < Minitest::Test
     assert_includes html, ".attach-button.is-disabled[data-modal-open] { pointer-events: auto; cursor: help; }"
     assert_equal "Ask Pi…", body.at_css('.prompt-form textarea')["placeholder"]
     assert_includes html, "@media (max-width: 760px)"
+    assert_includes html, "<style data-demo-mobile-overrides>"
+    assert_includes html, ".app-shell { position: fixed; inset: 0; height: auto; overflow: hidden; }"
+    assert_includes html, ".conversation-panel { height: 100%; }"
     assert_includes html, ".composer-controls { display: none; }"
   end
 
