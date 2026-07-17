@@ -161,6 +161,19 @@ class DemoTest < Minitest::Test
     assert_equal "2026-06-17", ages.fetch("Simplify documentation navigation")
   end
 
+  def test_demo_jump_controls_use_delayed_reveal_like_real_gripi
+    javascript = File.read(JAVASCRIPT)
+
+    assert_includes javascript, 'let lastRevealAt = 0;'
+    assert_includes javascript, 'scrollRevealDelayTimer = setTimeout(() => {'
+    assert_includes javascript, 'if (Date.now() - lastRevealAt > 120) return;'
+    assert_includes javascript, '}, 300);'
+    assert_includes javascript, 'resetJumpControlsReveal();'
+    assert_includes javascript, 'if (!visible) return;'
+    assert_includes javascript, 'if (!visible.top && !visible.bottom) { resetJumpControlsReveal(); return; }'
+    assert_includes javascript, 'latestReadableAssistantMessageIsVisible()'
+  end
+
   def test_demo_jump_controls_do_not_hide_during_programmatic_scroll
     javascript = File.read(JAVASCRIPT)
 
@@ -288,11 +301,13 @@ class DemoTest < Minitest::Test
     assert_includes javascript, "if (generation !== switchGeneration) return;"
   end
 
-  def test_jump_arrows_only_appear_for_the_current_scroll_direction
+  def test_jump_arrows_only_appear_for_intentional_scroll_direction
     result = run_javascript(<<~JS)
       console.log(JSON.stringify({
         up: GripiDemo.jumpControlVisibility(500, 300, 900),
         down: GripiDemo.jumpControlVisibility(300, 500, 900),
+        downLatestVisible: GripiDemo.jumpControlVisibility(300, 500, 900, true),
+        unchanged: GripiDemo.jumpControlVisibility(500, 500, 900),
         top: GripiDemo.jumpControlVisibility(200, 50, 900),
         bottom: GripiDemo.jumpControlVisibility(700, 850, 900)
       }));
@@ -300,6 +315,8 @@ class DemoTest < Minitest::Test
 
     assert_equal({ "top" => true, "bottom" => false }, result.fetch("up"))
     assert_equal({ "top" => false, "bottom" => true }, result.fetch("down"))
+    assert_equal({ "top" => false, "bottom" => false }, result.fetch("downLatestVisible"))
+    assert_nil result.fetch("unchanged")
     assert_equal({ "top" => false, "bottom" => false }, result.fetch("top"))
     assert_equal({ "top" => false, "bottom" => false }, result.fetch("bottom"))
   end

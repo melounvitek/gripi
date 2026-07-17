@@ -157,12 +157,12 @@
     };
   }
 
-  function jumpControlVisibility(previous, current, maximum) {
-    if (current === previous) return { top: false, bottom: false };
+  function jumpControlVisibility(previous, current, maximum, latestReadableAssistantVisible = false) {
+    if (current === previous) return null;
     const direction = current < previous ? "up" : "down";
     const nearTop = current < 120;
     const nearBottom = maximum - current < 120;
-    return { top: direction === "up" && !nearTop, bottom: direction === "down" && !nearBottom };
+    return { top: direction === "up" && !nearTop, bottom: direction === "down" && !nearBottom && !latestReadableAssistantVisible };
   }
 
   function responseScript(prompt) {
@@ -223,7 +223,9 @@
   let findMatches = [];
   let findIndex = -1;
   let lastScrollTop = 0;
+  let lastRevealAt = 0;
   let scrollRevealTimer = null;
+  let scrollRevealDelayTimer = null;
   let programmaticScroll = false;
   let programmaticScrollTimer = null;
   let autoScrollEnabled = true;
@@ -410,6 +412,7 @@
   }
 
   function renderConversation() {
+    resetJumpControlsReveal();
     element.history.replaceChildren(); element.live.replaceChildren();
     currentSession().messages.forEach((message) => element.history.append(messageArticle(message, false)));
     requestAnimationFrame(() => {
@@ -461,6 +464,44 @@
     target.scrollIntoView({ block: "center" });
     finishProgrammaticScrollSoon();
   }
+  function latestReadableAssistantMessageIsVisible() {
+    const messages = element.scroll.querySelectorAll('[data-role="assistant"].message--assistant:not(.message--thinking):not(.message--compact)');
+    const latest = messages[messages.length - 1];
+    if (!latest) return false;
+    const scrollRect = element.scroll.getBoundingClientRect();
+    const messageRect = latest.getBoundingClientRect();
+    return messageRect.bottom > scrollRect.top && messageRect.top < scrollRect.bottom;
+  }
+
+  function hideJumpControlsSoon() {
+    clearTimeout(scrollRevealTimer);
+    scrollRevealTimer = setTimeout(() => document.body.classList.remove("is-conversation-scrolling"), 1400);
+  }
+
+  function revealJumpControlsSoon() {
+    lastRevealAt = Date.now();
+    if (document.body.classList.contains("is-conversation-scrolling")) {
+      hideJumpControlsSoon();
+      return;
+    }
+    if (scrollRevealDelayTimer) return;
+    scrollRevealDelayTimer = setTimeout(() => {
+      scrollRevealDelayTimer = null;
+      if (Date.now() - lastRevealAt > 120) return;
+      document.body.classList.add("is-conversation-scrolling");
+      hideJumpControlsSoon();
+    }, 300);
+  }
+
+  function resetJumpControlsReveal() {
+    clearTimeout(scrollRevealTimer);
+    clearTimeout(scrollRevealDelayTimer);
+    scrollRevealTimer = null;
+    scrollRevealDelayTimer = null;
+    lastRevealAt = 0;
+    document.body.classList.remove("is-conversation-scrolling");
+  }
+
   function scrollLatest(force = false) {
     if (!autoScrollEnabled && !force) return;
     if (force) autoScrollEnabled = true;
@@ -625,12 +666,12 @@
     if (programmaticScroll) { lastScrollTop = current; finishProgrammaticScrollSoon(); return; }
     const maximum = Math.max(0, element.scroll.scrollHeight - element.scroll.clientHeight);
     autoScrollEnabled = maximum - current < 120;
-    const visible = jumpControlVisibility(lastScrollTop, current, maximum);
+    const visible = jumpControlVisibility(lastScrollTop, current, maximum, latestReadableAssistantMessageIsVisible());
     lastScrollTop = current;
+    if (!visible) return;
     setJumpControls(visible.top, visible.bottom);
-    document.body.classList.add("is-conversation-scrolling");
-    clearTimeout(scrollRevealTimer);
-    scrollRevealTimer = setTimeout(() => document.body.classList.remove("is-conversation-scrolling"), 1400);
+    if (!visible.top && !visible.bottom) { resetJumpControlsReveal(); return; }
+    revealJumpControlsSoon();
   }, { passive: true });
   ["wheel", "touchstart", "pointerdown", "keydown"].forEach((type) => element.scroll.addEventListener(type, cancelProgrammaticScroll, { passive: true }));
 
