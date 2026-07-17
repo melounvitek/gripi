@@ -32,6 +32,30 @@ class StartTest < Minitest::Test
     refute File.exist?(@restart_path)
   end
 
+  def test_default_host_is_localhost
+    write_fake_bundle(<<~SH)
+      printf '%s\n' "$*|$RACK_ENV" >> "$CALLS_PATH"
+      exit 0
+    SH
+
+    _stdout, _stderr, status = run_launcher
+
+    assert status.success?
+    assert_equal ["exec rackup -o 127.0.0.1 -p 4567|production"], File.readlines(@calls_path, chomp: true)
+  end
+
+  def test_gripi_host_overrides_default_host
+    write_fake_bundle(<<~SH)
+      printf '%s\n' "$*|$RACK_ENV" >> "$CALLS_PATH"
+      exit 0
+    SH
+
+    _stdout, _stderr, status = run_launcher(nil, "GRIPI_HOST" => "100.64.0.1")
+
+    assert status.success?
+    assert_equal ["exec rackup -o 100.64.0.1 -p 4567|production"], File.readlines(@calls_path, chomp: true)
+  end
+
   def test_stale_restart_marker_is_cleared_before_launch
     FileUtils.mkdir_p(File.dirname(@restart_path))
     FileUtils.touch(@restart_path)
@@ -128,7 +152,9 @@ class StartTest < Minitest::Test
       "PATH" => "#{@bin_dir}:#{ENV.fetch("PATH")}",
       "CALLS_PATH" => @calls_path,
       "RESTART_PATH" => @restart_path,
-      "GRIPI_RESTART_PATH" => @restart_path
+      "GRIPI_RESTART_PATH" => @restart_path,
+      "GRIPI_HOST" => nil,
+      "GRIPI_PORT" => nil
     }
   end
 

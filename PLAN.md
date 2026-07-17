@@ -55,10 +55,10 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
 
 ### 4. Safer default bind address
 
-- [ ] Change `bin/start` default host from `0.0.0.0` to `127.0.0.1`, or require an explicit env var to bind all interfaces.
-- [ ] Update README install/start examples if needed.
-- [ ] Update `docs/configuration.md` and `docs/examples.md` to match the chosen behavior.
-- [ ] Preserve intentional Tailscale direct binding via `GRIPI_HOST=100.x.y.z`.
+- [x] Change `bin/start` default host from `0.0.0.0` to `127.0.0.1`, or require an explicit env var to bind all interfaces.
+- [x] Update README install/start examples if needed.
+- [x] Update `docs/configuration.md` and `docs/examples.md` to match the chosen behavior.
+- [x] Preserve intentional Tailscale direct binding via `GRIPI_HOST=100.x.y.z`.
 
 ### 5. Strengthen auth/exposure docs
 
@@ -92,10 +92,10 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
 
 ### Round 2 — default host hardening
 
-- [ ] Add/update script tests for `bin/start` default host.
-- [ ] Change launcher behavior.
-- [ ] Update docs.
-- [ ] Run relevant script/docs tests and full Ruby suite.
+- [x] Add/update script tests for `bin/start` default host.
+- [x] Change launcher behavior.
+- [x] Update docs.
+- [x] Run relevant script/docs tests and full Ruby suite. Current full suite still fails only in existing `DemoTest#test_demo_embeds_the_exact_production_stylesheet`, unrelated to this change.
 
 ### Round 3 — GET side-effect reduction
 

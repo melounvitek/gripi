@@ -9,10 +9,10 @@ For remote access, use a VPN such as [Tailscale](https://tailscale.com/). It is 
 Use this when Gripi and your browser or desktop app run on the same machine:
 
 ```sh
-GRIPI_HOST=127.0.0.1 mise run start
+mise run start
 ```
 
-Open <http://localhost:4567>. This is the simplest and safest setup.
+Open <http://localhost:4567>. This is the simplest and safest setup; the default launcher binds only to `127.0.0.1`.
 
 ## Remote gateway over Tailscale
 
@@ -39,7 +39,7 @@ Open `http://100.x.y.z:4567` in a browser, or add it from the desktop app's **Ad
 Keep Gripi bound to the gateway machine itself:
 
 ```sh
-GRIPI_HOST=127.0.0.1 mise run start
+mise run start
 ```
 
 In another terminal, expose it within your Tailscale network over HTTPS:

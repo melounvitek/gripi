@@ -4,16 +4,14 @@ Gripi reads most settings from `~/.config/gripi/env`. Values passed in the proce
 
 ## Server address
 
-Set the address and port when starting the gateway:
+By default, `mise run start` listens only on `127.0.0.1` for same-machine use. Set the address and port when you intentionally want other devices on a trusted LAN or VPN to connect:
 
 ```sh
-GRIPI_HOST=127.0.0.1 mise run start
+mise run start
 GRIPI_HOST=100.x.y.z GRIPI_PORT=4568 mise run start
 ```
 
-Keep `GRIPI_HOST=127.0.0.1` for same-machine use. Bind to a LAN or VPN address only when you intentionally want other devices on that network to connect.
-
-Plain `mise run start` currently listens on all interfaces (`0.0.0.0`). Do not use that default unless network access to the machine is already restricted.
+Keep the default localhost binding for same-machine use. Bind to a LAN or VPN address only when you intentionally want other devices on that network to connect. Avoid `GRIPI_HOST=0.0.0.0` unless network access to the machine is already restricted.
 
 `GRIPI_HOST` and `GRIPI_PORT` must be set in the command or service environment; they are read by the launcher before Gripi loads `~/.config/gripi/env`.
 

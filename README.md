@@ -35,10 +35,10 @@ mise run setup
 Setup stores an admin password in `~/.config/gripi/env` and prints it. Start the gateway:
 
 ```sh
-GRIPI_HOST=127.0.0.1 mise run start
+mise run start
 ```
 
-Open <http://localhost:4567> and use the admin password to approve your browser.
+By default, the gateway listens only on `127.0.0.1`. Open <http://localhost:4567> and use the admin password to approve your browser.
 
 ### Desktop app
 

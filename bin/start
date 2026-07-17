@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-host="${1:-${GRIPI_HOST:-0.0.0.0}}"
+host="${1:-${GRIPI_HOST:-127.0.0.1}}"
 port="${GRIPI_PORT:-4567}"
 
 if [[ -n "${GRIPI_RESTART_PATH:-}" ]]; then

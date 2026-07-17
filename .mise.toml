@@ -11,7 +11,7 @@ run = "bin/start"
 
 [tasks.dev]
 description = "Run the web gateway in development mode on port 4567"
-run = "RACK_ENV=development bundle exec rackup -o 0.0.0.0 -p 4567"
+run = "RACK_ENV=development bundle exec rackup -o 127.0.0.1 -p 4567"
 
 [tasks.test]
 description = "Run the test suite"
