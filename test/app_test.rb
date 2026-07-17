@@ -4465,9 +4465,11 @@ class AppTest < Minitest::Test
       load_more = document.at_css(".sidebar-load-more")
       assert_equal "Load 1 more", load_more.text.gsub(/\s+/, " ").strip
       assert_includes load_more["href"], "sidebar_sessions_limit=41"
-      session_link = document.at_css('.recent-sessions a.session[href*="session-2.jsonl"]')
-      refute_includes session_link["href"], "sidebar_sessions_limit"
-      refute_includes session_link["href"], "show_all_sessions"
+      first_page_link = document.at_css('.recent-sessions a.session[href*="session-22.jsonl"]')
+      refute_includes first_page_link["href"], "sidebar_sessions_limit"
+      next_page_link = document.at_css('.recent-sessions a.session[href*="session-2.jsonl"]')
+      assert_includes next_page_link["href"], "sidebar_sessions_limit=40"
+      refute_includes next_page_link["href"], "show_all_sessions"
     end
   end
 
@@ -4528,6 +4530,38 @@ class AppTest < Minitest::Test
       refute_includes text, "Message 30"
       assert_includes text, "Message 31"
       assert_includes text, "Message 180"
+    end
+  end
+
+  def test_session_fragment_retains_loaded_limit_only_beyond_first_page
+    Dir.mktmpdir do |dir|
+      paths = write_sessions(dir, count: 41)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+      request = Rack::MockRequest.new(Gripi)
+
+      next_page_response = request.get(
+        "/session_fragment",
+        params: { "session" => paths[1], "sidebar_sessions_limit" => "40" }
+      )
+
+      assert_equal 200, next_page_response.status
+      next_page_payload = JSON.parse(next_page_response.body)
+      assert_includes next_page_payload.fetch("url"), "sidebar_sessions_limit=40"
+      sidebar = Nokogiri::HTML(next_page_payload.fetch("sidebar_html"))
+      session_links = sidebar.css(".sessions-list a.session")
+      assert_equal 40, session_links.length
+      assert_equal paths[1], session_links.last["data-session-path"]
+      assert_includes session_links.last["class"], "selected"
+      assert_includes session_links.last["href"], "sidebar_sessions_limit=40"
+
+      first_page_response = request.get(
+        "/session_fragment",
+        params: { "session" => paths[21], "sidebar_sessions_limit" => "40" }
+      )
+
+      assert_equal 200, first_page_response.status
+      refute_includes JSON.parse(first_page_response.body).fetch("url"), "sidebar_sessions_limit"
     end
   end
 

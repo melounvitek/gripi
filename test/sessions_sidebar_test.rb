@@ -112,6 +112,18 @@ class SessionsSidebarTest < Minitest::Test
     assert_equal 25, loaded_page.sessions.length
   end
 
+  def test_session_urls_retain_loaded_limit_only_beyond_the_first_page
+    sessions = 25.times.map { |index| session("session-#{index}", "project", "Session #{index}", index) }
+    sidebar = build_sidebar(
+      groups: groups(*sessions),
+      selected_session: sessions.last,
+      params: { "sidebar_sessions_limit" => "25" }
+    )
+
+    refute_includes sidebar.session_url(sessions.last.path), "sidebar_sessions_limit"
+    assert_includes sidebar.session_url(sessions.first.path), "sidebar_sessions_limit=25"
+  end
+
   def test_lists_known_projects_by_recent_activity_then_name
     alpha = session("alpha", "alpha-project", "Alpha", 10, modified_at: 30)
     beta = session("beta", "beta-project", "Beta", 20, modified_at: 10)

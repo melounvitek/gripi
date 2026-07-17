@@ -44,6 +44,9 @@ module Web
         query["no_session"] = "1" if !@selected_session && @all_sessions.any?
         query["project"] = selected_project_cwd if selected_project_cwd
         query["session_search"] = sidebar_session_search_query if sidebar_session_search?
+        if @selected_session && (sessions_limit = @sidebar.retained_sessions_limit_for(@selected_session.path))
+          query["sidebar_sessions_limit"] = sessions_limit
+        end
         query["session_only"] = "1" if params["session_only"].to_s == "1"
         "/?#{Rack::Utils.build_nested_query(query)}"
       end

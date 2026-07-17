@@ -74,6 +74,14 @@ module Sessions
       sessions_limit.to_s
     end
 
+    def retained_sessions_limit_for(session_path)
+      limit = sessions_limit_param
+      return unless limit
+
+      index = session_pool.index { |session| session.path == session_path }
+      limit if index && index >= RECENT_SESSION_LIMIT
+    end
+
     def sessions_overflow?
       sessions_limit < session_pool.length
     end
@@ -133,7 +141,7 @@ module Sessions
     end
 
     def session_url(session_path)
-      url_for(session: session_path)
+      url_for(session: session_path, sidebar_sessions_limit: retained_sessions_limit_for(session_path))
     end
 
     private
