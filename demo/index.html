@@ -574,6 +574,16 @@
       .session-sidebar-content::-webkit-scrollbar, .conversation-scroll::-webkit-scrollbar, .command-list::-webkit-scrollbar { display: none; }
     }
 </style>
+<style>
+  @media (max-width: 760px) {
+    .composer { padding: 0.55rem 0.75rem calc(0.6rem + env(safe-area-inset-bottom)); }
+    .composer-inner { gap: 0.45rem; }
+    .composer-input-row { grid-template-columns: 2.5rem minmax(0, 1fr) 2.75rem; align-items: stretch; gap: 0.45rem; }
+    .attach-button, .send-button { min-height: 2.5rem; border-radius: 0.45rem; }
+    textarea { min-height: 2.5rem; padding: 0.55rem 0.65rem; border-radius: 0.45rem; line-height: 1.35; }
+    .composer-controls { display: none; }
+  }
+</style>
 </head>
 <body data-home-dir="/home/demo">
   <div class="app-shell">
@@ -675,8 +685,8 @@ GRIPI_HOST=127.0.0.1 mise run start</code></pre><p><a href="https://github.com/m
           <div class="tree-position-banner" role="status" data-demo-secondary-state hidden><div><strong>Viewing earlier tree point.</strong> <span>Your next message will branch from here.</span></div><button type="button" class="secondary" data-demo-disabled>Jump to latest</button></div>
           <div class="session-sync-banner" role="status" data-demo-secondary-state hidden><div><strong>Session changed outside the gateway.</strong> <span>Finish using this session in Pi CLI before continuing here.</span></div><button type="button" class="secondary" data-demo-disabled>Take over in gateway</button></div>
           <span class="composer-state" data-state="idle" aria-live="polite"></span>
-          <div class="attachment-tray has-attachments" aria-live="polite"><span class="attachment"><span>architecture.png</span><button type="button" data-remove-attachment>Remove</button></span></div>
-          <div class="composer-input-row"><input class="image-input" id="image-input" type="file" accept="image/*" multiple><label for="image-input" class="attach-button" title="Attach images" aria-label="Attach images">＋</label><textarea name="message" rows="1" placeholder="Ask Pi… Enter to send, Shift+Enter for newline."></textarea><button type="submit" class="send-button">Send</button></div>
+          <div class="attachment-tray" aria-live="polite"></div>
+          <div class="composer-input-row"><input class="image-input" id="image-input" type="file" accept="image/*" multiple><label for="image-input" class="attach-button" title="Attach images" aria-label="Attach images">＋</label><textarea name="message" rows="1" placeholder="Ask Pi…"></textarea><button type="submit" class="send-button">Send</button></div>
           <div class="composer-controls"><div class="session-status-bar" id="session-status-bar"><span class="session-status-item" data-status-key="ctx"><span class="session-status-label">CTX</span> <span class="session-status-value">18%</span></span><button type="button" class="session-status-item model-settings-chip" data-status-key="model" data-modal-open="model-settings-modal"><span class="session-status-label">Model</span> <span class="session-status-value">anthropic/claude-sonnet-4 (high)</span></button></div></div>
         </form>
       </div></div>

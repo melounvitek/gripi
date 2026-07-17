@@ -698,5 +698,5 @@
   document.querySelector("[data-model-search]").addEventListener("input", (event) => { const query = event.target.value.toLowerCase(); document.querySelectorAll(".model-option").forEach((option) => { option.hidden = !option.textContent.toLowerCase().includes(query); }); });
 
   renderHeader(); renderConversation(); renderSidebar(); loadDraft();
-  if (!introSeen()) openModal("demo-intro-modal", element.prompt);
+  if (!introSeen()) openModal("demo-intro-modal", null);
 })(globalThis);

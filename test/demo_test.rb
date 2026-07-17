@@ -36,6 +36,7 @@ class DemoTest < Minitest::Test
     assert_includes html, "<style>"
     assert_includes html, '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,'
     assert_includes html, '<script src="demo.js"></script>'
+    refute_includes html, "architecture.png"
     refute_match(/<(?:link|script|img|iframe|source|object|embed)[^>]+(?:href|src|data)=["'](?:https?:|\/)/i, html)
     refute_match(/url\s*\(\s*["']?(?:https?:|\/)/i, html)
     refute_match(/@import\b/i, html)
@@ -206,7 +207,8 @@ class DemoTest < Minitest::Test
     assert_includes javascript, 'const introSeenKey = "gripi:static-demo:intro-seen";'
     assert_includes javascript, 'localStorage.getItem(introSeenKey) === "true"'
     assert_includes javascript, 'localStorage.setItem(introSeenKey, "true")'
-    assert_includes javascript, 'if (!introSeen()) openModal("demo-intro-modal", element.prompt);'
+    assert_includes javascript, 'if (!introSeen()) openModal("demo-intro-modal", null);'
+    refute_includes javascript, 'openModal("demo-intro-modal", element.prompt)'
     assert_includes javascript, 'if (modal.dataset.modal === "demo-intro-modal") markIntroSeen();'
     assert_includes javascript, 'document.querySelector(".app-shell").inert = true'
     assert_includes javascript, 'document.querySelector(".app-shell").inert = false'
@@ -222,6 +224,18 @@ class DemoTest < Minitest::Test
     refute_includes javascript, "showDemoNotice"
     refute_includes javascript, "data-dismiss-notice"
     assert_includes javascript, 'if (event.target.closest("[data-demo-disabled]")) event.preventDefault();'
+  end
+
+  def test_demo_mobile_composer_starts_clean_and_compact
+    html = File.read(HTML)
+    body = Nokogiri::HTML5(html).at_css("body")
+
+    attachment_tray = body.at_css(".attachment-tray")
+    refute attachment_tray["class"].to_s.split.include?("has-attachments")
+    assert_empty attachment_tray.css(".attachment")
+    assert_equal "Ask Pi…", body.at_css('.prompt-form textarea')["placeholder"]
+    assert_includes html, "@media (max-width: 760px)"
+    assert_includes html, ".composer-controls { display: none; }"
   end
 
   def test_streams_are_bound_to_the_originating_session_and_blocked_while_switching
