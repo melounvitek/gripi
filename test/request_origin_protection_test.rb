@@ -1,4 +1,6 @@
+ENV["APP_ENV"] = "test"
 ENV["GRIPI_ADMIN_PASSWORD"] ||= "test-password"
+ENV["GRIPI_PERMITTED_HOSTS"] ||= "gateway.tailnet.ts.net"
 
 require "minitest/autorun"
 require "rack/mock"
@@ -48,6 +50,7 @@ class RequestOriginProtectionTest < Minitest::Test
     Gripi.set :gateway_update_coordinator, @coordinator
     Gripi.set :gateway_instance_id, "instance1"
     Gripi.set :rpc_idle_timeout_seconds, 0
+    Gripi.set :trust_proxy_headers, false
     @request = Rack::MockRequest.new(Gripi)
   end
 
@@ -114,7 +117,23 @@ class RequestOriginProtectionTest < Minitest::Test
     assert_equal 0, @coordinator.status_calls
   end
 
-  def test_allows_forwarded_https_origin
+  def test_rejects_spoofed_forwarded_host_when_proxy_headers_are_not_trusted
+    response = @request.post(
+      "/gateway-update",
+      "HTTP_HOST" => "gateway.tailnet.ts.net",
+      "HTTP_X_FORWARDED_HOST" => "proxy.test",
+      "HTTP_X_FORWARDED_PROTO" => "https",
+      "HTTP_ORIGIN" => "https://proxy.test"
+    )
+
+    assert_equal 403, response.status
+    assert_equal "Cross-origin unsafe request rejected", response.body
+    assert_equal 0, @coordinator.start_calls
+  end
+
+  def test_allows_forwarded_https_origin_when_proxy_headers_are_trusted
+    Gripi.set :trust_proxy_headers, true
+
     response = @request.post(
       "/gateway-update",
       "HTTP_HOST" => "gateway.tailnet.ts.net",
@@ -126,7 +145,9 @@ class RequestOriginProtectionTest < Minitest::Test
     assert_equal 1, @coordinator.start_calls
   end
 
-  def test_allows_forwarded_host_and_port_origin
+  def test_allows_forwarded_host_and_port_origin_when_proxy_headers_are_trusted
+    Gripi.set :trust_proxy_headers, true
+
     response = @request.post(
       "/gateway-update",
       "HTTP_HOST" => "127.0.0.1:4567",
@@ -140,7 +161,9 @@ class RequestOriginProtectionTest < Minitest::Test
     assert_equal 1, @coordinator.start_calls
   end
 
-  def test_rejects_cross_origin_even_when_forwarded_headers_are_present
+  def test_rejects_cross_origin_even_when_trusted_forwarded_headers_are_present
+    Gripi.set :trust_proxy_headers, true
+
     response = @request.post(
       "/gateway-update",
       "HTTP_HOST" => "gateway.tailnet.ts.net",

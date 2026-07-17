@@ -37,21 +37,35 @@ module Web
       end
 
       def allowed_request_origins
-        origins = [request.base_url]
-        forwarded_origin = forwarded_request_origin
-        origins << forwarded_origin if forwarded_origin
+        origins = [direct_request_origin]
+        origins << forwarded_request_origin if settings.trust_proxy_headers
         origins.filter_map { |origin| normalized_request_origin(origin) }.uniq
+      end
+
+      def direct_request_origin
+        "#{request.env.fetch("rack.url_scheme", "http")}://#{direct_request_authority}"
+      end
+
+      def direct_request_authority
+        authority = request.env["HTTP_HOST"].to_s
+        return authority unless authority.empty?
+
+        host = request.env["SERVER_NAME"].to_s
+        host = "[#{host}]" if host.include?(":") && !host.start_with?("[")
+        port = request.env["SERVER_PORT"].to_s
+        default_port = request.env.fetch("rack.url_scheme", "http") == "https" ? "443" : "80"
+        port.empty? || port == default_port ? host : "#{host}:#{port}"
       end
 
       def forwarded_request_origin
         proto = first_forwarded_value(request.env["HTTP_X_FORWARDED_PROTO"])
         return unless proto
 
-        host = first_forwarded_value(request.env["HTTP_X_FORWARDED_HOST"]) || request.host_with_port
+        host = first_forwarded_value(request.env["HTTP_X_FORWARDED_HOST"]) || direct_request_authority
         return if host.to_s.empty?
 
         port = first_forwarded_value(request.env["HTTP_X_FORWARDED_PORT"])
-        host = "#{host}:#{port}" if port && !host.include?(":")
+        host = "#{host}:#{port}" if port&.match?(/\A\d+\z/) && !host.match?(/(?:\]|[^:]):\d+\z/)
         "#{proto}://#{host}"
       end
 

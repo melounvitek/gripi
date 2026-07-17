@@ -104,6 +104,7 @@ let extensionUiModal = null;
 let extensionUiForm = null;
 let extensionUiTitle = null;
 let extensionUiMessage = null;
+let extensionUiError = null;
 let extensionUiOptions = null;
 let extensionUiInputField = null;
 let extensionUiInput = null;
@@ -113,6 +114,9 @@ let extensionUiSubmit = null;
 let extensionWidgetsAboveContainer = null;
 let extensionWidgetsBelowContainer = null;
 let activeExtensionUiRequest = null;
+let extensionUiRequestQueue = [];
+let extensionUiTimeoutTimer = null;
+let extensionUiDeliveryPending = false;
 let extensionUiControlsBound = false;
 let extensionStatuses = new Map();
 let extensionWidgets = new Map();
@@ -161,6 +165,7 @@ function bindSessionDom() {
   extensionUiForm = extensionUiModal?.querySelector("[data-extension-ui-form]") || null;
   extensionUiTitle = extensionUiModal?.querySelector("[data-extension-ui-title]") || null;
   extensionUiMessage = extensionUiModal?.querySelector("[data-extension-ui-message]") || null;
+  extensionUiError = extensionUiModal?.querySelector("[data-extension-ui-error]") || null;
   extensionUiOptions = extensionUiModal?.querySelector("[data-extension-ui-options]") || null;
   extensionUiInputField = extensionUiModal?.querySelector("[data-extension-ui-input-field]") || null;
   extensionUiInput = extensionUiModal?.querySelector("[data-extension-ui-input]") || null;
@@ -843,22 +848,56 @@ function clearAttachments() {
 
 function showStatus(_text, _forceScroll = false) {}
 
-function extensionUiResponseBody(extra = {}) {
-  const session = currentSessionPath();
-  if (!activeExtensionUiRequest?.id || !session) return null;
-  const body = new URLSearchParams({ session, id: activeExtensionUiRequest.id, ...extra });
+function extensionUiResponseBody(request, extra = {}) {
+  if (!request?.id || !request.session || request.generation !== sessionViewGeneration || request.session !== currentSessionPath()) return null;
+  const body = new URLSearchParams({ session: request.session, id: request.id, ...extra });
   addSessionViewFormParams(body);
   return body;
 }
 
+function extensionUiRequestExpired(request) {
+  return request?.expiresAt && request.expiresAt <= Date.now();
+}
+
+function setExtensionUiDeliveryPending(pending) {
+  extensionUiDeliveryPending = pending;
+  extensionUiModal?.querySelectorAll("button, input, textarea").forEach((control) => { control.disabled = pending; });
+}
+
+function showExtensionUiError(message) {
+  if (!extensionUiError) return;
+  extensionUiError.textContent = message;
+  extensionUiError.hidden = false;
+}
+
 async function sendExtensionUiResponse(extra = {}) {
-  const body = extensionUiResponseBody(extra);
-  if (!body) return;
+  const request = activeExtensionUiRequest;
+  if (!request || extensionUiDeliveryPending) return false;
+  if (extensionUiRequestExpired(request)) {
+    finishExtensionUiRequest(request);
+    return false;
+  }
+
+  const body = extensionUiResponseBody(request, extra);
+  if (!body) return false;
+  setExtensionUiDeliveryPending(true);
+  if (extensionUiError) extensionUiError.hidden = true;
   try {
     const response = await fetch("/extension_ui_response", { method: "POST", body, headers: { "Accept": "application/json" } });
-    if (!response.ok) showStatus("Could not answer extension request", true);
+    if ([404, 422].includes(response.status)) {
+      if (activeExtensionUiRequest === request) finishExtensionUiRequest(request);
+      return false;
+    }
+    if (!response.ok) throw new Error("Extension UI response was rejected");
+    if (activeExtensionUiRequest === request) finishExtensionUiRequest(request);
+    return true;
   } catch (_error) {
-    showStatus("Could not answer extension request", true);
+    if (activeExtensionUiRequest === request && !extensionUiRequestExpired(request)) {
+      setExtensionUiDeliveryPending(false);
+      showExtensionUiError("Could not answer extension request. Please try again.");
+      showStatus("Could not answer extension request", true);
+    }
+    return false;
   }
 }
 
@@ -868,6 +907,10 @@ function resetExtensionUiModal() {
   if (extensionUiMessage) {
     extensionUiMessage.textContent = "";
     extensionUiMessage.hidden = true;
+  }
+  if (extensionUiError) {
+    extensionUiError.textContent = "";
+    extensionUiError.hidden = true;
   }
   if (extensionUiOptions) {
     extensionUiOptions.replaceChildren();
@@ -880,25 +923,55 @@ function resetExtensionUiModal() {
   if (extensionUiSubmit) {
     extensionUiSubmit.hidden = false;
     extensionUiSubmit.textContent = "Submit";
+    delete extensionUiSubmit.dataset.confirmResponse;
   }
+  setExtensionUiDeliveryPending(false);
 }
 
-function closeExtensionUiModal() {
+function finishExtensionUiRequest(request) {
+  if (activeExtensionUiRequest !== request) return;
+  clearTimeout(extensionUiTimeoutTimer);
+  extensionUiTimeoutTimer = null;
   closeModal(extensionUiModal);
   activeExtensionUiRequest = null;
   resetExtensionUiModal();
+  showNextExtensionUiDialog();
 }
 
-function cancelExtensionUiRequest() {
+async function cancelExtensionUiRequest() {
   if (!activeExtensionUiRequest) return;
-  sendExtensionUiResponse({ cancelled: "true" });
-  closeExtensionUiModal();
+  await sendExtensionUiResponse({ cancelled: "true" });
+}
+
+function showNextExtensionUiDialog() {
+  if (activeExtensionUiRequest) return;
+  while (extensionUiRequestQueue.length > 0 && extensionUiRequestExpired(extensionUiRequestQueue[0])) extensionUiRequestQueue.shift();
+  const request = extensionUiRequestQueue.shift();
+  if (!request) return;
+  activeExtensionUiRequest = request;
+  openExtensionUiDialog(request);
+  if (request.expiresAt) {
+    extensionUiTimeoutTimer = setTimeout(() => finishExtensionUiRequest(request), Math.max(0, request.expiresAt - Date.now()));
+  }
+}
+
+function enqueueExtensionUiDialog(event) {
+  if (!extensionUiModal || !event.id || !["select", "confirm", "input", "editor"].includes(event.method)) return false;
+  if (activeExtensionUiRequest?.id === event.id || extensionUiRequestQueue.some((request) => request.id === event.id)) return true;
+  const timeout = Number(event.timeout);
+  const request = {
+    ...event,
+    session: currentSessionPath(),
+    generation: sessionViewGeneration,
+    expiresAt: Number.isFinite(timeout) && timeout > 0 ? Date.now() + timeout : null
+  };
+  if (!extensionUiRequestExpired(request)) extensionUiRequestQueue.push(request);
+  showNextExtensionUiDialog();
+  return true;
 }
 
 function openExtensionUiDialog(event) {
-  if (!extensionUiModal || !event.id) return false;
   resetExtensionUiModal();
-  activeExtensionUiRequest = event;
   const title = event.title || "Extension request";
   if (extensionUiTitle) extensionUiTitle.textContent = title;
   if (extensionUiMessage && event.message) {
@@ -914,10 +987,7 @@ function openExtensionUiDialog(event) {
         button.className = "extension-ui-option";
         button.textContent = String(option);
         if (index === 0) button.setAttribute("data-modal-default-focus", "");
-        button.addEventListener("click", () => {
-          sendExtensionUiResponse({ value: String(option) });
-          closeExtensionUiModal();
-        });
+        button.addEventListener("click", async () => { await sendExtensionUiResponse({ value: String(option) }); });
         extensionUiOptions.append(button);
       });
       extensionUiOptions.hidden = false;
@@ -937,26 +1007,21 @@ function openExtensionUiDialog(event) {
   } else if (event.method === "editor") {
     if (extensionUiEditorField) extensionUiEditorField.hidden = false;
     if (extensionUiEditor) extensionUiEditor.value = event.prefill || "";
-  } else {
-    activeExtensionUiRequest = null;
-    return false;
   }
 
   openModal(extensionUiModal);
-  return true;
 }
 
-function submitExtensionUiDialog(event) {
+async function submitExtensionUiDialog(event) {
   event.preventDefault();
   if (!activeExtensionUiRequest) return;
   if (activeExtensionUiRequest.method === "confirm") {
-    sendExtensionUiResponse({ confirmed: "true" });
+    await sendExtensionUiResponse({ confirmed: "true" });
   } else if (activeExtensionUiRequest.method === "input") {
-    sendExtensionUiResponse({ value: extensionUiInput?.value || "" });
+    await sendExtensionUiResponse({ value: extensionUiInput?.value || "" });
   } else if (activeExtensionUiRequest.method === "editor") {
-    sendExtensionUiResponse({ value: extensionUiEditor?.value || "" });
+    await sendExtensionUiResponse({ value: extensionUiEditor?.value || "" });
   }
-  closeExtensionUiModal();
 }
 
 function handleExtensionEditorText(event) {
@@ -1013,6 +1078,22 @@ function updateExtensionWidget(event) {
   if (!Array.isArray(event.widgetLines)) extensionWidgets.delete(event.widgetKey);
   else extensionWidgets.set(event.widgetKey, { lines: event.widgetLines.map((line) => String(line)), placement: event.widgetPlacement || "aboveEditor" });
   renderExtensionWidgets();
+}
+
+function hydrateExtensionUiState() {
+  extensionStatuses.clear();
+  extensionWidgets.clear();
+  extensionDocumentTitle = null;
+  let state = {};
+  try {
+    state = JSON.parse(liveOutput?.dataset.extensionUiState || "{}");
+  } catch (_error) {
+  }
+  (Array.isArray(state.statuses) ? state.statuses : []).forEach(updateExtensionStatus);
+  (Array.isArray(state.widgets) ? state.widgets : []).forEach(updateExtensionWidget);
+  extensionDocumentTitle = state.title?.title == null ? null : state.title.title;
+  renderDocumentTitle();
+  (Array.isArray(state.pending_dialogs) ? state.pending_dialogs : []).forEach(enqueueExtensionUiDialog);
 }
 
 function renderExtensionWidgets() {
@@ -1099,7 +1180,7 @@ function renderEvent(event) {
 
   if (event.type === "extension_ui_request") {
     if (["select", "confirm", "input", "editor"].includes(event.method)) {
-      if (!openExtensionUiDialog(event)) sendExtensionUiResponse({ cancelled: "true" });
+      enqueueExtensionUiDialog(event);
       return;
     }
     if (event.method === "set_editor_text") {
@@ -1873,6 +1954,12 @@ async function copyText(text) {
 
 function resetSessionViewState() {
   currentSessionFindController.close({ restoreFocus: false });
+  clearTimeout(extensionUiTimeoutTimer);
+  extensionUiTimeoutTimer = null;
+  extensionUiRequestQueue = [];
+  activeExtensionUiRequest = null;
+  closeModal(extensionUiModal);
+  resetExtensionUiModal();
   conversationController.reset();
   sessionViewGeneration += 1;
   clearTimeout(eventPollTimer);
@@ -2631,6 +2718,7 @@ function initializeSessionView({ focus = true, scrollSnapshot = null } = {}) {
     if (initialComposerState === "running") setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });
     if (initialComposerCompacting) liveMessageRenderer.appendPendingCompactionMessage(new Date(initialComposerStateSince || Date.now()));
     liveMessageRenderer.restoreActiveToolExecutions();
+    hydrateExtensionUiState();
     scheduleNextEventPoll(0);
     if (!scrollSnapshot || scrollSnapshot.nearBottom) conversationController.positionInitialAtBottom();
     requestAnimationFrame(() => {

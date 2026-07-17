@@ -22,6 +22,8 @@ class GatewayUpdateCoordinator
     @sleeper = sleeper
     @thread_factory = thread_factory
     @mutex = Mutex.new
+    @operation_mutex = Mutex.new
+    @status_checking = false
     @running = false
     @finished = false
     @restart_pending = false
@@ -36,11 +38,24 @@ class GatewayUpdateCoordinator
   def status
     @mutex.synchronize do
       return @snapshot if @running || @finished
+      return @snapshot || Snapshot.new(state: :unknown) if @status_checking
 
-      @snapshot = snapshot_from_status(@updater.status)
-    rescue StandardError => error
-      @snapshot = failure_snapshot(error, :status)
+      @status_checking = true
     end
+
+    begin
+      snapshot = @operation_mutex.synchronize { snapshot_from_status(@updater.status) }
+    rescue StandardError => error
+      snapshot = failure_snapshot(error, :status)
+    ensure
+      @mutex.synchronize do
+        @status_checking = false
+        @snapshot = snapshot unless @running || @finished
+        snapshot = @snapshot
+      end
+    end
+
+    snapshot
   end
 
   def start
@@ -75,7 +90,7 @@ class GatewayUpdateCoordinator
   def perform_update
     wait_for_idle
     @mutex.synchronize { @snapshot = progress_snapshot }
-    result = @updater.update
+    result = @operation_mutex.synchronize { @updater.update }
     unless result&.state == :updated
       finish_with(snapshot_from_result(result))
       return

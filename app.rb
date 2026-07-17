@@ -54,11 +54,42 @@ class Gripi < Sinatra::Base
     end
   end
 
-  def self.permitted_hosts_from_env
-    ENV.fetch("GRIPI_PERMITTED_HOSTS", "")
-      .split(",")
-      .map(&:strip)
-      .reject(&:empty?)
+  def self.normalized_permitted_host(value)
+    value = value.to_s.strip
+    return if value.empty?
+
+    if (match = value.match(/\A\[([^\]]+)\](?::\d+)?\z/))
+      address = IPAddr.new(match[1])
+      return "[#{address}]" if address.ipv6?
+    end
+
+    begin
+      address = IPAddr.new(value)
+      return address.ipv6? ? "[#{address}]" : address.to_s
+    rescue IPAddr::InvalidAddressError
+      uri = URI.parse("http://#{value}")
+      return unless uri.host && uri.userinfo.nil? && uri.path.empty? && uri.query.nil? && uri.fragment.nil?
+
+      uri.host.downcase
+    end
+  rescue IPAddr::InvalidAddressError, URI::InvalidURIError
+    nil
+  end
+
+  def self.production_permitted_hosts
+    bind_host = normalized_permitted_host(ENV.fetch("GRIPI_BIND_HOST", "127.0.0.1"))
+    hosts = [bind_host].compact.reject { |host| ["0.0.0.0", "[::]"].include?(host) }
+    hosts.concat(["localhost", ".localhost"]) if bind_host == "localhost" || loopback_host?(bind_host)
+    hosts.concat(
+      ENV.fetch("GRIPI_PERMITTED_HOSTS", "").split(",").filter_map { |host| normalized_permitted_host(host) }
+    )
+    hosts.compact.uniq
+  end
+
+  def self.loopback_host?(host)
+    IPAddr.new(host.to_s.delete_prefix("[").delete_suffix("]")).loopback?
+  rescue IPAddr::InvalidAddressError
+    false
   end
 
   def self.development_permitted_hosts
@@ -72,19 +103,27 @@ class Gripi < Sinatra::Base
   end
 
   load_gateway_env_file
-  set :session_cwds_path, ENV.fetch("GRIPI_SESSION_CWDS_PATH", ConfiguredSessionCwds.default_path)
-  set :host_authorization, lambda {
-    configured_hosts = permitted_hosts_from_env
-    if development?
-      { permitted_hosts: development_permitted_hosts + configured_hosts }
-    elsif configured_hosts.empty?
-      {}
-    else
-      { permitted_hosts: configured_hosts }
-    end
-  }
-
   browser_auth_disabled = ENV.fetch("GRIPI_BROWSER_AUTH_DISABLED", "").match?(/\A(?:1|true|yes|on)\z/i)
+  legacy_proxy_compatibility = production? && !browser_auth_disabled &&
+    !ENV.key?("GRIPI_PERMITTED_HOSTS") && !ENV.key?("GRIPI_TRUST_PROXY_HEADERS")
+
+  set :session_cwds_path, ENV.fetch("GRIPI_SESSION_CWDS_PATH", ConfiguredSessionCwds.default_path)
+  if legacy_proxy_compatibility
+    set :host_authorization, {}
+  else
+    set :host_authorization, lambda {
+      permitted_hosts = production_permitted_hosts
+      permitted_hosts = development_permitted_hosts + permitted_hosts if development? || test?
+      { permitted_hosts: permitted_hosts }
+    }
+  end
+  trust_proxy_headers = if ENV.key?("GRIPI_TRUST_PROXY_HEADERS")
+    ENV.fetch("GRIPI_TRUST_PROXY_HEADERS").match?(/\A(?:1|true|yes|on)\z/i)
+  else
+    legacy_proxy_compatibility
+  end
+  set :trust_proxy_headers, trust_proxy_headers
+
   multi_user_mode = ENV.fetch("GRIPI_MULTI_USER_MODE", "").match?(/\A(?:1|true|yes|on)\z/i)
   gateway_admin_password = ENV["GRIPI_ADMIN_PASSWORD"].to_s
   if gateway_admin_password.empty? && !browser_auth_disabled

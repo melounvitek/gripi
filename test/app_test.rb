@@ -1,3 +1,4 @@
+ENV["APP_ENV"] = "test"
 ENV["GRIPI_ADMIN_PASSWORD"] ||= "test-password"
 
 require "minitest/autorun"
@@ -157,13 +158,95 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_permitted_hosts_can_be_configured_from_env
-    with_env("GRIPI_PERMITTED_HOSTS" => "remote-workspace.tail8fd8b2.ts.net, example.test") do
+  def test_permitted_hosts_include_the_launcher_binding_and_configured_public_hosts
+    with_env(
+      "GRIPI_BIND_HOST" => "localhost:4567",
+      "GRIPI_PERMITTED_HOSTS" => "remote-workspace.tail8fd8b2.ts.net:443, 100.64.0.1:4567, [::1]:4567"
+    ) do
       hosts = Gripi.settings.host_authorization.fetch(:permitted_hosts)
 
+      assert_includes hosts, "[::1]"
+      assert_includes hosts, "localhost"
       assert_includes hosts, "remote-workspace.tail8fd8b2.ts.net"
-      assert_includes hosts, "example.test"
+      assert_includes hosts, "100.64.0.1"
     end
+  end
+
+  def test_production_keeps_legacy_proxy_compatibility_with_browser_approval_and_no_explicit_security_config
+    settings = production_security_settings
+
+    assert_equal({}, settings.fetch("host_authorization"))
+    assert_equal true, settings.fetch("trust_proxy_headers")
+  end
+
+  def test_production_uses_strict_defaults_when_browser_approval_is_disabled
+    settings = production_security_settings("GRIPI_BROWSER_AUTH_DISABLED" => "1")
+
+    assert_includes settings.dig("host_authorization", "permitted_hosts"), "127.0.0.1"
+    assert_equal false, settings.fetch("trust_proxy_headers")
+  end
+
+  def test_explicit_permitted_hosts_enable_host_authorization_with_browser_approval
+    settings = production_security_settings("GRIPI_PERMITTED_HOSTS" => "gateway.example.ts.net")
+    empty_settings = production_security_settings("GRIPI_PERMITTED_HOSTS" => "")
+
+    assert_includes settings.dig("host_authorization", "permitted_hosts"), "gateway.example.ts.net"
+    assert_equal false, settings.fetch("trust_proxy_headers")
+    refute_equal({}, empty_settings.fetch("host_authorization"))
+    assert_equal false, empty_settings.fetch("trust_proxy_headers")
+  end
+
+  def test_explicit_proxy_header_setting_overrides_the_compatibility_default
+    disabled = production_security_settings("GRIPI_TRUST_PROXY_HEADERS" => "0")
+    enabled = production_security_settings(
+      "GRIPI_BROWSER_AUTH_DISABLED" => "1",
+      "GRIPI_TRUST_PROXY_HEADERS" => "1"
+    )
+
+    refute_equal({}, disabled.fetch("host_authorization"))
+    assert_equal false, disabled.fetch("trust_proxy_headers")
+    refute_equal({}, enabled.fetch("host_authorization"))
+    assert_equal true, enabled.fetch("trust_proxy_headers")
+  end
+
+  def test_wildcard_bind_requires_explicit_actual_client_hosts
+    settings = production_security_settings(
+      "GRIPI_BROWSER_AUTH_DISABLED" => "1",
+      "GRIPI_BIND_HOST" => "0.0.0.0",
+      "GRIPI_PERMITTED_HOSTS" => "100.64.0.1"
+    )
+    hosts = settings.dig("host_authorization", "permitted_hosts")
+
+    refute_includes hosts, "0.0.0.0"
+    assert_includes hosts, "100.64.0.1"
+  end
+
+  def test_production_rejects_dns_rebinding_even_when_host_matches_origin
+    env = ENV.to_h.merge(
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
+      "RACK_ENV" => "production",
+      "APP_ENV" => "production",
+      "GRIPI_BIND_HOST" => "127.0.0.1",
+      "GRIPI_BROWSER_AUTH_DISABLED" => "1",
+      "GRIPI_PERMITTED_HOSTS" => nil,
+      "GRIPI_TRUST_PROXY_HEADERS" => nil
+    )
+
+    stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", <<~RUBY)
+      require './app'
+      require 'rack/mock'
+      response = Rack::MockRequest.new(Gripi).post(
+        '/gateway-update',
+        'HTTP_HOST' => 'attacker.example',
+        'HTTP_ORIGIN' => 'http://attacker.example'
+      )
+      puts response.status
+      puts response.body
+    RUBY
+
+    assert status.success?, stderr
+    assert_equal "403\nHost not permitted", stdout.strip
   end
 
   def test_configured_host_passes_host_authorization
@@ -1338,6 +1421,27 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_equal({ "ok" => true, "session" => path }, JSON.parse(response.body))
       assert_equal [[:extension_ui_response, "dialog-1", "Allow", nil, false]], calls
+    end
+  end
+
+  def test_rejects_an_extension_ui_response_that_is_no_longer_pending
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      client = FakeRpcClient.new([])
+      def client.extension_ui_response(*) = { "success" => false, "error" => "Extension UI request is no longer pending" }
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/extension_ui_response",
+        params: { "session" => path, "id" => "dialog-1", "confirmed" => "true" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 422, response.status
+      assert_equal({ "success" => false, "error" => "Extension UI request is no longer pending" }, JSON.parse(response.body))
     end
   end
 
@@ -5979,6 +6083,40 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_live_output_hydrates_extension_ui_snapshot_state
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      client = FakeRpcClient.new([])
+      def client.live_snapshot
+        {
+          event_sequence: 5,
+          active_tool_events: [],
+          extension_ui: {
+            pending_dialogs: [{ "type" => "extension_ui_request", "id" => "dialog-1", "method" => "confirm", "timeout" => 2_000 }],
+            statuses: [{ "type" => "extension_ui_request", "method" => "setStatus", "statusKey" => "review", "statusText" => "Waiting" }],
+            widgets: [{ "type" => "extension_ui_request", "method" => "setWidget", "widgetKey" => "summary", "widgetLines" => ["Ready"] }],
+            title: { "type" => "extension_ui_request", "method" => "setTitle", "title" => "Review" }
+          }
+        }
+      end
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      live_output = Nokogiri::HTML(response.body).at_css("#live-output")
+      state = JSON.parse(live_output["data-extension-ui-state"])
+      assert_equal "dialog-1", state.fetch("pending_dialogs").first.fetch("id")
+      assert_equal "review", state.fetch("statuses").first.fetch("statusKey")
+      assert_equal "summary", state.fetch("widgets").first.fetch("widgetKey")
+      assert_equal "Review", state.fetch("title").fetch("title")
+      assert_includes APP_JAVASCRIPT, "hydrateExtensionUiState();"
+    end
+  end
+
   def test_live_output_restores_running_tool_progress_with_the_current_event_cursor
     Dir.mktmpdir do |dir|
       path = write_session_with_raw_messages(dir, [
@@ -7830,6 +7968,29 @@ class AppTest < Minitest::Test
 
   def workspace_id_from_cookie(cookie)
     cookie.split("=", 2).last
+  end
+
+  def production_security_settings(overrides = {})
+    env = ENV.to_h.merge(
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
+      "RACK_ENV" => "production",
+      "APP_ENV" => "production",
+      "GRIPI_BIND_HOST" => "127.0.0.1",
+      "GRIPI_BROWSER_AUTH_DISABLED" => nil,
+      "GRIPI_PERMITTED_HOSTS" => nil,
+      "GRIPI_TRUST_PROXY_HEADERS" => nil
+    ).merge(overrides)
+    stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", <<~RUBY)
+      require './app'
+      require 'json'
+      puts JSON.generate(
+        host_authorization: Gripi.settings.host_authorization,
+        trust_proxy_headers: Gripi.settings.trust_proxy_headers
+      )
+    RUBY
+    assert status.success?, stderr
+    JSON.parse(stdout)
   end
 
   def with_env(values)

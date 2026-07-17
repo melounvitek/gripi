@@ -332,6 +332,128 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal true, results.fetch("prevented")
   end
 
+  def test_extension_ui_dialogs_retry_transient_failures_and_advance_after_definitive_rejection
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    dialog_source = app_source.match(/function extensionUiResponseBody\(.*?(?=\nfunction handleExtensionEditorText)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let sessionViewGeneration = 4;
+      let sessionPath = "session-a";
+      const currentSessionPath = () => sessionPath;
+      const addSessionViewFormParams = () => {};
+      const statuses = [];
+      const showStatus = (message) => statuses.push(message);
+      const modalEvents = [];
+      const openModal = () => modalEvents.push("open");
+      const closeModal = () => modalEvents.push("close");
+      const controls = [{ disabled: false }, { disabled: false }];
+      const extensionUiModal = { querySelectorAll: () => controls };
+      const extensionUiTitle = { textContent: "" };
+      const extensionUiMessage = { textContent: "", hidden: true };
+      const extensionUiError = { textContent: "", hidden: true };
+      const extensionUiOptions = { children: [], replaceChildren() { this.children = []; }, append(child) { this.children.push(child); }, hidden: true };
+      const extensionUiInputField = { hidden: true };
+      const extensionUiInput = { value: "", placeholder: "" };
+      const extensionUiEditorField = { hidden: true };
+      const extensionUiEditor = { value: "" };
+      const extensionUiSubmit = { hidden: false, textContent: "", dataset: {} };
+      let activeExtensionUiRequest = null;
+      let extensionUiRequestQueue = [];
+      let extensionUiTimeoutTimer = null;
+      let extensionUiDeliveryPending = false;
+      const timers = [];
+      globalThis.setTimeout = (callback) => { timers.push(callback); return timers.length; };
+      globalThis.clearTimeout = () => {};
+      const document = { createElement: () => ({ dataset: {}, setAttribute() {}, addEventListener() {} }) };
+      const responses = [];
+      globalThis.fetch = () => new Promise((resolve) => responses.push(resolve));
+      eval(#{(dialog_source + "\nglobalThis.enqueue = enqueueExtensionUiDialog; globalThis.send = sendExtensionUiResponse; globalThis.active = () => activeExtensionUiRequest; globalThis.error = () => extensionUiError;").to_json});
+
+      globalThis.enqueue({ type: "extension_ui_request", id: "one", method: "confirm" });
+      globalThis.enqueue({ type: "extension_ui_request", id: "two", method: "input" });
+      const firstDelivery = globalThis.send({ confirmed: "true" });
+      const duplicateDelivery = await globalThis.send({ confirmed: "true" });
+      responses.shift()({ ok: false, status: 500 });
+      const firstResult = await firstDelivery;
+      const afterFailure = { id: globalThis.active()?.id, error: globalThis.error().textContent, disabled: controls[0].disabled };
+
+      const retry = globalThis.send({ confirmed: "true" });
+      responses.shift()({ ok: false, status: 422 });
+      const retryResult = await retry;
+      const afterRejection = globalThis.active()?.id;
+      const nextDelivery = globalThis.send({ value: "answer" });
+      responses.shift()({ ok: true, status: 200 });
+      const nextResult = await nextDelivery;
+      globalThis.enqueue({ type: "extension_ui_request", id: "three", method: "confirm" });
+      sessionPath = "session-b";
+      sessionViewGeneration += 1;
+      const staleResult = await globalThis.send({ value: "wrong session" });
+
+      console.log(JSON.stringify({
+        duplicateDelivery, firstResult, retryResult, nextResult, staleResult, fetchCount: responses.length,
+        afterFailure, afterRejection, activeId: globalThis.active()?.id || null, modalEvents, statuses
+      }));
+    JS
+
+    assert_equal false, results.fetch("duplicateDelivery")
+    assert_equal false, results.fetch("firstResult")
+    assert_equal false, results.fetch("retryResult")
+    assert_equal "two", results.fetch("afterRejection")
+    assert_equal true, results.fetch("nextResult")
+    assert_equal false, results.fetch("staleResult")
+    assert_equal({ "id" => "one", "error" => "Could not answer extension request. Please try again.", "disabled" => false }, results.fetch("afterFailure"))
+    assert_equal "three", results.fetch("activeId")
+    assert_equal ["open", "close", "open", "close", "open"], results.fetch("modalEvents")
+    assert_equal ["Could not answer extension request"], results.fetch("statuses")
+  end
+
+  def test_extension_ui_dialog_timeout_advances_queue_without_sending_a_response
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    dialog_source = app_source.match(/function extensionUiResponseBody\(.*?(?=\nfunction handleExtensionEditorText)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let now = 1_000;
+      Date.now = () => now;
+      let sessionViewGeneration = 1;
+      const currentSessionPath = () => "session-a";
+      const addSessionViewFormParams = () => {};
+      const showStatus = () => {};
+      const openModal = () => {};
+      const closeModal = () => {};
+      const extensionUiModal = { querySelectorAll: () => [] };
+      const extensionUiTitle = { textContent: "" };
+      const extensionUiMessage = { textContent: "", hidden: true };
+      const extensionUiError = { textContent: "", hidden: true };
+      const extensionUiOptions = { replaceChildren() {}, append() {}, hidden: true };
+      const extensionUiInputField = { hidden: true };
+      const extensionUiInput = { value: "", placeholder: "" };
+      const extensionUiEditorField = { hidden: true };
+      const extensionUiEditor = { value: "" };
+      const extensionUiSubmit = { hidden: false, textContent: "", dataset: {} };
+      let activeExtensionUiRequest = null;
+      let extensionUiRequestQueue = [];
+      let extensionUiTimeoutTimer = null;
+      let extensionUiDeliveryPending = false;
+      let timeoutCallback;
+      globalThis.setTimeout = (callback) => { timeoutCallback = callback; return 1; };
+      globalThis.clearTimeout = () => {};
+      const document = { createElement: () => ({ dataset: {}, setAttribute() {}, addEventListener() {} }) };
+      let fetchCount = 0;
+      globalThis.fetch = async () => { fetchCount += 1; return { ok: true }; };
+      eval(#{(dialog_source + "\nglobalThis.enqueue = enqueueExtensionUiDialog; globalThis.active = () => activeExtensionUiRequest;").to_json});
+
+      globalThis.enqueue({ id: "timed", method: "confirm", timeout: 100 });
+      globalThis.enqueue({ id: "next", method: "confirm" });
+      now = 1_100;
+      timeoutCallback();
+
+      console.log(JSON.stringify({ activeId: globalThis.active()?.id, fetchCount }));
+    JS
+
+    assert_equal "next", results.fetch("activeId")
+    assert_equal 0, results.fetch("fetchCount")
+  end
+
   def test_detaching_switches_the_main_view_while_leaving_popup_navigation_to_the_native_link
     app_source = File.read(File.join(ASSETS, "app.js"))
     detach_source = app_source.match(/function detachSession\(.*?\n\}/m).to_s

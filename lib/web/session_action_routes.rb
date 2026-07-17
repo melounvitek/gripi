@@ -516,6 +516,7 @@ module Web
           client.extension_ui_response(id, value: value, confirmed: confirmed, cancelled: cancelled)
         end
         halt 404, "No active Pi session" unless delivered
+        halt_failed_rpc_setting(delivered)
         content_type :json
         JSON.generate(ok: true, session: session_path)
       end

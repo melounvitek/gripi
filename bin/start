@@ -16,7 +16,7 @@ fi
 rm -f -- "$restart_path"
 
 set +e
-RACK_ENV=production bundle exec rackup -o "$host" -p "$port"
+RACK_ENV=production GRIPI_BIND_HOST="$host" bundle exec rackup -o "$host" -p "$port"
 status=$?
 set -e
 

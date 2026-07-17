@@ -65,6 +65,10 @@ class PiRpcClient
     @events = []
     @event_sequence = 0
     @active_tool_events = {}
+    @pending_extension_ui_dialogs = {}
+    @extension_statuses = {}
+    @extension_widgets = {}
+    @extension_title = nil
     @event_buffer_limit = event_buffer_limit
     @clock = clock
     @monotonic_clock = monotonic_clock
@@ -81,6 +85,7 @@ class PiRpcClient
     @compacting_since = nil
     @compaction_follow_ups = []
     @flushing_compaction_follow_ups = false
+    @deferred_command_ids = {}
     @reader = nil
   end
 
@@ -233,6 +238,15 @@ class PiRpcClient
       snapshot[:agent_running] = true if @agent_running
       snapshot[:compacting] = true if @compacting
       snapshot[:compacting_since] = @compacting_since if @compacting_since
+      prune_expired_extension_ui_dialogs
+      if @pending_extension_ui_dialogs.any? || @extension_statuses.any? || @extension_widgets.any? || @extension_title
+        snapshot[:extension_ui] = {
+          pending_dialogs: @pending_extension_ui_dialogs.values.reject { |dialog| dialog[:answering] }.map { |dialog| snapshot_extension_ui_dialog(dialog) },
+          statuses: @extension_statuses.values,
+          widgets: @extension_widgets.values,
+          title: @extension_title
+        }
+      end
       snapshot
     end
   end
@@ -261,9 +275,14 @@ class PiRpcClient
     ensure_reader
     after_seq = after_seq.to_i
     @mutex.synchronize do
+      prune_expired_extension_ui_dialogs
       oldest_seq = @events.first&.first
       missed = oldest_seq && after_seq < oldest_seq - 1
-      events = missed ? [] : @events.select { |seq, _event| seq > after_seq }.map(&:last)
+      events = if missed
+        []
+      else
+        @events.select { |seq, _event| seq > after_seq }.filter_map { |_seq, event| extension_ui_event_for_delivery(event) }
+      end
       { events: events, last_seq: @event_sequence, missed: !!missed }
     end
   end
@@ -418,7 +437,12 @@ class PiRpcClient
       @compacting_since = nil
       @compaction_follow_ups.clear
       @flushing_compaction_follow_ups = false
+      @deferred_command_ids.clear
       @active_tool_events.clear
+      @pending_extension_ui_dialogs.clear
+      @extension_statuses.clear
+      @extension_widgets.clear
+      @extension_title = nil
       @busy = false
       @busy_since = nil
       @condition.broadcast
@@ -428,7 +452,8 @@ class PiRpcClient
   public
 
   def extension_ui_response(id, value: nil, confirmed: nil, cancelled: false)
-    command = { type: "extension_ui_response", id: id.to_s }
+    id = id.to_s
+    command = { type: "extension_ui_response", id: id }
     if cancelled
       command[:cancelled] = true
     elsif !confirmed.nil?
@@ -436,7 +461,30 @@ class PiRpcClient
     else
       command[:value] = value.to_s
     end
-    write_command(command)
+
+    @write_mutex.synchronize do
+      dialog = @mutex.synchronize do
+        prune_expired_extension_ui_dialogs
+        @pending_extension_ui_dialogs[id]&.tap { |pending| pending[:answering] = true }
+      end
+      return { "type" => "response", "command" => "extension_ui_response", "success" => false, "error" => "Extension UI request is no longer pending" } unless dialog
+
+      begin
+        write_command_unlocked(command)
+        @mutex.synchronize { @pending_extension_ui_dialogs.delete(id) }
+      rescue Errno::EPIPE, IOError
+        @mutex.synchronize do
+          if @pending_extension_ui_dialogs[id].equal?(dialog)
+            dialog[:answering] = false
+            @event_sequence += 1
+            @events << [@event_sequence, dialog[:event]]
+            @events.shift while @events.length > @event_buffer_limit
+            @condition.broadcast
+          end
+        end
+        raise
+      end
+    end
     { "type" => "response", "command" => "extension_ui_response", "success" => true }
   end
 
@@ -473,9 +521,9 @@ class PiRpcClient
     follow_ups
   end
 
-  def flush_compaction_follow_ups(follow_ups)
+  def flush_compaction_follow_ups(follow_ups, first_type = "prompt")
     @write_mutex.synchronize do
-      write_first_compaction_follow_up_batch(follow_ups)
+      write_first_compaction_follow_up_batch(follow_ups, first_type)
       loop do
         follow_ups = @mutex.synchronize do
           if @compaction_follow_ups.empty?
@@ -499,32 +547,49 @@ class PiRpcClient
     end
   end
 
-  def write_first_compaction_follow_up_batch(follow_ups)
+  def write_first_compaction_follow_up_batch(follow_ups, first_type)
     first, *rest = follow_ups
-    write_queued_prompt_unlocked("prompt", first) if first
+    write_queued_prompt_unlocked(first_type, first) if first
     rest.each { |payload| write_queued_prompt_unlocked("follow_up", payload) }
   end
 
   def write_queued_prompt_unlocked(type, payload)
-    write_command_unlocked(payload.merge(id: next_id(type), type: type))
+    id = next_id(type)
+    @mutex.synchronize { @deferred_command_ids[id] = true }
+    write_command_unlocked(payload.merge(id: id, type: type))
+  rescue Errno::EPIPE, IOError
+    @mutex.synchronize { @deferred_command_ids.delete(id) }
+    raise
   end
 
   def store_response(response, serialized_bytesize:)
     follow_ups_to_flush = nil
+    first_follow_up_type = "prompt"
     @mutex.synchronize do
+      store_as_event = false
       status_key = internal_bridge_status_key(response)
       if status_key
         @bridge_statuses[status_key] = response["statusText"] if @pending_bridge_status_keys.key?(status_key)
       elsif response["id"] && @pending_ids.delete(response["id"])
         @responses[response["id"]] = response
+      elsif response["id"] && @deferred_command_ids.delete(response["id"])
+        store_as_event = response["success"] == false
       elsif response["type"] == "response" && response["id"]
         # A timed-out RPC response is no longer useful and must not become an event.
       else
+        store_as_event = true
+      end
+
+      if store_as_event
         if ["agent_start", "agent_settled", "turn_start", "compaction_start"].include?(response["type"])
           response = response.merge("gatewayTimestamp" => (@clock.call.to_f * 1000).to_i)
         end
         update_busy_state(response)
-        follow_ups_to_flush = begin_compaction_follow_up_flush if ["compaction", "compaction_end"].include?(response["type"])
+        update_extension_ui_state(response)
+        if ["compaction", "compaction_end"].include?(response["type"])
+          follow_ups_to_flush = begin_compaction_follow_up_flush
+          first_follow_up_type = "follow_up" if response["type"] == "compaction_end" && response["willRetry"] == true
+        end
         update_active_tool_events(response, serialized_bytesize)
         @event_sequence += 1
         @events << [@event_sequence, response]
@@ -532,7 +597,62 @@ class PiRpcClient
       end
       @condition.broadcast
     end
-    flush_compaction_follow_ups(follow_ups_to_flush) if follow_ups_to_flush&.any?
+    flush_compaction_follow_ups(follow_ups_to_flush, first_follow_up_type) if follow_ups_to_flush&.any?
+  end
+
+  def update_extension_ui_state(response)
+    return unless response["type"] == "extension_ui_request"
+
+    prune_expired_extension_ui_dialogs
+    case response["method"]
+    when "select", "confirm", "input", "editor"
+      id = response["id"].to_s
+      return if id.empty?
+
+      timeout = response["timeout"]
+      expires_at = monotonic_time + timeout.to_f / 1000 if timeout.is_a?(Numeric) && timeout.positive?
+      @pending_extension_ui_dialogs[id] = { event: response, expires_at: expires_at }
+    when "setStatus"
+      key = response["statusKey"].to_s
+      return if key.empty?
+
+      if response["statusText"].nil? || response["statusText"] == ""
+        @extension_statuses.delete(key)
+      else
+        @extension_statuses[key] = response
+      end
+    when "setWidget"
+      key = response["widgetKey"].to_s
+      return if key.empty?
+
+      if response["widgetLines"].is_a?(Array)
+        @extension_widgets[key] = response
+      else
+        @extension_widgets.delete(key)
+      end
+    when "setTitle"
+      @extension_title = response["title"].nil? ? nil : response
+    end
+  end
+
+  def prune_expired_extension_ui_dialogs
+    now = monotonic_time
+    @pending_extension_ui_dialogs.delete_if { |_id, dialog| dialog[:expires_at] && dialog[:expires_at] <= now }
+  end
+
+  def extension_ui_event_for_delivery(event)
+    return event unless event["type"] == "extension_ui_request" && ["select", "confirm", "input", "editor"].include?(event["method"])
+
+    dialog = @pending_extension_ui_dialogs[event["id"].to_s]
+    snapshot_extension_ui_dialog(dialog) if dialog && !dialog[:answering]
+  end
+
+  def snapshot_extension_ui_dialog(dialog)
+    event = dialog[:event]
+    return event unless dialog[:expires_at]
+
+    remaining_timeout = [((dialog[:expires_at] - monotonic_time) * 1000).ceil, 0].max
+    event.merge("timeout" => remaining_timeout)
   end
 
   def internal_bridge_status_key(response)

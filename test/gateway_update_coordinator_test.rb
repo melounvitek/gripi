@@ -1,5 +1,6 @@
 require "minitest/autorun"
 require "thread"
+require "timeout"
 require_relative "../lib/gateway_updater"
 require_relative "../lib/gateway_update_coordinator"
 
@@ -50,6 +51,66 @@ class GatewayUpdateCoordinatorTest < Minitest::Test
     assert_equal "target", snapshot.target_sha
     assert_equal 2, snapshot.behind_count
     assert_equal 1, updater.status_calls
+  end
+
+  def test_serves_cached_snapshots_without_duplicate_checks_while_status_is_blocked
+    status_started = Queue.new
+    release_status = Queue.new
+    updater = FakeUpdater.new(status(:available), -> {})
+    updater.define_singleton_method(:status) do
+      @status_calls = status_calls.to_i + 1
+      status_started << true
+      release_status.pop
+      status_result
+    end
+    coordinator = GatewayUpdateCoordinator.new(updater:, restarter: -> {})
+
+    checking_thread = Thread.new { coordinator.status }
+    status_started.pop
+    cached_snapshot = Timeout.timeout(0.5) { coordinator.cached_status }
+    concurrent_snapshot = Timeout.timeout(0.5) { coordinator.status }
+
+    assert_equal :unknown, cached_snapshot.state
+    assert_equal :unknown, concurrent_snapshot.state
+    assert_equal 1, updater.status_calls
+
+    release_status << true
+    checking_thread.join
+    assert_equal :available, coordinator.cached_status.state
+  ensure
+    release_status << true if release_status&.empty?
+    checking_thread&.join(1)
+  end
+
+  def test_start_waits_for_a_blocked_status_operation_before_updating
+    status_started = Queue.new
+    release_status = Queue.new
+    update_started = Queue.new
+    updater = FakeUpdater.new(status(:available), lambda {
+      update_started << true
+      GatewayUpdater::UpdateResult.new(state: :current, status: status(:current))
+    })
+    updater.define_singleton_method(:status) do
+      @status_calls = status_calls.to_i + 1
+      status_started << true
+      release_status.pop
+      status_result
+    end
+    coordinator = GatewayUpdateCoordinator.new(updater:, restarter: -> {})
+
+    checking_thread = Thread.new { coordinator.status }
+    status_started.pop
+    coordinator.start
+
+    assert_raises(Timeout::Error) { Timeout.timeout(0.1) { update_started.pop } }
+    assert_equal 0, updater.update_calls.to_i
+
+    release_status << true
+    Timeout.timeout(1) { update_started.pop }
+    assert_equal 1, updater.update_calls
+  ensure
+    release_status << true if release_status&.empty?
+    checking_thread&.join(1)
   end
 
   def test_starts_only_one_background_update_and_serves_progress_without_another_status_check

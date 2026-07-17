@@ -1,3 +1,4 @@
+ENV["APP_ENV"] = "test"
 ENV["GRIPI_ADMIN_PASSWORD"] ||= "test-password"
 
 require "minitest/autorun"

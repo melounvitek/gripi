@@ -651,6 +651,56 @@ class PiRpcClientTest < Minitest::Test
     reader&.close
   end
 
+  def test_flushes_compaction_follow_ups_as_native_follow_ups_when_pi_will_retry
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    writer.puts JSON.generate({ type: "compaction_start" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+    client.follow_up("First")
+    client.follow_up("Second")
+
+    writer.puts JSON.generate({ type: "compaction_end", willRetry: true })
+    Timeout.timeout(1) { sleep 0.01 until input.string.include?("Second") }
+
+    queued_commands = input.string.lines.map { |line| JSON.parse(line) }.select { |command| ["First", "Second"].include?(command["message"]) }
+    assert_equal ["follow_up", "follow_up"], queued_commands.map { |command| command.fetch("type") }
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_surfaces_failed_deferred_compaction_command_response_as_event
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    writer.puts JSON.generate({ type: "compaction_start" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+    client.follow_up("Queued message")
+    writer.puts JSON.generate({ type: "compaction_end", willRetry: true })
+    Timeout.timeout(1) { sleep 0.01 until input.string.include?("Queued message") }
+
+    queued_command = input.string.lines.map { |line| JSON.parse(line) }.find { |command| command["message"] == "Queued message" }
+    failed_response = { id: queued_command.fetch("id"), type: "response", command: "follow_up", success: false, error: "Prompt rejected" }
+    writer.puts JSON.generate(failed_response)
+
+    events = Timeout.timeout(1) do
+      loop do
+        events = client.events_after(0).fetch(:events)
+        break events if events.any? { |event| event["error"] == "Prompt rejected" }
+        sleep 0.01
+      end
+    end
+    assert_includes events, JSON.parse(JSON.generate(failed_response))
+  ensure
+    writer&.close
+    reader&.close
+  end
+
   def test_keeps_follow_ups_queued_while_compaction_queue_is_flushing
     input = StringIO.new
     output = StringIO.new
@@ -757,6 +807,7 @@ class PiRpcClientTest < Minitest::Test
 
     assert_equal({ "type" => "response", "command" => "extension_ui_response", "success" => true }, client.extension_ui_response("dialog-0", value: "Allow"))
     assert_equal({ "type" => "extension_ui_response", "id" => "dialog-0", "value" => "Allow" }, JSON.parse(Timeout.timeout(1) { command_reader.gets }))
+    refute_includes client.live_snapshot.fetch(:extension_ui).fetch(:pending_dialogs).map { |dialog| dialog.fetch("id") }, "dialog-0"
 
     client.extension_ui_response("dialog-1", confirmed: false)
     assert_equal({ "type" => "extension_ui_response", "id" => "dialog-1", "confirmed" => false }, JSON.parse(Timeout.timeout(1) { command_reader.gets }))
@@ -765,9 +816,196 @@ class PiRpcClientTest < Minitest::Test
     assert_equal({ "type" => "extension_ui_response", "id" => "dialog-2", "cancelled" => true }, JSON.parse(Timeout.timeout(1) { command_reader.gets }))
 
     events = client.events_after(0).fetch(:events)
-    assert_equal %w[select confirm input editor] + fire_and_forget_methods, events.map { |event| event["method"] }
+    assert_equal ["editor"] + fire_and_forget_methods, events.map { |event| event["method"] }
   ensure
     command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_live_snapshot_tracks_extension_ui_state_and_removes_cleared_values
+    input = StringIO.new
+    reader, writer = IO.pipe
+    now = 10.0
+    client = PiRpcClient.new(stdin: input, stdout: reader, monotonic_clock: -> { now })
+
+    events = [
+      { type: "extension_ui_request", id: "dialog-1", method: "input", message: "Name?", timeout: 5_000 },
+      { type: "extension_ui_request", id: "dialog-2", method: "confirm", message: "Continue?" },
+      { type: "extension_ui_request", method: "setStatus", statusKey: "branch", statusText: "Ready" },
+      { type: "extension_ui_request", method: "setWidget", widgetKey: "summary", widgetLines: ["One"], widgetPlacement: "belowEditor" },
+      { type: "extension_ui_request", method: "setTitle", title: "Extension title" }
+    ]
+    events.each { |event| writer.puts JSON.generate(event) }
+    Timeout.timeout(1) { sleep 0.01 until client.events_after(0).fetch(:events).length == events.length }
+
+    now = 12.0
+    state = client.live_snapshot.fetch(:extension_ui)
+    assert_equal ["dialog-1", "dialog-2"], state.fetch(:pending_dialogs).map { |dialog| dialog.fetch("id") }
+    assert_equal 3_000, state.fetch(:pending_dialogs).first.fetch("timeout")
+    assert_equal [{ "type" => "extension_ui_request", "method" => "setStatus", "statusKey" => "branch", "statusText" => "Ready" }], state.fetch(:statuses)
+    assert_equal "summary", state.fetch(:widgets).first.fetch("widgetKey")
+    assert_equal({ "type" => "extension_ui_request", "method" => "setTitle", "title" => "Extension title" }, state.fetch(:title))
+
+    writer.puts JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "branch", statusText: nil })
+    writer.puts JSON.generate({ type: "extension_ui_request", method: "setWidget", widgetKey: "summary" })
+    writer.puts JSON.generate({ type: "extension_ui_request", method: "setTitle", title: nil })
+    Timeout.timeout(1) { sleep 0.01 until client.events_after(0).fetch(:events).length == events.length + 3 }
+
+    state = client.live_snapshot.fetch(:extension_ui)
+    assert_empty state.fetch(:statuses)
+    assert_empty state.fetch(:widgets)
+    assert_nil state.fetch(:title)
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_expired_extension_ui_dialogs_are_not_restored_or_answered
+    input = StringIO.new
+    reader, writer = IO.pipe
+    now = 20.0
+    client = PiRpcClient.new(stdin: input, stdout: reader, monotonic_clock: -> { now })
+
+    writer.puts JSON.generate({ type: "extension_ui_request", id: "dialog-1", method: "select", options: ["Yes"], timeout: 1_000 })
+    Timeout.timeout(1) { sleep 0.01 until client.events_after(0).fetch(:events).any? }
+    now = 21.0
+
+    assert_empty client.live_snapshot.fetch(:extension_ui, {}).fetch(:pending_dialogs, [])
+    response = client.extension_ui_response("dialog-1", value: "Yes")
+    assert_equal false, response.fetch("success")
+    assert_empty input.string
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_events_after_prunes_expired_extension_ui_dialogs
+    input = StringIO.new
+    reader, writer = IO.pipe
+    now = 20.0
+    client = PiRpcClient.new(stdin: input, stdout: reader, monotonic_clock: -> { now })
+
+    writer.puts JSON.generate({ type: "extension_ui_request", id: "dialog-1", method: "confirm", timeout: 1_000 })
+    Timeout.timeout(1) { sleep 0.01 until client.events_after(0).fetch(:events).any? }
+    now = 21.0
+    assert_empty client.events_after(0).fetch(:events)
+    now = 20.5
+
+    assert_equal false, client.extension_ui_response("dialog-1", confirmed: true).fetch("success")
+    assert_empty input.string
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_events_after_does_not_replay_an_answered_extension_ui_dialog
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader)
+
+    response_writer.puts JSON.generate({ type: "extension_ui_request", id: "dialog-1", method: "confirm" })
+    Timeout.timeout(1) { sleep 0.01 until client.events_after(0).fetch(:events).any? }
+    client.extension_ui_response("dialog-1", confirmed: true)
+
+    assert_empty client.events_after(0).fetch(:events)
+    assert_equal "dialog-1", JSON.parse(Timeout.timeout(1) { command_reader.gets }).fetch("id")
+  ensure
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_events_after_reports_the_remaining_dialog_timeout
+    input = StringIO.new
+    reader, writer = IO.pipe
+    now = 20.0
+    client = PiRpcClient.new(stdin: input, stdout: reader, monotonic_clock: -> { now })
+
+    writer.puts JSON.generate({ type: "extension_ui_request", id: "dialog-1", method: "confirm", timeout: 2_000 })
+    Timeout.timeout(1) { sleep 0.01 until client.events_after(0).fetch(:events).any? }
+    now = 20.5
+
+    event = client.events_after(0).fetch(:events).first
+    assert_equal 1_500, event.fetch("timeout")
+    refute event.key?("gatewayExpiresAt")
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_recording_extension_ui_state_prunes_expired_dialogs
+    input = StringIO.new
+    reader, writer = IO.pipe
+    now = 20.0
+    client = PiRpcClient.new(stdin: input, stdout: reader, monotonic_clock: -> { now })
+
+    writer.puts JSON.generate({ type: "extension_ui_request", id: "dialog-1", method: "confirm", timeout: 1_000 })
+    Timeout.timeout(1) { sleep 0.01 until client.events_after(0).fetch(:events).any? }
+    now = 21.0
+    writer.puts JSON.generate({ type: "extension_ui_request", method: "setStatus", statusKey: "review", statusText: "Ready" })
+    Timeout.timeout(1) { sleep 0.01 until client.event_sequence == 2 }
+    now = 20.5
+
+    assert_equal false, client.extension_ui_response("dialog-1", confirmed: true).fetch("success")
+    assert_empty input.string
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_extension_ui_dialog_is_not_replayed_while_its_response_is_being_written
+    write_started = Queue.new
+    release_write = Queue.new
+    input = Object.new
+    input.define_singleton_method(:write) do |_command|
+      write_started << true
+      release_write.pop
+    end
+    input.define_singleton_method(:flush) {}
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    writer.puts JSON.generate({ type: "extension_ui_request", id: "dialog-1", method: "confirm" })
+    Timeout.timeout(1) { sleep 0.01 until client.events_after(0).fetch(:events).any? }
+    response_thread = Thread.new { client.extension_ui_response("dialog-1", confirmed: true) }
+    write_started.pop
+
+    assert_empty client.events_after(0).fetch(:events)
+    assert_empty client.live_snapshot.fetch(:extension_ui).fetch(:pending_dialogs)
+
+    release_write << true
+    assert_equal true, response_thread.value.fetch("success")
+  ensure
+    release_write << true if release_write&.empty?
+    response_thread&.join(1)
+    writer&.close
+    reader&.close
+  end
+
+  def test_extension_ui_response_removes_pending_dialog_only_after_write_succeeds
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader)
+
+    response_writer.puts JSON.generate({ type: "extension_ui_request", id: "dialog-1", method: "confirm" })
+    initial_events = Timeout.timeout(1) do
+      loop do
+        events = client.events_after(0)
+        break events if events.fetch(:events).any?
+        sleep 0.01
+      end
+    end
+    command_reader.close
+
+    assert_raises(Errno::EPIPE) { client.extension_ui_response("dialog-1", confirmed: true) }
+    assert_equal ["dialog-1"], client.live_snapshot.fetch(:extension_ui).fetch(:pending_dialogs).map { |dialog| dialog.fetch("id") }
+    restored_events = client.events_after(initial_events.fetch(:last_seq)).fetch(:events)
+    assert_equal ["dialog-1"], restored_events.map { |event| event.fetch("id") }
+  ensure
+    command_reader&.close unless command_reader&.closed?
     command_writer&.close
     response_reader&.close
     response_writer&.close

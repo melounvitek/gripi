@@ -11,9 +11,27 @@ mise run start
 GRIPI_HOST=100.x.y.z GRIPI_PORT=4568 mise run start
 ```
 
-Keep the default localhost binding for same-machine use. Bind to a LAN or VPN address only when you intentionally want other devices on that network to connect. Avoid `GRIPI_HOST=0.0.0.0` unless network access to the machine is already restricted.
+Keep the default localhost binding for same-machine use. Bind to a LAN or VPN address only when you intentionally want other devices on that network to connect. Avoid `GRIPI_HOST=0.0.0.0` unless network access to the machine is already restricted. Wildcard binds (`0.0.0.0` or `::`) do not identify the addresses clients use, so add each actual client-facing hostname or IP address to `GRIPI_PERMITTED_HOSTS`.
 
 `GRIPI_HOST` and `GRIPI_PORT` must be set in the command or service environment; they are read by the launcher before Gripi loads `~/.config/gripi/env`.
+
+Gripi accepts the hostname or IP address selected by the launcher. To use additional public names, such as a Tailscale Serve name or a custom reverse-proxy name, add a comma-separated list to `~/.config/gripi/env`:
+
+```sh
+GRIPI_PERMITTED_HOSTS=gateway.example.ts.net,gripi.example.net
+```
+
+Entries may be hostnames, IPv4 addresses, or bracketed IPv6 addresses, with an optional port. Host authorization is hostname-based, so the port does not widen access.
+
+Set proxy-header trust explicitly when using a reverse proxy:
+
+```sh
+GRIPI_TRUST_PROXY_HEADERS=1
+```
+
+Enable this only when Gripi is reachable through a trusted local/private reverse proxy that overwrites client-supplied `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-Port` headers. Gripi does not read the RFC `Forwarded` header. Also list every public proxy hostname in `GRIPI_PERMITTED_HOSTS`. Leave proxy support disabled for direct localhost, LAN, and VPN connections.
+
+For production installations upgraded from earlier versions, Gripi retains the previous permissive host and `X-Forwarded-*` behavior only while browser approval is enabled and neither `GRIPI_PERMITTED_HOSTS` nor `GRIPI_TRUST_PROXY_HEADERS` is present. This compatibility fallback keeps existing Tailscale Serve setups reachable after a self-update. Setting `GRIPI_PERMITTED_HOSTS` enables host authorization even when browser approval remains enabled; setting `GRIPI_TRUST_PROXY_HEADERS` to a true or false value overrides proxy-header trust. If `GRIPI_BROWSER_AUTH_DISABLED=1`, strict safe host defaults and disabled proxy-header trust apply unless these settings explicitly opt in.
 
 ## Browser approval
 

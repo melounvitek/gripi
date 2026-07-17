@@ -36,6 +36,13 @@ Open `http://100.x.y.z:4567` in a browser, or add it from the desktop app's **Ad
 
 ### HTTPS through Tailscale Serve
 
+First run `tailscale serve status` to find the gateway's `…ts.net` hostname. Add that hostname and explicit proxy-header support to `~/.config/gripi/env`:
+
+```sh
+GRIPI_PERMITTED_HOSTS=gateway.example.ts.net
+GRIPI_TRUST_PROXY_HEADERS=1
+```
+
 Keep Gripi bound to the gateway machine itself:
 
 ```sh
@@ -49,7 +56,7 @@ tailscale serve --bg --yes 4567
 tailscale serve status
 ```
 
-Open the `https://…ts.net` URL shown by `tailscale serve status`, or add it to the desktop app.
+Open the configured `https://…ts.net` URL, or add it to the desktop app. Existing browser-approval-enabled installations without either setting retain legacy compatibility after an update, but should add both settings to make the proxy policy explicit. Configure them before disabling browser approval. Do not enable proxy-header support when clients can bypass the trusted proxy and connect to the same listener with arbitrary `X-Forwarded-*` headers.
 
 If Tailscale requires elevated permissions, run this once and retry:
 
