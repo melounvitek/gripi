@@ -1,0 +1,29 @@
+{
+  "initial": {
+    "title": "Chromium verification · Gripi",
+    "heading": "Review changes",
+    "message": "Merge the reviewed changes?",
+    "status": "review Chromium verification",
+    "widget": "verificationSSR state restored\nDialogs queued safely"
+  },
+  "queued": {
+    "heading": "Release note",
+    "value": "Compaction and extension UI reliability",
+    "modalOpen": true
+  },
+  "failure": {
+    "error": "Could not answer extension request. Please try again.",
+    "modalOpen": true,
+    "submitEnabled": true
+  },
+  "timeout": {
+    "heading": "Timeout advanced",
+    "message": "The next queued request is now active.",
+    "option": "Continue"
+  },
+  "restored": {
+    "title": "Chromium verification · Gripi",
+    "status": "review Chromium verification",
+    "widget": "verificationSSR state restored\nDialogs queued safely"
+  }
+}
