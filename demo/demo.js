@@ -12,10 +12,10 @@
       ]
     },
     {
-      id: "demo-fidelity", name: "Does this look 1:1 realistic as the real product?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "Demo note", pinned: false,
+      id: "new-to-pi", name: "New to Pi? Start here", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "Read next", pinned: false,
       messages: [
-        { role: "user", text: "Does this static demo look exactly like the real product?", time: "Guide" },
-        { role: "assistant", text: "Not exactly. The demo uses the same overall interface, but some interactions and details are simplified, and a few parts are not as polished here as they are in the real app. A connected Gripi gateway has the full live session behavior, real tool output, and production rendering polish.", time: "Guide" }
+        { role: "user", text: "I found Gripi before Pi. Is this a good place to start?", time: "Guide" },
+        { role: "assistant", text: "Start with Pi itself. Pi is the coding agent that reads files, runs tools, edits code, and owns the projects and sessions shown here. Gripi runs that same Pi environment on a gateway machine and gives you desktop and browser access to it.\n\nTry Pi CLI first and become comfortable with its tools, sessions, models, extensions, and filesystem access. Gripi becomes useful when you want to reach an existing Pi setup from other devices.", link: { href: "https://pi.dev/", label: "Learn about Pi →" }, time: "Guide" }
       ]
     },
     {
@@ -23,13 +23,6 @@
       messages: [
         { role: "user", text: "Does Gripi change how Pi behaves?", time: "Guide" },
         { role: "assistant", text: "No. Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It starts and connects to Pi through a gateway, while Pi remains responsible for the actual agent runtime, tools, models, and session data.", time: "Guide" }
-      ]
-    },
-    {
-      id: "new-to-pi", name: "New to Pi? Start here", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "Read next", pinned: false,
-      messages: [
-        { role: "user", text: "I found Gripi before Pi. Is this a good place to start?", time: "Guide" },
-        { role: "assistant", text: "Start with Pi itself. Pi is the coding agent that reads files, runs tools, edits code, and owns the projects and sessions shown here. Gripi runs that same Pi environment on a gateway machine and gives you desktop and browser access to it.\n\nTry Pi CLI first and become comfortable with its tools, sessions, models, extensions, and filesystem access. Gripi becomes useful when you want to reach an existing Pi setup from other devices.", link: { href: "https://pi.dev/", label: "Learn about Pi →" }, time: "Guide" }
       ]
     },
     {
@@ -70,6 +63,13 @@
         { role: "assistant", text: "Running Gripi on a VPS is advanced and potentially dangerous. Do not do it unless you understand server hardening, network isolation, credential management, and remote-code-execution risk. Never expose Gripi through a public IP or public reverse proxy. Browser approval is not a substitute for network isolation.", time: "Guide" },
         { role: "tool", title: "Safer deployment checklist", text: "Private VPN only\nDedicated non-root OS user\nMinimal repositories and credentials\nFirewall and security updates\nEncrypted storage, backups, and monitoring\nBrowser approval kept enabled", time: "Guide" },
         { role: "assistant", text: "Prefer an always-on trusted computer or private home server. If you still choose a VPS, expose it only inside a private VPN such as Tailscale and treat every credential available to that OS user as reachable through Pi.", link: { href: "https://github.com/melounvitek/gripi/blob/master/docs/configuration.md", label: "Review Gripi security configuration →" }, time: "Guide" }
+      ]
+    },
+    {
+      id: "demo-fidelity", name: "Does this look 1:1 realistic as the real product?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "Demo note", pinned: false,
+      messages: [
+        { role: "user", text: "Does this static demo look exactly like the real product?", time: "Guide" },
+        { role: "assistant", text: "Not exactly. The demo uses the same overall interface, but some interactions and details are simplified, and a few parts are not as polished here as they are in the real app. A connected Gripi gateway has the full live session behavior, real tool output, and production rendering polish.", time: "Guide" }
       ]
     },
     { id: "release-notes", name: "Draft release notes", project: "website", monogram: "WE", color: "#9fc5ff", background: "#1e334d", age: "Monday", pinned: false, messages: [

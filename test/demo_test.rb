@@ -99,14 +99,14 @@ class DemoTest < Minitest::Test
 
     assert_equal [
       "Welcome to Gripi",
-      "Does this look 1:1 realistic as the real product?",
-      "Does Gripi change Pi?",
       "New to Pi? Start here",
+      "Does Gripi change Pi?",
       "What isn’t supported in Gripi?",
       "Run Gripi on an always-on computer",
       "Access Gripi remotely with Tailscale",
       "Use Gripi from a phone or tablet",
-      "Should I run Gripi on a VPS?"
+      "Should I run Gripi on a VPS?",
+      "Does this look 1:1 realistic as the real product?"
     ], grouped.fetch("gripi").map { |session| session.fetch("name") }
     assert_equal ["Draft release notes", "Simplify documentation navigation"], grouped.fetch("website").map { |session| session.fetch("name") }
     assert_equal ["Investigate flaky checkout spec", "Polish checkout confirmation copy", "Speed up CI dependency caching"], grouped.fetch("storefront").map { |session| session.fetch("name") }
