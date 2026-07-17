@@ -301,6 +301,16 @@ class DemoTest < Minitest::Test
     assert_includes html, ".composer-controls { display: none; }"
   end
 
+  def test_demo_uses_codex_model_label
+    html = File.read(HTML)
+    body = Nokogiri::HTML5(html).at_css("body")
+
+    assert_equal "openai-codex/gpt-5.5 (medium)", body.at_css('[data-status-key="model"] .session-status-value').text
+    assert body.at_css('input[name="model"][value="openai-codex/gpt-5.5"][checked]')
+    assert body.at_css('input[name="thinking"][value="medium"][checked]')
+    refute_includes html, "claude-sonnet"
+  end
+
   def test_demo_image_attachment_note_explains_static_demo_limitation
     body = Nokogiri::HTML5(File.read(HTML)).at_css("body")
     modal = body.at_css('[data-modal="demo-images-modal"]')
