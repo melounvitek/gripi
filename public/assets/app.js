@@ -1084,6 +1084,7 @@ function renderEvent(event) {
   }
 
   if (event.type === "compaction") {
+    if (liveOutput) liveOutput.dataset.composerCompacting = "false";
     liveMessageRenderer.renderCompactionEvent(event);
     showStatus("Compaction finished");
     if (liveAgentRunning) setComposerState("running", "Pi is running…", { since: liveBusySince });
@@ -1131,12 +1132,14 @@ function renderEvent(event) {
     if (["session_info", "session_info_changed"].includes(event.type)) sidebarController.refresh().catch(() => {});
     showStatus(eventStatusText(event));
     if (event.type === "compaction_start") {
+      if (liveOutput) liveOutput.dataset.composerCompacting = "true";
       liveMessageRenderer.resetLiveCompactionTracking();
       liveMessageRenderer.removePendingCompactionMessage();
       liveMessageRenderer.appendPendingCompactionMessage(eventTimestamp(event));
       setComposerState("running", "Compacting…", { since: eventTimeMilliseconds(event) });
     }
     if (event.type === "compaction_end") {
+      if (liveOutput) liveOutput.dataset.composerCompacting = "false";
       liveMessageRenderer.removePendingCompactionMessage();
       if (!event.aborted && !liveMessageRenderer.liveCompactionRendered) liveMessageRenderer.renderCompactionEvent(event);
       if (liveAgentRunning) setComposerState("running", "Pi is running…", { since: liveBusySince });
@@ -1388,6 +1391,7 @@ async function submitPrompt(event) {
   if (promptTextarea?.disabled) return;
 
   const followUp = composerState?.dataset.state === "running";
+  const compactingFollowUp = followUp && liveOutput?.dataset.composerCompacting === "true";
   const previousWaitingForOutputSince = waitingForOutputSince;
 
   const generation = sessionViewGeneration;
@@ -1441,8 +1445,8 @@ async function submitPrompt(event) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
-  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…");
-  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : followUp ? "Queueing follow-up…" : "Sending…", true);
+  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : "Sending…");
+  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : "Sending…", true);
   if (cloneCommand || newCommand) showSessionSwitching();
 
   const restoreSubmittedComposerInput = () => {
@@ -1459,7 +1463,7 @@ async function submitPrompt(event) {
   const showPromptFailure = (errorMessage) => {
     restoreSubmittedComposerInput();
     if (followUp) {
-      setComposerState("running", "Pi is running…", { since: previousWaitingForOutputSince });
+      setComposerState("running", compactingFollowUp ? "Compacting…" : "Pi is running…", { since: previousWaitingForOutputSince });
       showStatus(errorMessage, true);
       return;
     }
@@ -1563,8 +1567,9 @@ async function submitPrompt(event) {
       setComposerState("done", "Done");
       showStatus("Done");
     } else {
-      setComposerState("running", "Pi is running…");
-      if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
+      setComposerState("running", liveOutput?.dataset.composerCompacting === "true" ? "Compacting…" : "Pi is running…");
+      if (payload?.queued_after_compaction) showStatus("Queued for after compaction", true);
+      else if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
     }
   } else {
     clearStoredComposerDraft(submittedSession);

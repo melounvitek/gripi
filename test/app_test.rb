@@ -968,6 +968,35 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_marks_follow_up_prompt_queued_during_compaction
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      def client.follow_up(message, images = [])
+        @calls << (images.empty? ? [:follow_up, message] : [:follow_up, message, images])
+        { "success" => true, "compacting" => true }
+      end
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        client
+      }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "follow_up" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[ :start, path ], [ :follow_up, "Actually do this" ]], calls
+      payload = JSON.parse(response.body)
+      assert_equal true, payload.fetch("follow_up")
+      assert_equal true, payload.fetch("queued_after_compaction")
+    end
+  end
+
   def test_follow_up_prompt_treats_rename_slash_command_as_message
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -5784,7 +5813,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "promptTextarea.value = message;\n      persistStoredComposerDraft();"
       assert_includes APP_JAVASCRIPT, "pendingImages = submittedImageFiles.map((file) => ({ file, url: URL.createObjectURL(file) }));"
       assert_includes APP_JAVASCRIPT, "renderAttachments();"
-      assert_includes APP_JAVASCRIPT, "setComposerState(\"running\", \"Pi is running…\", { since: previousWaitingForOutputSince });"
+      assert_includes APP_JAVASCRIPT, "setComposerState(\"running\", compactingFollowUp ? \"Compacting…\" : \"Pi is running…\", { since: previousWaitingForOutputSince });"
       assert_includes APP_JAVASCRIPT, "markOptimisticUserMessageFailed(message);"
       assert_includes APP_JAVASCRIPT, "message.hasAttribute(\"data-optimistic-text\") ? message.dataset.optimisticText : message.querySelector(\".message-body\")?.textContent"
       assert_includes APP_JAVASCRIPT, 'return targetText.startsWith(`${optimisticText}\\n`);'
@@ -6492,7 +6521,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });"
       assert_includes APP_JAVASCRIPT, "if (initialComposerCompacting) liveMessageRenderer.appendPendingCompactionMessage(new Date(initialComposerStateSince || Date.now()));"
       assert_includes APP_JAVASCRIPT, "composerState.textContent = `${waitingForOutputLabel} ${formatWaitDuration(elapsed)}`;"
-      assert_includes APP_JAVASCRIPT, "if (event.type === \"compaction_start\") {\n      liveMessageRenderer.resetLiveCompactionTracking();\n      liveMessageRenderer.removePendingCompactionMessage();\n      liveMessageRenderer.appendPendingCompactionMessage(eventTimestamp(event));\n      setComposerState(\"running\", \"Compacting…\", { since: eventTimeMilliseconds(event) });\n    }"
+      assert_includes APP_JAVASCRIPT, "if (event.type === \"compaction_start\") {\n      if (liveOutput) liveOutput.dataset.composerCompacting = \"true\";\n      liveMessageRenderer.resetLiveCompactionTracking();\n      liveMessageRenderer.removePendingCompactionMessage();\n      liveMessageRenderer.appendPendingCompactionMessage(eventTimestamp(event));\n      setComposerState(\"running\", \"Compacting…\", { since: eventTimeMilliseconds(event) });\n    }"
     end
   end
 
@@ -7490,6 +7519,7 @@ class AppTest < Minitest::Test
 
     def follow_up(message, images = [])
       @calls << (images.empty? ? [:follow_up, message] : [:follow_up, message, images])
+      { "success" => true }
     end
 
     def get_messages

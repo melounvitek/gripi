@@ -79,6 +79,8 @@ class PiRpcClient
     @settled_at = nil
     @compacting = false
     @compacting_since = nil
+    @compaction_follow_ups = []
+    @flushing_compaction_follow_ups = false
     @reader = nil
   end
 
@@ -131,6 +133,7 @@ class PiRpcClient
   end
 
   def prompt(message, images = [])
+    wait_for_compaction_follow_up_flush
     payload = { message: message }
     payload[:images] = images unless images.empty?
     request("prompt", id: next_id("prompt"), **payload)
@@ -143,6 +146,10 @@ class PiRpcClient
   def follow_up(message, images = [])
     payload = { message: message }
     payload[:images] = images unless images.empty?
+    if queue_follow_up_during_compaction(payload)
+      return { "type" => "response", "command" => "follow_up", "success" => true, "queued" => true, "compacting" => true }
+    end
+
     request("follow_up", id: next_id("follow_up"), **payload)
   end
 
@@ -402,6 +409,8 @@ class PiRpcClient
       @agent_running = false
       @compacting = false
       @compacting_since = nil
+      @compaction_follow_ups.clear
+      @flushing_compaction_follow_ups = false
       @active_tool_events.clear
       @busy = false
       @busy_since = nil
@@ -427,13 +436,74 @@ class PiRpcClient
   private
 
   def write_command(command)
-    @write_mutex.synchronize do
-      @stdin.write(JSON.generate(command) + "\n")
-      @stdin.flush if @stdin.respond_to?(:flush)
+    @write_mutex.synchronize { write_command_unlocked(command) }
+  end
+
+  def write_command_unlocked(command)
+    @stdin.write(JSON.generate(command) + "\n")
+    @stdin.flush if @stdin.respond_to?(:flush)
+  end
+
+  def queue_follow_up_during_compaction(payload)
+    @mutex.synchronize do
+      return false unless @compacting || @flushing_compaction_follow_ups
+
+      @compaction_follow_ups << payload
+      true
     end
   end
 
+  def wait_for_compaction_follow_up_flush
+    @mutex.synchronize do
+      @condition.wait(@mutex, 0.1) while @flushing_compaction_follow_ups || (@compacting && @compaction_follow_ups.any?)
+    end
+  end
+
+  def begin_compaction_follow_up_flush
+    follow_ups = @compaction_follow_ups
+    @compaction_follow_ups = []
+    @flushing_compaction_follow_ups = true if follow_ups.any?
+    follow_ups
+  end
+
+  def flush_compaction_follow_ups(follow_ups)
+    @write_mutex.synchronize do
+      write_first_compaction_follow_up_batch(follow_ups)
+      loop do
+        follow_ups = @mutex.synchronize do
+          if @compaction_follow_ups.empty?
+            @flushing_compaction_follow_ups = false
+            @condition.broadcast
+            return
+          end
+
+          queued = @compaction_follow_ups
+          @compaction_follow_ups = []
+          queued
+        end
+        follow_ups.each { |payload| write_queued_prompt_unlocked("follow_up", payload) }
+      end
+    end
+  rescue Errno::EPIPE, IOError
+    @mutex.synchronize do
+      @compaction_follow_ups.clear
+      @flushing_compaction_follow_ups = false
+      @condition.broadcast
+    end
+  end
+
+  def write_first_compaction_follow_up_batch(follow_ups)
+    first, *rest = follow_ups
+    write_queued_prompt_unlocked("prompt", first) if first
+    rest.each { |payload| write_queued_prompt_unlocked("follow_up", payload) }
+  end
+
+  def write_queued_prompt_unlocked(type, payload)
+    write_command_unlocked(payload.merge(id: next_id(type), type: type))
+  end
+
   def store_response(response, serialized_bytesize:)
+    follow_ups_to_flush = nil
     @mutex.synchronize do
       status_key = internal_bridge_status_key(response)
       if status_key
@@ -447,6 +517,7 @@ class PiRpcClient
           response = response.merge("gatewayTimestamp" => (@clock.call.to_f * 1000).to_i)
         end
         update_busy_state(response)
+        follow_ups_to_flush = begin_compaction_follow_up_flush if ["compaction", "compaction_end"].include?(response["type"])
         update_active_tool_events(response, serialized_bytesize)
         @event_sequence += 1
         @events << [@event_sequence, response]
@@ -454,6 +525,7 @@ class PiRpcClient
       end
       @condition.broadcast
     end
+    flush_compaction_follow_ups(follow_ups_to_flush) if follow_ups_to_flush&.any?
   end
 
   def internal_bridge_status_key(response)

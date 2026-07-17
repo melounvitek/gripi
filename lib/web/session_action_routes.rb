@@ -294,6 +294,7 @@ module Web
           content_type :json
           payload = { session: session_path, redirect: redirect_path }
           payload[:follow_up] = true if follow_up_prompt && !slash_command
+          payload[:queued_after_compaction] = true if follow_up_prompt && response.is_a?(Hash) && response["compacting"] == true
           payload[:running] = prompt_running unless prompt_running.nil?
           if slash_command
             payload[:command] = slash_command.type.to_s

@@ -604,6 +604,114 @@ class PiRpcClientTest < Minitest::Test
     reader&.close
   end
 
+  def test_queues_follow_up_during_compaction_and_prompts_after_compaction_finishes
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    writer.puts JSON.generate({ type: "compaction_start" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+
+    response = client.follow_up("Run after compaction")
+
+    assert_equal true, response.fetch("success")
+    refute_includes input.string, "follow_up"
+
+    writer.puts JSON.generate({ type: "compaction_end" })
+    Timeout.timeout(1) { sleep 0.01 until input.string.include?("Run after compaction") }
+
+    queued_command = input.string.lines.map { |line| JSON.parse(line) }.find { |command| command["message"] == "Run after compaction" }
+    assert_equal "prompt", queued_command.fetch("type")
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_flushes_first_compaction_follow_up_as_prompt_and_remaining_as_follow_ups
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+    image = { "type" => "image", "source" => { "type" => "base64", "media_type" => "image/png", "data" => "abc" } }
+
+    writer.puts JSON.generate({ type: "compaction_start" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+    client.follow_up("First", [image])
+    client.follow_up("Second")
+
+    writer.puts JSON.generate({ type: "compaction_end" })
+    Timeout.timeout(1) { sleep 0.01 until input.string.include?("Second") }
+
+    queued_commands = input.string.lines.map { |line| JSON.parse(line) }.select { |command| ["First", "Second"].include?(command["message"]) }
+    assert_equal ["prompt", "follow_up"], queued_commands.map { |command| command.fetch("type") }
+    assert_equal [image], queued_commands.first.fetch("images")
+  ensure
+    writer&.close
+    reader&.close
+  end
+
+  def test_keeps_follow_ups_queued_while_compaction_queue_is_flushing
+    input = StringIO.new
+    output = StringIO.new
+    client = PiRpcClient.new(stdin: input, stdout: output)
+    client.instance_variable_set(:@flushing_compaction_follow_ups, true)
+
+    response = client.follow_up("Queued during flush")
+    client.send(:flush_compaction_follow_ups, [{ message: "First queued" }])
+
+    assert_equal true, response.fetch("success")
+    queued_commands = input.string.lines.map { |line| JSON.parse(line) }
+    assert_equal ["prompt", "follow_up"], queued_commands.map { |command| command.fetch("type") }
+    assert_equal ["First queued", "Queued during flush"], queued_commands.map { |command| command.fetch("message") }
+  end
+
+  def test_waits_to_send_new_prompts_until_compaction_follow_ups_finish_flushing
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+    client.instance_variable_set(:@flushing_compaction_follow_ups, true)
+
+    prompt_thread = Thread.new { client.prompt("New prompt") rescue nil }
+    sleep 0.05
+    refute_includes input.string, "New prompt"
+
+    client.send(:flush_compaction_follow_ups, [{ message: "First queued" }])
+    Timeout.timeout(1) { sleep 0.01 until input.string.include?("New prompt") }
+
+    queued_commands = input.string.lines.map { |line| JSON.parse(line) }
+    assert_equal ["First queued", "New prompt"], queued_commands.map { |command| command.fetch("message") }
+  ensure
+    prompt_thread&.kill
+    writer&.close
+    reader&.close
+  end
+
+  def test_waits_to_send_new_prompts_when_compaction_has_queued_follow_ups
+    input = StringIO.new
+    reader, writer = IO.pipe
+    client = PiRpcClient.new(stdin: input, stdout: reader)
+
+    writer.puts JSON.generate({ type: "compaction_start" })
+    writer.puts JSON.generate({ id: "state-1", type: "state" })
+    client.request("get_state", id: "state-1")
+    client.follow_up("Queued follow-up")
+
+    prompt_thread = Thread.new { client.prompt("New prompt") rescue nil }
+    sleep 0.05
+    refute_includes input.string, "New prompt"
+
+    writer.puts JSON.generate({ type: "compaction_end" })
+    Timeout.timeout(1) { sleep 0.01 until input.string.include?("New prompt") }
+
+    queued_commands = input.string.lines.map { |line| JSON.parse(line) }.select { |command| ["Queued follow-up", "New prompt"].include?(command["message"]) }
+    assert_equal ["Queued follow-up", "New prompt"], queued_commands.map { |command| command.fetch("message") }
+  ensure
+    prompt_thread&.kill
+    writer&.close
+    reader&.close
+  end
+
   def test_clears_busy_state_when_reader_exits
     input = StringIO.new
     output = StringIO.new([
