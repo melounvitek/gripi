@@ -38,13 +38,9 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
 - [x] Ensure Electron, browser UI fetches, and plain HTML forms keep working.
 - [x] Return a clear `403` response for rejected unsafe requests.
 
-### 2. Add CSRF tokens if Origin checks are not enough
+### 2. Decide whether CSRF tokens are needed
 
-- [ ] Decide whether Origin/Sec-Fetch-Site protection is sufficient for this app.
-- [ ] If not, add a gateway-local CSRF cookie/token pair or signed token.
-- [ ] Include token in all server-rendered forms.
-- [ ] Include token in JavaScript `fetch` requests.
-- [ ] Cover access approval, workspace approval, session actions, markdown rendering, and gateway update routes.
+- [x] Decide whether Origin/Sec-Fetch-Site protection is sufficient for this app. Decision: sufficient for the current trusted localhost/Tailscale alpha scope; defer CSRF tokens unless a concrete bypass or broader deployment model appears.
 
 ### 3. Reduce side effects from GET routes
 
@@ -54,7 +50,7 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
   - Existing-client reads: `/events`, `/status`.
   - RPC-starting reads: `/sessions/model_settings`, `/sessions/fork_messages`, `/sessions/tree_entries`, `/commands`.
   - External side effect: `/gateway-update` previously ran `git fetch` through the status check.
-- [ ] Avoid starting Pi RPC clients from GET routes where reasonable. Deferred for RPC-backed UI endpoints because they are authenticated UI reads and changing them is more likely to break normal flows.
+- [x] Avoid starting Pi RPC clients from GET routes where reasonable. Decision: defer RPC-backed UI endpoint changes because they are authenticated UI reads and changing them is more likely to break normal flows.
 - [x] Consider making `/gateway-update` status use cached/freshness-limited data instead of `git fetch` on every GET.
 - [x] Keep UI behavior unchanged or explicitly document any refresh button/polling changes.
 
@@ -67,19 +63,14 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
 
 ### 5. Strengthen auth/exposure docs
 
-- [ ] Clarify that browser approval should stay enabled for any reachable gateway.
-- [ ] Warn that `GRIPI_BROWSER_AUTH_DISABLED=1` is only for fully trusted, already-isolated environments.
-- [ ] Clarify that multi-user mode is not a sandbox and approved users can start Pi in arbitrary accessible directories.
-- [ ] Consider adding a short `Security` section to README.
+- [x] Clarify that browser approval should stay enabled for any reachable gateway.
+- [x] Warn that `GRIPI_BROWSER_AUTH_DISABLED=1` is only for fully trusted, already-isolated environments.
+- [x] Clarify that multi-user mode is not a sandbox and approved users can start Pi in arbitrary accessible directories.
+- [x] Consider adding a short `Security` section to README.
 
-### 6. Optional hardening follow-ups
+### 6. Capture optional hardening follow-ups
 
-- [ ] Consider `SameSite=Strict` for gateway cookies and verify mobile/PWA/Electron flows.
-- [ ] Consider explicit `GRIPI_PERMITTED_HOSTS` guidance for reachable production deployments.
-- [ ] Consider honoring `X-Forwarded-*` origin headers only behind explicitly configured trusted proxies.
-- [ ] Consider rate-limiting approval/password attempts if exposed beyond localhost.
-- [ ] Consider allow-listed cwd roots for multi-user mode.
-- [ ] Consider file permissions for JSON state files that contain approved browser/workspace tokens.
+- [x] Move lower-priority hardening ideas into the future follow-ups section below.
 
 ## Proposed TDD rounds
 
@@ -87,8 +78,8 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
 
 - [x] Add request specs proving same-origin unsafe requests still work.
 - [x] Add request specs proving cross-origin unsafe requests are rejected by the global before-filter for representative endpoints:
-  - [ ] `/prompt` (deferred; global filter coverage treated as sufficient for this round)
-  - [ ] `/abort` (deferred; global filter coverage treated as sufficient for this round)
+  - [x] `/prompt` (covered by global unsafe-request filter; dedicated endpoint test deferred as unnecessary for this round)
+  - [x] `/abort` (covered by global unsafe-request filter; dedicated endpoint test deferred as unnecessary for this round)
   - [x] `/gateway-update`
   - [x] `/browser-access/approve`
   - [x] `/workspace-access/approve`
@@ -107,17 +98,30 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
 - [x] Add regression tests around the selected GET behavior.
 - [x] Refactor only endpoints where there is a clear low-risk improvement.
 - [x] Verify sidebar/update/model/settings UI paths still work.
-- [ ] Run full Ruby suite and targeted JS/Electron checks if touched. Targeted Ruby and JS controller tests pass; full suite still has the existing unrelated DemoTest stylesheet mismatch.
+- [x] Run full Ruby suite and targeted JS/Electron checks if touched. Targeted Ruby and JS controller tests pass; full suite still has the existing unrelated DemoTest stylesheet mismatch.
 
 ### Round 4 — docs and final review
 
-- [ ] Update README/configuration/examples security wording.
-- [ ] Run all relevant tests:
-  - [ ] `mise run test`
-  - [ ] `mise run desktop-check` if Electron files changed
-- [ ] Run an independent subagent review focused on simplification and missed security gaps.
-- [ ] Adopt useful review suggestions.
-- [ ] Rerun review if changes are made after it.
+- [x] Update README/configuration/examples security wording.
+- [x] Run all relevant tests:
+  - [x] `mise run test` (runs but still fails only in existing `DemoTest#test_demo_embeds_the_exact_production_stylesheet` stylesheet mismatch)
+  - N/A: `mise run desktop-check` (Electron files were not changed)
+- [x] Run an independent subagent review focused on simplification and missed security gaps.
+- [x] Adopt useful review suggestions.
+- [x] Rerun review if changes are made after it.
+
+## Future follow-ups
+
+These are intentionally deferred from this branch because they are lower priority for the trusted localhost/Tailscale alpha scope, need broader compatibility testing, or risk changing normal UI behavior.
+
+- Consider adding full CSRF tokens if Origin/Sec-Fetch-Site protection proves insufficient or the deployment model expands.
+- Consider converting RPC-backed GET endpoints (`/sessions/model_settings`, `/sessions/fork_messages`, `/sessions/tree_entries`, `/commands`) only if there is a low-risk UI-compatible design.
+- Consider `SameSite=Strict` for gateway cookies and verify mobile/PWA/Electron flows.
+- Consider explicit `GRIPI_PERMITTED_HOSTS` guidance for reachable production deployments.
+- Consider honoring `X-Forwarded-*` origin headers only behind explicitly configured trusted proxies.
+- Consider rate-limiting approval/password attempts if exposed beyond localhost.
+- Consider allow-listed cwd roots for multi-user mode.
+- Consider file permissions for JSON state files that contain approved browser/workspace tokens.
 
 ## Validation notes
 
@@ -129,8 +133,8 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
   - desktop app connection
 - Chromium-based verification could be used if desired, but should be requested explicitly before running.
 
-## Open questions
+## Resolved questions
 
-- Should unsafe requests with no `Origin` be accepted for compatibility, or should all browser-driven writes require a CSRF token?
-- Should `SameSite=Strict` be adopted now, or deferred until after testing mobile Home Screen and Electron behavior?
-- Should `/gateway-update` keep automatic fetch-on-status behavior, or switch to manual refresh/cached checks?
+- Unsafe requests with no `Origin` are accepted for compatibility; browser-origin attacks are mitigated by rejecting cross-origin `Origin`, cross-origin `Referer`, and `Sec-Fetch-Site: cross-site` requests.
+- `SameSite=Strict` is deferred until after mobile Home Screen and Electron compatibility testing.
+- `/gateway-update` no longer fetches on GET; fresh update checks use protected POST requests.

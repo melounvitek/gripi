@@ -25,7 +25,7 @@ To disable browser approval for every connection, add this to the env file:
 GRIPI_BROWSER_AUTH_DISABLED=1
 ```
 
-Only disable approval when network access is already restricted to trusted devices.
+Keep access approval enabled for any gateway reachable from another device: browser approval in single-user mode, or user-token approval in multi-user mode. Only disable approval when network access is already restricted to trusted devices and users by localhost, a VPN, firewall rules, or another private network boundary. Disabling approval on a LAN, VPN, or public interface lets anyone who can reach the port use Pi on the gateway machine.
 
 ## Multi-user mode
 
@@ -41,7 +41,7 @@ Each user generates and keeps a private user token. Using the same token on anot
 
 In multi-user mode, user-token approval replaces per-browser approval. If `GRIPI_BROWSER_AUTH_DISABLED=1` is also set, new valid user tokens are approved automatically.
 
-Multi-user mode is intended for trusted users. It separates session visibility but does not provide OS-level process, filesystem, or credential isolation. Settings such as the selected model and thinking effort are currently shared between users.
+Multi-user mode is intended for trusted users. It separates session visibility but does not provide OS-level process, filesystem, or credential isolation. Approved users can start Pi in directories readable by the gateway process, and Pi runs with the gateway user's credentials. Settings such as the selected model and thinking effort are currently shared between users.
 
 ## Pinned session directories
 

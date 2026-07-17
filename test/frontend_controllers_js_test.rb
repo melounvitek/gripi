@@ -26,11 +26,15 @@ class FrontendControllersJsTest < Minitest::Test
         history: { state: null, replaceState() {} },
         confirm: () => true
       });
-      globalThis.fetch = async () => response({
-        state: "idle",
-        instanceId: "new-instance",
-        currentSha: "abc123"
-      });
+      const requests = [];
+      globalThis.fetch = async (url, options = {}) => {
+        requests.push([url, options.method || "GET"]);
+        return response({
+          state: "idle",
+          instanceId: "new-instance",
+          currentSha: "abc123"
+        });
+      };
 
       const controller = new GatewayUpdateController(document, window, null);
       controller.apply({ state: "available", targetSha: "def456", summary: "Update summary", message: "Update ready" });
@@ -43,7 +47,7 @@ class FrontendControllersJsTest < Minitest::Test
       const rollbackFailed = snapshot(control, button, message);
       await controller.check();
 
-      console.log(JSON.stringify({ available, waiting, failed, rollbackFailed, navigations }));
+      console.log(JSON.stringify({ available, waiting, failed, rollbackFailed, navigations, requests }));
 
       function eventTarget(properties = {}) {
         return Object.assign({ addEventListener() {} }, properties);
@@ -91,6 +95,7 @@ class FrontendControllersJsTest < Minitest::Test
     assert_equal "Install failed", results.dig("failed", "message")
     assert_equal true, results.dig("rollbackFailed", "buttonHidden")
     assert_equal ["https://example.test/?session=one&_gateway_updated=abc123"], results.fetch("navigations")
+    assert_equal [["/gateway-update/check", "POST"]], results.fetch("requests")
   end
 
   def test_gateway_update_controller_broadcasts_and_polls_update_progress

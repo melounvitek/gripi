@@ -65,9 +65,11 @@ By default, the gateway runs in single-user mode and shows all Pi sessions to on
 
 Multi-user mode is intended for trusted users. It does not provide OS-level process, filesystem, or credential isolation, and settings such as the selected model and thinking effort are currently shared between users. See [configuration](docs/configuration.md#multi-user-mode) to enable it.
 
-## Remote access and configuration
+## Security and remote access
 
 Do not expose the gateway directly to the public internet. Anyone who can use it can start Pi processes with the gateway machine's filesystem and credentials.
+
+Keep access approval enabled for any gateway reachable from another device: browser approval in single-user mode, or user-token approval in multi-user mode. Only disable approval when access is already limited to trusted devices and users by localhost, a VPN, firewall rules, or another private network boundary. Multi-user mode separates session visibility for trusted users; it is not a sandbox and does not isolate filesystem, process, or credential access.
 
 - [Example local and remote setups](docs/examples.md)
 - [Configuration options](docs/configuration.md)

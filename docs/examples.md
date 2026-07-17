@@ -2,7 +2,7 @@
 
 Gripi lets a desktop app or web browser use Pi running on the gateway machine. Pi has access to that machine's files, repositories, and credentials, so do not expose Gripi directly to the public internet.
 
-For remote access, use a VPN such as [Tailscale](https://tailscale.com/). It is free for personal use and a common default for this kind of setup.
+Keep access approval enabled for reachable gateways: browser approval in single-user mode, or user-token approval in multi-user mode. For remote access, use a VPN such as [Tailscale](https://tailscale.com/) limited to trusted devices and users. It is free for personal use and a common default for this kind of setup.
 
 ## Local gateway
 
