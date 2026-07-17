@@ -7,7 +7,7 @@
       messages: [
         { role: "user", text: "What is Gripi, and how can I get started?" },
         { role: "thinking", text: "I’ll give you a quick tour and the shortest path to a local installation." },
-        { role: "assistant", text: "Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.\n\nPi stays Pi: Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated." },
+        { role: "assistant", text: "Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Here, Pi means the coding-agent harness that connects the model to files, shell commands, tools, edits, and session history — not Raspberry Pi hardware. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.\n\nPi stays Pi: Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated." },
         { role: "assistant", text: "Clone and start Gripi with these commands. Setup prints the admin password used to approve your browser, then Gripi is available at http://localhost:4567.", code: "git clone https://github.com/melounvitek/gripi.git\ncd gripi\nmise install\nmise run setup\nGRIPI_HOST=127.0.0.1 mise run start", link: { href: "https://github.com/melounvitek/gripi", label: "View Gripi on GitHub →" } }
       ]
     },
@@ -15,14 +15,14 @@
       id: "new-to-pi", name: "New to Pi? Start here", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "2 minutes ago", pinned: false,
       messages: [
         { role: "user", text: "I found Gripi before Pi. Is this a good place to start?" },
-        { role: "assistant", text: "Start with Pi itself. Pi is the coding agent that reads files, runs tools, edits code, and owns the projects and sessions shown here. Gripi runs that same Pi environment on a gateway machine and gives you desktop and browser access to it.\n\nTry Pi CLI first and become comfortable with its tools, sessions, models, extensions, and filesystem access. Gripi becomes useful when you want to reach an existing Pi setup from other devices.", link: { href: "https://pi.dev/", label: "Learn about Pi →" } }
+        { role: "assistant", text: "Start with Pi itself. Pi is the coding-agent harness that reads files, runs tools, edits code, and owns the projects and sessions shown here — not Raspberry Pi hardware. Gripi runs that same Pi environment on a gateway machine and gives you desktop and browser access to it.\n\nTry Pi CLI first and become comfortable with its tools, sessions, models, extensions, and filesystem access. Gripi becomes useful when you want to reach an existing Pi setup from other devices.", link: { href: "https://pi.dev/", label: "Learn about Pi →" } }
       ]
     },
     {
       id: "pi-stays-pi", name: "Does Gripi change Pi?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "5 minutes ago", pinned: false,
       messages: [
         { role: "user", text: "Does Gripi change how Pi behaves?" },
-        { role: "assistant", text: "No. Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It starts and connects to Pi through a gateway, while Pi remains responsible for the actual agent runtime, tools, models, and session data." }
+        { role: "assistant", text: "No. Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It starts and connects to the Pi coding-agent harness through a gateway, while Pi remains responsible for the actual agent runtime, tools, models, and session data." }
       ]
     },
     {
@@ -159,7 +159,7 @@
 
   function responseScript(prompt) {
     const safePrompt = String(prompt || "your question").trim() || "your question";
-    const answer = `This is a prerecorded response to “${safePrompt}”. In a real Gripi session, Pi would now continue with full access to the selected project and its tools.\n\nThe static demo still mirrors the experience: messages appear live, tool activity is visible, and you can stop a response while it is streaming.`;
+    const answer = `This is a prerecorded response to “${safePrompt}”. In a real Gripi session, the Pi coding-agent harness would now continue with full access to the selected project and its tools.\n\nThe static demo still mirrors the experience: messages appear live, tool activity is visible, and you can stop a response while it is streaming.`;
     const words = answer.match(/\S+\s*/g) || [answer];
     return [
       { type: "status", text: "Pi is thinking…", delay: 180 },
@@ -201,7 +201,7 @@
   global.GripiDemo = { playScript, responseScript, safeIdentityColor, safeGuideLink, inlineCodeParts, toolSummaryParts, formatDemoTimestamp: timeLabel, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
   if (typeof document === "undefined") return;
 
-  const storageKey = "gripi:static-demo:v12";
+  const storageKey = "gripi:static-demo:v13";
   const introSeenKey = "gripi:static-demo:intro-seen";
   let sessions = initialSessions;
   let currentId = defaultSessionId;

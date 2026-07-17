@@ -88,6 +88,8 @@ class DemoTest < Minitest::Test
     assert_equal "welcome", result.fetch("defaultSessionId")
     assert_includes body.at_css("#history-output").text, "mise run setup"
     assert_includes body.at_css("#history-output").text, "Pi stays Pi"
+    assert_includes body.at_css("#history-output").text, "coding-agent harness"
+    assert_includes body.at_css("#history-output").text, "not Raspberry Pi hardware"
     refute_includes body.at_css("#history-output").text, "Installation requirements"
     refute_includes File.read(JAVASCRIPT), 'title: "Installation requirements"'
     refute_nil repository_link
@@ -116,8 +118,8 @@ class DemoTest < Minitest::Test
 
     body = Nokogiri::HTML5(File.read(HTML)).at_css("body")
     javascript = File.read(JAVASCRIPT)
-    refute_includes javascript, 'gripi:static-demo:v11'
-    assert_includes javascript, 'gripi:static-demo:v12'
+    refute_includes javascript, 'gripi:static-demo:v12'
+    assert_includes javascript, 'gripi:static-demo:v13'
     assert_includes javascript, "does not alter Pi’s system prompt"
     assert_includes javascript, "not as polished here as they are in the real app"
     assert_includes javascript, "Custom TUI components, overlays, widgets, editors"
@@ -222,10 +224,11 @@ class DemoTest < Minitest::Test
     refute_nil dialog
     assert modal.key?("hidden")
     assert_equal "Welcome to Gripi", body.at_css("#demo-intro-title").text
-    assert_includes dialog.text, "web and desktop interface for Pi"
-    assert_includes dialog.text, "Pi stays Pi"
-    assert_includes dialog.text, "simulated"
-    assert_includes dialog.text, "stay in this browser"
+    assert_includes dialog.text, "web and desktop interface for Pi (coding agent)"
+    assert_includes dialog.text, "simulated demo shows Gripi’s session UI"
+    assert_includes dialog.text, "Prompts stay in this browser"
+    refute_includes dialog.text, "Pi stays Pi"
+    refute_includes dialog.text, "connects the model to project files"
     refute_includes dialog.text, "Does this look 1:1 realistic as the real product?"
     refute_includes dialog.text, "not as polished here as they are in the real app"
     explore_action = dialog.at_css('button[data-modal-close][data-modal-default-focus]')
@@ -371,6 +374,7 @@ class DemoTest < Minitest::Test
 
     assert_equal %w[status thinking tool_start tool_end assistant_start delta done], result.fetch("types")
     assert_includes result.fetch("answer"), "How does this work?"
+    assert_includes result.fetch("answer"), "Pi coding-agent harness"
   end
 
   def test_demo_assistant_text_supports_inline_code_markup
