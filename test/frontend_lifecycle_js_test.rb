@@ -253,6 +253,85 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal({ "current" => "second", "previous" => "first" }, results.fetch("stored"))
   end
 
+  def test_modal_backdrop_clicks_do_not_close_dialogs
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    click_source = app_source.match(/document\.addEventListener\("click", \(event\) => \{\n  const opener = event\.target\.closest\("\[data-modal-open\]"\);.*?\n\}\);/m).to_s
+
+    results = run_javascript(<<~JS)
+      const closed = [];
+      let prevented = false;
+      const closeModal = (modal) => closed.push(modal?.name);
+      const openModal = () => {};
+      const openNewSessionModal = () => {};
+      const openForkSessionModal = () => {};
+      const openTreeSessionModal = () => {};
+      const openModelSettingsModal = () => {};
+      const currentSessionPath = () => "session";
+      const addSessionViewFormParams = () => {};
+      const showSessionSwitching = () => {};
+      const hideSessionSwitching = () => {};
+      const switchToBranchedSession = async () => {};
+      const showStatus = () => {};
+      const refreshCurrentSessionPreservingComposer = async () => {};
+      const scheduleNextEventPoll = () => {};
+      globalThis.fetch = () => Promise.resolve({ json: async () => ({}) });
+
+      let handler;
+      const document = { addEventListener(type, listener) { if (type === "click") handler = listener; }, querySelector: () => null };
+      eval(#{click_source.to_json});
+
+      const modal = { name: "modal" };
+      const backdropEvent = {
+        target: { closest: () => null, matches: (selector) => selector === "[data-modal]" },
+        preventDefault() { prevented = true; }
+      };
+      handler(backdropEvent);
+      const afterBackdrop = [...closed];
+
+      const closer = { closest: (selector) => selector === "[data-modal]" ? modal : null };
+      const closeButtonEvent = {
+        target: { closest: (selector) => selector === "[data-modal-close]" ? closer : null },
+        preventDefault() { prevented = true; }
+      };
+      handler(closeButtonEvent);
+
+      console.log(JSON.stringify({ afterBackdrop, closed, prevented }));
+    JS
+
+    assert_empty results.fetch("afterBackdrop")
+    assert_equal ["modal"], results.fetch("closed")
+    assert_equal true, results.fetch("prevented")
+  end
+
+  def test_escape_cancels_extension_ui_modal_requests
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    keydown_source = app_source.match(/document\.addEventListener\("keydown", \(event\) => \{\n  if \(event\.key === "Escape".*?\n\}\);/m).to_s
+
+    results = run_javascript(<<~JS)
+      const calls = [];
+      const extensionUiModal = { querySelector: () => null };
+      const activeExtensionUiRequest = { id: "request-1" };
+      const modalIsOpen = () => true;
+      const newSessionFormController = { closeSuggestions: () => false };
+      const closeModal = (modal) => calls.push(["close", modal === extensionUiModal]);
+      const cancelExtensionUiRequest = () => calls.push(["cancel"]);
+      let prevented = false;
+      let handler;
+      const document = {
+        querySelector: (selector) => selector === "[data-modal]:not([hidden])" ? extensionUiModal : null,
+        addEventListener(type, listener) { if (type === "keydown") handler = listener; }
+      };
+      eval(#{keydown_source.to_json});
+
+      handler({ key: "Escape", defaultPrevented: false, preventDefault() { prevented = true; } });
+
+      console.log(JSON.stringify({ calls, prevented }));
+    JS
+
+    assert_equal [["cancel"]], results.fetch("calls")
+    assert_equal true, results.fetch("prevented")
+  end
+
   def test_detaching_switches_the_main_view_while_leaving_popup_navigation_to_the_native_link
     app_source = File.read(File.join(ASSETS, "app.js"))
     detach_source = app_source.match(/function detachSession\(.*?\n\}/m).to_s

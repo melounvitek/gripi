@@ -1242,6 +1242,44 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_posts_extension_ui_response_to_active_rpc_client
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, FakeRpcClient.new(calls))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/extension_ui_response",
+        params: { "session" => path, "id" => "dialog-1", "value" => "Allow" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal({ "ok" => true, "session" => path }, JSON.parse(response.body))
+      assert_equal [[:extension_ui_response, "dialog-1", "Allow", nil, false]], calls
+    end
+  end
+
+  def test_extension_ui_response_requires_an_active_rpc_client
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/extension_ui_response",
+        params: { "session" => path, "id" => "dialog-1", "cancelled" => "true" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 404, response.status
+    end
+  end
+
   def test_event_poll_does_not_wait_for_a_synchronized_session_operation
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -7562,6 +7600,11 @@ class AppTest < Minitest::Test
 
     def abort
       @calls << [:abort]
+    end
+
+    def extension_ui_response(id, value: nil, confirmed: nil, cancelled: false)
+      @calls << [:extension_ui_response, id, value, confirmed, cancelled]
+      { "success" => true }
     end
 
     def compact(instructions = nil)

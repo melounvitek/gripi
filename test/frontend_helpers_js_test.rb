@@ -68,7 +68,7 @@ class FrontendHelpersJsTest < Minitest::Test
     assert_equal ["Useful name", "Changed name", nil, nil], results.fetch("names")
   end
 
-  def test_extension_ui_notices_explain_cancelled_dialogs_and_notifications
+  def test_extension_ui_notices_explain_notifications
     results = run_javascript(<<~JS)
       const { extensionUiRequestNotice } = await import(#{module_url("formatting.js").to_json});
       console.log(JSON.stringify([
@@ -81,7 +81,7 @@ class FrontendHelpersJsTest < Minitest::Test
       ]));
     JS
 
-    assert_equal({ "role" => "status", "text" => "This extension requested interactive UI that Gripi does not support yet. The request was cancelled." }, results[0])
+    assert_nil results[0]
     assert_equal({ "role" => "status", "text" => "Review finished" }, results[1])
     assert_equal({ "role" => "status", "text" => "Warning: Review needs attention" }, results[2])
     assert_equal({ "role" => "error", "text" => "Review failed" }, results[3])

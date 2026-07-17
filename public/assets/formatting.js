@@ -108,9 +108,7 @@ export function messageRoleLabel(roleName) {
 
 export function extensionUiRequestNotice(event) {
   if (event?.type !== "extension_ui_request") return null;
-  if (["select", "confirm", "input", "editor"].includes(event.method)) {
-    return { role: "status", text: "This extension requested interactive UI that Gripi does not support yet. The request was cancelled." };
-  }
+  if (["select", "confirm", "input", "editor"].includes(event.method)) return null;
   if (event.method === "notify" && event.message) {
     if (event.notifyType === "error") return { role: "error", text: event.message };
     return { role: "status", text: event.notifyType === "warning" ? `Warning: ${event.message}` : event.message };

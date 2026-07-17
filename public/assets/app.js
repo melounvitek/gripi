@@ -100,6 +100,20 @@ let lastEventSeq = 0;
 let waitingForOutputSince = null;
 let waitingForOutputTimer = null;
 let waitingForOutputLabel = "Pi is running…";
+let extensionUiModal = null;
+let extensionUiForm = null;
+let extensionUiTitle = null;
+let extensionUiMessage = null;
+let extensionUiOptions = null;
+let extensionUiInputField = null;
+let extensionUiInput = null;
+let extensionUiEditorField = null;
+let extensionUiEditor = null;
+let extensionUiSubmit = null;
+let activeExtensionUiRequest = null;
+let extensionUiControlsBound = false;
+let extensionStatuses = new Map();
+let baseDocumentTitle = document.title;
 let emptyEventPollCount = 0;
 let sessionViewGeneration = 0;
 let sessionSwitchGeneration = 0;
@@ -138,6 +152,16 @@ function bindSessionDom() {
   promptForm = document.querySelector(".prompt-form");
   abortForm = document.getElementById("abort-form");
   promptTextarea = promptForm?.querySelector("textarea") || null;
+  extensionUiModal = document.querySelector('[data-modal="extension-ui-modal"]');
+  extensionUiForm = extensionUiModal?.querySelector("[data-extension-ui-form]") || null;
+  extensionUiTitle = extensionUiModal?.querySelector("[data-extension-ui-title]") || null;
+  extensionUiMessage = extensionUiModal?.querySelector("[data-extension-ui-message]") || null;
+  extensionUiOptions = extensionUiModal?.querySelector("[data-extension-ui-options]") || null;
+  extensionUiInputField = extensionUiModal?.querySelector("[data-extension-ui-input-field]") || null;
+  extensionUiInput = extensionUiModal?.querySelector("[data-extension-ui-input]") || null;
+  extensionUiEditorField = extensionUiModal?.querySelector("[data-extension-ui-editor-field]") || null;
+  extensionUiEditor = extensionUiModal?.querySelector("[data-extension-ui-editor]") || null;
+  extensionUiSubmit = extensionUiModal?.querySelector("[data-extension-ui-submit]") || null;
   promptSessionInput = promptForm?.querySelector('input[name="session"]') || null;
   sendButton = promptForm?.querySelector(".send-button") || null;
   composerStopButton = document.querySelector(".session-header .composer-stop-button") || null;
@@ -153,6 +177,9 @@ function bindSessionDom() {
   liveMessageRenderer.bind();
   currentSessionFindController.bind();
   sessionStatusBar = document.getElementById("session-status-bar");
+  extensionStatuses.clear();
+  renderExtensionStatuses();
+  document.title = baseDocumentTitle;
   const existingModelStatus = sessionStatusBar?.querySelector('[data-status-key="model"] .session-status-value')?.textContent || "";
   const existingModelMatch = existingModelStatus.match(/^(.*?)(?:\s+\(([^)]*)\))?$/);
   liveStatusModel = existingModelMatch?.[1] || null;
@@ -797,6 +824,167 @@ function clearAttachments() {
 
 function showStatus(_text, _forceScroll = false) {}
 
+function extensionUiResponseBody(extra = {}) {
+  const session = currentSessionPath();
+  if (!activeExtensionUiRequest?.id || !session) return null;
+  const body = new URLSearchParams({ session, id: activeExtensionUiRequest.id, ...extra });
+  addSessionViewFormParams(body);
+  return body;
+}
+
+async function sendExtensionUiResponse(extra = {}) {
+  const body = extensionUiResponseBody(extra);
+  if (!body) return;
+  try {
+    const response = await fetch("/extension_ui_response", { method: "POST", body, headers: { "Accept": "application/json" } });
+    if (!response.ok) showStatus("Could not answer extension request", true);
+  } catch (_error) {
+    showStatus("Could not answer extension request", true);
+  }
+}
+
+function resetExtensionUiModal() {
+  if (!extensionUiModal) return;
+  if (extensionUiTitle) extensionUiTitle.textContent = "Extension request";
+  if (extensionUiMessage) {
+    extensionUiMessage.textContent = "";
+    extensionUiMessage.hidden = true;
+  }
+  if (extensionUiOptions) {
+    extensionUiOptions.replaceChildren();
+    extensionUiOptions.hidden = true;
+  }
+  if (extensionUiInputField) extensionUiInputField.hidden = true;
+  if (extensionUiInput) extensionUiInput.value = "";
+  if (extensionUiEditorField) extensionUiEditorField.hidden = true;
+  if (extensionUiEditor) extensionUiEditor.value = "";
+  if (extensionUiSubmit) {
+    extensionUiSubmit.hidden = false;
+    extensionUiSubmit.textContent = "Submit";
+  }
+}
+
+function closeExtensionUiModal() {
+  closeModal(extensionUiModal);
+  activeExtensionUiRequest = null;
+  resetExtensionUiModal();
+}
+
+function cancelExtensionUiRequest() {
+  if (!activeExtensionUiRequest) return;
+  sendExtensionUiResponse({ cancelled: "true" });
+  closeExtensionUiModal();
+}
+
+function openExtensionUiDialog(event) {
+  if (!extensionUiModal || !event.id) return false;
+  resetExtensionUiModal();
+  activeExtensionUiRequest = event;
+  const title = event.title || "Extension request";
+  if (extensionUiTitle) extensionUiTitle.textContent = title;
+  if (extensionUiMessage && event.message) {
+    extensionUiMessage.textContent = event.message;
+    extensionUiMessage.hidden = false;
+  }
+
+  if (event.method === "select") {
+    if (extensionUiOptions) {
+      (Array.isArray(event.options) ? event.options : []).forEach((option, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "extension-ui-option";
+        button.textContent = String(option);
+        if (index === 0) button.setAttribute("data-modal-default-focus", "");
+        button.addEventListener("click", () => {
+          sendExtensionUiResponse({ value: String(option) });
+          closeExtensionUiModal();
+        });
+        extensionUiOptions.append(button);
+      });
+      extensionUiOptions.hidden = false;
+    }
+    if (extensionUiSubmit) extensionUiSubmit.hidden = true;
+  } else if (event.method === "confirm") {
+    if (extensionUiSubmit) {
+      extensionUiSubmit.textContent = "Confirm";
+      extensionUiSubmit.dataset.confirmResponse = "true";
+    }
+  } else if (event.method === "input") {
+    if (extensionUiInputField) extensionUiInputField.hidden = false;
+    if (extensionUiInput) {
+      extensionUiInput.placeholder = event.placeholder || "";
+      extensionUiInput.value = event.value || "";
+    }
+  } else if (event.method === "editor") {
+    if (extensionUiEditorField) extensionUiEditorField.hidden = false;
+    if (extensionUiEditor) extensionUiEditor.value = event.prefill || "";
+  } else {
+    activeExtensionUiRequest = null;
+    return false;
+  }
+
+  openModal(extensionUiModal);
+  return true;
+}
+
+function submitExtensionUiDialog(event) {
+  event.preventDefault();
+  if (!activeExtensionUiRequest) return;
+  if (activeExtensionUiRequest.method === "confirm") {
+    sendExtensionUiResponse({ confirmed: "true" });
+  } else if (activeExtensionUiRequest.method === "input") {
+    sendExtensionUiResponse({ value: extensionUiInput?.value || "" });
+  } else if (activeExtensionUiRequest.method === "editor") {
+    sendExtensionUiResponse({ value: extensionUiEditor?.value || "" });
+  }
+  closeExtensionUiModal();
+}
+
+function handleExtensionEditorText(event) {
+  if (!promptTextarea) return;
+  const text = event.text || "";
+  if (!promptTextarea.value) {
+    promptTextarea.value = text;
+    resizePromptTextarea();
+    syncComposerFocus();
+    showStatus("Extension updated the editor");
+    return;
+  }
+  if (window.confirm("Extension wants to replace your draft. Apply it?")) {
+    promptTextarea.value = text;
+    resizePromptTextarea();
+    syncComposerFocus();
+    showStatus("Extension updated the editor");
+  } else {
+    showStatus("Kept existing draft");
+  }
+}
+
+function updateExtensionStatus(event) {
+  if (!event.statusKey) return;
+  if (event.statusText === undefined || event.statusText === null || event.statusText === "") extensionStatuses.delete(event.statusKey);
+  else extensionStatuses.set(event.statusKey, event.statusText);
+  renderExtensionStatuses();
+}
+
+function renderExtensionStatuses() {
+  if (!sessionStatusBar) return;
+  sessionStatusBar.querySelectorAll('[data-status-key^="extension:"]').forEach((node) => node.remove());
+  extensionStatuses.forEach((value, key) => {
+    const item = document.createElement("span");
+    item.className = "session-status-item";
+    item.dataset.statusKey = `extension:${key}`;
+    const label = document.createElement("span");
+    label.className = "session-status-label";
+    label.textContent = key;
+    const text = document.createElement("span");
+    text.className = "session-status-value";
+    text.textContent = value;
+    item.append(label, " ", text);
+    sessionStatusBar.append(item);
+  });
+}
+
 function eventTimeMilliseconds(event) {
   const value = eventTimestamp(event);
   const timestamp = typeof value === "number" ? value : Date.parse(value);
@@ -859,13 +1047,20 @@ function renderEvent(event) {
   }
 
   if (event.type === "extension_ui_request") {
+    if (["select", "confirm", "input", "editor"].includes(event.method)) {
+      if (!openExtensionUiDialog(event)) sendExtensionUiResponse({ cancelled: "true" });
+      return;
+    }
     if (event.method === "set_editor_text") {
-      if (promptTextarea) {
-        promptTextarea.value = event.text || "";
-        resizePromptTextarea();
-      }
-      syncComposerFocus();
-      showStatus("Extension updated the editor");
+      handleExtensionEditorText(event);
+      return;
+    }
+    if (event.method === "setStatus") {
+      updateExtensionStatus(event);
+      return;
+    }
+    if (event.method === "setTitle") {
+      document.title = event.title || baseDocumentTitle;
       return;
     }
 
@@ -1562,6 +1757,12 @@ function bindSessionControls() {
     updateCommandListForPrompt();
   });
 
+  if (!extensionUiControlsBound) {
+    extensionUiControlsBound = true;
+    extensionUiForm?.addEventListener("submit", submitExtensionUiDialog);
+    extensionUiModal?.querySelectorAll("[data-extension-ui-cancel]").forEach((button) => button.addEventListener("click", cancelExtensionUiRequest));
+  }
+
   promptForm?.addEventListener("submit", submitPrompt);
   abortForm?.addEventListener("submit", submitAbort);
 }
@@ -2034,8 +2235,6 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const modal = event.target.matches("[data-modal]") ? event.target : null;
-  if (modal) closeModal(modal);
 });
 
 document.addEventListener("input", (event) => {
@@ -2168,6 +2367,10 @@ document.addEventListener("keydown", (event) => {
     const openModalElement = document.querySelector("[data-modal]:not([hidden])");
     const cwdForm = openModalElement?.querySelector(".new-session-cwd-form");
     if (newSessionFormController.closeSuggestions(cwdForm)) return;
+    if (openModalElement === extensionUiModal && activeExtensionUiRequest) {
+      cancelExtensionUiRequest();
+      return;
+    }
     closeModal(openModalElement);
     return;
   }

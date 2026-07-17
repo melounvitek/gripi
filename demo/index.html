@@ -149,6 +149,7 @@
     .session-pin-toggle.is-pinned { color: var(--gold); }
     .session-pin-toggle:disabled { cursor: wait; opacity: 0.55; }
     .session-pin-toggle.is-loading:disabled { opacity: 1; }
+    .session-pin-toggle.is-loading:disabled:hover { border-color: transparent; background: transparent; }
     .session-pin-toggle.is-loading svg { visibility: hidden; }
     .session-pin-toggle.is-loading::after { content: ""; position: absolute; width: 0.85rem; height: 0.85rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     a.session.selected { background: var(--panel-softer); border-color: var(--accent-line-35); }
@@ -388,7 +389,12 @@
     .modal-header h2 { color: var(--text); font-family: var(--mono); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
     .modal-close-button { width: 2rem; height: 2rem; padding: 0; border-radius: 0.25rem; font-size: 1.2rem; line-height: 1; }
     .modal-field { display: grid; gap: 0.35rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
-    .modal-field input, .modal-field select { width: 100%; min-width: 0; letter-spacing: normal; text-transform: none; }
+    .modal-field input, .modal-field select, .modal-field textarea { width: 100%; min-width: 0; letter-spacing: normal; text-transform: none; }
+    .extension-ui-modal-card { width: min(40rem, 100%); }
+    .extension-ui-message { margin: 0; color: var(--copy); white-space: pre-wrap; }
+    .extension-ui-options { display: grid; gap: 0.45rem; }
+    .extension-ui-option { justify-self: stretch; width: 100%; display: block; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: var(--bg); color: var(--text); text-align: left; text-transform: none; letter-spacing: normal; }
+    .extension-ui-option:hover, .extension-ui-option:focus-visible { border-color: var(--accent-line-55); background: var(--accent-tint-08); color: var(--text); }
     .project-select { min-width: 0; width: 100%; }
     .sidebar-filter-row > .project-select { flex: 1 1 auto; }
     .project-select-native-hidden { position: absolute !important; width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }

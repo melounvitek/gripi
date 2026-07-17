@@ -16,7 +16,6 @@ class PiRpcClient
   ACTIVE_TOOL_SNAPSHOT_OUTPUT_BYTES = 1_024
   ACTIVE_TOOL_SNAPSHOT_TEXT_BYTES = 4 * 1_024
   SNAPSHOT_TOOL_NAME = "subagent"
-  CANCELLED_EXTENSION_DIALOG_METHODS = %w[select confirm input editor].freeze
   GRIPI_EXTENSION_PATH = File.expand_path("../pi_extensions/gripi-tree.ts", __dir__)
   RUBY_ENV_KEYS = %w[
     GEM_HOME
@@ -391,7 +390,6 @@ class PiRpcClient
       begin
         response = JSON.parse(line)
         store_response(response, serialized_bytesize: line.bytesize)
-        cancel_unsupported_extension_dialog(response)
       rescue JSON::ParserError
         next
       end
@@ -411,13 +409,22 @@ class PiRpcClient
     end
   end
 
-  def cancel_unsupported_extension_dialog(response)
-    return unless response["type"] == "extension_ui_request"
-    return unless CANCELLED_EXTENSION_DIALOG_METHODS.include?(response["method"])
-    return if response["id"].to_s.empty?
+  public
 
-    write_command(type: "extension_ui_response", id: response["id"], cancelled: true)
+  def extension_ui_response(id, value: nil, confirmed: nil, cancelled: false)
+    command = { type: "extension_ui_response", id: id.to_s }
+    if cancelled
+      command[:cancelled] = true
+    elsif !confirmed.nil?
+      command[:confirmed] = !!confirmed
+    else
+      command[:value] = value.to_s
+    end
+    write_command(command)
+    { "type" => "response", "command" => "extension_ui_response", "success" => true }
   end
+
+  private
 
   def write_command(command)
     @write_mutex.synchronize do

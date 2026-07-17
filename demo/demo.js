@@ -29,7 +29,7 @@
       id: "unsupported", name: "What isn’t supported in Gripi?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "9 minutes ago", pinned: false,
       messages: [
         { role: "user", text: "Does Gripi support everything an extension can do in Pi’s terminal UI?" },
-        { role: "assistant", text: "No. Standard tools, compatible custom tools, subagents, extension commands exposed through RPC, session data, images, compaction, and tree navigation work through Pi’s gateway runtime.\n\nGripi does not reproduce arbitrary terminal interfaces. Custom TUI components, overlays, widgets, editors, terminal keybindings, custom TUI rendering, and interactive select/confirm/input/editor dialogs are not currently supported." },
+        { role: "assistant", text: "No. Standard tools, compatible custom tools, subagents, extension commands exposed through RPC, semantic extension dialogs, session data, images, compaction, and tree navigation work through Pi’s gateway runtime.\n\nGripi supports RPC-compatible extension UI such as select, confirm, input, editor, notify, status, title, and editor-prefill requests. It does not reproduce arbitrary terminal interfaces: Custom TUI components, overlays, widgets, editors, terminal keybindings, and custom TUI rendering are not currently supported." },
         { role: "assistant", text: "Use Pi CLI directly for workflows that depend on custom terminal UI or explicitly require ctx.mode === “tui”. Gripi preserves the underlying Pi workflow, but it is not a browser implementation of every possible extension interface." }
       ]
     },

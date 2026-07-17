@@ -487,6 +487,24 @@ module Web
         redirect_to_rpc_session_after_branch(session_path, response)
       end
 
+      app.post "/extension_ui_response" do
+        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
+        id = params.fetch("id", "").to_s
+        halt 400, "Missing extension UI request id" if id.empty? || id.bytesize > 1_024
+
+        cancelled = params["cancelled"].to_s == "true"
+        confirmed = params.key?("confirmed") ? params["confirmed"].to_s == "true" : nil
+        value = params.key?("value") ? params["value"].to_s : nil
+        halt 400, "Invalid extension UI response" unless cancelled || !confirmed.nil? || !value.nil?
+
+        delivered = rpc_clients.with_active_client(session_path) do |client|
+          client.extension_ui_response(id, value: value, confirmed: confirmed, cancelled: cancelled)
+        end
+        halt 404, "No active Pi session" unless delivered
+        content_type :json
+        JSON.generate(ok: true, session: session_path)
+      end
+
       app.post "/abort" do
         session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
         with_synchronized_interrupt_rpc_client(session_path) { |client| client.abort }

@@ -76,7 +76,7 @@ Do not expose the gateway directly to the public internet. Anyone who can use it
 
 Gripi is intentionally thin around Pi. It uses Pi’s existing runtime, sessions, tools, models, and configuration instead of replacing them with Gripi-specific behavior. Gateway-only metadata is stored separately when needed.
 
-If a workflow depends on Pi’s native terminal UI, use Pi CLI directly.
+Gripi supports RPC-compatible extension UI such as select, confirm, input, editor, notify, status, title, and editor-prefill requests. If a workflow depends on Pi’s native terminal UI, custom TUI components, terminal keybindings, or `ctx.mode === "tui"`, use Pi CLI directly.
 
 ## Optional Pi setup
 
