@@ -18,6 +18,8 @@ Open <http://localhost:4567>. This is the simplest and safest setup.
 
 Use this when Pi should run on an always-on desktop, spare laptop, or home server while you connect from another device.
 
+This setup works well even on slower private networks. Gripi is still comfortable to use over Tailscale connections with 100ms+ ping, because most work happens on the gateway machine.
+
 1. Install Gripi and Pi CLI on the gateway machine.
 2. Put the gateway machine and client devices on the same Tailscale network.
 3. Choose one of the connection options below.
