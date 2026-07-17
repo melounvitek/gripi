@@ -12,6 +12,13 @@
       ]
     },
     {
+      id: "demo-fidelity", name: "Does this look 1:1 realistic as the real product?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "Demo note", pinned: false,
+      messages: [
+        { role: "user", text: "Does this static demo look exactly like the real product?", time: "Guide" },
+        { role: "assistant", text: "Not exactly. The demo uses the same overall interface, but some interactions and details are simplified, and a few parts are not as polished here as they are in the real app. A connected Gripi gateway has the full live session behavior, real tool output, and production rendering polish.", time: "Guide" }
+      ]
+    },
+    {
       id: "pi-stays-pi", name: "Does Gripi change Pi?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "Trust", pinned: false,
       messages: [
         { role: "user", text: "Does Gripi change how Pi behaves?", time: "Guide" },

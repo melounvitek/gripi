@@ -99,6 +99,7 @@ class DemoTest < Minitest::Test
 
     assert_equal [
       "Welcome to Gripi",
+      "Does this look 1:1 realistic as the real product?",
       "Does Gripi change Pi?",
       "New to Pi? Start here",
       "What isn’t supported in Gripi?",
@@ -116,6 +117,7 @@ class DemoTest < Minitest::Test
     refute_includes javascript, 'gripi:static-demo:v9'
     assert_includes javascript, 'gripi:static-demo:v10'
     assert_includes javascript, "does not alter Pi’s system prompt"
+    assert_includes javascript, "not as polished here as they are in the real app"
     assert_includes javascript, "Custom TUI components, overlays, widgets, editors"
     assert_includes javascript, "Never expose Gripi through a public IP or public reverse proxy."
     assert_includes javascript, 'switchSession(button.dataset.demoTreeTarget)'
@@ -188,9 +190,8 @@ class DemoTest < Minitest::Test
     assert_includes dialog.text, "Pi stays Pi"
     assert_includes dialog.text, "simulated"
     assert_includes dialog.text, "stay in this browser"
-    assert_includes dialog.text, "Does this look 1:1 realistic as the real product?"
-    assert_includes dialog.text, "Not exactly"
-    assert_includes dialog.text, "not as polished here as they are in the real app"
+    refute_includes dialog.text, "Does this look 1:1 realistic as the real product?"
+    refute_includes dialog.text, "not as polished here as they are in the real app"
     explore_action = dialog.at_css('button[data-modal-close][data-modal-default-focus]')
     assert explore_action, "Expected an Explore demo action"
     assert_equal "Explore demo", explore_action.text.strip
