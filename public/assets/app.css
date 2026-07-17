@@ -130,6 +130,7 @@
     .session-pin-toggle.is-pinned { color: var(--gold); }
     .session-pin-toggle:disabled { cursor: wait; opacity: 0.55; }
     .session-pin-toggle.is-loading:disabled { opacity: 1; }
+    .session-pin-toggle.is-loading:disabled:hover { border-color: transparent; background: transparent; }
     .session-pin-toggle.is-loading svg { visibility: hidden; }
     .session-pin-toggle.is-loading::after { content: ""; position: absolute; width: 0.85rem; height: 0.85rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     a.session.selected { background: var(--panel-softer); border-color: var(--accent-line-35); }
