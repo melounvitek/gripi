@@ -34,6 +34,95 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_session_metadata_skips_canonical_tool_results_and_falls_back_for_other_layouts
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      canonical_tool_result_text = "x" * 100_000
+      canonical_tool_result = JSON.generate({
+        type: "message",
+        id: "result-1",
+        parentId: "user-1",
+        timestamp: "2026-06-13T10:01:00Z",
+        message: { role: "toolResult", content: [{ type: "text", text: canonical_tool_result_text }] }
+      })
+      reordered_tool_result = JSON.generate({
+        type: "message",
+        id: "result-2",
+        message: { content: [{ type: "text", text: "fallback" }], role: "toolResult" }
+      })
+      File.write(path, [
+        JSON.generate({ type: "session", id: "session-1", timestamp: "2026-06-13T10:00:00Z", cwd: "/tmp/project" }),
+        JSON.generate({ type: "message", id: "user-1", message: { role: "user", content: [{ type: "text", text: "First prompt" }] } }),
+        canonical_tool_result,
+        reordered_tool_result
+      ].join("\n"))
+      parsed_lines = []
+      parse = JSON.method(:parse)
+      store = PiSessionStore.new(root: dir)
+
+      replace_singleton_method(JSON, :parse, ->(line, *args) { parsed_lines << line; parse.call(line, *args) }) do
+        session = store.sessions.first
+
+        assert_equal "First prompt", session.display_name
+        assert_equal 1, session.message_count
+      end
+
+      refute parsed_lines.include?(canonical_tool_result)
+      assert parsed_lines.include?(reordered_tool_result)
+      assert store.messages(path).any? { |message| message.text == canonical_tool_result_text }
+    end
+  end
+
+  def test_concurrent_metadata_cache_misses_read_a_session_once
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", timestamp: "2026-06-13T10:00:00Z", cwd: "/tmp/project" },
+        { type: "message", id: "user-1", message: { role: "user", content: [{ type: "text", text: "First prompt" }] } }
+      ])
+      read_count, results = concurrent_session_reads(PiSessionStore.new(root: dir))
+      timestamp = Time.iso8601("2026-06-13T10:00:00Z")
+      expected = {
+        path: path,
+        cwd: "/tmp/project",
+        id: "session-1",
+        display_name: "First prompt",
+        first_user_message: "First prompt",
+        message_count: 1,
+        assistant_response_count: 0,
+        latest_assistant_response_preview: nil,
+        latest_activity_kind: nil,
+        latest_activity_title: nil,
+        latest_activity_preview: nil,
+        parent_session_path: nil,
+        created_at: timestamp,
+        modified_at: File.mtime(path),
+        conversation_activity_at: timestamp
+      }
+
+      assert_equal 1, read_count
+      assert_equal [expected, expected], results.map { |sessions| sessions.fetch(0).to_h }
+    end
+  end
+
+  def test_concurrent_empty_metadata_cache_misses_are_shared_and_invalidated_after_append
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      File.write(path, JSON.generate({ type: "message", id: "user-1", message: { role: "user", content: [] } }) + "\n")
+      store = PiSessionStore.new(root: dir)
+
+      read_count, results = concurrent_session_reads(store)
+
+      assert_equal 1, read_count
+      assert_equal [[], []], results
+
+      File.open(path, "a") do |file|
+        file.puts JSON.generate({ type: "session", id: "session-1", timestamp: "2026-06-13T10:00:00Z", cwd: "/tmp/project" })
+      end
+      assert_equal ["session-1"], store.sessions.map(&:id)
+    end
+  end
+
   def test_empty_latest_session_name_restores_first_message_fallback
     Dir.mktmpdir do |dir|
       path = File.join(dir, "session.jsonl")
@@ -985,6 +1074,43 @@ class PiSessionStoreTest < Minitest::Test
   end
 
   private
+
+  def concurrent_session_reads(store)
+    read_count = 0
+    count_mutex = Mutex.new
+    original = File.method(:foreach)
+    foreach = lambda do |*args, **kwargs, &block|
+      count_mutex.synchronize { read_count += 1 }
+      sleep 0.05
+      original.call(*args, **kwargs, &block)
+    end
+    ready = Queue.new
+    start = Queue.new
+    results = nil
+
+    replace_singleton_method(File, :foreach, foreach) do
+      threads = 2.times.map do
+        Thread.new do
+          ready << true
+          start.pop
+          store.sessions
+        end
+      end
+      2.times { ready.pop }
+      2.times { start << true }
+      results = threads.map(&:value)
+    end
+
+    [read_count, results]
+  end
+
+  def replace_singleton_method(receiver, name, replacement)
+    original = receiver.method(name)
+    receiver.singleton_class.define_method(name, replacement)
+    yield
+  ensure
+    receiver.singleton_class.define_method(name, original)
+  end
 
   def write_jsonl(path, entries)
     File.write(path, entries.map { |entry| JSON.generate(entry) }.join("\n"))

@@ -25,6 +25,10 @@ class PiSessionStore
   Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :error, :tool_call_id, :tool_name, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :tool_prompt, :final_assistant_response, :entry_id, :images, :custom_type, :compaction, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :context_estimated, :cost_total, keyword_init: true)
   Conversation = Struct.new(:messages, :latest_stable_tree_position_id, :current_stable_tree_position_id, :status, keyword_init: true)
+  MAX_SESSION_CACHE_ENTRIES = 10_000
+  # Unknown layouts fall back to JSON parsing; only Pi's native key order takes this metadata fast path.
+  NATIVE_TOOL_RESULT_PREFIX = /\A\{"type":"message","id":"[^"]+","parentId":(?:null|"[^"]+"),"timestamp":"[^"]+","message":\{"role":"toolResult"/.freeze
+
   FileSnapshot = Struct.new(:device, :inode, :size, :mtime_ns, :append_cursor, :persisted_leaf_id, :complete, keyword_init: true) do
     def revision
       [device, inode, size, mtime_ns, append_cursor, persisted_leaf_id, complete ? 1 : 0].join(":")
@@ -33,18 +37,37 @@ class PiSessionStore
 
   @session_cache = {}
   @session_cache_mutex = Mutex.new
+  @session_cache_clock = 0
 
   class << self
-    def cached_session(path, signature)
-      @session_cache_mutex.synchronize do
-        cached = @session_cache[path]
-        cached[:session] if cached && cached[:signature] == signature
+    def fetch_session(path)
+      state = @session_cache_mutex.synchronize do
+        @session_cache_clock += 1
+        state = @session_cache[path] ||= { lock: Mutex.new, users: 0 }
+        state[:users] += 1
+        state[:last_used] = @session_cache_clock
+        state
       end
-    end
+      state.fetch(:lock).synchronize do
+        stat = File.stat(path)
+        signature = [stat.size, stat.mtime.to_f]
+        return state[:session] if state.key?(:session) && state[:signature] == signature
 
-    def cache_session(path, signature, session)
-      @session_cache_mutex.synchronize do
-        @session_cache[path] = { signature: signature, session: session }
+        session = yield(stat)
+        state[:signature] = signature
+        state[:session] = session
+      end
+    ensure
+      if state
+        @session_cache_mutex.synchronize do
+          state[:users] -= 1
+          excess = @session_cache.length - MAX_SESSION_CACHE_ENTRIES
+          if excess.positive?
+            @session_cache.select { |_cached_path, cached| cached[:users].zero? }
+                          .min_by(excess) { |_cached_path, cached| cached[:last_used] }
+                          .each { |cached_path, _cached| @session_cache.delete(cached_path) }
+          end
+        end
       end
     end
   end
@@ -378,15 +401,14 @@ class PiSessionStore
   end
 
   def parse_session(path)
-    stat = File.stat(path)
-    signature = [stat.size, stat.mtime.to_f]
-    cached_session = self.class.cached_session(path, signature)
-    if cached_session
-      return if hide_session_with_missing_cwd?(cached_session.cwd)
+    session = self.class.fetch_session(path) { |stat| session_from_metadata(path, stat) }
+    return unless session
+    return if hide_session_with_missing_cwd?(session.cwd)
 
-      return cached_session
-    end
+    session
+  end
 
+  def session_from_metadata(path, stat)
     session_entry = nil
     latest_name = nil
     first_user_message = nil
@@ -398,7 +420,7 @@ class PiSessionStore
     latest_activity_preview = nil
     conversation_activity_at = nil
 
-    read_entries(path).each do |entry|
+    each_entry(path, skip_canonical_tool_results: true) do |entry|
       case entry["type"]
       when "session"
         session_entry ||= entry
@@ -433,8 +455,7 @@ class PiSessionStore
 
     display_name = latest_name || first_user_message || File.basename(path, ".jsonl")
     conversation_activity_at ||= parse_time(session_entry["timestamp"])
-
-    session = Session.new(
+    Session.new(
       path: path,
       cwd: session_entry["cwd"] || "Unknown cwd",
       id: session_entry["id"],
@@ -451,10 +472,6 @@ class PiSessionStore
       modified_at: stat.mtime,
       conversation_activity_at: conversation_activity_at
     )
-    self.class.cache_session(path, signature, session)
-    return if hide_session_with_missing_cwd?(session.cwd)
-
-    session
   end
 
   def conversation_activity_message?(message)
@@ -510,13 +527,27 @@ class PiSessionStore
   end
 
   def read_entries(path)
-    File.readlines(path, chomp: true).filter_map do |line|
-      next if line.strip.empty?
+    each_entry(path).to_a
+  end
 
-      JSON.parse(line)
-    rescue JSON::ParserError
-      nil
+  def each_entry(path, skip_canonical_tool_results: false)
+    return enum_for(__method__, path, skip_canonical_tool_results: skip_canonical_tool_results) unless block_given?
+
+    File.foreach(path, chomp: true) do |line|
+      next if line.strip.empty?
+      next if skip_canonical_tool_results && canonical_tool_result_entry?(line)
+
+      entry = begin
+        JSON.parse(line)
+      rescue JSON::ParserError
+        next
+      end
+      yield entry
     end
+  end
+
+  def canonical_tool_result_entry?(line)
+    line.match?(NATIVE_TOOL_RESULT_PREFIX)
   end
 
   def last_append_cursor(file)
