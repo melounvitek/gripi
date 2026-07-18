@@ -78,9 +78,13 @@
     .session-header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 0.45rem; }
     .session-header-actions form { margin: 0; }
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.7rem; }
-    .session-header-window-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; line-height: 1; text-decoration: none; }
-    .session-header-window-action:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
+    .session-header-window-action, .session-header-focus-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; line-height: 1; text-decoration: none; }
+    .session-header-window-action:hover, .session-header-focus-action:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
+    .session-header-focus-action { gap: 0.4rem; }
+    .session-header-focus-action.is-active { border-color: var(--accent-line-55); background: var(--accent-tint-08); color: var(--accent); }
+    .session-header-focus-icon { width: 1rem; height: 1rem; }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.5rem; }
+    .conversation-panel.is-conversation-focused .conversation-scroll .message:not([data-role="user"]):not([data-final-assistant-response="true"]), .conversation-panel.is-conversation-focused .conversation-scroll .message--error, .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error { display: none; }
     .conversation-scroll:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-tint-14); }
     .current-session-find { position: sticky; top: 0.4rem; z-index: 5; width: min(38rem, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto repeat(3, 2rem); align-items: center; gap: 0.4rem; margin: 0 0 0.75rem auto; padding: 0.55rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: #1e1e24fa; box-shadow: var(--shadow-soft); }
     .current-session-find input[type="search"] { min-width: 0; padding: 0.5rem 0.65rem; }
@@ -540,6 +544,8 @@
       .session-header-actions { gap: 0.35rem; }
       .session-header-window-action { display: none; }
       .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.66rem; }
+      .session-header-focus-action { width: 2.4rem; min-width: 2.4rem; height: 2.4rem; min-height: 2.4rem; padding: 0; }
+      .session-header-focus-label { display: none; }
       .session-header h1 { font-size: 1rem; }
       .session-header-project { font-size: 0.7rem; }
       .project-select-trigger { min-height: 2.75rem; font-size: 16px; }
@@ -679,6 +685,10 @@
           <div class="session-header-project" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon">GR</span><span class="session-header-project-label">gripi</span></div>
         </div>
         <div class="session-header-actions">
+          <button type="button" class="session-header-action session-header-focus-action" data-conversation-focus-toggle aria-pressed="false" title="Show conversation only" aria-label="Focus view">
+            <svg class="session-header-focus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H8l-4 3V5Z"></path><path d="M8 9h8M8 12h6"></path></svg>
+            <span class="session-header-focus-label">Focus</span>
+          </button>
           <a class="session-header-action session-header-window-action" href="#" title="Open session in new window" aria-label="Open session in new window" data-demo-disabled>↗</a>
           <button type="button" class="danger abort-button session-abort-button composer-stop-button" id="stop-button" hidden disabled title="Abort running Pi"><span aria-hidden="true">⏹</span></button>
         </div>
@@ -693,8 +703,8 @@
         <section id="history-output">
           <article class="message message--user" data-role="user"><header class="message-header"><div class="role">user</div><div class="message-meta"></div></header><pre class="message-body">What is Gripi, and how can I get started?</pre></article>
           <article class="message message--assistant message--thinking" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta"></div></header><div class="message-body message-body--thinking message-body--markdown"><p>I’ll give you a quick tour and the shortest path to a local installation.</p></div></article>
-          <article class="message message--assistant" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta"></div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Here, Pi means the coding-agent harness that connects the model to files, shell commands, tools, edits, and session history — not Raspberry Pi hardware. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.</p><p>Pi stays Pi: Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated.</p></div></article>
-          <article class="message message--assistant" data-role="assistant"><header class="message-header"><div class="role">pi</div><div class="message-meta"></div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>Clone and start Gripi with these commands. Setup prints the admin password used to approve your browser, then Gripi is available at http://localhost:4567.</p><pre><code>git clone https://github.com/melounvitek/gripi.git
+          <article class="message message--assistant" data-role="assistant" data-final-assistant-response="true"><header class="message-header"><div class="role">pi</div><div class="message-meta"></div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Here, Pi means the coding-agent harness that connects the model to files, shell commands, tools, edits, and session history — not Raspberry Pi hardware. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.</p><p>Pi stays Pi: Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated.</p></div></article>
+          <article class="message message--assistant" data-role="assistant" data-final-assistant-response="true"><header class="message-header"><div class="role">pi</div><div class="message-meta"></div><button type="button" class="copy-button" data-copy-target="message">Copy</button></header><div class="message-body message-body--markdown"><p>Clone and start Gripi with these commands. Setup prints the admin password used to approve your browser, then Gripi is available at http://localhost:4567.</p><pre><code>git clone https://github.com/melounvitek/gripi.git
 cd gripi
 mise install
 mise run setup

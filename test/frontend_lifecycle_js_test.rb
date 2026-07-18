@@ -820,6 +820,73 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal false, results.fetch("nearBottomRestored")
   end
 
+  def test_focused_view_toggles_and_survives_in_page_session_switching
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      class ClassList {
+        constructor() { this.values = new Set(); }
+        add(name) { this.values.add(name); }
+        remove(name) { this.values.delete(name); }
+        toggle(name, enabled) { enabled ? this.add(name) : this.remove(name); }
+        contains(name) { return this.values.has(name); }
+      }
+      class Toggle {
+        constructor() { this.classList = new ClassList(); this.attributes = {}; this.listeners = []; }
+        addEventListener(type, listener) { if (type === "click") this.listeners.push(listener); }
+        removeEventListener(type, listener) { if (type === "click") this.listeners = this.listeners.filter((item) => item !== listener); }
+        setAttribute(name, value) { this.attributes[name] = value; }
+        click() { this.listeners.forEach((listener) => listener()); }
+      }
+      const scroll = {
+        scrollTop: 0, scrollHeight: 100, clientHeight: 100,
+        addEventListener() {}, removeEventListener() {}, querySelectorAll: () => [], querySelector: () => null
+      };
+      let panel = { classList: new ClassList() };
+      let toggle = new Toggle();
+      const document = {
+        body: { classList: new ClassList() },
+        getElementById: (id) => id === "conversation-scroll" ? scroll : null,
+        querySelector(selector) {
+          if (selector === ".conversation-panel") return panel;
+          if (selector === "[data-conversation-focus-toggle]") return toggle;
+          return null;
+        }
+      };
+      const window = { location: { search: "", origin: "https://example.test" }, matchMedia: () => ({ matches: false }) };
+      const controller = new ConversationController(document, window);
+      controller.bind();
+      const initiallyPressed = toggle.attributes["aria-pressed"];
+      toggle.click();
+      const firstPanelFocused = panel.classList.contains("is-conversation-focused");
+
+      controller.reset();
+      panel = { classList: new ClassList() };
+      toggle = new Toggle();
+      controller.bind();
+      const switchedPanelFocused = panel.classList.contains("is-conversation-focused");
+      const switchedTogglePressed = toggle.attributes["aria-pressed"];
+
+      controller.reset();
+      const reloadedController = new ConversationController(document, window);
+      reloadedController.bind();
+      console.log(JSON.stringify({
+        initiallyPressed,
+        firstPanelFocused,
+        switchedPanelFocused,
+        switchedTogglePressed,
+        reloadedPanelFocused: panel.classList.contains("is-conversation-focused"),
+        reloadedTogglePressed: toggle.attributes["aria-pressed"]
+      }));
+    JS
+
+    assert_equal "false", results.fetch("initiallyPressed")
+    assert_equal true, results.fetch("firstPanelFocused")
+    assert_equal true, results.fetch("switchedPanelFocused")
+    assert_equal "true", results.fetch("switchedTogglePressed")
+    assert_equal false, results.fetch("reloadedPanelFocused")
+    assert_equal "false", results.fetch("reloadedTogglePressed")
+  end
+
   def test_page_keyboard_intent_listener_remains_page_lifetime_state
     script = File.read(File.join(ASSETS, "app.js"))
 

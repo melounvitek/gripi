@@ -88,7 +88,7 @@ export class LiveMessageRenderer {
     const roleKey = messageRoleKey(roleName);
 
     const article = this.document.createElement("article");
-    article.className = `message message--${roleKey}${options.thinking ? " message--thinking" : ""}${live ? " message--live" : ""}`;
+    article.className = `message message--${roleKey}${options.thinking ? " message--thinking" : ""}${options.error ? " message--error" : ""}${live ? " message--live" : ""}`;
     article.dataset.role = roleName;
     article.dataset.messageTimestamp = timestampKey;
     article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);

@@ -22,6 +22,10 @@
             <% end %>
           </div>
           <div class="session-header-actions">
+            <button type="button" class="session-header-action session-header-focus-action" data-conversation-focus-toggle aria-pressed="false" title="Show conversation only" aria-label="Focus view">
+              <svg class="session-header-focus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H8l-4 3V5Z"></path><path d="M8 9h8M8 12h6"></path></svg>
+              <span class="session-header-focus-label">Focus</span>
+            </button>
             <% unless session_only? %>
               <a class="session-header-action session-header-window-action" href="<%= h session_only_url(@selected_session.path) %>" target="_blank" rel="noopener" title="Open session in new window" aria-label="Open session in new window">↗</a>
             <% end %>

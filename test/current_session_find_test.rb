@@ -19,6 +19,37 @@ class CurrentSessionFindTest < Minitest::Test
     assert_includes conversation, 'Conversation only'
   end
 
+  def test_open_find_refreshes_when_focused_view_changes
+    results = run_javascript(<<~JS)
+      const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});
+      let focusClick;
+      const control = { addEventListener() {} };
+      const bar = {
+        hidden: false,
+        querySelector(selector) {
+          if (selector.includes("input]")) return control;
+          if (selector.includes("count]")) return {};
+          return control;
+        }
+      };
+      const focusToggle = { addEventListener(_type, listener) { focusClick = listener; } };
+      const document = { querySelector: (selector) => selector === "[data-current-session-find]" ? bar : focusToggle };
+      const controller = new CurrentSessionFindController(document, {});
+      let searches = 0;
+      controller.search = async () => { searches += 1; };
+      controller.bind();
+      focusClick();
+      await Promise.resolve();
+      const whileOpen = searches;
+      bar.hidden = true;
+      focusClick();
+      await Promise.resolve();
+      console.log(JSON.stringify({ whileOpen, whileClosed: searches }));
+    JS
+
+    assert_equal({ "whileOpen" => 1, "whileClosed" => 1 }, results)
+  end
+
   def test_literal_matching_is_case_insensitive_and_does_not_treat_query_as_a_pattern
     results = run_javascript(<<~JS)
       const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});

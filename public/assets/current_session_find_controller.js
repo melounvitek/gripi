@@ -37,6 +37,9 @@ export class CurrentSessionFindController {
     this.conversationOnly?.addEventListener("change", () => {
       this.search({ resetIndex: true }).catch(() => {});
     });
+    this.document.querySelector("[data-conversation-focus-toggle]")?.addEventListener?.("click", () => {
+      if (this.open) this.search({ resetIndex: true }).catch(() => {});
+    });
     this.bar?.querySelector("[data-current-session-find-previous]")?.addEventListener("click", () => this.move(-1));
     this.bar?.querySelector("[data-current-session-find-next]")?.addEventListener("click", () => this.move(1));
     this.bar?.querySelector("[data-current-session-find-close]")?.addEventListener("click", () => this.close());
@@ -60,6 +63,10 @@ export class CurrentSessionFindController {
 
   conversationMessage(message) {
     return message.matches('[data-role="user"].message--user:not(.message--compact):not(.message--thinking):not(.message--error):not(.message--tool-error), [data-role="assistant"].message--assistant:not(.message--compact):not(.message--thinking):not(.message--status):not(.message--tool):not(.message--tool-call):not(.message--tool-transcript):not(.message--error):not(.message--tool-error)');
+  }
+
+  focusedViewMessage(message) {
+    return message.matches('[data-role="user"]:not(.message--error):not(.message--tool-error), [data-final-assistant-response="true"]:not(.message--error):not(.message--tool-error)');
   }
 
   textNodes(root) {
@@ -95,6 +102,7 @@ export class CurrentSessionFindController {
     if (!element || !query) return [];
     const matches = [];
     element.querySelectorAll(".message").forEach((message) => {
+      if (this.conversation.focusedView && !this.focusedViewMessage(message)) return;
       if (this.conversationOnly?.checked && !this.conversationMessage(message)) return;
       message.querySelectorAll(".compact-summary, .message-body").forEach((root) => {
         const source = this.source(root);

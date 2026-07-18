@@ -218,6 +218,7 @@
   let programmaticScroll = false;
   let programmaticScrollTimer = null;
   let autoScrollEnabled = true;
+  let focusedView = false;
 
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey));
@@ -234,6 +235,7 @@
     project: document.getElementById("project-filter"), projectTrigger: document.getElementById("project-select-trigger"), projectList: document.getElementById("project-select-listbox"),
     searchForm: document.getElementById("sidebar-session-search"), search: document.querySelector('#sidebar-session-search input[type="search"]'), clearFilters: document.querySelector("[data-sidebar-filters-clear]"),
     headerName: document.querySelector(".session-header-name"), headerProject: document.querySelector(".session-header-project"), form: document.getElementById("prompt-form"), prompt: document.querySelector(".prompt-form textarea"),
+    panel: document.querySelector(".conversation-panel"), focusToggle: document.querySelector("[data-conversation-focus-toggle]"),
     state: document.querySelector(".composer-state"), stop: document.getElementById("stop-button"), commands: document.getElementById("command-list"), attachmentTray: document.querySelector(".attachment-tray"),
     treeTarget: document.querySelector("[data-demo-tree-target]"), treeTargetTitle: document.querySelector("[data-demo-tree-target-title]"), treeCurrentTitle: document.querySelector("[data-demo-tree-current-title]")
   };
@@ -258,6 +260,14 @@
   function loadDraft() {
     try { element.prompt.value = localStorage.getItem(draftKey()) || ""; } catch (_error) { element.prompt.value = ""; }
     element.commands.classList.toggle("is-visible", element.prompt.value.startsWith("/"));
+  }
+  function setFocusedView(enabled) {
+    focusedView = enabled;
+    element.panel.classList.toggle("is-conversation-focused", focusedView);
+    element.focusToggle.classList.toggle("is-active", focusedView);
+    element.focusToggle.setAttribute("aria-pressed", String(focusedView));
+    element.focusToggle.setAttribute("title", focusedView ? "Show full transcript" : "Show conversation only");
+    element.focusToggle.setAttribute("aria-label", "Focus view");
   }
   function timeLabel(date = new Date()) { const pad = (value) => String(value).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`; }
   function applyIdentity(target, session) {
@@ -316,6 +326,7 @@
     const roleKey = role === "thinking" || role === "tool" ? "assistant" : role === "compaction" ? "status" : role;
     article.className = `message message--${roleKey}${role === "thinking" ? " message--thinking" : ""}${role === "tool" ? " message--compact message--tool-call" : ""}${role === "compaction" ? " message--compact" : ""}${live ? " message--live" : ""}`;
     article.dataset.role = roleKey;
+    if (role === "assistant" && !live && message.completed !== false) article.dataset.finalAssistantResponse = "true";
     const header = document.createElement("header");
     header.className = "message-header";
     const label = document.createElement("div");
@@ -501,7 +512,7 @@
     }
     if (event.type === "tool_end" && activeToolEntry) { activeToolEntry.message.text = event.text; activeToolEntry.article.classList.remove("message--live"); setRunning(true, "Pi is responding…"); }
     if (event.type === "assistant_start") {
-      const message = { role: "assistant", text: "", time: timeLabel() }; session.messages.push(message);
+      const message = { role: "assistant", text: "", time: timeLabel(), completed: false }; session.messages.push(message);
       const article = messageArticle(message, true); article.classList.add("message--streaming"); element.live.append(article);
       streamingEntry = { article, body: article.messageBody, message, session };
     }
@@ -512,8 +523,13 @@
       paragraph.textContent += event.text;
     }
     if (event.type === "done") {
+      if (streamingEntry) {
+        streamingEntry.message.completed = true;
+        streamingEntry.article.dataset.finalAssistantResponse = "true";
+      }
       streamingEntry?.article.classList.remove("message--streaming"); streamController = null; streamingEntry = null; activeToolEntry = null; setRunning(false); persist();
     }
+    refreshOpenFind();
     scrollLatest();
   }
 
@@ -523,7 +539,7 @@
     if (prompt.startsWith("/")) { handleSlash(prompt.split(/\s/)[0].slice(1)); element.prompt.value = ""; persistDraft(); element.commands.classList.remove("is-visible"); return; }
     const streamSession = currentSession();
     const message = { role: "user", text: prompt, time: timeLabel() };
-    streamSession.messages.push(message); touchSessionActivity(streamSession); renderSidebar(); element.live.append(messageArticle(message, true)); element.prompt.value = ""; persistDraft();
+    streamSession.messages.push(message); touchSessionActivity(streamSession); renderSidebar(); element.live.append(messageArticle(message, true)); element.prompt.value = ""; persistDraft(); refreshOpenFind();
     element.attachmentTray.replaceChildren(); element.attachmentTray.classList.remove("has-attachments");
     setRunning(true, "Sending…"); persist(); scrollLatest(true);
     streamController = new AbortController();
@@ -540,7 +556,7 @@
   function handleSlash(command) {
     const modals = { new: "new-session-modal", fork: "fork-session-modal", tree: "tree-session-modal", model: "model-settings-modal" };
     if (modals[command]) openModal(modals[command]);
-    else if (command === "compact") { const session = currentSession(); const message = { role: "compaction", title: "Conversation compacted", text: "Static demo compaction summary. In production this is generated by Pi.", time: timeLabel() }; session.messages.push(message); touchSessionActivity(session); renderSidebar(); element.live.append(messageArticle(message, true)); persist(); scrollLatest(true); }
+    else if (command === "compact") { const session = currentSession(); const message = { role: "compaction", title: "Conversation compacted", text: "Static demo compaction summary. In production this is generated by Pi.", time: timeLabel() }; session.messages.push(message); touchSessionActivity(session); renderSidebar(); element.live.append(messageArticle(message, true)); persist(); refreshOpenFind(); scrollLatest(true); }
   }
 
   function switchSession(id) {
@@ -573,6 +589,10 @@
     if (hide) container.hidden = true;
   }
 
+  function refreshOpenFind() {
+    if (!document.querySelector("[data-current-session-find]").hidden) updateFind();
+  }
+
   function updateFind() {
     clearFindMatches();
     const query = document.querySelector("[data-current-session-find-input]").value.trim();
@@ -581,6 +601,8 @@
     if (query) {
       const selector = conversationOnly ? ".message-body" : ".message";
       element.scroll.querySelectorAll(selector).forEach((root) => {
+        const message = root.closest(".message");
+        if (focusedView && !message?.matches('[data-role="user"]:not(.message--error):not(.message--tool-error), [data-final-assistant-response="true"]:not(.message--error):not(.message--tool-error)')) return;
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         const nodes = [];
         while (walker.nextNode()) if (!walker.currentNode.parentElement.closest("button, summary")) nodes.push(walker.currentNode);
@@ -646,6 +668,10 @@
   element.projectTrigger.addEventListener("click", () => { const open = element.projectList.hidden; element.projectList.hidden = !open; element.projectTrigger.setAttribute("aria-expanded", String(open)); if (open) { const rect = element.projectTrigger.getBoundingClientRect(); Object.assign(element.projectList.style, { left: `${rect.left}px`, top: `${rect.bottom + 4}px`, width: `${rect.width}px` }); } });
   element.projectList.addEventListener("click", (event) => { const option = event.target.closest("[data-project-value]"); if (option) selectProject(option.dataset.projectValue); });
   document.querySelector("[data-notification-toggle]").addEventListener("click", (event) => { const enabled = !event.currentTarget.classList.contains("is-enabled"); event.currentTarget.classList.toggle("is-enabled", enabled); event.currentTarget.classList.toggle("is-disabled", !enabled); event.currentTarget.querySelector("[data-notification-toggle-state]").textContent = enabled ? "Demo on" : "Demo off"; });
+  element.focusToggle.addEventListener("click", () => {
+    setFocusedView(!focusedView);
+    refreshOpenFind();
+  });
   element.form.addEventListener("submit", (event) => { event.preventDefault(); submitPrompt(); });
   element.prompt.addEventListener("input", () => { const slash = element.prompt.value.startsWith("/"); element.commands.classList.toggle("is-visible", slash); if (slash) element.commands.open = true; persistDraft(); });
   element.prompt.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitPrompt(); } });

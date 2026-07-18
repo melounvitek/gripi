@@ -28,6 +28,7 @@ export class ConversationController {
     this.messageJumpSuppressionTimer = null;
     this.messageJumpSuppressionScrollEndListener = null;
     this.messageJumpSuppressionGeneration = 0;
+    this.focusedView = false;
   }
 
   bind(promptTextarea = null) {
@@ -40,6 +41,13 @@ export class ConversationController {
     this.bottomJumpControls = this.document.querySelector(".jump-controls--bottom");
     this.jumpToFirstButton = this.document.querySelector(".jump-to-first");
     this.jumpToLatestButton = this.document.querySelector(".jump-to-latest");
+    this.conversationPanel = this.document.querySelector(".conversation-panel");
+    this.focusToggle = this.document.querySelector("[data-conversation-focus-toggle]");
+    this.applyFocusedView();
+    this.listen(this.focusToggle, "click", () => {
+      this.focusedView = !this.focusedView;
+      this.applyFocusedView();
+    });
     this.lastScrollTop = this.element?.scrollTop || 0;
     this.scrollDirection = null;
     this.followOversizedMessageBottom = false;
@@ -97,8 +105,18 @@ export class ConversationController {
     this.bindingEpoch += 1;
     this.element = null;
     this.liveOutput = null;
+    this.conversationPanel = null;
+    this.focusToggle = null;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
+  }
+
+  applyFocusedView() {
+    this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
+    this.focusToggle?.classList.toggle("is-active", this.focusedView);
+    this.focusToggle?.setAttribute("aria-pressed", String(this.focusedView));
+    this.focusToggle?.setAttribute("title", this.focusedView ? "Show full transcript" : "Show conversation only");
+    this.focusToggle?.setAttribute("aria-label", "Focus view");
   }
 
   listen(target, type, listener, options) {

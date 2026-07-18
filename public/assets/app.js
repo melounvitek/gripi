@@ -1608,7 +1608,7 @@ async function submitPrompt(event) {
     liveMessageRenderer.markOptimisticUserMessageFailed(message);
     setComposerState("error", errorMessage);
     showStatus(errorMessage, true);
-    liveMessageRenderer.appendMessage("assistant", `Prompt failed to send:\n\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true });
+    liveMessageRenderer.appendMessage("assistant", `Prompt failed to send:\n\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true, error: true });
   };
 
   let response;

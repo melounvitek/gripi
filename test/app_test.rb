@@ -5155,6 +5155,7 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
       assert_includes response.body, 'class="message message--user" data-role="user"'
       assert_includes response.body, 'class="message message--assistant" data-role="assistant"'
       assert_includes response.body, 'data-final-assistant-response="true"'
@@ -5163,6 +5164,12 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'message--tool'
       assert_includes response.body, 'data-role="toolResult"'
       assert_includes response.body, 'class="message message--error" data-role="error"'
+      focus_toggle = document.at_css("[data-conversation-focus-toggle]")
+      refute_nil focus_toggle
+      assert_equal "false", focus_toggle["aria-pressed"]
+      assert_equal "Show conversation only", focus_toggle["title"]
+      assert_equal "Focus view", focus_toggle["aria-label"]
+      assert_includes APP_STYLESHEET, '.conversation-scroll .message:not([data-role="user"]):not([data-final-assistant-response="true"]), .conversation-panel.is-conversation-focused .conversation-scroll .message--error, .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error { display: none; }'
       assert_includes response.body, 'class="message-body"'
       assert_includes response.body, "Hello &lt;Pi&gt;"
       assert_includes response.body, Time.parse("2026-06-13T10:00:00Z").localtime.strftime("%Y-%m-%d %H:%M")
@@ -6340,7 +6347,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "markOptimisticUserMessageFailed(message);"
       assert_includes APP_JAVASCRIPT, "message.hasAttribute(\"data-optimistic-text\") ? message.dataset.optimisticText : message.querySelector(\".message-body\")?.textContent"
       assert_includes APP_JAVASCRIPT, 'return targetText.startsWith(`${optimisticText}\\n`);'
-      assert_includes APP_JAVASCRIPT, "appendMessage(\"assistant\", `Prompt failed to send:\\n\\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true });"
+      assert_includes APP_JAVASCRIPT, "appendMessage(\"assistant\", `Prompt failed to send:\\n\\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true, error: true });"
       assert_includes APP_JAVASCRIPT, "clearTimeout(eventPollTimer);"
       assert_includes APP_JAVASCRIPT, "eventPollInFlight = false;"
       assert_includes APP_JAVASCRIPT, "sessionViewGeneration += 1;"
