@@ -80,7 +80,7 @@ Keep access approval enabled for any gateway reachable from another device: brow
 
 Gripi is intentionally thin around Pi. It uses Pi’s existing runtime, sessions, tools, models, and configuration instead of replacing them with Gripi-specific behavior. Gateway-only metadata is stored separately when needed.
 
-If a project uses project-local `.pi/settings.json`, `.pi/extensions/`, `.pi/skills/`, `.pi/prompts/`, `.pi/themes/`, `SYSTEM.md`, `APPEND_SYSTEM.md`, or `.agents/skills/`, trust the project in Pi CLI before opening or starting it in Gripi. This also covers project packages configured through `.pi/settings.json`. Pi owns this trust workflow; Gripi neither grants trust nor loads untrusted project resources. If Gripi already opened the project before it was trusted, restart the gateway after active work finishes so Pi reloads those resources.
+By default, Gripi automatically approves project-local resources for each Pi process it starts. This ensures project settings, extensions, skills, prompts, themes, system prompts, and packages work without first opening the directory in Pi CLI. Unlike Pi CLI’s default trust workflow, merely opening a project in Gripi may therefore load extensions or package installation scripts that execute arbitrary code as the gateway OS user. Only open projects whose contents you trust. See [configuration](docs/configuration.md#project-resource-approval) to disable automatic approval.
 
 The composer supports Pi-style `@` file search and path completion. While Pi is running, the send button steers by default; use its menu to select Follow-up mode for the next message. On desktop, Enter steers by default, Alt+Enter queues a follow-up, and Shift+Enter inserts a newline.
 

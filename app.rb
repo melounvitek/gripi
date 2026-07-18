@@ -142,6 +142,7 @@ class Gripi < Sinatra::Base
   set :enforce_secure_remote_transport, production? && !allow_insecure_remote_http
 
   multi_user_mode = ENV.fetch("GRIPI_MULTI_USER_MODE", "").match?(/\A(?:1|true|yes|on)\z/i)
+  auto_approve_projects = ENV.fetch("GRIPI_AUTO_APPROVE_PROJECTS", "1").match?(/\A(?:1|true|yes|on)\z/i)
   gateway_admin_password = ENV["GRIPI_ADMIN_PASSWORD"].to_s
   if gateway_admin_password.empty? && !browser_auth_disabled
     raise "GRIPI_ADMIN_PASSWORD is required. Set it in #{GRIPI_ENV_PATH} or in the gateway process environment."
@@ -157,6 +158,7 @@ class Gripi < Sinatra::Base
   set :workspace_ownership_path, ENV.fetch("GRIPI_WORKSPACE_OWNERSHIP_PATH", File.expand_path("~/.pi/gripi/session-owners.json"))
   set :gateway_admin_password, gateway_admin_password
   pi_rpc_command_prefix = PiRpcClient.command_prefix(node_path: ENV["GRIPI_NODE"], pi_path: ENV["GRIPI_PI"])
+  pi_rpc_command_prefix += ["--approve"] if auto_approve_projects
   set :pi_rpc_command_prefix, pi_rpc_command_prefix
   set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path, command_prefix: pi_rpc_command_prefix) }]
   set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd, command_prefix: pi_rpc_command_prefix) }]

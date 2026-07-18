@@ -125,13 +125,62 @@ class AppTest < Minitest::Test
       "GRIPI_ADMIN_PASSWORD" => "secret",
       "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
       "GRIPI_NODE" => "/opt/node",
-      "GRIPI_PI" => "/opt/pi"
+      "GRIPI_PI" => "/opt/pi",
+      "GRIPI_AUTO_APPROVE_PROJECTS" => nil
+    )
+
+    stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts Gripi.settings.pi_rpc_command_prefix.join(' ')")
+
+    assert status.success?, stderr
+    assert_equal "/opt/node /opt/pi --approve", stdout.strip
+  end
+
+  def test_app_boot_can_disable_automatic_project_approval
+    env = ENV.to_h.merge(
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
+      "GRIPI_NODE" => "/opt/node",
+      "GRIPI_PI" => "/opt/pi",
+      "GRIPI_AUTO_APPROVE_PROJECTS" => "0"
     )
 
     stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", "require './app'; puts Gripi.settings.pi_rpc_command_prefix.join(' ')")
 
     assert status.success?, stderr
     assert_equal "/opt/node /opt/pi", stdout.strip
+  end
+
+  def test_app_boot_applies_automatic_project_approval_to_new_and_resumed_sessions
+    env = ENV.to_h.merge(
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
+      "GRIPI_NODE" => "/opt/node",
+      "GRIPI_PI" => "/opt/pi",
+      "GRIPI_AUTO_APPROVE_PROJECTS" => nil
+    )
+    script = <<~RUBY
+      require './lib/pi_rpc_client'
+      class PiRpcClient
+        def self.start(session_path, command_prefix:)
+          puts ['resume', *command_prefix, session_path].join('|')
+        end
+
+        def self.start_in_cwd(cwd, command_prefix:)
+          puts ['new', *command_prefix, cwd].join('|')
+        end
+      end
+      require './app'
+      Gripi.settings.rpc_client_factory.first.call('/tmp/session.jsonl')
+      Gripi.settings.new_rpc_client_factory.first.call('/tmp/project')
+    RUBY
+
+    stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", script)
+
+    assert status.success?, stderr
+    assert_equal [
+      "resume|/opt/node|/opt/pi|--approve|/tmp/session.jsonl",
+      "new|/opt/node|/opt/pi|--approve|/tmp/project"
+    ], stdout.lines.map(&:strip)
   end
 
   def test_app_boot_rejects_partial_pi_rpc_command_config

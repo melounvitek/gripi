@@ -27,13 +27,15 @@ class ConfigurationDocsTest < Minitest::Test
     assert_includes examples, "credentials and environment variables"
   end
 
-  def test_documents_pi_cli_project_trust_prerequisite_and_reload_behavior
+  def test_documents_automatic_project_approval_and_its_opt_out
     readme = File.read(File.expand_path("../README.md", __dir__))
+    configuration = File.read(File.expand_path("../docs/configuration.md", __dir__))
 
-    assert_includes readme, "`.pi/themes/`, `SYSTEM.md`, `APPEND_SYSTEM.md`, or `.agents/skills/`"
-    assert_includes readme, "project packages configured through `.pi/settings.json`"
-    assert_includes readme, "trust the project in Pi CLI before opening or starting it in Gripi"
-    assert_includes readme, "restart the gateway after active work finishes"
+    assert_includes readme, "automatically approves project-local resources"
+    assert_includes readme, "arbitrary code as the gateway OS user"
+    assert_includes configuration, "GRIPI_AUTO_APPROVE_PROJECTS=0"
+    assert_includes configuration, "does not modify Pi’s saved trust decisions"
+    assert_includes configuration, "native Pi CLI default"
   end
 
   def test_documents_composer_parity_controls

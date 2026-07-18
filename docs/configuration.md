@@ -85,6 +85,22 @@ Add frequently used directories to `~/.config/gripi/pinned-dirs` to keep them av
 
 Use one directory per line. Blank lines and `#` comments are ignored.
 
+## Project resource approval
+
+By default, Gripi starts Pi with `--approve`, automatically loading project-local settings, extensions, skills, prompts, themes, system prompts, and packages. This differs from the native Pi CLI default, which asks before trusting project resources when an interactive UI is available.
+
+Project extensions and package installation scripts can execute arbitrary code as the gateway OS user, with access to that user’s files, credentials, environment, and network. Only open projects whose contents you trust.
+
+To stop automatically approving project resources, add this to `~/.config/gripi/env`:
+
+```sh
+GRIPI_AUTO_APPROVE_PROJECTS=0
+```
+
+With automatic approval disabled, Gripi omits `--approve` and Pi uses its normal trust resolution, including global extensions, saved trust decisions, and the global `defaultProjectTrust` setting. RPC mode cannot show Pi’s interactive trust prompt, so the default `"ask"` setting skips trust-gated project resources until the directory is trusted through Pi CLI. Gripi’s process-only approval does not modify Pi’s saved trust decisions in `~/.pi/agent/trust.json`.
+
+Changing this setting requires restarting the gateway after active work finishes.
+
 ## Custom Pi runtime
 
 To run Pi with explicit Node and Pi executables instead of resolving `pi` from `PATH`, set both variables:
