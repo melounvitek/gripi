@@ -22,6 +22,7 @@ module Sessions
       :session_sync_mode,
       :session_sync_revision,
       :session_sync_error,
+      :conversation_history_persisted,
       :messages,
       :conversation_start_index,
       :conversation_has_older_messages,
@@ -137,6 +138,7 @@ module Sessions
         :@session_sync_mode => @session_sync_mode,
         :@session_sync_revision => @session_sync_revision,
         :@session_sync_error => @session_sync_error,
+        :@conversation_history_persisted => @conversation_history_persisted,
         :@messages => @messages,
         :@conversation_start_index => @conversation_start_index,
         :@conversation_has_older_messages => @conversation_has_older_messages,
@@ -206,6 +208,7 @@ module Sessions
       @session_sync_mode = :available
       @session_sync_revision = nil
       @session_sync_error = nil
+      @conversation_history_persisted = false
       @messages = []
       @conversation_start_index = 0
       @conversation_older_message_count = 0
@@ -213,7 +216,10 @@ module Sessions
       @attachment_counts = {}
       @attachment_images = {}
       @session_status = nil
-      return unless @include_conversation && selected_existing_session?
+      return unless @include_conversation
+
+      @conversation_history_persisted = selected_existing_session?
+      return unless @conversation_history_persisted
 
       sync_state = synchronized_session_state
       @session_sync_mode = sync_state&.mode || :available

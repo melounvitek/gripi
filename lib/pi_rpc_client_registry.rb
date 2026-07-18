@@ -48,6 +48,11 @@ class PiRpcClientRegistry
     client&.respond_to?(:event_sequence) ? client.event_sequence : 0
   end
 
+  def event_replay_cursor(session_path)
+    client = client_for(session_path)
+    client&.respond_to?(:event_replay_cursor) ? client.event_replay_cursor : 0
+  end
+
   def live_snapshot(session_path)
     client = client_for(session_path)
     return { event_sequence: 0, active_tool_events: [] } unless client

@@ -36,6 +36,7 @@ class SessionsSessionViewTest < Minitest::Test
       assert_equal 0, assignments.fetch(:@conversation_older_message_count)
       assert_equal({}, assignments.fetch(:@attachment_counts))
       assert_instance_of PiSessionStore::Status, assignments.fetch(:@session_status)
+      assert assignments.fetch(:@conversation_history_persisted)
       refute assignments.fetch(:@current_tree_leaf_known)
       refute assignments.fetch(:@viewing_older_tree_leaf)
     end
@@ -206,7 +207,7 @@ class SessionsSessionViewTest < Minitest::Test
       view = Sessions::SessionView.build(
         sessions_root: dir,
         params: { "session" => pending_path },
-        include_conversation: false,
+        include_conversation: true,
         read_state_store: GatewayReadStateStore.new(path: File.join(dir, "read-state.json")),
         attachment_store: PiAttachmentStore.new(root: File.join(dir, "attachments")),
         rpc_clients: inactive_rpc_clients,
@@ -216,6 +217,7 @@ class SessionsSessionViewTest < Minitest::Test
       )
 
       assert_equal created_at, view.selected_session.conversation_activity_at
+      refute view.conversation_history_persisted
     end
   end
 

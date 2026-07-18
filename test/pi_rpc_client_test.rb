@@ -449,8 +449,9 @@ class PiRpcClientTest < Minitest::Test
 
     client.request("get_state", id: "state-1")
 
+    assert_equal 1, client.event_replay_cursor
     assert_equal({ events: [], last_seq: 2, missed: true }, client.events_after(0))
-    assert_equal({ events: [{ "type" => "event", "name" => "two" }], last_seq: 2, missed: false }, client.events_after(1))
+    assert_equal({ events: [{ "type" => "event", "name" => "two" }], last_seq: 2, missed: false }, client.events_after(client.event_replay_cursor))
   end
 
   def test_tracks_busy_state_from_agent_events

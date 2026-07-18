@@ -3292,6 +3292,41 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_pending_session_fragment_replays_events_missing_from_unpersisted_history
+    Dir.mktmpdir do |dir|
+      persisted_path = write_session(dir)
+      pending_path = File.join(File.dirname(persisted_path), "pending-session.jsonl")
+      user_event = {
+        "type" => "message_end",
+        "message" => { "role" => "user", "content" => [{ "type" => "text", "text" => "First message" }] }
+      }
+      client = FakeRpcClient.new([], [user_event])
+      client.define_singleton_method(:event_sequence) { 2 }
+      client.define_singleton_method(:event_replay_cursor) { 1 }
+      client.define_singleton_method(:events_after) do |after_seq|
+        { events: after_seq.to_i < 2 ? [user_event] : [], last_seq: 2, missed: false }
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(pending_path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) })
+      request = Rack::MockRequest.new(Gripi)
+
+      fragment_response = request.get("/session_fragment", params: { "session" => pending_path })
+
+      assert_equal 200, fragment_response.status
+      conversation = Nokogiri::HTML.fragment(JSON.parse(fragment_response.body).fetch("conversation_html"))
+      event_cursor = conversation.at_css("#live-output")["data-events-after"]
+      assert_equal "1", event_cursor
+
+      events_response = request.get("/events", params: { "session" => pending_path, "after" => event_cursor })
+
+      assert_equal 200, events_response.status
+      assert_equal [user_event], JSON.parse(events_response.body).fetch("events")
+    end
+  end
+
   def test_sidebar_keeps_active_pending_session_visible_after_switching_away
     Dir.mktmpdir do |dir|
       selected_path = write_session(dir)

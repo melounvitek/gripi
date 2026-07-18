@@ -227,6 +227,10 @@ class PiRpcClient
     @mutex.synchronize { @event_sequence }
   end
 
+  def event_replay_cursor
+    @mutex.synchronize { @events.first ? @events.first.first - 1 : @event_sequence }
+  end
+
   def live_snapshot
     @mutex.synchronize do
       snapshot = {
