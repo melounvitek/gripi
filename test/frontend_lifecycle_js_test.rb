@@ -956,6 +956,26 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal 1, results.dig("summary", "errorCount")
   end
 
+  def test_focused_activity_does_not_group_messages_across_an_unloaded_gap
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const message = () => ({
+        dataset: { role: "assistant" },
+        classList: { contains: (name) => name === "message--thinking" }
+      });
+      const first = message(); const second = message(); const gap = { hidden: false };
+      first.nextElementSibling = gap; gap.nextElementSibling = second;
+      const controller = new ConversationController({}, {});
+      controller.historyStatus = () => gap;
+      const open = controller.focusedActivityGroups([first, second]).map((group) => group.length);
+      gap.hidden = true;
+      const closed = controller.focusedActivityGroups([first, second]).map((group) => group.length);
+      console.log(JSON.stringify({ open, closed }));
+    JS
+
+    assert_equal({ "open" => [1, 1], "closed" => [2] }, results)
+  end
+
   def test_focused_activity_lists_only_tool_calls_and_errors
     results = run_javascript(<<~JS)
       const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});

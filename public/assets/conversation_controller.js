@@ -14,6 +14,7 @@ export class ConversationController {
     this.historyIntersectionObserver = null;
     this.historyRequestGeneration = 0;
     this.olderWindowPromise = null;
+    this.historyWindowAfterCursor = null;
     this.olderHistoryPromise = null;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
@@ -105,6 +106,7 @@ export class ConversationController {
     this.historyIntersectionObserver?.disconnect();
     this.historyIntersectionObserver = null;
     this.olderWindowPromise = null;
+    this.historyWindowAfterCursor = null;
     this.olderHistoryPromise = null;
     this.revealTimer = null;
     this.revealDelayTimer = null;
@@ -159,16 +161,33 @@ export class ConversationController {
   focusedActivityGroups(messages) {
     const groups = [];
     let group = [];
+    let previousMessage = null;
     messages.forEach((message) => {
+      if (previousMessage && this.historyGapBetween(previousMessage, message) && group.length > 0) {
+        groups.push(group);
+        group = [];
+      }
       if (this.focusedViewMessage(message)) {
         if (group.length > 0) groups.push(group);
         group = [];
       } else {
         group.push(message);
       }
+      previousMessage = message;
     });
     if (group.length > 0) groups.push(group);
     return groups;
+  }
+
+  historyGapBetween(first, second) {
+    const gap = this.historyStatus();
+    if (!gap || gap.hidden) return false;
+    let sibling = first.nextElementSibling;
+    while (sibling && sibling !== second) {
+      if (sibling === gap) return true;
+      sibling = sibling.nextElementSibling;
+    }
+    return false;
   }
 
   focusedActivitySummary(messages) {
@@ -211,7 +230,7 @@ export class ConversationController {
   refreshFocusedActivity() {
     if (!this.element?.querySelectorAll) return;
     const messages = [...this.element.querySelectorAll(".message")];
-    const signature = `${this.agentRunning}|${messages.map((message) => {
+    const signature = `${this.agentRunning}|${this.historyStatus()?.hidden !== false}|${messages.map((message) => {
       if (!this.focusedActivityMessageIds.has(message)) this.focusedActivityMessageIds.set(message, ++this.focusedActivityMessageSequence);
       return [
         this.focusedActivityMessageIds.get(message),
@@ -493,15 +512,16 @@ export class ConversationController {
     return this.document.querySelector('.prompt-form input[name="session"]')?.value || new URLSearchParams(this.window.location.search).get("session") || "";
   }
 
-  olderConversationUrl(cursor, element = this.element, loadAll = false) {
+  olderConversationUrl(cursor, element = this.element, loadAll = false, afterCursor = null) {
     const url = new URL(element.dataset.olderMessagesUrl, this.window.location.origin);
     url.searchParams.set("cursor", cursor);
+    if (afterCursor !== null) url.searchParams.set("after", afterCursor);
     if (loadAll) url.searchParams.set("all", "1");
     return url;
   }
 
   historyStatus() {
-    return this.element?.querySelector("[data-conversation-history-status]");
+    return this.element?.querySelector?.("[data-conversation-history-status]");
   }
 
   observeHistoryStatus() {
@@ -545,26 +565,42 @@ export class ConversationController {
     this.setHistoryStatus("Earlier messages could not load.");
   }
 
-  prependOlderHtml(html) {
+  insertHistoryHtml(html, insertionPoint, preserveViewport) {
     if (!this.element || !html) return;
     const template = this.document.createElement("template");
     template.innerHTML = html;
     enhanceMarkdownCodeBlocks(template.content, this.document);
     const previousTop = this.element.scrollTop;
     const previousHeight = this.element.scrollHeight;
-    const insertionPoint = this.element.querySelector(".message") || this.liveOutput || this.element.firstElementChild;
     this.element.insertBefore(template.content, insertionPoint);
     this.refreshFocusedActivity();
-    this.element.scrollTop = previousTop + (this.element.scrollHeight - previousHeight);
+    if (preserveViewport) this.element.scrollTop = previousTop + (this.element.scrollHeight - previousHeight);
     this.lastScrollTop = this.element.scrollTop;
     this.updateJumpControls();
   }
 
-  loadOlderWindow({ loadAll = false } = {}) {
+  prependOlderHtml(html) {
+    const insertionPoint = this.element?.querySelector(".message") || this.liveOutput || this.element?.firstElementChild;
+    this.insertHistoryHtml(html, insertionPoint, true);
+  }
+
+  historyGapAboveViewport() {
+    const gapTop = this.historyStatus()?.getBoundingClientRect?.().top;
+    const viewportTop = this.element?.getBoundingClientRect?.().top;
+    return gapTop !== undefined && viewportTop !== undefined && gapTop < viewportTop;
+  }
+
+  insertBeforeHistoryGap(html, preserveViewport = false) {
+    const insertionPoint = this.historyStatus() || this.element?.querySelector(".message") || this.liveOutput || this.element?.firstElementChild;
+    this.insertHistoryHtml(html, insertionPoint, preserveViewport);
+  }
+
+  loadOlderWindow({ loadAll = false, afterCursor = null } = {}) {
     if (!this.element) return Promise.resolve("cancelled");
     if (this.olderWindowPromise) return this.olderWindowPromise;
     const cursor = Number(this.element.dataset.olderMessageCursor || 0);
     if (!cursor || this.element.dataset.hasOlderMessages !== "true") return Promise.resolve("complete");
+    if (afterCursor === null && this.element.dataset.oldestMessageEndCursor !== undefined) afterCursor = Number(this.element.dataset.oldestMessageEndCursor);
 
     const epoch = this.bindingEpoch;
     const historyGeneration = this.historyRequestGeneration;
@@ -576,7 +612,7 @@ export class ConversationController {
     this.loadingHistoryStatus();
     const load = (async () => {
       try {
-        const response = await fetch(this.olderConversationUrl(cursor, scrollElement, loadAll), { headers: { "Accept": "application/json" }, signal: abortController.signal });
+        const response = await fetch(this.olderConversationUrl(cursor, scrollElement, loadAll, afterCursor), { headers: { "Accept": "application/json" }, signal: abortController.signal });
         if (!unchanged()) return "cancelled";
         if (!response.ok) {
           this.failHistoryStatus();
@@ -585,21 +621,23 @@ export class ConversationController {
         const payload = await response.json();
         if (!unchanged()) return "cancelled";
         const nextCursor = Number(payload.next_cursor || 0);
-        if (payload.has_older_messages && nextCursor >= cursor) {
+        const forward = afterCursor !== null;
+        if (payload.has_older_messages && (forward ? nextCursor <= afterCursor || nextCursor > cursor : nextCursor >= cursor)) {
           this.failHistoryStatus();
           return "failed";
         }
 
-        this.prependOlderHtml(payload.html || "");
-        scrollElement.dataset.olderMessageCursor = String(nextCursor);
+        const preserveGapViewport = forward && loadAll && this.historyGapAboveViewport();
+        if (forward) scrollElement.dataset.oldestMessageEndCursor = String(nextCursor);
+        else scrollElement.dataset.olderMessageCursor = String(nextCursor);
         scrollElement.dataset.hasOlderMessages = payload.has_older_messages ? "true" : "false";
         scrollElement.dataset.olderMessageCount = String(payload.older_message_count || 0);
-        if (payload.has_older_messages) {
-          this.availableHistoryStatus();
-          return "more";
-        }
-        this.finishHistoryStatus();
-        return "complete";
+        if (payload.has_older_messages) this.availableHistoryStatus();
+        else this.finishHistoryStatus();
+
+        if (forward) this.insertBeforeHistoryGap(payload.html || "", preserveGapViewport);
+        else this.prependOlderHtml(payload.html || "");
+        return payload.has_older_messages ? "more" : "complete";
       } catch (error) {
         if (!unchanged() || error?.name === "AbortError") return "cancelled";
         this.failHistoryStatus();
@@ -607,11 +645,22 @@ export class ConversationController {
       }
     })();
     const shared = load.finally(() => {
-      if (this.olderWindowPromise === shared) this.olderWindowPromise = null;
+      if (this.olderWindowPromise === shared) {
+        this.olderWindowPromise = null;
+        this.historyWindowAfterCursor = null;
+      }
       if (this.historyAbortController === abortController) this.historyAbortController = null;
     });
     this.olderWindowPromise = shared;
+    this.historyWindowAfterCursor = afterCursor;
     return shared;
+  }
+
+  loadOldestWindow() {
+    if (!this.element || this.element.dataset.oldestMessageEndCursor !== undefined) return Promise.resolve("complete");
+    if (this.olderWindowPromise && this.historyWindowAfterCursor === 0) return this.olderWindowPromise;
+    if (this.olderWindowPromise) this.cancelOlderHistory();
+    return this.loadOlderWindow({ afterCursor: 0 });
   }
 
   cancelOlderHistory() {
@@ -619,6 +668,7 @@ export class ConversationController {
     this.historyAbortController?.abort();
     this.historyAbortController = null;
     this.olderWindowPromise = null;
+    this.historyWindowAfterCursor = null;
     this.olderHistoryPromise = null;
     if (this.element?.dataset.hasOlderMessages === "true") this.availableHistoryStatus();
   }
@@ -668,8 +718,8 @@ export class ConversationController {
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     button.setAttribute("aria-label", "Loading earlier messages");
-    return this.loadOlderHistory()
-      .then((status) => { if (status === "complete") this.scrollToTop("auto"); })
+    return this.loadOldestWindow()
+      .then((status) => { if (status === "complete" || status === "more") this.scrollToTop("auto"); })
       .catch(() => {})
       .finally(() => {
         button.classList.remove("is-loading");

@@ -100,7 +100,8 @@ module Web
           cursor: params["cursor"].to_i,
           current_leaf_id: params["tree_leaf"].to_s.empty? ? nil : params["tree_leaf"].to_s,
           attachment_store: attachment_store,
-          load_all: params["all"].to_s == "1"
+          load_all: params["all"].to_s == "1",
+          after_cursor: params.key?("after") ? params["after"].to_i : nil
         )
         content_type :json
         JSON.generate(

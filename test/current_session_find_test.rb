@@ -313,6 +313,36 @@ class CurrentSessionFindTest < Minitest::Test
     assert_equal({ "scrollTop" => 320, "lastScrollTop" => 320, "point" => "first-message" }, results)
   end
 
+  def test_inserting_a_complete_gap_preserves_the_viewport_only_when_the_gap_is_above
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const template = { content: { querySelectorAll() { return []; } }, set innerHTML(_value) {} };
+      let gapTop = 80;
+      const gap = { name: "gap", hidden: false, getBoundingClientRect: () => ({ top: gapTop }) };
+      const document = { createElement: () => template };
+      const controller = new ConversationController(document, {});
+      const scroll = {
+        scrollTop: 140, scrollHeight: 500,
+        getBoundingClientRect: () => ({ top: 0 }),
+        querySelector(selector) { return selector.includes("history-status") ? gap : null; },
+        insertBefore(_content, point) { this.point = point.name; this.scrollHeight = 680; }
+      };
+      controller.element = scroll;
+      controller.updateJumpControls = () => {};
+      const preserveBelow = controller.historyGapAboveViewport();
+      gap.hidden = true;
+      controller.insertBeforeHistoryGap("<article>middle</article>", preserveBelow);
+      const belowTop = scroll.scrollTop;
+      scroll.scrollTop = 140; scroll.scrollHeight = 500; gapTop = -20; gap.hidden = false;
+      const preserveAbove = controller.historyGapAboveViewport();
+      gap.hidden = true;
+      controller.insertBeforeHistoryGap("<article>middle</article>", preserveAbove);
+      console.log(JSON.stringify({ belowTop, aboveTop: scroll.scrollTop, point: scroll.point, preserveBelow, preserveAbove }));
+    JS
+
+    assert_equal({ "belowTop" => 140, "aboveTop" => 320, "point" => "gap", "preserveBelow" => false, "preserveAbove" => true }, results)
+  end
+
   def test_older_window_fetches_only_one_chunk
     results = run_javascript(<<~JS)
       const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
@@ -346,6 +376,106 @@ class CurrentSessionFindTest < Minitest::Test
     JS
 
     assert_equal({ "status" => "complete", "fetchCount" => 1, "cursor" => "0", "hasOlder" => "false", "loadAll" => true }, results)
+  end
+
+  def test_oldest_window_load_starts_at_zero_and_keeps_the_middle_gap
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const scroll = { dataset: { olderMessageCursor: "300", hasOlderMessages: "true", olderMessagesUrl: "/older" }, querySelector: () => null };
+      const document = { querySelector: () => ({ value: "/session" }) };
+      const controller = new ConversationController(document, { location: { origin: "https://example.test", search: "" } });
+      controller.element = scroll; controller.bindingEpoch = 1; controller.insertBeforeHistoryGap = () => {}; controller.loadingHistoryStatus = () => {}; controller.availableHistoryStatus = () => {};
+      let url;
+      globalThis.fetch = async (requestUrl) => {
+        url = requestUrl;
+        return { ok: true, json: async () => ({ html: "oldest", next_cursor: 150, has_older_messages: true, older_message_count: 150 }) };
+      };
+      const status = await controller.loadOldestWindow();
+      console.log(JSON.stringify({ status, after: url.searchParams.get("after"), cursor: url.searchParams.get("cursor"), oldestEnd: scroll.dataset.oldestMessageEndCursor, gap: scroll.dataset.olderMessageCount }));
+    JS
+
+    assert_equal({ "status" => "more", "after" => "0", "cursor" => "300", "oldestEnd" => "150", "gap" => "150" }, results)
+  end
+
+  def test_repeated_oldest_window_loads_share_the_request
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const scroll = { dataset: { olderMessageCursor: "300", hasOlderMessages: "true", olderMessagesUrl: "/older" }, querySelector: () => null };
+      const document = { querySelector: () => ({ value: "/session" }) };
+      const controller = new ConversationController(document, { location: { origin: "https://example.test", search: "" } });
+      controller.element = scroll; controller.bindingEpoch = 1; controller.insertBeforeHistoryGap = () => {}; controller.loadingHistoryStatus = () => {}; controller.availableHistoryStatus = () => {};
+      let fetchCount = 0; let finish;
+      globalThis.fetch = () => {
+        fetchCount += 1;
+        return new Promise((resolve) => { finish = () => resolve({ ok: true, json: async () => ({ html: "oldest", next_cursor: 150, has_older_messages: true, older_message_count: 150 }) }); });
+      };
+      const first = controller.loadOldestWindow();
+      const second = controller.loadOldestWindow();
+      const shared = first === second;
+      finish();
+      console.log(JSON.stringify({ statuses: await Promise.all([first, second]), fetchCount, shared }));
+    JS
+
+    assert_equal({ "statuses" => ["more", "more"], "fetchCount" => 1, "shared" => true }, results)
+  end
+
+  def test_gap_window_continues_forward_from_the_oldest_loaded_message
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const scroll = { dataset: { olderMessageCursor: "300", oldestMessageEndCursor: "150", hasOlderMessages: "true", olderMessagesUrl: "/older" }, querySelector: () => null };
+      const document = { querySelector: () => ({ value: "/session" }) };
+      const controller = new ConversationController(document, { location: { origin: "https://example.test", search: "" } });
+      controller.element = scroll; controller.bindingEpoch = 1; controller.insertBeforeHistoryGap = () => {}; controller.loadingHistoryStatus = () => {}; controller.availableHistoryStatus = () => {};
+      let url;
+      globalThis.fetch = async (requestUrl) => {
+        url = requestUrl;
+        return { ok: true, json: async () => ({ html: "middle", next_cursor: 220, has_older_messages: true, older_message_count: 80 }) };
+      };
+      const status = await controller.loadOlderWindow();
+      console.log(JSON.stringify({ status, after: url.searchParams.get("after"), cursor: url.searchParams.get("cursor"), oldestEnd: scroll.dataset.oldestMessageEndCursor, gap: scroll.dataset.olderMessageCount }));
+    JS
+
+    assert_equal({ "status" => "more", "after" => "150", "cursor" => "300", "oldestEnd" => "220", "gap" => "80" }, results)
+  end
+
+  def test_oldest_window_load_replaces_an_in_flight_backward_request
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const scroll = { dataset: { olderMessageCursor: "300", hasOlderMessages: "true", olderMessagesUrl: "/older" }, querySelector: () => null };
+      const document = { querySelector: () => ({ value: "/session" }) };
+      const controller = new ConversationController(document, { location: { origin: "https://example.test", search: "" } });
+      controller.element = scroll; controller.bindingEpoch = 1; controller.prependOlderHtml = () => {}; controller.insertBeforeHistoryGap = () => {}; controller.loadingHistoryStatus = () => {}; controller.availableHistoryStatus = () => {};
+      let fetchCount = 0; let firstAborted = false; const urls = [];
+      globalThis.fetch = (url, options) => {
+        fetchCount += 1; urls.push(url.toString());
+        if (fetchCount === 1) return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => { firstAborted = true; reject({ name: "AbortError" }); }));
+        return Promise.resolve({ ok: true, json: async () => ({ html: "oldest", next_cursor: 150, has_older_messages: true, older_message_count: 150 }) });
+      };
+      const backwardLoad = controller.loadOlderWindow();
+      const oldestLoad = controller.loadOldestWindow();
+      console.log(JSON.stringify({ statuses: await Promise.all([backwardLoad, oldestLoad]), fetchCount, firstAborted, oldestStartsAtZero: urls[1].includes("after=0") }));
+    JS
+
+    assert_equal({ "statuses" => ["cancelled", "more"], "fetchCount" => 2, "firstAborted" => true, "oldestStartsAtZero" => true }, results)
+  end
+
+  def test_complete_history_load_fills_an_existing_middle_gap
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const scroll = { dataset: { olderMessageCursor: "300", oldestMessageEndCursor: "150", hasOlderMessages: "true", olderMessagesUrl: "/older" }, querySelector: () => null };
+      const document = { querySelector: () => ({ value: "/session" }) };
+      const controller = new ConversationController(document, { location: { origin: "https://example.test", search: "" } });
+      controller.element = scroll; controller.bindingEpoch = 1; controller.insertBeforeHistoryGap = () => {}; controller.loadingHistoryStatus = () => {}; controller.finishHistoryStatus = () => {};
+      let url;
+      globalThis.fetch = async (requestUrl) => {
+        url = requestUrl;
+        return { ok: true, json: async () => ({ html: "middle", next_cursor: 300, has_older_messages: false, older_message_count: 0 }) };
+      };
+      const status = await controller.loadOlderHistory();
+      console.log(JSON.stringify({ status, after: url.searchParams.get("after"), loadAll: url.searchParams.get("all"), oldestEnd: scroll.dataset.oldestMessageEndCursor, hasOlder: scroll.dataset.hasOlderMessages }));
+    JS
+
+    assert_equal({ "status" => "complete", "after" => "150", "loadAll" => "1", "oldestEnd" => "300", "hasOlder" => "false" }, results)
   end
 
   def test_complete_history_load_replaces_an_in_flight_window_request
@@ -487,7 +617,7 @@ class CurrentSessionFindTest < Minitest::Test
       };
       const controller = new ConversationController(document, { matchMedia: () => ({ matches: false }) });
       let finish; let topBehavior; let bottomJump;
-      controller.loadOlderHistory = () => new Promise((resolve) => { finish = resolve; });
+      controller.loadOldestWindow = () => new Promise((resolve) => { finish = resolve; });
       controller.scrollToTop = (behavior) => { topBehavior = behavior; };
       controller.scrollToBottom = (behavior, options) => { bottomJump = { behavior, force: options.force }; };
       controller.bind();
@@ -517,7 +647,7 @@ class CurrentSessionFindTest < Minitest::Test
     )
   end
 
-  def test_home_loads_complete_history_before_jumping_to_conversation_top
+  def test_home_loads_oldest_window_before_jumping_to_conversation_top
     results = run_javascript(<<~JS)
       const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
       class Classes {
@@ -549,7 +679,7 @@ class CurrentSessionFindTest < Minitest::Test
       };
       const controller = new ConversationController(document, { matchMedia: () => ({ matches: false }) });
       let finish; let loads = 0; let topBehavior; let prevented = false; let editablePrevented = false;
-      controller.loadOlderHistory = () => { loads += 1; return new Promise((resolve) => { finish = resolve; }); };
+      controller.loadOldestWindow = () => { loads += 1; return new Promise((resolve) => { finish = resolve; }); };
       controller.scrollToTop = (behavior) => { topBehavior = behavior; };
       controller.bind();
       scroll.listeners.keydown({ key: "Home", target: { closest: () => ({}) }, preventDefault: () => { editablePrevented = true; } });

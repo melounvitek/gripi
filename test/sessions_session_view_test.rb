@@ -153,6 +153,26 @@ class SessionsSessionViewTest < Minitest::Test
     end
   end
 
+  def test_builds_forward_conversation_window_after_cursor
+    Dir.mktmpdir do |dir|
+      session_path = write_session_with_messages(dir, 220)
+
+      view = Sessions::SessionView.older_window(
+        sessions_root: dir,
+        session_path: session_path,
+        cursor: 170,
+        after_cursor: 0,
+        current_leaf_id: nil,
+        attachment_store: PiAttachmentStore.new(root: File.join(dir, "attachments"))
+      )
+
+      assert_equal (1..150).map { |index| "Message #{index}" }, view.fetch(:messages).map(&:text)
+      assert_equal 150, view.fetch(:next_cursor)
+      assert view.fetch(:has_older_messages)
+      assert_equal 20, view.fetch(:older_message_count)
+    end
+  end
+
   def test_older_conversation_window_stays_on_the_requested_tree_leaf
     Dir.mktmpdir do |dir|
       path = File.join(dir, "session.jsonl")

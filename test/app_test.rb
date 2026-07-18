@@ -7339,6 +7339,29 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_serves_oldest_bounded_conversation_window_as_json
+    Dir.mktmpdir do |dir|
+      messages = (1..220).map { |index| { role: "user", text: "Message #{index}" } }
+      path = write_session_with_messages(dir, messages)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(Gripi).get(
+        "/conversation_older",
+        params: { "session" => path, "cursor" => "170", "after" => "0" }
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal 150, payload.fetch("next_cursor")
+      assert payload.fetch("has_older_messages")
+      assert_equal 20, payload.fetch("older_message_count")
+      assert_includes payload.fetch("html"), "Message 1"
+      assert_includes payload.fetch("html"), "Message 150"
+      refute_includes payload.fetch("html"), "Message 151"
+    end
+  end
+
   def test_serves_all_remaining_conversation_messages_for_explicit_full_history_load
     Dir.mktmpdir do |dir|
       messages = (1..220).map { |index| { role: "user", text: "Message #{index}" } }

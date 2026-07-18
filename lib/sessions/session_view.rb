@@ -35,19 +35,27 @@ module Sessions
       new(**kwargs).build
     end
 
-    def self.older_window(sessions_root:, session_path:, cursor:, current_leaf_id:, attachment_store:, load_all: false)
+    def self.older_window(sessions_root:, session_path:, cursor:, current_leaf_id:, attachment_store:, load_all: false, after_cursor: nil)
       return empty_older_window unless session_path_within_root?(session_path, sessions_root)
 
       store = PiSessionStore.new(root: sessions_root)
       all_messages = store.messages(session_path, current_leaf_id: current_leaf_id)
       cursor = [[cursor.to_i, 0].max, all_messages.length].min
-      messages = load_all ? all_messages.first(cursor) : conversation_window_before(all_messages, cursor)
-      next_cursor = cursor - messages.length
+      if after_cursor.nil?
+        messages = load_all ? all_messages.first(cursor) : conversation_window_before(all_messages, cursor)
+        next_cursor = cursor - messages.length
+        remaining_count = next_cursor
+      else
+        after_cursor = [[after_cursor.to_i, 0].max, cursor].min
+        messages = load_all ? all_messages.slice(after_cursor...cursor) : conversation_window_after(all_messages, after_cursor, cursor)
+        next_cursor = after_cursor + messages.length
+        remaining_count = cursor - next_cursor
+      end
       {
         messages: messages,
         next_cursor: next_cursor,
-        has_older_messages: next_cursor.positive?,
-        older_message_count: next_cursor,
+        has_older_messages: remaining_count.positive?,
+        older_message_count: remaining_count,
         attachment_counts: attachment_store.counts_for_messages(session_path, messages),
         attachment_images: attachment_store.images_for_messages(session_path, messages)
       }
@@ -266,6 +274,23 @@ module Sessions
         has_user_message ||= message.role == "user"
       end
       selected.reverse
+    end
+
+    def self.conversation_window_after(messages, cursor, before_cursor)
+      selected = []
+      bytes = 0
+      has_user_message = false
+      messages.slice(cursor...before_cursor).each do |message|
+        message_bytes = conversation_window_message_bytes(message)
+        enough_context = has_user_message || selected.length >= CONVERSATION_WINDOW_MIN_MESSAGES
+        break if selected.length >= CONVERSATION_WINDOW_MAX_MESSAGES
+        break if enough_context && bytes + message_bytes > CONVERSATION_WINDOW_BYTE_BUDGET
+
+        selected << message
+        bytes += message_bytes
+        has_user_message ||= message.role == "user"
+      end
+      selected
     end
 
     def self.conversation_window_message_bytes(message)
