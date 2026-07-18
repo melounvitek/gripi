@@ -219,6 +219,9 @@
   let programmaticScrollTimer = null;
   let autoScrollEnabled = true;
   let focusedView = false;
+  const focusedActivityMessageIds = new WeakMap();
+  let focusedActivityMessageSequence = 0;
+  let focusedActivitySignature = null;
 
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey));
@@ -265,9 +268,72 @@
     focusedView = enabled;
     element.panel.classList.toggle("is-conversation-focused", focusedView);
     element.focusToggle.classList.toggle("is-active", focusedView);
-    element.focusToggle.setAttribute("aria-pressed", String(focusedView));
-    element.focusToggle.setAttribute("title", focusedView ? "Show full transcript" : "Show conversation only");
-    element.focusToggle.setAttribute("aria-label", "Focus view");
+    const label = focusedView ? "Show details" : "Hide details";
+    element.focusToggle.setAttribute("title", label);
+    element.focusToggle.setAttribute("aria-label", label);
+    element.focusToggle.querySelector("[data-details-toggle-label]").textContent = label;
+    element.focusToggle.querySelector("[data-hide-details-icon]").hidden = focusedView;
+    element.focusToggle.querySelector("[data-show-details-icon]").hidden = !focusedView;
+  }
+  function focusedConversationMessage(message) {
+    const error = message.classList.contains("message--error") || message.classList.contains("message--tool-error");
+    return !error && (message.dataset.role === "user" || message.dataset.finalAssistantResponse === "true");
+  }
+  function focusedActivitySummary(messages) {
+    const reasoningCount = messages.filter((message) => message.classList.contains("message--thinking")).length;
+    const toolCount = messages.filter((message) => ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name))).length;
+    const errorCount = messages.filter((message) => message.classList.contains("message--error") || message.classList.contains("message--tool-error")).length;
+    const otherCount = messages.filter((message) => !message.classList.contains("message--thinking") && !["message--tool", "message--tool-call", "message--tool-transcript", "message--error"].some((name) => message.classList.contains(name)) && !message.classList.contains("message--tool-error")).length;
+    const parts = [];
+    if (reasoningCount > 0) parts.push(`${reasoningCount} reasoning ${reasoningCount === 1 ? "step" : "steps"}`);
+    if (toolCount > 0) parts.push(`${toolCount} tool ${toolCount === 1 ? "update" : "updates"}`);
+    if (otherCount > 0) parts.push(`${otherCount} other ${otherCount === 1 ? "update" : "updates"}`);
+    if (errorCount > 0) parts.push(`${errorCount} ${errorCount === 1 ? "error" : "errors"}`);
+    const list = parts.length < 2 ? parts[0] : parts.length === 2 ? `${parts[0]} and ${parts[1]}` : `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}`;
+    return { text: `Activity included ${list}.`, errorCount };
+  }
+  function refreshFocusedActivity() {
+    const messages = [...element.scroll.querySelectorAll(".message")];
+    const signature = messages.map((message) => {
+      if (!focusedActivityMessageIds.has(message)) focusedActivityMessageIds.set(message, ++focusedActivityMessageSequence);
+      return [focusedActivityMessageIds.get(message), focusedConversationMessage(message), message.classList.contains("message--thinking"), ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name)), message.classList.contains("message--error") || message.classList.contains("message--tool-error")].join(":");
+    }).join("|");
+    if (signature === focusedActivitySignature) return;
+    focusedActivitySignature = signature;
+    const summaries = [...element.scroll.querySelectorAll("[data-focus-activity-summary]")];
+    const activeSummary = document.activeElement?.closest?.("[data-focus-activity-summary]");
+    const activeSummaryIndex = summaries.indexOf(activeSummary);
+    const activeGroupId = activeSummary?.dataset.focusActivitySummary;
+    const focusAnchor = activeGroupId && messages.find((message) => message.dataset.focusActivityGroup === activeGroupId);
+    const expandedMessages = new Set(element.scroll.querySelectorAll(".message.is-focus-activity-expanded"));
+    summaries.forEach((summary) => summary.remove());
+    const replacementSummaries = [];
+    let replacementFocus = null;
+    messages.forEach((message) => { message.classList.remove("is-focus-activity-expanded"); delete message.dataset.focusActivityGroup; });
+    let groups = []; let group = [];
+    messages.forEach((message) => {
+      if (focusedConversationMessage(message)) { if (group.length) groups.push(group); group = []; }
+      else group.push(message);
+    });
+    if (group.length) groups.push(group);
+    groups.forEach((messages, index) => {
+      const groupId = `demo-${index}`;
+      const expanded = messages.some((message) => expandedMessages.has(message));
+      messages.forEach((message) => { message.dataset.focusActivityGroup = groupId; message.classList.toggle("is-focus-activity-expanded", expanded); });
+      const summaryData = focusedActivitySummary(messages);
+      const summary = document.createElement("button");
+      summary.type = "button";
+      summary.className = `focus-activity-summary${summaryData.errorCount ? " has-errors" : ""}${expanded ? " is-expanded" : ""}`;
+      summary.dataset.focusActivitySummary = groupId;
+      summary.setAttribute("aria-expanded", String(expanded));
+      const text = document.createElement("span"); text.className = "focus-activity-summary-text"; text.textContent = summaryData.text; summary.append(text);
+      if (summaryData.errorCount) { const error = document.createElement("span"); error.className = "focus-activity-error-count"; error.textContent = `${summaryData.errorCount} ${summaryData.errorCount === 1 ? "error" : "errors"}`; error.setAttribute("aria-hidden", "true"); summary.append(error); }
+      messages[0].before(summary);
+      replacementSummaries.push(summary);
+      if (focusAnchor && messages.includes(focusAnchor)) replacementFocus = summary;
+    });
+    if (activeSummary && !replacementFocus) replacementFocus = replacementSummaries[Math.min(Math.max(activeSummaryIndex, 0), replacementSummaries.length - 1)] || element.focusToggle;
+    replacementFocus?.focus({ preventScroll: true });
   }
   function timeLabel(date = new Date()) { const pad = (value) => String(value).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`; }
   function applyIdentity(target, session) {
@@ -430,6 +496,7 @@
   function renderConversation() {
     element.history.replaceChildren(); element.live.replaceChildren();
     currentSession().messages.forEach((message) => element.history.append(messageArticle(message, false)));
+    refreshFocusedActivity();
     requestAnimationFrame(() => {
       element.scroll.scrollTop = element.scroll.scrollHeight;
       lastScrollTop = element.scroll.scrollTop;
@@ -499,6 +566,7 @@
     streamingEntry = null; activeToolEntry = null;
     setRunning(false);
     persist();
+    refreshFocusedActivity();
   }
 
   function appendStreamEvent(event, session) {
@@ -529,6 +597,7 @@
       }
       streamingEntry?.article.classList.remove("message--streaming"); streamController = null; streamingEntry = null; activeToolEntry = null; setRunning(false); persist();
     }
+    if (["thinking", "tool_start", "assistant_start", "done"].includes(event.type)) refreshFocusedActivity();
     refreshOpenFind();
     scrollLatest();
   }
@@ -539,7 +608,7 @@
     if (prompt.startsWith("/")) { handleSlash(prompt.split(/\s/)[0].slice(1)); element.prompt.value = ""; persistDraft(); element.commands.classList.remove("is-visible"); return; }
     const streamSession = currentSession();
     const message = { role: "user", text: prompt, time: timeLabel() };
-    streamSession.messages.push(message); touchSessionActivity(streamSession); renderSidebar(); element.live.append(messageArticle(message, true)); element.prompt.value = ""; persistDraft(); refreshOpenFind();
+    streamSession.messages.push(message); touchSessionActivity(streamSession); renderSidebar(); element.live.append(messageArticle(message, true)); element.prompt.value = ""; persistDraft(); refreshFocusedActivity(); refreshOpenFind();
     element.attachmentTray.replaceChildren(); element.attachmentTray.classList.remove("has-attachments");
     setRunning(true, "Sending…"); persist(); scrollLatest(true);
     streamController = new AbortController();
@@ -556,7 +625,7 @@
   function handleSlash(command) {
     const modals = { new: "new-session-modal", fork: "fork-session-modal", tree: "tree-session-modal", model: "model-settings-modal" };
     if (modals[command]) openModal(modals[command]);
-    else if (command === "compact") { const session = currentSession(); const message = { role: "compaction", title: "Conversation compacted", text: "Static demo compaction summary. In production this is generated by Pi.", time: timeLabel() }; session.messages.push(message); touchSessionActivity(session); renderSidebar(); element.live.append(messageArticle(message, true)); persist(); refreshOpenFind(); scrollLatest(true); }
+    else if (command === "compact") { const session = currentSession(); const message = { role: "compaction", title: "Conversation compacted", text: "Static demo compaction summary. In production this is generated by Pi.", time: timeLabel() }; session.messages.push(message); touchSessionActivity(session); renderSidebar(); element.live.append(messageArticle(message, true)); persist(); refreshFocusedActivity(); refreshOpenFind(); scrollLatest(true); }
   }
 
   function switchSession(id) {
@@ -602,7 +671,7 @@
       const selector = conversationOnly ? ".message-body" : ".message";
       element.scroll.querySelectorAll(selector).forEach((root) => {
         const message = root.closest(".message");
-        if (focusedView && !message?.matches('[data-role="user"]:not(.message--error):not(.message--tool-error), [data-final-assistant-response="true"]:not(.message--error):not(.message--tool-error)')) return;
+        if (focusedView && !focusedConversationMessage(message) && !message?.classList.contains("is-focus-activity-expanded")) return;
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         const nodes = [];
         while (walker.nextNode()) if (!walker.currentNode.parentElement.closest("button, summary")) nodes.push(walker.currentNode);
@@ -636,6 +705,13 @@
     const open = event.target.closest("[data-modal-open]"); if (open) { openModal(open.dataset.modalOpen); return; }
     const close = event.target.closest("[data-modal-close]"); if (close) { closeModal(close.closest("[data-modal]")); return; }
     const command = event.target.closest("[data-command-name]"); if (command) { handleSlash(command.dataset.commandName); element.prompt.value = ""; persistDraft(); element.commands.classList.remove("is-visible"); return; }
+    const activity = event.target.closest("[data-focus-activity-summary]"); if (activity) {
+      const groupId = activity.dataset.focusActivitySummary;
+      const expanded = activity.getAttribute("aria-expanded") !== "true";
+      activity.setAttribute("aria-expanded", String(expanded)); activity.classList.toggle("is-expanded", expanded);
+      element.scroll.querySelectorAll("[data-focus-activity-group]").forEach((message) => { if (message.dataset.focusActivityGroup === groupId) message.classList.toggle("is-focus-activity-expanded", expanded); });
+      refreshOpenFind(); return;
+    }
     const copy = event.target.closest("[data-copy-target]"); if (copy) {
       const text = copy.closest(".message").querySelector(".message-body")?.textContent || "";
       const fallback = () => { const textarea = document.createElement("textarea"); textarea.value = text; textarea.className = "visually-hidden"; document.body.append(textarea); textarea.select(); const copied = document.execCommand("copy"); textarea.remove(); return copied; };

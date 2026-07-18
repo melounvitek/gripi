@@ -22,9 +22,10 @@
             <% end %>
           </div>
           <div class="session-header-actions">
-            <button type="button" class="session-header-action session-header-focus-action" data-conversation-focus-toggle aria-pressed="false" title="Show conversation only" aria-label="Focus view">
-              <svg class="session-header-focus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H8l-4 3V5Z"></path><path d="M8 9h8M8 12h6"></path></svg>
-              <span class="session-header-focus-label">Focus</span>
+            <button type="button" class="session-header-action session-header-focus-action" data-conversation-focus-toggle title="Hide details" aria-label="Hide details">
+              <svg class="session-header-focus-icon" data-hide-details-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle><path d="M3 3l18 18"></path></svg>
+              <svg class="session-header-focus-icon" data-show-details-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>
+              <span class="session-header-focus-label" data-details-toggle-label>Hide details</span>
             </button>
             <% unless session_only? %>
               <a class="session-header-action session-header-window-action" href="<%= h session_only_url(@selected_session.path) %>" target="_blank" rel="noopener" title="Open session in new window" aria-label="Open session in new window">↗</a>

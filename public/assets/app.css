@@ -65,7 +65,14 @@
     .session-header-focus-action.is-active { border-color: var(--accent-line-55); background: var(--accent-tint-08); color: var(--accent); }
     .session-header-focus-icon { width: 1rem; height: 1rem; }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.5rem; }
-    .conversation-panel.is-conversation-focused .conversation-scroll .message:not([data-role="user"]):not([data-final-assistant-response="true"]), .conversation-panel.is-conversation-focused .conversation-scroll .message--error, .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error { display: none; }
+    .focus-activity-summary { display: none; }
+    .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 0.5rem; min-height: 0; margin: 0 0 0.85rem; padding: 0.55rem 0.7rem; border: 1px solid var(--border-strong); background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.78rem; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
+    .conversation-panel.is-conversation-focused .focus-activity-summary:hover { border-color: var(--accent-line-55); background: var(--accent-tint-04); color: var(--text); }
+    .conversation-panel.is-conversation-focused .focus-activity-summary::after { content: "›"; margin-left: auto; color: var(--muted); font-size: 1rem; line-height: 1; transition: transform 120ms ease; }
+    .conversation-panel.is-conversation-focused .focus-activity-summary.is-expanded::after { transform: rotate(90deg); }
+    .focus-activity-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .focus-activity-error-count { flex: 0 0 auto; padding: 0.12rem 0.35rem; border: 1px solid #cc666659; border-radius: 0.2rem; background: var(--danger-soft); color: var(--danger); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; }
+    .conversation-panel.is-conversation-focused .conversation-scroll .message:not([data-role="user"]):not([data-final-assistant-response="true"]):not(.is-focus-activity-expanded), .conversation-panel.is-conversation-focused .conversation-scroll .message--error:not(.is-focus-activity-expanded), .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error:not(.is-focus-activity-expanded) { display: none; }
     .conversation-scroll:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-tint-14); }
     .current-session-find { position: sticky; top: 0.4rem; z-index: 5; width: min(38rem, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto repeat(3, 2rem); align-items: center; gap: 0.4rem; margin: 0 0 0.75rem auto; padding: 0.55rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: #1e1e24fa; box-shadow: var(--shadow-soft); }
     .current-session-find input[type="search"] { min-width: 0; padding: 0.5rem 0.65rem; }
@@ -530,8 +537,7 @@
       .session-header-actions { gap: 0.35rem; }
       .session-header-window-action { display: none; }
       .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.66rem; }
-      .session-header-focus-action { width: 2.4rem; min-width: 2.4rem; height: 2.4rem; min-height: 2.4rem; padding: 0; }
-      .session-header-focus-label { display: none; }
+      .session-header-focus-action { min-height: 2.4rem; padding: 0.42rem 0.6rem; }
       .session-header h1 { font-size: 1rem; }
       .session-header-project { font-size: 0.7rem; }
       .project-select-trigger { min-height: 2.75rem; font-size: 16px; }

@@ -50,6 +50,24 @@ class CurrentSessionFindTest < Minitest::Test
     assert_equal({ "whileOpen" => 1, "whileClosed" => 1 }, results)
   end
 
+  def test_focused_find_includes_expanded_activity
+    results = run_javascript(<<~JS)
+      const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});
+      const conversation = { focusedViewMessage: (message) => message.visible };
+      const controller = new CurrentSessionFindController({}, conversation);
+      const message = (visible, expanded) => ({ visible, classList: { contains: (name) => name === "is-focus-activity-expanded" && expanded } });
+      console.log(JSON.stringify({
+        conversation: controller.focusedViewMessage(message(true, false)),
+        collapsedActivity: controller.focusedViewMessage(message(false, false)),
+        expandedActivity: controller.focusedViewMessage(message(false, true))
+      }));
+    JS
+
+    assert_equal true, results.fetch("conversation")
+    assert_equal false, results.fetch("collapsedActivity")
+    assert_equal true, results.fetch("expandedActivity")
+  end
+
   def test_literal_matching_is_case_insensitive_and_does_not_treat_query_as_a_pattern
     results = run_javascript(<<~JS)
       const { CurrentSessionFindController } = await import(#{module_url("current_session_find_controller.js").to_json});

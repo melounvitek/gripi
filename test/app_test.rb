@@ -5167,10 +5167,15 @@ class AppTest < Minitest::Test
       assert_includes response.body, 'class="message message--error" data-role="error"'
       focus_toggle = document.at_css("[data-conversation-focus-toggle]")
       refute_nil focus_toggle
-      assert_equal "false", focus_toggle["aria-pressed"]
-      assert_equal "Show conversation only", focus_toggle["title"]
-      assert_equal "Focus view", focus_toggle["aria-label"]
-      assert_includes APP_STYLESHEET, '.conversation-scroll .message:not([data-role="user"]):not([data-final-assistant-response="true"]), .conversation-panel.is-conversation-focused .conversation-scroll .message--error, .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error { display: none; }'
+      refute focus_toggle.key?("aria-pressed")
+      assert_equal "Hide details", focus_toggle["title"]
+      assert_equal "Hide details", focus_toggle["aria-label"]
+      assert_equal "Hide details", focus_toggle.at_css("[data-details-toggle-label]").text
+      refute focus_toggle.at_css("[data-hide-details-icon]").key?("hidden")
+      assert focus_toggle.at_css("[data-show-details-icon]").key?("hidden")
+      assert_includes APP_STYLESHEET, ".conversation-panel.is-conversation-focused .focus-activity-summary {"
+      assert_includes APP_STYLESHEET, ':not([data-final-assistant-response="true"]):not(.is-focus-activity-expanded)'
+      assert_includes APP_STYLESHEET, ".focus-activity-error-count {"
       assert_includes response.body, 'class="message-body"'
       assert_includes response.body, "Hello &lt;Pi&gt;"
       assert_includes response.body, Time.parse("2026-06-13T10:00:00Z").localtime.strftime("%Y-%m-%d %H:%M")

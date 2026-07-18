@@ -284,6 +284,21 @@ Extract PDFs.
     ], result
   end
 
+  def test_removing_pending_compaction_refreshes_focused_activity
+    result = run_javascript(<<~JS)
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      let removed = 0;
+      let refreshes = 0;
+      const renderer = Object.create(LiveMessageRenderer.prototype);
+      renderer.liveOutput = { querySelectorAll: () => [{ remove() { removed += 1; } }] };
+      renderer.conversationController = { scheduleFocusedActivityRefresh() { refreshes += 1; } };
+      renderer.removePendingCompactionMessage();
+      console.log(JSON.stringify({ removed, refreshes }));
+    JS
+
+    assert_equal({ "removed" => 1, "refreshes" => 1 }, result)
+  end
+
   def test_live_compaction_renders_native_and_legacy_summaries_as_collapsed_details
     result = run_javascript(<<~JS)
       const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});

@@ -820,6 +820,121 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal false, results.fetch("nearBottomRestored")
   end
 
+  def test_focused_activity_groups_hidden_turn_items_and_summarizes_errors
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const message = (role, classes = [], final = false) => ({
+        dataset: { role, ...(final ? { finalAssistantResponse: "true" } : {}) },
+        classList: { contains: (name) => classes.includes(name) }
+      });
+      const controller = new ConversationController({}, {});
+      const thinking = message("assistant", ["message--thinking"]);
+      const tool = message("assistant", ["message--tool-call"]);
+      const error = message("error", ["message--error"]);
+      const status = message("status", ["message--status"]);
+      const groups = controller.focusedActivityGroups([
+        message("user", ["message--user"]),
+        thinking,
+        tool,
+        error,
+        message("assistant", ["message--assistant"], true),
+        status,
+        message("user", ["message--user"]),
+        message("assistant", ["message--assistant"], true)
+      ]);
+      const summary = controller.focusedActivitySummary(groups[0]);
+      console.log(JSON.stringify({
+        groupSizes: groups.map((group) => group.length),
+        firstGroupPreserved: groups[0][0] === thinking && groups[0][1] === tool && groups[0][2] === error,
+        summary
+      }));
+    JS
+
+    assert_equal [3, 1], results.fetch("groupSizes")
+    assert_equal true, results.fetch("firstGroupPreserved")
+    assert_equal "Activity included 1 reasoning step, 1 tool update, and 1 error.", results.dig("summary", "text")
+    assert_equal 1, results.dig("summary", "errorCount")
+  end
+
+  def test_focused_activity_summary_expands_and_collapses_its_messages
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const classes = () => {
+        const values = new Set();
+        return { toggle(name, enabled) { enabled ? values.add(name) : values.delete(name); }, contains(name) { return values.has(name); } };
+      };
+      const first = { dataset: { focusActivityGroup: "turn-1" }, classList: classes() };
+      const second = { dataset: { focusActivityGroup: "turn-1" }, classList: classes() };
+      const unrelated = { dataset: { focusActivityGroup: "turn-2" }, classList: classes() };
+      const summary = {
+        dataset: { focusActivitySummary: "turn-1" }, classList: classes(), attributes: { "aria-expanded": "false" },
+        getAttribute(name) { return this.attributes[name]; }, setAttribute(name, value) { this.attributes[name] = value; }
+      };
+      const controller = new ConversationController({}, {});
+      controller.element = { querySelectorAll: () => [first, second, unrelated] };
+      controller.updateJumpControls = () => {};
+      controller.toggleFocusedActivity(summary);
+      const expanded = [first, second, unrelated].map((message) => message.classList.contains("is-focus-activity-expanded"));
+      controller.toggleFocusedActivity(summary);
+      console.log(JSON.stringify({
+        expanded,
+        collapsed: [first, second, unrelated].map((message) => message.classList.contains("is-focus-activity-expanded")),
+        ariaExpanded: summary.attributes["aria-expanded"]
+      }));
+    JS
+
+    assert_equal [true, true, false], results.fetch("expanded")
+    assert_equal [false, false, false], results.fetch("collapsed")
+    assert_equal "false", results.fetch("ariaExpanded")
+  end
+
+  def test_live_text_updates_do_not_rebuild_focused_activity_groups
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const controller = new ConversationController({}, {});
+      controller.element = {};
+      controller.autoScrollEnabled = false;
+      let refreshes = 0;
+      controller.scheduleFocusedActivityRefresh = () => { refreshes += 1; };
+      controller.afterLiveOutputChange(false, true, false);
+      controller.afterLiveOutputChange(false, true, true);
+      console.log(JSON.stringify({ refreshes }));
+    JS
+
+    assert_equal 1, results.fetch("refreshes")
+  end
+
+  def test_live_auto_scroll_does_not_cancel_the_focused_activity_refresh
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const callbacks = new Map();
+      const cancelled = new Set();
+      let nextFrame = 0;
+      globalThis.requestAnimationFrame = (callback) => { const id = ++nextFrame; callbacks.set(id, callback); return id; };
+      globalThis.cancelAnimationFrame = (id) => cancelled.add(id);
+      const controller = new ConversationController({}, {});
+      controller.element = {};
+      controller.autoScrollEnabled = true;
+      let refreshes = 0;
+      let autoScrolls = 0;
+      controller.refreshFocusedActivity = () => { refreshes += 1; };
+      controller.applyAutoScroll = () => { autoScrolls += 1; };
+
+      controller.afterLiveOutputChange(true, true, true);
+      controller.afterLiveOutputChange(true, true, true);
+      while (callbacks.size > 0) {
+        const pending = [...callbacks.entries()];
+        callbacks.clear();
+        pending.forEach(([id, callback]) => { if (!cancelled.has(id)) callback(); });
+      }
+      console.log(JSON.stringify({ refreshes, autoScrolls, refreshPending: controller.focusedActivityRefreshFrame !== null }));
+    JS
+
+    assert_equal 1, results.fetch("refreshes")
+    assert_equal 1, results.fetch("autoScrolls")
+    assert_equal false, results.fetch("refreshPending")
+  end
+
   def test_focused_view_toggles_and_survives_in_page_session_switching
     results = run_javascript(<<~JS)
       const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
@@ -831,10 +946,11 @@ class FrontendLifecycleJsTest < Minitest::Test
         contains(name) { return this.values.has(name); }
       }
       class Toggle {
-        constructor() { this.classList = new ClassList(); this.attributes = {}; this.listeners = []; }
+        constructor() { this.classList = new ClassList(); this.attributes = {}; this.listeners = []; this.label = { textContent: "" }; this.hideIcon = {}; this.showIcon = {}; }
         addEventListener(type, listener) { if (type === "click") this.listeners.push(listener); }
         removeEventListener(type, listener) { if (type === "click") this.listeners = this.listeners.filter((item) => item !== listener); }
         setAttribute(name, value) { this.attributes[name] = value; }
+        querySelector(selector) { return { "[data-details-toggle-label]": this.label, "[data-hide-details-icon]": this.hideIcon, "[data-show-details-icon]": this.showIcon }[selector]; }
         click() { this.listeners.forEach((listener) => listener()); }
       }
       const scroll = {
@@ -855,36 +971,39 @@ class FrontendLifecycleJsTest < Minitest::Test
       const window = { location: { search: "", origin: "https://example.test" }, matchMedia: () => ({ matches: false }) };
       const controller = new ConversationController(document, window);
       controller.bind();
-      const initiallyPressed = toggle.attributes["aria-pressed"];
+      const initialLabel = toggle.label.textContent;
       toggle.click();
       const firstPanelFocused = panel.classList.contains("is-conversation-focused");
+      const focusedLabel = toggle.label.textContent;
 
       controller.reset();
       panel = { classList: new ClassList() };
       toggle = new Toggle();
       controller.bind();
       const switchedPanelFocused = panel.classList.contains("is-conversation-focused");
-      const switchedTogglePressed = toggle.attributes["aria-pressed"];
+      const switchedLabel = toggle.label.textContent;
 
       controller.reset();
       const reloadedController = new ConversationController(document, window);
       reloadedController.bind();
       console.log(JSON.stringify({
-        initiallyPressed,
+        initialLabel,
         firstPanelFocused,
+        focusedLabel,
         switchedPanelFocused,
-        switchedTogglePressed,
+        switchedLabel,
         reloadedPanelFocused: panel.classList.contains("is-conversation-focused"),
-        reloadedTogglePressed: toggle.attributes["aria-pressed"]
+        reloadedLabel: toggle.label.textContent
       }));
     JS
 
-    assert_equal "false", results.fetch("initiallyPressed")
+    assert_equal "Hide details", results.fetch("initialLabel")
     assert_equal true, results.fetch("firstPanelFocused")
+    assert_equal "Show details", results.fetch("focusedLabel")
     assert_equal true, results.fetch("switchedPanelFocused")
-    assert_equal "true", results.fetch("switchedTogglePressed")
+    assert_equal "Show details", results.fetch("switchedLabel")
     assert_equal false, results.fetch("reloadedPanelFocused")
-    assert_equal "false", results.fetch("reloadedTogglePressed")
+    assert_equal "Hide details", results.fetch("reloadedLabel")
   end
 
   def test_page_keyboard_intent_listener_remains_page_lifetime_state

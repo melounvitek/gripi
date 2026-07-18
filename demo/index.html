@@ -84,7 +84,14 @@
     .session-header-focus-action.is-active { border-color: var(--accent-line-55); background: var(--accent-tint-08); color: var(--accent); }
     .session-header-focus-icon { width: 1rem; height: 1rem; }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.5rem; }
-    .conversation-panel.is-conversation-focused .conversation-scroll .message:not([data-role="user"]):not([data-final-assistant-response="true"]), .conversation-panel.is-conversation-focused .conversation-scroll .message--error, .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error { display: none; }
+    .focus-activity-summary { display: none; }
+    .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 0.5rem; min-height: 0; margin: 0 0 0.85rem; padding: 0.55rem 0.7rem; border: 1px solid var(--border-strong); background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.78rem; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
+    .conversation-panel.is-conversation-focused .focus-activity-summary:hover { border-color: var(--accent-line-55); background: var(--accent-tint-04); color: var(--text); }
+    .conversation-panel.is-conversation-focused .focus-activity-summary::after { content: "›"; margin-left: auto; color: var(--muted); font-size: 1rem; line-height: 1; transition: transform 120ms ease; }
+    .conversation-panel.is-conversation-focused .focus-activity-summary.is-expanded::after { transform: rotate(90deg); }
+    .focus-activity-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .focus-activity-error-count { flex: 0 0 auto; padding: 0.12rem 0.35rem; border: 1px solid #cc666659; border-radius: 0.2rem; background: var(--danger-soft); color: var(--danger); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; }
+    .conversation-panel.is-conversation-focused .conversation-scroll .message:not([data-role="user"]):not([data-final-assistant-response="true"]):not(.is-focus-activity-expanded), .conversation-panel.is-conversation-focused .conversation-scroll .message--error:not(.is-focus-activity-expanded), .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error:not(.is-focus-activity-expanded) { display: none; }
     .conversation-scroll:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-tint-14); }
     .current-session-find { position: sticky; top: 0.4rem; z-index: 5; width: min(38rem, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto repeat(3, 2rem); align-items: center; gap: 0.4rem; margin: 0 0 0.75rem auto; padding: 0.55rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: #1e1e24fa; box-shadow: var(--shadow-soft); }
     .current-session-find input[type="search"] { min-width: 0; padding: 0.5rem 0.65rem; }
@@ -549,8 +556,7 @@
       .session-header-actions { gap: 0.35rem; }
       .session-header-window-action { display: none; }
       .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.66rem; }
-      .session-header-focus-action { width: 2.4rem; min-width: 2.4rem; height: 2.4rem; min-height: 2.4rem; padding: 0; }
-      .session-header-focus-label { display: none; }
+      .session-header-focus-action { min-height: 2.4rem; padding: 0.42rem 0.6rem; }
       .session-header h1 { font-size: 1rem; }
       .session-header-project { font-size: 0.7rem; }
       .project-select-trigger { min-height: 2.75rem; font-size: 16px; }
@@ -690,9 +696,10 @@
           <div class="session-header-project" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon">GR</span><span class="session-header-project-label">gripi</span></div>
         </div>
         <div class="session-header-actions">
-          <button type="button" class="session-header-action session-header-focus-action" data-conversation-focus-toggle aria-pressed="false" title="Show conversation only" aria-label="Focus view">
-            <svg class="session-header-focus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H8l-4 3V5Z"></path><path d="M8 9h8M8 12h6"></path></svg>
-            <span class="session-header-focus-label">Focus</span>
+          <button type="button" class="session-header-action session-header-focus-action" data-conversation-focus-toggle title="Hide details" aria-label="Hide details">
+            <svg class="session-header-focus-icon" data-hide-details-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle><path d="M3 3l18 18"></path></svg>
+            <svg class="session-header-focus-icon" data-show-details-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>
+            <span class="session-header-focus-label" data-details-toggle-label>Hide details</span>
           </button>
           <a class="session-header-action session-header-window-action" href="#" title="Open session in new window" aria-label="Open session in new window" data-demo-disabled>↗</a>
           <button type="button" class="danger abort-button session-abort-button composer-stop-button" id="stop-button" hidden disabled title="Abort running Pi"><span aria-hidden="true">⏹</span></button>

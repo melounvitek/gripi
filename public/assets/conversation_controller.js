@@ -29,6 +29,10 @@ export class ConversationController {
     this.messageJumpSuppressionScrollEndListener = null;
     this.messageJumpSuppressionGeneration = 0;
     this.focusedView = false;
+    this.focusedActivityRefreshFrame = null;
+    this.focusedActivityMessageIds = new WeakMap();
+    this.focusedActivityMessageSequence = 0;
+    this.focusedActivitySignature = null;
   }
 
   bind(promptTextarea = null) {
@@ -52,6 +56,13 @@ export class ConversationController {
     this.scrollDirection = null;
     this.followOversizedMessageBottom = false;
     if (!this.element) return;
+
+    this.listen(this.element, "click", (event) => {
+      const summary = event.target.closest?.("[data-focus-activity-summary]");
+      if (!summary) return;
+      this.toggleFocusedActivity(summary);
+    });
+    this.refreshFocusedActivity();
 
     this.listen(this.element, "keydown", (event) => {
       if (event.key === "Home" && this.jumpToFirstButton && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.target.closest?.("input, textarea, select, [contenteditable]")) {
@@ -93,6 +104,9 @@ export class ConversationController {
     this.revealTimer = null;
     this.revealDelayTimer = null;
     this.messageJumpSuppressionTimer = null;
+    if (this.focusedActivityRefreshFrame) cancelAnimationFrame(this.focusedActivityRefreshFrame);
+    this.focusedActivityRefreshFrame = null;
+    this.focusedActivitySignature = null;
     this.clearMessageJumpSuppressionScrollEndListener();
     this.messageJumpSuppressionGeneration += 1;
     this.messageJumpTargetsSuppressed = false;
@@ -114,9 +128,130 @@ export class ConversationController {
   applyFocusedView() {
     this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
     this.focusToggle?.classList.toggle("is-active", this.focusedView);
-    this.focusToggle?.setAttribute("aria-pressed", String(this.focusedView));
-    this.focusToggle?.setAttribute("title", this.focusedView ? "Show full transcript" : "Show conversation only");
-    this.focusToggle?.setAttribute("aria-label", "Focus view");
+    const label = this.focusedView ? "Show details" : "Hide details";
+    this.focusToggle?.setAttribute("title", label);
+    this.focusToggle?.setAttribute("aria-label", label);
+    const visibleLabel = this.focusToggle?.querySelector("[data-details-toggle-label]");
+    if (visibleLabel) visibleLabel.textContent = label;
+    const hideIcon = this.focusToggle?.querySelector("[data-hide-details-icon]");
+    const showIcon = this.focusToggle?.querySelector("[data-show-details-icon]");
+    if (hideIcon) hideIcon.hidden = this.focusedView;
+    if (showIcon) showIcon.hidden = !this.focusedView;
+  }
+
+  focusedViewMessage(message) {
+    const error = message.classList.contains("message--error") || message.classList.contains("message--tool-error");
+    return !error && (message.dataset.role === "user" || message.dataset.finalAssistantResponse === "true");
+  }
+
+  focusedActivityGroups(messages) {
+    const groups = [];
+    let group = [];
+    messages.forEach((message) => {
+      if (this.focusedViewMessage(message)) {
+        if (group.length > 0) groups.push(group);
+        group = [];
+      } else {
+        group.push(message);
+      }
+    });
+    if (group.length > 0) groups.push(group);
+    return groups;
+  }
+
+  focusedActivitySummary(messages) {
+    const reasoningCount = messages.filter((message) => message.classList.contains("message--thinking")).length;
+    const toolCount = messages.filter((message) => ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name))).length;
+    const errorCount = messages.filter((message) => message.classList.contains("message--error") || message.classList.contains("message--tool-error")).length;
+    const otherCount = messages.filter((message) => !message.classList.contains("message--thinking") && !["message--tool", "message--tool-call", "message--tool-transcript", "message--error"].some((name) => message.classList.contains(name)) && !message.classList.contains("message--tool-error")).length;
+    const parts = [];
+    if (reasoningCount > 0) parts.push(`${reasoningCount} reasoning ${reasoningCount === 1 ? "step" : "steps"}`);
+    if (toolCount > 0) parts.push(`${toolCount} tool ${toolCount === 1 ? "update" : "updates"}`);
+    if (otherCount > 0) parts.push(`${otherCount} other ${otherCount === 1 ? "update" : "updates"}`);
+    if (errorCount > 0) parts.push(`${errorCount} ${errorCount === 1 ? "error" : "errors"}`);
+    const list = parts.length < 2 ? parts[0] : parts.length === 2 ? `${parts[0]} and ${parts[1]}` : `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}`;
+    return { text: `Activity included ${list}.`, errorCount };
+  }
+
+  refreshFocusedActivity() {
+    if (!this.element?.querySelectorAll) return;
+    const messages = [...this.element.querySelectorAll(".message")];
+    const signature = messages.map((message) => {
+      if (!this.focusedActivityMessageIds.has(message)) this.focusedActivityMessageIds.set(message, ++this.focusedActivityMessageSequence);
+      return [
+        this.focusedActivityMessageIds.get(message),
+        this.focusedViewMessage(message),
+        message.classList.contains("message--thinking"),
+        ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name)),
+        message.classList.contains("message--error") || message.classList.contains("message--tool-error")
+      ].join(":");
+    }).join("|");
+    if (signature === this.focusedActivitySignature) return;
+    this.focusedActivitySignature = signature;
+    const summaries = [...this.element.querySelectorAll("[data-focus-activity-summary]")];
+    const activeSummary = this.document.activeElement?.closest?.("[data-focus-activity-summary]");
+    const activeSummaryIndex = summaries.indexOf(activeSummary);
+    const activeGroupId = activeSummary?.dataset.focusActivitySummary;
+    const focusAnchor = activeGroupId && messages.find((message) => message.dataset.focusActivityGroup === activeGroupId);
+    const expandedMessages = new Set(this.element.querySelectorAll(".message.is-focus-activity-expanded"));
+    summaries.forEach((summary) => summary.remove());
+    const replacementSummaries = [];
+    let replacementFocus = null;
+    messages.forEach((message) => {
+      message.classList.remove("is-focus-activity-expanded");
+      delete message.dataset.focusActivityGroup;
+    });
+    this.focusedActivityGroups(messages).forEach((group, index) => {
+      const groupId = `${this.bindingEpoch}-${index}`;
+      const expanded = group.some((message) => expandedMessages.has(message));
+      group.forEach((message) => {
+        message.dataset.focusActivityGroup = groupId;
+        message.classList.toggle("is-focus-activity-expanded", expanded);
+      });
+      const summaryData = this.focusedActivitySummary(group);
+      const summary = this.document.createElement("button");
+      summary.type = "button";
+      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${expanded ? " is-expanded" : ""}`;
+      summary.dataset.focusActivitySummary = groupId;
+      summary.setAttribute("aria-expanded", String(expanded));
+      const text = this.document.createElement("span");
+      text.className = "focus-activity-summary-text";
+      text.textContent = summaryData.text;
+      summary.append(text);
+      if (summaryData.errorCount > 0) {
+        const error = this.document.createElement("span");
+        error.className = "focus-activity-error-count";
+        error.textContent = `${summaryData.errorCount} ${summaryData.errorCount === 1 ? "error" : "errors"}`;
+        error.setAttribute("aria-hidden", "true");
+        summary.append(error);
+      }
+      group[0].before(summary);
+      replacementSummaries.push(summary);
+      if (focusAnchor && group.includes(focusAnchor)) replacementFocus = summary;
+    });
+    if (activeSummary && !replacementFocus) replacementFocus = replacementSummaries[Math.min(Math.max(activeSummaryIndex, 0), replacementSummaries.length - 1)] || this.focusToggle;
+    replacementFocus?.focus({ preventScroll: true });
+  }
+
+  scheduleFocusedActivityRefresh() {
+    if (!this.element || this.focusedActivityRefreshFrame) return;
+    const epoch = this.bindingEpoch;
+    const element = this.element;
+    this.focusedActivityRefreshFrame = requestAnimationFrame(() => {
+      this.focusedActivityRefreshFrame = null;
+      if (epoch === this.bindingEpoch && element === this.element) this.refreshFocusedActivity();
+    });
+  }
+
+  toggleFocusedActivity(summary) {
+    const groupId = summary.dataset.focusActivitySummary;
+    const expanded = summary.getAttribute("aria-expanded") !== "true";
+    summary.setAttribute("aria-expanded", String(expanded));
+    summary.classList.toggle("is-expanded", expanded);
+    this.element.querySelectorAll("[data-focus-activity-group]").forEach((message) => {
+      if (message.dataset.focusActivityGroup === groupId) message.classList.toggle("is-focus-activity-expanded", expanded);
+    });
+    this.updateJumpControls();
   }
 
   listen(target, type, listener, options) {
@@ -335,6 +470,7 @@ export class ConversationController {
     const previousHeight = this.element.scrollHeight;
     const insertionPoint = this.element.querySelector(".message") || this.liveOutput || this.element.firstElementChild;
     this.element.insertBefore(template.content, insertionPoint);
+    this.refreshFocusedActivity();
     this.element.scrollTop = previousTop + (this.element.scrollHeight - previousHeight);
     this.lastScrollTop = this.element.scrollTop;
     this.updateJumpControls();
@@ -535,7 +671,8 @@ export class ConversationController {
     return shouldScroll;
   }
 
-  afterLiveOutputChange(shouldScroll, live = true) {
+  afterLiveOutputChange(shouldScroll, live = true, activityChanged = false) {
+    if (activityChanged) this.scheduleFocusedActivityRefresh();
     if (shouldScroll && this.autoScrollEnabled) this.scheduleAutoScroll();
     else if (live) this.updateJumpControls();
   }

@@ -126,7 +126,7 @@ export class LiveMessageRenderer {
     article.append(body);
     this.renderMessageImages(article, options.images);
     this.liveOutput.append(article);
-    this.conversationController.afterLiveOutputChange(shouldScroll, live);
+    this.conversationController.afterLiveOutputChange(shouldScroll, live, true);
     return { article, body, compact: false };
   }
 
@@ -213,7 +213,7 @@ export class LiveMessageRenderer {
     article.append(header, details);
     this.renderMessageImages(article, options.images);
     this.liveOutput.append(article);
-    this.conversationController.afterLiveOutputChange(shouldScroll, live);
+    this.conversationController.afterLiveOutputChange(shouldScroll, live, true);
     return entry;
   }
 
@@ -405,6 +405,7 @@ export class LiveMessageRenderer {
     if (this.liveMessageAlreadyRendered(roleName, text, timestampKey)) {
       entry.article.remove();
       this.forgetLiveEntry(entry);
+      this.conversationController.scheduleFocusedActivityRefresh?.();
       return false;
     }
     entry.article.dataset.messageTimestamp = timestampKey;
@@ -502,7 +503,10 @@ export class LiveMessageRenderer {
       const updated = this.updateLiveSegment(existing, roleName, segment, shouldScroll, timestamp);
       if (updated) {
         updated.article.classList.toggle("message--streaming", streamingAssistantResponse);
-        if (finalAssistantResponse) updated.article.dataset.finalAssistantResponse = "true";
+        if (finalAssistantResponse) {
+          updated.article.dataset.finalAssistantResponse = "true";
+          this.conversationController.scheduleFocusedActivityRefresh?.();
+        }
         return updated;
       }
       this.forgetLiveEntry(existing);
@@ -542,8 +546,9 @@ export class LiveMessageRenderer {
       this.renderToolSummary(entry.summaryText, null, this.parser.toolExecutionSummary(event));
       this.renderToolTranscriptBody(entry.body, this.parser.toolExecutionText(event), event.toolName || entry.toolName);
     }
+    const errorChanged = entry.article.classList.contains("message--tool-error") !== (event.isError === true);
     entry.article.classList.toggle("message--tool-error", event.isError === true);
-    this.conversationController.afterLiveOutputChange(shouldScroll);
+    this.conversationController.afterLiveOutputChange(shouldScroll, true, errorChanged);
     return entry;
   }
 
@@ -583,7 +588,9 @@ export class LiveMessageRenderer {
   }
 
   removePendingCompactionMessage() {
-    this.liveOutput?.querySelectorAll('[data-pending-compaction="true"]').forEach((entry) => entry.remove());
+    const entries = this.liveOutput?.querySelectorAll('[data-pending-compaction="true"]') || [];
+    entries.forEach((entry) => entry.remove());
+    if (entries.length > 0) this.conversationController.scheduleFocusedActivityRefresh?.();
   }
 
   appendPendingCompactionMessage(timestamp = new Date()) {
@@ -629,18 +636,20 @@ export class LiveMessageRenderer {
           this.renderSubagentPrompt(toolExecutionEntry, segment.toolPrompt || this.parser.subagentPromptFromDetails(message.details));
           this.renderToolTranscriptBody(toolExecutionEntry.body, resultText, segment.toolName || toolExecutionEntry.toolName, { preview: segment.toolPreview === true });
           this.renderToolSummary(toolExecutionEntry.summaryText, segment.summaryParts, resultSummary);
+          const errorChanged = toolExecutionEntry.article.classList.contains("message--tool-error") !== (segment.error === true);
           toolExecutionEntry.article.classList.toggle("message--tool-error", segment.error === true);
           if (!this.markLiveEntryRendered(toolExecutionEntry, toolExecutionEntry.article.dataset.role || "toolResult", segment.text, timestamp)) return;
           this.replaceMessageImages(toolExecutionEntry.article, segment.images);
-          this.conversationController.afterLiveOutputChange(shouldScroll);
+          this.conversationController.afterLiveOutputChange(shouldScroll, true, errorChanged);
         } else if (pairedToolCallEntry && segment.isToolResult) {
           const mergedText = segment.toolName === "read" && segment.error !== true ? "" : (segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text : [pairedToolCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\n\n"));
           const preview = segment.toolPreview === true || (segment.error === true && pairedToolCallEntry.body.classList.contains("message-body--edit-preview"));
           this.renderToolTranscriptBody(pairedToolCallEntry.body, mergedText, segment.toolName || pairedToolCallEntry.toolName, { preview });
+          const errorChanged = pairedToolCallEntry.article.classList.contains("message--tool-error") !== (segment.error === true);
           pairedToolCallEntry.article.classList.toggle("message--tool-error", segment.error === true);
           if (!this.markLiveEntryRendered(pairedToolCallEntry, pairedToolCallEntry.article.dataset.role || "assistant", mergedText)) return;
           this.replaceMessageImages(pairedToolCallEntry.article, segment.images);
-          this.conversationController.afterLiveOutputChange(shouldScroll);
+          this.conversationController.afterLiveOutputChange(shouldScroll, true, errorChanged);
         } else if (roleName === "user" && !segment.compact) {
           this.upsertLiveUserSegment(event, segment, index, shouldScroll, timestamp);
         } else if (customMessage && !segment.compact) {
