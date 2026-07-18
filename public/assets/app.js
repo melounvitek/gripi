@@ -86,6 +86,7 @@ let modelSettingsOperationGeneration = 0;
 let thinkingCyclePending = false;
 let pendingImages = [];
 let escapeStopConfirmationExpiresAt = 0;
+const stoppingSessionPaths = new Set();
 let eventPollTimer = null;
 let eventPollInFlight = false;
 let eventPollAbortController = null;
@@ -690,30 +691,35 @@ function sessionSyncBlocked() {
 
 function setComposerState(state, label = "", { since = null, focus = true } = {}) {
   const previousState = composerState?.dataset.state;
+  const sessionPath = currentSessionPath();
+  if (state === "stopping") stoppingSessionPaths.add(sessionPath);
+  if (state === "running" && stoppingSessionPaths.has(sessionPath)) return;
+  if (!["running", "stopping"].includes(state)) stoppingSessionPaths.delete(sessionPath);
   if (state === "running") waitingForOutputLabel = label || "Pi is running…";
   if (state === "running" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());
   if (state !== "running") escapeStopConfirmationExpiresAt = 0;
   if (!["running", "sending"].includes(state)) stopWaitingForOutput();
   if (composerState) {
     composerState.dataset.state = state;
-    composerState.textContent = ["running", "sending", "error"].includes(state) ? label : "";
+    composerState.textContent = ["running", "sending", "stopping", "error"].includes(state) ? label : "";
     if (state === "running") updateWaitingForOutputStatus();
   }
-  const agentBusy = ["running", "sending"].includes(state);
+  const agentBusy = ["running", "sending", "stopping"].includes(state);
   const submitting = state === "sending";
-  if (abortButton) abortButton.disabled = !agentBusy;
+  const stopping = state === "stopping";
+  if (abortButton) abortButton.disabled = !agentBusy || stopping;
   if (sendButton) {
-    sendButton.hidden = submitting;
-    sendButton.disabled = sessionSyncBlocked();
+    sendButton.hidden = submitting || stopping;
+    sendButton.disabled = stopping || sessionSyncBlocked();
     sendButton.textContent = state === "running" ? "Queue" : state === "sending" ? "Sending…" : "Send";
     sendButton.setAttribute("aria-label", state === "running" ? "Send follow-up" : "Send message");
   }
   if (composerStopButton) {
     composerStopButton.hidden = !agentBusy;
-    composerStopButton.disabled = !agentBusy;
+    composerStopButton.disabled = !agentBusy || stopping;
     composerStopButton.classList.toggle("is-visible", agentBusy);
   }
-  if (promptTextarea) promptTextarea.disabled = submitting || sessionSyncBlocked();
+  if (promptTextarea) promptTextarea.disabled = submitting || stopping || sessionSyncBlocked();
   if (focus && state !== previousState) syncComposerFocus(state);
   const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]');
   if (modelButton) modelButton.disabled = agentBusy || sessionSyncBlocked();
@@ -724,7 +730,7 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
     scheduleNextEventPoll(0);
     sidebarController.requestRefresh();
   }
-  const attachmentsDisabled = submitting || sessionSyncBlocked();
+  const attachmentsDisabled = submitting || stopping || sessionSyncBlocked();
   if (imageInput) imageInput.disabled = attachmentsDisabled;
   if (attachButton) {
     attachButton.classList.toggle("is-disabled", attachmentsDisabled);
@@ -1663,15 +1669,25 @@ async function submitAbort(event) {
   event.preventDefault();
   if (!abortForm || abortForm.dataset.submitting === "true") return;
 
-  abortForm.dataset.submitting = "true";
+  if (composerState?.dataset.state !== "stopping") {
+    setComposerState("stopping", "Stopping current task…");
+    showStatus("Stopping current task…", true);
+  }
+  const submittedForm = abortForm;
+  const submittedSession = currentSessionPath();
+  submittedForm.dataset.submitting = "true";
   showSessionSwitching();
   try {
-    const response = await fetch(abortForm.action, { method: "POST", body: new FormData(abortForm), headers: { "Accept": "application/json" } });
-    if (!response.ok) showStatus("Stop failed", true);
+    const response = await fetch(submittedForm.action, { method: "POST", body: new FormData(submittedForm), headers: { "Accept": "application/json" } });
+    if (!response.ok) throw new Error("Stop failed");
   } catch (_error) {
-    showStatus("Stop failed", true);
+    stoppingSessionPaths.delete(submittedSession);
+    if (submittedSession === currentSessionPath() && composerState?.dataset.state === "stopping") {
+      setComposerState("running", liveOutput?.dataset.composerCompacting === "true" ? "Compacting…" : "Pi is running…", { since: liveBusySince });
+      showStatus("Stop failed", true);
+    }
   } finally {
-    delete abortForm.dataset.submitting;
+    delete submittedForm.dataset.submitting;
     hideSessionSwitching();
     scheduleNextEventPoll(0);
     sidebarController.refresh().catch(() => {});
@@ -1686,8 +1702,7 @@ function confirmOrStopRunningTask(event) {
 
   const now = Date.now();
   if (now <= escapeStopConfirmationExpiresAt) {
-    escapeStopConfirmationExpiresAt = 0;
-    if (composerState) composerState.textContent = "Stopping current task…";
+    setComposerState("stopping", "Stopping current task…");
     showStatus("Stopping current task…", true);
     abortForm.requestSubmit();
     return true;
@@ -2715,7 +2730,12 @@ function initializeSessionView({ focus = true, scrollSnapshot = null } = {}) {
     liveBusySince = Number(liveOutput.dataset.composerBusySince || 0) || null;
     const initialComposerLabel = initialComposerCompacting ? "Compacting…" : "Pi is running…";
     liveAgentRunning = liveOutput.dataset.agentRunning === "true";
-    if (initialComposerState === "running") setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });
+    if (initialComposerState === "running") {
+      if (stoppingSessionPaths.has(currentSessionPath())) setComposerState("stopping", "Stopping current task…", { focus: false });
+      else setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });
+    } else {
+      stoppingSessionPaths.delete(currentSessionPath());
+    }
     if (initialComposerCompacting) liveMessageRenderer.appendPendingCompactionMessage(new Date(initialComposerStateSince || Date.now()));
     liveMessageRenderer.restoreActiveToolExecutions();
     hydrateExtensionUiState();

@@ -185,6 +185,138 @@ class FrontendLifecycleJsTest < Minitest::Test
     ], results
   end
 
+  def test_escape_keeps_composer_stopping_despite_waiting_and_stale_running_updates
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    composer_source = app_source.match(/function updateWaitingForOutputStatus\(\).*?(?=\nfunction resizePromptTextarea)/m).to_s
+    stop_source = app_source.match(/function confirmOrStopRunningTask\(event\).*?(?=\nfunction composingFollowUp)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let now = 10_000;
+      Date.now = () => now;
+      let waitingForOutputSince = 5_000;
+      let waitingForOutputTimer = null;
+      let waitingForOutputLabel = "Pi is running…";
+      let escapeStopConfirmationExpiresAt = 0;
+      const stoppingSessionPaths = new Set();
+      const currentSessionPath = () => "session-a";
+      const classList = { toggle() {} };
+      const composerState = { dataset: { state: "running" }, textContent: "Pi is running…" };
+      const abortButton = { disabled: false };
+      const sendButton = { hidden: false, disabled: false, textContent: "", setAttribute() {} };
+      const composerStopButton = { hidden: false, disabled: false, classList };
+      const promptTextarea = { disabled: false };
+      const imageInput = null;
+      const attachButton = null;
+      const sessionStatusBar = null;
+      const liveOutput = null;
+      const syncComposerFocus = () => {};
+      const resetEventPollBackoff = () => {};
+      const scheduleNextEventPoll = () => {};
+      const sidebarController = { requestRefresh() {} };
+      const updatePromptPlaceholder = () => {};
+      const updateCommandListForPrompt = () => {};
+      const selectedSettingsModel = () => null;
+      const document = { querySelector: () => null };
+      const formatWaitDuration = () => "5s";
+      const ESCAPE_STOP_CONFIRMATION_WINDOW_MS = 2_000;
+      const statuses = [];
+      const showStatus = (message) => statuses.push(message);
+      let abortRequests = 0;
+      const abortForm = { requestSubmit() { abortRequests += 1; } };
+      const event = { repeat: false, preventDefault() {} };
+      eval(#{(composer_source + "\n" + stop_source + "\nglobalThis.confirmStop = confirmOrStopRunningTask; globalThis.updateWait = updateWaitingForOutputStatus; globalThis.setState = setComposerState;").to_json});
+
+      globalThis.confirmStop(event);
+      now += 100;
+      globalThis.confirmStop(event);
+      globalThis.updateWait();
+      globalThis.setState("running", "Pi is running…");
+      globalThis.confirmStop(event);
+
+      console.log(JSON.stringify({
+        state: composerState.dataset.state,
+        label: composerState.textContent,
+        promptDisabled: promptTextarea.disabled,
+        stopDisabled: composerStopButton.disabled,
+        abortRequests
+      }));
+    JS
+
+    assert_equal "stopping", results.fetch("state")
+    assert_equal "Stopping current task…", results.fetch("label")
+    assert_equal true, results.fetch("promptDisabled")
+    assert_equal true, results.fetch("stopDisabled")
+    assert_equal 1, results.fetch("abortRequests")
+  end
+
+  def test_abort_failure_only_restores_the_same_session_while_stopping
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    abort_source = app_source.match(/async function submitAbort\(event\).*?(?=\nfunction confirmOrStopRunningTask)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let sessionPath = "session-a";
+      const currentSessionPath = () => sessionPath;
+      const composerState = { dataset: { state: "running" } };
+      const liveOutput = null;
+      const liveBusySince = 1_000;
+      const transitions = [];
+      const statuses = [];
+      const setComposerState = (state) => {
+        transitions.push(state);
+        composerState.dataset.state = state;
+        if (state === "stopping") stoppingSessionPaths.add(currentSessionPath());
+      };
+      const showStatus = (message) => statuses.push(message);
+      const showSessionSwitching = () => {};
+      const hideSessionSwitching = () => {};
+      const scheduleNextEventPoll = () => {};
+      const sidebarController = { refresh: async () => {} };
+      const stoppingSessionPaths = new Set();
+      let abortForm = { action: "/abort", dataset: {} };
+      globalThis.FormData = class {};
+      let resolveRequest;
+      globalThis.fetch = () => new Promise((resolve) => { resolveRequest = resolve; });
+      const event = { preventDefault() {} };
+      eval(#{(abort_source + "\nglobalThis.submitAbortUnderTest = submitAbort;").to_json});
+
+      let request = globalThis.submitAbortUnderTest(event);
+      resolveRequest({ ok: false });
+      await request;
+
+      stoppingSessionPaths.add("session-a");
+      composerState.dataset.state = "stopping";
+      request = globalThis.submitAbortUnderTest(event);
+      composerState.dataset.state = "done";
+      resolveRequest({ ok: false });
+      await request;
+
+      stoppingSessionPaths.add("session-a");
+      composerState.dataset.state = "stopping";
+      const submittedForm = abortForm;
+      request = globalThis.submitAbortUnderTest(event);
+      abortForm = { action: "/abort", dataset: { submitting: "true" } };
+      sessionPath = "session-b";
+      resolveRequest({ ok: false });
+      await request;
+
+      console.log(JSON.stringify({
+        transitions,
+        statuses,
+        state: composerState.dataset.state,
+        markerCleared: !stoppingSessionPaths.has("session-a"),
+        submittedFormCleared: submittedForm.dataset.submitting === undefined,
+        replacementFormSubmitting: abortForm.dataset.submitting
+      }));
+    JS
+
+    assert_equal ["stopping", "running"], results.fetch("transitions")
+    assert_equal ["Stopping current task…", "Stop failed"], results.fetch("statuses")
+    assert_equal "stopping", results.fetch("state")
+    assert_equal true, results.fetch("markerCleared")
+    assert_equal true, results.fetch("submittedFormCleared")
+    assert_equal "true", results.fetch("replacementFormSubmitting")
+  end
+
   def test_composer_focus_does_not_interrupt_expanded_tool_output
     app_source = File.read(File.join(ASSETS, "app.js"))
     focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction desktopConversationFocusEnabled)/m).to_s

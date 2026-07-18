@@ -116,12 +116,13 @@ class FrontendHelpersJsTest < Minitest::Test
     assert_equal [1234, "native"], results
   end
 
-  def test_event_polling_is_fast_only_for_visible_running_sessions
+  def test_event_polling_is_fast_only_for_visible_active_sessions
     results = run_javascript(<<~JS)
       const { eventPollingDelay } = await import(#{module_url("polling.js").to_json});
       console.log(JSON.stringify([
         eventPollingDelay(false, "running", 0),
         eventPollingDelay(false, "running", 20),
+        eventPollingDelay(false, "stopping", 20),
         eventPollingDelay(true, "running", 0),
         eventPollingDelay(false, "done", 0),
         eventPollingDelay(false, "done", 2),
@@ -131,7 +132,7 @@ class FrontendHelpersJsTest < Minitest::Test
       ]));
     JS
 
-    assert_equal [250, 250, 10_000, 1_000, 2_000, 5_000, 2_000, 10_000], results
+    assert_equal [250, 250, 250, 10_000, 1_000, 2_000, 5_000, 2_000, 10_000], results
   end
 
   def test_keyboard_scroll_keys_keep_legacy_spacebar_support
