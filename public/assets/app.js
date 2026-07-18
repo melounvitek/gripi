@@ -1173,6 +1173,7 @@ function eventTimeMilliseconds(event) {
 function renderErrorEvent(event) {
   const errorText = eventErrorText(event);
   if (!errorText) return false;
+  conversationController.setAgentRunning(false);
   liveErrorSeen = true;
   liveMessageRenderer.appendMessage("error", errorText, true, true, eventTimestamp(event));
   showStatus(errorText, true);
@@ -1183,6 +1184,7 @@ function renderErrorEvent(event) {
 function renderEvent(event) {
   if (event.type === "agent_start") {
     liveAgentRunning = true;
+    conversationController.setAgentRunning(true);
     liveBusySince = eventTimeMilliseconds(event);
     liveErrorSeen = false;
     setComposerState("running", "Pi is running…", { since: liveBusySince });
@@ -1191,6 +1193,7 @@ function renderEvent(event) {
   }
 
   if (event.type === "turn_start") {
+    conversationController.setAgentRunning(true);
     liveBusySince ||= eventTimeMilliseconds(event);
     liveErrorSeen = false;
     setComposerState("running", "Pi is running…", { since: liveBusySince });
@@ -1200,7 +1203,10 @@ function renderEvent(event) {
 
   if (["message_start", "message_update", "message_end"].includes(event.type)) {
     const outcome = liveMessageRenderer.renderMessageEvent(event);
-    if (outcome.finalAssistantEnded) markCurrentSessionRead();
+    if (outcome.finalAssistantEnded) {
+      conversationController.setAgentRunning(false);
+      markCurrentSessionRead();
+    }
     notifyFinalAssistantReply(event);
     if (event.type === "message_end") refreshSessionStatus().catch(() => {});
     return;
@@ -1285,7 +1291,10 @@ function renderEvent(event) {
   }
 
   if (event.type === "turn_end") {
-    if (!liveAgentRunning) liveBusySince = null;
+    if (!liveAgentRunning) {
+      conversationController.setAgentRunning(false);
+      liveBusySince = null;
+    }
     if (!liveErrorSeen) {
       if (liveMessageRenderer.liveAssistantSeen) showStatus("Done");
       if (!liveAgentRunning) setComposerState("done", "Done");
@@ -1297,6 +1306,7 @@ function renderEvent(event) {
 
   if (event.type === "agent_settled") {
     liveAgentRunning = false;
+    conversationController.setAgentRunning(false);
     liveBusySince = null;
     if (renderErrorEvent(event)) {
       liveMessageRenderer.clearLiveAssistantStreaming();

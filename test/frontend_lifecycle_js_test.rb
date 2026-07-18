@@ -852,8 +852,77 @@ class FrontendLifecycleJsTest < Minitest::Test
 
     assert_equal [3, 1], results.fetch("groupSizes")
     assert_equal true, results.fetch("firstGroupPreserved")
-    assert_equal "Activity included 1 reasoning step, 1 tool update, and 1 error.", results.dig("summary", "text")
+    assert_equal "1 reasoning step · 1 tool update · 1 error", results.dig("summary", "text")
     assert_equal 1, results.dig("summary", "errorCount")
+  end
+
+  def test_focused_activity_running_state_refreshes_only_when_it_changes
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const controller = new ConversationController({}, {});
+      let refreshes = 0;
+      controller.scheduleFocusedActivityRefresh = () => { refreshes += 1; };
+      controller.setAgentRunning(true);
+      controller.setAgentRunning(true);
+      const running = controller.agentRunning;
+      controller.setAgentRunning(false);
+      console.log(JSON.stringify({ running, settled: controller.agentRunning, refreshes }));
+    JS
+
+    assert_equal true, results.fetch("running")
+    assert_equal false, results.fetch("settled")
+    assert_equal 2, results.fetch("refreshes")
+  end
+
+  def test_running_indicator_appears_only_on_latest_activity_group
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const classes = (...initial) => {
+        const values = new Set(initial);
+        return { contains: (name) => values.has(name), remove: (name) => values.delete(name), toggle: (name, enabled) => enabled ? values.add(name) : values.delete(name) };
+      };
+      const summaries = [];
+      const message = (role, names) => ({
+        dataset: { role }, classList: classes(...names),
+        before(summary) { summaries.push(summary); }
+      });
+      const thinking = message("assistant", ["message--thinking"]);
+      const user = message("user", ["message--user"]);
+      const tool = message("assistant", ["message--tool-call"]);
+      const messages = [thinking, user, tool];
+      const element = {
+        querySelectorAll(selector) {
+          if (selector === ".message") return messages;
+          if (selector === "[data-focus-activity-summary]") return summaries;
+          return [];
+        }
+      };
+      const document = {
+        activeElement: null,
+        createElement() {
+          return {
+            dataset: {}, children: [], className: "", attributes: {},
+            append(child) { this.children.push(child); },
+            setAttribute(name, value) { this.attributes[name] = value; },
+            remove() {}
+          };
+        }
+      };
+      const controller = new ConversationController(document, {});
+      controller.element = element;
+      controller.agentRunning = true;
+      controller.refreshFocusedActivity();
+      console.log(JSON.stringify(summaries.map((summary) => ({
+        running: summary.className.includes("is-running"),
+        spinner: summary.children.some((child) => child.className === "focus-activity-spinner"),
+        text: summary.children.find((child) => child.className === "focus-activity-summary-text")?.textContent
+      }))));
+    JS
+
+    assert_equal [
+      { "running" => false, "spinner" => false, "text" => "1 reasoning step" },
+      { "running" => true, "spinner" => true, "text" => "1 tool update" }
+    ], results
   end
 
   def test_focused_activity_summary_expands_and_collapses_its_messages
@@ -972,9 +1041,11 @@ class FrontendLifecycleJsTest < Minitest::Test
       const controller = new ConversationController(document, window);
       controller.bind();
       const initialLabel = toggle.label.textContent;
+      const initialTitle = toggle.attributes.title;
       toggle.click();
       const firstPanelFocused = panel.classList.contains("is-conversation-focused");
       const focusedLabel = toggle.label.textContent;
+      const focusedTitle = toggle.attributes.title;
 
       controller.reset();
       panel = { classList: new ClassList() };
@@ -988,8 +1059,10 @@ class FrontendLifecycleJsTest < Minitest::Test
       reloadedController.bind();
       console.log(JSON.stringify({
         initialLabel,
+        initialTitle,
         firstPanelFocused,
         focusedLabel,
+        focusedTitle,
         switchedPanelFocused,
         switchedLabel,
         reloadedPanelFocused: panel.classList.contains("is-conversation-focused"),
@@ -998,8 +1071,10 @@ class FrontendLifecycleJsTest < Minitest::Test
     JS
 
     assert_equal "Hide details", results.fetch("initialLabel")
+    assert_equal "Hide reasoning, tool calls, status updates, and errors", results.fetch("initialTitle")
     assert_equal true, results.fetch("firstPanelFocused")
     assert_equal "Show details", results.fetch("focusedLabel")
+    assert_equal "Show reasoning, tool calls, status updates, and errors", results.fetch("focusedTitle")
     assert_equal true, results.fetch("switchedPanelFocused")
     assert_equal "Show details", results.fetch("switchedLabel")
     assert_equal false, results.fetch("reloadedPanelFocused")

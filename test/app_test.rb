@@ -5168,14 +5168,18 @@ class AppTest < Minitest::Test
       focus_toggle = document.at_css("[data-conversation-focus-toggle]")
       refute_nil focus_toggle
       refute focus_toggle.key?("aria-pressed")
-      assert_equal "Hide details", focus_toggle["title"]
-      assert_equal "Hide details", focus_toggle["aria-label"]
+      assert_equal "Hide reasoning, tool calls, status updates, and errors", focus_toggle["title"]
+      assert_equal "Hide reasoning, tool calls, status updates, and errors", focus_toggle["aria-label"]
       assert_equal "Hide details", focus_toggle.at_css("[data-details-toggle-label]").text
       refute focus_toggle.at_css("[data-hide-details-icon]").key?("hidden")
       assert focus_toggle.at_css("[data-show-details-icon]").key?("hidden")
       assert_includes APP_STYLESHEET, ".conversation-panel.is-conversation-focused .focus-activity-summary {"
       assert_includes APP_STYLESHEET, ':not([data-final-assistant-response="true"]):not(.is-focus-activity-expanded)'
       assert_includes APP_STYLESHEET, ".focus-activity-error-count {"
+      assert_includes APP_STYLESHEET, ".focus-activity-spinner {"
+      assert_includes APP_STYLESHEET, ".session-header-focus-label { display: none; }"
+      assert_includes APP_JAVASCRIPT, "conversationController.setAgentRunning(true);"
+      assert_includes APP_JAVASCRIPT, "conversationController.setAgentRunning(false);"
       assert_includes response.body, 'class="message-body"'
       assert_includes response.body, "Hello &lt;Pi&gt;"
       assert_includes response.body, Time.parse("2026-06-13T10:00:00Z").localtime.strftime("%Y-%m-%d %H:%M")
@@ -7004,7 +7008,7 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_includes APP_JAVASCRIPT, "function markCurrentSessionRead()"
       assert_includes APP_JAVASCRIPT, "fetch(\"/sessions/mark_read\""
-      assert_includes APP_JAVASCRIPT, "if (outcome.finalAssistantEnded) markCurrentSessionRead();"
+      assert_includes APP_JAVASCRIPT, "if (outcome.finalAssistantEnded) {\n      conversationController.setAgentRunning(false);\n      markCurrentSessionRead();\n    }"
       assert_includes APP_JAVASCRIPT, "if (document.hidden || !document.hasFocus())"
       assert_includes APP_JAVASCRIPT, "markReadAfterVisible = true;"
       assert_includes APP_JAVASCRIPT, "if (markReadAfterVisible) markCurrentSessionRead();"

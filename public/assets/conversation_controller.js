@@ -30,6 +30,7 @@ export class ConversationController {
     this.messageJumpSuppressionScrollEndListener = null;
     this.messageJumpSuppressionGeneration = 0;
     this.focusedView = false;
+    this.agentRunning = false;
     this.focusedActivityRefreshFrame = null;
     this.focusedActivityMessageIds = new WeakMap();
     this.focusedActivityMessageSequence = 0;
@@ -41,6 +42,7 @@ export class ConversationController {
     this.bindingEpoch += 1;
     this.element = this.document.getElementById("conversation-scroll");
     this.liveOutput = this.document.getElementById("live-output");
+    this.agentRunning = this.liveOutput?.dataset.agentRunning === "true";
     this.promptTextarea = promptTextarea;
     this.topJumpControls = this.document.querySelector(".jump-controls--top");
     this.bottomJumpControls = this.document.querySelector(".jump-controls--bottom");
@@ -125,6 +127,7 @@ export class ConversationController {
     this.liveOutput = null;
     this.conversationPanel = null;
     this.focusToggle = null;
+    this.agentRunning = false;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
   }
@@ -132,15 +135,23 @@ export class ConversationController {
   applyFocusedView() {
     this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
     this.focusToggle?.classList.toggle("is-active", this.focusedView);
-    const label = this.focusedView ? "Show details" : "Hide details";
-    this.focusToggle?.setAttribute("title", label);
-    this.focusToggle?.setAttribute("aria-label", label);
+    const action = this.focusedView ? "Show" : "Hide";
+    const label = `${action} details`;
+    const description = `${action} reasoning, tool calls, status updates, and errors`;
+    this.focusToggle?.setAttribute("title", description);
+    this.focusToggle?.setAttribute("aria-label", description);
     const visibleLabel = this.focusToggle?.querySelector("[data-details-toggle-label]");
     if (visibleLabel) visibleLabel.textContent = label;
     const hideIcon = this.focusToggle?.querySelector("[data-hide-details-icon]");
     const showIcon = this.focusToggle?.querySelector("[data-show-details-icon]");
     if (hideIcon) hideIcon.hidden = this.focusedView;
     if (showIcon) showIcon.hidden = !this.focusedView;
+  }
+
+  setAgentRunning(running) {
+    if (this.agentRunning === running) return;
+    this.agentRunning = running;
+    this.scheduleFocusedActivityRefresh();
   }
 
   focusedViewMessage(message) {
@@ -173,14 +184,13 @@ export class ConversationController {
     if (toolCount > 0) parts.push(`${toolCount} tool ${toolCount === 1 ? "update" : "updates"}`);
     if (otherCount > 0) parts.push(`${otherCount} other ${otherCount === 1 ? "update" : "updates"}`);
     if (errorCount > 0) parts.push(`${errorCount} ${errorCount === 1 ? "error" : "errors"}`);
-    const list = parts.length < 2 ? parts[0] : parts.length === 2 ? `${parts[0]} and ${parts[1]}` : `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}`;
-    return { text: `Activity included ${list}.`, errorCount };
+    return { text: parts.join(" · "), errorCount };
   }
 
   refreshFocusedActivity() {
     if (!this.element?.querySelectorAll) return;
     const messages = [...this.element.querySelectorAll(".message")];
-    const signature = messages.map((message) => {
+    const signature = `${this.agentRunning}|${messages.map((message) => {
       if (!this.focusedActivityMessageIds.has(message)) this.focusedActivityMessageIds.set(message, ++this.focusedActivityMessageSequence);
       return [
         this.focusedActivityMessageIds.get(message),
@@ -189,7 +199,7 @@ export class ConversationController {
         ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name)),
         message.classList.contains("message--error") || message.classList.contains("message--tool-error")
       ].join(":");
-    }).join("|");
+    }).join("|")}`;
     if (signature === this.focusedActivitySignature) return;
     this.focusedActivitySignature = signature;
     const summaries = [...this.element.querySelectorAll("[data-focus-activity-summary]")];
@@ -205,7 +215,8 @@ export class ConversationController {
       message.classList.remove("is-focus-activity-expanded");
       delete message.dataset.focusActivityGroup;
     });
-    this.focusedActivityGroups(messages).forEach((group, index) => {
+    const groups = this.focusedActivityGroups(messages);
+    groups.forEach((group, index) => {
       const groupId = `${this.bindingEpoch}-${index}`;
       const expanded = group.some((message) => expandedMessages.has(message));
       group.forEach((message) => {
@@ -213,11 +224,18 @@ export class ConversationController {
         message.classList.toggle("is-focus-activity-expanded", expanded);
       });
       const summaryData = this.focusedActivitySummary(group);
+      const running = this.agentRunning && index === groups.length - 1 && group.at(-1) === messages.at(-1);
       const summary = this.document.createElement("button");
       summary.type = "button";
-      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${expanded ? " is-expanded" : ""}`;
+      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${expanded ? " is-expanded" : ""}${running ? " is-running" : ""}`;
       summary.dataset.focusActivitySummary = groupId;
       summary.setAttribute("aria-expanded", String(expanded));
+      if (running) {
+        const spinner = this.document.createElement("span");
+        spinner.className = "focus-activity-spinner";
+        spinner.setAttribute("aria-hidden", "true");
+        summary.append(spinner);
+      }
       const text = this.document.createElement("span");
       text.className = "focus-activity-summary-text";
       text.textContent = summaryData.text;

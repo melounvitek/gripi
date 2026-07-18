@@ -219,6 +219,7 @@
   let programmaticScrollTimer = null;
   let autoScrollEnabled = true;
   let focusedView = false;
+  let activityRunning = false;
   const focusedActivityMessageIds = new WeakMap();
   let focusedActivityMessageSequence = 0;
   let focusedActivitySignature = null;
@@ -268,9 +269,11 @@
     focusedView = enabled;
     element.panel.classList.toggle("is-conversation-focused", focusedView);
     element.focusToggle.classList.toggle("is-active", focusedView);
-    const label = focusedView ? "Show details" : "Hide details";
-    element.focusToggle.setAttribute("title", label);
-    element.focusToggle.setAttribute("aria-label", label);
+    const action = focusedView ? "Show" : "Hide";
+    const label = `${action} details`;
+    const description = `${action} reasoning, tool calls, status updates, and errors`;
+    element.focusToggle.setAttribute("title", description);
+    element.focusToggle.setAttribute("aria-label", description);
     element.focusToggle.querySelector("[data-details-toggle-label]").textContent = label;
     element.focusToggle.querySelector("[data-hide-details-icon]").hidden = focusedView;
     element.focusToggle.querySelector("[data-show-details-icon]").hidden = !focusedView;
@@ -289,15 +292,14 @@
     if (toolCount > 0) parts.push(`${toolCount} tool ${toolCount === 1 ? "update" : "updates"}`);
     if (otherCount > 0) parts.push(`${otherCount} other ${otherCount === 1 ? "update" : "updates"}`);
     if (errorCount > 0) parts.push(`${errorCount} ${errorCount === 1 ? "error" : "errors"}`);
-    const list = parts.length < 2 ? parts[0] : parts.length === 2 ? `${parts[0]} and ${parts[1]}` : `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}`;
-    return { text: `Activity included ${list}.`, errorCount };
+    return { text: parts.join(" · "), errorCount };
   }
   function refreshFocusedActivity() {
     const messages = [...element.scroll.querySelectorAll(".message")];
-    const signature = messages.map((message) => {
+    const signature = `${activityRunning}|${messages.map((message) => {
       if (!focusedActivityMessageIds.has(message)) focusedActivityMessageIds.set(message, ++focusedActivityMessageSequence);
       return [focusedActivityMessageIds.get(message), focusedConversationMessage(message), message.classList.contains("message--thinking"), ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name)), message.classList.contains("message--error") || message.classList.contains("message--tool-error")].join(":");
-    }).join("|");
+    }).join("|")}`;
     if (signature === focusedActivitySignature) return;
     focusedActivitySignature = signature;
     const summaries = [...element.scroll.querySelectorAll("[data-focus-activity-summary]")];
@@ -316,16 +318,19 @@
       else group.push(message);
     });
     if (group.length) groups.push(group);
+    const latestMessage = messages.at(-1);
     groups.forEach((messages, index) => {
       const groupId = `demo-${index}`;
       const expanded = messages.some((message) => expandedMessages.has(message));
       messages.forEach((message) => { message.dataset.focusActivityGroup = groupId; message.classList.toggle("is-focus-activity-expanded", expanded); });
       const summaryData = focusedActivitySummary(messages);
+      const running = activityRunning && index === groups.length - 1 && messages.at(-1) === latestMessage;
       const summary = document.createElement("button");
       summary.type = "button";
-      summary.className = `focus-activity-summary${summaryData.errorCount ? " has-errors" : ""}${expanded ? " is-expanded" : ""}`;
+      summary.className = `focus-activity-summary${summaryData.errorCount ? " has-errors" : ""}${expanded ? " is-expanded" : ""}${running ? " is-running" : ""}`;
       summary.dataset.focusActivitySummary = groupId;
       summary.setAttribute("aria-expanded", String(expanded));
+      if (running) { const spinner = document.createElement("span"); spinner.className = "focus-activity-spinner"; spinner.setAttribute("aria-hidden", "true"); summary.append(spinner); }
       const text = document.createElement("span"); text.className = "focus-activity-summary-text"; text.textContent = summaryData.text; summary.append(text);
       if (summaryData.errorCount) { const error = document.createElement("span"); error.className = "focus-activity-error-count"; error.textContent = `${summaryData.errorCount} ${summaryData.errorCount === 1 ? "error" : "errors"}`; error.setAttribute("aria-hidden", "true"); summary.append(error); }
       messages[0].before(summary);
@@ -518,6 +523,9 @@
   }
 
   function setRunning(running, text) {
+    activityRunning = running;
+    focusedActivitySignature = null;
+    refreshFocusedActivity();
     element.state.dataset.state = running ? "running" : "idle";
     element.state.textContent = text || "";
     element.stop.hidden = !running;
