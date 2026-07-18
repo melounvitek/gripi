@@ -11,6 +11,7 @@ export class ConversationController {
     this.timers = new Set();
     this.frames = new Set();
     this.historyAbortController = null;
+    this.historyIntersectionObserver = null;
     this.historyRequestGeneration = 0;
     this.olderWindowPromise = null;
     this.olderHistoryPromise = null;
@@ -79,6 +80,7 @@ export class ConversationController {
     });
     this.listen(this.element, "scroll", () => this.handleScroll(), { passive: true });
     this.listen(this.historyStatus(), "click", () => this.loadOlderWindow().catch(() => {}));
+    this.observeHistoryStatus();
     this.listen(this.jumpToFirstButton, "click", () => {
       if (this.jumpToFirstButton.dataset.jumpTarget === "message") return this.scrollToMessageTop();
 
@@ -99,6 +101,8 @@ export class ConversationController {
     this.frames.clear();
     this.historyAbortController?.abort();
     this.historyAbortController = null;
+    this.historyIntersectionObserver?.disconnect();
+    this.historyIntersectionObserver = null;
     this.olderWindowPromise = null;
     this.olderHistoryPromise = null;
     this.revealTimer = null;
@@ -435,6 +439,23 @@ export class ConversationController {
 
   historyStatus() {
     return this.element?.querySelector("[data-conversation-history-status]");
+  }
+
+  observeHistoryStatus() {
+    const status = this.historyStatus();
+    if (!status || !this.window.IntersectionObserver) return;
+    const loadVisibleHistory = () => this.loadOlderWindow().then((result) => {
+      if (result !== "more" || status !== this.historyStatus()) return result;
+      const statusRect = status.getBoundingClientRect();
+      const scrollRect = this.element.getBoundingClientRect();
+      if (statusRect.bottom > scrollRect.top && statusRect.top < scrollRect.bottom) return loadVisibleHistory();
+      return result;
+    });
+    this.historyIntersectionObserver = new this.window.IntersectionObserver((entries) => {
+      if (status !== this.historyStatus() || !entries.some((entry) => entry.target === status && entry.isIntersecting)) return;
+      loadVisibleHistory().catch(() => {});
+    }, { root: this.element });
+    this.historyIntersectionObserver.observe(status);
   }
 
   setHistoryStatus(text, hidden = false) {

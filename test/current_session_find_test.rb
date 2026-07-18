@@ -392,6 +392,44 @@ class CurrentSessionFindTest < Minitest::Test
     assert_equal({ "calls" => 1, "direction" => "up" }, results)
   end
 
+  def test_visible_history_status_loads_an_underfilled_conversation_without_scrolling
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      class Target {
+        constructor(rect) { this.listeners = {}; this.dataset = {}; this.scrollTop = 0; this.rect = rect; }
+        addEventListener(type, listener) { this.listeners[type] = listener; }
+        removeEventListener() {}
+        getBoundingClientRect() { return this.rect; }
+        querySelector(selector) { return selector.includes("history-status") ? status : null; }
+      }
+      const status = new Target({ top: 10, bottom: 30 });
+      const scroll = new Target({ top: 0, bottom: 100 });
+      const document = {
+        body: { classList: { remove() {} } },
+        getElementById: (id) => id === "conversation-scroll" ? scroll : null,
+        querySelector: () => null
+      };
+      let observedTarget; let observedRoot; let disconnected = false;
+      const window = {
+        IntersectionObserver: class {
+          constructor(callback, options) { this.callback = callback; observedRoot = options.root; }
+          observe(target) { observedTarget = target; this.callback([{ target, isIntersecting: true }]); }
+          disconnect() { disconnected = true; }
+        },
+        matchMedia: () => ({ matches: false })
+      };
+      const controller = new ConversationController(document, window);
+      let calls = 0;
+      controller.loadOlderWindow = async () => { calls += 1; return calls === 1 ? "more" : "complete"; };
+      controller.bind();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      controller.detach();
+      console.log(JSON.stringify({ calls, observedStatus: observedTarget === status, observedScroll: observedRoot === scroll, disconnected }));
+    JS
+
+    assert_equal({ "calls" => 2, "observedStatus" => true, "observedScroll" => true, "disconnected" => true }, results)
+  end
+
   def test_history_status_can_load_an_underfilled_conversation
     results = run_javascript(<<~JS)
       const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
