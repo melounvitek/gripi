@@ -40,9 +40,6 @@ export class CurrentSessionFindController {
     this.document.querySelector("[data-conversation-focus-toggle]")?.addEventListener?.("click", () => {
       if (this.open) this.search({ resetIndex: true }).catch(() => {});
     });
-    this.conversation.element?.addEventListener?.("click", (event) => {
-      if (this.open && event.target.closest?.("[data-focus-activity-summary]")) this.search({ resetIndex: true }).catch(() => {});
-    });
     this.bar?.querySelector("[data-current-session-find-previous]")?.addEventListener("click", () => this.move(-1));
     this.bar?.querySelector("[data-current-session-find-next]")?.addEventListener("click", () => this.move(1));
     this.bar?.querySelector("[data-current-session-find-close]")?.addEventListener("click", () => this.close());
@@ -69,7 +66,7 @@ export class CurrentSessionFindController {
   }
 
   focusedViewMessage(message) {
-    return this.conversation.focusedViewMessage(message) || message.classList.contains("is-focus-activity-expanded");
+    return this.conversation.focusedViewMessage(message);
   }
 
   textNodes(root) {

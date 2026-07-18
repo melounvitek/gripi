@@ -61,9 +61,8 @@ export class ConversationController {
     if (!this.element) return;
 
     this.listen(this.element, "click", (event) => {
-      const summary = event.target.closest?.("[data-focus-activity-summary]");
-      if (!summary) return;
-      this.toggleFocusedActivity(summary);
+      const toggle = event.target.closest?.("[data-focus-activity-toggle]");
+      if (toggle) this.toggleFocusedActivity(toggle);
     });
     this.refreshFocusedActivity();
 
@@ -135,17 +134,14 @@ export class ConversationController {
   applyFocusedView() {
     this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
     this.focusToggle?.classList.toggle("is-active", this.focusedView);
-    const action = this.focusedView ? "Show" : "Hide";
-    const label = `${action} details`;
-    const description = `${action} reasoning, tool calls, status updates, and errors`;
+    const action = this.focusedView ? "Expand" : "Condense";
+    const description = `${action} reasoning, tools, statuses, and errors`;
     this.focusToggle?.setAttribute("title", description);
     this.focusToggle?.setAttribute("aria-label", description);
-    const visibleLabel = this.focusToggle?.querySelector("[data-details-toggle-label]");
-    if (visibleLabel) visibleLabel.textContent = label;
-    const hideIcon = this.focusToggle?.querySelector("[data-hide-details-icon]");
-    const showIcon = this.focusToggle?.querySelector("[data-show-details-icon]");
-    if (hideIcon) hideIcon.hidden = this.focusedView;
-    if (showIcon) showIcon.hidden = !this.focusedView;
+    const condenseIcon = this.focusToggle?.querySelector("[data-condense-details-icon]");
+    const expandIcon = this.focusToggle?.querySelector("[data-expand-details-icon]");
+    if (condenseIcon) condenseIcon.hidden = this.focusedView;
+    if (expandIcon) expandIcon.hidden = !this.focusedView;
   }
 
   setAgentRunning(running) {
@@ -183,8 +179,32 @@ export class ConversationController {
     if (reasoningCount > 0) parts.push(`${reasoningCount} reasoning ${reasoningCount === 1 ? "step" : "steps"}`);
     if (toolCount > 0) parts.push(`${toolCount} tool ${toolCount === 1 ? "update" : "updates"}`);
     if (otherCount > 0) parts.push(`${otherCount} other ${otherCount === 1 ? "update" : "updates"}`);
-    if (errorCount > 0) parts.push(`${errorCount} ${errorCount === 1 ? "error" : "errors"}`);
     return { text: parts.join(" · "), errorCount };
+  }
+
+  focusedActivityItems(messages) {
+    const items = [];
+    const toolCallIndexes = new Map();
+    messages.forEach((message) => {
+      const toolCall = message.classList.contains("message--tool-call");
+      const error = message.classList.contains("message--error") || message.classList.contains("message--tool-error");
+      if (!toolCall && !error) return;
+
+      const source = message.querySelector(".compact-summary") || message.querySelector(".message-body");
+      const text = source?.textContent?.replace(/\s+/g, " ").trim();
+      if (!text && !error) return;
+      const toolCallId = message.dataset.toolCallId;
+      const existingIndex = toolCallId ? toolCallIndexes.get(toolCallId) : undefined;
+      if (existingIndex !== undefined) {
+        if (toolCall && text) items[existingIndex].text = text;
+        if (error) items[existingIndex].type = "error";
+        return;
+      }
+
+      if (toolCallId) toolCallIndexes.set(toolCallId, items.length);
+      items.push({ type: error ? "error" : "tool", text: text || "Error" });
+    });
+    return items;
   }
 
   refreshFocusedActivity() {
@@ -203,55 +223,80 @@ export class ConversationController {
     if (signature === this.focusedActivitySignature) return;
     this.focusedActivitySignature = signature;
     const summaries = [...this.element.querySelectorAll("[data-focus-activity-summary]")];
-    const activeSummary = this.document.activeElement?.closest?.("[data-focus-activity-summary]");
-    const activeSummaryIndex = summaries.indexOf(activeSummary);
-    const activeGroupId = activeSummary?.dataset.focusActivitySummary;
+    const activeToggle = this.document.activeElement?.closest?.("[data-focus-activity-toggle]");
+    const activeGroupId = activeToggle?.closest("[data-focus-activity-summary]")?.dataset.focusActivitySummary;
     const focusAnchor = activeGroupId && messages.find((message) => message.dataset.focusActivityGroup === activeGroupId);
-    const expandedMessages = new Set(this.element.querySelectorAll(".message.is-focus-activity-expanded"));
-    summaries.forEach((summary) => summary.remove());
-    const replacementSummaries = [];
-    let replacementFocus = null;
-    messages.forEach((message) => {
-      message.classList.remove("is-focus-activity-expanded");
-      delete message.dataset.focusActivityGroup;
+    const expandedMessages = new Set();
+    summaries.forEach((summary) => {
+      if (summary.querySelector("[data-focus-activity-toggle]")?.getAttribute("aria-expanded") === "true") {
+        messages.filter((message) => message.dataset.focusActivityGroup === summary.dataset.focusActivitySummary).forEach((message) => expandedMessages.add(message));
+      }
+      summary.remove();
     });
+    messages.forEach((message) => { delete message.dataset.focusActivityGroup; });
+    let replacementFocus = null;
     const groups = this.focusedActivityGroups(messages);
     groups.forEach((group, index) => {
       const groupId = `${this.bindingEpoch}-${index}`;
       const expanded = group.some((message) => expandedMessages.has(message));
-      group.forEach((message) => {
-        message.dataset.focusActivityGroup = groupId;
-        message.classList.toggle("is-focus-activity-expanded", expanded);
-      });
+      group.forEach((message) => { message.dataset.focusActivityGroup = groupId; });
       const summaryData = this.focusedActivitySummary(group);
+      const items = this.focusedActivityItems(group);
       const running = this.agentRunning && index === groups.length - 1 && group.at(-1) === messages.at(-1);
-      const summary = this.document.createElement("button");
-      summary.type = "button";
+      const summary = this.document.createElement("section");
       summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${expanded ? " is-expanded" : ""}${running ? " is-running" : ""}`;
       summary.dataset.focusActivitySummary = groupId;
-      summary.setAttribute("aria-expanded", String(expanded));
+
+      const header = this.document.createElement(items.length > 0 ? "button" : "div");
+      header.className = "focus-activity-header";
+      if (items.length > 0) {
+        header.type = "button";
+        header.dataset.focusActivityToggle = "true";
+        header.setAttribute("aria-expanded", String(expanded));
+      }
       if (running) {
         const spinner = this.document.createElement("span");
         spinner.className = "focus-activity-spinner";
         spinner.setAttribute("aria-hidden", "true");
-        summary.append(spinner);
+        header.append(spinner);
       }
-      const text = this.document.createElement("span");
-      text.className = "focus-activity-summary-text";
-      text.textContent = summaryData.text;
-      summary.append(text);
+      if (summaryData.text) {
+        const text = this.document.createElement("span");
+        text.className = "focus-activity-summary-text";
+        text.textContent = summaryData.text;
+        header.append(text);
+      }
       if (summaryData.errorCount > 0) {
         const error = this.document.createElement("span");
         error.className = "focus-activity-error-count";
         error.textContent = `${summaryData.errorCount} ${summaryData.errorCount === 1 ? "error" : "errors"}`;
-        error.setAttribute("aria-hidden", "true");
-        summary.append(error);
+        header.append(error);
+      }
+      summary.append(header);
+
+      if (items.length > 0) {
+        const list = this.document.createElement("ul");
+        list.className = "focus-activity-list";
+        list.hidden = !expanded;
+        items.forEach((item) => {
+          const row = this.document.createElement("li");
+          row.className = `focus-activity-item focus-activity-item--${item.type}`;
+          const marker = this.document.createElement("span");
+          marker.className = "focus-activity-item-marker";
+          marker.textContent = item.type === "error" ? "!" : "›";
+          marker.setAttribute("aria-hidden", "true");
+          const text = this.document.createElement("span");
+          text.className = "focus-activity-item-text";
+          text.textContent = item.text;
+          row.append(marker, text);
+          list.append(row);
+        });
+        summary.append(list);
       }
       group[0].before(summary);
-      replacementSummaries.push(summary);
-      if (focusAnchor && group.includes(focusAnchor)) replacementFocus = summary;
+      if (focusAnchor && group.includes(focusAnchor)) replacementFocus = header;
     });
-    if (activeSummary && !replacementFocus) replacementFocus = replacementSummaries[Math.min(Math.max(activeSummaryIndex, 0), replacementSummaries.length - 1)] || this.focusToggle;
+    if (activeToggle && !replacementFocus) replacementFocus = this.focusToggle;
     replacementFocus?.focus({ preventScroll: true });
   }
 
@@ -265,14 +310,13 @@ export class ConversationController {
     });
   }
 
-  toggleFocusedActivity(summary) {
-    const groupId = summary.dataset.focusActivitySummary;
-    const expanded = summary.getAttribute("aria-expanded") !== "true";
-    summary.setAttribute("aria-expanded", String(expanded));
+  toggleFocusedActivity(toggle) {
+    const summary = toggle.closest("[data-focus-activity-summary]");
+    const expanded = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", String(expanded));
     summary.classList.toggle("is-expanded", expanded);
-    this.element.querySelectorAll("[data-focus-activity-group]").forEach((message) => {
-      if (message.dataset.focusActivityGroup === groupId) message.classList.toggle("is-focus-activity-expanded", expanded);
-    });
+    const list = summary.querySelector(".focus-activity-list");
+    if (list) list.hidden = !expanded;
     this.updateJumpControls();
   }
 

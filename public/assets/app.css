@@ -61,19 +61,26 @@
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.7rem; }
     .session-header-window-action, .session-header-focus-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; line-height: 1; text-decoration: none; }
     .session-header-window-action:hover, .session-header-focus-action:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
-    .session-header-focus-action { gap: 0.4rem; }
+    .session-header-focus-action { width: 2.4rem; min-width: 2.4rem; padding: 0; }
     .session-header-focus-action.is-active { border-color: var(--accent-line-55); background: var(--accent-tint-08); color: var(--accent); }
-    .session-header-focus-icon { width: 1rem; height: 1rem; }
+    .session-header-focus-icon { width: 1.15rem; height: 1.15rem; }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.5rem; }
     .focus-activity-summary { display: none; }
-    .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 0.5rem; min-height: 0; margin: 0 0 0.85rem; padding: 0.55rem 0.7rem; border: 1px solid var(--border-strong); background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.78rem; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
-    .conversation-panel.is-conversation-focused .focus-activity-summary:hover { border-color: var(--accent-line-55); background: var(--accent-tint-04); color: var(--text); }
-    .conversation-panel.is-conversation-focused .focus-activity-summary::after { content: "›"; margin-left: auto; color: var(--muted); font-size: 1rem; line-height: 1; transition: transform 120ms ease; }
-    .conversation-panel.is-conversation-focused .focus-activity-summary.is-expanded::after { transform: rotate(90deg); }
+    .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin: 0 0 0.85rem; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.78rem; }
+    .focus-activity-header { width: 100%; display: flex; align-items: center; gap: 0.5rem; min-width: 0; min-height: 0; padding: 0.5rem 0.7rem; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
+    button.focus-activity-header { cursor: pointer; }
+    button.focus-activity-header:hover { background: var(--accent-tint-04); color: var(--text); }
+    button.focus-activity-header::after { content: "›"; flex: 0 0 auto; margin-left: auto; font-size: 1rem; line-height: 1; transition: transform 120ms ease; }
+    .focus-activity-summary.is-expanded button.focus-activity-header::after { transform: rotate(90deg); }
     .focus-activity-spinner { flex: 0 0 auto; width: 0.72rem; height: 0.72rem; border: 1.5px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     .focus-activity-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .focus-activity-error-count { flex: 0 0 auto; padding: 0.12rem 0.35rem; border: 1px solid #cc666659; border-radius: 0.2rem; background: var(--danger-soft); color: var(--danger); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; }
-    .conversation-panel.is-conversation-focused .conversation-scroll .message:not([data-role="user"]):not([data-final-assistant-response="true"]):not(.is-focus-activity-expanded), .conversation-panel.is-conversation-focused .conversation-scroll .message--error:not(.is-focus-activity-expanded), .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error:not(.is-focus-activity-expanded) { display: none; }
+    .focus-activity-list { display: grid; gap: 0.08rem; margin: 0; padding: 0.38rem 0.7rem 0.48rem; border-top: 1px solid var(--border); background: var(--accent-tint-04); list-style: none; }
+    .focus-activity-item { min-width: 0; display: flex; align-items: baseline; gap: 0.42rem; padding: 0.15rem 0; color: var(--text); font-family: var(--mono); font-size: 0.7rem; line-height: 1.35; }
+    .focus-activity-item-marker { flex: 0 0 auto; color: var(--accent); font-weight: 700; }
+    .focus-activity-item-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .focus-activity-item--error, .focus-activity-item--error .focus-activity-item-marker { color: var(--danger); }
+    .conversation-panel.is-conversation-focused .conversation-scroll .message:not([data-role="user"]):not([data-final-assistant-response="true"]) { display: none; }
     .conversation-scroll:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-tint-14); }
     .current-session-find { position: sticky; top: 0.4rem; z-index: 5; width: min(38rem, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto repeat(3, 2rem); align-items: center; gap: 0.4rem; margin: 0 0 0.75rem auto; padding: 0.55rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: #1e1e24fa; box-shadow: var(--shadow-soft); }
     .current-session-find input[type="search"] { min-width: 0; padding: 0.5rem 0.65rem; }
@@ -540,8 +547,7 @@
       .session-header-actions { gap: 0.35rem; }
       .session-header-window-action { display: none; }
       .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.66rem; }
-      .session-header-focus-action { width: 2.4rem; min-width: 2.4rem; min-height: 2.4rem; padding: 0; }
-      .session-header-focus-label { display: none; }
+      .session-header-focus-action { min-height: 2.4rem; }
       .session-header h1 { font-size: 1rem; }
       .session-header-project { font-size: 0.7rem; }
       .project-select-trigger { min-height: 2.75rem; font-size: 16px; }

@@ -5172,16 +5172,17 @@ class AppTest < Minitest::Test
       focus_toggle = document.at_css("[data-conversation-focus-toggle]")
       refute_nil focus_toggle
       refute focus_toggle.key?("aria-pressed")
-      assert_equal "Hide reasoning, tool calls, status updates, and errors", focus_toggle["title"]
-      assert_equal "Hide reasoning, tool calls, status updates, and errors", focus_toggle["aria-label"]
-      assert_equal "Hide details", focus_toggle.at_css("[data-details-toggle-label]").text
-      refute focus_toggle.at_css("[data-hide-details-icon]").key?("hidden")
-      assert focus_toggle.at_css("[data-show-details-icon]").key?("hidden")
+      assert_equal "Condense reasoning, tools, statuses, and errors", focus_toggle["title"]
+      assert_equal "Condense reasoning, tools, statuses, and errors", focus_toggle["aria-label"]
+      assert_nil focus_toggle.at_css("[data-details-toggle-label]")
+      refute focus_toggle.at_css("[data-condense-details-icon]").key?("hidden")
+      assert focus_toggle.at_css("[data-expand-details-icon]").key?("hidden")
       assert_includes APP_STYLESHEET, ".conversation-panel.is-conversation-focused .focus-activity-summary {"
-      assert_includes APP_STYLESHEET, ':not([data-final-assistant-response="true"]):not(.is-focus-activity-expanded)'
+      assert_includes APP_STYLESHEET, '.message:not([data-role="user"]):not([data-final-assistant-response="true"])'
+      assert_includes APP_STYLESHEET, ".focus-activity-list {"
       assert_includes APP_STYLESHEET, ".focus-activity-error-count {"
       assert_includes APP_STYLESHEET, ".focus-activity-spinner {"
-      assert_includes APP_STYLESHEET, ".session-header-focus-label { display: none; }"
+      assert_includes APP_STYLESHEET, ".session-header-focus-action { width: 2.4rem;"
       assert_includes APP_JAVASCRIPT, "conversationController.setAgentRunning(true);"
       assert_includes APP_JAVASCRIPT, "conversationController.setAgentRunning(false);"
       assert_includes response.body, 'class="message-body"'
@@ -5408,6 +5409,7 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       document = Nokogiri::HTML(response.body)
       tool_card = compact_card_with_summary(document, "read /tmp/screenshot.png")
+      assert_equal "read-1", tool_card["data-tool-call-id"]
       image = tool_card&.at_css(".message-images .message-image")
       assert image
       assert_equal "data:image/png;base64,#{image_data}", image["src"]

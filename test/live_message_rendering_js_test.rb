@@ -284,6 +284,29 @@ Extract PDFs.
     ], result
   end
 
+  def test_unmatched_live_tool_result_preserves_tool_call_identity
+    result = run_javascript(<<~JS)
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      const renderer = Object.create(LiveMessageRenderer.prototype);
+      renderer.parser = {
+        eventMessage: (event) => event.message,
+        contentSegments: () => [{ compact: true, isToolResult: true, toolCallId: "call-1", toolName: "custom-tool", summary: "custom-tool", text: "failed", error: true, images: [] }],
+        liveEventRole: () => "toolResult",
+        eventHasFinalAssistantText: () => false
+      };
+      renderer.conversationController = { followLiveOutput: () => false };
+      renderer.liveToolExecutions = new Map();
+      renderer.livePairedToolCalls = new Map();
+      let options;
+      renderer.appendCompactMessage = (_role, _summary, _text, _live, _scroll, _timestamp, value) => { options = value; };
+      renderer.renderMessageEvent({ type: "message_end", timestamp: "2026-06-13T10:00:00Z", message: { role: "toolResult", content: [{}] } });
+      console.log(JSON.stringify(options));
+    JS
+
+    assert_equal "call-1", result.fetch("toolCallId")
+    assert_equal true, result.fetch("error")
+  end
+
   def test_removing_pending_compaction_refreshes_focused_activity
     result = run_javascript(<<~JS)
       const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});

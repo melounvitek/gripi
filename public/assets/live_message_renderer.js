@@ -142,6 +142,7 @@ export class LiveMessageRenderer {
     article.dataset.role = roleName;
     article.dataset.messageTimestamp = timestampKey;
     article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
+    if (options.toolCallId) article.dataset.toolCallId = options.toolCallId;
 
     const header = this.document.createElement("header");
     header.className = "message-header";
@@ -515,7 +516,7 @@ export class LiveMessageRenderer {
     if (this.liveMessageAlreadyRendered(roleName, segment.text, messageTimestampKey(timestamp))) return null;
 
     const entry = segment.compact ?
-      this.appendCompactMessage(roleName, segment.summary, segment.text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, error: segment.error, images: segment.images }) :
+      this.appendCompactMessage(roleName, segment.summary, segment.text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolCallId: segment.toolCallId, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, error: segment.error, images: segment.images }) :
       this.appendMessage("assistant", segment.text, true, shouldScroll, timestamp, { thinking: segment.thinking, finalAssistantResponse, images: segment.images });
     if (!entry) return null;
     entry.article.classList.toggle("message--streaming", streamingAssistantResponse);
@@ -561,7 +562,7 @@ export class LiveMessageRenderer {
       return;
     }
 
-    const entry = this.appendCompactMessage("tool", this.parser.toolExecutionSummary(event), this.parser.toolExecutionText(event), true, shouldScroll, timestamp, { toolName: event.toolName, toolPrompt: event.toolName === "subagent" ? this.parser.subagentPromptFromEvent(event, restoredPrompt) : "", error: event.isError === true, timestampFallback });
+    const entry = this.appendCompactMessage("tool", this.parser.toolExecutionSummary(event), this.parser.toolExecutionText(event), true, shouldScroll, timestamp, { toolName: event.toolName, toolCallId: event.toolCallId, toolPrompt: event.toolName === "subagent" ? this.parser.subagentPromptFromEvent(event, restoredPrompt) : "", error: event.isError === true, timestampFallback });
     if (entry) {
       if (event.toolName === "subagent") this.retainSubagentDetails(entry, this.parser.subagentDetailsFromEvent(event));
       this.liveToolExecutions.set(event.toolCallId, entry);
@@ -655,7 +656,7 @@ export class LiveMessageRenderer {
         } else if (customMessage && !segment.compact) {
           this.upsertLiveCustomSegment(message, segment, index, shouldScroll, timestamp);
         } else if (segment.compact) {
-          this.appendCompactMessage(roleName, segment.summary, segment.text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, error: segment.error, images: segment.images });
+          this.appendCompactMessage(roleName, segment.summary, segment.text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolCallId: segment.toolCallId, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, error: segment.error, images: segment.images });
         } else {
           this.appendMessage(roleName, segment.text, true, shouldScroll, timestamp, { images: segment.images });
         }

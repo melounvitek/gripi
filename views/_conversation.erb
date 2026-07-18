@@ -22,10 +22,9 @@
             <% end %>
           </div>
           <div class="session-header-actions">
-            <button type="button" class="session-header-action session-header-focus-action" data-conversation-focus-toggle title="Hide reasoning, tool calls, status updates, and errors" aria-label="Hide reasoning, tool calls, status updates, and errors">
-              <svg class="session-header-focus-icon" data-hide-details-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle><path d="M3 3l18 18"></path></svg>
-              <svg class="session-header-focus-icon" data-show-details-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>
-              <span class="session-header-focus-label" data-details-toggle-label>Hide details</span>
+            <button type="button" class="session-header-action session-header-focus-action" data-conversation-focus-toggle title="Condense reasoning, tools, statuses, and errors" aria-label="Condense reasoning, tools, statuses, and errors">
+              <svg class="session-header-focus-icon" data-condense-details-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 2.5v7M2.5 6.5l3 3 3-3"></path><path d="M5.5 21.5v-7M2.5 17.5l3-3 3 3"></path><path d="M11 5.5h11M11 12h11M11 18.5h11"></path></svg>
+              <svg class="session-header-focus-icon" data-expand-details-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M5.5 9.5v-7M2.5 5.5l3-3 3 3"></path><path d="M5.5 14.5v7M2.5 18.5l3 3 3-3"></path><path d="M11 5.5h11M11 12h11M11 18.5h11"></path></svg>
             </button>
             <% unless session_only? %>
               <a class="session-header-action session-header-window-action" href="<%= h session_only_url(@selected_session.path) %>" target="_blank" rel="noopener" title="Open session in new window" aria-label="Open session in new window">↗</a>

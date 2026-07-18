@@ -914,8 +914,39 @@ class FrontendLifecycleJsTest < Minitest::Test
 
     assert_equal [3, 1], results.fetch("groupSizes")
     assert_equal true, results.fetch("firstGroupPreserved")
-    assert_equal "1 reasoning step · 1 tool update · 1 error", results.dig("summary", "text")
+    assert_equal "1 reasoning step · 1 tool update", results.dig("summary", "text")
     assert_equal 1, results.dig("summary", "errorCount")
+  end
+
+  def test_focused_activity_lists_only_tool_calls_and_errors
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const message = (classes, summary = "", body = "", toolCallId = "") => ({
+        dataset: { toolCallId },
+        classList: { contains: (name) => classes.includes(name) },
+        querySelector(selector) {
+          if (selector === ".compact-summary" && summary) return { textContent: summary };
+          if (selector === ".message-body" && body) return { textContent: body };
+          return null;
+        }
+      });
+      const controller = new ConversationController({}, {});
+      const items = controller.focusedActivityItems([
+        message(["message--thinking"], "", "Reasoning text"),
+        message(["message--tool-call"], "read   public/assets/app.js"),
+        message(["message--tool"], "tool result", "large result"),
+        message(["message--error"], "", "Request timed out"),
+        message(["message--tool-call"], "bash   mise run test", "", "call-1"),
+        message(["message--tool-error"], "", "command failed", "call-1")
+      ]);
+      console.log(JSON.stringify(items));
+    JS
+
+    assert_equal [
+      { "type" => "tool", "text" => "read public/assets/app.js" },
+      { "type" => "error", "text" => "Request timed out" },
+      { "type" => "error", "text" => "bash mise run test" }
+    ], results
   end
 
   def test_focused_activity_running_state_refreshes_only_when_it_changes
@@ -936,21 +967,19 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal 2, results.fetch("refreshes")
   end
 
-  def test_running_indicator_appears_only_on_latest_activity_group
+  def test_focused_activity_renders_static_timelines_with_running_state_on_latest_group
     results = run_javascript(<<~JS)
       const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
-      const classes = (...initial) => {
-        const values = new Set(initial);
-        return { contains: (name) => values.has(name), remove: (name) => values.delete(name), toggle: (name, enabled) => enabled ? values.add(name) : values.delete(name) };
-      };
+      const classes = (...names) => ({ contains: (name) => names.includes(name) });
       const summaries = [];
-      const message = (role, names) => ({
+      const message = (role, names, compactSummary = "") => ({
         dataset: { role }, classList: classes(...names),
+        querySelector(selector) { return selector === ".compact-summary" && compactSummary ? { textContent: compactSummary } : null; },
         before(summary) { summaries.push(summary); }
       });
       const thinking = message("assistant", ["message--thinking"]);
       const user = message("user", ["message--user"]);
-      const tool = message("assistant", ["message--tool-call"]);
+      const tool = message("assistant", ["message--tool-call"], "bash   mise run test");
       const messages = [thinking, user, tool];
       const element = {
         querySelectorAll(selector) {
@@ -960,63 +989,68 @@ class FrontendLifecycleJsTest < Minitest::Test
         }
       };
       const document = {
-        activeElement: null,
-        createElement() {
+        createElement(tagName) {
           return {
-            dataset: {}, children: [], className: "", attributes: {},
-            append(child) { this.children.push(child); },
+            tagName: tagName.toUpperCase(), dataset: {}, children: [], className: "", attributes: {},
+            append(...children) { this.children.push(...children); },
             setAttribute(name, value) { this.attributes[name] = value; },
             remove() {}
           };
         }
       };
+      const descendants = (node) => node.children.flatMap((child) => [child, ...descendants(child)]);
       const controller = new ConversationController(document, {});
       controller.element = element;
       controller.agentRunning = true;
       controller.refreshFocusedActivity();
-      console.log(JSON.stringify(summaries.map((summary) => ({
-        running: summary.className.includes("is-running"),
-        spinner: summary.children.some((child) => child.className === "focus-activity-spinner"),
-        text: summary.children.find((child) => child.className === "focus-activity-summary-text")?.textContent
-      }))));
+      console.log(JSON.stringify(summaries.map((summary) => {
+        const children = descendants(summary);
+        const toggle = children.find((child) => child.dataset.focusActivityToggle);
+        const list = children.find((child) => child.className === "focus-activity-list");
+        return {
+          tagName: summary.tagName,
+          running: summary.className.includes("is-running"),
+          spinner: children.some((child) => child.className === "focus-activity-spinner"),
+          text: children.find((child) => child.className === "focus-activity-summary-text")?.textContent,
+          items: children.filter((child) => child.tagName === "LI").map((child) => descendants(child).find((item) => item.className === "focus-activity-item-text")?.textContent),
+          expandable: !!toggle,
+          expanded: toggle?.attributes["aria-expanded"],
+          listHidden: list?.hidden
+        };
+      })));
     JS
 
     assert_equal [
-      { "running" => false, "spinner" => false, "text" => "1 reasoning step" },
-      { "running" => true, "spinner" => true, "text" => "1 tool update" }
+      { "tagName" => "SECTION", "running" => false, "spinner" => false, "text" => "1 reasoning step", "items" => [], "expandable" => false },
+      { "tagName" => "SECTION", "running" => true, "spinner" => true, "text" => "1 tool update", "items" => ["bash mise run test"], "expandable" => true, "expanded" => "false", "listHidden" => true }
     ], results
   end
 
-  def test_focused_activity_summary_expands_and_collapses_its_messages
+  def test_focused_activity_toggle_reveals_only_the_compact_list
     results = run_javascript(<<~JS)
       const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
-      const classes = () => {
-        const values = new Set();
-        return { toggle(name, enabled) { enabled ? values.add(name) : values.delete(name); }, contains(name) { return values.has(name); } };
-      };
-      const first = { dataset: { focusActivityGroup: "turn-1" }, classList: classes() };
-      const second = { dataset: { focusActivityGroup: "turn-1" }, classList: classes() };
-      const unrelated = { dataset: { focusActivityGroup: "turn-2" }, classList: classes() };
+      const values = new Set();
+      const list = { hidden: true };
       const summary = {
-        dataset: { focusActivitySummary: "turn-1" }, classList: classes(), attributes: { "aria-expanded": "false" },
-        getAttribute(name) { return this.attributes[name]; }, setAttribute(name, value) { this.attributes[name] = value; }
+        classList: { toggle(name, enabled) { enabled ? values.add(name) : values.delete(name); } },
+        querySelector: () => list
+      };
+      const toggle = {
+        attributes: { "aria-expanded": "false" },
+        closest: () => summary,
+        getAttribute(name) { return this.attributes[name]; },
+        setAttribute(name, value) { this.attributes[name] = value; }
       };
       const controller = new ConversationController({}, {});
-      controller.element = { querySelectorAll: () => [first, second, unrelated] };
       controller.updateJumpControls = () => {};
-      controller.toggleFocusedActivity(summary);
-      const expanded = [first, second, unrelated].map((message) => message.classList.contains("is-focus-activity-expanded"));
-      controller.toggleFocusedActivity(summary);
-      console.log(JSON.stringify({
-        expanded,
-        collapsed: [first, second, unrelated].map((message) => message.classList.contains("is-focus-activity-expanded")),
-        ariaExpanded: summary.attributes["aria-expanded"]
-      }));
+      controller.toggleFocusedActivity(toggle);
+      const expanded = { aria: toggle.attributes["aria-expanded"], listHidden: list.hidden, classActive: values.has("is-expanded") };
+      controller.toggleFocusedActivity(toggle);
+      console.log(JSON.stringify({ expanded, collapsed: { aria: toggle.attributes["aria-expanded"], listHidden: list.hidden, classActive: values.has("is-expanded") } }));
     JS
 
-    assert_equal [true, true, false], results.fetch("expanded")
-    assert_equal [false, false, false], results.fetch("collapsed")
-    assert_equal "false", results.fetch("ariaExpanded")
+    assert_equal({ "aria" => "true", "listHidden" => false, "classActive" => true }, results.fetch("expanded"))
+    assert_equal({ "aria" => "false", "listHidden" => true, "classActive" => false }, results.fetch("collapsed"))
   end
 
   def test_live_text_updates_do_not_rebuild_focused_activity_groups
@@ -1077,11 +1111,11 @@ class FrontendLifecycleJsTest < Minitest::Test
         contains(name) { return this.values.has(name); }
       }
       class Toggle {
-        constructor() { this.classList = new ClassList(); this.attributes = {}; this.listeners = []; this.label = { textContent: "" }; this.hideIcon = {}; this.showIcon = {}; }
+        constructor() { this.classList = new ClassList(); this.attributes = {}; this.listeners = []; this.condenseIcon = {}; this.expandIcon = {}; }
         addEventListener(type, listener) { if (type === "click") this.listeners.push(listener); }
         removeEventListener(type, listener) { if (type === "click") this.listeners = this.listeners.filter((item) => item !== listener); }
         setAttribute(name, value) { this.attributes[name] = value; }
-        querySelector(selector) { return { "[data-details-toggle-label]": this.label, "[data-hide-details-icon]": this.hideIcon, "[data-show-details-icon]": this.showIcon }[selector]; }
+        querySelector(selector) { return { "[data-condense-details-icon]": this.condenseIcon, "[data-expand-details-icon]": this.expandIcon }[selector]; }
         click() { this.listeners.forEach((listener) => listener()); }
       }
       const scroll = {
@@ -1102,45 +1136,45 @@ class FrontendLifecycleJsTest < Minitest::Test
       const window = { location: { search: "", origin: "https://example.test" }, matchMedia: () => ({ matches: false }) };
       const controller = new ConversationController(document, window);
       controller.bind();
-      const initialLabel = toggle.label.textContent;
       const initialTitle = toggle.attributes.title;
+      const initialIcons = [toggle.condenseIcon.hidden, toggle.expandIcon.hidden];
       toggle.click();
       const firstPanelFocused = panel.classList.contains("is-conversation-focused");
-      const focusedLabel = toggle.label.textContent;
       const focusedTitle = toggle.attributes.title;
+      const focusedIcons = [toggle.condenseIcon.hidden, toggle.expandIcon.hidden];
 
       controller.reset();
       panel = { classList: new ClassList() };
       toggle = new Toggle();
       controller.bind();
       const switchedPanelFocused = panel.classList.contains("is-conversation-focused");
-      const switchedLabel = toggle.label.textContent;
+      const switchedTitle = toggle.attributes.title;
 
       controller.reset();
       const reloadedController = new ConversationController(document, window);
       reloadedController.bind();
       console.log(JSON.stringify({
-        initialLabel,
         initialTitle,
+        initialIcons,
         firstPanelFocused,
-        focusedLabel,
         focusedTitle,
+        focusedIcons,
         switchedPanelFocused,
-        switchedLabel,
+        switchedTitle,
         reloadedPanelFocused: panel.classList.contains("is-conversation-focused"),
-        reloadedLabel: toggle.label.textContent
+        reloadedTitle: toggle.attributes.title
       }));
     JS
 
-    assert_equal "Hide details", results.fetch("initialLabel")
-    assert_equal "Hide reasoning, tool calls, status updates, and errors", results.fetch("initialTitle")
+    assert_equal "Condense reasoning, tools, statuses, and errors", results.fetch("initialTitle")
+    assert_equal [false, true], results.fetch("initialIcons")
     assert_equal true, results.fetch("firstPanelFocused")
-    assert_equal "Show details", results.fetch("focusedLabel")
-    assert_equal "Show reasoning, tool calls, status updates, and errors", results.fetch("focusedTitle")
+    assert_equal "Expand reasoning, tools, statuses, and errors", results.fetch("focusedTitle")
+    assert_equal [true, false], results.fetch("focusedIcons")
     assert_equal true, results.fetch("switchedPanelFocused")
-    assert_equal "Show details", results.fetch("switchedLabel")
+    assert_equal "Expand reasoning, tools, statuses, and errors", results.fetch("switchedTitle")
     assert_equal false, results.fetch("reloadedPanelFocused")
-    assert_equal "Hide details", results.fetch("reloadedLabel")
+    assert_equal "Condense reasoning, tools, statuses, and errors", results.fetch("reloadedTitle")
   end
 
   def test_page_keyboard_intent_listener_remains_page_lifetime_state
