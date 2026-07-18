@@ -11,6 +11,7 @@ require "fileutils"
 require "base64"
 require "pathname"
 require "timeout"
+require "zlib"
 require_relative "../app"
 
 class AppTest < Minitest::Test
@@ -7308,6 +7309,68 @@ class AppTest < Minitest::Test
       assert_includes payload.fetch("html"), "Message 1"
       assert_includes payload.fetch("html"), "Message 170"
       refute_includes payload.fetch("html"), "Message 171"
+    end
+  end
+
+  def test_compresses_full_history_response_when_client_accepts_gzip
+    Dir.mktmpdir do |dir|
+      messages = (1..220).map { |index| { role: "user", text: "Message #{index} with compressible conversation content" } }
+      path = write_session_with_messages(dir, messages)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(Gripi).get(
+        "/conversation_older",
+        params: { "session" => path, "cursor" => "170", "all" => "1" },
+        "HTTP_ACCEPT_ENCODING" => "gzip"
+      )
+
+      assert_equal 200, response.status
+      assert_equal "gzip", response["content-encoding"]
+      assert_nil response["content-length"]
+      assert_includes response["vary"], "Accept-Encoding"
+      payload = JSON.parse(Zlib.gunzip(response.body))
+      assert_equal 0, payload.fetch("next_cursor")
+      assert_includes payload.fetch("html"), "Message 1 with compressible conversation content"
+      assert_includes payload.fetch("html"), "Message 170 with compressible conversation content"
+    end
+  end
+
+  def test_does_not_compress_small_json_response
+    Dir.mktmpdir do |dir|
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(Gripi).get(
+        "/conversation_older",
+        params: { "session" => File.join(dir, "missing.jsonl"), "cursor" => "1" },
+        "HTTP_ACCEPT_ENCODING" => "gzip"
+      )
+
+      assert_equal 200, response.status
+      assert_nil response["content-encoding"]
+      assert_equal 0, JSON.parse(response.body).fetch("next_cursor")
+    end
+  end
+
+  def test_does_not_compress_large_image_attachment
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      image_data = "image data" * 200
+      attachment_path = PiAttachmentStore.new(root: @attachments_root).persist_prompt_images(path, [
+        { mimeType: "image/png", data: Base64.strict_encode64(image_data) }
+      ]).fetch(0)
+      Gripi.set :sessions_root, dir
+
+      response = Rack::MockRequest.new(Gripi).get(
+        "/attachments/#{File.basename(File.dirname(attachment_path))}/#{File.basename(attachment_path)}",
+        "HTTP_ACCEPT_ENCODING" => "gzip"
+      )
+
+      assert_equal 200, response.status
+      assert_equal "image/png", response.media_type
+      assert_nil response["content-encoding"]
+      assert_equal image_data, response.body
     end
   end
 

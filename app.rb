@@ -1,4 +1,5 @@
 require "sinatra/base"
+require "rack/deflater"
 require "json"
 require "securerandom"
 require_relative "lib/rpc/pending_session_registry"
@@ -29,6 +30,10 @@ require_relative "lib/request_rate_limiter"
 require_relative "lib/friendly_host_authorization"
 
 class Gripi < Sinatra::Base
+  use Rack::Deflater,
+    include: ["application/json"],
+    if: ->(_env, _status, headers, _body) { headers["content-length"].to_i >= 1_024 }
+
   register Web::RequestTransportSecurity
   register Web::SecurityHeaders
   register Web::RequestOriginProtection
