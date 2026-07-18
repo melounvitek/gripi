@@ -149,6 +149,32 @@ class PiSessionStore
     status_from_entries(read_entries(path))
   end
 
+  def cwd_for_session(path)
+    expanded_path = File.expand_path(path)
+    expanded_root = File.expand_path(@root)
+    return unless expanded_path.start_with?("#{expanded_root}#{File::SEPARATOR}") && File.extname(expanded_path) == ".jsonl"
+
+    real_root = File.realpath(expanded_root)
+    real_path = File.realpath(expanded_path)
+    return unless real_path.start_with?("#{real_root}#{File::SEPARATOR}")
+
+    File.foreach(real_path) do |line|
+      next if line.strip.empty?
+
+      entry = JSON.parse(line)
+      next unless entry["type"] == "session"
+
+      cwd = entry["cwd"]
+      return cwd if cwd.is_a?(String) && !cwd.empty? && File.absolute_path(cwd) == cwd
+      return nil
+    rescue JSON::ParserError
+      next
+    end
+    nil
+  rescue ArgumentError, SystemCallError
+    nil
+  end
+
   private
 
   def messages_from_entries(entries)

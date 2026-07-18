@@ -5,6 +5,16 @@ require "open3"
 class FrontendLifecycleJsTest < Minitest::Test
   ASSETS = File.expand_path("../public/assets", __dir__)
 
+  def test_composer_autocomplete_follows_session_lifecycle_and_keyboard_precedence
+    source = File.read(File.join(ASSETS, "app.js"))
+
+    assert_includes source, 'composerAutocompleteController.bind(promptTextarea, document.getElementById("composer-path-list"));'
+    assert_match(/function resetSessionViewState\(\) \{.*?composerAutocompleteController\.destroy\(\);/m, source)
+    assert_match(/if \(promptTextarea\.value\.startsWith\("\/"\).*?selectHighlightedCommand\(\);.*?if \(composerAutocompleteController\.handleKeydown\(event\)\) return;.*?cycleThinkingShortcut.*?toggleConversationPromptFocus.*?streamingBehaviorOverride = event\.altKey/m, source)
+    assert_includes source, 'if (event.key === "Escape" && !event.defaultPrevented && confirmOrStopRunningTask(event)) return;'
+    assert_match(/event\.type === "compaction_end".*?composerCompacting = "false";.*?selectSteeringBehavior\(\);.*?setComposerState\("running"/m, source)
+  end
+
   def test_conversation_rebinding_detaches_old_scroll_events_and_timers
     results = run_javascript(<<~JS)
       const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
@@ -188,7 +198,7 @@ class FrontendLifecycleJsTest < Minitest::Test
   def test_escape_keeps_composer_stopping_despite_waiting_and_stale_running_updates
     app_source = File.read(File.join(ASSETS, "app.js"))
     composer_source = app_source.match(/function updateWaitingForOutputStatus\(\).*?(?=\nfunction resizePromptTextarea)/m).to_s
-    stop_source = app_source.match(/function confirmOrStopRunningTask\(event\).*?(?=\nfunction composingFollowUp)/m).to_s
+    stop_source = app_source.match(/function confirmOrStopRunningTask\(event\).*?(?=\nfunction composingQueuedMessage)/m).to_s
 
     results = run_javascript(<<~JS)
       let now = 10_000;
@@ -203,6 +213,10 @@ class FrontendLifecycleJsTest < Minitest::Test
       const composerState = { dataset: { state: "running" }, textContent: "Pi is running…" };
       const abortButton = { disabled: false };
       const sendButton = { hidden: false, disabled: false, textContent: "", setAttribute() {} };
+      const streamingBehaviorControls = null;
+      const selectSteeringBehavior = () => {};
+      const updateStreamingBehaviorControls = () => {};
+      const selectedStreamingBehavior = () => "steer";
       const composerStopButton = { hidden: false, disabled: false, classList };
       const promptTextarea = { disabled: false };
       const imageInput = null;

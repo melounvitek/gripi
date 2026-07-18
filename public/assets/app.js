@@ -33,6 +33,7 @@ import { ProjectSelectController } from "./project_select_controller.js";
 import { NewSessionFormController } from "./new_session_form_controller.js";
 import { SidebarController } from "./sidebar_controller.js";
 import { ConversationController } from "./conversation_controller.js";
+import { ComposerAutocompleteController } from "./composer_autocomplete_controller.js";
 import { CurrentSessionFindController } from "./current_session_find_controller.js";
 import { LiveMessageParser } from "./live_message_parser.js";
 import { LiveMessageRenderer } from "./live_message_renderer.js";
@@ -63,6 +64,8 @@ let abortForm = null;
 let promptTextarea = null;
 let promptSessionInput = null;
 let sendButton = null;
+let streamingBehaviorControls = null;
+let streamingBehaviorOverride = null;
 let composerStopButton = null;
 let attachButton = null;
 let attachmentTray = null;
@@ -135,6 +138,9 @@ const notifiedFinalReplyKeys = new Set();
 const MAIN_SESSION_HISTORY_KEY = "gripi-main-session-history";
 const conversationController = new ConversationController(document, window);
 const currentSessionFindController = new CurrentSessionFindController(document, conversationController);
+const composerAutocompleteController = new ComposerAutocompleteController(document, {
+  currentSessionPath: () => currentSessionPath()
+});
 const liveMessageParser = new LiveMessageParser(document.body.dataset.homeDir || "");
 const serverMarkdownRenderer = new ServerMarkdownRenderer(document, conversationController);
 const liveMessageRenderer = new LiveMessageRenderer(document, conversationController, liveMessageParser, serverMarkdownRenderer);
@@ -179,6 +185,8 @@ function bindSessionDom() {
   extensionWidgetsBelowContainer = document.querySelector("[data-extension-widgets-below]");
   promptSessionInput = promptForm?.querySelector('input[name="session"]') || null;
   sendButton = promptForm?.querySelector(".send-button") || null;
+  streamingBehaviorControls = promptForm?.querySelector("[data-streaming-behavior]") || null;
+  streamingBehaviorOverride = null;
   composerStopButton = document.querySelector(".session-header .composer-stop-button") || null;
   attachButton = promptForm?.querySelector(".attach-button") || null;
   attachmentTray = promptForm?.querySelector(".attachment-tray") || null;
@@ -188,6 +196,7 @@ function bindSessionDom() {
   commandList = document.getElementById("command-list");
   highlightedCommandIndex = 0;
   conversationController.bind(promptTextarea);
+  composerAutocompleteController.bind(promptTextarea, document.getElementById("composer-path-list"));
   conversationScroll = conversationController.element;
   liveMessageRenderer.bind();
   currentSessionFindController.bind();
@@ -285,10 +294,38 @@ function toggleConversationPromptFocus(event, nextElement) {
   return true;
 }
 
+function selectedStreamingBehavior() {
+  if (liveOutput?.dataset.composerCompacting === "true") return "follow_up";
+  return streamingBehaviorControls?.querySelector('input[name="streaming_behavior"]:checked')?.value || "steer";
+}
+
+function submittedStreamingBehavior() {
+  const override = streamingBehaviorOverride;
+  streamingBehaviorOverride = null;
+  if (composerState?.dataset.state !== "running") return null;
+  return override || selectedStreamingBehavior();
+}
+
+function selectSteeringBehavior() {
+  const steerInput = streamingBehaviorControls?.querySelector('input[value="steer"]');
+  if (steerInput) steerInput.checked = true;
+}
+
+function updateStreamingBehaviorControls(state = composerState?.dataset.state) {
+  if (!streamingBehaviorControls) return;
+  const forcedFollowUp = liveOutput?.dataset.composerCompacting === "true";
+  const steerInput = streamingBehaviorControls.querySelector('input[value="steer"]');
+  const followUpInput = streamingBehaviorControls.querySelector('input[value="follow_up"]');
+  streamingBehaviorControls.hidden = state !== "running";
+  streamingBehaviorControls.disabled = state !== "running";
+  if (steerInput) steerInput.disabled = forcedFollowUp;
+  if (forcedFollowUp && followUpInput) followUpInput.checked = true;
+}
+
 function updatePromptPlaceholder() {
   if (!promptTextarea) return;
   if (composerState?.dataset.state === "running") {
-    promptTextarea.placeholder = "Send follow-up…";
+    promptTextarea.placeholder = selectedStreamingBehavior() === "follow_up" ? "Queue follow-up…" : "Steer Pi…";
     return;
   }
   if (promptTextarea.disabled) {
@@ -709,12 +746,15 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   const agentBusy = ["running", "sending", "stopping"].includes(state);
   const submitting = state === "sending";
   const stopping = state === "stopping";
+  if (state === "running" && previousState !== "running" && liveOutput?.dataset.composerCompacting !== "true") selectSteeringBehavior();
+  updateStreamingBehaviorControls(state);
   if (abortButton) abortButton.disabled = !agentBusy || stopping;
   if (sendButton) {
     sendButton.hidden = submitting || stopping;
     sendButton.disabled = stopping || sessionSyncBlocked();
-    sendButton.textContent = state === "running" ? "Queue" : state === "sending" ? "Sending…" : "Send";
-    sendButton.setAttribute("aria-label", state === "running" ? "Send follow-up" : "Send message");
+    const streamingBehavior = selectedStreamingBehavior();
+    sendButton.textContent = state === "running" ? streamingBehavior === "follow_up" ? "Queue" : "Steer" : state === "sending" ? "Sending…" : "Send";
+    sendButton.setAttribute("aria-label", state === "running" ? streamingBehavior === "follow_up" ? "Queue follow-up" : "Send steer" : "Send message");
   }
   if (composerStopButton) {
     composerStopButton.hidden = !agentBusy;
@@ -836,7 +876,7 @@ function renderAttachments() {
 }
 
 function addImageFiles(files, { restore = false } = {}) {
-  if (!restore && (promptTextarea?.disabled || composerState?.dataset.state === "running")) return false;
+  if (!restore && promptTextarea?.disabled) return false;
 
   const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
   if (imageFiles.length === 0) return false;
@@ -1174,6 +1214,7 @@ function renderEvent(event) {
 
   if (event.type === "compaction") {
     if (liveOutput) liveOutput.dataset.composerCompacting = "false";
+    selectSteeringBehavior();
     liveMessageRenderer.renderCompactionEvent(event);
     showStatus("Compaction finished");
     if (liveAgentRunning) setComposerState("running", "Pi is running…", { since: liveBusySince });
@@ -1229,6 +1270,7 @@ function renderEvent(event) {
     }
     if (event.type === "compaction_end") {
       if (liveOutput) liveOutput.dataset.composerCompacting = "false";
+      selectSteeringBehavior();
       liveMessageRenderer.removePendingCompactionMessage();
       if (!event.aborted && !liveMessageRenderer.liveCompactionRendered) liveMessageRenderer.renderCompactionEvent(event);
       if (liveAgentRunning) setComposerState("running", "Pi is running…", { since: liveBusySince });
@@ -1479,7 +1521,10 @@ async function submitPrompt(event) {
 
   if (promptTextarea?.disabled) return;
 
-  const followUp = composerState?.dataset.state === "running";
+  const streamingBehavior = submittedStreamingBehavior();
+  const queuedPrompt = !!streamingBehavior;
+  const followUp = streamingBehavior === "follow_up";
+  const steer = streamingBehavior === "steer";
   const compactingFollowUp = followUp && liveOutput?.dataset.composerCompacting === "true";
   const previousWaitingForOutputSince = waitingForOutputSince;
 
@@ -1500,18 +1545,19 @@ async function submitPrompt(event) {
   const formData = new FormData(promptForm);
   addSessionViewFormParams(formData);
   formData.set("message", message);
+  formData.delete("streaming_behavior");
   submittedImageFiles.forEach((file) => formData.append("images[]", file, file.name || "image"));
-  if (followUp) formData.set("streaming_behavior", "follow_up");
+  if (streamingBehavior) formData.set("streaming_behavior", streamingBehavior);
 
-  const nameCommand = followUp ? null : sessionNameSlashCommand(message);
-  const compactCommand = followUp ? null : sessionCompactSlashCommand(message);
-  const forkCommand = followUp ? null : sessionForkSlashCommand(message);
-  const treeCommand = followUp ? null : sessionTreeSlashCommand(message);
-  const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);
-  const newCommand = followUp ? null : sessionNewSlashCommand(message);
-  const modelCommand = followUp ? null : sessionModelSlashCommand(message);
+  const nameCommand = queuedPrompt ? null : sessionNameSlashCommand(message);
+  const compactCommand = queuedPrompt ? null : sessionCompactSlashCommand(message);
+  const forkCommand = queuedPrompt ? null : sessionForkSlashCommand(message);
+  const treeCommand = queuedPrompt ? null : sessionTreeSlashCommand(message);
+  const cloneCommand = queuedPrompt ? null : sessionCloneSlashCommand(message);
+  const newCommand = queuedPrompt ? null : sessionNewSlashCommand(message);
+  const modelCommand = queuedPrompt ? null : sessionModelSlashCommand(message);
   if (!nameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {
-    if (!followUp) {
+    if (!queuedPrompt) {
       liveMessageRenderer.resetLiveAssistantTracking();
       document.querySelectorAll(".tree-position-banner").forEach((banner) => banner.remove());
       const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || "Attached image" }));
@@ -1534,8 +1580,8 @@ async function submitPrompt(event) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
-  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : "Sending…");
-  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : "Sending…", true);
+  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering…" : "Sending…");
+  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering Pi…" : "Sending…", true);
   if (cloneCommand || newCommand) showSessionSwitching();
 
   const restoreSubmittedComposerInput = () => {
@@ -1551,8 +1597,11 @@ async function submitPrompt(event) {
 
   const showPromptFailure = (errorMessage) => {
     restoreSubmittedComposerInput();
-    if (followUp) {
+    if (queuedPrompt) {
       setComposerState("running", compactingFollowUp ? "Compacting…" : "Pi is running…", { since: previousWaitingForOutputSince });
+      const restoredInput = streamingBehaviorControls?.querySelector(`input[value="${streamingBehavior}"]`);
+      if (restoredInput && !restoredInput.disabled) restoredInput.checked = true;
+      updateComposerStreamingBehavior();
       showStatus(errorMessage, true);
       return;
     }
@@ -1659,6 +1708,7 @@ async function submitPrompt(event) {
       setComposerState("running", liveOutput?.dataset.composerCompacting === "true" ? "Compacting…" : "Pi is running…");
       if (payload?.queued_after_compaction) showStatus("Queued for after compaction", true);
       else if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
+      else if (payload?.steer) showStatus("Steered Pi", true);
     }
   } else {
     clearStoredComposerDraft(submittedSession);
@@ -1716,12 +1766,22 @@ function confirmOrStopRunningTask(event) {
   return true;
 }
 
-function composingFollowUp() {
+function composingQueuedMessage() {
   return composerState?.dataset.state === "running";
 }
 
+function updateComposerStreamingBehavior() {
+  updateStreamingBehaviorControls();
+  if (sendButton && composerState?.dataset.state === "running") {
+    const followUp = selectedStreamingBehavior() === "follow_up";
+    sendButton.textContent = followUp ? "Queue" : "Steer";
+    sendButton.setAttribute("aria-label", followUp ? "Queue follow-up" : "Send steer");
+  }
+  updatePromptPlaceholder();
+}
+
 function visibleCommands() {
-  if (composingFollowUp()) return [];
+  if (composingQueuedMessage()) return [];
   return [...(commandList?.querySelectorAll(".command") || [])].filter((command) => !command.hidden);
 }
 
@@ -1745,7 +1805,11 @@ function resetCommandSelection() {
 
 function showQueuedSlashCommandMessage() {
   if (!commandList) return;
-  commandList.querySelector("[data-queued-slash-message]")?.removeAttribute("hidden");
+  const message = commandList.querySelector("[data-queued-slash-message]");
+  if (message) {
+    message.textContent = "Slash commands are not supported in steering or follow-up messages.";
+    message.removeAttribute("hidden");
+  }
   commandList.querySelectorAll(".command-list h3, .command").forEach((element) => { element.hidden = true; });
   highlightedCommandIndex = 0;
 }
@@ -1756,7 +1820,7 @@ function hideQueuedSlashCommandMessage() {
 
 function filterCommandsFromPrompt() {
   if (!commandList || !promptTextarea) return;
-  if (composingFollowUp()) return showQueuedSlashCommandMessage();
+  if (composingQueuedMessage()) return showQueuedSlashCommandMessage();
   hideQueuedSlashCommandMessage();
   commandList.querySelectorAll(".command-list h3").forEach((heading) => { heading.hidden = false; });
   const query = promptTextarea.value.startsWith("/") ? promptTextarea.value.slice(1).trim().toLowerCase() : "";
@@ -1768,7 +1832,7 @@ function filterCommandsFromPrompt() {
 }
 
 function selectCommand(command) {
-  if (composingFollowUp() || !command || !promptTextarea) return false;
+  if (composingQueuedMessage() || !command || !promptTextarea) return false;
   promptTextarea.value = `/${command.dataset.commandName} `;
   commandList?.classList.remove("is-visible");
   commandList?.removeAttribute("open");
@@ -1793,7 +1857,7 @@ function moveHighlightedCommand(direction) {
 async function ensureCommandsLoaded() {
   const list = commandList;
   const generation = sessionSwitchGeneration;
-  if (!list || composingFollowUp() || list.dataset.loaded === "true") return;
+  if (!list || composingQueuedMessage() || list.dataset.loaded === "true") return;
   const url = list.dataset.commandsUrl;
   if (!url || list.dataset.loading === "true") return;
 
@@ -1823,7 +1887,7 @@ function updateCommandListForPrompt() {
   if (promptTextarea.value.startsWith("/")) {
     commandList.classList.add("is-visible");
     commandList.setAttribute("open", "");
-    if (composingFollowUp()) {
+    if (composingQueuedMessage()) {
       showQueuedSlashCommandMessage();
     } else {
       ensureCommandsLoaded();
@@ -1847,23 +1911,28 @@ function bindPageLifetimeControls() {
 
 function bindSessionControls() {
   promptTextarea?.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+
     if (promptTextarea.value.startsWith("/") && commandList?.classList.contains("is-visible")) {
-      if (event.key === "ArrowDown") {
+      const commands = visibleCommands();
+      if (event.key === "ArrowDown" && commands.length > 0) {
         event.preventDefault();
         moveHighlightedCommand(1);
         return;
       }
-      if (event.key === "ArrowUp") {
+      if (event.key === "ArrowUp" && commands.length > 0) {
         event.preventDefault();
         moveHighlightedCommand(-1);
         return;
       }
-      if (((event.key === "Enter" && !event.shiftKey) || (event.key === "Tab" && !event.shiftKey)) && visibleCommands().length > 0) {
+      if (((event.key === "Enter" && !event.shiftKey) || (event.key === "Tab" && !event.shiftKey)) && commands.length > 0) {
         event.preventDefault();
         selectHighlightedCommand();
         return;
       }
     }
+
+    if (composerAutocompleteController.handleKeydown(event)) return;
 
     if (event.key === "Tab" && event.shiftKey) {
       if (cycleThinkingShortcut(event)) {
@@ -1876,6 +1945,7 @@ function bindSessionControls() {
 
     if (event.key === "Enter" && !event.shiftKey && automaticComposerFocusEnabled()) {
       event.preventDefault();
+      streamingBehaviorOverride = event.altKey ? "follow_up" : null;
       promptForm.requestSubmit();
     }
   });
@@ -1907,6 +1977,7 @@ function bindSessionControls() {
   });
 
   reconnectButton?.addEventListener("click", reconnectSession);
+  streamingBehaviorControls?.addEventListener("change", updateComposerStreamingBehavior);
   promptTextarea?.addEventListener("input", () => {
     resizePromptTextarea();
     persistStoredComposerDraft();
@@ -1971,6 +2042,7 @@ async function copyText(text) {
 
 function resetSessionViewState() {
   currentSessionFindController.close({ restoreFocus: false });
+  composerAutocompleteController.destroy();
   clearTimeout(extensionUiTimeoutTimer);
   extensionUiTimeoutTimer = null;
   extensionUiRequestQueue = [];
@@ -2567,7 +2639,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.key === "Escape" && confirmOrStopRunningTask(event)) return;
+  if (event.key === "Escape" && !event.defaultPrevented && confirmOrStopRunningTask(event)) return;
 
   if (event.key === "Control") {
     enterSessionShortcutMode();

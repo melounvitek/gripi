@@ -177,7 +177,7 @@ module Web
     end
 
     def session_cwd(session_path)
-      PiSessionStore.new(root: settings.sessions_root).sessions.find { |session| session.path == session_path }&.cwd
+      PiSessionStore.new(root: settings.sessions_root).cwd_for_session(session_path)
     end
 
     def response_data(response)

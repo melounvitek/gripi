@@ -235,35 +235,55 @@ module Web
         images = prompt_images_from(params["images"])
         halt 400, "Message cannot be empty" if message.strip.empty? && images.empty?
 
-        follow_up_prompt = params["streaming_behavior"].to_s == "follow_up"
-        if follow_up_prompt && rpc_clients.compacting?(session_path)
+        streaming_behavior = params["streaming_behavior"].to_s
+        halt 400, "Invalid streaming behavior" unless ["", "steer", "follow_up"].include?(streaming_behavior)
+        queued_prompt = !streaming_behavior.empty?
+        follow_up_prompt = streaming_behavior == "follow_up"
+        compacting = rpc_clients.compacting?(session_path)
+        if streaming_behavior == "steer" && compacting
+          status 409
+          content_type :json
+          halt JSON.generate(error: "Steering is unavailable during compaction")
+        end
+        if follow_up_prompt && compacting
           halt_if_known_session_sync_blocked(session_path)
         else
           halt_if_session_sync_blocked(session_path)
         end
-        slash_command = follow_up_prompt ? nil : Prompts::SlashCommand.parse(message)
+        slash_command = queued_prompt ? nil : Prompts::SlashCommand.parse(message)
         branch_response = nil
         name_response = nil
         prompt_running = nil
-        if follow_up_prompt
+        if queued_prompt
           submitted_at = Time.now
           attachment_paths = []
           rpc_message = message
-          prepare_follow_up_payload = lambda do
+          prepare_queued_payload = lambda do
             next unless attachment_paths.empty? && rpc_message == message
 
             attachment_paths = attachment_store.persist_prompt_images(session_path, images)
             rpc_message = message_with_attachment_paths(message, attachment_paths)
           end
-          submit_follow_up = lambda do |client|
-            prepare_follow_up_payload.call
-            client.follow_up(rpc_message, images)
+          submit_queued_prompt = lambda do |client|
+            prepare_queued_payload.call
+            if follow_up_prompt
+              client.follow_up(rpc_message, images)
+            else
+              if client.respond_to?(:compacting?) && client.compacting?
+                status 409
+                content_type :json
+                halt JSON.generate(error: "Steering is unavailable during compaction")
+              end
+              client.steer(rpc_message, images)
+            end
           end
-          response = with_compacting_rpc_client(session_path) do |client|
-            prepare_follow_up_payload.call
-            client.queue_follow_up_during_compaction(rpc_message, images) if client.respond_to?(:queue_follow_up_during_compaction)
+          if follow_up_prompt
+            response = with_compacting_rpc_client(session_path) do |client|
+              prepare_queued_payload.call
+              client.queue_follow_up_during_compaction(rpc_message, images) if client.respond_to?(:queue_follow_up_during_compaction)
+            end
           end
-          response ||= with_synchronized_rpc_client(session_path, &submit_follow_up)
+          response ||= with_synchronized_rpc_client(session_path, &submit_queued_prompt)
           halt_failed_rpc_prompt(response)
           attachment_store.record_prompt(session_path, rpc_message, images.length, timestamp: submitted_at, paths: attachment_paths, mime_types: images.map { |image| image[:mimeType] })
         elsif slash_command&.type == :name && slash_command.name
@@ -307,7 +327,8 @@ module Web
         elsif json_request?
           content_type :json
           payload = { session: session_path, redirect: redirect_path }
-          payload[:follow_up] = true if follow_up_prompt && !slash_command
+          payload[:steer] = true if streaming_behavior == "steer"
+          payload[:follow_up] = true if follow_up_prompt
           payload[:queued_after_compaction] = true if follow_up_prompt && response.is_a?(Hash) && response["compacting"] == true
           payload[:running] = prompt_running unless prompt_running.nil?
           if slash_command

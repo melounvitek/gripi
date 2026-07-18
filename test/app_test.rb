@@ -1178,6 +1178,57 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_posts_steering_prompt_with_uploaded_images_without_invoking_slash_commands
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      image_path = File.join(dir, "screenshot.png")
+      File.binwrite(image_path, "fake image data")
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      upload = Rack::Multipart::UploadedFile.new(image_path, "image/png", true)
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "/name keep working", "streaming_behavior" => "steer", "images[]" => upload },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [:start, path], calls[0]
+      assert_equal :steer, calls[1][0]
+      assert_match %r{\A/name keep working\n\n/.+/[a-f0-9]{64}/[a-f0-9]{64}\.png\z}, calls[1][1]
+      assert_equal [{ type: "image", data: Base64.strict_encode64("fake image data"), mimeType: "image/png" }], calls[1][2]
+      payload = JSON.parse(response.body)
+      assert_equal true, payload.fetch("steer")
+      refute payload.key?("command")
+    end
+  end
+
+  def test_rejects_unknown_streaming_behavior
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "Do this", "streaming_behavior" => "later" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 400, response.status
+      assert_empty calls
+    end
+  end
+
   def test_posts_follow_up_prompt_to_selected_session
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -1234,7 +1285,12 @@ class AppTest < Minitest::Test
       path = write_session(dir)
       calls = []
       client = FakeRpcClient.new(calls, [], path)
-      def client.compacting? = true
+      client.instance_variable_set(:@compacting_checks, 0)
+      def client.compacting?
+        @compacting_checks += 1
+        true
+      end
+      def client.compacting_checks = @compacting_checks
       def client.busy? = true
       def client.follow_up(message, images = [])
         @calls << (images.empty? ? [:follow_up, message] : [:follow_up, message, images])
@@ -1271,10 +1327,97 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_includes calls, [:queue_follow_up_during_compaction, "Actually do this"]
+      assert_equal 2, client.compacting_checks
       assert operation_thread.alive?
     ensure
       release_operation << true if operation_thread&.alive?
       operation_thread&.join
+    end
+  end
+
+  def test_follow_up_uses_compaction_queue_when_compaction_starts_during_submission
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls, [], path)
+      client.instance_variable_set(:@compacting_checks, 0)
+      def client.compacting?
+        @compacting_checks += 1
+        @compacting_checks > 1
+      end
+      def client.compacting_checks = @compacting_checks
+      def client.busy? = true
+      def client.queue_follow_up_during_compaction(message, images = [])
+        @calls << (images.empty? ? [:queue_follow_up_during_compaction, message] : [:queue_follow_up_during_compaction, message, images])
+        { "success" => true, "compacting" => true }
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "Actually do this", "streaming_behavior" => "follow_up" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_includes calls, [:queue_follow_up_during_compaction, "Actually do this"]
+      assert_equal 2, client.compacting_checks
+      assert_equal true, JSON.parse(response.body).fetch("queued_after_compaction")
+    end
+  end
+
+  def test_rejects_steering_during_compaction
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls, [], path)
+      def client.compacting? = true
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "Change direction", "streaming_behavior" => "steer" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 409, response.status
+      assert_equal "Steering is unavailable during compaction", JSON.parse(response.body).fetch("error")
+      assert_empty calls
+    end
+  end
+
+  def test_rejects_steering_when_compaction_starts_during_submission
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls, [], path)
+      client.instance_variable_set(:@compacting_checks, 0)
+      def client.compacting?
+        @compacting_checks += 1
+        @compacting_checks > 1
+      end
+      def client.compacting_checks = @compacting_checks
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "Change direction", "streaming_behavior" => "steer" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 409, response.status
+      assert_equal "Steering is unavailable during compaction", JSON.parse(response.body).fetch("error")
+      assert_equal 2, client.compacting_checks
+      assert_empty calls
     end
   end
 
@@ -3527,13 +3670,22 @@ class AppTest < Minitest::Test
       refute_includes APP_STYLESHEET, ".composer-state { position: absolute;"
       refute_includes response.body, "Ready"
       assert_includes response.body, "composer-input-row"
+      assert_includes response.body, "composer-textarea-wrap"
+      assert_includes response.body, "id=\"composer-path-list\" role=\"listbox\" aria-label=\"Path suggestions\" hidden"
+      assert_includes APP_STYLESHEET, ".composer-path-list { position: absolute;"
       assert_includes response.body, "Attach images"
       assert_includes response.body, "send-button"
+      assert_includes response.body, "<fieldset class=\"streaming-behavior\" data-streaming-behavior hidden disabled>"
+      assert_includes response.body, "name=\"streaming_behavior\" value=\"steer\" checked"
+      assert_includes response.body, "name=\"streaming_behavior\" value=\"follow_up\""
+      assert_includes response.body, ">Steer</span>"
+      assert_includes response.body, ">Follow-up</span>"
       assert_includes response.body, "composer-stop-button"
       assert_includes response.body, "session-abort-button composer-stop-button"
       assert_includes response.body, "Loading…"
       refute_includes response.body, "Loading session…"
-      assert_includes APP_JAVASCRIPT, "Send follow-up…"
+      assert_includes APP_JAVASCRIPT, "Steer Pi…"
+      assert_includes APP_JAVASCRIPT, "Queue follow-up…"
       assert_includes APP_STYLESHEET, "[hidden] { display: none !important; }"
       assert_includes response.body, "Ask Pi… Enter to send, Shift+Enter for newline."
       refute_includes response.body, "autofocus"
@@ -6510,15 +6662,15 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, 'document.addEventListener("gripi:sidebar-selected-title"'
       assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(event.detail.title);"
       assert_includes APP_JAVASCRIPT, "updateNotificationToggle();"
-      assert_includes APP_JAVASCRIPT, "const nameCommand = followUp ? null : sessionNameSlashCommand(message);"
-      assert_includes APP_JAVASCRIPT, "const compactCommand = followUp ? null : sessionCompactSlashCommand(message);"
-      assert_includes APP_JAVASCRIPT, "const forkCommand = followUp ? null : sessionForkSlashCommand(message);"
-      assert_includes APP_JAVASCRIPT, "const treeCommand = followUp ? null : sessionTreeSlashCommand(message);"
-      assert_includes APP_JAVASCRIPT, "const cloneCommand = followUp ? null : sessionCloneSlashCommand(message);"
-      assert_includes APP_JAVASCRIPT, "const newCommand = followUp ? null : sessionNewSlashCommand(message);"
-      assert_includes APP_JAVASCRIPT, "const modelCommand = followUp ? null : sessionModelSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const nameCommand = queuedPrompt ? null : sessionNameSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const compactCommand = queuedPrompt ? null : sessionCompactSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const forkCommand = queuedPrompt ? null : sessionForkSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const treeCommand = queuedPrompt ? null : sessionTreeSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const cloneCommand = queuedPrompt ? null : sessionCloneSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const newCommand = queuedPrompt ? null : sessionNewSlashCommand(message);"
+      assert_includes APP_JAVASCRIPT, "const modelCommand = queuedPrompt ? null : sessionModelSlashCommand(message);"
       assert_includes APP_JAVASCRIPT, "if (!nameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {"
-      assert_includes APP_JAVASCRIPT, "if (!followUp) {\n      liveMessageRenderer.resetLiveAssistantTracking();\n      document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n      const optimisticImages = pendingImages.map"
+      assert_includes APP_JAVASCRIPT, "if (!queuedPrompt) {\n      liveMessageRenderer.resetLiveAssistantTracking();\n      document.querySelectorAll(\".tree-position-banner\").forEach((banner) => banner.remove());\n      const optimisticImages = pendingImages.map"
       assert_includes APP_JAVASCRIPT, "const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || \"Attached image\" }));\n      liveMessageRenderer.appendMessage(\"user\", message || `[${imageAttachmentLabel(submittedImageFiles.length)}]`, true, true, new Date(), { optimistic: true, optimisticText: message, images: optimisticImages });\n    }"
       assert_includes APP_JAVASCRIPT, "resetEventPollBackoff();"
       assert_includes APP_JAVASCRIPT, "scheduleNextEventPoll(0);"
@@ -6539,9 +6691,9 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "function resizePromptTextarea()"
       assert_includes APP_JAVASCRIPT, "commandList?.removeAttribute(\"open\");"
       assert_includes APP_JAVASCRIPT, "function filterCommandsFromPrompt()"
-      assert_includes response.body, "Slash commands are not supported in queued follow-up messages."
-      assert_includes APP_JAVASCRIPT, "function composingFollowUp()"
-      assert_includes APP_JAVASCRIPT, "if (composingFollowUp()) return showQueuedSlashCommandMessage();"
+      assert_includes response.body, "Slash commands are not supported in steering or follow-up messages."
+      assert_includes APP_JAVASCRIPT, "function composingQueuedMessage()"
+      assert_includes APP_JAVASCRIPT, "if (composingQueuedMessage()) return showQueuedSlashCommandMessage();"
       assert_includes APP_JAVASCRIPT, "const query = promptTextarea.value.startsWith(\"/\") ? promptTextarea.value.slice(1).trim().toLowerCase() : \"\";"
       assert_includes APP_JAVASCRIPT, "function selectHighlightedCommand()"
       assert_includes APP_JAVASCRIPT, "setComposerState(\"running\", \"Pi is running…\");"
@@ -6552,7 +6704,14 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "if (focus && state !== previousState) syncComposerFocus(state);"
       assert_includes APP_JAVASCRIPT, "if (focus) syncComposerFocus();"
       assert_includes APP_JAVASCRIPT, "composerStopButton.hidden = !agentBusy;"
-      assert_includes APP_JAVASCRIPT, "if (followUp) formData.set(\"streaming_behavior\", \"follow_up\");"
+      assert_includes APP_JAVASCRIPT, "formData.set(\"streaming_behavior\", streamingBehavior);"
+      assert_includes APP_JAVASCRIPT, "const streamingBehavior = submittedStreamingBehavior();"
+      assert_includes APP_JAVASCRIPT, "event.altKey ? \"follow_up\" : null"
+      assert_includes APP_JAVASCRIPT, "event.key === \"Enter\" && !event.shiftKey"
+      assert_includes APP_JAVASCRIPT, "streamingBehaviorControls.hidden = state !== \"running\";"
+      assert_includes APP_JAVASCRIPT, "streamingBehaviorControls.disabled = state !== \"running\";"
+      assert_includes APP_JAVASCRIPT, "const forcedFollowUp = liveOutput?.dataset.composerCompacting === \"true\";"
+      assert_includes APP_JAVASCRIPT, "steerInput.disabled = forcedFollowUp;"
       assert_includes APP_JAVASCRIPT, "const attachmentsDisabled = submitting || stopping || sessionSyncBlocked();"
       assert_includes APP_JAVASCRIPT, "addImageFiles(files);"
       assert_includes APP_JAVASCRIPT, "function confirmOrStopRunningTask(event)"
@@ -6562,8 +6721,11 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "setComposerState(\"stopping\", \"Stopping current task…\");"
       assert_includes APP_JAVASCRIPT, "if (stoppingSessionPaths.has(currentSessionPath())) setComposerState(\"stopping\", \"Stopping current task…\", { focus: false });"
       assert_includes APP_JAVASCRIPT, "abortForm.requestSubmit();"
-      assert_includes APP_JAVASCRIPT, "if (event.key === \"Escape\" && confirmOrStopRunningTask(event)) return;"
-      assert_includes APP_JAVASCRIPT, "Send follow-up…"
+      assert_includes APP_JAVASCRIPT, "if (event.key === \"Escape\" && !event.defaultPrevented && confirmOrStopRunningTask(event)) return;"
+      assert_includes APP_JAVASCRIPT, "Steer Pi…"
+      assert_includes APP_JAVASCRIPT, "Queue follow-up…"
+      assert_includes APP_JAVASCRIPT, "Send steer"
+      assert_includes APP_JAVASCRIPT, "Queue follow-up"
     end
   end
 
@@ -7926,8 +8088,9 @@ class AppTest < Minitest::Test
       @calls << (images.empty? ? [:prompt, message] : [:prompt, message, images])
     end
 
-    def steer(message)
-      @calls << [:steer, message]
+    def steer(message, images = [])
+      @calls << (images.empty? ? [:steer, message] : [:steer, message, images])
+      { "success" => true }
     end
 
     def follow_up(message, images = [])

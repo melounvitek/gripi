@@ -20,6 +20,7 @@ require_relative "lib/web/pwa_routes"
 require_relative "lib/web/gateway_update_routes"
 require_relative "lib/web/session_view_routes"
 require_relative "lib/web/session_action_routes"
+require_relative "lib/web/composer_path_routes"
 require_relative "lib/pi_rpc_client"
 require_relative "lib/gateway_updater"
 require_relative "lib/gateway_update_coordinator"
@@ -37,6 +38,7 @@ class Gripi < Sinatra::Base
   register Web::GatewayUpdateRoutes
   register Web::SessionViewRoutes
   register Web::SessionActionRoutes
+  register Web::ComposerPathRoutes
 
   set :root, File.dirname(__FILE__)
   set :public_folder, File.join(root, "public")

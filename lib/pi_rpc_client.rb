@@ -144,8 +144,10 @@ class PiRpcClient
     request("prompt", id: next_id("prompt"), **payload)
   end
 
-  def steer(message)
-    request("steer", id: next_id("steer"), message: message)
+  def steer(message, images = [])
+    payload = { message: message }
+    payload[:images] = images unless images.empty?
+    request("steer", id: next_id("steer"), **payload)
   end
 
   def follow_up(message, images = [])

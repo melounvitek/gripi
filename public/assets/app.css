@@ -85,6 +85,10 @@
     .attachment button { padding: 0.1rem 0.35rem; background: transparent; border: 1px solid var(--border); color: var(--muted); }
     .attachment button:hover { color: var(--text); background: var(--panel-softer); transform: none; }
     .composer-input-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; gap: 0.55rem; }
+    .composer-textarea-wrap { position: relative; min-width: 0; }
+    .composer-path-list { position: absolute; z-index: 8; right: 0; bottom: calc(100% + 0.35rem); left: 0; max-height: min(18rem, 42dvh); overflow-y: auto; padding: 0.3rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: var(--panel); box-shadow: var(--shadow-soft); }
+    .composer-path-option { width: 100%; min-height: 0; display: block; padding: 0.48rem 0.55rem; border: 0; background: transparent; color: var(--copy); font-family: var(--mono); font-size: 0.78rem; font-weight: 400; letter-spacing: normal; line-height: 1.35; text-align: left; text-transform: none; overflow-wrap: anywhere; }
+    .composer-path-option:hover, .composer-path-option[aria-selected="true"] { background: var(--accent-tint-08); color: var(--text); }
     .image-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     .attach-button { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; }
     .attach-button:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
@@ -314,6 +318,12 @@
     .composer-state[data-state="running"]::before, .composer-state[data-state="sending"]::before { background: var(--success); box-shadow: 0 0 0 4px #b5bd6826; }
     .composer-state[data-state="error"] { display: inline-flex; color: var(--danger); }
     .composer-state[data-state="error"]::before { background: var(--danger); }
+    .streaming-behavior { justify-self: start; display: inline-flex; gap: 0.25rem; margin: 0; padding: 0.2rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel-soft); }
+    .streaming-behavior legend { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    .streaming-behavior label { min-height: 2.25rem; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.55rem; border-radius: 0.25rem; color: var(--muted); font-family: var(--mono); font-size: 0.72rem; cursor: pointer; }
+    .streaming-behavior label:has(input:checked) { background: var(--accent-tint-08); color: var(--text); }
+    .streaming-behavior label:has(input:disabled) { opacity: 0.48; cursor: not-allowed; }
+    .streaming-behavior input { margin: 0; padding: 0; }
     .composer-controls { display: flex; justify-content: flex-end; }
     .composer-controls:has(.session-status-bar:empty) { display: none; }
     .session-status-bar { display: flex; align-items: center; justify-content: flex-end; gap: 0.9rem; color: var(--muted-soft); font-family: var(--mono); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
@@ -531,8 +541,10 @@
       .message--tool-transcript .message-body, pre { white-space: pre-wrap; }
       .message--tool-transcript .message-body { white-space: pre; overflow-wrap: normal; word-break: normal; }
       .composer, .composer-inner, .prompt-form, .composer-controls { width: 100%; max-width: 100%; min-width: 0; }
-      .composer { padding: 0.65rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); overflow-x: hidden; }
+      .composer { padding: 0.65rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); overflow: visible; }
       .composer-input-row { width: 100%; max-width: 100%; min-width: 0; grid-template-columns: 2.75rem minmax(0, 1fr) 3.25rem; gap: 0.4rem; }
+      .streaming-behavior { width: 100%; }
+      .streaming-behavior label { flex: 1 1 0; justify-content: center; min-height: 2.75rem; }
       .attach-button, .send-button { min-width: 0; width: 100%; min-height: 2.75rem; padding: 0; }
       .attach-button { font-size: 1.3rem; }
       .send-button { display: inline-flex; align-items: center; justify-content: center; font-size: 0; }

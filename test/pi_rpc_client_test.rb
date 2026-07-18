@@ -1244,7 +1244,7 @@ class PiRpcClientTest < Minitest::Test
     with_secure_random_hex("tree123") { client.tree_snapshot }
     with_secure_random_hex("leaf123") { client.tree_leaf }
     client.prompt("Hello", [{ type: "image", data: "abc", mimeType: "image/png" }])
-    client.steer("Redirect now")
+    client.steer("Redirect now", [{ type: "image", data: "steer", mimeType: "image/webp" }])
     client.abort
     client.new_session("/tmp/session.jsonl")
     client.switch_session("/tmp/other-session.jsonl")
@@ -1269,7 +1269,7 @@ class PiRpcClientTest < Minitest::Test
       { "id" => "prompt-3", "type" => "prompt", "message" => "/gripi_tree_snapshot tree123 e30" },
       { "id" => "prompt-4", "type" => "prompt", "message" => "/gripi_tree_leaf leaf123 e30" },
       { "id" => "prompt-5", "type" => "prompt", "message" => "Hello", "images" => [{ "type" => "image", "data" => "abc", "mimeType" => "image/png" }] },
-      { "id" => "steer-6", "type" => "steer", "message" => "Redirect now" },
+      { "id" => "steer-6", "type" => "steer", "message" => "Redirect now", "images" => [{ "type" => "image", "data" => "steer", "mimeType" => "image/webp" }] },
       { "id" => "abort-7", "type" => "abort" },
       { "id" => "new_session-8", "type" => "new_session", "parentSession" => "/tmp/session.jsonl" },
       { "id" => "switch_session-9", "type" => "switch_session", "sessionPath" => "/tmp/other-session.jsonl" },
