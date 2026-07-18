@@ -1,4 +1,5 @@
 require "uri"
+require_relative "../security_error_page"
 
 module Web
   module RequestOriginProtection
@@ -10,26 +11,46 @@ module Web
       def protect_unsafe_request_origin!
         return unless unsafe_request?
 
-        halt 403, unsafe_request_rejection_message if cross_site_fetch_request? || !request_origin_allowed?
+        reject_unsafe_request! if cross_site_fetch_request? || !request_origin_allowed?
       end
 
-      def unsafe_request_rejection_message
+      def reject_unsafe_request!
+        title, message = unsafe_request_rejection
+        content_type "text/html"
+        headers(
+          "Cache-Control" => "no-store",
+          "Content-Security-Policy" => SecurityErrorPage::CONTENT_SECURITY_POLICY
+        )
+        halt 403, SecurityErrorPage.render(title: title, message: message)
+      end
+
+      def unsafe_request_rejection
         if !settings.trust_proxy_headers && !request.env["HTTP_X_FORWARDED_PROTO"].to_s.empty?
-          <<~MESSAGE.strip
-            Gripi rejected this request because proxy headers are not trusted.
+          [
+            "Trusted proxy configuration required",
+            <<~MESSAGE.strip
+              Gripi rejected this request because proxy headers are not trusted.
 
-            If this gateway is behind Tailscale Serve or another trusted HTTPS reverse proxy, add this line to ~/.config/gripi/env:
+              If this gateway is behind Tailscale Serve or another trusted HTTPS reverse proxy, add this line to ~/.config/gripi/env:
 
-            GRIPI_TRUST_PROXY_HEADERS=1
+              GRIPI_TRUST_PROXY_HEADERS=1
 
-            Then restart Gripi. With the documented systemd service:
+              Then restart Gripi. With the documented systemd service:
 
-            systemctl --user restart gripi.service
+              systemctl --user restart gripi.service
 
-            Enable this only for a trusted proxy that overwrites forwarded headers and cannot be bypassed.
-          MESSAGE
+              Enable this only for a trusted proxy that overwrites forwarded headers and cannot be bypassed.
+            MESSAGE
+          ]
         else
-          "Cross-origin unsafe request rejected"
+          [
+            "Cross-origin request blocked",
+            <<~MESSAGE.strip
+              Gripi blocked this browser action because it could not verify that the request came from the gateway page.
+
+              Return to Gripi in a normal top-level browser tab and try again. If the gateway is behind a reverse proxy, verify that its public URL and trusted proxy settings match the documented configuration.
+            MESSAGE
+          ]
         end
       end
 
@@ -43,12 +64,18 @@ module Web
 
       def request_origin_allowed?
         origin = request.env["HTTP_ORIGIN"].to_s.strip
+        return same_origin_null_request? if origin == "null"
         return origin_allowed?(origin) unless origin.empty?
 
         referer = request.env["HTTP_REFERER"].to_s.strip
         return true if referer.empty?
 
         origin_allowed?(referer)
+      end
+
+      def same_origin_null_request?
+        # Fetch Metadata is browser-controlled; opaque sandbox origins cannot claim same-origin.
+        request.env["HTTP_SEC_FETCH_SITE"].to_s.casecmp?("same-origin")
       end
 
       def origin_allowed?(origin)

@@ -1,6 +1,5 @@
 ENV["APP_ENV"] = "test"
 ENV["GRIPI_ADMIN_PASSWORD"] ||= "test-password"
-ENV["GRIPI_PERMITTED_HOSTS"] ||= "gateway.tailnet.ts.net"
 
 require "minitest/autorun"
 require "rack/mock"
@@ -69,9 +68,18 @@ class RequestOriginProtectionTest < Minitest::Test
   end
 
   def test_rejects_unsafe_request_with_cross_origin
-    response = @request.post("/gateway-update", "HTTP_ORIGIN" => "http://evil.example")
+    response = @request.post(
+      "/gateway-update",
+      "HTTP_ORIGIN" => "http://evil.example",
+      "HTTP_SEC_FETCH_SITE" => "same-origin"
+    )
 
     assert_equal 403, response.status
+    assert_includes response["Content-Type"], "text/html"
+    assert_equal "no-store", response["Cache-Control"]
+    assert_equal SecurityErrorPage::CONTENT_SECURITY_POLICY, response["Content-Security-Policy"]
+    assert_includes response.body, "Cross-origin request blocked"
+    assert_includes response.body, "<style>"
     assert_equal 0, @coordinator.start_calls
   end
 
@@ -86,6 +94,29 @@ class RequestOriginProtectionTest < Minitest::Test
     response = @request.post("/gateway-update", "HTTP_SEC_FETCH_SITE" => "cross-site")
 
     assert_equal 403, response.status
+    assert_equal 0, @coordinator.start_calls
+  end
+
+  def test_allows_null_origin_when_fetch_metadata_confirms_same_origin
+    response = @request.post(
+      "/gateway-update",
+      "HTTP_ORIGIN" => "null",
+      "HTTP_SEC_FETCH_SITE" => "same-origin"
+    )
+
+    assert_equal 202, response.status
+    assert_equal 1, @coordinator.start_calls
+  end
+
+  def test_rejects_null_origin_without_same_origin_fetch_metadata
+    [nil, "same-site", "cross-site", "none"].each do |fetch_site|
+      env = { "HTTP_ORIGIN" => "null" }
+      env["HTTP_SEC_FETCH_SITE"] = fetch_site if fetch_site
+
+      response = @request.post("/gateway-update", env)
+
+      assert_equal 403, response.status, fetch_site.inspect
+    end
     assert_equal 0, @coordinator.start_calls
   end
 
@@ -120,7 +151,7 @@ class RequestOriginProtectionTest < Minitest::Test
   def test_rejects_spoofed_forwarded_host_when_proxy_headers_are_not_trusted
     response = @request.post(
       "/gateway-update",
-      "HTTP_HOST" => "gateway.tailnet.ts.net",
+      "HTTP_HOST" => "gateway.test",
       "HTTP_X_FORWARDED_HOST" => "proxy.test",
       "HTTP_X_FORWARDED_PROTO" => "https",
       "HTTP_ORIGIN" => "https://proxy.test"
@@ -137,9 +168,9 @@ class RequestOriginProtectionTest < Minitest::Test
 
     response = @request.post(
       "/gateway-update",
-      "HTTP_HOST" => "gateway.tailnet.ts.net",
+      "HTTP_HOST" => "gateway.test",
       "HTTP_X_FORWARDED_PROTO" => "https",
-      "HTTP_ORIGIN" => "https://gateway.tailnet.ts.net"
+      "HTTP_ORIGIN" => "https://gateway.test"
     )
 
     assert_equal 202, response.status
@@ -152,10 +183,10 @@ class RequestOriginProtectionTest < Minitest::Test
     response = @request.post(
       "/gateway-update",
       "HTTP_HOST" => "127.0.0.1:4567",
-      "HTTP_X_FORWARDED_HOST" => "gateway.tailnet.ts.net",
+      "HTTP_X_FORWARDED_HOST" => "gateway.test",
       "HTTP_X_FORWARDED_PROTO" => "https",
       "HTTP_X_FORWARDED_PORT" => "443",
-      "HTTP_ORIGIN" => "https://gateway.tailnet.ts.net"
+      "HTTP_ORIGIN" => "https://gateway.test"
     )
 
     assert_equal 202, response.status
@@ -167,7 +198,7 @@ class RequestOriginProtectionTest < Minitest::Test
 
     response = @request.post(
       "/gateway-update",
-      "HTTP_HOST" => "gateway.tailnet.ts.net",
+      "HTTP_HOST" => "gateway.test",
       "HTTP_X_FORWARDED_PROTO" => "https",
       "HTTP_ORIGIN" => "https://evil.example"
     )

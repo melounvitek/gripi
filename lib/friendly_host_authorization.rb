@@ -1,4 +1,5 @@
 require "rack/protection/host_authorization"
+require_relative "security_error_page"
 
 class FriendlyHostAuthorization < Rack::Protection::HostAuthorization
   def accepts?(env)
@@ -64,8 +65,13 @@ class FriendlyHostAuthorization < Rack::Protection::HostAuthorization
     warn env, "attack prevented by #{self.class}"
     [
       options[:status],
-      { "content-type" => "text/plain; charset=utf-8", "cache-control" => "no-store", "x-content-type-options" => "nosniff" },
-      [lines.join("\n")]
+      {
+        "content-type" => "text/html; charset=utf-8",
+        "cache-control" => "no-store",
+        "content-security-policy" => SecurityErrorPage::CONTENT_SECURITY_POLICY,
+        "x-content-type-options" => "nosniff"
+      },
+      [SecurityErrorPage.render(title: "Gateway hostname blocked", message: lines.join("\n"))]
     ]
   end
 

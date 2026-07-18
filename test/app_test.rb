@@ -262,7 +262,8 @@ class AppTest < Minitest::Test
     RUBY
 
     assert status.success?, stderr
-    assert_includes stdout, "403\nGripi blocked this hostname."
+    assert_includes stdout, "403\n<!doctype html>"
+    assert_includes stdout, "Gateway hostname blocked"
     assert_includes stdout, "GRIPI_PERMITTED_HOSTS=attacker.example"
     assert_includes stdout, "Only continue if you recognize"
   end
@@ -293,7 +294,8 @@ class AppTest < Minitest::Test
     RUBY
 
     assert status.success?, stderr
-    assert_includes stdout, "403\nGripi blocked this hostname."
+    assert_includes stdout, "403\n<!doctype html>"
+    assert_includes stdout, "Gateway hostname blocked"
     assert_includes stdout, "GRIPI_PERMITTED_HOSTS=remote-ubuntu.tail8fd8b2.ts.net"
     assert_includes stdout, "GRIPI_TRUST_PROXY_HEADERS=1"
     assert_includes stdout, "systemctl --user restart gripi.service"
@@ -549,7 +551,12 @@ class AppTest < Minitest::Test
 
       blocked = request.get("/")
       cookie = Array(blocked["Set-Cookie"]).first.split(";", 2).first
-      requested = request.post("/browser-access/request", "HTTP_COOKIE" => cookie)
+      requested = request.post(
+        "/browser-access/request",
+        "HTTP_COOKIE" => cookie,
+        "HTTP_ORIGIN" => "null",
+        "HTTP_SEC_FETCH_SITE" => "same-origin"
+      )
 
       assert_equal 303, requested.status
       state = JSON.parse(File.read(Gripi.settings.browser_access_path))

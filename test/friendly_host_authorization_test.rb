@@ -28,6 +28,9 @@ class FriendlyHostAuthorizationTest < Minitest::Test
     )
 
     assert_equal 403, response.status
+    assert_equal "text/html; charset=utf-8", response["Content-Type"]
+    assert_includes response["Content-Security-Policy"], "default-src 'none'"
+    assert_includes response.body, "<style>"
     assert_includes response.body, "GRIPI_PERMITTED_HOSTS=gateway.example.ts.net"
     refute_includes response.body, "GRIPI_PERMITTED_HOSTS=127.0.0.1"
   end

@@ -136,6 +136,6 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
 
 ## Resolved questions
 
-- Unsafe requests with no `Origin` are accepted for compatibility; browser-origin attacks are mitigated by rejecting cross-origin `Origin`, cross-origin `Referer`, and `Sec-Fetch-Site: cross-site` requests.
+- Unsafe requests with no `Origin` are accepted for compatibility. `Origin: null` is accepted only when browser-controlled Fetch Metadata confirms `Sec-Fetch-Site: same-origin`; other opaque and cross-origin requests remain rejected.
 - `SameSite=Strict` is deferred until after mobile Home Screen and Electron compatibility testing.
 - `/gateway-update` no longer fetches on GET; fresh update checks use protected POST requests.
