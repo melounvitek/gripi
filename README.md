@@ -23,7 +23,7 @@
 Requirements:
 
 - [mise](https://mise.jdx.dev/)
-- [Pi CLI](https://pi.dev/) available on `PATH`
+- [Pi CLI](https://pi.dev/) available on `PATH`, working, authenticated, and configured under the same OS user that runs Gripi
 
 ```sh
 git clone https://github.com/melounvitek/gripi.git
@@ -32,7 +32,9 @@ mise install
 mise run setup
 ```
 
-Setup stores an admin password in `~/.config/gripi/env` and prints it. Start the gateway:
+Setup stores an admin password in `~/.config/gripi/env` and prints it. Gripi setup does not install or configure Pi; authenticate and configure Pi separately before starting the gateway.
+
+Start the gateway:
 
 ```sh
 mise run start
@@ -77,6 +79,10 @@ Keep access approval enabled for any gateway reachable from another device: brow
 ## Pi compatibility
 
 Gripi is intentionally thin around Pi. It uses Pi’s existing runtime, sessions, tools, models, and configuration instead of replacing them with Gripi-specific behavior. Gateway-only metadata is stored separately when needed.
+
+If a project uses project-local `.pi/settings.json`, `.pi/extensions/`, `.pi/skills/`, `.pi/prompts/`, `.pi/themes/`, `SYSTEM.md`, `APPEND_SYSTEM.md`, or `.agents/skills/`, trust the project in Pi CLI before opening or starting it in Gripi. This also covers project packages configured through `.pi/settings.json`. Pi owns this trust workflow; Gripi neither grants trust nor loads untrusted project resources. If Gripi already opened the project before it was trusted, restart the gateway after active work finishes so Pi reloads those resources.
+
+The composer supports Pi-style `@` file search and path completion. While Pi is running, use the **Steer** or **Follow-up** control to choose how the message is delivered. On desktop, Enter steers by default, Alt+Enter queues a follow-up, and Shift+Enter inserts a newline.
 
 Gripi supports RPC-compatible extension UI such as select, confirm, input, editor, notify, status, title, and editor-prefill requests. If a workflow depends on Pi’s native terminal UI, custom TUI components, terminal keybindings, or `ctx.mode === "tui"`, use Pi CLI directly.
 

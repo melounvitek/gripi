@@ -94,6 +94,8 @@ GRIPI_NODE=/path/to/node
 GRIPI_PI=/path/to/pi
 ```
 
+Selecting executables only chooses the Pi runtime; it does not authenticate or configure Pi. The selected runtime must already work under the same OS user and environment as Gripi.
+
 ## Self-updates
 
 Gripi checks `origin/master` after the page loads and shows a sidebar control when updates are available. Anyone who can use the gateway can trigger an update, and updating interrupts active Pi work.

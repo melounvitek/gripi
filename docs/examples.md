@@ -97,6 +97,8 @@ WantedBy=default.target
 
 Replace `WorkingDirectory` with the Gripi checkout and `ExecStart` with the path reported by `command -v mise`. The unit above is configured for Tailscale Serve; for a direct VPN connection, replace `127.0.0.1` with the gateway machine's Tailscale address.
 
+Run the service as the same service user that has a working, authenticated, and configured Pi installation. Pi credentials and environment variables must be available to the service process; credentials loaded only by an interactive shell may not be available to systemd.
+
 The explicit `PATH` includes common Pi installation locations. If `command -v pi` reports another directory, add that directory to `PATH` or configure the [custom Pi runtime](configuration.md#custom-pi-runtime).
 
 Enable the service:
