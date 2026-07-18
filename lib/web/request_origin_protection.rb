@@ -10,7 +10,27 @@ module Web
       def protect_unsafe_request_origin!
         return unless unsafe_request?
 
-        halt 403, "Cross-origin unsafe request rejected" if cross_site_fetch_request? || !request_origin_allowed?
+        halt 403, unsafe_request_rejection_message if cross_site_fetch_request? || !request_origin_allowed?
+      end
+
+      def unsafe_request_rejection_message
+        if !settings.trust_proxy_headers && !request.env["HTTP_X_FORWARDED_PROTO"].to_s.empty?
+          <<~MESSAGE.strip
+            Gripi rejected this request because proxy headers are not trusted.
+
+            If this gateway is behind Tailscale Serve or another trusted HTTPS reverse proxy, add this line to ~/.config/gripi/env:
+
+            GRIPI_TRUST_PROXY_HEADERS=1
+
+            Then restart Gripi. With the documented systemd service:
+
+            systemctl --user restart gripi.service
+
+            Enable this only for a trusted proxy that overwrites forwarded headers and cannot be bypassed.
+          MESSAGE
+        else
+          "Cross-origin unsafe request rejected"
+        end
       end
 
       def unsafe_request?

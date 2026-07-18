@@ -46,7 +46,7 @@
 
     <p class="muted">SSH fallback: edit <code><%= h settings.browser_access_path %></code>, copy the pending request with this code into <code>approved_browsers</code>, remove it from <code>pending_requests</code>, then reload.</p>
   </main>
-  <script>
+  <script nonce="<%= h csp_nonce %>">
     async function pollAccessStatus() {
       try {
         const response = await fetch(document.body.dataset.accessStatusUrl, { headers: { "Accept": "application/json" } });

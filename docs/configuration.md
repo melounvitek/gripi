@@ -4,14 +4,25 @@ Gripi reads most settings from `~/.config/gripi/env`. Values passed in the proce
 
 ## Server address
 
-By default, `mise run start` listens only on `127.0.0.1` for same-machine use. Set the address and port when you intentionally want other devices on a trusted LAN or VPN to connect:
+By default, `mise run start` listens only on `127.0.0.1` for same-machine use:
 
 ```sh
 mise run start
+```
+
+Production mode rejects plaintext HTTP requests from non-loopback clients. For remote access, prefer HTTPS through Tailscale Serve or another trusted private reverse proxy. Direct Tailscale-IP HTTP is encrypted by Tailscale below the HTTP layer, but Gripi cannot detect that; enable it explicitly in `~/.config/gripi/env`:
+
+```sh
+GRIPI_ALLOW_INSECURE_REMOTE_HTTP=1
+```
+
+Then bind to the Tailscale address:
+
+```sh
 GRIPI_HOST=100.x.y.z GRIPI_PORT=4568 mise run start
 ```
 
-Keep the default localhost binding for same-machine use. Bind to a LAN or VPN address only when you intentionally want other devices on that network to connect. Avoid `GRIPI_HOST=0.0.0.0` unless network access to the machine is already restricted. Wildcard binds (`0.0.0.0` or `::`) do not identify the addresses clients use, so add each actual client-facing hostname or IP address to `GRIPI_PERMITTED_HOSTS`.
+Do not use this override for ordinary unencrypted LAN or Wi-Fi access. Keep the default localhost binding for same-machine use, and avoid `GRIPI_HOST=0.0.0.0` unless network access to the machine is already restricted. Wildcard binds (`0.0.0.0` or `::`) do not identify the addresses clients use, so add each actual client-facing hostname or IP address to `GRIPI_PERMITTED_HOSTS`.
 
 `GRIPI_HOST` and `GRIPI_PORT` must be set in the command or service environment; they are read by the launcher before Gripi loads `~/.config/gripi/env`.
 
@@ -29,9 +40,11 @@ Set proxy-header trust explicitly when using a reverse proxy:
 GRIPI_TRUST_PROXY_HEADERS=1
 ```
 
-Enable this only when Gripi is reachable through a trusted local/private reverse proxy that overwrites client-supplied `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-Port` headers. Gripi does not read the RFC `Forwarded` header. Also list every public proxy hostname in `GRIPI_PERMITTED_HOSTS`. Leave proxy support disabled for direct localhost, LAN, and VPN connections.
+Enable this only when Gripi is reachable through a trusted local/private reverse proxy that overwrites client-supplied `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-Port` headers. Gripi does not read the RFC `Forwarded` header. Also list every public proxy hostname in `GRIPI_PERMITTED_HOSTS`. Leave proxy support disabled for direct localhost, LAN, and VPN connections. Do not let clients bypass the proxy and reach a proxy-trusting listener directly, because they could spoof these headers.
 
-For production installations upgraded from earlier versions, Gripi retains the previous permissive host and `X-Forwarded-*` behavior only while browser approval is enabled and neither `GRIPI_PERMITTED_HOSTS` nor `GRIPI_TRUST_PROXY_HEADERS` is present. This compatibility fallback keeps existing Tailscale Serve setups reachable after a self-update. Setting `GRIPI_PERMITTED_HOSTS` enables host authorization even when browser approval remains enabled; setting `GRIPI_TRUST_PROXY_HEADERS` to a true or false value overrides proxy-header trust. If `GRIPI_BROWSER_AUTH_DISABLED=1`, strict safe host defaults and disabled proxy-header trust apply unless these settings explicitly opt in.
+Host authorization and proxy-header trust always use strict defaults. Before upgrading an older Tailscale Serve or reverse-proxy installation, set both its public hostname in `GRIPI_PERMITTED_HOSTS` and `GRIPI_TRUST_PROXY_HEADERS=1`; the previous automatic compatibility fallback has been removed. Direct connections must leave proxy-header trust disabled.
+
+If a request arrives for an unconfigured hostname, Gripi keeps it blocked and displays the exact validated hostname to add, the proxy setting when relevant, and the restart command. Only follow that diagnostic when you recognize the hostname as your intended Gripi address. A configured hostname with missing proxy trust similarly produces instructions after an unsafe browser action is rejected.
 
 ## Browser approval
 
@@ -57,7 +70,7 @@ GRIPI_MULTI_USER_MODE=1
 
 Each user generates and keeps a private user token. Using the same token on another browser shows the same session list.
 
-In multi-user mode, user-token approval replaces per-browser approval. If `GRIPI_BROWSER_AUTH_DISABLED=1` is also set, new valid user tokens are approved automatically.
+In multi-user mode, user-token approval replaces per-browser approval. If `GRIPI_BROWSER_AUTH_DISABLED=1` is also set, every new valid user token is approved automatically and remains in the workspace access state until removed manually. Use that combination only when every client able to reach the gateway is trusted.
 
 Multi-user mode is intended for trusted users. It separates session visibility but does not provide OS-level process, filesystem, or credential isolation. Approved users can start Pi in directories readable by the gateway process, and Pi runs with the gateway user's credentials. Settings such as the selected model and thinking effort are currently shared between users.
 

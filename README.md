@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-**Gripi is a desktop and web portal for [Pi](https://pi.dev/), powered by a self-hosted gateway.** Run the gateway on a development machine or home server with Pi CLI installed, then use Pi from the desktop app or any web browser. Locally, or over a private network.
+**Gripi is a desktop and web portal for [Pi](https://pi.dev/), powered by a self-hosted gateway.** Run the gateway on a development machine or home server with Pi CLI installed, then use Pi from the desktop app or any web browser. Locally, or over an encrypted private network.
 
 **Pi stays Pi.** Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It is a gateway and UI layer for accessing the Pi environment you already run.
 
@@ -69,7 +69,7 @@ Multi-user mode is intended for trusted users. It does not provide OS-level proc
 
 Do not expose the gateway directly to the public internet. Anyone who can use it can start Pi processes with the gateway machine's filesystem and credentials.
 
-Keep access approval enabled for any gateway reachable from another device: browser approval in single-user mode, or user-token approval in multi-user mode. Only disable approval when access is already limited to trusted devices and users by localhost, a VPN, firewall rules, or another private network boundary. Multi-user mode separates session visibility for trusted users; it is not a sandbox and does not isolate filesystem, process, or credential access.
+Keep access approval enabled for any gateway reachable from another device: browser approval in single-user mode, or user-token approval in multi-user mode. Use HTTPS or an encrypted VPN such as Tailscale for remote access; ordinary LAN or Wi-Fi HTTP can expose passwords and access cookies. Production mode rejects remote plaintext HTTP unless `GRIPI_ALLOW_INSECURE_REMOTE_HTTP=1` explicitly allows transport already encrypted by a private VPN. Only disable approval when access is already limited to trusted devices and users. Multi-user mode separates session visibility for trusted users; it is not a sandbox and does not isolate filesystem, process, or credential access.
 
 - [Example local and remote setups](docs/examples.md)
 - [Configuration options](docs/configuration.md)

@@ -110,18 +110,19 @@ Make Gripi safer to announce for trusted localhost/Tailscale usage by reducing b
 - [x] Adopt useful review suggestions.
 - [x] Rerun review if changes are made after it.
 
-## Future follow-ups
+## Follow-up status
 
-These are intentionally deferred from this branch because they are lower priority for the trusted localhost/Tailscale alpha scope, need broader compatibility testing, or risk changing normal UI behavior.
+- [x] Add explicit `GRIPI_PERMITTED_HOSTS` guidance for reachable production deployments.
+- [x] Honor `X-Forwarded-*` origin headers only behind explicitly configured trusted proxies.
+- [x] Rate-limit approval and password attempts.
+- [x] Restrict JSON state files containing browser and workspace credentials to the gateway user.
+
+## Remaining future follow-ups
 
 - Consider adding full CSRF tokens if Origin/Sec-Fetch-Site protection proves insufficient or the deployment model expands.
 - Consider converting RPC-backed GET endpoints (`/sessions/model_settings`, `/sessions/fork_messages`, `/sessions/tree_entries`, `/commands`) only if there is a low-risk UI-compatible design.
 - Consider `SameSite=Strict` for gateway cookies and verify mobile/PWA/Electron flows.
-- Consider explicit `GRIPI_PERMITTED_HOSTS` guidance for reachable production deployments.
-- Consider honoring `X-Forwarded-*` origin headers only behind explicitly configured trusted proxies.
-- Consider rate-limiting approval/password attempts if exposed beyond localhost.
 - Consider allow-listed cwd roots for multi-user mode.
-- Consider file permissions for JSON state files that contain approved browser/workspace tokens.
 
 ## Validation notes
 

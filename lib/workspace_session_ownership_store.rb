@@ -1,10 +1,10 @@
 require "json"
-require "fileutils"
 require "digest"
+require_relative "secure_state_file"
 
 class WorkspaceSessionOwnershipStore
   def initialize(path:)
-    @path = path
+    @file = SecureStateFile.new(path)
     @mutex = Mutex.new
   end
 
@@ -53,19 +53,17 @@ class WorkspaceSessionOwnershipStore
   end
 
   def read_state
-    return empty_state unless File.exist?(@path)
+    contents = @file.read
+    return empty_state unless contents
 
-    parsed = JSON.parse(File.read(@path))
+    parsed = JSON.parse(contents)
     { "sessions" => parsed.fetch("sessions", {}) }
   rescue JSON::ParserError
     empty_state
   end
 
   def write_state(state)
-    FileUtils.mkdir_p(File.dirname(@path))
-    temp_path = "#{@path}.tmp"
-    File.write(temp_path, JSON.pretty_generate(state) + "\n")
-    File.rename(temp_path, @path)
+    @file.write(JSON.pretty_generate(state) + "\n")
   end
 
   def empty_state

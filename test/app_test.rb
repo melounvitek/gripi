@@ -36,6 +36,8 @@ class AppTest < Minitest::Test
     Gripi.set :rpc_client_registry, nil
     Gripi.set :session_synchronizer, nil
     Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new
+    Gripi.set :access_request_rate_limiter, RequestRateLimiter.new(limit: 30, window: 60)
+    Gripi.set :admin_login_rate_limiter, RequestRateLimiter.new(limit: 10, window: 5 * 60)
     Gripi.set :rpc_client_factory, [->(session_path) { PiRpcClient.start(session_path) }]
     Gripi.set :new_rpc_client_factory, [->(cwd) { PiRpcClient.start_in_cwd(cwd) }]
   end
@@ -158,6 +160,13 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_host_diagnostic_only_suggests_exact_non_wildcard_hosts
+    assert_equal "gateway.example.ts.net", Gripi.normalized_suggested_host("gateway.example.ts.net:443")
+    [".example", "*", "*.example", "example.*", "0.0.0.0", "[::]"].each do |host|
+      assert_nil Gripi.normalized_suggested_host(host), host
+    end
+  end
+
   def test_permitted_hosts_include_the_launcher_binding_and_configured_public_hosts
     with_env(
       "GRIPI_BIND_HOST" => "localhost:4567",
@@ -172,18 +181,18 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_production_keeps_legacy_proxy_compatibility_with_browser_approval_and_no_explicit_security_config
+  def test_production_uses_strict_security_defaults
     settings = production_security_settings
-
-    assert_equal({}, settings.fetch("host_authorization"))
-    assert_equal true, settings.fetch("trust_proxy_headers")
-  end
-
-  def test_production_uses_strict_defaults_when_browser_approval_is_disabled
-    settings = production_security_settings("GRIPI_BROWSER_AUTH_DISABLED" => "1")
 
     assert_includes settings.dig("host_authorization", "permitted_hosts"), "127.0.0.1"
     assert_equal false, settings.fetch("trust_proxy_headers")
+    assert_equal true, settings.fetch("enforce_secure_remote_transport")
+  end
+
+  def test_production_can_explicitly_allow_insecure_remote_http
+    settings = production_security_settings("GRIPI_ALLOW_INSECURE_REMOTE_HTTP" => "1")
+
+    assert_equal false, settings.fetch("enforce_secure_remote_transport")
   end
 
   def test_explicit_permitted_hosts_enable_host_authorization_with_browser_approval
@@ -196,7 +205,7 @@ class AppTest < Minitest::Test
     assert_equal false, empty_settings.fetch("trust_proxy_headers")
   end
 
-  def test_explicit_proxy_header_setting_overrides_the_compatibility_default
+  def test_explicit_proxy_header_setting_controls_proxy_trust
     disabled = production_security_settings("GRIPI_TRUST_PROXY_HEADERS" => "0")
     enabled = production_security_settings(
       "GRIPI_BROWSER_AUTH_DISABLED" => "1",
@@ -207,6 +216,13 @@ class AppTest < Minitest::Test
     assert_equal false, disabled.fetch("trust_proxy_headers")
     refute_equal({}, enabled.fetch("host_authorization"))
     assert_equal true, enabled.fetch("trust_proxy_headers")
+  end
+
+  def test_wildcard_bind_without_explicit_hosts_denies_every_host
+    settings = production_security_settings("GRIPI_BIND_HOST" => "0.0.0.0")
+
+    assert_equal true, settings.dig("host_authorization", "deny_all")
+    assert_empty settings.dig("host_authorization", "permitted_hosts")
   end
 
   def test_wildcard_bind_requires_explicit_actual_client_hosts
@@ -246,7 +262,96 @@ class AppTest < Minitest::Test
     RUBY
 
     assert status.success?, stderr
-    assert_equal "403\nHost not permitted", stdout.strip
+    assert_includes stdout, "403\nGripi blocked this hostname."
+    assert_includes stdout, "GRIPI_PERMITTED_HOSTS=attacker.example"
+    assert_includes stdout, "Only continue if you recognize"
+  end
+
+  def test_rejected_tailscale_serve_host_shows_exact_safe_configuration
+    env = ENV.to_h.merge(
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
+      "RACK_ENV" => "production",
+      "APP_ENV" => "production",
+      "GRIPI_BIND_HOST" => "127.0.0.1",
+      "GRIPI_PERMITTED_HOSTS" => nil,
+      "GRIPI_TRUST_PROXY_HEADERS" => nil
+    )
+
+    stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", <<~RUBY)
+      require './app'
+      require 'rack/mock'
+      response = Rack::MockRequest.new(Gripi).get(
+        '/',
+        'HTTP_HOST' => 'remote-ubuntu.tail8fd8b2.ts.net',
+        'HTTP_X_FORWARDED_HOST' => 'remote-ubuntu.tail8fd8b2.ts.net',
+        'HTTP_X_FORWARDED_PROTO' => 'https',
+        'REMOTE_ADDR' => '127.0.0.1'
+      )
+      puts response.status
+      puts response.body
+    RUBY
+
+    assert status.success?, stderr
+    assert_includes stdout, "403\nGripi blocked this hostname."
+    assert_includes stdout, "GRIPI_PERMITTED_HOSTS=remote-ubuntu.tail8fd8b2.ts.net"
+    assert_includes stdout, "GRIPI_TRUST_PROXY_HEADERS=1"
+    assert_includes stdout, "systemctl --user restart gripi.service"
+  end
+
+  def test_rejected_host_diagnostic_does_not_render_invalid_host_markup
+    env = ENV.to_h.merge(
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
+      "RACK_ENV" => "production",
+      "APP_ENV" => "production",
+      "GRIPI_BIND_HOST" => "127.0.0.1"
+    )
+
+    stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", <<~RUBY)
+      require './app'
+      require 'rack/mock'
+      response = Rack::MockRequest.new(Gripi).get('/', 'HTTP_HOST' => 'evil<script>.example')
+      puts response.status
+      puts response.body
+    RUBY
+
+    assert status.success?, stderr
+    assert_includes stdout, "Add the intended exact hostname to GRIPI_PERMITTED_HOSTS"
+    refute_includes stdout, "evil<script>.example"
+  end
+
+  def test_complete_tailscale_serve_configuration_allows_unsafe_requests
+    env = ENV.to_h.merge(
+      "GRIPI_ADMIN_PASSWORD" => "secret",
+      "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
+      "RACK_ENV" => "production",
+      "APP_ENV" => "production",
+      "GRIPI_BIND_HOST" => "127.0.0.1",
+      "GRIPI_BROWSER_AUTH_DISABLED" => "1",
+      "GRIPI_PERMITTED_HOSTS" => "remote-ubuntu.tail8fd8b2.ts.net",
+      "GRIPI_TRUST_PROXY_HEADERS" => "1"
+    )
+
+    stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", <<~RUBY)
+      require './app'
+      require 'rack/mock'
+      response = Rack::MockRequest.new(Gripi).post(
+        '/markdown',
+        params: { 'text' => 'ok' },
+        'HTTP_HOST' => 'remote-ubuntu.tail8fd8b2.ts.net',
+        'HTTP_X_FORWARDED_HOST' => 'remote-ubuntu.tail8fd8b2.ts.net',
+        'HTTP_X_FORWARDED_PROTO' => 'https',
+        'HTTP_ORIGIN' => 'https://remote-ubuntu.tail8fd8b2.ts.net',
+        'REMOTE_ADDR' => '127.0.0.1'
+      )
+      puts response.status
+      puts response.body
+    RUBY
+
+    assert status.success?, stderr
+    assert_includes stdout, "200\n"
+    assert_includes stdout, '"html":"<p>ok</p>'
   end
 
   def test_configured_host_passes_host_authorization
@@ -255,7 +360,8 @@ class AppTest < Minitest::Test
       "GRIPI_ENV_PATH" => File.join(Dir.tmpdir, "missing-gripi-env"),
       "RACK_ENV" => "development",
       "APP_ENV" => "development",
-      "GRIPI_PERMITTED_HOSTS" => "remote-workspace.tail8fd8b2.ts.net"
+      "GRIPI_PERMITTED_HOSTS" => "remote-workspace.tail8fd8b2.ts.net",
+      "GRIPI_BROWSER_ACCESS_PATH" => File.join(@browser_access_root, "browser-access.json")
     )
 
     stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", <<~RUBY)
@@ -535,6 +641,42 @@ class AppTest < Minitest::Test
       assert_equal 400, approve_response.status
       assert_equal 400, deny_response.status
     end
+  end
+
+  def test_browser_access_request_submissions_are_rate_limited
+    Gripi.set :gateway_admin_password, "secret"
+    Gripi.set :access_request_rate_limiter, RequestRateLimiter.new(limit: 2, window: 60)
+    request = Rack::MockRequest.new(Gripi)
+    cookie = Array(request.get("/")["Set-Cookie"]).first.split(";", 2).first
+
+    allowed = request.post("/browser-access/request", "HTTP_COOKIE" => cookie)
+    limited = request.post("/browser-access/request", "HTTP_COOKIE" => cookie)
+
+    assert_equal 303, allowed.status
+    assert_equal 429, limited.status
+  end
+
+  def test_admin_password_attempts_are_rate_limited
+    Gripi.set :gateway_admin_password, "secret"
+    Gripi.set :admin_login_rate_limiter, RequestRateLimiter.new(limit: 2, window: 60)
+    request = Rack::MockRequest.new(Gripi)
+    cookie = Array(request.get("/")["Set-Cookie"]).first.split(";", 2).first
+
+    2.times do
+      response = request.post(
+        "/browser-access/admin-login",
+        params: { "password" => "wrong" },
+        "HTTP_COOKIE" => cookie
+      )
+      assert_equal 403, response.status
+    end
+
+    limited = request.post(
+      "/browser-access/admin-login",
+      params: { "password" => "secret" },
+      "HTTP_COOKIE" => cookie
+    )
+    assert_equal 429, limited.status
   end
 
   def test_admin_password_approves_current_browser
@@ -7979,14 +8121,16 @@ class AppTest < Minitest::Test
       "GRIPI_BIND_HOST" => "127.0.0.1",
       "GRIPI_BROWSER_AUTH_DISABLED" => nil,
       "GRIPI_PERMITTED_HOSTS" => nil,
-      "GRIPI_TRUST_PROXY_HEADERS" => nil
+      "GRIPI_TRUST_PROXY_HEADERS" => nil,
+      "GRIPI_ALLOW_INSECURE_REMOTE_HTTP" => nil
     ).merge(overrides)
     stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "-I.", "-e", <<~RUBY)
       require './app'
       require 'json'
       puts JSON.generate(
         host_authorization: Gripi.settings.host_authorization,
-        trust_proxy_headers: Gripi.settings.trust_proxy_headers
+        trust_proxy_headers: Gripi.settings.trust_proxy_headers,
+        enforce_secure_remote_transport: Gripi.settings.enforce_secure_remote_transport
       )
     RUBY
     assert status.success?, stderr

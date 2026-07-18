@@ -26,13 +26,19 @@ This setup works well even on slower private networks. Gripi is still comfortabl
 
 ### Direct VPN connection
 
-Bind Gripi to the gateway machine's Tailscale address:
+Tailscale encrypts this connection below the HTTP layer, but Gripi cannot distinguish it from unsafe plaintext LAN traffic. Add the explicit override to `~/.config/gripi/env`:
+
+```sh
+GRIPI_ALLOW_INSECURE_REMOTE_HTTP=1
+```
+
+Then bind Gripi to the gateway machine's Tailscale address:
 
 ```sh
 GRIPI_HOST=100.x.y.z mise run start
 ```
 
-Open `http://100.x.y.z:4567` in a browser, or add it from the desktop app's **Add Server…** menu.
+Open `http://100.x.y.z:4567` in a browser, or add it from the desktop app's **Add Server…** menu. Use this override only for an encrypted, access-controlled network such as Tailscale—not ordinary LAN or Wi-Fi HTTP.
 
 ### HTTPS through Tailscale Serve
 
@@ -56,7 +62,7 @@ tailscale serve --bg --yes 4567
 tailscale serve status
 ```
 
-Open the configured `https://…ts.net` URL, or add it to the desktop app. Existing browser-approval-enabled installations without either setting retain legacy compatibility after an update, but should add both settings to make the proxy policy explicit. Configure them before disabling browser approval. Do not enable proxy-header support when clients can bypass the trusted proxy and connect to the same listener with arbitrary `X-Forwarded-*` headers.
+Open the configured `https://…ts.net` URL, or add it to the desktop app. Older installations must add both settings before updating because automatic legacy proxy compatibility has been removed. Do not enable proxy-header support when clients can bypass the trusted proxy and connect to the same listener with arbitrary `X-Forwarded-*` headers.
 
 If Tailscale requires elevated permissions, run this once and retry:
 

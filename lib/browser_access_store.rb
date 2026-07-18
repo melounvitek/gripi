@@ -1,16 +1,29 @@
 require "json"
-require "fileutils"
 require "securerandom"
 require "time"
+require_relative "secure_state_file"
 
 class BrowserAccessStore
   PRUNE_INTERVAL = 24 * 60 * 60
   UNREQUESTED_RETENTION = 7 * 24 * 60 * 60
   DENIED_RETENTION = 7 * 24 * 60 * 60
   REQUESTED_RETENTION = 30 * 24 * 60 * 60
+  MAX_PENDING_REQUESTS = 100
+  MAX_TERMINAL_REQUESTS = 100
+  MAX_IP_BYTES = 64
+  MAX_USER_AGENT_BYTES = 512
+
+  class PendingRequestsFull < StandardError
+    attr_reader :limit
+
+    def initialize(limit)
+      @limit = limit
+      super("Pending browser request limit reached (#{limit})")
+    end
+  end
 
   def initialize(path:)
-    @path = path
+    @file = SecureStateFile.new(path)
     @mutex = Mutex.new
     @last_pruned_at = Time.at(0)
   end
@@ -27,14 +40,15 @@ class BrowserAccessStore
     update do |state|
       request = state.fetch("pending_requests").find { |item| item["token"] == token }
       unless request
+        enforce_pending_limit!(state)
         request = {
           "code" => unique_code(state),
           "token" => token,
           "requested" => false,
           "created_at" => now,
           "requested_at" => nil,
-          "ip" => ip.to_s,
-          "user_agent" => user_agent.to_s
+          "ip" => bounded_string(ip, MAX_IP_BYTES),
+          "user_agent" => bounded_string(user_agent, MAX_USER_AGENT_BYTES)
         }
         state.fetch("pending_requests") << request
       end
@@ -47,21 +61,28 @@ class BrowserAccessStore
     update do |state|
       request = state.fetch("pending_requests").find { |item| item["token"] == token }
       unless request
+        enforce_pending_limit!(state)
         request = {
           "code" => unique_code(state),
           "token" => token,
           "requested" => false,
           "created_at" => now,
           "requested_at" => nil,
-          "ip" => ip.to_s,
-          "user_agent" => user_agent.to_s
+          "ip" => bounded_string(ip, MAX_IP_BYTES),
+          "user_agent" => bounded_string(user_agent, MAX_USER_AGENT_BYTES)
         }
         state.fetch("pending_requests") << request
       end
+      enforce_pending_limit!(state, excluding: request) if request["denied_at"]
+      request.delete("denied_at")
       request["requested"] = true
-      request["requested_at"] ||= now
+      request["requested_at"] = now
       request
     end
+  end
+
+  def pending?(token)
+    data.fetch("pending_requests", []).any? { |request| request["token"] == token && !request["denied_at"] }
   end
 
   def pending_requests
@@ -121,8 +142,21 @@ class BrowserAccessStore
     state.fetch("approved_browsers") << {
       "token" => token,
       "approved_at" => Time.now.utc.iso8601,
-      "label" => label.to_s
+      "label" => bounded_string(label, MAX_USER_AGENT_BYTES)
     }
+  end
+
+  def enforce_pending_limit!(state, excluding: nil)
+    active_count = state.fetch("pending_requests").count do |request|
+      request != excluding && !request["denied_at"]
+    end
+    return if active_count < MAX_PENDING_REQUESTS
+
+    raise PendingRequestsFull, MAX_PENDING_REQUESTS
+  end
+
+  def bounded_string(value, max_bytes)
+    value.to_s.byteslice(0, max_bytes).to_s.scrub("")
   end
 
   def unique_code(state)
@@ -142,6 +176,7 @@ class BrowserAccessStore
       prune_pending_requests!(state)
       result = yield state
       prune_pending_requests!(state)
+      prune_terminal_requests!(state)
       write_state(state)
       @last_pruned_at = Time.now
       result
@@ -157,7 +192,9 @@ class BrowserAccessStore
       return if now - @last_pruned_at < PRUNE_INTERVAL
 
       state = read_state
-      write_state(state) if prune_pending_requests!(state, now: now)
+      changed = prune_pending_requests!(state, now: now)
+      changed = prune_terminal_requests!(state) || changed
+      write_state(state) if changed
       @last_pruned_at = now
     end
   end
@@ -168,6 +205,16 @@ class BrowserAccessStore
       stale_pending_request?(request, now)
     end
     state.fetch("pending_requests").length != before_count
+  end
+
+  def prune_terminal_requests!(state)
+    terminal = state.fetch("pending_requests").select { |request| request["denied_at"] }
+    overflow = terminal.length - MAX_TERMINAL_REQUESTS
+    return false unless overflow.positive?
+
+    remove = terminal.sort_by { |request| parse_time(request["denied_at"]) || Time.at(0) }.first(overflow)
+    state.fetch("pending_requests").reject! { |request| remove.include?(request) }
+    true
   end
 
   def stale_pending_request?(request, now)
@@ -182,7 +229,7 @@ class BrowserAccessStore
 
   def timestamp_stale?(timestamp, now, retention)
     time = parse_time(timestamp)
-    time && now - time > retention
+    !time || now - time > retention
   end
 
   def parse_time(timestamp)
@@ -192,22 +239,25 @@ class BrowserAccessStore
   end
 
   def read_state
-    return empty_state unless File.exist?(@path)
+    contents = @file.read
+    return empty_state unless contents
 
-    parsed = JSON.parse(File.read(@path))
+    parsed = JSON.parse(contents)
+    pending_requests = Array(parsed["pending_requests"])
+    pending_requests.each do |request|
+      request["ip"] = bounded_string(request["ip"], MAX_IP_BYTES)
+      request["user_agent"] = bounded_string(request["user_agent"], MAX_USER_AGENT_BYTES)
+    end
     {
       "approved_browsers" => Array(parsed["approved_browsers"]),
-      "pending_requests" => Array(parsed["pending_requests"])
+      "pending_requests" => pending_requests
     }
   rescue JSON::ParserError
     empty_state
   end
 
   def write_state(state)
-    FileUtils.mkdir_p(File.dirname(@path))
-    temp_path = "#{@path}.tmp"
-    File.write(temp_path, JSON.pretty_generate(state) + "\n")
-    File.rename(temp_path, @path)
+    @file.write(JSON.pretty_generate(state) + "\n")
   end
 
   def empty_state

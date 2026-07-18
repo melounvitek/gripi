@@ -38,6 +38,7 @@ class GatewayUpdateRoutesTest < Minitest::Test
 
   def setup
     @sessions_root = Dir.mktmpdir
+    @browser_access_root = Dir.mktmpdir
     @coordinator = FakeCoordinator.new(
       Snapshot.new(
         state: :available,
@@ -49,6 +50,7 @@ class GatewayUpdateRoutesTest < Minitest::Test
       )
     )
     Gripi.set :sessions_root, @sessions_root
+    Gripi.set :browser_access_path, File.join(@browser_access_root, "browser-access.json")
     Gripi.set :browser_auth_disabled, true
     Gripi.set :multi_user_mode, false
     Gripi.set :rpc_idle_timeout_seconds, 0
@@ -59,6 +61,7 @@ class GatewayUpdateRoutesTest < Minitest::Test
 
   def teardown
     FileUtils.remove_entry(@sessions_root) if Dir.exist?(@sessions_root)
+    FileUtils.remove_entry(@browser_access_root) if Dir.exist?(@browser_access_root)
   end
 
   def test_get_returns_the_cached_coordinator_status_as_json

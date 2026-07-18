@@ -127,7 +127,8 @@ class RequestOriginProtectionTest < Minitest::Test
     )
 
     assert_equal 403, response.status
-    assert_equal "Cross-origin unsafe request rejected", response.body
+    assert_includes response.body, "GRIPI_TRUST_PROXY_HEADERS=1"
+    assert_includes response.body, "systemctl --user restart gripi.service"
     assert_equal 0, @coordinator.start_calls
   end
 

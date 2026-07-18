@@ -72,6 +72,7 @@ module Web
 
       def valid_workspace_key?(key)
         normalized = normalize_workspace_key(key)
+        return false if normalized.bytesize > 256
         return true if normalized.match?(/\Apiu_[A-Za-z0-9_-]{16,}\z/)
         return false if normalized.length < 12
 
@@ -105,12 +106,21 @@ module Web
         approved_current_workspace?
       end
 
+      def request_workspace_access(workspace_id)
+        token = browser_token
+        halt 429, "Too many access requests" unless settings.access_request_rate_limiter.allow?(client_rate_limit_key)
+        workspace_access_store.request_access(workspace_id, browser_token: token)
+      rescue WorkspaceAccessStore::PendingRequestsFull
+        halt 503, "Too many pending workspace access requests"
+      end
+
       def set_workspace_cookie(workspace_id)
         response.set_cookie(
           WorkspaceAccess::WORKSPACE_COOKIE,
           value: workspace_id,
           path: "/",
           httponly: true,
+          secure: secure_transport?,
           same_site: :lax,
           max_age: 365 * 24 * 60 * 60
         )
@@ -178,6 +188,8 @@ module Web
             set_workspace_cookie(workspace_id)
             redirect safe_return_to
           elsif workspace_bootstrap_required?
+            halt 429, "Too many admin login attempts" unless settings.admin_login_rate_limiter.allow?(client_rate_limit_key)
+
             if secure_compare(params["admin_password"].to_s, settings.gateway_admin_password.to_s)
               workspace_access_store.approve_workspace(workspace_id)
               set_workspace_cookie(workspace_id)
@@ -186,12 +198,12 @@ module Web
               @workspace_key_error = "Admin password did not match."
               @workspace_return_to = safe_return_to
               @workspace_bootstrap_required = true
-              @workspace_bootstrap_pending_request = workspace_access_store.request_access(workspace_id, browser_token: browser_token)
+              @workspace_bootstrap_pending_request = request_workspace_access(workspace_id)
               status 403
               erb :workspace_key
             end
           else
-            @workspace_pending_request = workspace_access_store.request_access(workspace_id, browser_token: browser_token)
+            @workspace_pending_request = request_workspace_access(workspace_id)
             @workspace_return_to = safe_return_to
             status 403
             erb :workspace_key
@@ -201,6 +213,8 @@ module Web
 
       app.get "/workspace-access/status" do
         halt 404 unless multi_user_mode?
+
+        halt 400, "Valid code is required" unless valid_access_code?(params["code"])
 
         request = workspace_access_store.request_for_code(params["code"].to_s)
         status_value = if request && workspace_access_store.approved?(request["workspace_id"])
@@ -236,7 +250,7 @@ module Web
       app.post "/workspace-access/approve" do
         halt 404 unless multi_user_mode?
         halt 403 unless workspace_approval_allowed?
-        halt 400, "Code is required" if params["code"].to_s.empty?
+        halt 400, "Valid code is required" unless valid_access_code?(params["code"])
 
         request = workspace_access_store.approve_code(params.fetch("code"))
         content_type :json
@@ -246,7 +260,7 @@ module Web
       app.post "/workspace-access/deny" do
         halt 404 unless multi_user_mode?
         halt 403 unless workspace_approval_allowed?
-        halt 400, "Code is required" if params["code"].to_s.empty?
+        halt 400, "Valid code is required" unless valid_access_code?(params["code"])
 
         request = workspace_access_store.deny_code(params.fetch("code"))
         content_type :json

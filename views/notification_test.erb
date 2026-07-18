@@ -33,7 +33,7 @@
     </div>
     <div class="status" data-status>Ready.</div>
   </main>
-  <script>
+  <script nonce="<%= h csp_nonce %>">
     const enableButton = document.querySelector("[data-enable]");
     const sendButton = document.querySelector("[data-send]");
     const statusBox = document.querySelector("[data-status]");

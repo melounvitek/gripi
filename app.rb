@@ -11,6 +11,8 @@ require_relative "lib/configured_session_cwds"
 require_relative "lib/web/view_helpers"
 require_relative "lib/web/store_helpers"
 require_relative "lib/web/rpc_helpers"
+require_relative "lib/web/request_transport_security"
+require_relative "lib/web/security_headers"
 require_relative "lib/web/request_origin_protection"
 require_relative "lib/web/browser_access"
 require_relative "lib/web/workspace_access"
@@ -22,8 +24,12 @@ require_relative "lib/pi_rpc_client"
 require_relative "lib/gateway_updater"
 require_relative "lib/gateway_update_coordinator"
 require_relative "lib/request_gateway_restart"
+require_relative "lib/request_rate_limiter"
+require_relative "lib/friendly_host_authorization"
 
 class Gripi < Sinatra::Base
+  register Web::RequestTransportSecurity
+  register Web::SecurityHeaders
   register Web::RequestOriginProtection
   register Web::BrowserAccess
   register Web::WorkspaceAccess
@@ -76,6 +82,14 @@ class Gripi < Sinatra::Base
     nil
   end
 
+  def self.normalized_suggested_host(value)
+    host = normalized_permitted_host(value)
+    return if host.to_s.start_with?(".") || host.to_s.include?("*")
+    return if ["0.0.0.0", "[::]"].include?(host)
+
+    host
+  end
+
   def self.production_permitted_hosts
     bind_host = normalized_permitted_host(ENV.fetch("GRIPI_BIND_HOST", "127.0.0.1"))
     hosts = [bind_host].compact.reject { |host| ["0.0.0.0", "[::]"].include?(host) }
@@ -104,25 +118,21 @@ class Gripi < Sinatra::Base
 
   load_gateway_env_file
   browser_auth_disabled = ENV.fetch("GRIPI_BROWSER_AUTH_DISABLED", "").match?(/\A(?:1|true|yes|on)\z/i)
-  legacy_proxy_compatibility = production? && !browser_auth_disabled &&
-    !ENV.key?("GRIPI_PERMITTED_HOSTS") && !ENV.key?("GRIPI_TRUST_PROXY_HEADERS")
+  allow_insecure_remote_http = ENV.fetch("GRIPI_ALLOW_INSECURE_REMOTE_HTTP", "").match?(/\A(?:1|true|yes|on)\z/i)
 
   set :session_cwds_path, ENV.fetch("GRIPI_SESSION_CWDS_PATH", ConfiguredSessionCwds.default_path)
-  if legacy_proxy_compatibility
-    set :host_authorization, {}
-  else
-    set :host_authorization, lambda {
-      permitted_hosts = production_permitted_hosts
-      permitted_hosts = development_permitted_hosts + permitted_hosts if development? || test?
-      { permitted_hosts: permitted_hosts }
+  set :host_authorization, lambda {
+    permitted_hosts = production_permitted_hosts
+    permitted_hosts = development_permitted_hosts + permitted_hosts if development? || test?
+    {
+      permitted_hosts: permitted_hosts,
+      deny_all: permitted_hosts.empty?,
+      normalize_suggested_host: ->(host) { normalized_suggested_host(host) },
+      configured_hosts_present: !ENV.fetch("GRIPI_PERMITTED_HOSTS", "").empty?
     }
-  end
-  trust_proxy_headers = if ENV.key?("GRIPI_TRUST_PROXY_HEADERS")
-    ENV.fetch("GRIPI_TRUST_PROXY_HEADERS").match?(/\A(?:1|true|yes|on)\z/i)
-  else
-    legacy_proxy_compatibility
-  end
-  set :trust_proxy_headers, trust_proxy_headers
+  }
+  set :trust_proxy_headers, ENV.fetch("GRIPI_TRUST_PROXY_HEADERS", "").match?(/\A(?:1|true|yes|on)\z/i)
+  set :enforce_secure_remote_transport, production? && !allow_insecure_remote_http
 
   multi_user_mode = ENV.fetch("GRIPI_MULTI_USER_MODE", "").match?(/\A(?:1|true|yes|on)\z/i)
   gateway_admin_password = ENV["GRIPI_ADMIN_PASSWORD"].to_s
@@ -154,7 +164,13 @@ class Gripi < Sinatra::Base
     active_session_count: -> { Gripi.settings.rpc_client_registry&.busy_session_count.to_i }
   )
   set :pending_session_registry, Rpc::PendingSessionRegistry.new
+  def self.setup_host_authorization(builder)
+    builder.use FriendlyHostAuthorization, host_authorization
+  end
+
   set :rpc_idle_timeout_seconds, ENV.fetch("GRIPI_RPC_IDLE_TIMEOUT_SECONDS", "1800").to_i
+  set :access_request_rate_limiter, RequestRateLimiter.new(limit: 30, window: 60)
+  set :admin_login_rate_limiter, RequestRateLimiter.new(limit: 10, window: 5 * 60)
 
   RECENT_SIDEBAR_SESSION_LIMIT = Sessions::Sidebar::RECENT_SESSION_LIMIT
   SIDEBAR_SESSION_PAGE_SIZE = Sessions::Sidebar::SESSION_PAGE_SIZE

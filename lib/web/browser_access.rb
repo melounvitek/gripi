@@ -32,11 +32,11 @@ module Web
       def browser_token
         return @browser_token if defined?(@browser_token)
 
-        @browser_token = request.cookies["gripi_browser"]
-        return @browser_token unless @browser_token.to_s.empty?
+        @browser_token = request.cookies["gripi_browser"].to_s
+        return @browser_token unless @browser_token.empty? || @browser_token.bytesize > 128
 
         @browser_token = SecureRandom.hex(32)
-        response.set_cookie("gripi_browser", value: @browser_token, path: "/", httponly: true, same_site: :lax, max_age: 365 * 24 * 60 * 60)
+        response.set_cookie("gripi_browser", value: @browser_token, path: "/", httponly: true, secure: secure_transport?, same_site: :lax, max_age: 365 * 24 * 60 * 60)
         @browser_token
       end
 
@@ -50,7 +50,7 @@ module Web
         return if BrowserAccess::ACCESS_ENDPOINTS.include?(request.path_info)
         return if approved_browser?
 
-        @access_request = browser_access_store.ensure_pending(token: browser_token, ip: request.ip, user_agent: request.user_agent)
+        @access_request = ensure_browser_pending
         @access_error = nil
         status 403
         halt erb(:access_blocked)
@@ -58,9 +58,26 @@ module Web
 
       def safe_return_to
         return_to = params["return_to"].to_s
-        return return_to if return_to.start_with?("/") && !return_to.start_with?("//")
+        return return_to if return_to.bytesize <= 2_048 && return_to.start_with?("/") && !return_to.start_with?("//")
 
         "/"
+      end
+
+      def client_rate_limit_key
+        request.env["REMOTE_ADDR"].to_s
+      end
+
+      def ensure_browser_pending
+        unless browser_access_store.pending?(browser_token)
+          halt 429, "Too many access requests" unless settings.access_request_rate_limiter.allow?(client_rate_limit_key)
+        end
+        browser_access_store.ensure_pending(token: browser_token, ip: request.ip, user_agent: request.user_agent)
+      rescue BrowserAccessStore::PendingRequestsFull
+        halt 503, "Too many pending browser access requests"
+      end
+
+      def valid_access_code?(code)
+        code.to_s.match?(/\A[A-Z0-9]{4}-[A-Z0-9]{4}\z/)
       end
 
       def secure_compare(left, right)
@@ -77,18 +94,25 @@ module Web
       app.post "/browser-access/request" do
         halt 404 unless browser_access_enabled?
 
-        browser_access_store.request_access(browser_token, ip: request.ip, user_agent: request.user_agent)
+        halt 429, "Too many access requests" unless settings.access_request_rate_limiter.allow?(client_rate_limit_key)
+        begin
+          browser_access_store.request_access(browser_token, ip: request.ip, user_agent: request.user_agent)
+        rescue BrowserAccessStore::PendingRequestsFull
+          halt 503, "Too many pending browser access requests"
+        end
         redirect safe_return_to
       end
 
       app.post "/browser-access/admin-login" do
         halt 404 unless browser_access_enabled?
 
+        halt 429, "Too many admin login attempts" unless settings.admin_login_rate_limiter.allow?(client_rate_limit_key)
+
         if secure_compare(params["password"].to_s, settings.gateway_admin_password.to_s)
           browser_access_store.approve_current_browser(browser_token, label: request.user_agent)
           redirect safe_return_to
         else
-          @access_request = browser_access_store.ensure_pending(token: browser_token, ip: request.ip, user_agent: request.user_agent)
+          @access_request = ensure_browser_pending
           @access_error = "Admin password did not match."
           status 403
           erb :access_blocked
@@ -112,7 +136,7 @@ module Web
       app.post "/browser-access/approve" do
         halt 403 unless approved_browser?
 
-        halt 400, "Code is required" if params["code"].to_s.empty?
+        halt 400, "Valid code is required" unless valid_access_code?(params["code"])
 
         request = browser_access_store.approve_code(params.fetch("code"))
         content_type :json
@@ -122,7 +146,7 @@ module Web
       app.post "/browser-access/deny" do
         halt 403 unless approved_browser?
 
-        halt 400, "Code is required" if params["code"].to_s.empty?
+        halt 400, "Valid code is required" unless valid_access_code?(params["code"])
 
         request = browser_access_store.deny_code(params.fetch("code"))
         content_type :json

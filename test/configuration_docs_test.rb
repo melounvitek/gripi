@@ -9,6 +9,7 @@ class ConfigurationDocsTest < Minitest::Test
     assert_includes configuration, "GRIPI_TRUST_PROXY_HEADERS=1"
     assert_includes configuration, "Gripi does not read the RFC `Forwarded` header"
     assert_includes configuration, "Wildcard binds (`0.0.0.0` or `::`)"
-    assert_includes examples, "retain legacy compatibility after an update"
+    assert_includes configuration, "GRIPI_ALLOW_INSECURE_REMOTE_HTTP=1"
+    assert_includes examples, "automatic legacy proxy compatibility has been removed"
   end
 end
