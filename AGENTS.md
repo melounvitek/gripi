@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Touch interactions
+
+Touch controls must activate on the first tap. Avoid sticky-hover behavior that requires a second tap, and cover custom touch interactions with regression tests.
+
 ## Planning files
 
 This repo may use `TODO.md` for tracking follow-up work, rough ideas, and deferred tasks. When useful, suggest adding items there rather than losing them in chat.
