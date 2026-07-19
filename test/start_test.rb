@@ -28,7 +28,7 @@ class StartTest < Minitest::Test
     _stdout, _stderr, status = run_launcher("127.0.0.1", "GRIPI_PORT" => "5678")
 
     assert_equal 23, status.exitstatus
-    assert_equal ["exec rackup -o 127.0.0.1 -p 5678|production|127.0.0.1"], File.readlines(@calls_path, chomp: true)
+    assert_equal ["exec puma -C config/puma.rb -b tcp://127.0.0.1:5678|production|127.0.0.1"], File.readlines(@calls_path, chomp: true)
     refute File.exist?(@restart_path)
   end
 
@@ -41,7 +41,7 @@ class StartTest < Minitest::Test
     _stdout, _stderr, status = run_launcher
 
     assert status.success?
-    assert_equal ["exec rackup -o 127.0.0.1 -p 4567|production|127.0.0.1"], File.readlines(@calls_path, chomp: true)
+    assert_equal ["exec puma -C config/puma.rb -b tcp://127.0.0.1:4567|production|127.0.0.1"], File.readlines(@calls_path, chomp: true)
   end
 
   def test_gripi_host_overrides_default_host
@@ -53,7 +53,19 @@ class StartTest < Minitest::Test
     _stdout, _stderr, status = run_launcher(nil, "GRIPI_HOST" => "100.64.0.1")
 
     assert status.success?
-    assert_equal ["exec rackup -o 100.64.0.1 -p 4567|production|100.64.0.1"], File.readlines(@calls_path, chomp: true)
+    assert_equal ["exec puma -C config/puma.rb -b tcp://100.64.0.1:4567|production|100.64.0.1"], File.readlines(@calls_path, chomp: true)
+  end
+
+  def test_ipv6_host_is_preserved_in_puma_bind_uri
+    write_fake_bundle(<<~SH)
+      printf '%s\n' "$*|$RACK_ENV|$GRIPI_BIND_HOST" >> "$CALLS_PATH"
+      exit 0
+    SH
+
+    _stdout, _stderr, status = run_launcher(nil, "GRIPI_HOST" => "::1")
+
+    assert status.success?
+    assert_equal ["exec puma -C config/puma.rb -b tcp://[::1]:4567|production|::1"], File.readlines(@calls_path, chomp: true)
   end
 
   def test_stale_restart_marker_is_cleared_before_launch

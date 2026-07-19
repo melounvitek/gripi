@@ -1,0 +1,106 @@
+require "fileutils"
+require "minitest/autorun"
+require "open3"
+require "puma"
+require "puma/configuration"
+require "socket"
+require "timeout"
+require "tmpdir"
+
+class PumaConfigTest < Minitest::Test
+  PROJECT_ROOT = File.expand_path("..", __dir__)
+  REQUEST_BODY_LIMIT = 64 * 1024 * 1024
+
+  def setup
+    @tmpdir = Dir.mktmpdir
+    @app_calls_path = File.join(@tmpdir, "app-calls")
+    @rackup_path = File.join(@tmpdir, "config.ru")
+    File.write(@rackup_path, <<~RUBY)
+      calls_path = #{@app_calls_path.inspect}
+      run lambda { |_env|
+        File.write(calls_path, "called")
+        [200, { "content-type" => "text/plain" }, ["OK"]]
+      }
+    RUBY
+
+    @port = available_port
+    @stdin, @stdout, @stderr, @wait_thread = Open3.popen3(
+      { "RACK_ENV" => "production" },
+      "bundle", "exec", "puma", "--silent",
+      "-C", File.join(PROJECT_ROOT, "config/puma.rb"),
+      "-b", "tcp://127.0.0.1:#{@port}",
+      @rackup_path,
+      chdir: PROJECT_ROOT
+    )
+    @stdin.close
+    wait_until_listening
+  end
+
+  def teardown
+    if @wait_thread&.alive?
+      Process.kill("TERM", @wait_thread.pid)
+      unless @wait_thread.join(5)
+        Process.kill("KILL", @wait_thread.pid)
+        @wait_thread.join
+      end
+    end
+    @stdout&.close
+    @stderr&.close
+    FileUtils.remove_entry(@tmpdir) if @tmpdir && Dir.exist?(@tmpdir)
+  end
+
+  def test_rejects_oversized_content_length_before_calling_the_rack_app
+    configuration = Puma::Configuration.new(config_files: [File.join(PROJECT_ROOT, "config/puma.rb")])
+    configuration.load
+    assert_equal REQUEST_BODY_LIMIT, configuration.options[:http_content_length_limit]
+
+    response = TCPSocket.open("127.0.0.1", @port) do |socket|
+      socket.write(<<~HTTP.gsub("\n", "\r\n"))
+        POST / HTTP/1.1
+        Host: 127.0.0.1
+        Content-Length: #{REQUEST_BODY_LIMIT + 1}
+        Expect: 100-continue
+        Connection: close
+
+      HTTP
+      response = read_response_headers(socket)
+      if response.match?(/\AHTTP\/1\.1 100 /)
+        socket.write("x")
+        response = read_response_headers(socket)
+      end
+      response
+    end
+
+    assert_match(/\AHTTP\/1\.1 413 /, response)
+    refute File.exist?(@app_calls_path)
+  end
+
+  private
+
+  def read_response_headers(socket)
+    response = +""
+    Timeout.timeout(5) do
+      response << socket.readpartial(1024) until response.include?("\r\n\r\n")
+    end
+    response
+  end
+
+  def available_port
+    server = TCPServer.new("127.0.0.1", 0)
+    server.local_address.ip_port
+  ensure
+    server&.close
+  end
+
+  def wait_until_listening
+    Timeout.timeout(10) do
+      loop do
+        TCPSocket.open("127.0.0.1", @port).close
+        break
+      rescue Errno::ECONNREFUSED
+        raise "Puma exited before accepting connections: #{@stderr.read}" unless @wait_thread.alive?
+        sleep 0.05
+      end
+    end
+  end
+end

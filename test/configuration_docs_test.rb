@@ -13,6 +13,14 @@ class ConfigurationDocsTest < Minitest::Test
     assert_includes examples, "automatic legacy proxy compatibility has been removed"
   end
 
+  def test_documents_fixed_request_body_limit_and_reverse_proxy_cap
+    configuration = File.read(File.expand_path("../docs/configuration.md", __dir__))
+
+    assert_includes configuration, "fixed 64 MiB request-body limit"
+    assert_includes configuration, "reverse proxy"
+    assert_includes configuration, "unbounded request-body buffering or caching"
+  end
+
   def test_documents_pi_authentication_and_configuration_prerequisites
     readme = File.read(File.expand_path("../README.md", __dir__))
     configuration = File.read(File.expand_path("../docs/configuration.md", __dir__))

@@ -15,8 +15,13 @@ fi
 
 rm -f -- "$restart_path"
 
+puma_host="$host"
+if [[ "$host" == *:* && "$host" != \[*\] ]]; then
+  puma_host="[$host]"
+fi
+
 set +e
-RACK_ENV=production GRIPI_BIND_HOST="$host" bundle exec rackup -o "$host" -p "$port"
+RACK_ENV=production GRIPI_BIND_HOST="$host" bundle exec puma -C config/puma.rb -b "tcp://$puma_host:$port"
 status=$?
 set -e
 
