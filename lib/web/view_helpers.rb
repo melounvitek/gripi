@@ -1,3 +1,4 @@
+require "base64"
 require "digest"
 require "erb"
 require_relative "../rendering/markdown_renderer"
@@ -9,6 +10,7 @@ module Web
   module ViewHelpers
     TOOL_OUTPUT_DESKTOP_TAIL_LINES = 18
     TOOL_OUTPUT_MOBILE_TAIL_LINES = 12
+    TERMINAL_OUTPUT_EXCLUDED_TOOLS = %w[read edit write].freeze
     PROJECT_IDENTITY_COLORS = [
       ["#6a3b1d33", "#e6a66f"],
       ["#334f7833", "#8db9ef"],
@@ -318,6 +320,17 @@ module Web
 
     def render_compact_message_body(message)
       render_compact_message_lines(message, tool_output_lines(message), 0)
+    end
+
+    def terminal_tool_output?(message)
+      return false unless message.compact && !TERMINAL_OUTPUT_EXCLUDED_TOOLS.include?(message.tool_name)
+
+      text = message.text.to_s
+      text.match?(/[\x08\x1b\u0080-\u009f]/) || text.match?(/\r(?!\n)/)
+    end
+
+    def terminal_tool_output_source(message)
+      Base64.strict_encode64(message.text.to_s)
     end
 
     def collapsible_tool_output?(message)

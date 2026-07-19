@@ -202,6 +202,41 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal 1, results.fetch("renders")
   end
 
+  def test_lazy_history_waits_for_terminal_hydration_before_preserving_the_viewport
+    results = run_javascript(<<~JS)
+      const { ConversationController } = await import(#{module_url("conversation_controller.js").to_json});
+      const content = { hydrated: false, querySelectorAll: () => [] };
+      const template = { content, set innerHTML(_value) {} };
+      const document = { createElement: () => template, body: { classList: { remove() {} } } };
+      const controller = new ConversationController(document, {});
+      let inserted = false;
+      let hydratedAtInsert = false;
+      const element = {
+        scrollTop: 10,
+        scrollHeight: 100,
+        insertBefore(fragment) { inserted = true; hydratedAtInsert = fragment.hydrated; this.scrollHeight = 160; }
+      };
+      controller.element = element;
+      controller.bindingEpoch = 1;
+      controller.refreshFocusedActivity = () => {};
+      controller.updateJumpControls = () => {};
+      controller.historyEnhancer = async (root) => {
+        await Promise.resolve();
+        root.hydrated = true;
+      };
+
+      const insertion = controller.insertHistoryHtml("<article></article>", null, true);
+      const insertedSynchronously = inserted;
+      await insertion;
+      console.log(JSON.stringify({ insertedSynchronously, inserted, hydratedAtInsert, scrollTop: element.scrollTop }));
+    JS
+
+    assert_equal false, results.fetch("insertedSynchronously")
+    assert_equal true, results.fetch("inserted")
+    assert_equal true, results.fetch("hydratedAtInsert")
+    assert_equal 70, results.fetch("scrollTop")
+  end
+
   def test_expanding_tool_output_starts_at_its_internal_bottom_without_moving_the_conversation
     app_source = File.read(File.join(ASSETS, "app.js"))
     handler_source = app_source.match(/document\.addEventListener\("click", \(event\) => \{\n  const button = event\.target\.closest\("\[data-tool-output-toggle\]"\);.*?\n\}\);/m).to_s

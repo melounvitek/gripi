@@ -25,6 +25,7 @@ export class LiveMessageRenderer {
     this.pendingMessages = this.document.querySelector("[data-pending-messages]");
     this.lastLiveCompaction = null;
     this.resetLiveAssistantTracking();
+    this.hydrateTerminalOutputs(this.conversationScroll);
     try {
       this.renderQueuedMessages(JSON.parse(this.liveOutput?.dataset.queuedMessages || "{}"));
     } catch (_error) {
@@ -285,6 +286,31 @@ export class LiveMessageRenderer {
     const lines = rawText.split("\n");
     if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
     this.renderResolvedToolTranscriptBody(body, lines, rawText, toolName, options);
+  }
+
+  hydrateTerminalOutputs(root, { notify = true } = {}) {
+    const bodies = [...(root?.querySelectorAll?.("[data-terminal-output-source]") || [])];
+    if (bodies.length === 0) return null;
+
+    const renders = bodies.map(async (body) => {
+      const source = this.decodeTerminalOutputSource(body.dataset.terminalOutputSource);
+      delete body.dataset.terminalOutputSource;
+      try {
+        const rendered = await renderTerminalOutput(source);
+        this.renderResolvedToolTranscriptBody(body, rendered.lines, rendered.lines.map((line) => line.text).join("\n"), body.dataset.terminalToolName || "");
+      } catch (_error) {
+        const lines = source.split("\n");
+        this.renderResolvedToolTranscriptBody(body, lines, source, body.dataset.terminalToolName || "");
+      }
+    });
+    return Promise.all(renders).then(() => {
+      if (notify) this.conversationController.afterLiveOutputChange(this.conversationController.followLiveOutput());
+    });
+  }
+
+  decodeTerminalOutputSource(encoded) {
+    const bytes = Uint8Array.from(globalThis.atob(encoded || ""), (character) => character.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
   }
 
   queueTerminalTranscriptRender(body, text, toolName, options) {

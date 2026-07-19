@@ -34,7 +34,18 @@
                       </details>
                     <% end %>
                     <% if message.text.to_s != "" %>
-                      <% if collapsible_tool_output?(message) %>
+                      <% if terminal_tool_output?(message) %>
+                        <div class="tool-output-collapse" data-tool-output-collapse data-tool-output-collapsible="true" data-collapsed="false">
+                          <div class="tool-output-collapse-control" data-tool-output-collapse-control hidden>
+                            <span class="tool-output-hidden-count tool-output-hidden-count--desktop"></span>
+                            <span class="tool-output-hidden-count tool-output-hidden-count--mobile"></span>
+                            <button type="button" class="tool-output-toggle" data-tool-output-toggle aria-expanded="false">Expand</button>
+                          </div>
+                          <pre class="message-body" data-tool-output-body data-terminal-output-source="<%= h terminal_tool_output_source(message) %>" data-terminal-tool-name="<%= h message.tool_name %>"></pre>
+                          <template data-tool-output-full></template>
+                          <template data-tool-output-tail></template>
+                        </div>
+                      <% elsif collapsible_tool_output?(message) %>
                         <div class="tool-output-collapse" data-tool-output-collapse data-tool-output-collapsible="true" data-collapsed="true">
                           <div class="tool-output-collapse-control" data-tool-output-collapse-control>
                             <span class="tool-output-hidden-count tool-output-hidden-count--desktop">… (<%= h tool_output_hidden_line_count(message, Web::ViewHelpers::TOOL_OUTPUT_DESKTOP_TAIL_LINES) %> earlier lines)</span>

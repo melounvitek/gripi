@@ -433,6 +433,27 @@ Extract PDFs.
     assert_equal "Legacy summary", result.dig("legacy", "text")
   end
 
+  def test_server_terminal_source_hydrates_through_the_shared_screen_renderer
+    result = run_javascript(<<~JS)
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      const source = "old\\x1b[2J\\x1b[H\\x1b[32mfinal\\x1b[0m";
+      const body = { dataset: { terminalOutputSource: Buffer.from(source).toString("base64"), terminalToolName: "bash" } };
+      const renderer = Object.create(LiveMessageRenderer.prototype);
+      let followChanges = 0;
+      let rendered;
+      renderer.conversationController = { followLiveOutput: () => false, afterLiveOutputChange: () => { followChanges += 1; } };
+      renderer.renderResolvedToolTranscriptBody = (_body, lines, rawText, toolName) => {
+        rendered = { lines: lines.map((line) => line.text), rawText, toolName };
+      };
+      await renderer.hydrateTerminalOutputs({ querySelectorAll: () => [body] });
+      console.log(JSON.stringify({ rendered, sourceRemoved: body.dataset.terminalOutputSource === undefined, followChanges }));
+    JS
+
+    assert_equal({ "lines" => ["final"], "rawText" => "final", "toolName" => "bash" }, result["rendered"])
+    assert_equal true, result["sourceRemoved"]
+    assert_equal 1, result["followChanges"]
+  end
+
   def test_pending_message_queue_hydrates_and_tracks_authoritative_updates
     result = run_javascript(<<~JS)
       const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});

@@ -5992,6 +5992,48 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_encodes_terminal_tool_output_for_client_side_screen_hydration
+    Dir.mktmpdir do |dir|
+      terminal_output = "old 10%\rold 20%\e[2J\e[H\e[31mfinal\e[0m"
+      path = write_session_with_raw_messages(dir, [
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "bash-1", name: "bash", arguments: { command: "terminal command" } }]
+          }
+        },
+        {
+          type: "message",
+          timestamp: "2026-06-13T10:00:01Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "bash-1",
+            toolName: "bash",
+            content: [{ type: "text", text: terminal_output }],
+            isError: false
+          }
+        }
+      ])
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      document = Nokogiri::HTML(response.body)
+      tool_card = compact_card_with_summary(document, "$ terminal command")
+      body = tool_card.at_css("[data-terminal-output-source]")
+      assert_equal "bash", body["data-terminal-tool-name"]
+      assert_equal terminal_output, Base64.strict_decode64(body["data-terminal-output-source"])
+      assert_empty body.text
+      refute_includes response.body, terminal_output
+      assert tool_card.at_css("[data-tool-output-full]")
+      assert tool_card.at_css("[data-tool-output-tail]")
+    end
+  end
+
   def test_collapses_long_tool_outputs_to_latest_lines
     Dir.mktmpdir do |dir|
       long_output = (1..25).map { |index| "line #{index}" }.join("\n")

@@ -606,18 +606,26 @@ export class ConversationController {
     const template = this.document.createElement("template");
     template.innerHTML = html;
     enhanceMarkdownCodeBlocks(template.content, this.document);
-    const previousTop = this.element.scrollTop;
-    const previousHeight = this.element.scrollHeight;
-    this.element.insertBefore(template.content, insertionPoint);
-    this.refreshFocusedActivity();
-    if (preserveViewport) this.element.scrollTop = previousTop + (this.element.scrollHeight - previousHeight);
-    this.lastScrollTop = this.element.scrollTop;
-    this.updateJumpControls();
+    const element = this.element;
+    const bindingEpoch = this.bindingEpoch;
+    const insert = () => {
+      if (element !== this.element || bindingEpoch !== this.bindingEpoch) return;
+      const previousTop = element.scrollTop;
+      const previousHeight = element.scrollHeight;
+      element.insertBefore(template.content, insertionPoint);
+      this.refreshFocusedActivity();
+      if (preserveViewport) element.scrollTop = previousTop + (element.scrollHeight - previousHeight);
+      this.lastScrollTop = element.scrollTop;
+      this.updateJumpControls();
+    };
+    const enhancement = this.historyEnhancer?.(template.content);
+    if (enhancement?.then) return enhancement.catch(() => {}).then(insert);
+    insert();
   }
 
   prependOlderHtml(html) {
     const insertionPoint = this.element?.querySelector(".message") || this.liveOutput || this.element?.firstElementChild;
-    this.insertHistoryHtml(html, insertionPoint, true);
+    return this.insertHistoryHtml(html, insertionPoint, true);
   }
 
   historyGapAboveViewport() {
@@ -628,7 +636,7 @@ export class ConversationController {
 
   insertBeforeHistoryGap(html, preserveViewport = false) {
     const insertionPoint = this.historyStatus() || this.element?.querySelector(".message") || this.liveOutput || this.element?.firstElementChild;
-    this.insertHistoryHtml(html, insertionPoint, preserveViewport);
+    return this.insertHistoryHtml(html, insertionPoint, preserveViewport);
   }
 
   loadOlderWindow({ afterCursor = null } = {}) {
@@ -671,8 +679,8 @@ export class ConversationController {
         if (payload.has_older_messages) this.availableHistoryStatus();
         else this.finishHistoryStatus();
 
-        if (forward) this.insertBeforeHistoryGap(payload.html || "", preserveGapViewport);
-        else this.prependOlderHtml(payload.html || "");
+        if (forward) await this.insertBeforeHistoryGap(payload.html || "", preserveGapViewport);
+        else await this.prependOlderHtml(payload.html || "");
         return payload.has_older_messages ? "more" : "complete";
       } catch (error) {
         if (!unchanged() || error?.name === "AbortError") return "cancelled";

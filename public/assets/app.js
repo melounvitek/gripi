@@ -150,6 +150,7 @@ const composerAutocompleteController = new ComposerAutocompleteController(docume
 const liveMessageParser = new LiveMessageParser(document.body.dataset.homeDir || "");
 const serverMarkdownRenderer = new ServerMarkdownRenderer(document, conversationController);
 const liveMessageRenderer = new LiveMessageRenderer(document, conversationController, liveMessageParser, serverMarkdownRenderer);
+conversationController.historyEnhancer = (root) => liveMessageRenderer.hydrateTerminalOutputs(root, { notify: false });
 const treeSessionController = new TreeSessionController(document, window, {
   currentSessionPath: () => currentSessionPath(),
   addSessionViewFormParams: (formData) => addSessionViewFormParams(formData),
