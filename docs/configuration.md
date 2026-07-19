@@ -50,7 +50,7 @@ If a request arrives for an unconfigured hostname, Gripi keeps it blocked and di
 
 Production Puma enforces a fixed 64 MiB request-body limit before requests reach Sinatra authentication or parsing. The limit is not configurable.
 
-When running Gripi behind a reverse proxy, enforce a corresponding request-body cap there as well. Use a cap no greater than 64 MiB, lowering it only if valid Gripi requests still fit, and do not allow unbounded request-body buffering or caching in the proxy.
+When running Gripi behind a reverse proxy, enforce a corresponding request-body cap there as well. Use a cap no greater than 64 MiB, lowering it only if valid Gripi requests still fit, and do not allow unbounded request-body buffering in the proxy.
 
 ## Browser approval
 

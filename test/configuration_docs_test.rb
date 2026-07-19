@@ -18,7 +18,7 @@ class ConfigurationDocsTest < Minitest::Test
 
     assert_includes configuration, "fixed 64 MiB request-body limit"
     assert_includes configuration, "reverse proxy"
-    assert_includes configuration, "unbounded request-body buffering or caching"
+    assert_includes configuration, "unbounded request-body buffering"
   end
 
   def test_documents_pi_authentication_and_configuration_prerequisites

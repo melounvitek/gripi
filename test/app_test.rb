@@ -850,6 +850,23 @@ class AppTest < Minitest::Test
     assert store.approved?(fresh_token)
   end
 
+  def test_successful_admin_password_login_has_private_response_and_secure_cookie_attributes_over_https
+    Gripi.set :gateway_admin_password, "secret"
+
+    response = Rack::MockRequest.new(Gripi).post(
+      "/browser-access/admin-login",
+      params: { "password" => "secret" },
+      "rack.url_scheme" => "https"
+    )
+
+    assert_equal 303, response.status
+    assert_equal "private, no-store", response["Cache-Control"]
+    cookie_attributes = Array(response["Set-Cookie"]).first.split(";").map { |attribute| attribute.strip.downcase }
+    assert_includes cookie_attributes, "httponly"
+    assert_includes cookie_attributes, "samesite=lax"
+    assert_includes cookie_attributes, "secure"
+  end
+
   def test_failed_admin_password_login_does_not_rotate_or_approve_token
     Gripi.set :gateway_admin_password, "secret"
     request = Rack::MockRequest.new(Gripi)

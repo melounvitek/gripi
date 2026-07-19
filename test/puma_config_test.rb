@@ -3,19 +3,28 @@ require "minitest/autorun"
 require "open3"
 require "puma"
 require "puma/configuration"
+require "puma/server"
 require "socket"
 require "timeout"
 require "tmpdir"
 
 class PumaConfigTest < Minitest::Test
   PROJECT_ROOT = File.expand_path("..", __dir__)
-  REQUEST_BODY_LIMIT = 64 * 1024 * 1024
+  PRODUCTION_REQUEST_BODY_LIMIT = 64 * 1024 * 1024
+  TEST_REQUEST_BODY_LIMIT = 1_024
 
   def setup
     @tmpdir = Dir.mktmpdir
     @app_calls_path = File.join(@tmpdir, "app-calls")
-    @rackup_path = File.join(@tmpdir, "config.ru")
-    File.write(@rackup_path, <<~RUBY)
+    @rackup_root = File.join(@tmpdir, "rackup")
+    FileUtils.mkdir_p(File.join(@rackup_root, "config"))
+    FileUtils.ln_s(File.join(PROJECT_ROOT, "lib"), File.join(@rackup_root, "lib"))
+    production_config = File.read(File.join(PROJECT_ROOT, "config/puma.rb"))
+    File.write(
+      File.join(@rackup_root, "config/puma.rb"),
+      production_config + "\nhttp_content_length_limit #{TEST_REQUEST_BODY_LIMIT}\n"
+    )
+    File.write(File.join(@rackup_root, "config.ru"), <<~RUBY)
       calls_path = #{@app_calls_path.inspect}
       run lambda { |_env|
         File.write(calls_path, "called")
@@ -25,12 +34,9 @@ class PumaConfigTest < Minitest::Test
 
     @port = available_port
     @stdin, @stdout, @stderr, @wait_thread = Open3.popen3(
-      { "RACK_ENV" => "production" },
-      "bundle", "exec", "puma", "--silent",
-      "-C", File.join(PROJECT_ROOT, "config/puma.rb"),
-      "-b", "tcp://127.0.0.1:#{@port}",
-      @rackup_path,
-      chdir: PROJECT_ROOT
+      { "BUNDLE_GEMFILE" => File.join(PROJECT_ROOT, "Gemfile"), "RACK_ENV" => "production" },
+      "bundle", "exec", "rackup", "--quiet", "-o", "127.0.0.1", "-p", @port.to_s,
+      chdir: @rackup_root
     )
     @stdin.close
     wait_until_listening
@@ -52,13 +58,13 @@ class PumaConfigTest < Minitest::Test
   def test_rejects_oversized_content_length_before_calling_the_rack_app
     configuration = Puma::Configuration.new(config_files: [File.join(PROJECT_ROOT, "config/puma.rb")])
     configuration.load
-    assert_equal REQUEST_BODY_LIMIT, configuration.options[:http_content_length_limit]
+    assert_equal PRODUCTION_REQUEST_BODY_LIMIT, configuration.options[:http_content_length_limit]
 
     response = TCPSocket.open("127.0.0.1", @port) do |socket|
       socket.write(<<~HTTP.gsub("\n", "\r\n"))
         POST / HTTP/1.1
         Host: 127.0.0.1
-        Content-Length: #{REQUEST_BODY_LIMIT + 1}
+        Content-Length: #{TEST_REQUEST_BODY_LIMIT + 1}
         Expect: 100-continue
         Connection: close
 
@@ -68,6 +74,30 @@ class PumaConfigTest < Minitest::Test
         socket.write("x")
         response = read_response_headers(socket)
       end
+      response
+    end
+
+    assert_match(/\AHTTP\/1\.1 413 /, response)
+    refute File.exist?(@app_calls_path)
+  end
+
+  def test_rejects_chunked_body_over_the_limit_without_waiting_for_the_terminal_chunk
+    response = TCPSocket.open("127.0.0.1", @port) do |socket|
+      socket.write(<<~HTTP.gsub("\n", "\r\n"))
+        POST / HTTP/1.1
+        Host: 127.0.0.1
+        Transfer-Encoding: chunked
+        Expect: 100-continue
+
+      HTTP
+      assert_match(/\AHTTP\/1\.1 100 /, read_response_headers(socket))
+
+      2.times do
+        body = "x" * 600
+        socket.write("#{body.bytesize.to_s(16)}\r\n#{body}\r\n")
+      end
+      response = read_response_headers(socket)
+      Timeout.timeout(5) { socket.read }
       response
     end
 

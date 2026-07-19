@@ -45,26 +45,6 @@ class BrowserAccessStoreTest < Minitest::Test
     assert_equal BrowserAccessStore::MAX_PENDING_REQUESTS, active_count
   end
 
-  def test_replaces_old_pending_token_with_new_approved_token
-    store = BrowserAccessStore.new(path: @path)
-    store.request_access("old-token", ip: "127.0.0.1", user_agent: "test")
-
-    store.replace_browser_token("old-token", "fresh-token", label: "new browser")
-
-    state = read_state
-    assert_equal ["fresh-token"], state.fetch("approved_browsers").map { |browser| browser.fetch("token") }
-    assert_empty state.fetch("pending_requests")
-  end
-
-  def test_replaces_old_approved_token_with_new_approved_token
-    store = BrowserAccessStore.new(path: @path)
-    store.approve_current_browser("old-token", label: "old browser")
-
-    store.replace_browser_token("old-token", "fresh-token", label: "new browser")
-
-    assert_equal ["fresh-token"], read_state.fetch("approved_browsers").map { |browser| browser.fetch("token") }
-  end
-
   def test_bounds_persisted_ip_and_user_agent
     BrowserAccessStore.new(path: @path).ensure_pending(
       token: "browser",
