@@ -12,11 +12,16 @@
   "scripts": {
     "desktop": "electron .",
     "desktop:check": "node --test electron/*.test.js && node --check electron/main.js && node --check electron/preload.js && node --check electron/gateway_preload.js && node --check electron/shell.js",
+    "test:e2e:support": "node --test e2e/support/*.test.mjs",
+    "test:e2e": "npm run test:e2e:support && node e2e/support/managed_server.mjs",
+    "test:e2e:external": "node e2e/support/external.mjs",
+    "test:e2e:real": "node e2e/support/managed_server.mjs --real-pi --project=real-pi",
     "dist": "electron-builder",
     "dist:linux": "electron-builder --linux",
     "dist:mac": "electron-builder --mac"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "electron": "^43.0.0",
     "electron-builder": "^26.15.3"
   },

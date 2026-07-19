@@ -103,4 +103,7 @@ This project is written in Ruby, because I am a Ruby developer trying full vibe-
 ```sh
 mise run dev
 mise run test
+mise run e2e
 ```
+
+See [testing](docs/testing.md) for the managed browser suite, external implementation contract, and optional real-Pi smoke test.

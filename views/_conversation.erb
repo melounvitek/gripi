@@ -145,7 +145,7 @@
                 <input class="image-input" id="image-input" type="file" accept="image/*" multiple<%= " disabled" if session_sync_blocked %>>
                 <label for="image-input" class="attach-button<%= " is-disabled" if session_sync_blocked %>" title="Attach images" aria-label="Attach images"<%= ' aria-disabled="true"' if session_sync_blocked %>>＋</label>
                 <div class="composer-textarea-wrap">
-                  <textarea name="message" rows="1" placeholder="<%= session_sync_blocked ? "Finish using this session in Pi CLI, then take over in the gateway." : "Ask Pi…" %>"<%= " disabled" if session_sync_blocked %>></textarea>
+                  <textarea name="message" rows="1" aria-label="Message to Pi" placeholder="<%= session_sync_blocked ? "Finish using this session in Pi CLI, then take over in the gateway." : "Ask Pi…" %>"<%= " disabled" if session_sync_blocked %>></textarea>
                   <div class="composer-path-list" id="composer-path-list" role="listbox" aria-label="Path suggestions" hidden></div>
                 </div>
                 <div class="send-control">
