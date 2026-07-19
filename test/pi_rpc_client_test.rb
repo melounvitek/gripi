@@ -456,6 +456,168 @@ class PiRpcClientTest < Minitest::Test
     response_writer&.close
   end
 
+  def test_bash_sends_native_rpc_payload_and_only_includes_true_exclusion
+    commands = []
+    response_reader, response_writer = IO.pipe
+    input = Object.new
+    input.define_singleton_method(:write) do |payload|
+      command = JSON.parse(payload)
+      commands << command
+      response_writer.puts JSON.generate(id: command.fetch("id"), type: "response", command: "bash", success: true, data: { output: "done" })
+      payload.bytesize
+    end
+    input.define_singleton_method(:flush) {}
+    client = PiRpcClient.new(stdin: input, stdout: response_reader)
+
+    client.bash("pwd")
+    client.bash("git status", exclude_from_context: true)
+
+    assert_equal({ "id" => "bash-1", "type" => "bash", "command" => "pwd" }, commands[0])
+    assert_equal({ "id" => "bash-2", "type" => "bash", "command" => "git status", "excludeFromContext" => true }, commands[1])
+  ensure
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_bash_wait_has_no_finite_request_timeout
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader, request_timeout: 0.05)
+
+    bash_thread = Thread.new { client.bash("sleep 1") }
+    command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
+    sleep 0.1
+    assert bash_thread.alive?
+
+    response_writer.puts JSON.generate(id: command.fetch("id"), type: "response", command: "bash", success: true, data: { output: "done" })
+    assert_equal "done", Timeout.timeout(1) { bash_thread.value }.dig("data", "output")
+  ensure
+    bash_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_abort_bash_uses_short_abort_timeout
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader, request_timeout: 1, abort_timeout: 0.05)
+
+    abort_thread = Thread.new { client.abort_bash }
+    abort_thread.report_on_exception = false
+    command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
+
+    assert_equal "abort_bash", command.fetch("type")
+    assert_raises(PiRpcClient::RequestTimeout) { Timeout.timeout(1) { abort_thread.value } }
+  ensure
+    abort_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_tracks_active_bash_and_atomically_rejects_a_second_command
+    now = Time.at(1_000)
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader, clock: -> { now })
+
+    bash_thread = Thread.new { client.bash("sleep 1", exclude_from_context: true) }
+    command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
+
+    assert_equal "sleep 1", client.active_bash_command
+    assert_equal now, client.active_bash_started_at
+    assert client.busy?
+    refute client.agent_running?
+    assert_equal({ command: "sleep 1", exclude_from_context: true, started_at: now }, client.live_snapshot.fetch(:active_bash))
+    error = assert_raises(PiRpcClient::BashAlreadyRunning) { client.bash("pwd") }
+    assert_includes error.message, "already running"
+    refute IO.select([command_reader], nil, nil, 0.05), "second bash command must not be written"
+
+    response_writer.puts JSON.generate(id: command.fetch("id"), type: "response", command: "bash", success: true, data: { output: "done", exitCode: 0 })
+    assert_equal true, Timeout.timeout(1) { bash_thread.value }.fetch("success")
+
+    assert_nil client.active_bash_command
+    assert_nil client.active_bash_started_at
+    refute client.busy?
+    refute client.live_snapshot.key?(:active_bash)
+    assert_equal [
+      { "type" => "bash_start", "command" => "sleep 1", "excludeFromContext" => true, "gatewayTimestamp" => 1_000_000 },
+      { "type" => "bash_end", "command" => "sleep 1", "excludeFromContext" => true, "result" => { "output" => "done", "exitCode" => 0 }, "gatewayTimestamp" => 1_000_000 }
+    ], client.events_after(0).fetch(:events)
+  ensure
+    bash_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_bash_failure_is_replayed_and_clears_active_state
+    input = StringIO.new
+    output = StringIO.new(JSON.generate({ id: "bash-1", type: "response", command: "bash", success: false, error: "Command failed" }) + "\n")
+    client = PiRpcClient.new(stdin: input, stdout: output)
+
+    response = client.bash("false")
+
+    assert_equal false, response.fetch("success")
+    refute client.busy?
+    assert_nil client.active_bash_command
+    event = client.events_after(0).fetch(:events).last
+    assert_equal "bash_error", event.fetch("type")
+    assert_equal "false", event.fetch("command")
+    assert_equal false, event.fetch("excludeFromContext")
+    assert_equal "Command failed", event.fetch("error")
+  end
+
+  def test_process_exit_terminates_bash_wait_and_clears_active_state
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader, request_timeout: 0.05)
+
+    bash_thread = Thread.new { client.bash("sleep 1") }
+    bash_thread.report_on_exception = false
+    Timeout.timeout(1) { command_reader.gets }
+    response_writer.close
+
+    error = assert_raises(IOError) { Timeout.timeout(1) { bash_thread.value } }
+    assert_includes error.message, "process exited"
+    refute client.busy?
+    assert_nil client.active_bash_command
+    assert_equal "bash_error", client.events_after(0).fetch(:events).last.fetch("type")
+  ensure
+    bash_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close unless response_writer&.closed?
+  end
+
+  def test_close_terminates_bash_wait_and_clears_active_state
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader)
+
+    bash_thread = Thread.new { client.bash("sleep 1") }
+    bash_thread.report_on_exception = false
+    Timeout.timeout(1) { command_reader.gets }
+
+    client.close
+
+    assert_raises(IOError) { Timeout.timeout(1) { bash_thread.value } }
+    refute client.busy?
+    assert_nil client.active_bash_command
+    assert_nil client.active_bash_started_at
+  ensure
+    bash_thread&.kill
+    command_reader&.close
+    command_writer&.close unless command_writer&.closed?
+    response_reader&.close unless response_reader&.closed?
+    response_writer&.close
+  end
+
   def test_snapshots_latest_updates_for_running_tools_with_the_event_cursor
     input = StringIO.new
     reader, writer = IO.pipe

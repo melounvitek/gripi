@@ -7,6 +7,7 @@ require_relative "rpc/diagnostics"
 
 class PiRpcClient
   class RequestTimeout < IOError; end
+  class BashAlreadyRunning < StandardError; end
 
   DEFAULT_EVENT_BUFFER_LIMIT = 5_000
   DEFAULT_EVENT_BUFFER_BYTES = 8 * 1024 * 1024
@@ -114,6 +115,10 @@ class PiRpcClient
     @busy_since = nil
     @agent_running = false
     @settled_at = nil
+    @active_bash_token = nil
+    @active_bash_command = nil
+    @active_bash_exclude_from_context = false
+    @active_bash_started_at = nil
     @compacting = false
     @compacting_since = nil
     @compaction_follow_ups = []
@@ -217,6 +222,29 @@ class PiRpcClient
     request("abort", id: next_id("abort"), timeout: @abort_timeout)
   end
 
+  def bash(command, exclude_from_context: false)
+    token = begin_bash(command, exclude_from_context)
+    payload = { command: command }
+    payload[:excludeFromContext] = true if exclude_from_context
+    response = request("bash", id: next_id("bash"), timeout: nil, **payload)
+    if response.is_a?(Hash) && response["success"] == true
+      complete_bash(token, "bash_end", "result", response["data"], command: command, exclude_from_context: exclude_from_context)
+    else
+      error = response.is_a?(Hash) ? response["error"] : nil
+      complete_bash(token, "bash_error", "error", error.to_s.empty? ? "Bash command failed" : error, command: command, exclude_from_context: exclude_from_context)
+    end
+    response
+  rescue StandardError => error
+    complete_bash(token, "bash_error", "error", error.message, command: command, exclude_from_context: exclude_from_context) if token
+    raise
+  ensure
+    clear_active_bash(token) if token
+  end
+
+  def abort_bash
+    request("abort_bash", id: next_id("abort_bash"), timeout: @abort_timeout)
+  end
+
   def new_session(parent_session = nil)
     payload = parent_session ? { parentSession: parent_session } : {}
     request("new_session", id: next_id("new_session"), timeout: LONG_REQUEST_TIMEOUT, **payload)
@@ -286,9 +314,16 @@ class PiRpcClient
         event_replay_cursor: @event_replay_floor,
         active_tool_events: @active_tool_events.values
       }
-      snapshot[:busy] = true if @busy
-      snapshot[:busy_since] = @busy_since if @busy_since
+      snapshot[:busy] = true if busy_locked?
+      snapshot[:busy_since] = busy_since_locked if busy_since_locked
       snapshot[:agent_running] = true if @agent_running
+      if @active_bash_command
+        snapshot[:active_bash] = {
+          command: @active_bash_command,
+          exclude_from_context: @active_bash_exclude_from_context,
+          started_at: @active_bash_started_at
+        }
+      end
       snapshot[:compacting] = true if @compacting
       snapshot[:compacting_since] = @compacting_since if @compacting_since
       if @queued_messages.values.any?(&:any?)
@@ -308,11 +343,19 @@ class PiRpcClient
   end
 
   def busy?
-    @mutex.synchronize { @busy }
+    @mutex.synchronize { busy_locked? }
   end
 
   def busy_since
-    @mutex.synchronize { @busy_since }
+    @mutex.synchronize { busy_since_locked }
+  end
+
+  def active_bash_command
+    @mutex.synchronize { @active_bash_command }
+  end
+
+  def active_bash_started_at
+    @mutex.synchronize { @active_bash_started_at }
   end
 
   def agent_running?
@@ -644,6 +687,7 @@ class PiRpcClient
     @mutex.synchronize do
       @reader_running = false
       @agent_running = false
+      clear_active_bash_state
       @compacting = false
       @compacting_since = nil
       @compaction_follow_ups.clear
@@ -1104,6 +1148,69 @@ class PiRpcClient
       "toolName" => SNAPSHOT_TOOL_NAME,
       "partialResult" => { "content" => [{ "type" => "text", "text" => text }] }
     }
+  end
+
+  def begin_bash(command, exclude_from_context)
+    token = Object.new
+    @mutex.synchronize do
+      raise BashAlreadyRunning, "A bash command is already running for this Pi RPC client" if @active_bash_token
+
+      @active_bash_token = token
+      @active_bash_command = command
+      @active_bash_exclude_from_context = !!exclude_from_context
+      @active_bash_started_at = @clock.call
+      append_gateway_event(
+        "type" => "bash_start",
+        "command" => command,
+        "excludeFromContext" => !!exclude_from_context,
+        "gatewayTimestamp" => (@active_bash_started_at.to_f * 1000).to_i
+      )
+    end
+    token
+  end
+
+  def complete_bash(token, type, value_key, value, command: nil, exclude_from_context: nil)
+    @mutex.synchronize do
+      active = @active_bash_token.equal?(token)
+      command ||= @active_bash_command if active
+      exclude_from_context = @active_bash_exclude_from_context if active
+      clear_active_bash_state if active
+      append_gateway_event(
+        "type" => type,
+        "command" => command,
+        "excludeFromContext" => !!exclude_from_context,
+        value_key => value,
+        "gatewayTimestamp" => (@clock.call.to_f * 1000).to_i
+      )
+    end
+  end
+
+  def clear_active_bash(token)
+    @mutex.synchronize do
+      clear_active_bash_state if @active_bash_token.equal?(token)
+    end
+  end
+
+  def clear_active_bash_state
+    @active_bash_token = nil
+    @active_bash_command = nil
+    @active_bash_exclude_from_context = false
+    @active_bash_started_at = nil
+    @condition.broadcast
+  end
+
+  def append_gateway_event(event)
+    @event_sequence += 1
+    append_replay_event(event, JSON.generate(event).bytesize)
+    @condition.broadcast
+  end
+
+  def busy_locked?
+    @busy || !!@active_bash_token
+  end
+
+  def busy_since_locked
+    [@busy_since, @active_bash_started_at].compact.min
   end
 
   def update_busy_state(response)
