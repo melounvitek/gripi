@@ -436,7 +436,7 @@
     .project-select-trigger--plain { grid-template-columns: minmax(0, 1fr) auto; }
     .project-select-chevron { color: var(--muted); font-size: 0.72rem; }
     .project-select-listbox { position: fixed; z-index: 180; display: grid; gap: 0.2rem; overflow-y: auto; padding: 0.35rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; box-shadow: 0 16px 42px #00000080; }
-    .project-select-option { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.55rem; min-height: 2.65rem; padding: 0.45rem 0.55rem; border-radius: 0.25rem; color: var(--text); cursor: pointer; }
+    .project-select-option { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.5rem; min-height: 2.25rem; padding: 0.35rem 0.5rem; border-radius: 0.25rem; color: var(--text); font-size: 0.82rem; cursor: pointer; }
     .project-select-listbox--plain .project-select-option--plain { grid-template-columns: minmax(0, 1fr); }
     .project-select-option:hover, .project-select-option.is-active { background: var(--panel-softer); }
     .project-select-option[aria-selected="true"] { color: var(--project-identity-fg, var(--accent)); font-weight: 650; }

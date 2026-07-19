@@ -3211,9 +3211,14 @@ class AppTest < Minitest::Test
     assert_includes coarse_styles, ".session-header-view-select .project-select-trigger--plain { min-height: 2.75rem; }"
   end
 
+  def test_desktop_custom_select_options_keep_compact_typography
+    assert_includes APP_STYLESHEET, ".project-select-option { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.5rem; min-height: 2.25rem; padding: 0.35rem 0.5rem; border-radius: 0.25rem; color: var(--text); font-size: 0.82rem; cursor: pointer; }"
+  end
+
   def test_mobile_custom_selectors_keep_compact_typography
     assert_includes APP_STYLESHEET, ".project-select-trigger { min-height: 2.75rem; }"
     refute_includes APP_STYLESHEET, ".project-select-trigger { min-height: 2.75rem; font-size: 16px; }"
+    assert_includes APP_STYLESHEET, ".project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }"
   end
 
   def test_narrow_header_prioritizes_the_transcript_view_selector
