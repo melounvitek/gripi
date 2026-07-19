@@ -23,7 +23,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :error, :tool_call_id, :tool_name, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :tool_prompt, :final_assistant_response, :entry_id, :images, :custom_type, :compaction, :bash_exit_code, :bash_cancelled, :bash_truncated, :bash_excluded_from_context, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :error, :tool_call_id, :tool_name, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :tool_prompt, :final_assistant_response, :entry_id, :images, :custom_type, :compaction, :bash_exit_code, :bash_cancelled, :bash_truncated, :bash_excluded_from_context, :bash_started_at, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :context_estimated, :cost_total, keyword_init: true)
   Conversation = Struct.new(:messages, :latest_stable_tree_position_id, :current_stable_tree_position_id, :status, :subagent_tool_call_context, keyword_init: true)
   ConversationWindow = Struct.new(:messages, :start_index, :total_message_count, :tree_leaf_id, :latest_stable_tree_position_id, :current_stable_tree_position_id, :status, :subagent_tool_call_context, keyword_init: true)
@@ -1125,10 +1125,12 @@ class PiSessionStore
       summary: "$ #{command}",
       error: message["exitCode"].is_a?(Integer) && !message["exitCode"].zero?,
       tool_name: "bash",
+      tool_transcript: true,
       bash_exit_code: message["exitCode"],
       bash_cancelled: message["cancelled"],
       bash_truncated: message["truncated"],
-      bash_excluded_from_context: excluded
+      bash_excluded_from_context: excluded,
+      bash_started_at: Time.at(message["timestamp"] / 1000.0)
     )
   end
 

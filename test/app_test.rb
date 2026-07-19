@@ -906,7 +906,7 @@ class AppTest < Minitest::Test
         client = FakeRpcClient.new(calls)
         client.define_singleton_method(:bash) do |submitted_command, exclude_from_context: false|
           calls << [:bash, submitted_command, exclude_from_context]
-          { "type" => "response", "command" => "bash", "success" => true, "data" => { "output" => "done", "exitCode" => 0 } }
+          { "id" => "bash-7", "type" => "response", "command" => "bash", "success" => true, "data" => { "output" => "done", "exitCode" => 0 } }
         end
         Gripi.set :sessions_root, dir
         Gripi.set :rpc_client_registry, nil
@@ -925,11 +925,58 @@ class AppTest < Minitest::Test
         assert_equal [[:start, path], [:bash, command, excluded]], calls
         payload = JSON.parse(response.body)
         assert_equal "bash", payload.fetch("command")
+        assert_equal "bash-7", payload.fetch("bash_id")
         assert_equal({ "output" => "done", "exitCode" => 0 }, payload.fetch("data"))
         assert_equal excluded, payload.fetch("exclude_from_context")
         assert_equal path, payload.fetch("session")
         assert_includes payload.fetch("redirect"), Rack::Utils.escape(path)
       end
+    end
+  end
+
+  def test_json_bash_rpc_failure_returns_its_completed_lifecycle_without_restoring_as_unsent
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      client = FakeRpcClient.new([])
+      client.define_singleton_method(:bash) do |_command, exclude_from_context: false|
+        { "id" => "bash-8", "type" => "response", "command" => "bash", "success" => false, "error" => "Shell unavailable" }
+      end
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { client }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "!pwd" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal "bash-8", payload.fetch("bash_id")
+      assert_equal "Shell unavailable", payload.fetch("error")
+    end
+  end
+
+  def test_json_post_acceptance_bash_disconnect_keeps_the_completed_lifecycle
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      client = FakeRpcClient.new([])
+      client.define_singleton_method(:bash) do |_command, exclude_from_context: false|
+        raise PiRpcClient::BashRequestFailed.new("bash-9", "Pi RPC process exited before responding")
+      end
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { client }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "!pwd" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      payload = JSON.parse(response.body)
+      assert_equal "bash-9", payload.fetch("bash_id")
+      assert_includes payload.fetch("error"), "before responding"
     end
   end
 
@@ -955,6 +1002,28 @@ class AppTest < Minitest::Test
         assert_equal [[:start, path], [:prompt, message]], calls
         refute JSON.parse(response.body).key?("command")
       end
+    end
+  end
+
+  def test_browser_classification_keeps_trimmed_indented_bang_as_a_regular_prompt
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, nil
+      Gripi.set :rpc_client_factory, [->(session_path) {
+        calls << [:start, session_path]
+        FakeRpcClient.new(calls)
+      }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/prompt",
+        params: { "session" => path, "message" => "!pwd", "bash_mode" => "prompt" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[:start, path], [:prompt, "!pwd"]], calls
     end
   end
 
@@ -3756,7 +3825,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_abort_prioritizes_a_running_agent_over_active_bash
+  def test_abort_prioritizes_an_active_bash_over_an_overlapping_agent
     Dir.mktmpdir do |dir|
       path = write_session(dir)
       calls = []
@@ -3776,7 +3845,7 @@ class AppTest < Minitest::Test
       )
 
       assert_equal 200, response.status
-      assert_equal [[:abort]], calls
+      assert_equal [[:abort_bash]], calls
     end
   end
 
@@ -6222,6 +6291,7 @@ class AppTest < Minitest::Test
       assert_equal 3, cards.length
       included, excluded, terminal = cards
       assert_equal "bashExecution", included["data-role"]
+      assert_includes included["class"], "message--tool-transcript"
       assert_includes included["class"], "message--tool-error"
       assert_equal "shell", included.at_css(".role").text
       assert_equal "$ printf '<command>'", included.at_css(".compact-summary").text
@@ -7303,11 +7373,11 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "const previousWaitingForOutputSince = waitingForOutputSince;"
       assert_includes APP_JAVASCRIPT, "const submittedImageFiles = pendingImages.map((entry) => entry.file);"
       assert_includes APP_JAVASCRIPT, "submittedImageFiles.forEach((file) => formData.append(\"images[]\", file, file.name || \"image\"));"
-      assert_includes APP_JAVASCRIPT, "if (cloneCommand && payload?.cancelled) {\n      restoreSubmittedComposerInput();\n      setComposerState(\"idle\");\n      showStatus(\"Clone cancelled\", true);\n      return;\n    }"
+      assert_includes APP_JAVASCRIPT, "if (cloneCommand && payload?.cancelled) {\n      restoreSubmittedPromptInput();\n      setComposerState(\"idle\");\n      showStatus(\"Clone cancelled\", true);\n      return;\n    }"
       assert_includes APP_JAVASCRIPT, "function persistStoredComposerDraft()"
-      assert_includes APP_JAVASCRIPT, "const restoreSubmittedComposerInput = () => {"
-      assert_includes APP_JAVASCRIPT, "promptTextarea.value = message;\n      persistStoredComposerDraft();"
-      assert_includes APP_JAVASCRIPT, "pendingImages = submittedImageFiles.map((file) => ({ file, url: URL.createObjectURL(file) }));"
+      assert_includes APP_JAVASCRIPT, "function restoreSubmittedComposerInput(message, imageFiles)"
+      assert_includes APP_JAVASCRIPT, 'promptTextarea.value = promptTextarea.value ? `${message}\n${promptTextarea.value}` : message;'
+      assert_includes APP_JAVASCRIPT, "imageFiles.forEach((file) => pendingImages.push({ file, url: URL.createObjectURL(file) }));"
       assert_includes APP_JAVASCRIPT, "renderAttachments();"
       assert_includes APP_JAVASCRIPT, "setComposerState(\"running\", compactingFollowUp ? \"Compacting…\" : \"Pi is running…\", { since: previousWaitingForOutputSince });"
       assert_includes APP_JAVASCRIPT, "markOptimisticUserMessageFailed(message);"
@@ -7712,8 +7782,8 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || \"Attached image\" }));\n      liveMessageRenderer.appendMessage(\"user\", message || `[${imageAttachmentLabel(submittedImageFiles.length)}]`, true, true, new Date(), { optimistic: true, optimisticText: message, images: optimisticImages });\n    }"
       assert_includes APP_JAVASCRIPT, "resetEventPollBackoff();"
       assert_includes APP_JAVASCRIPT, "scheduleNextEventPoll(0);"
-      assert_includes APP_JAVASCRIPT, "if (nameCommand) {\n      restoreSubmittedComposerInput();\n      setComposerState(\"error\", payload?.error || \"Session name could not be changed\");"
-      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"name\") {\n      if (payload.error) {\n        restoreSubmittedComposerInput();\n        setComposerState(\"error\", payload.error);\n        showStatus(payload.error, true);\n        return;\n      }\n      clearStoredComposerDraft(submittedSession);"
+      assert_includes APP_JAVASCRIPT, "if (nameCommand) {\n      restoreSubmittedPromptInput();\n      setComposerState(\"error\", payload?.error || \"Session name could not be changed\");"
+      assert_includes APP_JAVASCRIPT, "if (payload?.command === \"name\") {\n      if (payload.error) {\n        restoreSubmittedPromptInput();\n        setComposerState(\"error\", payload.error);\n        showStatus(payload.error, true);\n        return;\n      }\n      clearStoredComposerDraft(submittedSession);"
       assert_includes APP_JAVASCRIPT, "updateSessionHeaderName(payload.name);\n      setComposerState(\"done\", payload.current ? \"Named\" : \"Name set\");"
       assert_includes APP_JAVASCRIPT, "function appendSessionNameFeedback(payload)"
       assert_includes APP_JAVASCRIPT, 'const delimiter = "`".repeat(Math.max(1, ...backtickRuns.map((run) => run.length + 1)));'
@@ -7741,7 +7811,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "promptTextarea.disabled = submitting || stopping || sessionSyncBlocked();"
       assert_includes APP_JAVASCRIPT, "if (focus && state !== previousState) syncComposerFocus(state);"
       assert_includes APP_JAVASCRIPT, "if (focus) syncComposerFocus();"
-      assert_includes APP_JAVASCRIPT, "composerStopButton.hidden = !agentBusy;"
+      assert_includes APP_JAVASCRIPT, "composerStopButton.hidden = !taskBusy;"
       assert_includes APP_JAVASCRIPT, "formData.set(\"streaming_behavior\", streamingBehavior);"
       assert_includes APP_JAVASCRIPT, "const streamingBehavior = submittedStreamingBehavior();"
       assert_includes APP_JAVASCRIPT, "if (streamingBehavior) selectStreamingBehavior(\"steer\", { focus: false });"
@@ -7757,7 +7827,7 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "const attachmentsDisabled = submitting || stopping || sessionSyncBlocked();"
       assert_includes APP_JAVASCRIPT, "addImageFiles(files);"
       assert_includes APP_JAVASCRIPT, "function confirmOrStopRunningTask(event)"
-      assert_includes APP_JAVASCRIPT, "if (composerState?.dataset.state !== \"running\") return false;"
+      assert_includes APP_JAVASCRIPT, "if (![\"running\", \"bash\"].includes(composerState?.dataset.state)) return false;"
       assert_includes APP_JAVASCRIPT, "if (event.repeat) return true;"
       assert_includes APP_JAVASCRIPT, "showStatus(\"Press ESC again to stop current task\", true);"
       assert_includes APP_JAVASCRIPT, "setComposerState(\"stopping\", \"Stopping current task…\");"
@@ -7768,6 +7838,34 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "Queue follow-up…"
       assert_includes APP_JAVASCRIPT, "Send steer"
       assert_includes APP_JAVASCRIPT, "Queue follow-up"
+    end
+  end
+
+  def test_browser_bash_submission_uses_a_separate_nonblocking_lifecycle
+    assert_includes APP_JAVASCRIPT, "const rawMessage = promptTextarea.value;"
+    assert_includes APP_JAVASCRIPT, "const bashCommand = parseNativeBash(rawMessage);"
+    assert_includes APP_JAVASCRIPT, "if (bashCommand) return submitBashPrompt(rawMessage, bashCommand);"
+    assert_includes APP_JAVASCRIPT, "formData.set(\"bash_mode\", \"prompt\");"
+    assert_includes APP_JAVASCRIPT, "formData.set(\"bash_mode\", \"bash\");"
+    assert_includes APP_JAVASCRIPT, "liveMessageRenderer.renderBashEvent"
+    assert_includes APP_JAVASCRIPT, "restoreSubmittedBashInput"
+    bash_source = APP_JAVASCRIPT.match(/async function submitBashPrompt.*?(?=\nasync function submitPrompt)/m).to_s
+    refute_includes bash_source, "setComposerState(\"sending\""
+    refute_includes bash_source, "appendMessage(\"user\""
+  end
+
+  def test_stop_control_remains_a_native_first_click_submit_control_for_bash
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      Gripi.set :sessions_root, dir
+
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
+
+      stop = Nokogiri::HTML(response.body).at_css("button.composer-stop-button")
+      assert_equal "submit", stop["type"]
+      assert_equal "abort-form", stop["form"]
+      assert_nil stop["data-touch-action"]
+      assert_includes APP_JAVASCRIPT, "if (![\"running\", \"bash\"].includes(composerState?.dataset.state)) return false;"
     end
   end
 
@@ -8099,6 +8197,139 @@ class AppTest < Minitest::Test
       assert_includes busy_response.body, "Pi is working"
       assert_includes busy_response.body, "session-indicators"
       assert_includes busy_response.body, "session-running-indicator"
+    end
+  end
+
+  def test_active_bash_snapshot_is_separate_from_agent_composer_state
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      Gripi.set :sessions_root, dir
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      client = FakeRpcClient.new([])
+      def client.live_snapshot
+        {
+          event_sequence: 4,
+          active_tool_events: [],
+          busy: true,
+          busy_since: Time.at(1_000),
+          active_bash: { bash_id: "bash-4", command: "sleep 30", exclude_from_context: true, started_at: Time.at(1_000) }
+        }
+      end
+      registry.register(path, client)
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      live_output = Nokogiri::HTML(response.body).at_css("#live-output")
+      assert_equal "bash", live_output["data-composer-state"]
+      assert_equal "false", live_output["data-agent-running"]
+      active_bash = JSON.parse(live_output["data-active-bash"])
+      assert_equal "bash-4", active_bash.fetch("bash_id")
+      assert_equal "sleep 30", active_bash.fetch("command")
+      assert active_bash.fetch("exclude_from_context")
+      assert active_bash.fetch("started_at")
+    end
+  end
+
+  def test_stale_bash_snapshot_does_not_duplicate_newly_persisted_history
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [{
+        type: "message", id: "bash-1", timestamp: "2026-06-13T10:00:02Z",
+        message: {
+          role: "bashExecution", command: "pwd", output: "/tmp", exitCode: 0,
+          cancelled: false, truncated: false, timestamp: 1_781_344_800_000, excludeFromContext: false
+        }
+      }])
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      client = FakeRpcClient.new([], [], path)
+      def client.live_snapshot
+        {
+          event_sequence: 5,
+          active_tool_events: [],
+          busy: true,
+          active_bash: { bash_id: "bash-3", command: "pwd", exclude_from_context: false, started_at: Time.parse("2026-06-13T10:00:00Z") },
+          completed_bash_events: [{
+            "type" => "bash_end", "bashId" => "bash-3", "command" => "pwd", "excludeFromContext" => false,
+            "result" => { "output" => "/tmp", "exitCode" => 0, "cancelled" => false, "truncated" => false },
+            "startedAt" => Time.parse("2026-06-13T10:00:00Z").to_i * 1000,
+            "gatewayTimestamp" => Time.parse("2026-06-13T10:00:03Z").to_i * 1000
+          }]
+        }
+      end
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
+
+      document = Nokogiri::HTML(response.body)
+      live_output = document.at_css("#live-output")
+      assert_nil JSON.parse(live_output["data-active-bash"])
+      assert_empty JSON.parse(live_output["data-completed-bash-events"])
+      assert_equal "bash-3", JSON.parse(live_output["data-persisted-bash-executions"]).first
+      assert_equal "idle", live_output["data-composer-state"]
+      assert_equal 1, Nokogiri::HTML(response.body).css(".message--bash-execution").length
+    end
+  end
+
+  def test_completed_bash_snapshot_is_available_until_overlapping_agent_history_persists
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      Gripi.set :sessions_root, dir
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      client = FakeRpcClient.new([])
+      def client.live_snapshot
+        {
+          event_sequence: 5,
+          active_tool_events: [],
+          busy: true,
+          agent_running: true,
+          completed_bash_events: [{
+            "type" => "bash_end", "bashId" => "bash-3", "command" => "pwd", "excludeFromContext" => false,
+            "result" => { "output" => "/tmp", "exitCode" => 0 }, "gatewayTimestamp" => 1_000_000
+          }]
+        }
+      end
+      registry.register(path, client)
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
+
+      live_output = Nokogiri::HTML(response.body).at_css("#live-output")
+      completed = JSON.parse(live_output["data-completed-bash-events"])
+      assert_equal "bash-3", completed.first.fetch("bashId")
+      assert_equal "/tmp", completed.first.dig("result", "output")
+    end
+  end
+
+  def test_active_bash_preserves_overlapping_agent_state
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      Gripi.set :sessions_root, dir
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      client = FakeRpcClient.new([])
+      def client.live_snapshot
+        {
+          event_sequence: 5,
+          active_tool_events: [],
+          busy: true,
+          busy_since: Time.at(1_000),
+          agent_busy_since: Time.at(1_005),
+          agent_running: true,
+          active_bash: { bash_id: "bash-4", command: "sleep 30", exclude_from_context: false, started_at: Time.at(1_000) }
+        }
+      end
+      registry.register(path, client)
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
+
+      live_output = Nokogiri::HTML(response.body).at_css("#live-output")
+      assert_equal "running", live_output["data-composer-state"]
+      assert_equal "true", live_output["data-agent-running"]
+      assert_equal "1005000", live_output["data-composer-state-since"]
+      assert_equal "bash-4", JSON.parse(live_output["data-active-bash"]).fetch("bash_id")
     end
   end
 

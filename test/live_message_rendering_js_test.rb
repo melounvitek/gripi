@@ -89,6 +89,130 @@ class LiveMessageRenderingJsTest < Minitest::Test
     assert_equal({ "text" => "Network fallback", "pending" => nil }, result["network"])
   end
 
+  def test_live_bash_events_update_one_terminal_aware_shell_card_by_id
+    result = run_javascript(<<~JS)
+      const { LiveMessageParser } = await import(#{module_url("live_message_parser.js").to_json});
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      const classes = new Set();
+      const status = { hidden: true, children: [], replaceChildren(...children) { this.children = children; } };
+      const entry = {
+        article: {
+          dataset: {},
+          classList: {
+            add(...names) { names.forEach((name) => classes.add(name)); },
+            toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); },
+            contains(name) { return classes.has(name); }
+          }
+        },
+        summaryText: { textContent: "" },
+        body: {},
+        status
+      };
+      const renderer = Object.create(LiveMessageRenderer.prototype);
+      renderer.document = { createElement() { return { className: "", textContent: "" }; } };
+      renderer.parser = new LiveMessageParser("/home/tester");
+      renderer.liveBashExecutions = new Map();
+      renderer.completedBashExecutionIds = new Set();
+      renderer.conversationController = { followLiveOutput: () => false, afterLiveOutputChange() {} };
+      let appended = 0;
+      const outputs = [];
+      renderer.appendCompactMessage = (_role, summary, text, _live, _scroll, _timestamp, options) => {
+        appended += 1;
+        entry.summaryText.textContent = summary;
+        entry.article.dataset.bashId = options.bashId;
+        outputs.push(text);
+        return entry;
+      };
+      renderer.renderToolTranscriptBody = (_body, text, toolName) => outputs.push([text, toolName]);
+
+      const started = renderer.renderBashEvent({
+        type: "bash_start", bashId: "bash-9", command: "/home/tester/bin/run <unsafe>", excludeFromContext: true, gatewayTimestamp: 1000
+      });
+      const running = {
+        same: started === entry,
+        summary: entry.summaryText.textContent,
+        status: status.children.map((item) => item.textContent),
+        role: started.article.dataset.bashId
+      };
+      const completed = renderer.renderBashEvent({
+        type: "bash_end", bashId: "bash-9", command: "/home/tester/bin/run <unsafe>", excludeFromContext: true,
+        result: { output: "progress\\rfinished \\u001b[31mred\\u001b[0m", exitCode: 7, cancelled: true, truncated: true }, gatewayTimestamp: 2000
+      });
+      const finished = {
+        same: completed === entry,
+        status: status.children.map((item) => item.textContent),
+        classes: [...classes].sort(),
+        output: outputs.at(-1)
+      };
+      renderer.renderBashEvent({
+        type: "bash_end", bashId: "bash-9", command: "/home/tester/bin/run <unsafe>", excludeFromContext: true,
+        result: { output: "progress\\rfinished \\u001b[31mred\\u001b[0m", exitCode: 7, cancelled: true, truncated: true },
+        gatewayTimestamp: 3000
+      });
+      renderer.renderBashEvent({
+        type: "bash_start", bashId: "bash-9", command: "ignored late start", gatewayTimestamp: 1000
+      });
+      console.log(JSON.stringify({
+        appended,
+        running,
+        finished,
+        afterLateStart: {
+          summary: entry.summaryText.textContent,
+          status: status.children.map((item) => item.textContent),
+          output: outputs.at(-1)
+        }
+      }));
+    JS
+
+    assert_equal 1, result.fetch("appended")
+    assert_equal({ "same" => true, "summary" => "$ ~/bin/run <unsafe>", "status" => ["excluded from model context", "running"], "role" => "bash-9" }, result.fetch("running"))
+    assert result.dig("finished", "same")
+    assert_equal ["excluded from model context", "exit 7", "cancelled", "output truncated"], result.dig("finished", "status")
+    assert_includes result.dig("finished", "classes"), "message--bash-execution"
+    assert_includes result.dig("finished", "classes"), "message--tool-error"
+    assert_equal ["progress\rfinished \e[31mred\e[0m", "bash"], result.dig("finished", "output")
+    assert_equal "$ ~/bin/run <unsafe>", result.dig("afterLateStart", "summary")
+    assert_equal ["excluded from model context", "exit 7", "cancelled", "output truncated"], result.dig("afterLateStart", "status")
+    assert_equal ["progress\rfinished \e[31mred\e[0m", "bash"], result.dig("afterLateStart", "output")
+  end
+
+  def test_active_bash_snapshot_is_consumed_and_rendered_as_a_start_event
+    result = run_javascript(<<~JS)
+      const { LiveMessageRenderer } = await import(#{module_url("live_message_renderer.js").to_json});
+      const renderer = Object.create(LiveMessageRenderer.prototype);
+      renderer.liveOutput = { dataset: {
+        activeBash: JSON.stringify({
+          bash_id: "bash-3", command: "sleep 30", exclude_from_context: true, started_at: "2026-06-13T10:00:00Z"
+        }),
+        completedBashEvents: JSON.stringify([{ type: "bash_end", bashId: "bash-2", command: "pwd", result: { output: "/tmp" } }]),
+        persistedBashExecutions: JSON.stringify(["bash-1"])
+      } };
+      const rendered = [];
+      renderer.completedBashExecutionIds = new Set();
+      renderer.renderBashEvent = (event) => { rendered.push(event); };
+      const persisted = renderer.restorePersistedBashExecutions();
+      const completed = renderer.restoreCompletedBashExecutions();
+      const restored = renderer.restoreActiveBash();
+      console.log(JSON.stringify({
+        restored,
+        completed,
+        persisted,
+        rendered,
+        consumed: renderer.liveOutput.dataset.activeBash === undefined && renderer.liveOutput.dataset.completedBashEvents === undefined && renderer.liveOutput.dataset.persistedBashExecutions === undefined
+      }));
+    JS
+
+    assert result.fetch("consumed")
+    assert_equal "bash_start", result.dig("restored", "type")
+    assert_equal "bash-3", result.dig("restored", "bashId")
+    assert_equal "bash-1", result.dig("persisted", 0)
+    assert_equal "bash-2", result.dig("completed", 0, "bashId")
+    assert_equal "bash_end", result.dig("rendered", 0, "type")
+    assert_equal "sleep 30", result.dig("rendered", 1, "command")
+    assert result.dig("rendered", 1, "excludeFromContext")
+    assert_equal 1_781_344_800_000, result.dig("rendered", 1, "gatewayTimestamp")
+  end
+
   def test_parser_only_honors_phases_from_valid_v1_signatures
     result = run_javascript(<<~JS)
       const { LiveMessageParser } = await import(#{module_url("live_message_parser.js").to_json});

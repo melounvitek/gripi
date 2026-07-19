@@ -363,6 +363,7 @@ class FrontendLifecycleJsTest < Minitest::Test
       let waitingForOutputTimer = null;
       let waitingForOutputLabel = "Pi is running…";
       let escapeStopConfirmationExpiresAt = 0;
+      let escapeStopConfirmationTimer = null;
       const stoppingSessionPaths = new Set();
       const currentSessionPath = () => "session-a";
       const classList = { toggle() {} };
@@ -418,6 +419,249 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal 1, results.fetch("abortRequests")
   end
 
+  def test_completed_bash_does_not_regress_when_its_start_event_arrives_late
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    lifecycle_source = app_source.match(/function startLiveBash\(.*?(?=\nfunction renderEvent)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let liveBash = { id: "bash-1" };
+      const completedBashIds = new Set();
+      const rendered = [];
+      const liveMessageRenderer = { renderBashEvent: (event) => rendered.push(event.type) };
+      const composerState = { dataset: { state: "bash" } };
+      const liveOutput = { dataset: { composerCompacting: "false" } };
+      const stoppingSessionPaths = new Set();
+      const currentSessionPath = () => "session-a";
+      let liveAgentRunning = false;
+      const eventTimeMilliseconds = (event) => event.gatewayTimestamp;
+      const setComposerState = () => {};
+      const showCurrentActiveTask = () => {};
+      const resetEventPollBackoff = () => {};
+      eval(#{(lifecycle_source + "\nglobalThis.startBash = startLiveBash; globalThis.finishBash = finishLiveBash;").to_json});
+
+      globalThis.finishBash({ type: "bash_end", bashId: "bash-1", result: { output: "done" }, gatewayTimestamp: 2_000 });
+      globalThis.finishBash({ type: "bash_end", bashId: "bash-1", result: { output: "done" }, gatewayTimestamp: 3_000 });
+      globalThis.startBash({ type: "bash_start", bashId: "bash-1", command: "ignored late start", gatewayTimestamp: 4_000 });
+      console.log(JSON.stringify({ active: liveBash, rendered, completed: completedBashIds.has("bash-1") }));
+    JS
+
+    assert_nil results.fetch("active")
+    assert_equal ["bash_end"], results.fetch("rendered")
+    assert results.fetch("completed")
+  end
+
+  def test_agent_ui_wins_over_bash_and_settling_returns_to_the_remaining_task
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    state_source = app_source.match(/function showCurrentActiveTask\(.*?(?=\nfunction setComposerState)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let liveAgentRunning = false;
+      let liveBash = { id: "bash-1" };
+      let liveBusySince = 1_000;
+      const liveOutput = { dataset: { composerCompacting: "false" } };
+      const transitions = [];
+      const setComposerState = (state, label) => transitions.push([state, label]);
+      eval(#{(state_source + "\nglobalThis.showTask = showCurrentActiveTask;").to_json});
+
+      globalThis.showTask();
+      liveAgentRunning = true;
+      globalThis.showTask();
+      liveAgentRunning = false;
+      globalThis.showTask();
+      liveOutput.dataset.composerCompacting = "true";
+      globalThis.showTask();
+      liveOutput.dataset.composerCompacting = "false";
+      liveBash = null;
+      globalThis.showTask();
+      console.log(JSON.stringify(transitions));
+    JS
+
+    assert_equal [
+      ["bash", "Shell command running…"],
+      ["running", "Pi is running…"],
+      ["bash", "Shell command running…"],
+      ["running", "Compacting…"],
+      ["done", "Done"]
+    ], results
+  end
+
+  def test_bash_completion_preserves_overlapping_agent_running_state
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    lifecycle_source = app_source.match(/function startLiveBash\(.*?(?=\nfunction renderEvent)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let liveBash = { id: "bash-1" };
+      let liveAgentRunning = true;
+      const completedBashIds = new Set();
+      const liveMessageRenderer = { renderBashEvent() {} };
+      const composerState = { dataset: { state: "stopping" } };
+      const stoppingSessionPaths = new Set(["session-a"]);
+      const currentSessionPath = () => "session-a";
+      const transitions = [];
+      const setComposerState = (state) => {
+        if (state === "running" && stoppingSessionPaths.has(currentSessionPath())) return;
+        composerState.dataset.state = state;
+        transitions.push(state);
+      };
+      const showCurrentActiveTask = () => setComposerState(liveAgentRunning ? "running" : "idle");
+      const eventTimeMilliseconds = () => 2_000;
+      const resetEventPollBackoff = () => {};
+      eval(#{(lifecycle_source + "\nglobalThis.finishBash = finishLiveBash;").to_json});
+
+      globalThis.finishBash({ type: "bash_end", bashId: "bash-1", result: { output: "done" } });
+      console.log(JSON.stringify({ liveBash, transitions, state: composerState.dataset.state, stopping: stoppingSessionPaths.has("session-a") }));
+    JS
+
+    assert_nil results.fetch("liveBash")
+    assert_equal ["running"], results.fetch("transitions")
+    assert_equal "running", results.fetch("state")
+    refute results.fetch("stopping")
+  end
+
+  def test_escape_confirmation_is_visible_for_a_bash_only_task
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    wait_source = app_source.match(/function updateWaitingForOutputStatus\(\).*?(?=\nfunction startWaitingForOutput)/m).to_s
+    stop_source = app_source.match(/function confirmOrStopRunningTask\(event\).*?(?=\nfunction composingQueuedMessage)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let now = 10_000;
+      Date.now = () => now;
+      let waitingForOutputSince = null;
+      let escapeStopConfirmationExpiresAt = 0;
+      let escapeStopConfirmationTimer = null;
+      let timerCallback = null;
+      globalThis.setTimeout = (callback) => { timerCallback = callback; return 1; };
+      globalThis.clearTimeout = () => {};
+      const composerState = { dataset: { state: "bash" }, textContent: "Shell command running…" };
+      const ESCAPE_STOP_CONFIRMATION_WINDOW_MS = 2_000;
+      const showStatus = () => {};
+      const setComposerState = () => {};
+      const abortForm = { requestSubmit() {} };
+      const event = { repeat: false, preventDefault() {} };
+      eval(#{(wait_source + "\n" + stop_source + "\nglobalThis.confirmBashStop = confirmOrStopRunningTask;").to_json});
+      const handled = globalThis.confirmBashStop(event);
+      const confirmationLabel = composerState.textContent;
+      now = 12_001;
+      timerCallback();
+      console.log(JSON.stringify({ handled, confirmationLabel, expiredLabel: composerState.textContent }));
+    JS
+
+    assert_equal({
+      "handled" => true,
+      "confirmationLabel" => "Press ESC again to stop current task",
+      "expiredLabel" => "Shell command running…"
+    }, results)
+  end
+
+  def test_bash_submission_stays_nonblocking_and_restores_a_rejected_duplicate
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    bash_source = app_source.match(/function restoreSubmittedComposerInput\(.*?(?=\nasync function submitPrompt)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let sessionViewGeneration = 1;
+      let sessionSwitchGeneration = 1;
+      const promptSessionInput = { value: "session-a" };
+      const promptTextarea = { value: "!sleep 30", disabled: false };
+      const promptForm = { action: "/prompt" };
+      const commandList = { classList: { remove() {} }, removeAttribute() {} };
+      const submittedFile = { name: "screen.png", type: "image/png" };
+      let pendingImages = [{ file: submittedFile, url: "blob:old" }];
+      const completedBashIds = new Set();
+      let resolveRequest;
+      const statuses = [];
+      const polls = [];
+      const currentSessionPath = () => promptSessionInput.value;
+      const addSessionViewFormParams = () => {};
+      const clearStoredComposerDraft = () => {};
+      const persistStoredComposerDraft = () => {};
+      const clearAttachments = () => { pendingImages = []; };
+      const renderAttachments = () => {};
+      const resetCommandSelection = () => {};
+      const resizePromptTextarea = () => {};
+      const resetEventPollBackoff = () => {};
+      const scheduleNextEventPoll = (delay) => polls.push(delay);
+      const showStatus = (message) => statuses.push(message);
+      const sidebarController = { requestRefresh() {} };
+      const finished = [];
+      const finishLiveBash = (event) => finished.push(event);
+      globalThis.URL = { createObjectURL: (file) => `blob:restored-${file.name}` };
+      globalThis.FormData = class {
+        set() {}
+        append() {}
+      };
+      globalThis.fetch = () => new Promise((resolve) => { resolveRequest = resolve; });
+      eval(#{(bash_source + "\nglobalThis.submitBashUnderTest = submitBashPrompt;").to_json});
+
+      const submission = globalThis.submitBashUnderTest("!sleep 30", { command: "sleep 30", excludeFromContext: false });
+      const whilePending = { value: promptTextarea.value, disabled: promptTextarea.disabled, attachmentCount: pendingImages.length };
+      promptTextarea.value = "ordinary prompt";
+      resolveRequest({ ok: false, json: async () => ({ error: "A bash command is already running" }) });
+      await submission;
+      const restoredValue = promptTextarea.value;
+      const restoredFiles = pendingImages.map((entry) => entry.file.name);
+
+      promptTextarea.value = "!bad";
+      pendingImages = [];
+      const acceptedFailure = globalThis.submitBashUnderTest("!bad", { command: "bad", excludeFromContext: false });
+      resolveRequest({ ok: true, json: async () => ({ bash_id: "bash-2", error: "Shell unavailable" }) });
+      await acceptedFailure;
+
+      console.log(JSON.stringify({
+        whilePending,
+        restoredValue,
+        restoredFiles,
+        acceptedFailure: { value: promptTextarea.value, event: finished[0] },
+        statuses,
+        polls
+      }));
+    JS
+
+    assert_equal({ "value" => "", "disabled" => false, "attachmentCount" => 0 }, results.fetch("whilePending"))
+    assert_equal "!sleep 30\nordinary prompt", results.fetch("restoredValue")
+    assert_equal ["screen.png"], results.fetch("restoredFiles")
+    assert_equal "", results.dig("acceptedFailure", "value")
+    assert_equal "bash_error", results.dig("acceptedFailure", "event", "type")
+    assert_equal "bash-2", results.dig("acceptedFailure", "event", "bashId")
+    assert_equal ["A bash command is already running"], results.fetch("statuses")
+    assert_equal [0, 0, 0, 0], results.fetch("polls")
+  end
+
+  def test_prompt_and_bash_failure_restoration_merge_with_the_current_draft
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    restore_source = app_source.match(/function restoreSubmittedComposerInput\(.*?(?=\nasync function submitBashPrompt)/m).to_s
+
+    results = run_javascript(<<~JS)
+      const currentFile = { name: "current.png" };
+      const promptFile = { name: "prompt.png" };
+      const bashFile = { name: "bash.png" };
+      const promptTextarea = { value: "new draft" };
+      let pendingImages = [{ file: currentFile, url: "blob:current" }];
+      const persistStoredComposerDraft = () => {};
+      const renderAttachments = () => {};
+      const resizePromptTextarea = () => {};
+      globalThis.URL = { createObjectURL: (file) => `blob:${file.name}` };
+      eval(#{(restore_source + "\nglobalThis.restoreInput = restoreSubmittedComposerInput;").to_json});
+
+      globalThis.restoreInput("ordinary prompt", [promptFile]);
+      globalThis.restoreInput("!failed", [bashFile]);
+      const promptThenBash = { text: promptTextarea.value, files: pendingImages.map((entry) => entry.file.name) };
+
+      promptTextarea.value = "new draft";
+      pendingImages = [{ file: currentFile, url: "blob:current" }];
+      globalThis.restoreInput("!failed", [bashFile]);
+      globalThis.restoreInput("ordinary prompt", [promptFile]);
+      console.log(JSON.stringify({
+        promptThenBash,
+        bashThenPrompt: { text: promptTextarea.value, files: pendingImages.map((entry) => entry.file.name) }
+      }));
+    JS
+
+    assert_equal "!failed\nordinary prompt\nnew draft", results.dig("promptThenBash", "text")
+    assert_equal ["current.png", "prompt.png", "bash.png"], results.dig("promptThenBash", "files")
+    assert_equal "ordinary prompt\n!failed\nnew draft", results.dig("bashThenPrompt", "text")
+    assert_equal ["current.png", "bash.png", "prompt.png"], results.dig("bashThenPrompt", "files")
+  end
+
   def test_abort_failure_only_restores_the_same_session_while_stopping
     app_source = File.read(File.join(ASSETS, "app.js"))
     abort_source = app_source.match(/async function submitAbort\(event\).*?(?=\nfunction confirmOrStopRunningTask)/m).to_s
@@ -435,6 +679,7 @@ class FrontendLifecycleJsTest < Minitest::Test
         composerState.dataset.state = state;
         if (state === "stopping") stoppingSessionPaths.add(currentSessionPath());
       };
+      const showCurrentActiveTask = () => setComposerState("running");
       const showStatus = (message) => statuses.push(message);
       const showSessionSwitching = () => {};
       const hideSessionSwitching = () => {};

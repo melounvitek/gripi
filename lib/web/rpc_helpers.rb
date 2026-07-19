@@ -76,6 +76,8 @@ module Web
       headers "Retry-After" => "1"
       content_type :json
       halt JSON.generate(error: "Pi RPC client is restarting")
+    rescue PiRpcClient::BashRequestFailed => error
+      { "id" => error.bash_id, "type" => "response", "command" => "bash", "success" => false, "error" => error.message }
     rescue PiRpcClient::RequestTimeout => error
       status 504
       content_type :json

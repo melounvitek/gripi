@@ -277,6 +277,50 @@ module Web
       format_time(message.timestamp) if message.timestamp
     end
 
+    def persisted_active_bash_message(active_bash, messages)
+      return unless active_bash
+
+      summary = "$ #{display_home_path(active_bash[:command] || active_bash["command"])}"
+      started_at = active_bash[:started_at] || active_bash["started_at"]
+      Array(messages).reverse_each.find do |message|
+        message.role == "bashExecution" && message.summary == summary && message.timestamp && started_at && message.timestamp.to_f >= started_at.to_f
+      end
+    end
+
+    def completed_bash_event_persisted?(event, messages)
+      return false unless event["type"] == "bash_end"
+
+      result = event["result"]
+      return false unless result.is_a?(Hash)
+
+      started_at = event["startedAt"]
+      return false unless started_at.is_a?(Numeric)
+
+      summary = "$ #{display_home_path(event["command"])}"
+      started_at /= 1000.0
+      Array(messages).reverse_each.any? do |message|
+        message.role == "bashExecution" &&
+          message.summary == summary &&
+          message.text == result["output"].to_s &&
+          message.bash_exit_code == result["exitCode"] &&
+          message.bash_cancelled == (result["cancelled"] == true) &&
+          message.bash_truncated == (result["truncated"] == true) &&
+          message.bash_excluded_from_context == (event["excludeFromContext"] == true) &&
+          message.bash_started_at && message.bash_started_at.to_f >= started_at
+      end
+    end
+
+    def partition_completed_bash_events(events, messages)
+      persisted = []
+      remaining = Array(events).reject do |event|
+        next false unless completed_bash_event_persisted?(event, messages)
+
+        persisted << event["bashId"]
+        true
+      end
+      [remaining, persisted]
+    end
+
     def bash_execution_status_items(message)
       items = []
       items << "excluded from model context" if message.bash_excluded_from_context

@@ -472,8 +472,11 @@ class PiRpcClientTest < Minitest::Test
     client.bash("pwd")
     client.bash("git status", exclude_from_context: true)
 
-    assert_equal({ "id" => "bash-1", "type" => "bash", "command" => "pwd" }, commands[0])
-    assert_equal({ "id" => "bash-2", "type" => "bash", "command" => "git status", "excludeFromContext" => true }, commands[1])
+    assert_match(/\Abash-[0-9a-f]{32}\z/, commands[0].fetch("id"))
+    assert_match(/\Abash-[0-9a-f]{32}\z/, commands[1].fetch("id"))
+    refute_equal commands[0].fetch("id"), commands[1].fetch("id")
+    assert_equal({ "type" => "bash", "command" => "pwd" }, commands[0].reject { |key, _value| key == "id" })
+    assert_equal({ "type" => "bash", "command" => "git status", "excludeFromContext" => true }, commands[1].reject { |key, _value| key == "id" })
   ensure
     response_reader&.close
     response_writer&.close
@@ -493,6 +496,41 @@ class PiRpcClientTest < Minitest::Test
     assert_equal "done", Timeout.timeout(1) { bash_thread.value }.dig("data", "output")
   ensure
     bash_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_active_bash_is_exposed_only_after_its_command_is_written
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader)
+    write_mutex = client.instance_variable_get(:@write_mutex)
+    write_mutex.lock
+    write_mutex_held = true
+
+    bash_thread = Thread.new { client.bash("sleep 1") }
+    Timeout.timeout(1) { sleep 0.001 until client.busy? }
+    assert_nil client.active_bash_command
+
+    write_mutex.unlock
+    write_mutex_held = false
+    bash_command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
+    Timeout.timeout(1) { sleep 0.001 until client.active_bash_command }
+    abort_thread = Thread.new { client.abort_bash }
+    abort_command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
+
+    assert_equal "bash", bash_command.fetch("type")
+    assert_equal "abort_bash", abort_command.fetch("type")
+    response_writer.puts JSON.generate(id: abort_command.fetch("id"), type: "response", command: "abort_bash", success: true)
+    response_writer.puts JSON.generate(id: bash_command.fetch("id"), type: "response", command: "bash", success: true, data: { output: "", exitCode: 0, cancelled: true })
+    assert_equal true, Timeout.timeout(1) { abort_thread.value }.fetch("success")
+    assert_equal true, Timeout.timeout(1) { bash_thread.value }.fetch("success")
+  ensure
+    write_mutex&.unlock if write_mutex_held
+    bash_thread&.kill
+    abort_thread&.kill
     command_reader&.close
     command_writer&.close
     response_reader&.close
@@ -531,7 +569,8 @@ class PiRpcClientTest < Minitest::Test
     assert_equal now, client.active_bash_started_at
     assert client.busy?
     refute client.agent_running?
-    assert_equal({ command: "sleep 1", exclude_from_context: true, started_at: now }, client.live_snapshot.fetch(:active_bash))
+    bash_id = command.fetch("id")
+    assert_equal({ bash_id: bash_id, command: "sleep 1", exclude_from_context: true, started_at: now }, client.live_snapshot.fetch(:active_bash))
     error = assert_raises(PiRpcClient::BashAlreadyRunning) { client.bash("pwd") }
     assert_includes error.message, "already running"
     refute IO.select([command_reader], nil, nil, 0.05), "second bash command must not be written"
@@ -544,8 +583,8 @@ class PiRpcClientTest < Minitest::Test
     refute client.busy?
     refute client.live_snapshot.key?(:active_bash)
     assert_equal [
-      { "type" => "bash_start", "command" => "sleep 1", "excludeFromContext" => true, "gatewayTimestamp" => 1_000_000 },
-      { "type" => "bash_end", "command" => "sleep 1", "excludeFromContext" => true, "result" => { "output" => "done", "exitCode" => 0 }, "gatewayTimestamp" => 1_000_000 }
+      { "type" => "bash_start", "bashId" => bash_id, "command" => "sleep 1", "excludeFromContext" => true, "gatewayTimestamp" => 1_000_000 },
+      { "type" => "bash_end", "bashId" => bash_id, "command" => "sleep 1", "excludeFromContext" => true, "result" => { "output" => "done", "exitCode" => 0 }, "startedAt" => 1_000_000, "gatewayTimestamp" => 1_000_000 }
     ], client.events_after(0).fetch(:events)
   ensure
     bash_thread&.kill
@@ -555,10 +594,73 @@ class PiRpcClientTest < Minitest::Test
     response_writer&.close
   end
 
+  def test_snapshots_deferred_completed_bash_until_the_overlapping_agent_settles
+    now = Time.at(1_000)
+    response_reader, response_writer = IO.pipe
+    bash_ids = []
+    input = Object.new
+    input.define_singleton_method(:write) do |payload|
+      command = JSON.parse(payload)
+      bash_ids << command.fetch("id")
+      now += 1
+      response_writer.puts JSON.generate(id: command.fetch("id"), type: "response", command: "bash", success: true, data: { output: "done", exitCode: 0 })
+      payload.bytesize
+    end
+    input.define_singleton_method(:flush) {}
+    client = PiRpcClient.new(stdin: input, stdout: response_reader, clock: -> { now })
+    client.send(:store_response, { "type" => "agent_start" }, serialized_bytesize: 22)
+
+    client.bash("pwd")
+
+    completed = client.live_snapshot.fetch(:completed_bash_events)
+    assert_equal 1, completed.length
+    assert_equal bash_ids.first, completed.first.fetch("bashId")
+    assert_equal 1_000_000, completed.first.fetch("startedAt")
+    assert_equal 1_001_000, completed.first.fetch("gatewayTimestamp")
+    assert_equal "done", completed.first.dig("result", "output")
+
+    client.send(:store_response, { "type" => "agent_settled" }, serialized_bytesize: 24)
+    refute client.live_snapshot.key?(:completed_bash_events)
+  ensure
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_bounds_deferred_completed_bash_events_during_an_overlapping_agent_run
+    response_reader, response_writer = IO.pipe
+    bash_ids = []
+    input = Object.new
+    input.define_singleton_method(:write) do |payload|
+      command = JSON.parse(payload)
+      bash_ids << command.fetch("id")
+      response_writer.puts JSON.generate(id: command.fetch("id"), type: "response", command: "bash", success: true, data: { output: command.fetch("command"), exitCode: 0 })
+      payload.bytesize
+    end
+    input.define_singleton_method(:flush) {}
+    client = PiRpcClient.new(stdin: input, stdout: response_reader)
+    client.send(:store_response, { "type" => "agent_start" }, serialized_bytesize: 22)
+
+    17.times { |index| client.bash("command #{index}") }
+
+    completed = client.live_snapshot.fetch(:completed_bash_events)
+    assert_equal 16, completed.length
+    assert_equal bash_ids.drop(1), completed.map { |event| event.fetch("bashId") }
+  ensure
+    response_reader&.close
+    response_writer&.close
+  end
+
   def test_bash_failure_is_replayed_and_clears_active_state
-    input = StringIO.new
-    output = StringIO.new(JSON.generate({ id: "bash-1", type: "response", command: "bash", success: false, error: "Command failed" }) + "\n")
-    client = PiRpcClient.new(stdin: input, stdout: output)
+    response_reader, response_writer = IO.pipe
+    bash_id = nil
+    input = Object.new
+    input.define_singleton_method(:write) do |payload|
+      bash_id = JSON.parse(payload).fetch("id")
+      response_writer.puts JSON.generate(id: bash_id, type: "response", command: "bash", success: false, error: "Command failed")
+      payload.bytesize
+    end
+    input.define_singleton_method(:flush) {}
+    client = PiRpcClient.new(stdin: input, stdout: response_reader, clock: -> { Time.at(1_000) })
 
     response = client.bash("false")
 
@@ -567,9 +669,27 @@ class PiRpcClientTest < Minitest::Test
     assert_nil client.active_bash_command
     event = client.events_after(0).fetch(:events).last
     assert_equal "bash_error", event.fetch("type")
+    assert_equal bash_id, event.fetch("bashId")
     assert_equal "false", event.fetch("command")
     assert_equal false, event.fetch("excludeFromContext")
     assert_equal "Command failed", event.fetch("error")
+    assert_equal 1_000_000, event.fetch("startedAt")
+  ensure
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_bash_write_failure_does_not_emit_an_accepted_lifecycle
+    input = Object.new
+    input.define_singleton_method(:write) { |_payload| raise Errno::EPIPE }
+    input.define_singleton_method(:flush) {}
+    client = PiRpcClient.new(stdin: input, stdout: StringIO.new)
+
+    error = assert_raises(IOError) { client.bash("pwd") }
+
+    assert_includes error.message, "before accepting"
+    refute client.busy?
+    assert_empty client.events_after(0).fetch(:events)
   end
 
   def test_process_exit_terminates_bash_wait_and_clears_active_state
@@ -579,10 +699,11 @@ class PiRpcClientTest < Minitest::Test
 
     bash_thread = Thread.new { client.bash("sleep 1") }
     bash_thread.report_on_exception = false
-    Timeout.timeout(1) { command_reader.gets }
+    command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
     response_writer.close
 
-    error = assert_raises(IOError) { Timeout.timeout(1) { bash_thread.value } }
+    error = assert_raises(PiRpcClient::BashRequestFailed) { Timeout.timeout(1) { bash_thread.value } }
+    assert_equal command.fetch("id"), error.bash_id
     assert_includes error.message, "process exited"
     refute client.busy?
     assert_nil client.active_bash_command

@@ -1,4 +1,5 @@
 import { ESCAPE_STOP_CONFIRMATION_WINDOW_MS, STALE_SESSION_REFRESH_AFTER_MS } from "./constants.js";
+import { parseNativeBash } from "./bash.js";
 import {
   compactNumber,
   eventErrorText,
@@ -84,6 +85,8 @@ let sessionStatusBar = null;
 let reconnectBanner = null;
 let reconnectButton = null;
 let liveAgentRunning = false;
+let liveBash = null;
+const completedBashIds = new Set();
 let liveBusySince = null;
 let liveErrorSeen = false;
 let liveStatusModel = null;
@@ -96,6 +99,7 @@ let modelSettingsOperationGeneration = 0;
 let thinkingCyclePending = false;
 let pendingImages = [];
 let escapeStopConfirmationExpiresAt = 0;
+let escapeStopConfirmationTimer = null;
 const stoppingSessionPaths = new Set();
 let eventPollTimer = null;
 let eventPollInFlight = false;
@@ -725,11 +729,16 @@ async function refreshSessionStatus(generation = sessionViewGeneration) {
 }
 
 function updateWaitingForOutputStatus() {
-  if (!composerState || composerState.dataset.state !== "running" || !waitingForOutputSince) return;
-  if (Date.now() <= escapeStopConfirmationExpiresAt) {
+  if (!composerState) return;
+  if (["running", "bash"].includes(composerState.dataset.state) && Date.now() <= escapeStopConfirmationExpiresAt) {
     composerState.textContent = "Press ESC again to stop current task";
     return;
   }
+  if (composerState.dataset.state === "bash") {
+    composerState.textContent = "Shell command running…";
+    return;
+  }
+  if (composerState.dataset.state !== "running" || !waitingForOutputSince) return;
 
   const elapsed = Date.now() - waitingForOutputSince;
   composerState.textContent = `${waitingForOutputLabel} ${formatWaitDuration(elapsed)}`;
@@ -752,6 +761,17 @@ function sessionSyncBlocked() {
   return ["external_follow", "conflict"].includes(liveOutput?.dataset.sessionSyncMode);
 }
 
+function showCurrentActiveTask(idleState = "done", idleLabel = "Done") {
+  const compacting = liveOutput?.dataset.composerCompacting === "true";
+  if (liveAgentRunning || compacting) {
+    setComposerState("running", compacting ? "Compacting…" : "Pi is running…", { since: liveBusySince });
+  } else if (liveBash) {
+    setComposerState("bash", "Shell command running…");
+  } else {
+    setComposerState(idleState, idleLabel);
+  }
+}
+
 function setComposerState(state, label = "", { since = null, focus = true } = {}) {
   const previousState = composerState?.dataset.state;
   const sessionPath = currentSessionPath();
@@ -760,19 +780,24 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   if (!["running", "stopping"].includes(state)) stoppingSessionPaths.delete(sessionPath);
   if (state === "running") waitingForOutputLabel = label || "Pi is running…";
   if (state === "running" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());
-  if (state !== "running") escapeStopConfirmationExpiresAt = 0;
+  if (!["running", "bash"].includes(state)) {
+    escapeStopConfirmationExpiresAt = 0;
+    clearTimeout(escapeStopConfirmationTimer);
+    escapeStopConfirmationTimer = null;
+  }
   if (!["running", "sending"].includes(state)) stopWaitingForOutput();
   if (composerState) {
     composerState.dataset.state = state;
-    composerState.textContent = ["running", "sending", "stopping", "error"].includes(state) ? label : "";
+    composerState.textContent = ["running", "bash", "sending", "stopping", "error"].includes(state) ? label : "";
     if (state === "running") updateWaitingForOutputStatus();
   }
+  const taskBusy = ["running", "bash", "sending", "stopping"].includes(state);
   const agentBusy = ["running", "sending", "stopping"].includes(state);
   const submitting = state === "sending";
   const stopping = state === "stopping";
   if (!["running", "sending"].includes(state)) streamingBehaviorSelection = "steer";
   updateStreamingSendControl(state);
-  if (abortButton) abortButton.disabled = !agentBusy || stopping;
+  if (abortButton) abortButton.disabled = !taskBusy || stopping;
   if (sendButton) {
     sendButton.hidden = submitting || stopping;
     sendButton.disabled = stopping || sessionSyncBlocked();
@@ -782,9 +807,9 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
     }
   }
   if (composerStopButton) {
-    composerStopButton.hidden = !agentBusy;
-    composerStopButton.disabled = !agentBusy || stopping;
-    composerStopButton.classList.toggle("is-visible", agentBusy);
+    composerStopButton.hidden = !taskBusy;
+    composerStopButton.disabled = !taskBusy || stopping;
+    composerStopButton.classList.toggle("is-visible", taskBusy);
   }
   if (promptTextarea) promptTextarea.disabled = submitting || stopping || sessionSyncBlocked();
   if (focus && state !== previousState) syncComposerFocus(state);
@@ -1199,11 +1224,48 @@ function renderErrorEvent(event) {
   liveErrorSeen = true;
   liveMessageRenderer.appendMessage("error", errorText, true, true, eventTimestamp(event));
   showStatus(errorText, true);
-  setComposerState("error", errorText);
+  showCurrentActiveTask("error", errorText);
   return true;
 }
 
+function startLiveBash(event) {
+  if (completedBashIds.has(event.bashId)) return;
+  const startedAt = eventTimeMilliseconds(event);
+  liveBash = {
+    id: event.bashId,
+    command: event.command,
+    excludeFromContext: event.excludeFromContext === true,
+    startedAt
+  };
+  liveMessageRenderer.renderBashEvent(event);
+  if (!liveAgentRunning && liveOutput?.dataset.composerCompacting !== "true" && !["sending", "stopping"].includes(composerState?.dataset.state)) {
+    setComposerState("bash", "Shell command running…");
+  }
+  resetEventPollBackoff();
+}
+
+function finishLiveBash(event) {
+  if (completedBashIds.has(event.bashId)) return;
+  completedBashIds.add(event.bashId);
+  liveMessageRenderer.renderBashEvent(event);
+  stoppingSessionPaths.delete(currentSessionPath());
+  if (liveBash?.id === event.bashId) liveBash = null;
+  if (composerState?.dataset.state !== "sending") {
+    showCurrentActiveTask("done", event.type === "bash_error" ? "Shell command failed" : "Done");
+  }
+}
+
 function renderEvent(event) {
+  if (event.type === "bash_start") {
+    startLiveBash(event);
+    return;
+  }
+
+  if (["bash_end", "bash_error"].includes(event.type)) {
+    finishLiveBash(event);
+    return;
+  }
+
   if (event.type === "agent_start") {
     liveAgentRunning = true;
     conversationController.setAgentRunning(true);
@@ -1244,11 +1306,8 @@ function renderEvent(event) {
     if (liveOutput) liveOutput.dataset.composerCompacting = "false";
     liveMessageRenderer.renderCompactionEvent(event);
     showStatus("Compaction finished");
-    if (liveAgentRunning) setComposerState("running", "Pi is running…", { since: liveBusySince });
-    else {
-      liveBusySince = null;
-      setComposerState("done", "Done");
-    }
+    if (!liveAgentRunning) liveBusySince = null;
+    showCurrentActiveTask();
     refreshSessionStatus().catch(() => {});
     sidebarController.refresh().catch(() => {});
     return;
@@ -1309,11 +1368,8 @@ function renderEvent(event) {
       if (compactionFailed) renderErrorEvent(event);
       else if (!event.aborted) liveMessageRenderer.renderCompactionEvent(event);
       if (!compactionFailed) {
-        if (liveAgentRunning) setComposerState("running", "Pi is running…", { since: liveBusySince });
-        else {
-          liveBusySince = null;
-          setComposerState("done", event.aborted ? "Compaction aborted" : "Done");
-        }
+        if (!liveAgentRunning) liveBusySince = null;
+        showCurrentActiveTask("done", event.aborted ? "Compaction aborted" : "Done");
       }
       if (!event.aborted && !compactionFailed) refreshSessionStatus().catch(() => {});
       sidebarController.refresh().catch(() => {});
@@ -1328,7 +1384,9 @@ function renderEvent(event) {
     }
     if (!liveErrorSeen) {
       if (liveMessageRenderer.liveAssistantSeen) showStatus("Done");
-      if (!liveAgentRunning) setComposerState("done", "Done");
+      if (!liveAgentRunning) showCurrentActiveTask();
+    } else if (!liveAgentRunning && liveBash) {
+      showCurrentActiveTask();
     }
     liveMessageRenderer.clearLiveAssistantStreaming();
     liveMessageRenderer.resetLiveAssistantTracking();
@@ -1346,7 +1404,9 @@ function renderEvent(event) {
     }
     if (!liveErrorSeen) {
       if (liveMessageRenderer.liveAssistantSeen) showStatus("Done");
-      setComposerState("done", "Done");
+      showCurrentActiveTask();
+    } else if (liveBash) {
+      showCurrentActiveTask();
     }
     liveMessageRenderer.clearLiveAssistantStreaming();
     liveMessageRenderer.resetLiveAssistantTracking();
@@ -1557,10 +1617,82 @@ async function pollEvents() {
   }
 }
 
+function restoreSubmittedComposerInput(message, imageFiles) {
+  if (promptTextarea && message) {
+    promptTextarea.value = promptTextarea.value ? `${message}\n${promptTextarea.value}` : message;
+    persistStoredComposerDraft();
+  }
+  imageFiles.forEach((file) => pendingImages.push({ file, url: URL.createObjectURL(file) }));
+  renderAttachments();
+  resizePromptTextarea();
+}
+
+async function submitBashPrompt(rawMessage, bashCommand) {
+  const generation = sessionViewGeneration;
+  const switchGeneration = sessionSwitchGeneration;
+  const submittedSession = promptSessionInput?.value;
+  const submittedImageFiles = pendingImages.map((entry) => entry.file);
+  const submittedViewChanged = () => generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value;
+  const formData = new FormData(promptForm);
+  addSessionViewFormParams(formData);
+  formData.set("message", rawMessage);
+  formData.set("bash_mode", "bash");
+  submittedImageFiles.forEach((file) => formData.append("images[]", file, file.name || "image"));
+
+  promptTextarea.value = "";
+  clearStoredComposerDraft(submittedSession);
+  clearAttachments();
+  commandList?.classList.remove("is-visible");
+  commandList?.removeAttribute("open");
+  resetCommandSelection();
+  resizePromptTextarea();
+  resetEventPollBackoff();
+  scheduleNextEventPoll(0);
+
+  const restoreSubmittedBashInput = () => {
+    if (submittedViewChanged()) return;
+    restoreSubmittedComposerInput(rawMessage, submittedImageFiles);
+  };
+
+  try {
+    const response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
+    const payload = await response.json().catch(() => null);
+    if (submittedViewChanged()) {
+      sidebarController.requestRefresh();
+      return;
+    }
+    if (!response.ok || !payload?.bash_id) {
+      restoreSubmittedBashInput();
+      showStatus(payload?.error || "Shell command failed to start", true);
+      return;
+    }
+
+    const completionEvent = {
+      type: payload.error ? "bash_error" : "bash_end",
+      bashId: payload.bash_id,
+      command: bashCommand.command,
+      excludeFromContext: bashCommand.excludeFromContext,
+      result: payload.data || {},
+      error: payload.error,
+      gatewayTimestamp: Date.now()
+    };
+    finishLiveBash(completionEvent);
+  } catch (_error) {
+    restoreSubmittedBashInput();
+    showStatus("Shell command failed to start", true);
+  } finally {
+    scheduleNextEventPoll(0);
+  }
+}
+
 async function submitPrompt(event) {
   event.preventDefault();
 
   if (promptTextarea?.disabled) return;
+
+  const rawMessage = promptTextarea.value;
+  const bashCommand = parseNativeBash(rawMessage);
+  if (bashCommand) return submitBashPrompt(rawMessage, bashCommand);
 
   const streamingBehavior = submittedStreamingBehavior();
   const queuedPrompt = !!streamingBehavior;
@@ -1579,7 +1711,7 @@ async function submitPrompt(event) {
     sidebarController.requestRefresh();
     return true;
   };
-  const message = promptTextarea.value.trim();
+  const message = rawMessage.trim();
   const submittedImageFiles = pendingImages.map((entry) => entry.file);
   if (!message && submittedImageFiles.length === 0) return;
   const submissionGeneration = ++promptSubmissionGeneration;
@@ -1589,6 +1721,7 @@ async function submitPrompt(event) {
   const formData = new FormData(promptForm);
   addSessionViewFormParams(formData);
   formData.set("message", message);
+  formData.set("bash_mode", "prompt");
   formData.delete("streaming_behavior");
   submittedImageFiles.forEach((file) => formData.append("images[]", file, file.name || "image"));
   if (streamingBehavior) formData.set("streaming_behavior", streamingBehavior);
@@ -1628,19 +1761,13 @@ async function submitPrompt(event) {
   showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering Pi…" : "Sending…", true);
   if (cloneCommand || newCommand) showSessionSwitching();
 
-  const restoreSubmittedComposerInput = () => {
-    if (promptTextarea && message) {
-      promptTextarea.value = message;
-      persistStoredComposerDraft();
-    }
-    pendingImages = submittedImageFiles.map((file) => ({ file, url: URL.createObjectURL(file) }));
-    renderAttachments();
-    resizePromptTextarea();
+  const restoreSubmittedPromptInput = () => {
+    restoreSubmittedComposerInput(message, submittedImageFiles);
     if (cloneCommand || newCommand) hideSessionSwitching();
   };
 
   const showPromptFailure = (errorMessage) => {
-    restoreSubmittedComposerInput();
+    restoreSubmittedPromptInput();
     if (queuedPrompt) {
       const currentState = composerState?.dataset.state;
       if (["running", "sending"].includes(currentState)) selectStreamingBehavior(streamingBehavior, { focus: false });
@@ -1649,7 +1776,8 @@ async function submitPrompt(event) {
       return;
     }
     liveMessageRenderer.markOptimisticUserMessageFailed(message);
-    setComposerState("error", errorMessage);
+    if (liveBash) showCurrentActiveTask("error", errorMessage);
+    else setComposerState("error", errorMessage);
     showStatus(errorMessage, true);
     liveMessageRenderer.appendMessage("assistant", `Prompt failed to send:\n\n${errorMessage}`, true, true, new Date(), { finalAssistantResponse: true, error: true });
   };
@@ -1661,7 +1789,7 @@ async function submitPrompt(event) {
     if (stopHandlingChangedSubmittedView()) return;
     if (submittedPromptSuperseded()) return;
     if (nameCommand) {
-      restoreSubmittedComposerInput();
+      restoreSubmittedPromptInput();
       setComposerState("error", "Session name could not be changed");
       showStatus("Session name could not be changed", true);
       return;
@@ -1677,13 +1805,13 @@ async function submitPrompt(event) {
     if (stopHandlingChangedSubmittedView()) return;
     if (submittedPromptSuperseded()) return;
     if (cloneCommand && payload?.cancelled) {
-      restoreSubmittedComposerInput();
+      restoreSubmittedPromptInput();
       setComposerState("idle");
       showStatus("Clone cancelled", true);
       return;
     }
     if (nameCommand) {
-      restoreSubmittedComposerInput();
+      restoreSubmittedPromptInput();
       setComposerState("error", payload?.error || "Session name could not be changed");
       showStatus(payload?.error || "Session name could not be changed", true);
       return;
@@ -1694,14 +1822,14 @@ async function submitPrompt(event) {
     if (stopHandlingChangedSubmittedView()) return;
     if (submittedPromptSuperseded()) return;
     if (cloneCommand && payload?.cancelled) {
-      restoreSubmittedComposerInput();
+      restoreSubmittedPromptInput();
       setComposerState("idle");
       showStatus("Clone cancelled", true);
       return;
     }
     if (payload?.command === "name") {
       if (payload.error) {
-        restoreSubmittedComposerInput();
+        restoreSubmittedPromptInput();
         setComposerState("error", payload.error);
         showStatus(payload.error, true);
         return;
@@ -1752,6 +1880,7 @@ async function submitPrompt(event) {
       setComposerState("done", "Done");
       showStatus("Done");
     } else {
+      liveAgentRunning = true;
       setComposerState("running", liveOutput?.dataset.composerCompacting === "true" ? "Compacting…" : "Pi is running…");
       if (payload?.queued_after_compaction) showStatus("Queued for after compaction", true);
       else if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
@@ -1759,6 +1888,7 @@ async function submitPrompt(event) {
     }
   } else {
     clearStoredComposerDraft(submittedSession);
+    liveAgentRunning = true;
     setComposerState("running", "Pi is running…");
   }
   conversationController.scrollToBottom();
@@ -1782,7 +1912,7 @@ async function submitAbort(event) {
   } catch (_error) {
     stoppingSessionPaths.delete(submittedSession);
     if (submittedSession === currentSessionPath() && composerState?.dataset.state === "stopping") {
-      setComposerState("running", liveOutput?.dataset.composerCompacting === "true" ? "Compacting…" : "Pi is running…", { since: liveBusySince });
+      showCurrentActiveTask();
       showStatus("Stop failed", true);
     }
   } finally {
@@ -1794,7 +1924,7 @@ async function submitAbort(event) {
 }
 
 function confirmOrStopRunningTask(event) {
-  if (composerState?.dataset.state !== "running") return false;
+  if (!["running", "bash"].includes(composerState?.dataset.state)) return false;
 
   event.preventDefault();
   if (event.repeat) return true;
@@ -1808,6 +1938,8 @@ function confirmOrStopRunningTask(event) {
   }
 
   escapeStopConfirmationExpiresAt = now + ESCAPE_STOP_CONFIRMATION_WINDOW_MS;
+  clearTimeout(escapeStopConfirmationTimer);
+  escapeStopConfirmationTimer = setTimeout(updateWaitingForOutputStatus, ESCAPE_STOP_CONFIRMATION_WINDOW_MS + 1);
   updateWaitingForOutputStatus();
   showStatus("Press ESC again to stop current task", true);
   return true;
@@ -2125,9 +2257,14 @@ function resetSessionViewState() {
   liveMessageRenderer.resetLiveAssistantTracking();
   liveMessageRenderer.resetLiveCompactionTracking();
   liveAgentRunning = false;
+  liveBash = null;
+  completedBashIds.clear();
   liveBusySince = null;
   liveErrorSeen = false;
   resetEventPollBackoff();
+  clearTimeout(escapeStopConfirmationTimer);
+  escapeStopConfirmationTimer = null;
+  escapeStopConfirmationExpiresAt = 0;
   stopWaitingForOutput();
   lastEventSeq = 0;
   hideReconnectBanner();
@@ -2876,8 +3013,18 @@ function initializeSessionView({ focus = true, scrollSnapshot = null } = {}) {
     liveBusySince = Number(liveOutput.dataset.composerBusySince || 0) || null;
     const initialComposerLabel = initialComposerCompacting ? "Compacting…" : "Pi is running…";
     liveAgentRunning = liveOutput.dataset.agentRunning === "true";
-    if (initialComposerState === "running") {
+    liveMessageRenderer.restorePersistedBashExecutions().forEach((bashId) => completedBashIds.add(bashId));
+    liveMessageRenderer.restoreCompletedBashExecutions().forEach((event) => completedBashIds.add(event.bashId));
+    const activeBashEvent = liveMessageRenderer.restoreActiveBash();
+    liveBash = activeBashEvent ? {
+      id: activeBashEvent.bashId,
+      command: activeBashEvent.command,
+      excludeFromContext: activeBashEvent.excludeFromContext,
+      startedAt: eventTimeMilliseconds(activeBashEvent)
+    } : null;
+    if (["running", "bash"].includes(initialComposerState)) {
       if (stoppingSessionPaths.has(currentSessionPath())) setComposerState("stopping", "Stopping current task…", { focus: false });
+      else if (initialComposerState === "bash") setComposerState("bash", "Shell command running…", { focus: false });
       else setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });
     } else {
       stoppingSessionPaths.delete(currentSessionPath());

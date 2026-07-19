@@ -217,9 +217,7 @@ module Web
       end
 
       def abort_rpc_client(client)
-        if client.respond_to?(:agent_running?) && client.agent_running?
-          client.abort
-        elsif client.respond_to?(:active_bash_command) && client.active_bash_command && client.respond_to?(:abort_bash)
+        if client.respond_to?(:active_bash_command) && client.active_bash_command && client.respond_to?(:abort_bash)
           client.abort_bash
         else
           client.abort
@@ -268,7 +266,7 @@ module Web
         images = prompt_images_from(params["images"])
         halt 400, "Message cannot be empty" if message.strip.empty? && images.empty?
 
-        bash_command = Prompts::BashCommand.parse(message)
+        bash_command = Prompts::BashCommand.parse(message) unless params["bash_mode"] == "prompt"
         if bash_command
           unless images.empty?
             status 400
@@ -282,17 +280,20 @@ module Web
           response = with_synchronized_bash_rpc_client(session_path) do |client|
             client.bash(bash_command.command, exclude_from_context: bash_command.exclude_from_context)
           end
-          halt_failed_rpc_prompt(response)
+          halt_failed_rpc_prompt(response) unless json_request?
           redirect_path = session_redirect_path(session_path)
           if json_request?
             content_type :json
-            next JSON.generate(
+            payload = {
               command: "bash",
+              bash_id: response["id"],
               data: response_data(response),
               exclude_from_context: bash_command.exclude_from_context,
               session: session_path,
               redirect: redirect_path
-            )
+            }
+            payload[:error] = response["error"] if response["success"] == false
+            next JSON.generate(payload)
           end
           redirect redirect_path
         end

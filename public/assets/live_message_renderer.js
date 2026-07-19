@@ -17,6 +17,8 @@ export class LiveMessageRenderer {
     this.terminalRenderStates = new WeakMap();
     this.terminalBindingGeneration = 0;
     this.terminalHydration = Promise.resolve();
+    this.liveBashExecutions = new Map();
+    this.completedBashExecutionIds = new Set();
     this.resetLiveAssistantTracking();
   }
 
@@ -27,6 +29,8 @@ export class LiveMessageRenderer {
     this.conversationScroll = this.conversationController.element;
     this.pendingMessages = this.document.querySelector("[data-pending-messages]");
     this.lastLiveCompaction = null;
+    this.liveBashExecutions = new Map();
+    this.completedBashExecutionIds = new Set();
     this.resetLiveAssistantTracking();
     this.terminalHydration = this.hydrateTerminalOutputs(this.conversationScroll) || Promise.resolve();
     try {
@@ -173,11 +177,12 @@ export class LiveMessageRenderer {
     const roleKey = messageRoleKey(roleName);
 
     const article = this.document.createElement("article");
-    article.className = `message message--${roleKey} message--compact${options.compaction === true ? " message--compaction" : ""}${options.toolName && roleName === "assistant" ? " message--tool-call" : ""}${options.toolTranscript ? " message--tool-transcript" : ""}${options.error === true ? " message--tool-error" : ""}${live ? " message--live" : ""}`;
+    article.className = `message message--${roleKey} message--compact${options.compaction === true ? " message--compaction" : ""}${options.toolName && roleName === "assistant" ? " message--tool-call" : ""}${options.toolTranscript ? " message--tool-transcript" : ""}${options.bashExecution ? " message--bash-execution" : ""}${options.bashExcluded ? " message--bash-excluded" : ""}${options.bashCancelled ? " message--bash-cancelled" : ""}${options.bashTruncated ? " message--bash-truncated" : ""}${options.error === true ? " message--tool-error" : ""}${live ? " message--live" : ""}`;
     article.dataset.role = roleName;
     article.dataset.messageTimestamp = timestampKey;
     article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
     if (options.toolCallId) article.dataset.toolCallId = options.toolCallId;
+    if (options.bashId) article.dataset.bashId = options.bashId;
 
     const header = this.document.createElement("header");
     header.className = "message-header";
@@ -204,6 +209,14 @@ export class LiveMessageRenderer {
       action.className = "compaction-details-action";
       action.setAttribute("aria-hidden", "true");
       summaryElement.append(action);
+    }
+    let status = null;
+    if (options.bashExecution) {
+      status = this.document.createElement("div");
+      status.className = "bash-execution-status";
+      status.setAttribute("role", "status");
+      status.setAttribute("aria-label", "Shell command status");
+      this.renderBashStatus(status, options.statusItems);
     }
     let output = null;
     let body;
@@ -241,16 +254,145 @@ export class LiveMessageRenderer {
       tailTemplate.dataset.toolOutputTail = "";
       output.append(control, body, fullTemplate, tailTemplate);
       this.renderToolTranscriptBody(body, text, options.toolName, { preview: options.toolPreview === true });
-      details.append(summaryElement, output);
+      details.append(summaryElement);
+      if (status) details.append(status);
+      details.append(output);
     }
 
-    const entry = { article, details, output, body, summaryText, compact: true, toolName: options.toolName || "" };
+    const entry = { article, details, output, body, summaryText, status, compact: true, toolName: options.toolName || "" };
     if (!compaction) this.renderSubagentPrompt(entry, options.toolPrompt);
     article.append(header, details);
     this.renderMessageImages(article, options.images);
     this.liveOutput.append(article);
     this.conversationController.afterLiveOutputChange(shouldScroll, live, true);
     return entry;
+  }
+
+  renderBashStatus(status, items = []) {
+    if (!status) return;
+    const labels = Array.isArray(items) ? items : [];
+    const elements = labels.map((label) => {
+      const item = this.document.createElement("span");
+      item.className = "bash-execution-status-item";
+      item.textContent = label;
+      return item;
+    });
+    status.replaceChildren(...elements);
+    status.hidden = elements.length === 0;
+  }
+
+  renderBashEvent(event) {
+    const bashId = event?.bashId || event?.bash_id;
+    if (!bashId || !["bash_start", "bash_end", "bash_error"].includes(event.type)) return null;
+    if (this.completedBashExecutionIds.has(bashId)) return this.liveBashExecutions.get(bashId) || null;
+
+    const timestamp = eventTimestamp(event);
+    if (event.type !== "bash_start") this.completedBashExecutionIds.add(bashId);
+    const result = event.result && typeof event.result === "object" ? event.result : {};
+    const command = String(event.command || "");
+    const excluded = event.excludeFromContext === true || event.exclude_from_context === true;
+    const failed = event.type === "bash_error" || (Number.isInteger(result.exitCode) && result.exitCode !== 0);
+    const cancelled = result.cancelled === true;
+    const truncated = result.truncated === true;
+    const statusItems = [];
+    if (excluded) statusItems.push("excluded from model context");
+    if (event.type === "bash_start") statusItems.push("running");
+    if (event.type === "bash_end" && Number.isInteger(result.exitCode) && result.exitCode !== 0) statusItems.push(`exit ${result.exitCode}`);
+    if (cancelled) statusItems.push("cancelled");
+    if (truncated) statusItems.push("output truncated");
+    if (event.type === "bash_error") statusItems.push("failed");
+    const output = event.type === "bash_error" ? String(event.error || "Bash command failed") : String(result.output || "");
+    const summary = `$ ${this.parser.displayHomePath(command)}`;
+
+    let entry = this.liveBashExecutions.get(bashId);
+    const created = !entry;
+    if (!entry) {
+      entry = this.appendCompactMessage("bashExecution", summary, output, true, false, timestamp, {
+        bashExecution: true,
+        bashId,
+        bashExcluded: excluded,
+        bashCancelled: cancelled,
+        bashTruncated: truncated,
+        error: failed,
+        statusItems,
+        toolName: "bash",
+        toolTranscript: true
+      });
+      if (!entry) return null;
+      this.liveBashExecutions.set(bashId, entry);
+    }
+
+    entry.article.dataset.bashId = bashId;
+    entry.summaryText.textContent = summary;
+    entry.article.classList.add("message--bash-execution", "message--tool-transcript");
+    entry.article.classList.toggle("message--bash-excluded", excluded);
+    entry.article.classList.toggle("message--bash-cancelled", cancelled);
+    entry.article.classList.toggle("message--bash-truncated", truncated);
+    entry.article.classList.toggle("message--tool-error", failed);
+    this.renderBashStatus(entry.status, statusItems);
+    if (!created) {
+      const shouldScroll = this.conversationController.followLiveOutput();
+      this.renderToolTranscriptBody(entry.body, output, "bash");
+      this.conversationController.afterLiveOutputChange(shouldScroll, true, true);
+    }
+    return entry;
+  }
+
+  restoreActiveBash() {
+    if (!this.liveOutput?.dataset.activeBash) return null;
+
+    const serialized = this.liveOutput.dataset.activeBash;
+    delete this.liveOutput.dataset.activeBash;
+    try {
+      const active = JSON.parse(serialized);
+      if (!active || typeof active !== "object" || !active.bash_id || typeof active.command !== "string") return null;
+      const startedAt = new Date(active.started_at).getTime();
+      const event = {
+        type: "bash_start",
+        bashId: active.bash_id,
+        command: active.command,
+        excludeFromContext: active.exclude_from_context === true,
+        ...(Number.isFinite(startedAt) ? { gatewayTimestamp: startedAt } : {})
+      };
+      this.renderBashEvent(event);
+      return event;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  restorePersistedBashExecutions() {
+    if (!this.liveOutput?.dataset.persistedBashExecutions) return [];
+
+    const serialized = this.liveOutput.dataset.persistedBashExecutions;
+    delete this.liveOutput.dataset.persistedBashExecutions;
+    try {
+      const bashIds = JSON.parse(serialized);
+      if (!Array.isArray(bashIds)) return [];
+      return bashIds.filter((bashId) => typeof bashId === "string" && bashId).map((bashId) => {
+        this.completedBashExecutionIds.add(bashId);
+        return bashId;
+      });
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  restoreCompletedBashExecutions() {
+    if (!this.liveOutput?.dataset.completedBashEvents) return [];
+
+    const serialized = this.liveOutput.dataset.completedBashEvents;
+    delete this.liveOutput.dataset.completedBashEvents;
+    try {
+      const events = JSON.parse(serialized);
+      if (!Array.isArray(events)) return [];
+      return events.filter((event) => event && ["bash_end", "bash_error"].includes(event.type) && event.bashId).map((event) => {
+        this.renderBashEvent(event);
+        return event;
+      });
+    } catch (_error) {
+      return [];
+    }
   }
 
   renderSubagentPrompt(entry, prompt) {
@@ -280,7 +422,10 @@ export class LiveMessageRenderer {
 
   renderToolTranscriptBody(body, text, toolName = "", options = {}) {
     const rawText = String(text || "");
-    if (!TERMINAL_OUTPUT_EXCLUDED_TOOLS.has(toolName) && hasTerminalControls(rawText)) {
+    const terminalOutput = !TERMINAL_OUTPUT_EXCLUDED_TOOLS.has(toolName) && hasTerminalControls(rawText);
+    const collapse = body.closest?.("[data-tool-output-collapse]");
+    if (toolName === "bash" && collapse) collapse.dataset.toolOutputCollapsible = String(terminalOutput);
+    if (terminalOutput) {
       this.queueTerminalTranscriptRender(body, rawText, toolName, options);
       return;
     }

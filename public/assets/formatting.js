@@ -90,7 +90,7 @@ export function messageTimestampKey(timestamp) {
 
 export function messageRoleKey(roleName) {
   if (["assistant", "user", "error"].includes(roleName)) return roleName;
-  if (["tool", "toolResult"].includes(roleName)) return "tool";
+  if (["tool", "toolResult", "bashExecution"].includes(roleName)) return "tool";
   return "status";
 }
 
@@ -102,6 +102,7 @@ export function messageFingerprint(roleName, text, timestampKey) {
 export function messageRoleLabel(roleName) {
   if (roleName === "assistant") return "pi";
   if (roleName === "toolResult") return "tool result";
+  if (roleName === "bashExecution") return "shell";
   if (["custom", "session_info"].includes(roleName)) return "status";
   return roleName || "status";
 }

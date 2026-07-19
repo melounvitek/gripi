@@ -13,12 +13,34 @@ class FrontendHelpersJsTest < Minitest::Test
         helpers.formatWaitDuration(125000),
         helpers.imageAttachmentLabel(1),
         helpers.notificationReplyPreview("  a   reply  "),
-        helpers.messageFingerprint("toolResult", " Done\\r\\n", "123")
+        helpers.messageFingerprint("toolResult", " Done\\r\\n", "123"),
+        helpers.messageRoleKey("bashExecution"),
+        helpers.messageRoleLabel("bashExecution")
       ]));
     JS
 
     assert_equal ["1.5k", "2m 05s", "1 image attached", "a reply"], results.first(4)
-    assert_match(/\Atool:123:[0-9a-f]+\z/, results.last)
+    assert_match(/\Atool:123:[0-9a-f]+\z/, results[4])
+    assert_equal ["tool", "shell"], results.last(2)
+  end
+
+  def test_native_bash_parser_uses_raw_composer_syntax
+    results = run_javascript(<<~JS)
+      const { parseNativeBash } = await import(#{module_url("bash.js").to_json});
+      console.log(JSON.stringify({
+        included: parseNativeBash("!  printf one\\nprintf two  "),
+        excluded: parseNativeBash("!! git status"),
+        leadingWhitespace: parseNativeBash(" !pwd"),
+        leadingNewline: parseNativeBash("\\n!pwd"),
+        empty: [parseNativeBash("!"), parseNativeBash("!!  \\n\\t")]
+      }));
+    JS
+
+    assert_equal({ "command" => "printf one\nprintf two", "excludeFromContext" => false }, results.fetch("included"))
+    assert_equal({ "command" => "git status", "excludeFromContext" => true }, results.fetch("excluded"))
+    assert_nil results.fetch("leadingWhitespace")
+    assert_nil results.fetch("leadingNewline")
+    assert_equal [nil, nil], results.fetch("empty")
   end
 
   def test_notification_reply_preview_returns_plain_text
@@ -125,6 +147,7 @@ class FrontendHelpersJsTest < Minitest::Test
         eventPollingDelay(false, "running", 0),
         eventPollingDelay(false, "running", 20),
         eventPollingDelay(false, "stopping", 20),
+        eventPollingDelay(false, "bash", 20),
         eventPollingDelay(true, "running", 0),
         eventPollingDelay(false, "done", 0),
         eventPollingDelay(false, "done", 2),
@@ -134,7 +157,7 @@ class FrontendHelpersJsTest < Minitest::Test
       ]));
     JS
 
-    assert_equal [250, 250, 250, 10_000, 1_000, 2_000, 5_000, 2_000, 10_000], results
+    assert_equal [250, 250, 250, 250, 10_000, 1_000, 2_000, 5_000, 2_000, 10_000], results
   end
 
   def test_keyboard_scroll_keys_keep_legacy_spacebar_support

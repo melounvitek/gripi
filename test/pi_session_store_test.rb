@@ -886,6 +886,7 @@ class PiSessionStoreTest < Minitest::Test
       refute included.bash_truncated
       refute included.bash_excluded_from_context
       assert_equal Time.iso8601("2026-06-13T10:01:00Z"), included.timestamp
+      assert_equal Time.at(0.001), included.bash_started_at
       assert_equal "$ printf excluded", excluded.summary
       assert_equal "", excluded.text
       assert excluded.bash_cancelled
