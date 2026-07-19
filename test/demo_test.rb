@@ -289,7 +289,7 @@ class DemoTest < Minitest::Test
     assert_includes coarse_styles, ".session-row a.session { padding-right: 3.6rem; }"
     assert_includes coarse_styles, ".session-pin-toggle { top: 0.35rem; right: 0.35rem; width: 2.75rem; height: 2.75rem; padding: 0.8rem; opacity: 0.7; }"
     assert_includes coarse_styles, ".session-header-view-select > select { min-height: 2.75rem; font-size: 16px; }"
-    assert_includes coarse_styles, ".session-header-view-select .project-select-trigger--plain { min-height: 2.75rem; }"
+    refute_includes coarse_styles, ".session-header-view-select .project-select-trigger--plain { min-height: 2.75rem; }"
   end
 
   def test_demo_conversation_view_selector_supports_keyboard_navigation

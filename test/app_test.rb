@@ -3208,7 +3208,7 @@ class AppTest < Minitest::Test
     assert_includes coarse_styles, ".session-row a.session { padding-right: 3.6rem; }"
     assert_includes coarse_styles, ".session-pin-toggle { top: 0.35rem; right: 0.35rem; width: 2.75rem; height: 2.75rem; padding: 0.8rem; opacity: 0.7; }"
     assert_includes coarse_styles, ".session-header-view-select > select { min-height: 2.75rem; font-size: 16px; }"
-    assert_includes coarse_styles, ".session-header-view-select .project-select-trigger--plain { min-height: 2.75rem; }"
+    refute_includes coarse_styles, ".session-header-view-select .project-select-trigger--plain { min-height: 2.75rem; }"
   end
 
   def test_desktop_custom_select_options_keep_compact_typography
@@ -3216,9 +3216,12 @@ class AppTest < Minitest::Test
   end
 
   def test_mobile_custom_selectors_keep_compact_typography
+    narrow_styles = APP_STYLESHEET.match(/@media \(max-width: 760px\) \{\n(?<styles>.*?)\n    \}/m)[:styles]
+
     assert_includes APP_STYLESHEET, ".project-select-trigger { min-height: 2.75rem; }"
     refute_includes APP_STYLESHEET, ".project-select-trigger { min-height: 2.75rem; font-size: 16px; }"
     assert_includes APP_STYLESHEET, ".project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }"
+    refute_includes narrow_styles, ".session-header-view-select .project-select-trigger--plain { min-height: 2.75rem; }"
   end
 
   def test_narrow_header_prioritizes_the_transcript_view_selector
