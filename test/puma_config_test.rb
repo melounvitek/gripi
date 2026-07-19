@@ -61,24 +61,40 @@ class PumaConfigTest < Minitest::Test
     assert_equal PRODUCTION_REQUEST_BODY_LIMIT, configuration.options[:http_content_length_limit]
 
     response = TCPSocket.open("127.0.0.1", @port) do |socket|
-      socket.write(<<~HTTP.gsub("\n", "\r\n"))
+      content_length = TEST_REQUEST_BODY_LIMIT + 1
+      socket.write(<<~HTTP.gsub("\n", "\r\n") + ("x" * content_length) + <<~HTTP.gsub("\n", "\r\n"))
         POST / HTTP/1.1
         Host: 127.0.0.1
-        Content-Length: #{TEST_REQUEST_BODY_LIMIT + 1}
+        Content-Length: #{content_length}
         Expect: 100-continue
+
+      HTTP
+        GET /smuggled HTTP/1.1
+        Host: 127.0.0.1
         Connection: close
 
       HTTP
-      response = read_response_headers(socket)
-      if response.match?(/\AHTTP\/1\.1 100 /)
-        socket.write("x")
-        response = read_response_headers(socket)
-      end
+
+      response_buffer = +""
+      response = read_response(socket, response_buffer)
+      response = read_response(socket, response_buffer) if response.match?(/\AHTTP\/1\.1 100 /)
+      assert_equal "", response_buffer
+      assert_equal "", Timeout.timeout(5) { socket.read }
       response
     end
 
     assert_match(/\AHTTP\/1\.1 413 /, response)
     refute File.exist?(@app_calls_path)
+  end
+
+  def test_body_limit_patch_can_be_required_independently
+    _output, error, status = Open3.capture3(
+      { "BUNDLE_GEMFILE" => File.join(PROJECT_ROOT, "Gemfile") },
+      "bundle", "exec", "ruby", "-Ilib", "-e", 'require "puma_chunked_body_limit"',
+      chdir: PROJECT_ROOT
+    )
+
+    assert status.success?, error
   end
 
   def test_rejects_chunked_body_over_the_limit_without_waiting_for_the_terminal_chunk
@@ -90,14 +106,16 @@ class PumaConfigTest < Minitest::Test
         Expect: 100-continue
 
       HTTP
-      assert_match(/\AHTTP\/1\.1 100 /, read_response_headers(socket))
+      response_buffer = +""
+      assert_match(/\AHTTP\/1\.1 100 /, read_response(socket, response_buffer))
 
       2.times do
         body = "x" * 600
         socket.write("#{body.bytesize.to_s(16)}\r\n#{body}\r\n")
       end
-      response = read_response_headers(socket)
-      Timeout.timeout(5) { socket.read }
+      response = read_response(socket, response_buffer)
+      assert_equal "", response_buffer
+      assert_equal "", Timeout.timeout(5) { socket.read }
       response
     end
 
@@ -107,12 +125,14 @@ class PumaConfigTest < Minitest::Test
 
   private
 
-  def read_response_headers(socket)
-    response = +""
+  def read_response(socket, buffer)
     Timeout.timeout(5) do
-      response << socket.readpartial(1024) until response.include?("\r\n\r\n")
+      buffer << socket.readpartial(1024) until buffer.include?("\r\n\r\n")
+      headers = buffer.slice!(0, buffer.index("\r\n\r\n") + 4)
+      content_length = headers[/\r\nContent-Length: (\d+)/i, 1].to_i
+      buffer << socket.readpartial(1024) while buffer.bytesize < content_length
+      headers + buffer.slice!(0, content_length)
     end
-    response
   end
 
   def available_port
