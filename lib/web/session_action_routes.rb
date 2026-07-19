@@ -4,6 +4,7 @@ require_relative "../prompts/uploaded_images"
 require_relative "../rpc/branch_session"
 require_relative "../rpc/command_catalog"
 require_relative "../rpc/start_new_session"
+require_relative "../rpc/stop_session"
 require_relative "../rpc/tree_projection"
 require_relative "../pi_session_store"
 
@@ -51,6 +52,10 @@ module Web
           pending_sessions: pending_session_registry,
           sessions_root: settings.sessions_root
         )
+      rescue PiRpcClient::RequestTimeout => error
+        status 504
+        content_type :json
+        halt JSON.generate(error: error.message)
       end
 
       def redirect_to_rpc_session_after_branch(previous_session_path, response, text: nil)
@@ -158,7 +163,7 @@ module Web
       def commands_for(session_path)
         response = with_synchronized_rpc_client(session_path) { |client| client.get_commands }
         Rpc::CommandCatalog.commands_from(response)
-      rescue Errno::EPIPE, IOError
+      rescue PiRpcClientRegistry::OperationPending, PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting, Errno::EPIPE, IOError
         Rpc::CommandCatalog.builtin_commands
       end
 
@@ -189,7 +194,7 @@ module Web
           context: context,
           disk_independent: !!(provider && model_id && thinking_level && context)
         }
-      rescue Errno::EPIPE, IOError
+      rescue PiRpcClientRegistry::OperationPending, PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting, Errno::EPIPE, IOError
         nil
       end
 
@@ -550,7 +555,7 @@ module Web
         value = params.key?("value") ? params["value"].to_s : nil
         halt 400, "Invalid extension UI response" unless cancelled || !confirmed.nil? || !value.nil?
 
-        delivered = rpc_clients.with_active_client(session_path) do |client|
+        delivered = with_existing_control_rpc_client(session_path) do |client|
           client.extension_ui_response(id, value: value, confirmed: confirmed, cancelled: cancelled)
         end
         halt 404, "No active Pi session" unless delivered
@@ -560,11 +565,23 @@ module Web
       end
 
       app.post "/abort" do
-        session_path = require_current_workspace_session!(canonical_rpc_session_path(params.fetch("session")))
-        with_synchronized_interrupt_rpc_client(session_path) { |client| client.abort }
+        requested_path = require_current_workspace_session!(params.fetch("session"))
+        session_path = requested_path
+        result = Rpc::StopSession.call do
+          pending_path = stop_matching_pending_rpc_session(requested_path) { |client| client.abort } unless rpc_clients.active?(requested_path)
+          if pending_path
+            session_path = pending_path
+          else
+            with_synchronized_interrupt_rpc_client(session_path) { |client| client.abort }
+          end
+        end
         if json_request?
+          status 202 if result.stopping
           content_type :json
-          JSON.generate(ok: true, session: session_path)
+          payload = { ok: true, session: session_path }
+          payload[:forced] = true if result.forced
+          payload[:stopping] = true if result.stopping
+          JSON.generate(payload)
         else
           redirect session_redirect_path(session_path)
         end

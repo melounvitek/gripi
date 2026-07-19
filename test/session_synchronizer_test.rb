@@ -290,6 +290,31 @@ class SessionSynchronizerTest < Minitest::Test
     end
   end
 
+  def test_mutable_operation_fails_fast_while_session_synchronization_is_pending
+    with_session do |root, path|
+      client = FakeClient.new(positions: { nil => { known: true, leaf_id: nil, error: nil } })
+      synchronizer = build_synchronizer(root, FakeRegistry.new(client))
+      operation_started = Queue.new
+      release_operation = Queue.new
+
+      operation = Thread.new do
+        synchronizer.with_mutable_client(path) do
+          operation_started << true
+          release_operation.pop
+        end
+      end
+      operation_started.pop
+
+      error = assert_raises(Sessions::SessionSynchronizer::BusyError) do
+        synchronizer.with_mutable_client(path) { flunk "second operation should not start" }
+      end
+      assert_includes error.message, "pending"
+    ensure
+      release_operation << true if operation&.alive?
+      operation&.join
+    end
+  end
+
   def test_interrupt_does_not_wait_for_synchronized_operation
     with_session do |root, path|
       client = FakeClient.new(positions: { nil => { known: true, leaf_id: nil, error: nil } })

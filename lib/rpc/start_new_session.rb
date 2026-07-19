@@ -17,10 +17,14 @@ module Rpc
 
     def call(cwd)
       client = @client_factory.call(cwd)
+      registered = false
       session_path = session_file_from(client.get_state) || pending_session_path
       @rpc_clients.register(session_path, client)
+      registered = true
       @pending_sessions.remember(session_path, cwd) unless File.exist?(session_path)
       session_path
+    ensure
+      client&.close unless registered
     end
 
     private

@@ -35,14 +35,29 @@ module Web
     end
 
     def with_synchronized_rpc_client(session_path)
+      Rpc::Diagnostics.log("request_operation", path: request.path_info, session: session_path, lane: "operation")
       return with_rpc_client(session_path) { |client| yield client } unless File.exist?(session_path)
 
       session_synchronizer.with_mutable_client(session_path) { |client| yield client }
     rescue Sessions::SessionSynchronizer::BlockedError => error
       halt_session_sync_error(error)
+    rescue Sessions::SessionSynchronizer::BusyError, PiRpcClientRegistry::OperationPending
+      status 409
+      content_type :json
+      halt JSON.generate(error: "Another session operation is pending")
+    rescue PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting
+      status 503
+      headers "Retry-After" => "1"
+      content_type :json
+      halt JSON.generate(error: "Pi RPC client is restarting")
+    rescue PiRpcClient::RequestTimeout => error
+      status 504
+      content_type :json
+      halt JSON.generate(error: error.message)
     end
 
     def with_synchronized_interrupt_rpc_client(session_path)
+      Rpc::Diagnostics.log("request_operation", path: request.path_info, session: session_path, lane: "interrupt")
       return with_interrupt_rpc_client(session_path) { |client| yield client } unless File.exist?(session_path)
 
       session_synchronizer.with_interrupt_client(session_path) { |client| yield client }
@@ -61,8 +76,8 @@ module Web
     def halt_if_session_sync_blocked(session_path)
       return unless File.exist?(session_path)
 
-      state = session_sync_state(session_path)
-      return unless state.blocked?
+      state = session_synchronizer.inspect_if_available(session_path)
+      return unless state&.blocked?
 
       halt_session_sync_error(
         Sessions::SessionSynchronizer::BlockedError.new(session_sync_error_message(state), mode: state.mode)
@@ -99,7 +114,7 @@ module Web
         except: except.compact,
         on_close: ->(session_path) { forget_pending_rpc_cwd(session_path) }
       ) do |session_path|
-        session_synchronizer.inspect(session_path) if File.exist?(session_path)
+        session_synchronizer.inspect_if_available(session_path) if File.exist?(session_path)
       end
     end
 
@@ -108,8 +123,24 @@ module Web
       rpc_clients.with_client(session_path) { |client| yield client }
     end
 
+    def with_existing_control_rpc_client(session_path)
+      rpc_clients.with_existing_client(session_path) { |client| yield client }
+    rescue PiRpcClientRegistry::OperationPending
+      status 409
+      content_type :json
+      halt JSON.generate(error: "Another session operation is pending")
+    rescue PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting
+      status 503
+      headers "Retry-After" => "1"
+      content_type :json
+      halt JSON.generate(error: "Pi RPC client is restarting")
+    rescue PiRpcClient::RequestTimeout => error
+      status 504
+      content_type :json
+      halt JSON.generate(error: error.message)
+    end
+
     def with_interrupt_rpc_client(session_path)
-      session_path = canonical_rpc_session_path(session_path)
       rpc_clients.with_interrupt_client(session_path) { |client| yield client }
     end
 
@@ -126,7 +157,7 @@ module Web
       return unless cwd && rpc_clients.active?(session_path)
       return if multi_user_mode? && !workspace_session_ownership_store.owned_by?(session_path, current_workspace_id)
 
-      state = rpc_clients.with_active_client(session_path) { |client| client.get_state }
+      state = rpc_clients.with_existing_client(session_path) { |client| client.get_state }
       real_path = session_file_from(state)
       return unless real_path && File.exist?(real_path) && session_cwd(real_path) == cwd
 
@@ -135,6 +166,8 @@ module Web
       claim_session_for_current_workspace(real_path)
       forget_pending_rpc_cwd(session_path)
       real_path
+    rescue PiRpcClientRegistry::OperationPending, PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting
+      nil
     end
 
     def remap_pending_rpc_client(session_path)
@@ -155,9 +188,43 @@ module Web
         next unless rpc_clients.active?(pending_path)
         next unless session_cwd(session_path) == cwd
 
-        state = rpc_clients.with_active_client(pending_path) { |client| client.get_state }
+        state = rpc_clients.with_existing_client(pending_path) { |client| client.get_state }
         session_file_from(state) == session_path
+      rescue PiRpcClientRegistry::OperationPending, PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting
+        false
       end&.first
+    end
+
+    def stop_matching_pending_rpc_session(session_path)
+      unavailable = false
+      pending_rpc_cwd_entries.each do |pending_path, cwd|
+        next unless session_cwd(session_path) == cwd
+        next if multi_user_mode? && !workspace_session_ownership_store.owned_by?(pending_path, current_workspace_id)
+
+        matched = false
+        rpc_clients.with_existing_interrupt_client(pending_path) do |client|
+          state = begin
+            client.respond_to?(:get_state_for_interrupt) ? client.get_state_for_interrupt : client.get_state
+          rescue PiRpcClient::RequestTimeout, IOError, Errno::EPIPE
+            unavailable = true
+            nil
+          end
+          if state && session_file_from(state) == session_path
+            matched = true
+            yield client
+          end
+        end
+        return pending_path if matched
+      rescue PiRpcClientRegistry::InterruptPending, PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting
+        unavailable = true
+      end
+
+      if unavailable
+        status 409
+        content_type :json
+        halt JSON.generate(error: "Could not identify the active pending Pi session; try stopping it again from its current page")
+      end
+      nil
     end
 
     def pending_rpc_cwd(session_path)

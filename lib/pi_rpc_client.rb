@@ -3,6 +3,7 @@ require "base64"
 require "open3"
 require "securerandom"
 require "thread"
+require_relative "rpc/diagnostics"
 
 class PiRpcClient
   class RequestTimeout < IOError; end
@@ -17,6 +18,11 @@ class PiRpcClient
   NATIVE_TOOL_UPDATE_PREFIX = /\A\{"type":"tool_execution_update","toolCallId":"((?:\\.|[^"\\])*)"/.freeze
   NATIVE_TOOL_UPDATE_START = '{"type":"tool_execution_update","toolCallId":"'.freeze
   UNTRACKABLE_TOOL_UPDATE_ID = Object.new.freeze
+  DEFAULT_REQUEST_TIMEOUT = 30
+  LONG_REQUEST_TIMEOUT = 5 * 60
+  ABORT_REQUEST_TIMEOUT = 10
+  PROCESS_TERM_TIMEOUT = 1
+  PROCESS_KILL_TIMEOUT = 1
   TREE_BRIDGE_TIMEOUT = 5
   MAX_ACTIVE_TOOL_SNAPSHOTS = 16
   MAX_ACTIVE_TOOL_SNAPSHOT_BYTES = 64 * 1024
@@ -34,13 +40,17 @@ class PiRpcClient
   ].freeze
 
   def self.start(session_path, command_prefix: ["pi"], popen: Open3.method(:popen3))
-    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GRIPI_EXTENSION_PATH, "--session", session_path)
-    new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
+    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GRIPI_EXTENSION_PATH, "--session", session_path, **process_group_options)
+    new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread, process_group: true)
   end
 
   def self.start_in_cwd(cwd, command_prefix: ["pi"], popen: Open3.method(:popen3))
-    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GRIPI_EXTENSION_PATH, chdir: cwd)
-    new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread)
+    stdin, stdout, stderr, wait_thread = popen.call(pi_process_env, *command_prefix, "--mode", "rpc", "--extension", GRIPI_EXTENSION_PATH, **process_group_options.merge(chdir: cwd))
+    new(stdin: stdin, stdout: stdout, stderr: stderr, wait_thread: wait_thread, process_group: true)
+  end
+
+  def self.process_group_options
+    Gem.win_platform? ? { new_pgroup: true } : { pgroup: true }
   end
 
   def self.pi_process_env
@@ -61,7 +71,7 @@ class PiRpcClient
     [node_path, pi_path]
   end
 
-  def initialize(stdin:, stdout:, stderr: nil, wait_thread: nil, event_buffer_limit: DEFAULT_EVENT_BUFFER_LIMIT, event_buffer_bytes: DEFAULT_EVENT_BUFFER_BYTES, clock: -> { Time.now }, monotonic_clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }, tree_bridge_timeout: TREE_BRIDGE_TIMEOUT, oversized_tool_update_sample_interval_seconds: DEFAULT_OVERSIZED_TOOL_UPDATE_SAMPLE_INTERVAL_SECONDS)
+  def initialize(stdin:, stdout:, stderr: nil, wait_thread: nil, event_buffer_limit: DEFAULT_EVENT_BUFFER_LIMIT, event_buffer_bytes: DEFAULT_EVENT_BUFFER_BYTES, clock: -> { Time.now }, monotonic_clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }, tree_bridge_timeout: TREE_BRIDGE_TIMEOUT, oversized_tool_update_sample_interval_seconds: DEFAULT_OVERSIZED_TOOL_UPDATE_SAMPLE_INTERVAL_SECONDS, request_timeout: DEFAULT_REQUEST_TIMEOUT, abort_timeout: ABORT_REQUEST_TIMEOUT, process_group: false, process_term_timeout: PROCESS_TERM_TIMEOUT, process_kill_timeout: PROCESS_KILL_TIMEOUT)
     @stdin = stdin
     @stdout = stdout
     @stderr = stderr
@@ -89,8 +99,15 @@ class PiRpcClient
     @monotonic_clock = monotonic_clock
     @tree_bridge_timeout = tree_bridge_timeout
     @oversized_tool_update_sample_interval_seconds = oversized_tool_update_sample_interval_seconds
+    @request_timeout = request_timeout
+    @abort_timeout = abort_timeout
+    @process_group = process_group
+    @process_term_timeout = process_term_timeout
+    @process_kill_timeout = process_kill_timeout
     @mutex = Mutex.new
     @write_mutex = Mutex.new
+    @close_mutex = Mutex.new
+    @process_cleanup_mutex = Mutex.new
     @condition = ConditionVariable.new
     @reader_running = false
     @busy = false
@@ -103,10 +120,22 @@ class PiRpcClient
     @flushing_compaction_follow_ups = false
     @deferred_command_ids = {}
     @reader = nil
+    @stderr_reader = Thread.new { read_stderr } if @stderr
+    @closed = false
+    if @process_group && !Gem.win_platform? && @wait_thread&.respond_to?(:join)
+      @process_watcher = Thread.new do
+        @wait_thread.join
+        terminate_remaining_process_group
+      end
+    end
   end
 
   def get_state
     request("get_state", id: next_id("get_state"))
+  end
+
+  def get_state_for_interrupt
+    request("get_state", id: next_id("get_state"), timeout: @abort_timeout)
   end
 
   def get_messages
@@ -154,10 +183,11 @@ class PiRpcClient
   end
 
   def prompt(message, images = [])
-    wait_for_compaction_follow_up_flush
+    deadline = monotonic_time + @request_timeout if @request_timeout
+    wait_for_compaction_follow_up_flush(deadline)
     payload = { message: message }
     payload[:images] = images unless images.empty?
-    request("prompt", id: next_id("prompt"), **payload)
+    request("prompt", id: next_id("prompt"), timeout: remaining_timeout(deadline), **payload)
   end
 
   def steer(message, images = [])
@@ -184,16 +214,16 @@ class PiRpcClient
   end
 
   def abort
-    request("abort", id: next_id("abort"))
+    request("abort", id: next_id("abort"), timeout: @abort_timeout)
   end
 
   def new_session(parent_session = nil)
     payload = parent_session ? { parentSession: parent_session } : {}
-    request("new_session", id: next_id("new_session"), **payload)
+    request("new_session", id: next_id("new_session"), timeout: LONG_REQUEST_TIMEOUT, **payload)
   end
 
   def switch_session(session_path)
-    request("switch_session", id: next_id("switch_session"), sessionPath: session_path)
+    request("switch_session", id: next_id("switch_session"), timeout: LONG_REQUEST_TIMEOUT, sessionPath: session_path)
   end
 
   def get_commands
@@ -202,7 +232,7 @@ class PiRpcClient
 
   def compact(custom_instructions = nil)
     payload = custom_instructions.to_s.empty? ? {} : { customInstructions: custom_instructions }
-    request("compact", id: next_id("compact"), **payload)
+    request("compact", id: next_id("compact"), timeout: LONG_REQUEST_TIMEOUT, **payload)
   end
 
   def get_fork_messages
@@ -210,11 +240,11 @@ class PiRpcClient
   end
 
   def fork(entry_id)
-    request("fork", id: next_id("fork"), entryId: entry_id)
+    request("fork", id: next_id("fork"), timeout: LONG_REQUEST_TIMEOUT, entryId: entry_id)
   end
 
   def clone_session
-    request("clone", id: next_id("clone"))
+    request("clone", id: next_id("clone"), timeout: LONG_REQUEST_TIMEOUT)
   end
 
   def tree_snapshot(filter_mode = nil)
@@ -229,7 +259,7 @@ class PiRpcClient
   def navigate_tree(entry_id, summary: "none", custom_instructions: nil)
     payload = { entryId: entry_id, summary: summary }
     payload[:customInstructions] = custom_instructions unless custom_instructions.to_s.empty?
-    extension_request("gripi_tree_navigate", payload)
+    extension_request("gripi_tree_navigate", payload, timeout: LONG_REQUEST_TIMEOUT)
   end
 
   def set_tree_label(entry_id, label)
@@ -313,20 +343,32 @@ class PiRpcClient
   end
 
   def close
-    close_io(@stdin)
-    close_io(@stdout)
-    close_io(@stderr)
-    terminate_process
-    @reader&.join(0.2)
+    @close_mutex.synchronize do
+      return if @closed
+
+      @closed = true
+      close_io(@stdin)
+      close_io(@stdout)
+      close_io(@stderr)
+      terminate_process
+      @reader&.join(0.2)
+      @stderr_reader&.join(0.2)
+      @process_watcher&.join(@process_kill_timeout)
+    end
   end
 
-  def request(type, id:, timeout: nil, **payload)
+  def request(type, id:, timeout: @request_timeout, **payload)
     command = payload.merge(id: id, type: type)
+    Rpc::Diagnostics.log("command_started", command: type, rpc_id: id)
     deadline = monotonic_time + timeout if timeout
     @mutex.synchronize { @pending_ids[id] = true }
     ensure_reader
     begin
-      write_command(command)
+      write_command(command, deadline: deadline, type: type)
+    rescue RequestTimeout
+      @mutex.synchronize { @pending_ids.delete(id) }
+      Rpc::Diagnostics.log("command_timed_out", command: type, rpc_id: id, stage: "write")
+      raise
     rescue Errno::EPIPE, IOError
       @mutex.synchronize { @pending_ids.delete(id) }
       raise IOError, "Pi RPC process exited before accepting command"
@@ -337,9 +379,13 @@ class PiRpcClient
         if deadline && deadline <= monotonic_time
           @pending_ids.delete(id)
           @responses.delete(id)
+          Rpc::Diagnostics.log("command_timed_out", command: type, rpc_id: id, stage: "response")
           raise RequestTimeout, "Pi RPC command timed out: #{type}"
         end
-        return @responses.delete(id) if @responses.key?(id)
+        if @responses.key?(id)
+          Rpc::Diagnostics.log("response_received", command: type, rpc_id: id)
+          return @responses.delete(id)
+        end
         unless @reader_running
           @pending_ids.delete(id)
           raise IOError, "Pi RPC process exited before responding to command"
@@ -357,6 +403,7 @@ class PiRpcClient
     request_id = SecureRandom.hex(8)
     status_key = "#{command}:#{request_id}"
     encoded_payload = Base64.urlsafe_encode64(JSON.generate(payload), padding: false)
+    timeout ||= @request_timeout
     deadline = monotonic_time + timeout if timeout
     @mutex.synchronize { @pending_bridge_status_keys[status_key] = true }
     response = request(
@@ -401,6 +448,12 @@ class PiRpcClient
     end
   end
 
+  def read_stderr
+    @stderr.readpartial(4 * 1024) while true
+  rescue EOFError, IOError
+    nil
+  end
+
   def close_io(io)
     io&.close unless io&.closed?
   rescue IOError
@@ -409,10 +462,69 @@ class PiRpcClient
 
   def terminate_process
     return unless @wait_thread&.respond_to?(:pid)
+    return terminate_windows_process_tree if @process_group && Gem.win_platform?
+    if @wait_thread.respond_to?(:alive?) && !@wait_thread.alive?
+      @process_watcher&.join(@process_kill_timeout)
+      return
+    end
 
-    Process.kill("TERM", @wait_thread.pid)
+    Rpc::Diagnostics.log("process_terminating", pid: @wait_thread.pid, signal: "TERM", process_group: @process_group)
+    return unless signal_process("TERM")
+
+    parent_exited = @wait_thread.respond_to?(:join) && @wait_thread.join(@process_term_timeout)
+    if @process_group
+      parent_exited ? @process_watcher&.join(@process_kill_timeout) : terminate_remaining_process_group
+    elsif !parent_exited
+      Rpc::Diagnostics.log("process_terminating", pid: @wait_thread.pid, signal: "KILL", process_group: false)
+      signal_process("KILL")
+    end
+    @wait_thread.join(@process_kill_timeout) if @wait_thread.respond_to?(:join)
   rescue Errno::ESRCH, IOError
     nil
+  end
+
+  def terminate_remaining_process_group
+    @process_cleanup_mutex.synchronize do
+      return unless process_group_alive?
+
+      Rpc::Diagnostics.log("process_terminating", pid: @wait_thread.pid, signal: "KILL", process_group: true)
+      signal_process("KILL")
+    end
+  end
+
+  def terminate_windows_process_tree
+    return if @wait_thread.respond_to?(:alive?) && !@wait_thread.alive?
+
+    Rpc::Diagnostics.log("process_terminating", pid: @wait_thread.pid, signal: "KILL", process_group: true)
+    killer = Process.spawn("taskkill", "/PID", @wait_thread.pid.to_s, "/T", "/F", out: File::NULL, err: File::NULL)
+    killer_wait = Process.detach(killer)
+    finished = killer_wait.join(@process_kill_timeout)
+    unless finished
+      Process.kill("KILL", killer)
+      finished = killer_wait.join(@process_kill_timeout)
+    end
+    signal_process("KILL") unless finished && finished.value.success?
+    @wait_thread.join(@process_kill_timeout) if @wait_thread.respond_to?(:join)
+  rescue Errno::ENOENT, Errno::ESRCH
+    signal_process("KILL")
+  end
+
+  def process_group_alive?
+    return false unless @process_group && !Gem.win_platform?
+
+    Process.kill(0, -@wait_thread.pid)
+    true
+  rescue Errno::ESRCH
+    false
+  end
+
+  def signal_process(signal)
+    pid = @wait_thread.pid
+    target = @process_group && !Gem.win_platform? ? -pid : pid
+    Process.kill(signal, target)
+    true
+  rescue Errno::ESRCH
+    false
   end
 
   def monotonic_time
@@ -562,7 +674,8 @@ class PiRpcClient
       command[:value] = value.to_s
     end
 
-    @write_mutex.synchronize do
+    deadline = monotonic_time + @request_timeout if @request_timeout
+    with_write_lock(deadline, "extension_ui_response") do
       dialog = @mutex.synchronize do
         prune_expired_extension_ui_dialogs
         @pending_extension_ui_dialogs[id]&.tap { |pending| pending[:answering] = true }
@@ -570,7 +683,7 @@ class PiRpcClient
       return { "type" => "response", "command" => "extension_ui_response", "success" => false, "error" => "Extension UI request is no longer pending" } unless dialog
 
       begin
-        write_command_unlocked(command)
+        write_command_unlocked(command, deadline: deadline)
         @mutex.synchronize { @pending_extension_ui_dialogs.delete(id) }
       rescue Errno::EPIPE, IOError
         @mutex.synchronize do
@@ -589,13 +702,42 @@ class PiRpcClient
 
   private
 
-  def write_command(command)
-    @write_mutex.synchronize { write_command_unlocked(command) }
+  def write_command(command, deadline: nil, type: command[:type])
+    with_write_lock(deadline, type) do
+      write_command_unlocked(command, deadline: deadline, type: type)
+    end
   end
 
-  def write_command_unlocked(command)
-    @stdin.write(JSON.generate(command) + "\n")
-    @stdin.flush if @stdin.respond_to?(:flush)
+  def with_write_lock(deadline, type)
+    acquired = false
+    until (acquired = @write_mutex.try_lock)
+      raise RequestTimeout, "Pi RPC command timed out: #{type}" if deadline && remaining_timeout(deadline).zero?
+
+      sleep [remaining_timeout(deadline) || 0.01, 0.01].min
+    end
+    yield
+  ensure
+    @write_mutex.unlock if acquired
+  end
+
+  def write_command_unlocked(command, deadline: nil, type: command[:type])
+    serialized = JSON.generate(command) + "\n"
+    unless deadline && @stdin.respond_to?(:write_nonblock)
+      @stdin.write(serialized)
+      @stdin.flush if @stdin.respond_to?(:flush)
+      return
+    end
+
+    offset = 0
+    while offset < serialized.bytesize
+      written = @stdin.write_nonblock(serialized.byteslice(offset..), exception: false)
+      if written == :wait_writable
+        wait = remaining_timeout(deadline)
+        raise RequestTimeout, "Pi RPC command timed out: #{type}" unless wait&.positive? && IO.select(nil, [@stdin], nil, wait)
+      else
+        offset += written
+      end
+    end
   end
 
   def queue_compaction_follow_up_payload(payload)
@@ -607,9 +749,13 @@ class PiRpcClient
     end
   end
 
-  def wait_for_compaction_follow_up_flush
+  def wait_for_compaction_follow_up_flush(deadline = nil)
     @mutex.synchronize do
-      @condition.wait(@mutex, 0.1) while @flushing_compaction_follow_ups || (@compacting && @compaction_follow_ups.any?)
+      while @flushing_compaction_follow_ups || (@compacting && @compaction_follow_ups.any?)
+        raise RequestTimeout, "Pi RPC command timed out: prompt" if deadline && remaining_timeout(deadline).zero?
+
+        @condition.wait(@mutex, [remaining_timeout(deadline) || 0.1, 0.1].min)
+      end
     end
   end
 

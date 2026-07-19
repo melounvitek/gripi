@@ -56,6 +56,8 @@ module Sessions
 
       begin
         inspect_locked(session_path, include_position: include_position)
+      rescue PiRpcClientRegistry::OperationPending, PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting
+        nil
       rescue IOError, Errno::EPIPE
         recover_from_rpc_exit_locked(session_path)
       rescue SystemCallError => error
@@ -70,7 +72,14 @@ module Sessions
     end
 
     def with_mutable_client(session_path, &block)
-      synchronize(session_path) { with_verified_client(session_path, :with_client, &block) }
+      lock = lock_for(session_path)
+      raise BusyError, "Another session operation is pending." unless lock.try_lock
+
+      begin
+        with_verified_client(session_path, :with_client, &block)
+      ensure
+        lock.unlock
+      end
     end
 
     def with_interrupt_client(session_path)
@@ -85,6 +94,8 @@ module Sessions
         end
 
         with_verified_client(session_path, :with_interrupt_client) { |client| yield client }
+      rescue PiRpcClientRegistry::OperationPending
+        @rpc_clients.with_existing_interrupt_client(session_path) { |client| yield client }
       ensure
         lock.unlock
       end

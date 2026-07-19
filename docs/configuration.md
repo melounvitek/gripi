@@ -112,6 +112,16 @@ GRIPI_PI=/path/to/pi
 
 Selecting executables only chooses the Pi runtime; it does not authenticate or configure Pi. The selected runtime must already work under the same OS user and environment as Gripi.
 
+## RPC diagnostics
+
+To investigate a stuck Pi RPC client, enable structured lifecycle diagnostics:
+
+```sh
+GRIPI_RPC_DIAGNOSTICS=1
+```
+
+Diagnostics include request paths, session paths, RPC command types and IDs, admission rejections, response arrival, timeouts, client eviction, and process termination. Prompt and conversation contents are never logged. Restart Gripi after changing this setting.
+
 ## Self-updates
 
 Gripi checks `origin/master` after the page loads and shows a sidebar control when updates are available. Anyone who can use the gateway can trigger an update, and updating interrupts active Pi work.

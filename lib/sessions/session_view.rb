@@ -249,7 +249,7 @@ module Sessions
         elsif sync_state.blocked?
           sync_state.persisted_leaf_id
         end
-      else
+      elsif !@session_synchronizer
         @conversation_tree_leaf_id = current_leaf_id_for(true)
       end
       conversation = @store.conversation(@selected_session.path, current_leaf_id: @conversation_tree_leaf_id)
@@ -318,7 +318,7 @@ module Sessions
     def synchronized_session_state
       return unless @session_synchronizer
 
-      @session_synchronizer.inspect(@selected_session.path, include_position: true)
+      @session_synchronizer.inspect_if_available(@selected_session.path, include_position: true)
     end
 
     def current_leaf_id_for(existing_conversation)

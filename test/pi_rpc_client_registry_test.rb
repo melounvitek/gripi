@@ -192,11 +192,94 @@ class PiRpcClientRegistryTest < Minitest::Test
     assert_empty calls
   end
 
-  def test_serializes_rpc_operations_for_the_same_session
+  def test_client_creation_does_not_block_registry_or_duplicate_requests
+    creation_started = Queue.new
+    release_creation = Queue.new
+    registry = PiRpcClientRegistry.new(factory: ->(session_path) {
+      if session_path == "/tmp/slow.jsonl"
+        creation_started << true
+        release_creation.pop
+      end
+      FakeClient.new([])
+    })
+    creating = Thread.new { registry.ensure_client("/tmp/slow.jsonl") }
+    creation_started.pop
+
+    assert_raises(PiRpcClientRegistry::ClientStarting) do
+      registry.ensure_client("/tmp/slow.jsonl")
+    end
+    assert_instance_of FakeClient, registry.ensure_client("/tmp/other.jsonl")
+
+    release_creation << true
+    assert_instance_of FakeClient, creating.value
+  ensure
+    release_creation << true if creating&.alive?
+    creating&.join
+  end
+
+  def test_does_not_move_registered_client_while_same_path_creation_is_pending
+    creation_started = Queue.new
+    release_creation = Queue.new
+    created_calls = []
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) {
+      creation_started << true
+      release_creation.pop
+      FakeClient.new(created_calls)
+    })
+    creating = Thread.new { registry.ensure_client("/tmp/session.jsonl") }
+    creation_started.pop
+    assert_raises(PiRpcClientRegistry::ClientStarting) do
+      registry.move("/tmp/session.jsonl", "/tmp/moved.jsonl")
+    end
+
+    registered = FakeClient.new([])
+    registry.register("/tmp/session.jsonl", registered)
+    assert_raises(PiRpcClientRegistry::ClientStarting) do
+      registry.move("/tmp/session.jsonl", "/tmp/moved.jsonl")
+    end
+
+    release_creation << true
+    assert_same registered, creating.value
+    assert_same registered, registry.client_for("/tmp/session.jsonl")
+    assert_equal [:close], created_calls
+  ensure
+    release_creation << true if creating&.alive?
+    creating&.join
+  end
+
+  def test_close_all_cancels_pending_client_installation
+    creation_started = Queue.new
+    release_creation = Queue.new
+    created_calls = []
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) {
+      creation_started << true
+      release_creation.pop
+      FakeClient.new(created_calls)
+    })
+    errors = Queue.new
+    creating = Thread.new do
+      registry.ensure_client("/tmp/session.jsonl")
+    rescue PiRpcClientRegistry::ClientStarting => error
+      errors << error
+    end
+    creation_started.pop
+
+    registry.close_all
+    release_creation << true
+    creating.join
+
+    assert_instance_of PiRpcClientRegistry::ClientStarting, errors.pop
+    refute registry.active?("/tmp/session.jsonl")
+    assert_equal [:close], created_calls
+  ensure
+    release_creation << true if creating&.alive?
+    creating&.join
+  end
+
+  def test_rejects_an_rpc_operation_while_another_is_pending_for_the_same_session
     registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeClient.new([]) })
     first_started = Queue.new
     release_first = Queue.new
-    second_started = Queue.new
 
     first = Thread.new do
       registry.with_client("/tmp/session.jsonl") do
@@ -205,17 +288,13 @@ class PiRpcClientRegistryTest < Minitest::Test
       end
     end
     first_started.pop
-    second = Thread.new do
-      registry.with_client("/tmp/session.jsonl") { second_started << true }
-    end
 
-    refute second_started.pop(timeout: 0.05)
-    release_first << true
-    assert second_started.pop(timeout: 1)
+    assert_raises(PiRpcClientRegistry::OperationPending) do
+      registry.with_client("/tmp/session.jsonl") { flunk "second operation should not start" }
+    end
   ensure
     release_first << true if first&.alive?
     first&.join
-    second&.join
   end
 
   def test_allows_concurrent_rpc_operation_while_serialized_operation_is_running
@@ -242,6 +321,27 @@ class PiRpcClientRegistryTest < Minitest::Test
     concurrent&.join
   end
 
+  def test_rejects_a_duplicate_interrupt_while_one_is_pending
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeClient.new([]) })
+    first_started = Queue.new
+    release_first = Queue.new
+
+    first = Thread.new do
+      registry.with_interrupt_client("/tmp/session.jsonl") do
+        first_started << true
+        release_first.pop
+      end
+    end
+    first_started.pop
+
+    assert_raises(PiRpcClientRegistry::InterruptPending) do
+      registry.with_interrupt_client("/tmp/session.jsonl") { flunk "duplicate interrupt should not start" }
+    end
+  ensure
+    release_first << true if first&.alive?
+    first&.join
+  end
+
   def test_evicts_client_after_terminal_io_failure_and_recreates_it_later
     calls = []
     clients = [FakeClient.new(calls), FakeClient.new(calls)]
@@ -257,21 +357,113 @@ class PiRpcClientRegistryTest < Minitest::Test
     refute_same first_client, registry.ensure_client("/tmp/session.jsonl")
   end
 
-  def test_io_failure_does_not_evict_a_replacement_client
+  def test_does_not_create_a_replacement_until_timed_out_client_is_closed
+    close_started = Queue.new
+    release_close = Queue.new
+    clients = []
+    first_client = FakeClient.new([])
+    first_client.define_singleton_method(:close) do
+      close_started << true
+      release_close.pop
+    end
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) {
+      client = clients.empty? ? first_client : FakeClient.new([])
+      clients << client
+      client
+    })
+    registry.ensure_client("/tmp/session.jsonl")
+
+    failing = Thread.new do
+      registry.with_client("/tmp/session.jsonl") { raise IOError, "timed out" }
+    rescue IOError
+      nil
+    end
+    close_started.pop
+
+    assert_raises(PiRpcClientRegistry::ClientRetiring) do
+      registry.ensure_client("/tmp/session.jsonl")
+    end
+    assert_equal 1, clients.length
+
+    release_close << true
+    failing.join
+    refute_same first_client, registry.ensure_client("/tmp/session.jsonl")
+  ensure
+    release_close << true if failing&.alive?
+    failing&.join
+  end
+
+  def test_does_not_move_a_client_while_it_is_retiring
+    close_started = Queue.new
+    release_close = Queue.new
+    client = FakeClient.new([])
+    client.define_singleton_method(:close) do
+      close_started << true
+      release_close.pop
+    end
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { client })
+    registry.ensure_client("/tmp/old.jsonl")
+    failing = Thread.new do
+      registry.with_client("/tmp/old.jsonl") { raise IOError, "timed out" }
+    rescue IOError
+      nil
+    end
+    close_started.pop
+
+    assert_raises(PiRpcClientRegistry::ClientRetiring) do
+      registry.move("/tmp/old.jsonl", "/tmp/new.jsonl")
+    end
+
+    release_close << true
+    failing.join
+    refute registry.active?("/tmp/old.jsonl")
+    refute registry.active?("/tmp/new.jsonl")
+  ensure
+    release_close << true if failing&.alive?
+    failing&.join
+  end
+
+  def test_does_not_replace_an_active_destination_client_when_moving
+    source = FakeClient.new([])
+    destination = FakeClient.new([])
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+    registry.register("/tmp/source.jsonl", source)
+    registry.register("/tmp/destination.jsonl", destination)
+    destination_started = Queue.new
+    release_destination = Queue.new
+    active = Thread.new do
+      registry.with_client("/tmp/destination.jsonl") do
+        destination_started << true
+        release_destination.pop
+      end
+    end
+    destination_started.pop
+
+    assert_raises(PiRpcClientRegistry::OperationPending) do
+      registry.move("/tmp/source.jsonl", "/tmp/destination.jsonl")
+    end
+    assert_same source, registry.client_for("/tmp/source.jsonl")
+    assert_same destination, registry.client_for("/tmp/destination.jsonl")
+  ensure
+    release_destination << true if active&.alive?
+    active&.join
+  end
+
+  def test_register_does_not_replace_a_client_with_an_active_request
     calls = []
     registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
     original = FakeClient.new(calls)
     replacement = FakeClient.new(calls)
     registry.register("/tmp/session.jsonl", original)
 
-    assert_raises(IOError) do
-      registry.with_client("/tmp/session.jsonl") do
+    registry.with_client("/tmp/session.jsonl") do
+      assert_raises(PiRpcClientRegistry::OperationPending) do
         registry.register("/tmp/session.jsonl", replacement)
-        raise IOError, "original process exited"
       end
+      assert_same original, registry.client_for("/tmp/session.jsonl")
     end
 
-    assert_same replacement, registry.client_for("/tmp/session.jsonl")
+    assert_empty calls
   end
 
   def test_keeps_clients_currently_in_use

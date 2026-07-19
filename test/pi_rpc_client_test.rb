@@ -4,6 +4,8 @@ require "json"
 require "base64"
 require "open3"
 require "timeout"
+require "tmpdir"
+require "rbconfig"
 require_relative "../lib/pi_rpc_client"
 
 class PiRpcClientTest < Minitest::Test
@@ -19,7 +21,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start("/tmp/session.jsonl", popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls.map { |args| args.drop(1) }
+    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, "--session", "/tmp/session.jsonl", PiRpcClient.process_group_options]], calls.map { |args| args.drop(1) }
   end
 
   def test_removes_gateway_ruby_environment_when_starting_pi
@@ -76,7 +78,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start("/tmp/session.jsonl", command_prefix: ["/opt/node", "/opt/pi"], popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, "--session", "/tmp/session.jsonl"]], calls.map { |args| args.drop(1) }
+    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, "--session", "/tmp/session.jsonl", PiRpcClient.process_group_options]], calls.map { |args| args.drop(1) }
   end
 
   def test_starts_new_pi_rpc_process_in_cwd
@@ -91,7 +93,7 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start_in_cwd("/tmp/project", popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls.map { |args| args.drop(1) }
+    assert_equal [["pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, PiRpcClient.process_group_options.merge(chdir: "/tmp/project")]], calls.map { |args| args.drop(1) }
   end
 
   def test_starts_new_pi_rpc_process_with_configured_node_and_pi_paths
@@ -106,7 +108,120 @@ class PiRpcClientTest < Minitest::Test
     client = PiRpcClient.start_in_cwd("/tmp/project", command_prefix: ["/opt/node", "/opt/pi"], popen: popen)
 
     assert_instance_of PiRpcClient, client
-    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, { chdir: "/tmp/project" }]], calls.map { |args| args.drop(1) }
+    assert_equal [["/opt/node", "/opt/pi", "--mode", "rpc", "--extension", PiRpcClient::GRIPI_EXTENSION_PATH, PiRpcClient.process_group_options.merge(chdir: "/tmp/project")]], calls.map { |args| args.drop(1) }
+  end
+
+  def test_close_terminates_the_pi_process_group
+    skip "POSIX process groups are not available on Windows" if Gem.win_platform?
+
+    Dir.mktmpdir do |dir|
+      pid_path = File.join(dir, "descendant.pid")
+      script_path = File.join(dir, "process_tree.rb")
+      File.write(script_path, <<~RUBY)
+        require "rbconfig"
+        descendant = spawn(RbConfig.ruby, "-e", 'trap("TERM") {}; loop { sleep 1 }')
+        File.write(ARGV.fetch(0), descendant.to_s)
+        sleep 60
+      RUBY
+      stdin, stdout, stderr, wait_thread = Open3.popen3(RbConfig.ruby, script_path, pid_path, pgroup: true)
+      Timeout.timeout(1) { sleep 0.01 until File.exist?(pid_path) }
+      descendant_pid = File.read(pid_path).to_i
+      sleep 0.1
+      client = PiRpcClient.new(
+        stdin: stdin,
+        stdout: stdout,
+        stderr: stderr,
+        wait_thread: wait_thread,
+        process_group: true,
+        process_term_timeout: 0.05,
+        process_kill_timeout: 0.5
+      )
+
+      client.close
+
+      refute process_running?(wait_thread.pid)
+      Timeout.timeout(1) { sleep 0.01 while process_running?(descendant_pid) }
+      refute process_running?(descendant_pid)
+    ensure
+      Process.kill("KILL", descendant_pid) if descendant_pid && process_running?(descendant_pid)
+      Process.kill("KILL", -wait_thread.pid) if wait_thread&.pid && process_running?(wait_thread.pid)
+    end
+  end
+
+  def test_process_watcher_terminates_descendants_when_pi_exits_first
+    skip "POSIX process groups are not available on Windows" if Gem.win_platform?
+
+    Dir.mktmpdir do |dir|
+      pid_path = File.join(dir, "descendant.pid")
+      script_path = File.join(dir, "exiting_parent.rb")
+      File.write(script_path, <<~RUBY)
+        require "rbconfig"
+        descendant = spawn(RbConfig.ruby, "-e", 'loop { sleep 1 }')
+        File.write(ARGV.fetch(0), descendant.to_s)
+      RUBY
+      stdin, stdout, stderr, wait_thread = Open3.popen3(RbConfig.ruby, script_path, pid_path, pgroup: true)
+      client = PiRpcClient.new(
+        stdin: stdin,
+        stdout: stdout,
+        stderr: stderr,
+        wait_thread: wait_thread,
+        process_group: true,
+        process_term_timeout: 0.05,
+        process_kill_timeout: 0.5
+      )
+      Timeout.timeout(1) { sleep 0.01 until File.exist?(pid_path) }
+      descendant_pid = File.read(pid_path).to_i
+
+      Timeout.timeout(1) { sleep 0.01 while process_running?(descendant_pid) }
+      refute process_running?(descendant_pid)
+      client.close
+    ensure
+      Process.kill("KILL", descendant_pid) if descendant_pid && process_running?(descendant_pid)
+      Process.kill("KILL", -wait_thread.pid) if wait_thread&.pid && process_running?(wait_thread.pid)
+    end
+  end
+
+  def test_concurrent_close_waits_for_process_cleanup
+    close_started = Queue.new
+    release_close = Queue.new
+    input = Object.new
+    input.define_singleton_method(:closed?) { false }
+    input.define_singleton_method(:close) do
+      close_started << true
+      release_close.pop
+    end
+    client = PiRpcClient.new(stdin: input, stdout: StringIO.new)
+    first = Thread.new { client.close }
+    close_started.pop
+    second_finished = Queue.new
+    second = Thread.new do
+      client.close
+      second_finished << true
+    end
+
+    refute second_finished.pop(timeout: 0.05)
+    release_close << true
+    assert second_finished.pop(timeout: 1)
+  ensure
+    release_close << true if first&.alive?
+    first&.join
+    second&.join
+  end
+
+  def test_close_does_not_signal_a_pid_after_the_original_waiter_has_exited
+    unrelated_pid = spawn(RbConfig.ruby, "-e", "sleep 60")
+    waiter = Struct.new(:pid) do
+      def alive? = false
+    end.new(unrelated_pid)
+    client = PiRpcClient.new(stdin: StringIO.new, stdout: StringIO.new, wait_thread: waiter)
+
+    client.close
+    client.close
+
+    assert process_running?(unrelated_pid)
+  ensure
+    Process.kill("KILL", unrelated_pid) if unrelated_pid && process_running?(unrelated_pid)
+    Process.wait(unrelated_pid) if unrelated_pid
   end
 
   def test_command_prefix_defaults_to_pi
@@ -256,6 +371,89 @@ class PiRpcClientTest < Minitest::Test
     command_writer&.close
     response_reader&.close
     response_writer&.close unless response_writer&.closed?
+  end
+
+  def test_times_out_when_pi_stdin_stops_accepting_commands
+    command_reader, command_writer = IO.pipe
+    begin
+      loop { command_writer.write_nonblock("x" * 4096) }
+    rescue IO::WaitWritable
+      nil
+    end
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader, request_timeout: 0.05)
+    request_thread = Thread.new { client.get_state }
+    request_thread.report_on_exception = false
+
+    error = assert_raises(PiRpcClient::RequestTimeout) { Timeout.timeout(1) { request_thread.value } }
+    assert_includes error.message, "get_state"
+  ensure
+    request_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_drains_pi_stderr_while_waiting_for_responses
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    stderr_reader, stderr_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader, stderr: stderr_reader, request_timeout: 1)
+    server = Thread.new do
+      command = JSON.parse(command_reader.gets)
+      stderr_writer.write("x" * (1024 * 1024))
+      response_writer.puts JSON.generate(id: command.fetch("id"), type: "response", command: command.fetch("type"), success: true)
+    end
+
+    response = client.get_state
+
+    assert_equal true, response.fetch("success")
+  ensure
+    server&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+    stderr_reader&.close
+    stderr_writer&.close
+  end
+
+  def test_times_out_when_pi_process_does_not_respond
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader, request_timeout: 0.05)
+
+    request_thread = Thread.new { client.get_state }
+    request_thread.report_on_exception = false
+    Timeout.timeout(1) { command_reader.gets }
+
+    error = assert_raises(PiRpcClient::RequestTimeout) { Timeout.timeout(1) { request_thread.value } }
+    assert_includes error.message, "get_state"
+  ensure
+    request_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
+  def test_abort_uses_shorter_timeout
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader, request_timeout: 1, abort_timeout: 0.05)
+
+    abort_thread = Thread.new { client.abort }
+    abort_thread.report_on_exception = false
+    Timeout.timeout(1) { command_reader.gets }
+
+    assert_raises(PiRpcClient::RequestTimeout) { Timeout.timeout(1) { abort_thread.value } }
+  ensure
+    abort_thread&.kill
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
   end
 
   def test_snapshots_latest_updates_for_running_tools_with_the_event_cursor
@@ -643,7 +841,8 @@ class PiRpcClientTest < Minitest::Test
       stdin: input,
       stdout: output,
       monotonic_clock: -> { now += 1 },
-      oversized_tool_update_sample_interval_seconds: 20
+      oversized_tool_update_sample_interval_seconds: 20,
+      request_timeout: nil
     )
 
     client.request("get_state", id: "state-1")
@@ -1358,6 +1557,29 @@ class PiRpcClientTest < Minitest::Test
     response_writer&.close
   end
 
+  def test_extension_ui_response_times_out_when_pi_stdin_is_full
+    command_reader, command_writer = IO.pipe
+    response_reader, response_writer = IO.pipe
+    client = PiRpcClient.new(stdin: command_writer, stdout: response_reader, request_timeout: 0.05)
+    response_writer.puts JSON.generate({ type: "extension_ui_request", id: "dialog-1", method: "confirm" })
+    Timeout.timeout(1) { sleep 0.01 until client.events_after(0).fetch(:events).any? }
+    begin
+      loop { command_writer.write_nonblock("x" * 4096) }
+    rescue IO::WaitWritable
+      nil
+    end
+
+    assert_raises(PiRpcClient::RequestTimeout) do
+      client.extension_ui_response("dialog-1", confirmed: true)
+    end
+    assert_equal ["dialog-1"], client.live_snapshot.fetch(:extension_ui).fetch(:pending_dialogs).map { |dialog| dialog.fetch("id") }
+  ensure
+    command_reader&.close
+    command_writer&.close
+    response_reader&.close
+    response_writer&.close
+  end
+
   def test_reads_bounded_tree_snapshot_through_extension_bridge
     input = StringIO.new
     snapshot = {
@@ -1649,6 +1871,18 @@ class PiRpcClientTest < Minitest::Test
         details: { cumulativeState: "x" * payload_bytes }
       }
     }
+  end
+
+  def process_running?(pid)
+    return false unless pid&.positive?
+
+    stat_path = "/proc/#{pid}/stat"
+    return File.read(stat_path).split.fetch(2) != "Z" if File.exist?(stat_path)
+
+    Process.kill(0, pid)
+    true
+  rescue Errno::ENOENT, Errno::ESRCH
+    false
   end
 
   def decode_extension_command(message, name)

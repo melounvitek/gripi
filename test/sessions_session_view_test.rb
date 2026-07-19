@@ -289,6 +289,34 @@ class SessionsSessionViewTest < Minitest::Test
     end
   end
 
+  def test_conversation_renders_persisted_history_when_synchronization_is_busy
+    Dir.mktmpdir do |dir|
+      session_path = write_session(dir)
+      rpc_clients = Object.new
+      rpc_clients.define_singleton_method(:active?) { |_path| true }
+      rpc_clients.define_singleton_method(:with_active_client) { flunk "rendering should not wait on RPC" }
+      rpc_clients.define_singleton_method(:live_snapshot) do |_path|
+        { event_sequence: 0, active_tool_events: [] }
+      end
+      synchronizer = Object.new
+      synchronizer.define_singleton_method(:inspect_if_available) { |_path, include_position:| nil }
+
+      view = Sessions::SessionView.build(
+        sessions_root: dir,
+        params: { "session" => session_path },
+        include_conversation: true,
+        read_state_store: GatewayReadStateStore.new(path: File.join(dir, "read-state.json")),
+        attachment_store: PiAttachmentStore.new(root: File.join(dir, "attachments")),
+        rpc_clients: rpc_clients,
+        session_synchronizer: synchronizer,
+        mark_selected_read: false
+      )
+
+      assert_equal ["Hello"], view.messages.map(&:text)
+      refute view.current_tree_leaf_known
+    end
+  end
+
   def test_active_session_leaf_fallback_uses_lightweight_tree_bridge
     calls = []
     client = Object.new

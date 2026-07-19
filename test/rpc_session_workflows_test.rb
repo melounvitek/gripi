@@ -3,6 +3,7 @@
 require "minitest/autorun"
 require "fileutils"
 require "tmpdir"
+require_relative "../lib/pi_rpc_client"
 require_relative "../lib/rpc/pending_session_registry"
 require_relative "../lib/rpc/start_new_session"
 require_relative "../lib/rpc/branch_session"
@@ -55,6 +56,29 @@ class RpcSessionWorkflowsTest < Minitest::Test
       assert_same client, rpc_clients.client_for(result)
       assert_equal cwd, pending_sessions.cwd_for(result)
       assert_equal [[:start_new, cwd], [:get_state]], calls
+    end
+  end
+
+  def test_start_new_session_closes_unregistered_client_when_state_times_out
+    Dir.mktmpdir do |dir|
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:get_state) do
+        raise PiRpcClient::RequestTimeout, "Pi RPC command timed out: get_state"
+      end
+      client.define_singleton_method(:close) { calls << [:close] }
+
+      assert_raises(PiRpcClient::RequestTimeout) do
+        Rpc::StartNewSession.call(
+          dir,
+          client_factory: ->(_cwd) { client },
+          rpc_clients: FakeRpcClientRegistry.new,
+          pending_sessions: Rpc::PendingSessionRegistry.new,
+          sessions_root: dir
+        )
+      end
+
+      assert_equal [[:close]], calls
     end
   end
 
@@ -130,6 +154,11 @@ class RpcSessionWorkflowsTest < Minitest::Test
 
     def client_for(session_path)
       @clients[session_path]
+    end
+
+    def with_existing_client(session_path)
+      client = @clients[session_path]
+      yield client if client
     end
 
     def move(from_path, to_path)

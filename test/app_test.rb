@@ -12,6 +12,8 @@ require "base64"
 require "pathname"
 require "timeout"
 require "zlib"
+require "net/http"
+require "puma"
 require_relative "../app"
 
 class AppTest < Minitest::Test
@@ -1813,6 +1815,38 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_extension_ui_response_fails_fast_while_an_operation_is_pending
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, FakeRpcClient.new(calls))
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      operation_started = Queue.new
+      release_operation = Queue.new
+      operation = Thread.new do
+        registry.with_client(path) do
+          operation_started << true
+          release_operation.pop
+        end
+      end
+      operation_started.pop
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/extension_ui_response",
+        params: { "session" => path, "id" => "dialog-1", "value" => "Allow" },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 409, response.status
+      assert_empty calls
+    ensure
+      release_operation << true if operation&.alive?
+      operation&.join
+    end
+  end
+
   def test_rejects_an_extension_ui_response_that_is_no_longer_pending
     Dir.mktmpdir do |dir|
       path = write_session(dir)
@@ -2074,6 +2108,29 @@ class AppTest < Minitest::Test
       assert_match %r{pending-[^&]+\.jsonl}, response["Location"]
       refute_includes response["Location"], Rack::Utils.escape(paths.last)
       assert_equal [[ :start_new, project_cwd(dir) ], [ :get_state ]], calls
+    end
+  end
+
+  def test_new_session_timeout_closes_client_and_returns_gateway_timeout
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:get_state) do
+        raise PiRpcClient::RequestTimeout, "Pi RPC command timed out: get_state"
+      end
+      Gripi.set :sessions_root, dir
+      Gripi.set :new_rpc_client_factory, [->(_cwd) { client }]
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/sessions/new",
+        params: { "session" => path },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 504, response.status
+      assert_equal "Pi RPC command timed out: get_state", JSON.parse(response.body).fetch("error")
+      assert_equal [[:close]], calls
     end
   end
 
@@ -3477,6 +3534,269 @@ class AppTest < Minitest::Test
       assert_equal 200, response.status
       assert_equal({ "ok" => true, "session" => path }, JSON.parse(response.body))
       assert_equal [[ :start, path ], [ :abort ]], calls
+    end
+  end
+
+  def test_abort_reaches_an_active_pending_client_without_state_lookup
+    Dir.mktmpdir do |dir|
+      pending_path = File.join(dir, "pending-session.jsonl")
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:get_state) { flunk "abort should not canonicalize through get_state" }
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(pending_path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.settings.pending_session_registry.remember(pending_path, dir)
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/abort",
+        params: { "session" => pending_path },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal [[:abort]], calls
+    end
+  end
+
+  def test_abort_alias_lookup_keeps_the_identified_client_leased_through_abort
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      pending_path = File.join(dir, "pending-session.jsonl")
+      calls = []
+      identified = Queue.new
+      continue_probe = Queue.new
+      client = FakeRpcClient.new(calls, [], path)
+      client.define_singleton_method(:busy?) { true }
+      client.define_singleton_method(:get_state_for_interrupt) do
+        identified << true
+        continue_probe.pop
+        get_state
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(pending_path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.settings.pending_session_registry.remember(pending_path, project_cwd(dir))
+      operation_started = Queue.new
+      release_operation = Queue.new
+      operation = Thread.new do
+        registry.with_client(pending_path) do
+          operation_started << true
+          release_operation.pop
+        end
+      end
+      operation_started.pop
+      abort_request = Thread.new do
+        Rack::MockRequest.new(Gripi).post(
+          "/abort",
+          params: { "session" => path },
+          "HTTP_ACCEPT" => "application/json"
+        )
+      end
+      identified.pop
+
+      assert_raises(PiRpcClientRegistry::OperationPending) do
+        registry.move(pending_path, File.join(dir, "moved.jsonl"))
+      end
+      continue_probe << true
+      response = abort_request.value
+
+      assert_equal 200, response.status
+      assert_includes calls, [:abort]
+      assert_same client, registry.client_for(pending_path)
+    ensure
+      continue_probe << true if abort_request&.alive?
+      release_operation << true if operation&.alive?
+      abort_request&.join
+      operation&.join
+    end
+  end
+
+  def test_abort_alias_lookup_does_not_retire_an_unidentified_pending_client
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      pending_path = File.join(dir, "pending-session.jsonl")
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:get_state_for_interrupt) do
+        raise PiRpcClient::RequestTimeout, "Pi RPC command timed out: get_state"
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(pending_path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.settings.pending_session_registry.remember(pending_path, project_cwd(dir))
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/abort",
+        params: { "session" => path },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 409, response.status
+      assert registry.active?(pending_path)
+      assert_empty calls
+    end
+  end
+
+  def test_abort_alias_lookup_skips_an_unresponsive_unrelated_pending_client
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      first_path = File.join(dir, "pending-first.jsonl")
+      target_path = File.join(dir, "pending-target.jsonl")
+      first_calls = []
+      target_calls = []
+      first_client = FakeRpcClient.new(first_calls)
+      first_client.define_singleton_method(:get_state_for_interrupt) do
+        raise PiRpcClient::RequestTimeout, "Pi RPC command timed out: get_state"
+      end
+      target_client = FakeRpcClient.new(target_calls, [], path)
+      target_client.define_singleton_method(:get_state_for_interrupt) { get_state }
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(first_path, first_client)
+      registry.register(target_path, target_client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.settings.pending_session_registry.remember(first_path, project_cwd(dir))
+      Gripi.settings.pending_session_registry.remember(target_path, project_cwd(dir))
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/abort",
+        params: { "session" => path },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert registry.active?(first_path)
+      assert_empty first_calls
+      assert_includes target_calls, [:abort]
+    end
+  end
+
+  def test_abort_forcibly_retires_an_unresponsive_rpc_client
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:busy?) { true }
+      client.define_singleton_method(:abort) { raise PiRpcClient::RequestTimeout, "Pi RPC command timed out: abort" }
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      response = Rack::MockRequest.new(Gripi).post(
+        "/abort",
+        params: { "session" => path },
+        "HTTP_ACCEPT" => "application/json"
+      )
+
+      assert_equal 200, response.status
+      assert_equal({ "ok" => true, "session" => path, "forced" => true }, JSON.parse(response.body))
+      refute registry.active?(path)
+      assert_equal [[:close]], calls
+    end
+  end
+
+  def test_duplicate_abort_returns_while_the_first_is_pending
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      calls = []
+      started = Queue.new
+      release = Queue.new
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:busy?) { true }
+      client.define_singleton_method(:abort) do
+        calls << [:abort]
+        started << true
+        release.pop
+        { "success" => true }
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      first = Thread.new do
+        Rack::MockRequest.new(Gripi).post(
+          "/abort",
+          params: { "session" => path },
+          "HTTP_ACCEPT" => "application/json"
+        )
+      end
+      started.pop
+
+      duplicate = Timeout.timeout(1) do
+        Rack::MockRequest.new(Gripi).post(
+          "/abort",
+          params: { "session" => path },
+          "HTTP_ACCEPT" => "application/json"
+        )
+      end
+
+      assert_equal 202, duplicate.status
+      assert_equal true, JSON.parse(duplicate.body).fetch("stopping")
+      assert_equal [[:abort]], calls
+    ensure
+      release << true if first&.alive?
+      first&.join
+    end
+  end
+
+  def test_stuck_session_requests_do_not_exhaust_puma
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      steer_started = Queue.new
+      abort_started = Queue.new
+      release_steer = Queue.new
+      release_abort = Queue.new
+      client = FakeRpcClient.new([], [], path)
+      client.define_singleton_method(:busy?) { true }
+      client.define_singleton_method(:steer) do |_message, _images = []|
+        steer_started << true
+        release_steer.pop
+        { "success" => true }
+      end
+      client.define_singleton_method(:abort) do
+        abort_started << true
+        release_abort.pop
+        { "success" => true }
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :session_synchronizer, nil
+      server = Puma::Server.new(Gripi, nil, min_threads: 0, max_threads: 5)
+      server.add_tcp_listener("127.0.0.1", 0)
+      server_thread = server.run
+      port = server.connected_ports.fetch(0)
+
+      steer = Thread.new { http_post(port, "/prompt", session: path, message: "Change direction", streaming_behavior: "steer") }
+      steer_started.pop
+      abort_request = Thread.new { http_post(port, "/abort", session: path) }
+      abort_started.pop
+
+      duplicate_steer = Timeout.timeout(1) do
+        http_post(port, "/prompt", session: path, message: "Again", streaming_behavior: "steer")
+      end
+      duplicate_abort = Timeout.timeout(1) { http_post(port, "/abort", session: path) }
+      events = Timeout.timeout(1) { http_get(port, "/events", session: path, after: 0) }
+      conversation = Timeout.timeout(1) { http_get(port, "/", session: path) }
+
+      assert_equal "409", duplicate_steer.code
+      assert_equal "202", duplicate_abort.code
+      assert_equal "200", events.code
+      assert_equal "200", conversation.code
+    ensure
+      release_steer << true if steer&.alive?
+      release_abort << true if abort_request&.alive?
+      steer&.join
+      abort_request&.join
+      server&.stop(true)
+      server_thread&.join
     end
   end
 
@@ -8567,6 +8887,19 @@ class AppTest < Minitest::Test
     yield
   ensure
     receiver.define_method(name, original)
+  end
+
+  def http_post(port, path, params)
+    request = Net::HTTP::Post.new(path)
+    request["Accept"] = "application/json"
+    request.set_form_data(params)
+    Net::HTTP.start("127.0.0.1", port, open_timeout: 1, read_timeout: 2) { |http| http.request(request) }
+  end
+
+  def http_get(port, path, params)
+    uri = URI("http://127.0.0.1:#{port}#{path}")
+    uri.query = URI.encode_www_form(params)
+    Net::HTTP.start(uri.host, uri.port, open_timeout: 1, read_timeout: 2) { |http| http.get(uri.request_uri) }
   end
 
   def native_tree_from_file(path)

@@ -1,34 +1,50 @@
 require "thread"
+require_relative "rpc/diagnostics"
 
 class PiRpcClientRegistry
-  Entry = Struct.new(:client, :last_used_at, :active_requests, :operation_mutex, keyword_init: true)
+  class OperationPending < StandardError; end
+  class InterruptPending < StandardError; end
+  class ClientRetiring < StandardError; end
+  class ClientStarting < StandardError; end
+
+  Entry = Struct.new(:client, :last_used_at, :active_requests, :operation_mutex, :interrupt_mutex, :retiring, keyword_init: true)
 
   def initialize(factory:, clock: -> { Time.now })
     @factory = factory
     @clock = clock
     @clients = {}
+    @creating = {}
     @mutex = Mutex.new
   end
 
   def ensure_client(session_path)
-    @mutex.synchronize do
-      entry = @clients[session_path] ||= new_entry(@factory.call(session_path))
-      touch_entry(entry)
-      entry.client
-    end
+    entry = acquire_entry(session_path, create: true, touch: true)
+    entry.client
+  ensure
+    release_entry(entry, touch: true) if entry
   end
 
   def register(session_path, client)
     old_client = nil
     @mutex.synchronize do
-      old_client = @clients[session_path]&.client unless @clients[session_path]&.client.equal?(client)
+      current = @clients[session_path]
+      raise ClientRetiring, "Pi RPC client is restarting" if current&.retiring
+      if current && !current.client.equal?(client) && current.active_requests.positive?
+        raise OperationPending, "Session operation is pending"
+      end
+      next if current&.client.equal?(client)
+
+      old_client = current&.client
       @clients[session_path] = new_entry(client)
     end
     old_client&.close
   end
 
   def client_for(session_path)
-    @mutex.synchronize { @clients[session_path]&.client }
+    @mutex.synchronize do
+      entry = @clients[session_path]
+      entry.client if entry && !entry.retiring
+    end
   end
 
   def touch(session_path)
@@ -97,19 +113,19 @@ class PiRpcClientRegistry
   end
 
   def with_existing_client(session_path, touch: true, &block)
-    with_entry(session_path, serialize: true, create: false, touch: touch, &block)
+    with_entry(session_path, serialize: :operation, create: false, touch: touch, &block)
   end
 
   def with_client(session_path, &block)
-    with_entry(session_path, serialize: true, &block)
+    with_entry(session_path, serialize: :operation, &block)
   end
 
   def with_interrupt_client(session_path, &block)
-    with_entry(session_path, serialize: false, &block)
+    with_entry(session_path, serialize: :interrupt, &block)
   end
 
   def with_existing_interrupt_client(session_path, &block)
-    with_entry(session_path, serialize: false, create: false, &block)
+    with_entry(session_path, serialize: :interrupt, create: false, &block)
   end
 
   def with_active_client(session_path, touch: true, &block)
@@ -119,10 +135,21 @@ class PiRpcClientRegistry
   def move(old_path, new_path)
     old_client = nil
     @mutex.synchronize do
-      entry = @clients.delete(old_path)
-      return unless entry
+      raise ClientStarting, "Pi RPC client is starting" if @creating[old_path] || @creating[new_path]
 
-      old_client = @clients[new_path]&.client unless @clients[new_path]&.client.equal?(entry.client)
+      entry = @clients[old_path]
+      return unless entry
+      raise ClientRetiring, "Pi RPC client is restarting" if entry.retiring
+      raise OperationPending, "Source session operation is pending" if entry.active_requests.positive?
+
+      destination = @clients[new_path]
+      raise ClientRetiring, "Pi RPC client is restarting" if destination&.retiring
+      if destination && !destination.equal?(entry) && destination.active_requests.positive?
+        raise OperationPending, "Destination session operation is pending"
+      end
+
+      @clients.delete(old_path)
+      old_client = destination&.client unless destination&.client.equal?(entry.client)
       touch_entry(entry)
       @clients[new_path] = entry
     end
@@ -183,6 +210,7 @@ class PiRpcClientRegistry
     clients = @mutex.synchronize do
       existing = @clients.values.map(&:client)
       @clients = {}
+      @creating.clear
       existing
     end
     clients.each(&:close)
@@ -194,28 +222,94 @@ class PiRpcClientRegistry
     entry = acquire_entry(session_path, create: create, touch: touch)
     return unless entry
 
-    if serialize
-      entry.operation_mutex.synchronize { yield entry.client }
-    else
-      yield entry.client
+    lock = case serialize
+    when :operation then entry.operation_mutex
+    when :interrupt then entry.interrupt_mutex
     end
-  rescue Errno::EPIPE, IOError
-    discard_entry(entry) if entry
+    unless lock
+      return yield entry.client
+    end
+
+    error_class = serialize == :interrupt ? InterruptPending : OperationPending
+    unless lock.try_lock
+      Rpc::Diagnostics.log("operation_rejected", session: session_path, lane: serialize)
+      raise error_class, "Another #{serialize} is already pending for this session"
+    end
+
+    begin
+      yield entry.client
+    ensure
+      lock.unlock
+    end
+  rescue Errno::EPIPE, IOError => error
+    discard_entry(entry, reason: error.class.name) if entry
     raise
   ensure
     release_entry(entry, touch: touch) if entry
   end
 
   def acquire_entry(session_path, create:, touch:)
-    @mutex.synchronize do
-      entry = @clients[session_path]
-      entry ||= @clients[session_path] = new_entry(@factory.call(session_path)) if create
-      return unless entry
+    creation_token = nil
+    entry = @mutex.synchronize do
+      existing = @clients[session_path]
+      raise ClientRetiring, "Pi RPC client is restarting" if existing&.retiring
+      if existing
+        existing.active_requests += 1
+        touch_entry(existing) if touch
+        next existing
+      end
+      next unless create
+      raise ClientStarting, "Pi RPC client is starting" if @creating[session_path]
 
-      entry.active_requests += 1
-      touch_entry(entry) if touch
-      entry
+      creation_token = Object.new
+      @creating[session_path] = creation_token
+      nil
     end
+    return entry if entry
+    return unless create
+
+    begin
+      client = @factory.call(session_path)
+    rescue StandardError
+      @mutex.synchronize { @creating.delete(session_path) if @creating[session_path].equal?(creation_token) }
+      raise
+    end
+    install_created_entry(session_path, client, creation_token, touch: touch)
+  end
+
+  def install_created_entry(session_path, client, creation_token, touch:)
+    unused_client = nil
+    error = nil
+    entry = @mutex.synchronize do
+      unless @creating[session_path].equal?(creation_token)
+        unused_client = client
+        error = ClientStarting.new("Pi RPC client creation was cancelled")
+        next
+      end
+
+      @creating.delete(session_path)
+      existing = @clients[session_path]
+      if existing&.retiring
+        unused_client = client
+        error = ClientRetiring.new("Pi RPC client is restarting")
+        next
+      end
+
+      if existing
+        unused_client = client
+        client_entry = existing
+      else
+        client_entry = new_entry(client)
+        @clients[session_path] = client_entry
+      end
+      client_entry.active_requests += 1
+      touch_entry(client_entry) if touch
+      client_entry
+    end
+    unused_client&.close
+    raise error if error
+
+    entry
   end
 
   def release_entry(entry, touch:)
@@ -225,16 +319,29 @@ class PiRpcClientRegistry
     end
   end
 
-  def discard_entry(entry)
+  def discard_entry(entry, reason:)
+    session_path = nil
+    owns_retirement = false
     client = @mutex.synchronize do
       session_path, current_entry = @clients.find { |_path, candidate| candidate.equal?(entry) }
-      @clients.delete(session_path)&.client if current_entry
+      next unless current_entry && !current_entry.retiring
+
+      current_entry.retiring = true
+      owns_retirement = true
+      current_entry.client
     end
-    client.close if client&.respond_to?(:close)
+    return unless client
+
+    Rpc::Diagnostics.log("client_evicted", session: session_path, reason: reason)
+    client.close if client.respond_to?(:close)
+  ensure
+    if owns_retirement
+      @mutex.synchronize { @clients.delete_if { |_path, candidate| candidate.equal?(entry) } }
+    end
   end
 
   def new_entry(client)
-    Entry.new(client: client, last_used_at: @clock.call, active_requests: 0, operation_mutex: Mutex.new)
+    Entry.new(client: client, last_used_at: @clock.call, active_requests: 0, operation_mutex: Mutex.new, interrupt_mutex: Mutex.new, retiring: false)
   end
 
   def touch_entry(entry)
