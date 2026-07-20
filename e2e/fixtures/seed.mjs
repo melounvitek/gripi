@@ -93,7 +93,7 @@ export async function seedFixtures(root) {
   await Promise.all(Object.values(projects).map((project) => mkdir(project, { recursive: true })));
 
   const definitions = [
-    ["contract-project", "contract", sessions.marker, { question: "Contract fixture marker", answer: "The external E2E target is disposable." }],
+    ["mobile-project", "mobile-landing", sessions.mobileLanding],
     ["history-project", "history", sessions.history, { question: "Persisted browser question", answer: "Persisted browser answer" }],
     ["prompt-project", "prompt", sessions.prompt],
     ["controls-project", "steer", sessions.controlsSteer],
@@ -107,9 +107,13 @@ export async function seedFixtures(root) {
     ["bash-project", "bash-cancel", sessions.bashCancel],
     ["bash-project", "bash-overlap", sessions.bashOverlap],
     ["mobile-project", "mobile", sessions.mobile],
-    ["mobile-project", "mobile-landing", sessions.mobileLanding],
     ["mobile-bash-project", "bash-mobile", sessions.bashMobile],
-    ["prompt-project", "prompt-retry", sessions.promptRetry]
+    ["prompt-project", "prompt-retry", sessions.promptRetry],
+    ["prompt-project", "prompt-retry-stop", sessions.promptRetryStop],
+    ["prompt-project", "prompt-retry-exhausted", sessions.promptRetryExhausted],
+    ["prompt-project", "prompt-retry-compact", sessions.promptRetryCompact],
+    ["contract-project", "contract", sessions.marker, { question: "Contract fixture marker", answer: "The external E2E target is disposable." }],
+    ["bash-project", "bash-retry", sessions.bashRetry]
   ];
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
     await writeSession(root, projects[projectName], slug, title, index + 1, history);
