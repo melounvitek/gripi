@@ -49,7 +49,7 @@ const terminalLatestFrame = `${terminalReset}${terminalLatestHistory.join("\n")}
 
 export const nativeBash = {
   included: {
-    command: "printf 'included native bash output'",
+    command: "for index in $(seq 1 25); do echo \"included native bash output $index\"; done",
     output: `${Array.from({ length: 25 }, (_, index) => `included native bash output ${index + 1}`).join("\n")}\n`
   },
   excluded: { command: "printf 'excluded native bash output'", output: "excluded native bash output\n" },
