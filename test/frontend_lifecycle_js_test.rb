@@ -576,7 +576,7 @@ class FrontendLifecycleJsTest < Minitest::Test
         type: "basic",
         json: async () => ({ code: "session_operation_pending", error: "Another session operation is pending. Please retry." })
       });
-      const success = { ok: true, status: 200, type: "basic" };
+      const success = { ok: true, status: 200, type: "basic", json: async () => ({ accepted: true }) };
       const definitiveFailure = {
         ok: false,
         status: 422,
@@ -623,40 +623,6 @@ class FrontendLifecycleJsTest < Minitest::Test
     assert_equal ["waiting", "waiting", "waiting", "waiting", "waiting"], results.fetch("retryNotices")
   end
 
-  def test_prompt_request_stops_retrying_when_submission_is_cancelled
-    app_source = File.read(File.join(ASSETS, "app.js"))
-    retry_source = app_source.match(/const PROMPT_RETRY_DELAYS.*?(?=\nasync function submitPrompt)/m).to_s
-
-    results = run_javascript(<<~JS)
-      let fetches = 0;
-      let cancellationChecks = 0;
-      const delays = [];
-      globalThis.fetch = async () => {
-        fetches += 1;
-        return {
-          ok: false,
-          status: 409,
-          type: "basic",
-          json: async () => ({ code: "session_operation_pending" })
-        };
-      };
-      globalThis.setTimeout = (callback, delay) => { delays.push(delay); callback(); return 1; };
-      eval(#{(retry_source + "\nglobalThis.sendWithRetries = sendPromptRequest;").to_json});
-
-      const result = await globalThis.sendWithRetries("/prompt", {}, {
-        retryCancelled: () => {
-          cancellationChecks += 1;
-          return cancellationChecks === 2;
-        },
-        onRetry: () => {}
-      });
-
-      console.log(JSON.stringify({ cancelled: result.cancelled, fetches, delays }));
-    JS
-
-    assert_equal({ "cancelled" => true, "fetches" => 1, "delays" => [250] }, results)
-  end
-
   def test_bash_submission_stays_nonblocking_and_restores_a_rejected_duplicate
     app_source = File.read(File.join(ASSETS, "app.js"))
     bash_source = app_source.match(/function restoreSubmittedComposerInput\(.*?(?=\nasync function submitPrompt)/m).to_s
@@ -664,6 +630,7 @@ class FrontendLifecycleJsTest < Minitest::Test
     results = run_javascript(<<~JS)
       let sessionViewGeneration = 1;
       let sessionSwitchGeneration = 1;
+      let promptSubmissionGeneration = 0;
       const promptSessionInput = { value: "session-a" };
       const promptTextarea = { value: "!sleep 30", disabled: false };
       const promptForm = { action: "/prompt" };
@@ -771,6 +738,7 @@ class FrontendLifecycleJsTest < Minitest::Test
 
     results = run_javascript(<<~JS)
       let sessionPath = "session-a";
+      let promptSubmissionGeneration = 0;
       const currentSessionPath = () => sessionPath;
       const composerState = { dataset: { state: "running" } };
       const liveOutput = null;

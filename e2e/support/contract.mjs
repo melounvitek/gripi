@@ -25,6 +25,7 @@ export const prompts = {
   standard: "Show the deterministic browser response",
   retry: "Retry this deterministic browser response",
   retryExhausted: "Keep this prompt available after retry exhaustion",
+  retryCancelled: "Do not send this prompt after stopping",
   steerStart: "Start the steer scenario",
   steerMessage: "Use the steered direction",
   followUpStart: "Start the follow-up scenario",

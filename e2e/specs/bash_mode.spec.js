@@ -2,6 +2,31 @@ import { expect, test } from "@playwright/test";
 import { nativeBash, prompts, sessions } from "../support/contract.mjs";
 import { expectRunFinished, selectSession, sendPrompt } from "../support/ui.mjs";
 
+test("automatically retries transient contention for native bash", async ({ page }) => {
+  const command = "printf 'retried native bash'";
+  let promptRequests = 0;
+  await page.route("**/prompt", async (route) => {
+    promptRequests += 1;
+    if (promptRequests === 1) {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "session_operation_pending" })
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.goto("/");
+  await selectSession(page, sessions.promptRetry);
+  await sendPrompt(page, `!${command}`);
+
+  await expect(bashCard(page, command)).toContainText(`Fake Pi completed: ${command}`);
+  expect(promptRequests).toBe(2);
+});
+
 test("complete an included native bash command and restore it after reload", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.bashIncluded);

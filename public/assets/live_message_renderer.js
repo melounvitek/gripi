@@ -82,6 +82,12 @@ export class LiveMessageRenderer {
     return !!this.optimisticUserMessage(text);
   }
 
+  removeOptimisticUserMessage(text) {
+    const message = this.optimisticUserMessage(text);
+    message?.remove();
+    if (message) this.conversationController.scheduleFocusedActivityRefresh?.();
+  }
+
   markOptimisticUserMessageFailed(text) {
     const message = this.optimisticUserMessage(text);
     if (!message) return;

@@ -964,7 +964,8 @@ class AppTest < Minitest::Test
   def test_json_prompt_marks_session_operation_contention_as_retryable
     Dir.mktmpdir do |dir|
       path = write_session(dir)
-      client = FakeRpcClient.new([], [], path)
+      calls = []
+      client = FakeRpcClient.new(calls, [], path)
       registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
       registry.register(path, client)
       Gripi.set :sessions_root, dir
@@ -996,6 +997,7 @@ class AppTest < Minitest::Test
         },
         JSON.parse(response.body)
       )
+      refute_includes calls, [:prompt, "Hello Pi"]
     ensure
       release_operation << true if operation&.alive?
       operation&.join

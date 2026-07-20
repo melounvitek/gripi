@@ -1626,7 +1626,9 @@ async function submitBashPrompt(rawMessage, bashCommand) {
   const switchGeneration = sessionSwitchGeneration;
   const submittedSession = promptSessionInput?.value;
   const submittedImageFiles = pendingImages.map((entry) => entry.file);
+  const submissionGeneration = ++promptSubmissionGeneration;
   const submittedViewChanged = () => generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value;
+  const retryCancelled = () => submittedViewChanged() || submissionGeneration !== promptSubmissionGeneration;
   const formData = new FormData(promptForm);
   addSessionViewFormParams(formData);
   formData.set("message", rawMessage);
@@ -1649,15 +1651,20 @@ async function submitBashPrompt(rawMessage, bashCommand) {
   };
 
   try {
-    const response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
-    const payload = await response.json().catch(() => null);
+    const result = await sendPromptRequest(promptForm.action, formData, {
+      retryCancelled,
+      onRetry: () => showStatus("Waiting to send…", true)
+    });
+    if (result.cancelled) return;
+    const { response, payload } = result;
     if (submittedViewChanged()) {
       sidebarController.requestRefresh();
       return;
     }
     if (!response.ok || !payload?.bash_id) {
       restoreSubmittedBashInput();
-      showStatus(payload?.error || "Shell command failed to start", true);
+      const errorMessage = payload?.error || (payload?.code === "session_operation_pending" ? "Another session operation is pending. Please retry." : "Shell command failed to start");
+      showStatus(errorMessage, true);
       return;
     }
 
@@ -1684,9 +1691,10 @@ const PROMPT_RETRY_DELAYS = [250, 500, 1_000];
 async function sendPromptRequest(action, formData, { retryCancelled, onRetry }) {
   for (let attempt = 0; ; attempt += 1) {
     const response = await fetch(action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
-    if (response.ok || response.type === "opaqueredirect") return { response, payload: null };
+    if (response.type === "opaqueredirect") return { response, payload: null };
 
     const payload = await response.json().catch(() => null);
+    if (response.ok) return { response, payload };
     const retryDelay = PROMPT_RETRY_DELAYS[attempt];
     const retryable = response.status === 409 && payload?.code === "session_operation_pending" && retryDelay !== undefined;
     if (!retryable) return { response, payload };
@@ -1779,8 +1787,16 @@ async function submitPrompt(event) {
     if (cloneCommand || newCommand) hideSessionSwitching();
   };
 
-  const showPromptFailure = (errorMessage) => {
+  const clearPendingCompaction = () => {
+    if (!compactCommand) return;
+
+    liveMessageRenderer.removePendingCompactionMessage();
+    sidebarController.refresh({ force: true }).catch(() => {});
+  };
+
+  const showPromptFailure = (errorMessage, { retryableContention = false } = {}) => {
     restoreSubmittedPromptInput();
+    clearPendingCompaction();
     if (queuedPrompt) {
       const currentState = composerState?.dataset.state;
       if (["running", "sending"].includes(currentState)) selectStreamingBehavior(streamingBehavior, { focus: false });
@@ -1788,7 +1804,8 @@ async function submitPrompt(event) {
       showStatus(errorMessage, true);
       return;
     }
-    liveMessageRenderer.markOptimisticUserMessageFailed(message);
+    if (retryableContention) liveMessageRenderer.removeOptimisticUserMessage(message);
+    else liveMessageRenderer.markOptimisticUserMessageFailed(message);
     if (liveBash) showCurrentActiveTask("error", errorMessage);
     else setComposerState("error", errorMessage);
     showStatus(errorMessage, true);
@@ -1805,7 +1822,13 @@ async function submitPrompt(event) {
         showStatus("Waiting to send…", true);
       }
     });
-    if (result.cancelled) return;
+    if (result.cancelled) {
+      if (!submittedViewChanged()) {
+        clearPendingCompaction();
+        if (!queuedPrompt) liveMessageRenderer.removeOptimisticUserMessage(message);
+      }
+      return;
+    }
     response = result.response;
     responsePayload = result.payload;
   } catch (_error) {
@@ -1839,9 +1862,11 @@ async function submitPrompt(event) {
       showStatus(payload?.error || "Session name could not be changed", true);
       return;
     }
-    showPromptFailure(payload?.error || "Prompt failed to send");
+    const retryableContention = payload?.code === "session_operation_pending";
+    const errorMessage = payload?.error || (retryableContention ? "Another session operation is pending. Please retry." : "Prompt failed to send");
+    showPromptFailure(errorMessage, { retryableContention });
   } else if (response.ok) {
-    const payload = await response.json().catch(() => null);
+    const payload = responsePayload;
     if (stopHandlingChangedSubmittedView()) return;
     if (submittedPromptSuperseded()) return;
     if (cloneCommand && payload?.cancelled) {
@@ -1921,6 +1946,7 @@ async function submitAbort(event) {
   event.preventDefault();
   if (!abortForm || abortForm.dataset.submitting === "true") return;
 
+  promptSubmissionGeneration += 1;
   if (composerState?.dataset.state !== "stopping") {
     setComposerState("stopping", "Stopping current task…");
     showStatus("Stopping current task…", true);
