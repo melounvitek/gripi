@@ -1679,6 +1679,25 @@ async function submitBashPrompt(rawMessage, bashCommand) {
   }
 }
 
+const PROMPT_RETRY_DELAYS = [250, 500, 1_000];
+
+async function sendPromptRequest(action, formData, { retryCancelled, onRetry }) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
+    if (response.ok || response.type === "opaqueredirect") return { response, payload: null };
+
+    const payload = await response.json().catch(() => null);
+    const retryDelay = PROMPT_RETRY_DELAYS[attempt];
+    const retryable = response.status === 409 && payload?.code === "session_operation_pending" && retryDelay !== undefined;
+    if (!retryable) return { response, payload };
+    if (retryCancelled()) return { cancelled: true };
+
+    onRetry();
+    await new Promise((resolve) => setTimeout(resolve, retryDelay));
+    if (retryCancelled()) return { cancelled: true };
+  }
+}
+
 async function submitPrompt(event) {
   event.preventDefault();
 
@@ -1777,8 +1796,18 @@ async function submitPrompt(event) {
   };
 
   let response;
+  let responsePayload;
   try {
-    response = await fetch(promptForm.action, { method: "POST", body: formData, headers: { "Accept": "application/json" }, redirect: "manual" });
+    const result = await sendPromptRequest(promptForm.action, formData, {
+      retryCancelled: () => stopHandlingChangedSubmittedView() || submittedPromptSuperseded(),
+      onRetry: () => {
+        setComposerState("sending", "Waiting to send…");
+        showStatus("Waiting to send…", true);
+      }
+    });
+    if (result.cancelled) return;
+    response = result.response;
+    responsePayload = result.payload;
   } catch (_error) {
     if (stopHandlingChangedSubmittedView()) return;
     if (submittedPromptSuperseded()) return;
@@ -1795,7 +1824,7 @@ async function submitPrompt(event) {
   if (submittedPromptSuperseded()) return;
 
   if (!response.ok && response.type !== "opaqueredirect") {
-    const payload = await response.json().catch(() => null);
+    const payload = responsePayload;
     if (stopHandlingChangedSubmittedView()) return;
     if (submittedPromptSuperseded()) return;
     if (cloneCommand && payload?.cancelled) {

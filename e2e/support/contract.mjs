@@ -5,6 +5,7 @@ export const sessions = {
   marker: FIXTURE_MARKER,
   history: "E2E History Desktop",
   prompt: "E2E Prompt Desktop",
+  promptRetry: "E2E Prompt Retry Desktop",
   controlsSteer: "E2E Steer Desktop",
   controlsFollowUp: "E2E Follow-up Desktop",
   controlsAbort: "E2E Abort Desktop",
@@ -22,6 +23,8 @@ export const sessions = {
 
 export const prompts = {
   standard: "Show the deterministic browser response",
+  retry: "Retry this deterministic browser response",
+  retryExhausted: "Keep this prompt available after retry exhaustion",
   steerStart: "Start the steer scenario",
   steerMessage: "Use the steered direction",
   followUpStart: "Start the follow-up scenario",

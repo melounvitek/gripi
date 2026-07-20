@@ -562,6 +562,101 @@ class FrontendLifecycleJsTest < Minitest::Test
     }, results)
   end
 
+  def test_prompt_request_retries_only_explicit_session_contention
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    retry_source = app_source.match(/const PROMPT_RETRY_DELAYS.*?(?=\nasync function submitPrompt)/m).to_s
+
+    results = run_javascript(<<~JS)
+      const attempts = [];
+      const delays = [];
+      const retryNotices = [];
+      const pending = () => ({
+        ok: false,
+        status: 409,
+        type: "basic",
+        json: async () => ({ code: "session_operation_pending", error: "Another session operation is pending. Please retry." })
+      });
+      const success = { ok: true, status: 200, type: "basic" };
+      const definitiveFailure = {
+        ok: false,
+        status: 422,
+        type: "basic",
+        json: async () => ({ error: "No API key" })
+      };
+      globalThis.setTimeout = (callback, delay) => { delays.push(delay); callback(); return delays.length; };
+      globalThis.fetch = async (_action, options) => attempts.shift()(options);
+      eval(#{(retry_source + "\nglobalThis.sendWithRetries = sendPromptRequest;").to_json});
+
+      attempts.push(pending, pending, () => success);
+      const recovered = await globalThis.sendWithRetries("/prompt", {}, {
+        retryCancelled: () => false,
+        onRetry: () => retryNotices.push("waiting")
+      });
+      const recoveredFetches = 3 - attempts.length;
+
+      attempts.push(pending, pending, pending, pending);
+      const exhausted = await globalThis.sendWithRetries("/prompt", {}, {
+        retryCancelled: () => false,
+        onRetry: () => retryNotices.push("waiting")
+      });
+      const exhaustedFetches = 4 - attempts.length;
+
+      attempts.push(() => definitiveFailure);
+      const rejected = await globalThis.sendWithRetries("/prompt", {}, {
+        retryCancelled: () => false,
+        onRetry: () => retryNotices.push("unexpected")
+      });
+
+      console.log(JSON.stringify({
+        recovered: { ok: recovered.response.ok, fetches: recoveredFetches },
+        exhausted: { code: exhausted.payload.code, fetches: exhaustedFetches },
+        rejected: { error: rejected.payload.error },
+        delays,
+        retryNotices
+      }));
+    JS
+
+    assert_equal({ "ok" => true, "fetches" => 3 }, results.fetch("recovered"))
+    assert_equal({ "code" => "session_operation_pending", "fetches" => 4 }, results.fetch("exhausted"))
+    assert_equal({ "error" => "No API key" }, results.fetch("rejected"))
+    assert_equal [250, 500, 250, 500, 1_000], results.fetch("delays")
+    assert_equal ["waiting", "waiting", "waiting", "waiting", "waiting"], results.fetch("retryNotices")
+  end
+
+  def test_prompt_request_stops_retrying_when_submission_is_cancelled
+    app_source = File.read(File.join(ASSETS, "app.js"))
+    retry_source = app_source.match(/const PROMPT_RETRY_DELAYS.*?(?=\nasync function submitPrompt)/m).to_s
+
+    results = run_javascript(<<~JS)
+      let fetches = 0;
+      let cancellationChecks = 0;
+      const delays = [];
+      globalThis.fetch = async () => {
+        fetches += 1;
+        return {
+          ok: false,
+          status: 409,
+          type: "basic",
+          json: async () => ({ code: "session_operation_pending" })
+        };
+      };
+      globalThis.setTimeout = (callback, delay) => { delays.push(delay); callback(); return 1; };
+      eval(#{(retry_source + "\nglobalThis.sendWithRetries = sendPromptRequest;").to_json});
+
+      const result = await globalThis.sendWithRetries("/prompt", {}, {
+        retryCancelled: () => {
+          cancellationChecks += 1;
+          return cancellationChecks === 2;
+        },
+        onRetry: () => {}
+      });
+
+      console.log(JSON.stringify({ cancelled: result.cancelled, fetches, delays }));
+    JS
+
+    assert_equal({ "cancelled" => true, "fetches" => 1, "delays" => [250] }, results)
+  end
+
   def test_bash_submission_stays_nonblocking_and_restores_a_rejected_duplicate
     app_source = File.read(File.join(ASSETS, "app.js"))
     bash_source = app_source.match(/function restoreSubmittedComposerInput\(.*?(?=\nasync function submitPrompt)/m).to_s
