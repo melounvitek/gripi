@@ -83,7 +83,9 @@ export async function seedFixtures(root) {
     "controls-project",
     "settings-project",
     "extension-project",
+    "bash-project",
     "mobile-project",
+    "mobile-bash-project",
     "new-session-desktop",
     "new-session-mobile"
   ];
@@ -100,8 +102,13 @@ export async function seedFixtures(root) {
     ["controls-project", "terminal", sessions.terminal],
     ["settings-project", "settings", sessions.settings],
     ["extension-project", "extension", sessions.extension],
+    ["bash-project", "bash-included", sessions.bashIncluded],
+    ["bash-project", "bash-excluded", sessions.bashExcluded],
+    ["bash-project", "bash-cancel", sessions.bashCancel],
+    ["bash-project", "bash-overlap", sessions.bashOverlap],
     ["mobile-project", "mobile", sessions.mobile],
-    ["mobile-project", "mobile-landing", sessions.mobileLanding]
+    ["mobile-project", "mobile-landing", sessions.mobileLanding],
+    ["mobile-bash-project", "bash-mobile", sessions.bashMobile]
   ];
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
     await writeSession(root, projects[projectName], slug, title, index + 1, history);

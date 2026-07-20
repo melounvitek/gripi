@@ -12,7 +12,12 @@ export const sessions = {
   settings: "E2E Settings Desktop",
   extension: "E2E Extension Desktop",
   mobile: "E2E Prompt Mobile",
-  mobileLanding: "E2E Mobile Landing"
+  mobileLanding: "E2E Mobile Landing",
+  bashIncluded: "E2E Bash Included Desktop",
+  bashExcluded: "E2E Bash Excluded Desktop",
+  bashCancel: "E2E Bash Cancel Desktop",
+  bashOverlap: "E2E Bash Overlap Desktop",
+  bashMobile: "E2E Bash Cancel Mobile"
 };
 
 export const prompts = {
@@ -33,6 +38,15 @@ const terminalFirstHistory = Array.from({ length: 28 }, (_, index) => `Terminal 
 const terminalLatestHistory = [...terminalFirstHistory, "Terminal history 29", "Terminal history 30", "Terminal history 31", "Terminal history 32"];
 const terminalFirstFrame = `${terminalReset}${terminalFirstHistory.join("\n")}\nTerminal stale screen`;
 const terminalLatestFrame = `${terminalReset}${terminalLatestHistory.join("\n")}\x1b[?1049h\x1b[H\x1b[32mTerminal current screen\x1b[0m`;
+
+export const nativeBash = {
+  included: { command: "printf 'included native bash output'", output: "included native bash output\n" },
+  excluded: { command: "printf 'excluded native bash output'", output: "excluded native bash output\n" },
+  nonzero: { command: "exit 7", output: "deterministic nonzero output\n", exitCode: 7 },
+  cancel: { command: "sleep 30 # e2e-cancel" },
+  overlap: { command: "sleep 30 # e2e-overlap" },
+  mobileCancel: { command: "sleep 30 # e2e-mobile-cancel" }
+};
 
 export const tool = {
   command: "printf tool-command-ran",

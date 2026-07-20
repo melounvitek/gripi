@@ -427,7 +427,13 @@ class FrontendLifecycleJsTest < Minitest::Test
       let liveBash = { id: "bash-1" };
       const completedBashIds = new Set();
       const rendered = [];
-      const liveMessageRenderer = { renderBashEvent: (event) => rendered.push(event.type) };
+      const liveMessageRenderer = {
+        bashExecutionCompleted: (bashId) => completedBashIds.has(bashId),
+        renderBashEvent: (event) => {
+          rendered.push(event.type);
+          if (event.type !== "bash_start") completedBashIds.add(event.bashId);
+        }
+      };
       const composerState = { dataset: { state: "bash" } };
       const liveOutput = { dataset: { composerCompacting: "false" } };
       const stoppingSessionPaths = new Set();
@@ -493,7 +499,10 @@ class FrontendLifecycleJsTest < Minitest::Test
       let liveBash = { id: "bash-1" };
       let liveAgentRunning = true;
       const completedBashIds = new Set();
-      const liveMessageRenderer = { renderBashEvent() {} };
+      const liveMessageRenderer = {
+        bashExecutionCompleted: (bashId) => completedBashIds.has(bashId),
+        renderBashEvent(event) { if (event.type !== "bash_start") completedBashIds.add(event.bashId); }
+      };
       const composerState = { dataset: { state: "stopping" } };
       const stoppingSessionPaths = new Set(["session-a"]);
       const currentSessionPath = () => "session-a";
@@ -566,7 +575,6 @@ class FrontendLifecycleJsTest < Minitest::Test
       const commandList = { classList: { remove() {} }, removeAttribute() {} };
       const submittedFile = { name: "screen.png", type: "image/png" };
       let pendingImages = [{ file: submittedFile, url: "blob:old" }];
-      const completedBashIds = new Set();
       let resolveRequest;
       const statuses = [];
       const polls = [];

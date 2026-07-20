@@ -4,8 +4,9 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-import { prompts, replies, tool } from "./contract.mjs";
+import { nativeBash, prompts, replies, tool } from "./contract.mjs";
 
+const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
 const sessionsRoot = process.env.GRIPI_E2E_SESSIONS_ROOT;
 let sessionPath = resumedPath || null;
@@ -18,6 +19,8 @@ let thinkingLevel = "medium";
 let busy = false;
 let activeScenario = null;
 let pendingExtensionRequest = null;
+let activeBash = null;
+const deferredBashMessages = [];
 let sessionPersisted = false;
 let entrySequence = 0;
 const timers = new Set();
@@ -153,6 +156,12 @@ function handleCommand(command) {
       break;
     case "abort":
       acceptAbort(command);
+      break;
+    case "bash":
+      acceptBash(command);
+      break;
+    case "abort_bash":
+      acceptBashAbort(command);
       break;
     case "extension_ui_response":
       acceptExtensionResponse(command);
@@ -296,7 +305,62 @@ function acceptAbort(command) {
   activeScenario = null;
   pendingExtensionRequest = null;
   emit({ type: "agent_end", messages: [], willRetry: false });
+  persistDeferredBashMessages();
   emit({ type: "agent_settled" });
+}
+
+function acceptBash(command) {
+  if (activeBash) {
+    respond(command, false, { error: "A bash command is already running" });
+    return;
+  }
+
+  const operation = { command, timer: null };
+  activeBash = operation;
+  const delay = LONG_BASH_COMMANDS.has(command.command) ? 30_000 : 120;
+  operation.timer = setTimeout(() => completeBash(operation, bashResult(command.command)), delay);
+}
+
+function acceptBashAbort(command) {
+  respond(command, true);
+  if (!activeBash) return;
+
+  completeBash(activeBash, { output: "", cancelled: true, truncated: false });
+}
+
+function completeBash(operation, result) {
+  if (activeBash !== operation) return;
+  clearTimeout(operation.timer);
+  activeBash = null;
+  const message = {
+    role: "bashExecution",
+    command: operation.command.command,
+    output: result.output,
+    ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+    cancelled: result.cancelled,
+    truncated: result.truncated,
+    timestamp: Date.now(),
+    ...(operation.command.excludeFromContext === true ? { excludeFromContext: true } : {})
+  };
+  if (busy) deferredBashMessages.push(message);
+  else appendMessage(message);
+  respond(operation.command, true, { data: result });
+}
+
+function bashResult(command) {
+  if (command === nativeBash.included.command) return completedBashResult(nativeBash.included.output);
+  if (command === nativeBash.excluded.command) return completedBashResult(nativeBash.excluded.output);
+  if (command === nativeBash.nonzero.command) return completedBashResult(nativeBash.nonzero.output, nativeBash.nonzero.exitCode);
+
+  return completedBashResult(`Fake Pi completed: ${command}\n`);
+}
+
+function completedBashResult(output, exitCode = 0) {
+  return { output, exitCode, cancelled: false, truncated: false };
+}
+
+function persistDeferredBashMessages() {
+  while (deferredBashMessages.length > 0) appendMessage(deferredBashMessages.shift());
 }
 
 function acceptExtensionResponse(command) {
@@ -356,6 +420,7 @@ function completeAssistant(reply) {
   emit({ type: "agent_end", messages: [completed], willRetry: false });
   busy = false;
   activeScenario = null;
+  persistDeferredBashMessages();
   emit({ type: "agent_settled" });
 }
 
@@ -459,5 +524,6 @@ function log(record) {
 
 function shutdown() {
   clearTimers();
+  if (activeBash) clearTimeout(activeBash.timer);
   process.exit(0);
 }

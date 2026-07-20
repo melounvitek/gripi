@@ -1,3 +1,5 @@
+require_relative "pi_bash_execution_text"
+
 class PiSessionIndexScanner
   CAPTURE_BYTES = 8 * 1024
   STRING_SPECIAL_BYTE = /["\\\x00-\x1f]/n
@@ -356,7 +358,11 @@ class PiSessionIndexScanner
       return unless optional_boolean_scalar?(["message", "excludeFromContext"])
       return unless !@keys[["message"]].include?("fullOutputPath") || @strings.key?(["message", "fullOutputPath"])
 
-      separator = command.empty? || output.empty? ? 0 : 1
+      exit_code = @scalars[["message", "exitCode"]]
+      cancelled = @scalars[["message", "cancelled"]] == true
+      truncated = @scalars[["message", "truncated"]] == true
+      full_output_path = @strings[["message", "fullOutputPath"]]
+      full_output_path_characters = full_output_path.characters if full_output_path && !full_output_path.empty?
       {
         type: "message",
         id: string_value(["id"]),
@@ -366,7 +372,15 @@ class PiSessionIndexScanner
         segments: [segment("bashExecution", (command.bytes + output.bytes) * 2, nil, "bash")],
         subagent_tool_call_ids: [],
         status_data: { type: "bash_execution", excluded_from_context: @scalars[["message", "excludeFromContext"]] == true },
-        estimate_text_length: @scalars[["message", "excludeFromContext"]] == true ? nil : command.characters + output.characters + separator
+        estimate_text_length: @scalars[["message", "excludeFromContext"]] == true ? nil : PiBashExecutionText.character_length(
+          command_characters: command.characters,
+          output_characters: output.characters,
+          output_empty: output.empty?,
+          exit_code: exit_code,
+          cancelled: cancelled,
+          truncated: truncated,
+          full_output_path_characters: full_output_path_characters
+        )
       }
     end
 

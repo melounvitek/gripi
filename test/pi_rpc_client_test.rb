@@ -566,7 +566,6 @@ class PiRpcClientTest < Minitest::Test
     command = JSON.parse(Timeout.timeout(1) { command_reader.gets })
 
     assert_equal "sleep 1", client.active_bash_command
-    assert_equal now, client.active_bash_started_at
     assert client.busy?
     refute client.agent_running?
     bash_id = command.fetch("id")
@@ -579,7 +578,6 @@ class PiRpcClientTest < Minitest::Test
     assert_equal true, Timeout.timeout(1) { bash_thread.value }.fetch("success")
 
     assert_nil client.active_bash_command
-    assert_nil client.active_bash_started_at
     refute client.busy?
     refute client.live_snapshot.key?(:active_bash)
     assert_equal [
@@ -730,7 +728,6 @@ class PiRpcClientTest < Minitest::Test
     assert_raises(IOError) { Timeout.timeout(1) { bash_thread.value } }
     refute client.busy?
     assert_nil client.active_bash_command
-    assert_nil client.active_bash_started_at
   ensure
     bash_thread&.kill
     command_reader&.close

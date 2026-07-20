@@ -50,10 +50,22 @@ class ConfigurationDocsTest < Minitest::Test
     readme = File.read(File.expand_path("../README.md", __dir__))
 
     assert_includes readme, "Pi-style `@` file search and path completion"
+    assert_includes readme, "`!command`"
+    assert_includes readme, "`!!command`"
+    assert_includes readme, "appears when the RPC command completes rather than streaming"
     assert_includes readme, "the send button steers by default"
     assert_includes readme, "use its menu to select Follow-up mode for the next message"
     assert_includes readme, "Enter steers by default"
     assert_includes readme, "Alt+Enter"
     assert_includes readme, "Shift+Enter inserts a newline"
+  end
+
+  def test_documents_direct_shell_access_for_every_approved_user
+    readme = File.read(File.expand_path("../README.md", __dir__))
+    configuration = File.read(File.expand_path("../docs/configuration.md", __dir__))
+
+    assert_includes readme, "Every approved user can directly execute arbitrary shell commands as the gateway OS user"
+    assert_includes configuration, "Every approved user can directly execute arbitrary shell commands as the gateway OS user"
+    assert_includes configuration, "Multi-user mode does not give shell commands a different OS identity"
   end
 end

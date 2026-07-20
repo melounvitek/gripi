@@ -72,7 +72,7 @@ Each user generates and keeps a private user token. Using the same token on anot
 
 In multi-user mode, user-token approval replaces per-browser approval. If `GRIPI_BROWSER_AUTH_DISABLED=1` is also set, every new valid user token is approved automatically and remains in the workspace access state until removed manually. Use that combination only when every client able to reach the gateway is trusted.
 
-Multi-user mode is intended for trusted users. It separates session visibility but does not provide OS-level process, filesystem, or credential isolation. Approved users can start Pi in directories readable by the gateway process, and Pi runs with the gateway user's credentials. Settings such as the selected model and thinking effort are currently shared between users.
+Multi-user mode is intended for trusted users. It separates session visibility but does not provide OS-level process, filesystem, or credential isolation. Every approved user can directly execute arbitrary shell commands as the gateway OS user, with access to that user's files, credentials, environment, and network. Multi-user mode does not give shell commands a different OS identity or restrict one approved user to particular directories. Settings such as the selected model and thinking effort are currently shared between users.
 
 ## Pinned session directories
 

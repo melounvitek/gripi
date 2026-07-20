@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { seedFixtures } from "../fixtures/seed.mjs";
-import { prompts } from "./contract.mjs";
+import { nativeBash, prompts } from "./contract.mjs";
 
 const fakePiPath = path.resolve("e2e/support/fake_pi.mjs");
 
@@ -69,6 +69,106 @@ test("fake Pi follows the native prompt lifecycle for a new session", { timeout:
   const persisted = (await readFile(sessionPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(persisted[0].type, "session");
   assert.deepEqual(persisted.filter((entry) => entry.type === "message").map((entry) => entry.message.role), ["user", "user", "assistant", "toolResult", "assistant"]);
+});
+
+test("fake Pi keeps fresh bash history in memory until an assistant response persists the session", { timeout: 5_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-bash-"));
+  const fixture = await seedFixtures(root);
+  const child = spawnFake(fixture, ["--mode", "rpc"], fixture.projects["bash-project"]);
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+  child.stdin.write(`${JSON.stringify({ id: "bash-state", type: "get_state" })}\n`);
+  const sessionPath = (await nextRecord(records)).data.sessionFile;
+  await assert.rejects(readFile(sessionPath), { code: "ENOENT" });
+
+  child.stdin.write(`${JSON.stringify({ id: "bash-included", type: "bash", command: nativeBash.included.command })}\n`);
+  const included = await nextRecord(records);
+  assert.deepEqual(included, {
+    id: "bash-included",
+    type: "response",
+    command: "bash",
+    success: true,
+    data: { output: nativeBash.included.output, exitCode: 0, cancelled: false, truncated: false }
+  });
+
+  child.stdin.write(`${JSON.stringify({ id: "bash-excluded", type: "bash", command: nativeBash.excluded.command, excludeFromContext: true })}\n`);
+  assert.equal((await nextRecord(records)).id, "bash-excluded");
+  child.stdin.write(`${JSON.stringify({ id: "bash-nonzero", type: "bash", command: nativeBash.nonzero.command })}\n`);
+  const nonzero = await nextRecord(records);
+  assert.equal(nonzero.data.exitCode, nativeBash.nonzero.exitCode);
+  assert.equal(nonzero.data.output, nativeBash.nonzero.output);
+
+  await assert.rejects(readFile(sessionPath), { code: "ENOENT" });
+
+  child.stdin.write(`${JSON.stringify({ id: "prompt-after-bash", type: "prompt", message: prompts.standard })}\n`);
+  assert.equal((await nextRecord(records)).id, "prompt-after-bash");
+  const promptEvents = [];
+  while (promptEvents.at(-1)?.type !== "agent_settled") promptEvents.push(await nextRecord(records));
+  assert.ok(promptEvents.some((event) => event.type === "message_end" && event.message?.role === "assistant"));
+
+  const persisted = (await readFile(sessionPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(persisted[0].type, "session");
+  const messages = persisted.filter((entry) => entry.type === "message").map((entry) => entry.message);
+  const bashMessages = messages.filter((message) => message.role === "bashExecution");
+  assert.deepEqual(bashMessages.map((message) => ({
+    command: message.command,
+    output: message.output,
+    exitCode: message.exitCode,
+    cancelled: message.cancelled,
+    truncated: message.truncated,
+    excludeFromContext: message.excludeFromContext,
+    timestampType: typeof message.timestamp
+  })), [
+    { ...nativeBash.included, exitCode: 0, cancelled: false, truncated: false, excludeFromContext: undefined, timestampType: "number" },
+    { ...nativeBash.excluded, exitCode: 0, cancelled: false, truncated: false, excludeFromContext: true, timestampType: "number" },
+    { command: nativeBash.nonzero.command, output: nativeBash.nonzero.output, exitCode: 7, cancelled: false, truncated: false, excludeFromContext: undefined, timestampType: "number" }
+  ]);
+});
+
+test("fake Pi serializes bash, cancels it while the agent runs, and defers its entry", { timeout: 5_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-bash-overlap-"));
+  const fixture = await seedFixtures(root);
+  const sessionPath = path.join(fixture.sessionsRoot, "e2e", "bash-overlap.jsonl");
+  const child = spawnFake(fixture, ["--mode", "rpc", "--session", sessionPath]);
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+
+  child.stdin.write(`${JSON.stringify({ id: "prompt-active", type: "prompt", message: prompts.abortStart })}\n`);
+  assert.equal((await nextRecord(records)).id, "prompt-active");
+  await readRecords(records, 4);
+
+  child.stdin.write(`${JSON.stringify({ id: "bash-long", type: "bash", command: nativeBash.overlap.command })}\n`);
+  child.stdin.write(`${JSON.stringify({ id: "bash-duplicate", type: "bash", command: nativeBash.included.command })}\n`);
+  const duplicate = await nextRecord(records);
+  assert.equal(duplicate.id, "bash-duplicate");
+  assert.equal(duplicate.success, false);
+  assert.match(duplicate.error, /already running/i);
+
+  child.stdin.write(`${JSON.stringify({ id: "entries-before", type: "get_entries" })}\n`);
+  const before = await nextRecord(records);
+  assert.equal(before.id, "entries-before");
+  assert.equal(before.data.entries.some((entry) => entry.message?.role === "bashExecution"), false);
+
+  child.stdin.write(`${JSON.stringify({ id: "cancel-long", type: "abort_bash" })}\n`);
+  const cancellationRecords = await readRecords(records, 2);
+  const abortResponse = cancellationRecords.find((record) => record.id === "cancel-long");
+  const bashResponse = cancellationRecords.find((record) => record.id === "bash-long");
+  assert.equal(abortResponse.success, true);
+  assert.deepEqual(bashResponse.data, { output: "", cancelled: true, truncated: false });
+
+  child.stdin.write(`${JSON.stringify({ id: "entries-deferred", type: "get_entries" })}\n`);
+  const deferred = await nextRecord(records);
+  assert.equal(deferred.data.entries.some((entry) => entry.message?.role === "bashExecution"), false);
+
+  child.stdin.write(`${JSON.stringify({ id: "abort-agent", type: "abort" })}\n`);
+  assert.equal((await nextRecord(records)).id, "abort-agent");
+  assert.deepEqual((await readRecords(records, 2)).map((record) => record.type), ["agent_end", "agent_settled"]);
+  child.stdin.write(`${JSON.stringify({ id: "entries-settled", type: "get_entries" })}\n`);
+  const settled = await nextRecord(records);
+  const bashEntry = settled.data.entries.at(-1);
+  assert.equal(bashEntry.message.role, "bashExecution");
+  assert.equal(bashEntry.message.command, nativeBash.overlap.command);
+  assert.equal(bashEntry.message.cancelled, true);
 });
 
 test("fake Pi uses LF framing rather than Unicode line separators", { timeout: 5_000 }, async (context) => {

@@ -86,7 +86,6 @@ let reconnectBanner = null;
 let reconnectButton = null;
 let liveAgentRunning = false;
 let liveBash = null;
-const completedBashIds = new Set();
 let liveBusySince = null;
 let liveErrorSeen = false;
 let liveStatusModel = null;
@@ -1229,7 +1228,7 @@ function renderErrorEvent(event) {
 }
 
 function startLiveBash(event) {
-  if (completedBashIds.has(event.bashId)) return;
+  if (liveMessageRenderer.bashExecutionCompleted(event.bashId)) return;
   const startedAt = eventTimeMilliseconds(event);
   liveBash = {
     id: event.bashId,
@@ -1245,8 +1244,7 @@ function startLiveBash(event) {
 }
 
 function finishLiveBash(event) {
-  if (completedBashIds.has(event.bashId)) return;
-  completedBashIds.add(event.bashId);
+  if (liveMessageRenderer.bashExecutionCompleted(event.bashId)) return;
   liveMessageRenderer.renderBashEvent(event);
   stoppingSessionPaths.delete(currentSessionPath());
   if (liveBash?.id === event.bashId) liveBash = null;
@@ -2258,7 +2256,6 @@ function resetSessionViewState() {
   liveMessageRenderer.resetLiveCompactionTracking();
   liveAgentRunning = false;
   liveBash = null;
-  completedBashIds.clear();
   liveBusySince = null;
   liveErrorSeen = false;
   resetEventPollBackoff();
@@ -3013,8 +3010,8 @@ function initializeSessionView({ focus = true, scrollSnapshot = null } = {}) {
     liveBusySince = Number(liveOutput.dataset.composerBusySince || 0) || null;
     const initialComposerLabel = initialComposerCompacting ? "Compacting…" : "Pi is running…";
     liveAgentRunning = liveOutput.dataset.agentRunning === "true";
-    liveMessageRenderer.restorePersistedBashExecutions().forEach((bashId) => completedBashIds.add(bashId));
-    liveMessageRenderer.restoreCompletedBashExecutions().forEach((event) => completedBashIds.add(event.bashId));
+    liveMessageRenderer.restorePersistedBashExecutions();
+    liveMessageRenderer.restoreCompletedBashExecutions();
     const activeBashEvent = liveMessageRenderer.restoreActiveBash();
     liveBash = activeBashEvent ? {
       id: activeBashEvent.bashId,

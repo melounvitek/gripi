@@ -259,7 +259,7 @@ export class LiveMessageRenderer {
       details.append(output);
     }
 
-    const entry = { article, details, output, body, summaryText, status, compact: true, toolName: options.toolName || "" };
+    const entry = { article, details, output, body, summaryText, status, meta, compact: true, toolName: options.toolName || "" };
     if (!compaction) this.renderSubagentPrompt(entry, options.toolPrompt);
     article.append(header, details);
     this.renderMessageImages(article, options.images);
@@ -281,6 +281,10 @@ export class LiveMessageRenderer {
     status.hidden = elements.length === 0;
   }
 
+  bashExecutionCompleted(bashId) {
+    return this.completedBashExecutionIds.has(bashId);
+  }
+
   renderBashEvent(event) {
     const bashId = event?.bashId || event?.bash_id;
     if (!bashId || !["bash_start", "bash_end", "bash_error"].includes(event.type)) return null;
@@ -294,12 +298,14 @@ export class LiveMessageRenderer {
     const failed = event.type === "bash_error" || (Number.isInteger(result.exitCode) && result.exitCode !== 0);
     const cancelled = result.cancelled === true;
     const truncated = result.truncated === true;
+    const fullOutputPath = truncated && typeof result.fullOutputPath === "string" ? this.parser.displayHomePath(result.fullOutputPath) : "";
     const statusItems = [];
     if (excluded) statusItems.push("excluded from model context");
     if (event.type === "bash_start") statusItems.push("running");
     if (event.type === "bash_end" && Number.isInteger(result.exitCode) && result.exitCode !== 0) statusItems.push(`exit ${result.exitCode}`);
     if (cancelled) statusItems.push("cancelled");
     if (truncated) statusItems.push("output truncated");
+    if (fullOutputPath) statusItems.push(`full output: ${fullOutputPath}`);
     if (event.type === "bash_error") statusItems.push("failed");
     const output = event.type === "bash_error" ? String(event.error || "Bash command failed") : String(result.output || "");
     const summary = `$ ${this.parser.displayHomePath(command)}`;
@@ -324,6 +330,12 @@ export class LiveMessageRenderer {
 
     entry.article.dataset.bashId = bashId;
     entry.summaryText.textContent = summary;
+    if (event.type !== "bash_start") {
+      const timestampKey = messageTimestampKey(timestamp);
+      entry.article.dataset.messageTimestamp = timestampKey;
+      entry.article.dataset.messageFingerprint = messageFingerprint("bashExecution", output, timestampKey);
+      entry.meta.textContent = formatTimestamp(timestamp);
+    }
     entry.article.classList.add("message--bash-execution", "message--tool-transcript");
     entry.article.classList.toggle("message--bash-excluded", excluded);
     entry.article.classList.toggle("message--bash-cancelled", cancelled);

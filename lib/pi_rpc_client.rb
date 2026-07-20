@@ -247,13 +247,13 @@ class PiRpcClient
     end
     response
   rescue StandardError => error
-    accepted = token && bash_started?(token)
+    accepted = token && @mutex.synchronize { token[:started] }
     complete_bash(token, "bash_error", "error", error.message, command: command, exclude_from_context: exclude_from_context) if accepted
     raise BashRequestFailed.new(token.fetch(:id), error.message), cause: error if accepted
 
     raise
   ensure
-    clear_active_bash(token) if token
+    @mutex.synchronize { clear_active_bash_state if @active_bash_token.equal?(token) } if token
   end
 
   def abort_bash
@@ -370,10 +370,6 @@ class PiRpcClient
 
   def active_bash_command
     @mutex.synchronize { @active_bash_command }
-  end
-
-  def active_bash_started_at
-    @mutex.synchronize { @active_bash_started_at }
   end
 
   def agent_running?
@@ -1202,10 +1198,6 @@ class PiRpcClient
     end
   end
 
-  def bash_started?(token)
-    @mutex.synchronize { token[:started] }
-  end
-
   def complete_bash(token, type, value_key, value, command: nil, exclude_from_context: nil)
     @mutex.synchronize do
       active = @active_bash_token.equal?(token)
@@ -1227,12 +1219,6 @@ class PiRpcClient
         @completed_bash_events.shift while @completed_bash_events.length > MAX_COMPLETED_BASH_EVENTS
       end
       append_gateway_event(event)
-    end
-  end
-
-  def clear_active_bash(token)
-    @mutex.synchronize do
-      clear_active_bash_state if @active_bash_token.equal?(token)
     end
   end
 

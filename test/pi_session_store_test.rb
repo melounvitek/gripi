@@ -886,34 +886,49 @@ class PiSessionStoreTest < Minitest::Test
       refute included.bash_truncated
       refute included.bash_excluded_from_context
       assert_equal Time.iso8601("2026-06-13T10:01:00Z"), included.timestamp
-      assert_equal Time.at(0.001), included.bash_started_at
+      assert_equal Time.at(0.001), included.bash_recorded_at
       assert_equal "$ printf excluded", excluded.summary
       assert_equal "", excluded.text
       assert excluded.bash_cancelled
       assert excluded.bash_truncated
       assert excluded.bash_excluded_from_context
-      refute_includes indexed_messages.map(&:to_h).join, "private-included"
-      refute_includes indexed_messages.map(&:to_h).join, "private-excluded"
+      assert_equal "/tmp/private-included.log", included.bash_full_output_path
+      assert_equal "/tmp/private-excluded.log", excluded.bash_full_output_path
     end
   end
 
-  def test_bash_execution_context_estimates_include_command_and_output_but_not_double_bang_entries
+  def test_bash_execution_context_estimates_match_native_text_in_full_and_indexed_parsing
     Dir.mktmpdir do |dir|
       path = File.join(dir, "session.jsonl")
       summary = "Summary"
-      command = "printf included"
-      output = "included output"
-      write_jsonl(path, [
-        { type: "session", id: "session-1", cwd: "/tmp/project" },
-        { type: "message", id: "included", parentId: nil, message: { role: "bashExecution", command: command, output: output, exitCode: 0, cancelled: false, truncated: false, timestamp: 1 } },
-        { type: "message", id: "excluded", parentId: "included", message: { role: "bashExecution", command: "secret command", output: "secret output", exitCode: 0, cancelled: false, truncated: false, timestamp: 2, excludeFromContext: true } },
-        { type: "compaction", id: "compaction-1", parentId: "excluded", summary: summary, firstKeptEntryId: "included", tokensBefore: 100 }
-      ])
+      messages = [
+        { role: "bashExecution", command: "printf ok", output: "ok", exitCode: 0, cancelled: false, truncated: false, timestamp: 1 },
+        { role: "bashExecution", command: "true", output: "", exitCode: 0, cancelled: false, truncated: false, timestamp: 2 },
+        { role: "bashExecution", command: "sleep 30", output: "", cancelled: true, truncated: false, timestamp: 3 },
+        { role: "bashExecution", command: "false", output: "failed", exitCode: 7, cancelled: false, truncated: false, timestamp: 4 },
+        { role: "bashExecution", command: "generate", output: "tail", exitCode: 0, cancelled: false, truncated: true, fullOutputPath: "/tmp/full.log", timestamp: 5 },
+        { role: "bashExecution", command: "secret", output: "hidden", exitCode: 0, cancelled: false, truncated: false, timestamp: 6, excludeFromContext: true }
+      ]
+      entries = [{ type: "session", id: "session-1", cwd: "/tmp/project" }]
+      messages.each_with_index do |message, index|
+        entries << { type: "message", id: "bash-#{index}", parentId: index.zero? ? nil : "bash-#{index - 1}", message: message }
+      end
+      entries << { type: "compaction", id: "compaction-1", parentId: "bash-5", summary: summary, firstKeptEntryId: "bash-0", tokensBefore: 100 }
+      write_jsonl(path, entries)
+      expected_text = [
+        summary,
+        "Ran `printf ok`\n```\nok\n```",
+        "Ran `true`\n(no output)",
+        "Ran `sleep 30`\n(no output)\n\n(command cancelled)",
+        "Ran `false`\n```\nfailed\n```\n\nCommand exited with code 7",
+        "Ran `generate`\n```\ntail\n```\n\n[Output truncated. Full output: /tmp/full.log]"
+      ].join("\n")
       store = PiSessionStore.new(root: dir)
-      expected_tokens = ([summary, command, output].join("\n").length / 4.0).ceil
+      full_status = store.conversation(path).status
+      indexed_status = store.conversation_window(path).status
 
-      assert_equal expected_tokens, store.conversation(path).status.context_tokens
-      assert_equal expected_tokens, store.conversation_window(path).status.context_tokens
+      assert_equal (expected_text.length / 4.0).ceil, full_status.context_tokens
+      assert_equal full_status.to_h, indexed_status.to_h
     end
   end
 

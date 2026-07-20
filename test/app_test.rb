@@ -6255,7 +6255,7 @@ class AppTest < Minitest::Test
   def test_renders_native_bash_execution_history_with_status_and_terminal_output
     Dir.mktmpdir do |dir|
       terminal_output = "progress 10%\rprogress 20%\e[2J\e[H\e[31m<done>\e[0m"
-      full_output_path = "/tmp/private-full-output.log"
+      full_output_path = File.join(Dir.home, "private-<full>&-output.log")
       path = write_session_with_raw_messages(dir, [
         {
           type: "message", id: "bash-1", timestamp: "2026-06-13T10:00:00Z",
@@ -6303,7 +6303,7 @@ class AppTest < Minitest::Test
       assert_includes excluded["class"], "message--bash-cancelled"
       assert_includes excluded["class"], "message--bash-truncated"
       assert_equal "$ empty <script>alert(1)</script>", excluded.at_css(".compact-summary").text
-      assert_equal ["excluded from model context", "cancelled", "output truncated"], excluded.css(".bash-execution-status-item").map(&:text)
+      assert_equal ["excluded from model context", "cancelled", "output truncated", "full output: ~/private-<full>&-output.log"], excluded.css(".bash-execution-status-item").map(&:text)
       assert_nil excluded.at_css(".message-body")
       terminal_body = terminal.at_css("[data-terminal-output-source]")
       assert_equal "bash", terminal_body["data-terminal-tool-name"]
@@ -6311,6 +6311,8 @@ class AppTest < Minitest::Test
       refute_includes response.body, terminal_output
       refute_includes response.body, full_output_path
       refute_includes response.body, "<script>alert(1)</script>"
+      refute_includes response.body, "<full>&"
+      assert_includes response.body, "full output: ~/private-&lt;full&gt;&amp;-output.log"
       assert_includes response.body, "&lt;script&gt;alert(1)&lt;/script&gt;"
     end
   end
@@ -7839,19 +7841,6 @@ class AppTest < Minitest::Test
       assert_includes APP_JAVASCRIPT, "Send steer"
       assert_includes APP_JAVASCRIPT, "Queue follow-up"
     end
-  end
-
-  def test_browser_bash_submission_uses_a_separate_nonblocking_lifecycle
-    assert_includes APP_JAVASCRIPT, "const rawMessage = promptTextarea.value;"
-    assert_includes APP_JAVASCRIPT, "const bashCommand = parseNativeBash(rawMessage);"
-    assert_includes APP_JAVASCRIPT, "if (bashCommand) return submitBashPrompt(rawMessage, bashCommand);"
-    assert_includes APP_JAVASCRIPT, "formData.set(\"bash_mode\", \"prompt\");"
-    assert_includes APP_JAVASCRIPT, "formData.set(\"bash_mode\", \"bash\");"
-    assert_includes APP_JAVASCRIPT, "liveMessageRenderer.renderBashEvent"
-    assert_includes APP_JAVASCRIPT, "restoreSubmittedBashInput"
-    bash_source = APP_JAVASCRIPT.match(/async function submitBashPrompt.*?(?=\nasync function submitPrompt)/m).to_s
-    refute_includes bash_source, "setComposerState(\"sending\""
-    refute_includes bash_source, "appendMessage(\"user\""
   end
 
   def test_stop_control_remains_a_native_first_click_submit_control_for_bash

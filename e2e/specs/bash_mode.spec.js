@@ -1,0 +1,88 @@
+import { expect, test } from "@playwright/test";
+import { nativeBash, prompts, sessions } from "../support/contract.mjs";
+import { expectRunFinished, selectSession, sendPrompt } from "../support/ui.mjs";
+
+test("complete an included native bash command and restore it after reload", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.bashIncluded);
+
+  await sendPrompt(page, `!${nativeBash.included.command}`);
+  const card = bashCard(page, nativeBash.included.command);
+  await expect(card).toContainText(nativeBash.included.output.trim());
+  await expect(card).toHaveAttribute("data-role", "bashExecution");
+  await expect(card.locator(".bash-execution-status-item")).toHaveCount(0);
+  await expectRunFinished(page);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.bashIncluded })).toBeVisible();
+  const restored = bashCard(page, nativeBash.included.command);
+  await expect(restored).toHaveCount(1);
+  await expect(restored).toContainText(nativeBash.included.output.trim());
+});
+
+test("mark a double-bang command as excluded from model context", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.bashExcluded);
+
+  await sendPrompt(page, `!!${nativeBash.excluded.command}`);
+  const card = bashCard(page, nativeBash.excluded.command);
+  await expect(card).toContainText(nativeBash.excluded.output.trim());
+  await expect(card).toHaveClass(/message--bash-excluded/);
+  await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("excluded from model context");
+  await expectRunFinished(page);
+
+  await page.reload();
+  await expect(card).toHaveCount(1);
+  await expect(card).toHaveClass(/message--bash-excluded/);
+  await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("excluded from model context");
+});
+
+test("cancel a long-running bash command with one click", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.bashCancel);
+
+  await sendPrompt(page, `!${nativeBash.cancel.command}`);
+  const card = bashCard(page, nativeBash.cancel.command);
+  await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("running");
+
+  await page.reload();
+  await expect(card).toHaveCount(1);
+  await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("running");
+  await page.getByRole("button", { name: "Abort running Pi" }).click();
+
+  await expect(card).toHaveClass(/message--bash-cancelled/);
+  await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("cancelled");
+  await expectRunFinished(page);
+});
+
+test("stop overlapping bash before retaining and then aborting the agent run", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.bashOverlap);
+  await sendPrompt(page, prompts.abortStart);
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+
+  await sendPrompt(page, `!${nativeBash.overlap.command}`);
+  const card = bashCard(page, nativeBash.overlap.command);
+  await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("running");
+
+  const stop = page.getByRole("button", { name: "Abort running Pi" });
+  await stop.click();
+  await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("cancelled");
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(page.getByRole("button", { name: "Send steer" })).toBeVisible();
+  await expect(page.getByLabel("Message to Pi")).toHaveAttribute("placeholder", "Steer Pi…");
+  await expect(stop).toBeEnabled();
+
+  await stop.click();
+  await expectRunFinished(page);
+
+  await page.reload();
+  const restored = bashCard(page, nativeBash.overlap.command);
+  await expect(restored).toHaveCount(1);
+  await expect(restored).toHaveClass(/message--bash-cancelled/);
+  await expect(restored.getByRole("status", { name: "Shell command status" })).toContainText("cancelled");
+});
+
+function bashCard(page, command) {
+  return page.locator('article[data-role="bashExecution"]').filter({ hasText: `$ ${command}` });
+}

@@ -69,7 +69,7 @@ Multi-user mode is intended for trusted users. It does not provide OS-level proc
 
 ## Security and remote access
 
-Do not expose the gateway directly to the public internet. Anyone who can use it can start Pi processes with the gateway machine's filesystem and credentials.
+Do not expose the gateway directly to the public internet. Anyone who can use it can start Pi processes with the gateway machine's filesystem and credentials. Every approved user can directly execute arbitrary shell commands as the gateway OS user, with that user's filesystem, credentials, environment, and network access. In multi-user mode, session visibility is separate, but all approved users share this same OS-level authority.
 
 Keep access approval enabled for any gateway reachable from another device: browser approval in single-user mode, or user-token approval in multi-user mode. Use HTTPS or an encrypted VPN such as Tailscale for remote access; ordinary LAN or Wi-Fi HTTP can expose passwords and access cookies. Production mode rejects remote plaintext HTTP unless `GRIPI_ALLOW_INSECURE_REMOTE_HTTP=1` explicitly allows transport already encrypted by a private VPN. Only disable approval when access is already limited to trusted devices and users. Multi-user mode separates session visibility for trusted users; it is not a sandbox and does not isolate filesystem, process, or credential access.
 
@@ -82,7 +82,9 @@ Gripi is intentionally thin around Pi. It uses Pi’s existing runtime, sessions
 
 By default, Gripi automatically approves project-local resources for each Pi process it starts. This ensures project settings, extensions, skills, prompts, themes, system prompts, and packages work without first opening the directory in Pi CLI. Unlike Pi CLI’s default trust workflow, merely opening a project in Gripi may therefore load extensions or package installation scripts that execute arbitrary code as the gateway OS user. Only open projects whose contents you trust. See [configuration](docs/configuration.md#project-resource-approval) to disable automatic approval.
 
-The composer supports Pi-style `@` file search and path completion. While Pi is running, the send button steers by default; use its menu to select Follow-up mode for the next message. On desktop, Enter steers by default, Alt+Enter queues a follow-up, and Shift+Enter inserts a newline.
+The composer supports Pi-style `@` file search and path completion. `!command` runs a shell command and includes its result in later model context; `!!command` runs it but excludes its result from model context. Shell output appears when the RPC command completes rather than streaming. Bash remains available while Pi is running. When both are active, Stop cancels the shell command first; press Stop again to cancel the agent run. In a brand-new unsaved Pi session, bash history remains process-resident until Pi persists the session with an assistant response; Gripi does not write Pi session files itself.
+
+While Pi is running, the send button steers by default; use its menu to select Follow-up mode for the next message. On desktop, Enter steers by default, Alt+Enter queues a follow-up, and Shift+Enter inserts a newline.
 
 Gripi supports RPC-compatible extension UI such as select, confirm, input, editor, notify, status, title, and editor-prefill requests. If a workflow depends on Pi’s native terminal UI, custom TUI components, terminal keybindings, or `ctx.mode === "tui"`, use Pi CLI directly.
 

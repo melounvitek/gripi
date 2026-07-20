@@ -2,6 +2,7 @@ require "json"
 require "time"
 require "erb"
 require_relative "pi_session_index"
+require_relative "pi_bash_execution_text"
 
 class PiSessionStore
   Session = Struct.new(
@@ -23,7 +24,7 @@ class PiSessionStore
     keyword_init: true
   )
 
-  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :error, :tool_call_id, :tool_name, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :tool_prompt, :final_assistant_response, :entry_id, :images, :custom_type, :compaction, :bash_exit_code, :bash_cancelled, :bash_truncated, :bash_excluded_from_context, :bash_started_at, keyword_init: true)
+  Message = Struct.new(:role, :text, :timestamp, :compact, :summary, :error, :tool_call_id, :tool_name, :thinking, :tool_summary_html, :tool_transcript, :tool_preview, :tool_prompt, :final_assistant_response, :entry_id, :images, :custom_type, :compaction, :bash_exit_code, :bash_cancelled, :bash_truncated, :bash_excluded_from_context, :bash_full_output_path, :bash_recorded_at, keyword_init: true)
   Status = Struct.new(:provider, :model_id, :thinking_level, :context_tokens, :context_limit, :context_percent, :context_estimated, :cost_total, keyword_init: true)
   Conversation = Struct.new(:messages, :latest_stable_tree_position_id, :current_stable_tree_position_id, :status, :subagent_tool_call_context, keyword_init: true)
   ConversationWindow = Struct.new(:messages, :start_index, :total_message_count, :tree_leaf_id, :latest_stable_tree_position_id, :current_stable_tree_position_id, :status, :subagent_tool_call_context, keyword_init: true)
@@ -786,7 +787,7 @@ class PiSessionStore
     if native_bash_execution_message?(message)
       return if message["excludeFromContext"] == true
 
-      return [message["command"], message["output"]].reject(&:empty?).join("\n")
+      return PiBashExecutionText.render(message)
     end
 
     content_text(message["content"])
@@ -1130,7 +1131,8 @@ class PiSessionStore
       bash_cancelled: message["cancelled"],
       bash_truncated: message["truncated"],
       bash_excluded_from_context: excluded,
-      bash_started_at: Time.at(message["timestamp"] / 1000.0)
+      bash_full_output_path: message["fullOutputPath"] && display_home_path(message["fullOutputPath"]),
+      bash_recorded_at: Time.at(message["timestamp"] / 1000.0)
     )
   end
 

@@ -306,7 +306,7 @@ module Web
           message.bash_cancelled == (result["cancelled"] == true) &&
           message.bash_truncated == (result["truncated"] == true) &&
           message.bash_excluded_from_context == (event["excludeFromContext"] == true) &&
-          message.bash_started_at && message.bash_started_at.to_f >= started_at
+          message.bash_recorded_at && message.bash_recorded_at.to_f >= started_at
       end
     end
 
@@ -327,6 +327,7 @@ module Web
       items << "exit #{message.bash_exit_code}" if message.bash_exit_code.is_a?(Integer) && !message.bash_exit_code.zero?
       items << "cancelled" if message.bash_cancelled
       items << "output truncated" if message.bash_truncated
+      items << "full output: #{message.bash_full_output_path}" if message.bash_truncated && !message.bash_full_output_path.to_s.empty?
       items
     end
 

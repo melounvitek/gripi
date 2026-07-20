@@ -1,6 +1,7 @@
 require "minitest/autorun"
 require "json"
 require "open3"
+require "time"
 
 class LiveMessageRenderingJsTest < Minitest::Test
   ASSETS = File.expand_path("../public/assets", __dir__)
@@ -106,6 +107,7 @@ class LiveMessageRenderingJsTest < Minitest::Test
         },
         summaryText: { textContent: "" },
         body: {},
+        meta: { textContent: "" },
         status
       };
       const renderer = Object.create(LiveMessageRenderer.prototype);
@@ -116,41 +118,48 @@ class LiveMessageRenderingJsTest < Minitest::Test
       renderer.conversationController = { followLiveOutput: () => false, afterLiveOutputChange() {} };
       let appended = 0;
       const outputs = [];
-      renderer.appendCompactMessage = (_role, summary, text, _live, _scroll, _timestamp, options) => {
+      renderer.appendCompactMessage = (_role, summary, text, _live, _scroll, timestamp, options) => {
         appended += 1;
         entry.summaryText.textContent = summary;
         entry.article.dataset.bashId = options.bashId;
+        entry.article.dataset.messageTimestamp = String(new Date(timestamp).getTime() / 1000);
+        entry.meta.textContent = `started:${timestamp}`;
         outputs.push(text);
         return entry;
       };
       renderer.renderToolTranscriptBody = (_body, text, toolName) => outputs.push([text, toolName]);
 
       const started = renderer.renderBashEvent({
-        type: "bash_start", bashId: "bash-9", command: "/home/tester/bin/run <unsafe>", excludeFromContext: true, gatewayTimestamp: 1000
+        type: "bash_start", bashId: "bash-9", command: "/home/tester/bin/run <unsafe>", excludeFromContext: true, gatewayTimestamp: "2026-06-13T10:00:00Z"
       });
       const running = {
         same: started === entry,
         summary: entry.summaryText.textContent,
         status: status.children.map((item) => item.textContent),
-        role: started.article.dataset.bashId
+        role: started.article.dataset.bashId,
+        timestamp: started.article.dataset.messageTimestamp,
+        meta: entry.meta.textContent
       };
       const completed = renderer.renderBashEvent({
         type: "bash_end", bashId: "bash-9", command: "/home/tester/bin/run <unsafe>", excludeFromContext: true,
-        result: { output: "progress\\rfinished \\u001b[31mred\\u001b[0m", exitCode: 7, cancelled: true, truncated: true }, gatewayTimestamp: 2000
+        result: { output: "progress\\rfinished \\u001b[31mred\\u001b[0m", exitCode: 7, cancelled: true, truncated: true, fullOutputPath: "/home/tester/logs/<unsafe>&.log" }, gatewayTimestamp: "2026-06-13T10:02:00Z"
       });
       const finished = {
         same: completed === entry,
         status: status.children.map((item) => item.textContent),
         classes: [...classes].sort(),
-        output: outputs.at(-1)
+        output: outputs.at(-1),
+        timestamp: entry.article.dataset.messageTimestamp,
+        fingerprint: entry.article.dataset.messageFingerprint,
+        meta: entry.meta.textContent
       };
       renderer.renderBashEvent({
         type: "bash_end", bashId: "bash-9", command: "/home/tester/bin/run <unsafe>", excludeFromContext: true,
         result: { output: "progress\\rfinished \\u001b[31mred\\u001b[0m", exitCode: 7, cancelled: true, truncated: true },
-        gatewayTimestamp: 3000
+        gatewayTimestamp: "2026-06-13T10:03:00Z"
       });
       renderer.renderBashEvent({
-        type: "bash_start", bashId: "bash-9", command: "ignored late start", gatewayTimestamp: 1000
+        type: "bash_start", bashId: "bash-9", command: "ignored late start", gatewayTimestamp: "2026-06-13T10:00:00Z"
       });
       console.log(JSON.stringify({
         appended,
@@ -165,14 +174,20 @@ class LiveMessageRenderingJsTest < Minitest::Test
     JS
 
     assert_equal 1, result.fetch("appended")
-    assert_equal({ "same" => true, "summary" => "$ ~/bin/run <unsafe>", "status" => ["excluded from model context", "running"], "role" => "bash-9" }, result.fetch("running"))
+    assert_equal true, result.dig("running", "same")
+    assert_equal "$ ~/bin/run <unsafe>", result.dig("running", "summary")
+    assert_equal ["excluded from model context", "running"], result.dig("running", "status")
+    assert_equal "bash-9", result.dig("running", "role")
+    refute_equal result.dig("running", "timestamp"), result.dig("finished", "timestamp")
+    refute_equal result.dig("running", "meta"), result.dig("finished", "meta")
     assert result.dig("finished", "same")
-    assert_equal ["excluded from model context", "exit 7", "cancelled", "output truncated"], result.dig("finished", "status")
+    assert_equal ["excluded from model context", "exit 7", "cancelled", "output truncated", "full output: ~/logs/<unsafe>&.log"], result.dig("finished", "status")
     assert_includes result.dig("finished", "classes"), "message--bash-execution"
     assert_includes result.dig("finished", "classes"), "message--tool-error"
     assert_equal ["progress\rfinished \e[31mred\e[0m", "bash"], result.dig("finished", "output")
+    assert_match(/\Atool:#{Time.iso8601("2026-06-13T10:02:00Z").to_i}:/, result.dig("finished", "fingerprint"))
     assert_equal "$ ~/bin/run <unsafe>", result.dig("afterLateStart", "summary")
-    assert_equal ["excluded from model context", "exit 7", "cancelled", "output truncated"], result.dig("afterLateStart", "status")
+    assert_equal ["excluded from model context", "exit 7", "cancelled", "output truncated", "full output: ~/logs/<unsafe>&.log"], result.dig("afterLateStart", "status")
     assert_equal ["progress\rfinished \e[31mred\e[0m", "bash"], result.dig("afterLateStart", "output")
   end
 
