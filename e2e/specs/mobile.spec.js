@@ -2,6 +2,23 @@ import { expect, test } from "@playwright/test";
 import { nativeBash, prompts, replies, sessions } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
+test("keep native Tab order for coarse pointers", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator('label[aria-label="Open sessions"]').click();
+  await page.getByRole("link", { name: new RegExp(sessions.history) }).click();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.history })).toBeVisible();
+
+  await page.locator("#conversation-scroll").focus();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Copy" })).toBeFocused();
+
+  const composer = page.locator('textarea[name="message"]');
+  await composer.focus();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Send" })).toBeFocused();
+});
+
 test("navigate and complete a conversation from the mobile session drawer", async ({ page }) => {
   await page.goto("/");
 

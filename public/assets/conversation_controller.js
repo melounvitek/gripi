@@ -76,7 +76,7 @@ export class ConversationController {
         this.jumpToConversationTop();
         return;
       }
-      if (event.key !== "Tab" || !this.promptTextarea) return;
+      if (event.key !== "Tab" || !this.promptTextarea || this.window.matchMedia?.("(pointer: fine)").matches === false) return;
       event.preventDefault();
       this.promptTextarea.focus({ preventScroll: true });
     });

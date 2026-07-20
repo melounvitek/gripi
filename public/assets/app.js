@@ -298,7 +298,7 @@ function syncComposerFocus(state = composerState?.dataset.state) {
 }
 
 function toggleConversationPromptFocus(event, nextElement) {
-  if (!nextElement) return false;
+  if (!nextElement || window.matchMedia?.("(pointer: fine)").matches === false) return false;
   event.preventDefault();
   nextElement.focus({ preventScroll: true });
   return true;
