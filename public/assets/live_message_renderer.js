@@ -235,7 +235,7 @@ export class LiveMessageRenderer {
       output = this.document.createElement("div");
       output.className = "tool-output-collapse";
       output.dataset.toolOutputCollapse = "";
-      output.dataset.toolOutputCollapsible = ["assistant", "tool", "toolResult"].includes(roleName) ? "true" : "false";
+      output.dataset.toolOutputCollapsible = ["assistant", "tool", "toolResult", "bashExecution"].includes(roleName) ? "true" : "false";
       output.dataset.collapsed = "false";
       const control = this.document.createElement("div");
       control.className = "tool-output-collapse-control";
@@ -441,8 +441,6 @@ export class LiveMessageRenderer {
   renderToolTranscriptBody(body, text, toolName = "", options = {}) {
     const rawText = String(text || "");
     const terminalOutput = !TERMINAL_OUTPUT_EXCLUDED_TOOLS.has(toolName) && hasTerminalControls(rawText);
-    const collapse = body.closest?.("[data-tool-output-collapse]");
-    if (toolName === "bash" && collapse) collapse.dataset.toolOutputCollapsible = String(terminalOutput);
     if (terminalOutput) {
       this.queueTerminalTranscriptRender(body, rawText, toolName, options);
       return;

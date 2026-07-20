@@ -410,7 +410,7 @@ module Web
     end
 
     def collapsible_tool_output?(message)
-      return false unless %w[assistant tool toolResult].include?(message.role)
+      return false unless %w[assistant tool toolResult bashExecution].include?(message.role)
       return false unless message.compact && !message.thinking && !message.final_assistant_response
 
       tool_output_lines(message).length > TOOL_OUTPUT_DESKTOP_TAIL_LINES

@@ -6427,6 +6427,30 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_collapses_long_native_bash_execution_history
+    Dir.mktmpdir do |dir|
+      output = (1..25).map { |index| "line #{index}" }.join("\n")
+      path = write_session_with_raw_messages(dir, [{
+        type: "message", id: "bash-1", timestamp: "2026-06-13T10:00:00Z",
+        message: {
+          role: "bashExecution", command: "generate output", output: output, exitCode: 0,
+          cancelled: false, truncated: false, timestamp: 1
+        }
+      }])
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_factory, [->(_session_path) { FakeRpcClient.new([]) }]
+
+      response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path })
+
+      assert_equal 200, response.status
+      card = Nokogiri::HTML(response.body).at_css(".message--bash-execution")
+      collapse = card.at_css("[data-tool-output-collapse]")
+      assert_equal "true", collapse["data-collapsed"]
+      assert_equal "Expand", collapse.at_css("[data-tool-output-toggle]").text
+      assert_equal (8..25).map { |index| "line #{index}" }, collapse.css(".message-body .tool-output-line").map(&:text)
+    end
+  end
+
   def test_open_session_renders_images_from_read_results
     Dir.mktmpdir do |dir|
       image_data = Base64.strict_encode64("fake image data")
