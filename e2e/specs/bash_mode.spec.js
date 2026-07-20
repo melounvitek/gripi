@@ -33,16 +33,18 @@ test("complete an included native bash command and restore it after reload", asy
 
   await sendPrompt(page, `!${nativeBash.included.command}`);
   const card = bashCard(page, nativeBash.included.command);
-  await expect(card).toContainText(nativeBash.included.output.trim());
+  await expectLongOutputCollapsed(card);
   await expect(card).toHaveAttribute("data-role", "bashExecution");
   await expect(card.locator(".bash-execution-status-item")).toHaveCount(0);
+  await card.getByRole("button", { name: "Expand" }).click();
+  await expect(card.getByRole("region", { name: "Expanded tool output" })).toContainText(nativeBash.included.output.split("\n")[0]);
   await expectRunFinished(page);
 
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: sessions.bashIncluded })).toBeVisible();
   const restored = bashCard(page, nativeBash.included.command);
   await expect(restored).toHaveCount(1);
-  await expect(restored).toContainText(nativeBash.included.output.trim());
+  await expectLongOutputCollapsed(restored);
 });
 
 test("mark a double-bang command as excluded from model context", async ({ page }) => {
@@ -110,4 +112,11 @@ test("stop overlapping bash before retaining and then aborting the agent run", a
 
 function bashCard(page, command) {
   return page.locator('article[data-role="bashExecution"]').filter({ hasText: `$ ${command}` });
+}
+
+async function expectLongOutputCollapsed(card) {
+  const lines = nativeBash.included.output.trimEnd().split("\n");
+  await expect(card.getByRole("button", { name: "Expand" })).toBeVisible();
+  await expect(card.locator(".message-body").getByText(lines[0], { exact: true })).toHaveCount(0);
+  await expect(card.locator(".message-body").getByText(lines.at(-1), { exact: true })).toBeVisible();
 }

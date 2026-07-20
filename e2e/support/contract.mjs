@@ -48,7 +48,10 @@ const terminalFirstFrame = `${terminalReset}${terminalFirstHistory.join("\n")}\n
 const terminalLatestFrame = `${terminalReset}${terminalLatestHistory.join("\n")}\x1b[?1049h\x1b[H\x1b[32mTerminal current screen\x1b[0m`;
 
 export const nativeBash = {
-  included: { command: "printf 'included native bash output'", output: "included native bash output\n" },
+  included: {
+    command: "printf 'included native bash output'",
+    output: `${Array.from({ length: 25 }, (_, index) => `included native bash output ${index + 1}`).join("\n")}\n`
+  },
   excluded: { command: "printf 'excluded native bash output'", output: "excluded native bash output\n" },
   nonzero: { command: "exit 7", output: "deterministic nonzero output\n", exitCode: 7 },
   cancel: { command: "sleep 30 # e2e-cancel" },
