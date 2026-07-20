@@ -297,12 +297,8 @@ function syncComposerFocus(state = composerState?.dataset.state) {
   target?.focus({ preventScroll: true });
 }
 
-function desktopConversationFocusEnabled() {
-  return window.matchMedia?.("(max-width: 760px)").matches !== true;
-}
-
 function toggleConversationPromptFocus(event, nextElement) {
-  if (!nextElement || !desktopConversationFocusEnabled()) return false;
+  if (!nextElement) return false;
   event.preventDefault();
   nextElement.focus({ preventScroll: true });
   return true;

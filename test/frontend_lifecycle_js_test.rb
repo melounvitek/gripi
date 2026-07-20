@@ -314,7 +314,7 @@ class FrontendLifecycleJsTest < Minitest::Test
 
   def test_composer_focus_follows_work_lifecycle_on_desktop_only_near_the_conversation_bottom
     app_source = File.read(File.join(ASSETS, "app.js"))
-    focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction desktopConversationFocusEnabled)/m).to_s
+    focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction toggleConversationPromptFocus)/m).to_s
 
     results = run_javascript(<<~JS)
       let modalOpen = false;
@@ -741,7 +741,7 @@ class FrontendLifecycleJsTest < Minitest::Test
 
   def test_composer_focus_does_not_interrupt_expanded_tool_output
     app_source = File.read(File.join(ASSETS, "app.js"))
-    focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction desktopConversationFocusEnabled)/m).to_s
+    focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction toggleConversationPromptFocus)/m).to_s
 
     results = run_javascript(<<~JS)
       let focusCount = 0;
@@ -762,7 +762,7 @@ class FrontendLifecycleJsTest < Minitest::Test
 
   def test_composer_focus_remains_automatic_only_for_fine_pointers
     app_source = File.read(File.join(ASSETS, "app.js"))
-    focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction desktopConversationFocusEnabled)/m).to_s
+    focus_source = app_source.match(/function automaticComposerFocusEnabled\(\).*?(?=\nfunction toggleConversationPromptFocus)/m).to_s
 
     results = run_javascript(<<~JS)
       let focusCount = 0;
