@@ -2,8 +2,9 @@
             <% parent_session = session_parent(session) %>
             <% identity = project_identity(session.cwd) %>
             <% session_pinned = pinned?(session) %>
+            <% conversation_search_query = sidebar_conversation_search_query(session) %>
             <div class="session-row<%= session_pinned ? " is-pinned" : "" %>">
-              <a class="<%= h session_classes(session, "session", "recent-session", compacting ? "compacting" : nil) %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>" data-latest-assistant-response-preview="<%= h session.latest_assistant_response_preview.to_s %>"<%= ' aria-current="page"' if @selected_session&.path == session.path %><% if shortcut %> data-session-shortcut="<%= h shortcut %>"<% end %>>
+              <a class="<%= h session_classes(session, "session", "recent-session", compacting ? "compacting" : nil) %>" href="<%= h session_url(session.path) %>" data-session-path="<%= h session.path %>" data-assistant-response-count="<%= h session.assistant_response_count.to_i %>" data-latest-assistant-response-preview="<%= h session.latest_assistant_response_preview.to_s %>"<%= ' aria-current="page"' if @selected_session&.path == session.path %><% if shortcut %> data-session-shortcut="<%= h shortcut %>"<% end %><% if conversation_search_query %> data-session-find-query="<%= h conversation_search_query %>"<% end %>>
                 <div class="session-content">
                   <% if unread?(session) %><span class="visually-hidden">Unread: </span><% end %>
                   <div class="session-title"><%= h session.display_name %></div>

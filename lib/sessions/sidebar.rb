@@ -123,6 +123,14 @@ module Sessions
       search? || !!selected_project_cwd
     end
 
+    def conversation_search_query_for(session)
+      query = search_query
+      return if query.length < 3
+      return unless session.first_user_message.to_s.downcase.include?(query.downcase)
+
+      query
+    end
+
     def matches_filters?(session)
       (!selected_project_cwd || session.cwd == selected_project_cwd) && matches_search?(session)
     end

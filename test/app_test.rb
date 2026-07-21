@@ -5312,18 +5312,22 @@ class AppTest < Minitest::Test
       cwd_response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => alpha_path, "session_search" => "beta-project" })
 
       assert_equal 200, title_response.status
+      title_document = Nokogiri::HTML(title_response.body)
       assert_includes title_response.body, "Alpha refactor"
       refute_includes title_response.body, "Gamma cleanup"
       refute_includes title_response.body, "No sessions match these filters."
+      refute title_document.at_css('.sessions-list a.session')["data-session-find-query"]
       assert_equal 200, message_response.status
       message_document = Nokogiri::HTML(message_response.body)
       assert_equal ["Current session", "Sessions"], message_document.css(".recent-sessions-header h2").map(&:text)
       assert_equal ["Alpha refactor"], message_document.css(".current-session-section .session-title").map(&:text)
       assert_equal ["Investigate webhook delivery"], message_document.css(".sessions-list .session-title").map(&:text)
+      assert_equal "webhook", message_document.at_css('.sessions-list a.session')["data-session-find-query"]
       assert_equal 200, cwd_response.status
       cwd_document = Nokogiri::HTML(cwd_response.body)
       assert_equal ["Alpha refactor"], cwd_document.css(".current-session-section .session-title").map(&:text)
       assert_equal ["Investigate webhook delivery"], cwd_document.css(".sessions-list .session-title").map(&:text)
+      refute cwd_document.at_css('.sessions-list a.session')["data-session-find-query"]
     end
   end
 

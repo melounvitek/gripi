@@ -151,6 +151,30 @@ class SessionsSidebarTest < Minitest::Test
     assert_equal ["beta-project", "gamma-project", "alpha-project"], sidebar.known_session_cwds
   end
 
+  def test_exposes_only_known_conversation_search_matches_for_handoff
+    matching = session("matching", "project", "Matching", 20, first_user_message: "Investigate Webhook delivery")
+    metadata_only = session("metadata", "webhook-project", "Metadata only", 10, first_user_message: "Unrelated question")
+    sidebar = build_sidebar(
+      groups: groups(matching, metadata_only),
+      selected_session: metadata_only,
+      params: { "session_search" => "webhook" }
+    )
+
+    assert_equal "webhook", sidebar.conversation_search_query_for(matching)
+    assert_nil sidebar.conversation_search_query_for(metadata_only)
+  end
+
+  def test_does_not_handoff_short_conversation_search_queries
+    matching = session("matching", "project", "Matching", 20, first_user_message: "Investigate Webhook delivery")
+    sidebar = build_sidebar(
+      groups: groups(matching),
+      selected_session: matching,
+      params: { "session_search" => "we" }
+    )
+
+    assert_nil sidebar.conversation_search_query_for(matching)
+  end
+
   def test_clear_filters_url_removes_search_and_project_but_keeps_session
     current = session("current", "current-project", "Current", 20)
     filtered = session("filtered", "filtered-project", "Filtered", 10)

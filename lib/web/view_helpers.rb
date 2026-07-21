@@ -177,6 +177,10 @@ module Web
       @sidebar.matches_filters?(session)
     end
 
+    def sidebar_conversation_search_query(session)
+      @sidebar.conversation_search_query_for(session)
+    end
+
     def sidebar_filters_clear_url
       @sidebar.filters_clear_url
     end
