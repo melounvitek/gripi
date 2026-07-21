@@ -25,6 +25,10 @@ class PumaConfigTest < Minitest::Test
       production_config + "\nhttp_content_length_limit #{TEST_REQUEST_BODY_LIMIT}\n"
     )
     File.write(File.join(@rackup_root, "config.ru"), <<~RUBY)
+      module Gripi
+        def self.start_rpc_client_maintenance = nil
+        def self.stop_rpc_client_maintenance = nil
+      end
       calls_path = #{@app_calls_path.inspect}
       run lambda { |_env|
         File.write(calls_path, "called")
@@ -56,7 +60,7 @@ class PumaConfigTest < Minitest::Test
   end
 
   def test_rejects_oversized_content_length_before_calling_the_rack_app
-    configuration = Puma::Configuration.new(config_files: [File.join(PROJECT_ROOT, "config/puma.rb")])
+    configuration = Puma::Configuration.new(config_files: [File.join(PROJECT_ROOT, "config/puma.rb")], events: Puma::Events.new)
     configuration.load
     assert_equal PRODUCTION_REQUEST_BODY_LIMIT, configuration.options[:http_content_length_limit]
 
