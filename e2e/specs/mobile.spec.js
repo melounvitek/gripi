@@ -6,7 +6,9 @@ test("keep native Tab order for coarse pointers", async ({ page }) => {
   await page.goto("/");
 
   await page.locator('label[aria-label="Open sessions"]').click();
-  await page.getByRole("link", { name: new RegExp(sessions.history) }).click();
+  const history = page.getByRole("link", { name: new RegExp(sessions.history) });
+  if (!await history.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
+  await history.click();
   await expect(page.getByRole("heading", { level: 1, name: sessions.history })).toBeVisible();
 
   await page.locator("#conversation-scroll").focus();

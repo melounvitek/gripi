@@ -5,8 +5,7 @@ import { message } from "../support/ui.mjs";
 test("switch focus between the composer and conversation in a narrow desktop window", async ({ page }) => {
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Search sessions" }).click();
-  await page.getByRole("searchbox", { name: "Search sessions" }).fill("History Desktop");
+  await searchSessions(page, "History Desktop");
   await page.getByRole("link", { name: new RegExp(sessions.history) }).click();
   await expect(page.getByRole("heading", { level: 1, name: sessions.history })).toBeVisible();
   await page.setViewportSize({ width: 600, height: 900 });
@@ -24,8 +23,7 @@ test("switch focus between the composer and conversation in a narrow desktop win
 test("find, select, and pin a session with persisted history", async ({ page }) => {
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Search sessions" }).click();
-  await page.getByRole("searchbox", { name: "Search sessions" }).fill("History Desktop");
+  await searchSessions(page, "History Desktop");
   let session = page.getByRole("link", { name: new RegExp(sessions.history) });
   await expect(session).toBeVisible();
   await session.click();
@@ -41,3 +39,13 @@ test("find, select, and pin a session with persisted history", async ({ page }) 
   await expect(row.getByRole("button", { name: "Unpin session" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Pinned" })).toBeVisible();
 });
+
+async function searchSessions(page, query) {
+  await page.getByRole("button", { name: "Search sessions" }).click();
+  const search = page.getByRole("searchbox", { name: "Search sessions" });
+  await search.fill(query);
+  await Promise.all([
+    page.waitForURL((url) => url.searchParams.get("session_search") === query, { waitUntil: "domcontentloaded" }),
+    search.press("Enter")
+  ]);
+}
