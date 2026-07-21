@@ -5,6 +5,7 @@ export const sessions = {
   marker: FIXTURE_MARKER,
   history: "E2E History Desktop",
   prompt: "E2E Prompt Desktop",
+  markRead: "E2E Mark Read Desktop",
   promptRetry: "E2E Prompt Retry Desktop",
   promptRetryStop: "E2E Prompt Retry Stop Desktop",
   promptRetryExhausted: "E2E Prompt Retry Exhausted Desktop",

@@ -40,6 +40,26 @@ test("keep sidebar metadata refreshes fast while an active run is deferred", asy
   await expect(sidebar).not.toHaveAttribute("data-sidebar-metadata-deferred", "");
 });
 
+test("mark a final reply read without a sidebar refresh", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.markRead);
+  const sessionOnlyUrl = new URL(page.url());
+  sessionOnlyUrl.searchParams.set("session_only", "1");
+  await page.goto(sessionOnlyUrl.toString());
+
+  const liveOutput = page.locator("#live-output");
+  const initialCount = Number(await liveOutput.getAttribute("data-assistant-response-count"));
+  const markReadRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/sessions/mark_read");
+  await sendPrompt(page, prompts.standard);
+  await expect(message(page, "assistant", replies.standard)).toBeVisible();
+  await expectRunFinished(page);
+
+  const request = await markReadRequest;
+  const body = new URLSearchParams(request.postData());
+  expect(body.get("assistant_response_count")).toBe(String(initialCount + 1));
+  await expect(liveOutput).toHaveAttribute("data-assistant-response-count", String(initialCount + 1));
+});
+
 test("abort an active run", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.controlsAbort);

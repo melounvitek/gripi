@@ -96,6 +96,7 @@ export async function seedFixtures(root) {
     ["mobile-project", "mobile-landing", sessions.mobileLanding],
     ["history-project", "history", sessions.history, { question: "Persisted browser question", answer: "Persisted browser answer" }],
     ["prompt-project", "prompt", sessions.prompt],
+    ["prompt-project", "mark-read", sessions.markRead],
     ["controls-project", "steer", sessions.controlsSteer],
     ["controls-project", "follow-up", sessions.controlsFollowUp],
     ["controls-project", "abort", sessions.controlsAbort],
