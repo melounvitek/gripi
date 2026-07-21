@@ -125,6 +125,7 @@ module Sessions
       mark_selected_read:,
       pending_sessions: [],
       session_filter: nil,
+      defer_busy_metadata: false,
       now: Time.now
     )
       @sessions_root = sessions_root
@@ -138,12 +139,15 @@ module Sessions
       @mark_selected_read = mark_selected_read
       @pending_sessions = pending_sessions
       @session_filter = session_filter
+      @defer_busy_metadata = defer_busy_metadata
       @now = now
     end
 
     def build
-      @store = PiSessionStore.new(root: @sessions_root, hide_missing_cwds: true)
+      defer_metadata_refresh = ->(path) { @rpc_clients.busy?(path) } if @defer_busy_metadata
+      @store = PiSessionStore.new(root: @sessions_root, hide_missing_cwds: true, defer_session_metadata_refresh: defer_metadata_refresh)
       @groups = @store.grouped_sessions
+      @session_metadata_refresh_deferred = @store.session_metadata_refresh_deferred?
       merge_pending_sessions
       @groups = filtered_groups(@groups)
       @all_sessions = @groups.values.flatten
@@ -165,6 +169,7 @@ module Sessions
     def to_instance_variables
       {
         :@store => @store,
+        :@session_metadata_refresh_deferred => @session_metadata_refresh_deferred,
         :@groups => @groups,
         :@all_sessions => @all_sessions,
         :@selected_session => @selected_session,

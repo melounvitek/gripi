@@ -6,7 +6,7 @@ module Web
     module Helpers
       private
 
-      def prepare_session_view(include_conversation: false)
+      def prepare_session_view(include_conversation: false, defer_busy_metadata: false)
         remap_selected_pending_session
         pending_sessions = pending_session_registry.entries_with_created_at
         Sessions::SessionView.build(
@@ -20,7 +20,8 @@ module Web
           session_synchronizer: session_synchronizer,
           mark_selected_read: should_mark_selected_session_read?,
           pending_sessions: pending_sessions,
-          session_filter: workspace_session_filter
+          session_filter: workspace_session_filter,
+          defer_busy_metadata: defer_busy_metadata
         ).to_instance_variables.each do |name, value|
           instance_variable_set(name, value)
         end
@@ -69,7 +70,7 @@ module Web
       end
 
       app.get "/sidebar" do
-        prepare_session_view
+        prepare_session_view(defer_busy_metadata: true)
         erb :_sidebar, layout: false
       end
 

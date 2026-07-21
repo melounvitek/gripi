@@ -8062,6 +8062,79 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_sidebar_defers_busy_session_metadata_until_settlement
+    Dir.mktmpdir do |dir|
+      selected_path, busy_path = write_sessions(dir, count: 2)
+      Gripi.set :sessions_root, dir
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      busy = false
+      client = FakeRpcClient.new([])
+      client.define_singleton_method(:busy?) { busy }
+      registry.register(busy_path, client)
+      Gripi.set :rpc_client_registry, registry
+      request = Rack::MockRequest.new(Gripi)
+
+      request.get("/sidebar", params: { "session" => selected_path })
+      File.open(busy_path, "a") do |file|
+        file.puts JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Finished while busy" }] } })
+      end
+      busy = true
+
+      2.times do
+        response = request.get("/sidebar", params: { "session" => selected_path })
+        document = Nokogiri::HTML(response.body)
+        link = document.at_css("a.session[data-session-path='#{busy_path}']")
+        assert_equal "0", link["data-assistant-response-count"]
+        refute link["class"].include?("unread")
+        assert document.at_css(".session-sidebar[data-sidebar-metadata-deferred]")
+      end
+
+      busy = false
+      settled_response = request.get("/sidebar", params: { "session" => selected_path })
+      settled_document = Nokogiri::HTML(settled_response.body)
+      settled_link = settled_document.at_css("a.session[data-session-path='#{busy_path}']")
+
+      assert_equal "1", settled_link["data-assistant-response-count"]
+      assert settled_link["class"].include?("unread")
+      refute settled_document.at_css(".session-sidebar[data-sidebar-metadata-deferred]")
+    end
+  end
+
+  def test_sidebar_keeps_fast_refresh_when_busy_session_settles_during_rendering
+    previous_idle_timeout = Gripi.settings.rpc_idle_timeout_seconds
+    Gripi.set :rpc_idle_timeout_seconds, 0
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      Gripi.set :sessions_root, dir
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeRpcClient.new([]) })
+      registry.register(path, FakeRpcClient.new([]))
+      Gripi.set :rpc_client_registry, registry
+      request = Rack::MockRequest.new(Gripi)
+      request.get("/sidebar", params: { "session" => path })
+      File.open(path, "a") do |file|
+        file.puts JSON.generate({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Final response" }] } })
+      end
+
+      busy_checks = 0
+      client = FakeRpcClient.new([])
+      client.define_singleton_method(:busy?) do
+        busy_checks += 1
+        busy_checks == 1
+      end
+      registry.register(path, client)
+
+      response = request.get("/sidebar", params: { "session" => path })
+      document = Nokogiri::HTML(response.body)
+      link = document.at_css("a.session[data-session-path='#{path}']")
+
+      assert_equal "0", link["data-assistant-response-count"]
+      refute document.at_css(".session-running-indicator")
+      assert document.at_css(".session-sidebar[data-sidebar-metadata-deferred]")
+    end
+  ensure
+    Gripi.set :rpc_idle_timeout_seconds, previous_idle_timeout
+  end
+
   def test_sidebar_sessions_include_assistant_response_count_for_unread_tracking
     Dir.mktmpdir do |dir|
       path = write_session(dir)

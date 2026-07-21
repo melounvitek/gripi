@@ -1064,12 +1064,15 @@ class FrontendControllersJsTest < Minitest::Test
       controller.scheduleRefresh();
       active = true;
       controller.scheduleRefresh();
+      active = false;
+      sidebar.dataset.sidebarMetadataDeferred = "";
+      controller.scheduleRefresh();
       controller.requestRefresh();
 
       console.log(JSON.stringify(timers));
     JS
 
-    assert_equal [10_000, 2_500, 0], results
+    assert_equal [10_000, 2_500, 2_500, 0], results
   end
 
   def test_sidebar_controller_shows_loading_state_while_toggling_pins

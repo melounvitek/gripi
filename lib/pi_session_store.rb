@@ -54,7 +54,7 @@ class PiSessionStore
   @session_index_cache_bytes = 0
 
   class << self
-    def fetch_session(path)
+    def fetch_session(path, defer_refresh: false)
       state = @session_cache_mutex.synchronize do
         @session_cache_clock += 1
         state = @session_cache[path] ||= { lock: Mutex.new, users: 0 }
@@ -65,11 +65,13 @@ class PiSessionStore
       state.fetch(:lock).synchronize do
         stat = File.stat(path)
         signature = [stat.size, stat.mtime.to_f]
-        return state[:session] if state.key?(:session) && state[:signature] == signature
+        return [state[:session], false] if state.key?(:session) && state[:signature] == signature
+        return [state[:session], true] if defer_refresh && state[:session]
 
         session = yield(stat)
         state[:signature] = signature
         state[:session] = session
+        [session, false]
       end
     ensure
       if state
@@ -121,9 +123,15 @@ class PiSessionStore
     end
   end
 
-  def initialize(root: File.expand_path("~/.pi/agent/sessions"), hide_missing_cwds: false)
+  def initialize(root: File.expand_path("~/.pi/agent/sessions"), hide_missing_cwds: false, defer_session_metadata_refresh: nil)
     @root = root
     @hide_missing_cwds = hide_missing_cwds
+    @defer_session_metadata_refresh = defer_session_metadata_refresh
+    @session_metadata_refresh_deferred = false
+  end
+
+  def session_metadata_refresh_deferred?
+    @session_metadata_refresh_deferred
   end
 
   def sessions
@@ -801,7 +809,9 @@ class PiSessionStore
   end
 
   def parse_session(path)
-    session = self.class.fetch_session(path) { |stat| session_from_metadata(path, stat) }
+    defer_refresh = @defer_session_metadata_refresh&.call(path) == true
+    session, deferred = self.class.fetch_session(path, defer_refresh: defer_refresh) { |stat| session_from_metadata(path, stat) }
+    @session_metadata_refresh_deferred ||= deferred
     return unless session
     return if hide_session_with_missing_cwd?(session.cwd)
 

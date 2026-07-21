@@ -126,6 +126,67 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_defers_refresh_of_successfully_cached_metadata_until_requested
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", timestamp: "2026-06-13T10:00:00Z", cwd: "/tmp/project" },
+        { type: "session_info", name: "Initial name" }
+      ])
+      defer_refresh = false
+      store = PiSessionStore.new(root: dir, defer_session_metadata_refresh: ->(_path) { defer_refresh })
+
+      assert_equal "Initial name", store.sessions.first.display_name
+      File.write(path, [
+        JSON.generate({ type: "session", id: "session-1", timestamp: "2026-06-13T10:00:00Z", cwd: "/tmp/project" }),
+        JSON.generate({ type: "session_info", name: "Rewritten name with a longer value" })
+      ].join("\n") + "\n")
+      File.open(path, "a") { |file| file.puts JSON.generate({ type: "session_info", name: "Final name after append" }) }
+      defer_refresh = true
+
+      assert_equal "Initial name", store.sessions.first.display_name
+      assert store.session_metadata_refresh_deferred?
+
+      refreshed_store = PiSessionStore.new(root: dir, defer_session_metadata_refresh: ->(_path) { false })
+      assert_equal "Final name after append", refreshed_store.sessions.first.display_name
+    end
+  end
+
+  def test_does_not_defer_first_or_previously_unsuccessful_metadata_parse
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      File.write(path, JSON.generate({ type: "message", id: "user-1", message: { role: "user", content: [] } }) + "\n")
+      store = PiSessionStore.new(root: dir, defer_session_metadata_refresh: ->(_path) { true })
+
+      assert_empty store.sessions
+      refute store.session_metadata_refresh_deferred?
+
+      File.open(path, "a") do |file|
+        file.puts JSON.generate({ type: "session", id: "session-1", timestamp: "2026-06-13T10:00:00Z", cwd: "/tmp/project" })
+      end
+
+      assert_equal ["session-1"], store.sessions.map(&:id)
+      refute store.session_metadata_refresh_deferred?
+    end
+  end
+
+  def test_metadata_refreshes_immediately_without_a_deferral_predicate
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", timestamp: "2026-06-13T10:00:00Z", cwd: "/tmp/project" },
+        { type: "session_info", name: "Initial name" }
+      ])
+      store = PiSessionStore.new(root: dir)
+      assert_equal "Initial name", store.sessions.first.display_name
+
+      File.open(path, "a") { |file| file.write("\n#{JSON.generate({ type: "session_info", name: "Updated name" })}\n") }
+
+      assert_equal "Updated name", store.sessions.first.display_name
+      refute store.session_metadata_refresh_deferred?
+    end
+  end
+
   def test_empty_latest_session_name_restores_first_message_fallback
     Dir.mktmpdir do |dir|
       path = File.join(dir, "session.jsonl")

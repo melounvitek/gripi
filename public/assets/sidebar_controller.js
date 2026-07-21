@@ -121,7 +121,8 @@ export class SidebarController {
 
   refreshDelay() {
     const active = this.element?.querySelector(".session-running-indicator, .session-compacting-indicator");
-    return active ? 2500 : 10000;
+    const metadataDeferred = this.element?.dataset.sidebarMetadataDeferred !== undefined;
+    return active || metadataDeferred ? 2500 : 10000;
   }
 
   requestRefresh(delay = 0) {
