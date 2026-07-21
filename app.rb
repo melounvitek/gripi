@@ -181,8 +181,24 @@ class Gripi < Sinatra::Base
     builder.use FriendlyHostAuthorization, host_authorization
   end
 
-  set :rpc_idle_timeout_seconds, ENV.fetch("GRIPI_RPC_IDLE_TIMEOUT_SECONDS", "300").to_i
-  set :rpc_idle_sweep_seconds, ENV.fetch("GRIPI_RPC_IDLE_SWEEP_SECONDS", "30").to_f
+  rpc_idle_timeout_seconds = begin
+    Integer(ENV.fetch("GRIPI_RPC_IDLE_TIMEOUT_SECONDS", "300"), 10)
+  rescue ArgumentError
+    raise ArgumentError, "GRIPI_RPC_IDLE_TIMEOUT_SECONDS must be a non-negative integer"
+  end
+  raise ArgumentError, "GRIPI_RPC_IDLE_TIMEOUT_SECONDS must be a non-negative integer" if rpc_idle_timeout_seconds.negative?
+
+  rpc_idle_sweep_seconds = begin
+    Float(ENV.fetch("GRIPI_RPC_IDLE_SWEEP_SECONDS", "30"))
+  rescue ArgumentError
+    raise ArgumentError, "GRIPI_RPC_IDLE_SWEEP_SECONDS must be a positive number"
+  end
+  unless rpc_idle_sweep_seconds.positive? && rpc_idle_sweep_seconds.finite?
+    raise ArgumentError, "GRIPI_RPC_IDLE_SWEEP_SECONDS must be a positive number"
+  end
+
+  set :rpc_idle_timeout_seconds, rpc_idle_timeout_seconds
+  set :rpc_idle_sweep_seconds, rpc_idle_sweep_seconds
   set :resource_monitoring_enabled, ENV.fetch("GRIPI_RESOURCE_MONITORING", "").match?(/\A(?:1|true|yes|on)\z/i)
   set :resource_usage_monitor, ResourceUsageMonitor.new
   set :access_request_rate_limiter, RequestRateLimiter.new(limit: 30, window: 60)
@@ -215,12 +231,57 @@ class Gripi < Sinatra::Base
     return [] unless timeout.positive? && registry
 
     synchronizer = session_synchronizer_for(registry)
-    registry.close_idle_clients(
-      idle_timeout: timeout,
-      on_close: ->(session_path) { settings.pending_session_registry.forget(session_path) }
-    ) do |session_path|
-      synchronizer.inspect_if_available(session_path) if File.exist?(session_path)
+    closed_paths = []
+    errors = []
+    registry.idle_client_paths(idle_timeout: timeout).each do |candidate_path|
+      begin
+        session_path, remapped = remap_idle_pending_rpc_client(candidate_path, registry)
+        next unless session_path
+
+        closed = false
+        if File.exist?(session_path)
+          synchronizer.reconcile_if_available(session_path) do
+            closed = if remapped
+              registry.close_client_if_idle(session_path)
+            else
+              registry.close_client_if_expired(session_path, idle_timeout: timeout)
+            end
+          end
+        else
+          closed = registry.close_client_if_expired(session_path, idle_timeout: timeout)
+        end
+        if closed
+          settings.pending_session_registry.forget(session_path)
+          closed_paths << session_path
+        end
+      rescue StandardError => error
+        errors << error
+      end
     end
+    raise errors.first if errors.any?
+
+    closed_paths
+  end
+
+  def self.remap_idle_pending_rpc_client(session_path, registry)
+    cwd = settings.pending_session_registry.cwd_for(session_path)
+    return [session_path, false] unless cwd
+
+    response = registry.with_existing_client(session_path, touch: false) { |client| client.get_state }
+    data = response.is_a?(Hash) && response["data"].is_a?(Hash) ? response["data"] : response
+    persisted_path = data["sessionFile"] || data["session_file"] || data["path"] if data.is_a?(Hash)
+    return [session_path, false] unless persisted_path
+    return [nil, false] unless File.exist?(persisted_path)
+    return [nil, false] unless PiSessionStore.new(root: settings.sessions_root).cwd_for_session(persisted_path) == cwd
+
+    registry.move(session_path, persisted_path)
+    PiAttachmentStore.new(root: settings.attachments_root).migrate_session(session_path, persisted_path)
+    WorkspaceSessionOwnershipStore.new(path: settings.workspace_ownership_path).move(session_path, persisted_path)
+    settings.pending_session_registry.forget(session_path)
+    [persisted_path, true]
+  rescue PiRpcClientRegistry::OperationPending, PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting,
+    PiRpcClient::RequestTimeout, IOError, SystemCallError
+    [nil, false]
   end
 
   set :rpc_idle_client_maintenance, Rpc::IdleClientMaintenance.new(

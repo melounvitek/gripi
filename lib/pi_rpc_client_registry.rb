@@ -170,59 +170,60 @@ class PiRpcClientRegistry
   end
 
   def close_client_if_idle(session_path)
-    client = @mutex.synchronize do
-      entry = @clients[session_path]
-      next unless entry
-      next if entry.active_requests.positive?
-      next if entry.client.respond_to?(:busy?) && entry.client.busy?
-
-      @clients.delete(session_path)
-      entry.client
+    close_client_when(session_path) do |entry|
+      entry.active_requests.zero? && !client_busy?(entry)
     end
-    return false unless client
+  end
 
-    client.close
-    true
+  def idle_client_paths(idle_timeout:, now: @clock.call, except: [])
+    @mutex.synchronize do
+      @clients.filter_map do |session_path, entry|
+        idle = now - entry_activity_at(entry) >= idle_timeout
+        session_path if idle && !client_busy?(entry) && entry.active_requests.zero? && !entry.retiring && !except.include?(session_path)
+      end
+    end
+  end
+
+  def close_client_if_expired(session_path, idle_timeout:, now: @clock.call, on_close: nil)
+    close_client_when(session_path, on_close: on_close) do |entry|
+      idle = now - entry_activity_at(entry) >= idle_timeout
+      idle && !client_busy?(entry) && entry.active_requests.zero?
+    end
   end
 
   def close_idle_clients(idle_timeout:, now: @clock.call, except: [], on_close: nil)
-    candidates = @mutex.synchronize do
-      @clients.filter_map do |session_path, entry|
-        idle = now - entry_activity_at(entry) >= idle_timeout
-        busy = entry.client.respond_to?(:busy?) && entry.client.busy?
-        session_path if idle && !busy && entry.active_requests.zero? && !except.include?(session_path)
-      end
-    end
+    candidates = idle_client_paths(idle_timeout: idle_timeout, now: now, except: except)
     candidates.each { |session_path| yield session_path } if block_given?
 
-    clients_to_close = []
     closed_paths = []
-    @mutex.synchronize do
-      @clients.delete_if do |session_path, entry|
-        idle = now - entry_activity_at(entry) >= idle_timeout
-        busy = entry.client.respond_to?(:busy?) && entry.client.busy?
-        close = idle && !busy && entry.active_requests.zero? && !except.include?(session_path)
-        if close
-          clients_to_close << entry.client
-          closed_paths << session_path
-          on_close&.call(session_path)
-        end
-        close
+    errors = []
+    candidates.each do |session_path|
+      begin
+        closed = close_client_if_expired(session_path, idle_timeout: idle_timeout, now: now, on_close: on_close)
+        closed_paths << session_path if closed
+      rescue StandardError => error
+        errors << error
       end
     end
+    raise errors.first if errors.any?
 
-    clients_to_close.each(&:close)
     closed_paths
   end
 
   def close_all
-    clients = @mutex.synchronize do
-      existing = @clients.values.map(&:client)
-      @clients = {}
+    paths = @mutex.synchronize do
       @creating.clear
-      existing
+      @clients.keys
     end
-    clients.each(&:close)
+    errors = []
+    paths.each do |session_path|
+      begin
+        close_client_when(session_path) { true }
+      rescue StandardError => error
+        errors << error
+      end
+    end
+    raise errors.first if errors.any?
   end
 
   private
@@ -354,6 +355,32 @@ class PiRpcClientRegistry
     if owns_retirement
       @mutex.synchronize { @clients.delete_if { |_path, candidate| candidate.equal?(entry) } }
     end
+  end
+
+  def close_client_when(session_path, on_close: nil)
+    entry = @mutex.synchronize do
+      current = @clients[session_path]
+      next unless current && !current.retiring && yield(current)
+
+      current.retiring = true
+      current
+    end
+    return false unless entry
+
+    begin
+      entry.client.close
+    rescue StandardError
+      @mutex.synchronize { entry.retiring = false if @clients[session_path].equal?(entry) }
+      raise
+    end
+
+    @mutex.synchronize { @clients.delete(session_path) if @clients[session_path].equal?(entry) }
+    on_close&.call(session_path)
+    true
+  end
+
+  def client_busy?(entry)
+    entry.client.respond_to?(:busy?) && entry.client.busy?
   end
 
   def new_entry(client)

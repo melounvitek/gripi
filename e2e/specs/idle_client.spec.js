@@ -9,7 +9,7 @@ test("retire an idle Pi client despite browser polling and restart it on demand"
   test.skip(!fakePiLog, "requires the managed fake Pi runtime");
 
   await page.goto("/");
-  await selectSession(page, sessions.prompt);
+  await selectSession(page, sessions.idleClient);
   const previousPids = startedPids(await fakePiRecords());
 
   await sendPrompt(page, prompts.standard);
@@ -42,7 +42,7 @@ async function fakePiRecords() {
 }
 
 function startedPids(records) {
-  return records.filter((record) => record.event === "started" && record.sessionPath?.endsWith("/prompt.jsonl")).map((record) => record.pid);
+  return records.filter((record) => record.event === "started" && record.sessionPath?.endsWith("/idle-client.jsonl")).map((record) => record.pid);
 }
 
 function stoppedPids(records) {

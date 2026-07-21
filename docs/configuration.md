@@ -109,9 +109,9 @@ Changing this setting requires restarting the gateway after active work finishes
 
 ## Pi process lifetime
 
-Gripi closes a settled Pi RPC process after five minutes without a user operation. It checks for idle processes every 30 seconds. Browser polling for events, status, sidebar content, or resource usage does not extend the timeout, so a forgotten open tab cannot keep Pi running indefinitely.
+Gripi closes a settled Pi RPC process during the first sweep after five minutes without a user operation, normally between five minutes and five minutes 30 seconds after settlement. Browser polling for events, status, sidebar content, or resource usage does not extend the timeout, so a forgotten open tab cannot keep Pi running indefinitely.
 
-Active agent turns, compaction, gateway bash commands, and in-flight requests remain protected. Conversation history stays in Pi's JSONL session file. Using the session again starts a fresh Pi process, which adds startup latency and does not restore process-local replay buffers, extension UI state, or warm configuration.
+Active agent turns, compaction, gateway bash commands, and in-flight requests remain protected. Conversation history stays in Pi's JSONL session file. Using the session again starts a fresh Pi process, which adds startup latency and does not restore process-local replay buffers, extension UI state, or warm configuration. A new session that never produced a Pi JSONL file has no persisted history to reopen and disappears when its process is retired.
 
 Override either interval in `~/.config/gripi/env` when needed:
 
@@ -120,7 +120,7 @@ GRIPI_RPC_IDLE_TIMEOUT_SECONDS=300
 GRIPI_RPC_IDLE_SWEEP_SECONDS=30
 ```
 
-Set `GRIPI_RPC_IDLE_TIMEOUT_SECONDS=0` to disable idle retirement. The sweep interval must remain positive. Changing either setting requires restarting the gateway.
+The idle timeout must be a non-negative integer. The sweep interval accepts a positive finite number. Set `GRIPI_RPC_IDLE_TIMEOUT_SECONDS=0` to disable idle retirement. Changing either setting requires restarting the gateway.
 
 ## Custom Pi runtime
 

@@ -1,7 +1,17 @@
 import { expect } from "@playwright/test";
 
 export async function selectSession(page, title) {
-  const link = page.getByRole("link", { name: new RegExp(escapeRegExp(title)) });
+  let link = page.getByRole("link", { name: new RegExp(escapeRegExp(title)) });
+  if (!await link.isVisible()) {
+    await page.getByRole("button", { name: "Search sessions" }).click();
+    const search = page.getByRole("searchbox", { name: "Search sessions" });
+    await search.fill(title);
+    await Promise.all([
+      page.waitForURL((url) => url.searchParams.get("session_search") === title, { waitUntil: "domcontentloaded" }),
+      search.press("Enter")
+    ]);
+    link = page.getByRole("link", { name: new RegExp(escapeRegExp(title)) });
+  }
   await expect(link).toBeVisible();
   await link.click();
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();

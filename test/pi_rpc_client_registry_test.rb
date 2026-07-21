@@ -16,7 +16,28 @@ class PiRpcClientRegistryTest < Minitest::Test
     assert_equal [:close], calls
   end
 
-  def test_runs_close_callback_before_closing_the_client
+  def test_attempts_every_idle_close_and_retries_a_failed_client
+    now = Time.at(1_000)
+    calls = []
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+    failing = FakeClient.new(calls)
+    failing.define_singleton_method(:close) do
+      calls << :failing_close
+      raise "close failed"
+    end
+    registry.register("/tmp/failing.jsonl", failing)
+    registry.register("/tmp/healthy.jsonl", FakeClient.new(calls))
+
+    now = Time.at(2_801)
+    error = assert_raises(RuntimeError) { registry.close_idle_clients(idle_timeout: 1_800) }
+
+    assert_equal "close failed", error.message
+    assert registry.active?("/tmp/failing.jsonl")
+    refute registry.active?("/tmp/healthy.jsonl")
+    assert_equal [:failing_close, :close], calls
+  end
+
+  def test_runs_close_callback_after_closing_the_client
     now = Time.at(1_000)
     calls = []
     registry = PiRpcClientRegistry.new(factory: ->(_session_path) { FakeClient.new(calls) }, clock: -> { now })
@@ -25,7 +46,7 @@ class PiRpcClientRegistryTest < Minitest::Test
     now = Time.at(2_801)
     registry.close_idle_clients(idle_timeout: 1_800, on_close: ->(path) { calls << [:on_close, path] })
 
-    assert_equal [[:on_close, "/tmp/session.jsonl"], :close], calls
+    assert_equal [:close, [:on_close, "/tmp/session.jsonl"]], calls
   end
 
   def test_keeps_busy_clients_past_idle_timeout
@@ -517,6 +538,25 @@ class PiRpcClientRegistryTest < Minitest::Test
     end
 
     assert_empty calls
+  end
+
+  def test_close_all_attempts_every_client_when_one_close_fails
+    calls = []
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+    failing = FakeClient.new(calls)
+    failing.define_singleton_method(:close) do
+      calls << :failing_close
+      raise "close failed"
+    end
+    registry.register("/tmp/failing.jsonl", failing)
+    registry.register("/tmp/healthy.jsonl", FakeClient.new(calls))
+
+    error = assert_raises(RuntimeError) { registry.close_all }
+
+    assert_equal "close failed", error.message
+    assert registry.active?("/tmp/failing.jsonl")
+    refute registry.active?("/tmp/healthy.jsonl")
+    assert_equal [:failing_close, :close], calls
   end
 
   def test_keeps_clients_currently_in_use

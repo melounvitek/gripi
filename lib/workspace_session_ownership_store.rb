@@ -16,6 +16,14 @@ class WorkspaceSessionOwnershipStore
     end
   end
 
+  def move(from_session_path, to_session_path)
+    update do |state|
+      sessions = state.fetch("sessions")
+      owner = sessions.delete(canonical_path(from_session_path))
+      sessions[canonical_path(to_session_path)] = owner if owner
+    end
+  end
+
   def owned_by?(session_path, workspace_id)
     return false if session_path.to_s.empty? || workspace_id.to_s.empty?
 

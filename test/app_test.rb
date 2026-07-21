@@ -90,6 +90,19 @@ class AppTest < Minitest::Test
 
       assert_equal "300,30.0", stdout
       assert_equal "17,2.5", overridden_stdout
+
+      _stdout, invalid_timeout_error, invalid_timeout_status = Open3.capture3(
+        env.merge("GRIPI_RPC_IDLE_TIMEOUT_SECONDS" => "invalid"),
+        *command
+      )
+      _stdout, invalid_sweep_error, invalid_sweep_status = Open3.capture3(
+        env.merge("GRIPI_RPC_IDLE_SWEEP_SECONDS" => "0"),
+        *command
+      )
+      refute invalid_timeout_status.success?
+      assert_includes invalid_timeout_error, "GRIPI_RPC_IDLE_TIMEOUT_SECONDS"
+      refute invalid_sweep_status.success?
+      assert_includes invalid_sweep_error, "GRIPI_RPC_IDLE_SWEEP_SECONDS"
     end
   end
 
@@ -2340,6 +2353,61 @@ class AppTest < Minitest::Test
 
     assert_empty Gripi.cleanup_idle_rpc_clients
     assert_nil Gripi.settings.rpc_client_registry
+  end
+
+  def test_idle_cleanup_defers_retirement_while_session_reconciliation_is_locked
+    now = Time.at(1_000)
+    path = __FILE__
+    registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+    registry.register(path, FakeRpcClient.new([]))
+    reconciliation_available = false
+    synchronizer = Object.new
+    synchronizer.define_singleton_method(:configured_for?) { |_root, candidate| candidate.equal?(registry) }
+    synchronizer.define_singleton_method(:reconcile_if_available) do |_session_path, &block|
+      block.call if reconciliation_available
+    end
+    Gripi.set :rpc_client_registry, registry
+    Gripi.set :session_synchronizer, synchronizer
+    Gripi.set :rpc_idle_timeout_seconds, 1_800
+
+    now = Time.at(2_801)
+    assert_empty Gripi.cleanup_idle_rpc_clients
+    assert registry.active?(path)
+
+    reconciliation_available = true
+    assert_equal [path], Gripi.cleanup_idle_rpc_clients
+    refute registry.active?(path)
+  end
+
+  def test_idle_cleanup_attempts_remaining_clients_after_a_close_failure
+    Dir.mktmpdir do |dir|
+      now = Time.at(1_000)
+      paths = write_sessions(dir, count: 2)
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+      failing = FakeRpcClient.new(calls)
+      failing.define_singleton_method(:close) do
+        calls << [:failing_close]
+        raise "close failed"
+      end
+      registry.register(paths.first, failing)
+      registry.register(paths.last, FakeRpcClient.new(calls))
+      synchronizer = Object.new
+      synchronizer.define_singleton_method(:configured_for?) { |_root, candidate| candidate.equal?(registry) }
+      synchronizer.define_singleton_method(:reconcile_if_available) { |_path, &block| block.call }
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :session_synchronizer, synchronizer
+      Gripi.set :rpc_idle_timeout_seconds, 1_800
+
+      now = Time.at(2_801)
+      error = assert_raises(RuntimeError) { Gripi.cleanup_idle_rpc_clients }
+
+      assert_equal "close failed", error.message
+      assert registry.active?(paths.first)
+      refute registry.active?(paths.last)
+      assert_equal [[:failing_close], [:close]], calls
+    end
   end
 
   def test_event_poll_does_not_trigger_idle_client_cleanup
@@ -4707,7 +4775,38 @@ class AppTest < Minitest::Test
       refute registry.active?(pending_path)
       refute_includes pending_sessions.paths, pending_path
       refute_includes response.body, pending_path
-      assert_equal [[:close]], calls
+      assert_equal [[:get_state], [:close]], calls
+    end
+  end
+
+  def test_idle_persisted_pending_session_moves_workspace_ownership_before_retirement
+    Dir.mktmpdir do |dir|
+      now = Time.at(1_000)
+      persisted_path = write_session(dir)
+      pending_path = File.join(dir, "pending-session.jsonl")
+      calls = []
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
+      registry.register(pending_path, FakeRpcClient.new(calls, [], persisted_path))
+      pending_sessions = Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) }, clock: -> { now })
+      owner = "workspace-owner"
+      ownership = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
+      ownership.claim(pending_path, owner)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+      Gripi.set :pending_session_registry, pending_sessions
+      Gripi.set :rpc_idle_timeout_seconds, 1_800
+      Gripi.set :multi_user_mode, true
+
+      now = Time.at(2_801)
+      assert_equal [persisted_path], Gripi.cleanup_idle_rpc_clients
+
+      refute registry.active?(pending_path)
+      refute registry.active?(persisted_path)
+      refute_includes pending_sessions.paths, pending_path
+      refute ownership.owned_by?(pending_path, owner)
+      assert ownership.owned_by?(persisted_path, owner)
+      assert_includes calls, [:get_state]
+      assert_includes calls, [:close]
     end
   end
 
@@ -9780,7 +9879,7 @@ class AppTest < Minitest::Test
 
       refute registry.active?(pending_path)
       refute_includes pending_sessions.paths, pending_path
-      assert_equal [[:close]], calls
+      assert_equal [[:get_state], [:close]], calls
     end
   end
 

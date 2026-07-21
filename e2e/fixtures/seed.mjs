@@ -93,7 +93,7 @@ export async function seedFixtures(root) {
   await Promise.all(Object.values(projects).map((project) => mkdir(project, { recursive: true })));
 
   const definitions = [
-    ["mobile-project", "mobile-landing", sessions.mobileLanding],
+    ["prompt-project", "idle-client", sessions.idleClient],
     ["history-project", "history", sessions.history, { question: "Persisted browser question", answer: "Persisted browser answer" }],
     ["prompt-project", "prompt", sessions.prompt],
     ["prompt-project", "mark-read", sessions.markRead],

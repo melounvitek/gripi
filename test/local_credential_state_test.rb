@@ -44,6 +44,16 @@ class LocalCredentialStateTest < Minitest::Test
     paths.each_value { |path| assert_equal 0o600, File.stat(path).mode & 0o777, path }
   end
 
+  def test_moves_session_ownership_atomically
+    store = WorkspaceSessionOwnershipStore.new(path: credential_paths.fetch(:owners))
+    store.claim("/tmp/pending.jsonl", "workspace")
+
+    store.move("/tmp/pending.jsonl", "/tmp/persisted.jsonl")
+
+    refute store.owned_by?("/tmp/pending.jsonl", "workspace")
+    assert store.owned_by?("/tmp/persisted.jsonl", "workspace")
+  end
+
   def test_concurrent_workspace_secret_creation_returns_one_persisted_secret
     path = credential_paths.fetch(:secret)
     ready = Queue.new

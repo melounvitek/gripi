@@ -51,10 +51,15 @@ module Sessions
     end
 
     def inspect_if_available(session_path, include_position: false)
-      lock = lock_for(session_path)
-      return unless lock.try_lock
+      reconcile_if_available(session_path, include_position: include_position)
+    end
 
-      begin
+    def reconcile_if_available(session_path, include_position: false)
+      lock = lock_for(session_path)
+      acquired = lock.try_lock
+      return unless acquired
+
+      result = begin
         inspect_locked(session_path, include_position: include_position)
       rescue PiRpcClientRegistry::OperationPending, PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting
         nil
@@ -62,9 +67,11 @@ module Sessions
         recover_from_rpc_exit_locked(session_path)
       rescue SystemCallError => error
         conflict_result_locked(session_path, "Session file could not be read: #{error.message}")
-      ensure
-        lock.unlock
       end
+      yield result if result && block_given?
+      result
+    ensure
+      lock&.unlock if acquired
     end
 
     def message_for(result)

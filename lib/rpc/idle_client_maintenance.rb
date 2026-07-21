@@ -20,7 +20,6 @@ module Rpc
 
         @stopping = false
         @thread = Thread.new { run }
-        @thread.report_on_exception = false
       end
       true
     end
@@ -50,7 +49,11 @@ module Rpc
 
         @cleanup.call
       rescue StandardError => error
-        @on_error&.call(error)
+        begin
+          @on_error&.call(error)
+        rescue StandardError => reporting_error
+          warn("Idle client maintenance error reporting failed: #{reporting_error.class}: #{reporting_error.message}")
+        end
       end
     end
   end

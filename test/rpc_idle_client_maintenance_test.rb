@@ -52,6 +52,31 @@ class RpcIdleClientMaintenanceTest < Minitest::Test
     maintenance&.stop
   end
 
+  def test_continues_when_error_reporting_fails
+    calls = 0
+    completed = Queue.new
+    maintenance = Rpc::IdleClientMaintenance.new(
+      interval: 0.01,
+      cleanup: -> {
+        calls += 1
+        raise "failed sweep" if calls == 1
+
+        completed << true
+      },
+      on_error: ->(_error) { raise "failed reporter" }
+    )
+
+    _stdout, stderr = capture_io do
+      maintenance.start
+      assert Timeout.timeout(1) { completed.pop }
+      maintenance.stop
+    end
+
+    assert_includes stderr, "failed reporter"
+  ensure
+    maintenance&.stop
+  end
+
   def test_rejects_a_non_positive_interval
     assert_raises(ArgumentError) { Rpc::IdleClientMaintenance.new(interval: 0, cleanup: -> {}) }
   end

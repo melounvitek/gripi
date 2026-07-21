@@ -224,6 +224,29 @@ class SessionSynchronizerTest < Minitest::Test
     end
   end
 
+  def test_idle_reconciliation_does_not_yield_while_the_session_lock_is_held
+    with_session do |root, path|
+      append(path, type: "message", id: "persisted", parentId: nil, message: { role: "user", content: [] })
+      client = FakeClient.new(positions: {
+        "persisted" => { known: true, leaf_id: "persisted", error: nil }
+      })
+      synchronizer = build_synchronizer(root, FakeRegistry.new(client))
+      lock = synchronizer.send(:lock_for, path)
+      lock.lock
+      yielded = false
+
+      assert_nil synchronizer.reconcile_if_available(path) { yielded = true }
+      refute yielded
+
+      lock.unlock
+      result = synchronizer.reconcile_if_available(path) { yielded = true }
+      assert_equal :managed, result.mode
+      assert yielded
+    ensure
+      lock&.unlock if lock&.owned?
+    end
+  end
+
   def test_idle_cleanup_reconciles_unseen_gateway_entries_before_closing_client
     with_session do |root, path|
       append(path, type: "message", id: "old", parentId: nil, message: { role: "user", content: [] })
