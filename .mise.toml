@@ -1,6 +1,7 @@
 [tools]
 ruby = "4.0.2"
 node = "22.22.1"
+go = "1.26.5"
 
 [tasks.setup]
 description = "Install dependencies and create local gateway config"
@@ -15,8 +16,20 @@ description = "Run the web gateway in development mode on port 4567"
 run = "RACK_ENV=development bundle exec rackup -o 127.0.0.1 -p 4567"
 
 [tasks.test]
-description = "Run the test suite"
-run = "bundle exec ruby -Itest -e 'Dir[\"test/*_test.rb\"].sort.each { |file| require File.expand_path(file) }'"
+description = "Run the Ruby and Go test suites"
+run = "bundle exec ruby -Itest -e 'Dir[\"test/*_test.rb\"].sort.each { |file| require File.expand_path(file) }' && go test ./..."
+
+[tasks.test-go]
+description = "Run the Go gateway test suite"
+run = "go test ./..."
+
+[tasks.build-go]
+description = "Build the Go gateway"
+run = "go build -o tmp/gripi ./cmd/gripi"
+
+[tasks.benchmark-ruby]
+description = "Measure the Ruby gateway under the seeded memory workload"
+run = "node scripts/benchmark_gateway_memory.mjs ruby"
 
 [tasks.e2e]
 description = "Run the managed browser E2E contract suite"
