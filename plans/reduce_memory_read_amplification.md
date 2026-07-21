@@ -1,6 +1,6 @@
 # Reduce misleading RAM reporting and session metadata read amplification
 
-Status: implementation complete; production restart verification pending
+Status: completed; production restart verification was not performed
 
 ## Goal
 
