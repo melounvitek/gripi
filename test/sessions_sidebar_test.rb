@@ -5,6 +5,24 @@ require_relative "../lib/sessions/sidebar"
 class SessionsSidebarTest < Minitest::Test
   Session = Struct.new(:path, :cwd, :display_name, :first_user_message, :modified_at, :conversation_activity_at, keyword_init: true)
 
+  def test_loads_unread_state_once_for_all_sessions
+    sessions = 3.times.map { |index| session("session-#{index}", "project", "Session #{index}", index) }
+    read_state = FakeReadState.new([sessions.first.path, sessions.last.path])
+
+    sidebar = Sessions::Sidebar.new(
+      groups: groups(*sessions),
+      selected_session: sessions.first,
+      params: {},
+      read_state_store: read_state,
+      pinned_session_store: FakePinnedSessions.new([])
+    )
+
+    refute sidebar.unread?(sessions.first)
+    assert sidebar.unread?(sessions.last)
+    assert_equal 1, sidebar.unread_session_count
+    assert_equal [sessions], read_state.unread_path_calls
+  end
+
   def test_keeps_filtered_sessions_strict_while_exposing_filtered_out_current_session
     current = session("current", "current-project", "Current work", 10)
     unread = session("unread", "unread-project", "Unread work", 30)
@@ -184,12 +202,16 @@ class SessionsSidebarTest < Minitest::Test
   end
 
   class FakeReadState
+    attr_reader :unread_path_calls
+
     def initialize(unread_paths)
       @unread_paths = unread_paths.to_set
+      @unread_path_calls = []
     end
 
-    def unread?(session)
-      @unread_paths.include?(session.path)
+    def unread_paths(sessions)
+      @unread_path_calls << sessions
+      sessions.filter_map { |session| session.path if @unread_paths.include?(session.path) }
     end
   end
 end

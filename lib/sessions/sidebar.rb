@@ -9,7 +9,7 @@ module Sessions
       @groups = groups
       @selected_session = selected_session
       @params = params
-      @read_state_store = read_state_store
+      @unread_paths = read_state_store.unread_paths(@groups.values.flatten).to_h { |path| [path, true] }
       @pinned_paths = pinned_session_store&.pinned_paths&.to_h { |path| [path, true] } || {}
     end
 
@@ -18,7 +18,7 @@ module Sessions
     end
 
     def unread?(session)
-      !selected?(session) && @read_state_store.unread?(session)
+      !selected?(session) && @unread_paths.key?(session.path)
     end
 
     def pinned?(session)

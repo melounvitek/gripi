@@ -48,6 +48,15 @@ class GatewayReadStateStore
     end
   end
 
+  def unread_paths(sessions)
+    @mutex.synchronize do
+      state = read_state
+      sessions.filter_map do |session|
+        session.path if state.fetch(session.path, session.assistant_response_count.to_i) < session.assistant_response_count.to_i
+      end
+    end
+  end
+
   private
 
   def read_state
