@@ -255,6 +255,11 @@ class PiSessionStore
   end
 
   def status(path)
+    index = session_index(path)
+    return status_from_index(index) if index.supported
+
+    status_from_entries(read_entries(path))
+  rescue Errno::EAGAIN
     status_from_entries(read_entries(path))
   end
 

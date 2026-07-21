@@ -1095,6 +1095,65 @@ class PiSessionStoreTest < Minitest::Test
     end
   end
 
+  def test_status_does_not_materialize_large_tool_results
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      large_output = "large-status-output-#{"x" * 300_000}"
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        { type: "message", id: "assistant-1", parentId: nil, timestamp: "2026-06-13T10:00:00Z", message: { role: "assistant", model: "gpt-5.6", content: [{ type: "text", text: "Answer" }], usage: { totalTokens: 12_345 } } },
+        { type: "message", id: "result-1", parentId: "assistant-1", timestamp: "2026-06-13T10:01:00Z", message: { role: "toolResult", toolCallId: "tool-1", toolName: "read", content: [{ type: "text", text: large_output }] } }
+      ])
+      parsed_large_entry = false
+      parse = JSON.method(:parse)
+      statuses = nil
+
+      replace_singleton_method(JSON, :parse, ->(line, *args) { parsed_large_entry = true if line.include?("large-status-output-"); parse.call(line, *args) }) do
+        store = PiSessionStore.new(root: dir)
+        statuses = [store.status(path), store.status(path)]
+      end
+
+      assert_equal [12_345, 12_345], statuses.map(&:context_tokens)
+      assert_equal ["gpt-5.6", "gpt-5.6"], statuses.map(&:model_id)
+      refute parsed_large_entry
+    end
+  end
+
+  def test_status_recovers_when_an_incomplete_entry_finishes
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        { type: "message", id: "assistant-1", message: { role: "assistant", content: [], usage: { totalTokens: 123 } } }
+      ])
+      appended = JSON.generate(type: "message", id: "assistant-2", message: { role: "assistant", content: [], usage: { totalTokens: 456 } })
+      split = appended.length / 2
+      File.open(path, "a") { |file| file.write("\n#{appended[0...split]}") }
+      store = PiSessionStore.new(root: dir)
+
+      assert_equal 123, store.status(path).context_tokens
+
+      File.open(path, "a") { |file| file.puts(appended[split..]) }
+      assert_equal 456, store.status(path).context_tokens
+    end
+  end
+
+  def test_status_falls_back_for_unsupported_large_entries
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "session.jsonl")
+      write_jsonl(path, [
+        { type: "session", id: "session-1", cwd: "/tmp/project" },
+        { type: "unknown", payload: "x" * 300_000 },
+        { type: "message", message: { role: "assistant", model: "fallback-model", content: [], usage: { totalTokens: 456 } } }
+      ])
+
+      status = PiSessionStore.new(root: dir).status(path)
+
+      assert_equal 456, status.context_tokens
+      assert_equal "fallback-model", status.model_id
+    end
+  end
+
   def test_estimates_latest_status_from_newer_compaction_entry
     Dir.mktmpdir do |dir|
       path = File.join(dir, "session.jsonl")

@@ -3772,6 +3772,19 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_status_validates_only_the_requested_session
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      Gripi.set :sessions_root, dir
+
+      response = replace_instance_method(PiSessionStore, :sessions, ->(*) { raise "all sessions should not be scanned" }) do
+        Rack::MockRequest.new(Gripi).get("/status", params: { "session" => path })
+      end
+
+      assert_equal 200, response.status
+    end
+  end
+
   def test_returns_live_rpc_status_for_an_active_session
     Dir.mktmpdir do |dir|
       path = write_session_with_raw_messages(dir, [

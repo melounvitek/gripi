@@ -158,7 +158,7 @@ module Web
       end
 
       def known_session_path?(session_path)
-        PiSessionStore.new(root: settings.sessions_root).sessions.any? { |session| session.path == session_path }
+        !PiSessionStore.new(root: settings.sessions_root).cwd_for_session(session_path).nil?
       end
 
       def commands_for(session_path)
