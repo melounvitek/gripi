@@ -180,7 +180,7 @@ class Gripi < Sinatra::Base
     builder.use FriendlyHostAuthorization, host_authorization
   end
 
-  set :rpc_idle_timeout_seconds, ENV.fetch("GRIPI_RPC_IDLE_TIMEOUT_SECONDS", "1800").to_i
+  set :rpc_idle_timeout_seconds, ENV.fetch("GRIPI_RPC_IDLE_TIMEOUT_SECONDS", "300").to_i
   set :resource_monitoring_enabled, ENV.fetch("GRIPI_RESOURCE_MONITORING", "").match?(/\A(?:1|true|yes|on)\z/i)
   set :resource_usage_monitor, ResourceUsageMonitor.new
   set :access_request_rate_limiter, RequestRateLimiter.new(limit: 30, window: 60)
@@ -193,16 +193,36 @@ class Gripi < Sinatra::Base
   helpers Web::StoreHelpers
   helpers Web::RpcHelpers
 
+  def self.session_synchronizer_for(registry)
+    synchronizer = settings.session_synchronizer
+    return synchronizer if synchronizer&.configured_for?(settings.sessions_root, registry)
+
+    settings.session_synchronizer_mutex.synchronize do
+      synchronizer = settings.session_synchronizer
+      unless synchronizer&.configured_for?(settings.sessions_root, registry)
+        synchronizer = Sessions::SessionSynchronizer.new(sessions_root: settings.sessions_root, rpc_clients: registry)
+        settings.session_synchronizer = synchronizer
+      end
+      synchronizer
+    end
+  end
+
+  def self.cleanup_idle_rpc_clients
+    timeout = settings.rpc_idle_timeout_seconds
+    registry = settings.rpc_client_registry
+    return [] unless timeout.positive? && registry
+
+    synchronizer = session_synchronizer_for(registry)
+    registry.close_idle_clients(
+      idle_timeout: timeout,
+      on_close: ->(session_path) { settings.pending_session_registry.forget(session_path) }
+    ) do |session_path|
+      synchronizer.inspect_if_available(session_path) if File.exist?(session_path)
+    end
+  end
+
   before do
     enforce_browser_access
     enforce_workspace_access
-    unless settings.resource_monitoring_enabled && request.path_info == "/resource-usage"
-      current_path = params["session"]
-      pending_session = pending_rpc_cwd(current_path)
-      current_session_owned = !multi_user_mode? || workspace_session_ownership_store.owned_by?(current_path, current_workspace_id)
-      rpc_clients.touch(current_path) if pending_session && current_session_owned
-      protect_current_session = request.path_info == "/events" && current_session_owned
-      cleanup_idle_rpc_clients(except: protect_current_session ? [current_path] : [])
-    end
   end
 end

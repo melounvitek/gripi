@@ -657,7 +657,6 @@ module Web
         else
           payload[:session_sync] = { mode: :available, revision: nil, error: nil, gateway_busy: rpc_clients.busy?(session_path) }
         end
-        cleanup_idle_rpc_clients
         content_type :json
         JSON.generate(payload)
       end

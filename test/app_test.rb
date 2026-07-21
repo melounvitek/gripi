@@ -52,6 +52,23 @@ class AppTest < Minitest::Test
     FileUtils.remove_entry(@workspace_root) if @workspace_root && Dir.exist?(@workspace_root)
   end
 
+  def test_rpc_idle_timeout_defaults_to_five_minutes_and_accepts_an_override
+    Dir.mktmpdir do |home|
+      env = ENV.to_h.merge(
+        "GRIPI_ENV_PATH" => File.join(home, "missing-env"),
+        "GRIPI_BROWSER_AUTH_DISABLED" => "1",
+        "GRIPI_RPC_IDLE_TIMEOUT_SECONDS" => nil
+      )
+      command = [RbConfig.ruby, "-I.", "-e", "require './app'; print Gripi.settings.rpc_idle_timeout_seconds"]
+
+      stdout, = Open3.capture3(env, *command)
+      overridden_stdout, = Open3.capture3(env.merge("GRIPI_RPC_IDLE_TIMEOUT_SECONDS" => "17"), *command)
+
+      assert_equal "300", stdout
+      assert_equal "17", overridden_stdout
+    end
+  end
+
   def test_app_boot_fails_without_admin_password
     Dir.mktmpdir do |home|
       env = ENV.to_h.merge("GRIPI_ENV_PATH" => File.join(home, "missing-env"), "GRIPI_ADMIN_PASSWORD" => nil)
@@ -2293,7 +2310,15 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_event_poll_closes_an_idle_persisted_client_after_reading_events
+  def test_idle_cleanup_does_not_create_an_rpc_registry
+    Gripi.set :rpc_client_registry, nil
+    Gripi.set :rpc_idle_timeout_seconds, 300
+
+    assert_empty Gripi.cleanup_idle_rpc_clients
+    assert_nil Gripi.settings.rpc_client_registry
+  end
+
+  def test_event_poll_does_not_trigger_idle_client_cleanup
     Dir.mktmpdir do |dir|
       now = Time.at(1_000)
       path = write_session(dir)
@@ -2309,6 +2334,11 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert_equal [{ "type" => "assistant_delta", "text" => "Hi" }], JSON.parse(response.body).fetch("events")
+      assert registry.active?(path)
+      refute_includes calls, [:close]
+
+      Gripi.cleanup_idle_rpc_clients
+
       refute registry.active?(path)
       assert_includes calls, [:close]
     end
@@ -4646,6 +4676,7 @@ class AppTest < Minitest::Test
       Gripi.set :rpc_idle_timeout_seconds, 1_800
 
       now = Time.at(2_801)
+      Gripi.cleanup_idle_rpc_clients
       response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => selected_path })
 
       assert_equal 200, response.status
@@ -4672,6 +4703,7 @@ class AppTest < Minitest::Test
       Gripi.set :rpc_idle_timeout_seconds, 1_800
 
       now = Time.at(2_801)
+      Gripi.cleanup_idle_rpc_clients
       response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => selected_path })
 
       assert_equal 200, response.status
@@ -4703,7 +4735,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_polled_pending_session_does_not_expire
+  def test_polled_pending_session_expires_during_scheduled_cleanup
     Dir.mktmpdir do |dir|
       now = Time.at(1_000)
       pending_path = File.join(dir, "pending-session.jsonl")
@@ -4721,8 +4753,13 @@ class AppTest < Minitest::Test
 
       assert_equal 200, response.status
       assert registry.active?(pending_path)
-      assert_includes pending_sessions.paths, pending_path
       refute_includes calls, [:close]
+
+      Gripi.cleanup_idle_rpc_clients
+
+      refute registry.active?(pending_path)
+      refute_includes pending_sessions.paths, pending_path
+      assert_includes calls, [:close]
     end
   end
 
@@ -9689,7 +9726,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_multi_user_event_poll_does_not_protect_other_workspace_pending_session
+  def test_multi_user_event_poll_does_not_trigger_cleanup_for_another_workspace
     Dir.mktmpdir do |dir|
       now = Time.at(1_000)
       write_session(dir)
@@ -9711,6 +9748,12 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(Gripi).get("/events", params: { "session" => pending_path }, "HTTP_COOKIE" => own_cookie)
 
       assert_equal 404, response.status
+      assert registry.active?(pending_path)
+      assert_includes pending_sessions.paths, pending_path
+      refute_includes calls, [:close]
+
+      Gripi.cleanup_idle_rpc_clients
+
       refute registry.active?(pending_path)
       refute_includes pending_sessions.paths, pending_path
       assert_equal [[:close]], calls

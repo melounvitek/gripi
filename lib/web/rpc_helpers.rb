@@ -16,18 +16,7 @@ module Web
     end
 
     def session_synchronizer
-      registry = rpc_clients
-      synchronizer = settings.session_synchronizer
-      return synchronizer if synchronizer&.configured_for?(settings.sessions_root, registry)
-
-      settings.session_synchronizer_mutex.synchronize do
-        synchronizer = settings.session_synchronizer
-        unless synchronizer&.configured_for?(settings.sessions_root, registry)
-          synchronizer = Sessions::SessionSynchronizer.new(sessions_root: settings.sessions_root, rpc_clients: registry)
-          settings.session_synchronizer = synchronizer
-        end
-        synchronizer
-      end
+      Gripi.session_synchronizer_for(rpc_clients)
     end
 
     def session_sync_state(session_path, include_position: false)
@@ -140,19 +129,6 @@ module Web
 
     def session_sync_error_message(state)
       session_synchronizer.message_for(state)
-    end
-
-    def cleanup_idle_rpc_clients(except: [])
-      timeout = settings.rpc_idle_timeout_seconds
-      return unless timeout.positive?
-
-      rpc_clients.close_idle_clients(
-        idle_timeout: timeout,
-        except: except.compact,
-        on_close: ->(session_path) { forget_pending_rpc_cwd(session_path) }
-      ) do |session_path|
-        session_synchronizer.inspect_if_available(session_path) if File.exist?(session_path)
-      end
     end
 
     def with_rpc_client(session_path)
