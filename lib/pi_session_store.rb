@@ -264,6 +264,22 @@ class PiSessionStore
   end
 
   def cwd_for_session(path)
+    session_header(path)&.fetch("cwd")
+  end
+
+  def session_generation(path)
+    header = session_header(path)
+    return unless header && !header["id"].to_s.empty?
+
+    stat = File.stat(path)
+    [stat.dev, stat.ino, header["id"]].join(":")
+  rescue SystemCallError
+    nil
+  end
+
+  private
+
+  def session_header(path)
     expanded_path = File.expand_path(path)
     expanded_root = File.expand_path(@root)
     return unless path == expanded_path
@@ -280,7 +296,7 @@ class PiSessionStore
       next unless entry["type"] == "session"
 
       cwd = entry["cwd"]
-      return cwd if cwd.is_a?(String) && !cwd.empty? && File.absolute_path(cwd) == cwd
+      return entry if cwd.is_a?(String) && !cwd.empty? && File.absolute_path(cwd) == cwd
       return nil
     rescue JSON::ParserError
       next
@@ -289,8 +305,6 @@ class PiSessionStore
   rescue ArgumentError, SystemCallError
     nil
   end
-
-  private
 
   def session_index(path)
     self.class.fetch_session_index(path) do |previous|

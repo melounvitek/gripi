@@ -106,8 +106,8 @@ let eventPollAbortController = null;
 let eventPollResumeTimer = null;
 let staleSessionRefreshInFlight = false;
 let markReadInFlight = false;
-let markReadQueued = false;
-let markReadAfterVisible = false;
+const markReadQueued = new Map();
+let markReadAfterVisible = null;
 let hiddenAt = null;
 let lastEventPollSuccessAt = Date.now();
 let lastEventSeq = 0;
@@ -2469,34 +2469,46 @@ function currentSessionPath() {
   return promptSessionInput?.value || new URLSearchParams(window.location.search).get("session") || "";
 }
 
-async function markCurrentSessionRead() {
-  const sessionPath = currentSessionPath();
-  if (!sessionPath || sidebarController.element) return;
-  if (document.hidden || !document.hasFocus()) {
-    markReadAfterVisible = true;
+async function markCurrentSessionRead(readState = null) {
+  const pending = readState || {
+    sessionPath: currentSessionPath(),
+    responseCount: liveOutput?.dataset.assistantResponseCount,
+    sessionGeneration: liveOutput?.dataset.sessionGeneration
+  };
+  if (!pending.sessionPath || (!readState && sidebarController.element)) return;
+  if (!readState && (document.hidden || !document.hasFocus())) {
+    markReadAfterVisible = pending.sessionPath;
     return;
   }
-  markReadAfterVisible = false;
+  if (!readState) markReadAfterVisible = null;
   if (markReadInFlight) {
-    markReadQueued = true;
+    markReadQueued.set(pending.sessionPath, pending);
     return;
   }
 
   markReadInFlight = true;
   const body = new URLSearchParams({
-    session: sessionPath,
-    assistant_response_count: liveOutput.dataset.assistantResponseCount
+    session: pending.sessionPath,
+    assistant_response_count: pending.responseCount,
+    session_generation: pending.sessionGeneration
   });
   try {
     await fetch("/sessions/mark_read", { method: "POST", body });
   } catch (_error) {
   } finally {
     markReadInFlight = false;
-    if (markReadQueued) {
-      markReadQueued = false;
-      markCurrentSessionRead();
+    const next = markReadQueued.entries().next().value;
+    if (next) {
+      markReadQueued.delete(next[0]);
+      markCurrentSessionRead(next[1]);
     }
   }
+}
+
+function markCurrentSessionReadAfterVisible() {
+  const sessionPath = markReadAfterVisible;
+  markReadAfterVisible = null;
+  if (sessionPath === currentSessionPath()) markCurrentSessionRead();
 }
 
 async function openRecentSessionShortcut(shortcut) {
@@ -3114,12 +3126,12 @@ window.addEventListener("visibilitychange", () => {
   } else {
     scheduleNextEventPoll(0);
   }
-  if (markReadAfterVisible) markCurrentSessionRead();
+  if (markReadAfterVisible) markCurrentSessionReadAfterVisible();
   sidebarController.scheduleRefresh();
 });
 window.addEventListener("pageshow", () => resumeEventPolling().catch(() => {}));
 window.addEventListener("focus", () => {
-  if (markReadAfterVisible) markCurrentSessionRead();
+  if (markReadAfterVisible) markCurrentSessionReadAfterVisible();
   resumeEventPolling().catch(() => {});
 });
 window.addEventListener("online", () => resumeEventPolling().catch(() => {}));

@@ -81,13 +81,13 @@ class FrontendLifecycleJsTest < Minitest::Test
 
   def test_mark_read_request_sends_the_rendered_assistant_response_count
     source = File.read(File.join(ASSETS, "app.js"))
-    mark_read_source = source.match(/async function markCurrentSessionRead\(\).*?(?=\nasync function openRecentSessionShortcut)/m).to_s
+    mark_read_source = source.match(/async function markCurrentSessionRead.*?(?=\nasync function openRecentSessionShortcut)/m).to_s
 
     result = run_javascript(<<~JS)
-      let markReadAfterVisible = false;
+      let markReadAfterVisible = null;
       let markReadInFlight = false;
-      let markReadQueued = false;
-      const liveOutput = { dataset: { assistantResponseCount: "7" } };
+      const markReadQueued = new Map();
+      const liveOutput = { dataset: { assistantResponseCount: "7", sessionGeneration: "1:2:session-1" } };
       const sidebarController = { element: null };
       const document = { hidden: false, hasFocus: () => true };
       const currentSessionPath = () => "/tmp/session.jsonl";
@@ -103,7 +103,49 @@ class FrontendLifecycleJsTest < Minitest::Test
     JS
 
     assert_equal "/sessions/mark_read", result.fetch("url")
-    assert_equal({ "session" => "/tmp/session.jsonl", "assistant_response_count" => "7" }, result.fetch("body"))
+    assert_equal({ "session" => "/tmp/session.jsonl", "assistant_response_count" => "7", "session_generation" => "1:2:session-1" }, result.fetch("body"))
+  end
+
+  def test_queued_mark_read_request_keeps_its_session_when_the_view_switches_again
+    source = File.read(File.join(ASSETS, "app.js"))
+    mark_read_source = source.match(/async function markCurrentSessionRead.*?(?=\nasync function openRecentSessionShortcut)/m).to_s
+
+    requests = run_javascript(<<~JS)
+      let markReadAfterVisible = null;
+      let markReadInFlight = false;
+      const markReadQueued = new Map();
+      const liveOutput = { dataset: { assistantResponseCount: "1", sessionGeneration: "1:2:session-a" } };
+      const sidebarController = { element: null };
+      const document = { hidden: false, hasFocus: () => true };
+      let sessionPath = "/tmp/session-a.jsonl";
+      const currentSessionPath = () => sessionPath;
+      const requests = [];
+      let finishFirst;
+      const fetch = async (_url, options) => {
+        requests.push(Object.fromEntries(options.body.entries()));
+        if (requests.length === 1) await new Promise((resolve) => { finishFirst = resolve; });
+        return { ok: true };
+      };
+      eval(#{(mark_read_source + "\nglobalThis.markRead = markCurrentSessionRead;").to_json});
+
+      const first = globalThis.markRead();
+      sessionPath = "/tmp/session-b.jsonl";
+      liveOutput.dataset.assistantResponseCount = "4";
+      liveOutput.dataset.sessionGeneration = "3:4:session-b";
+      await globalThis.markRead();
+      sessionPath = "/tmp/session-c.jsonl";
+      liveOutput.dataset.assistantResponseCount = "9";
+      liveOutput.dataset.sessionGeneration = "5:6:session-c";
+      finishFirst();
+      await first;
+      await new Promise((resolve) => setImmediate(resolve));
+      console.log(JSON.stringify(requests));
+    JS
+
+    assert_equal [
+      { "session" => "/tmp/session-a.jsonl", "assistant_response_count" => "1", "session_generation" => "1:2:session-a" },
+      { "session" => "/tmp/session-b.jsonl", "assistant_response_count" => "4", "session_generation" => "3:4:session-b" }
+    ], requests
   end
 
   def test_conversation_rebinding_detaches_old_scroll_events_and_timers

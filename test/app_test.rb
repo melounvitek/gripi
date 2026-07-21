@@ -8397,8 +8397,9 @@ class AppTest < Minitest::Test
       unread_response = request.get("/sidebar", params: { "session" => first_path })
       assert_includes unread_response.body, "class=\"session recent-session unread"
 
+      generation = PiSessionStore.new(root: dir).session_generation(second_path)
       mark_response = replace_instance_method(PiSessionStore, :sessions, ->(*) { raise "sessions should not be parsed" }) do
-        request.post("/sessions/mark_read", params: { "session" => second_path, "assistant_response_count" => "1" })
+        request.post("/sessions/mark_read", params: { "session" => second_path, "assistant_response_count" => "1", "session_generation" => generation })
       end
       assert_equal 204, mark_response.status
 
@@ -8413,11 +8414,32 @@ class AppTest < Minitest::Test
       Gripi.set :sessions_root, dir
       request = Rack::MockRequest.new(Gripi)
 
-      [nil, "", "-1", "1.5", "2147483648"].each do |count|
-        response = request.post("/sessions/mark_read", params: { "session" => path, "assistant_response_count" => count })
+      generation = PiSessionStore.new(root: dir).session_generation(path)
+      [nil, "", "-1", "1.5", "2147483648", "1" * 1_000].each do |count|
+        response = request.post("/sessions/mark_read", params: { "session" => path, "assistant_response_count" => count, "session_generation" => generation })
 
         assert_equal 400, response.status
       end
+    end
+  end
+
+  def test_mark_read_endpoint_rejects_a_stale_session_generation
+    Dir.mktmpdir do |dir|
+      path = write_session(dir)
+      Gripi.set :sessions_root, dir
+      generation = PiSessionStore.new(root: dir).session_generation(path)
+      replacement = File.join(dir, "replacement.jsonl")
+      File.write(replacement, File.read(path))
+      File.rename(replacement, path)
+
+      response = Rack::MockRequest.new(Gripi).post("/sessions/mark_read", params: {
+        "session" => path,
+        "assistant_response_count" => "1",
+        "session_generation" => generation
+      })
+
+      assert_equal 409, response.status
+      refute File.exist?(Gripi.settings.read_state_path)
     end
   end
 
@@ -8487,14 +8509,17 @@ class AppTest < Minitest::Test
       response = Rack::MockRequest.new(Gripi).get("/", params: { "session" => path, "session_only" => "1" })
 
       assert_equal 200, response.status
-      assert_equal "0", Nokogiri::HTML(response.body).at_css("#live-output")["data-assistant-response-count"]
-      assert_includes APP_JAVASCRIPT, "function markCurrentSessionRead()"
+      live_output = Nokogiri::HTML(response.body).at_css("#live-output")
+      assert_equal "0", live_output["data-assistant-response-count"]
+      refute_empty live_output["data-session-generation"]
+      assert_includes APP_JAVASCRIPT, "function markCurrentSessionRead(readState = null)"
       assert_includes APP_JAVASCRIPT, "fetch(\"/sessions/mark_read\""
       assert_includes APP_JAVASCRIPT, "if (outcome.finalAssistantEnded) {\n      conversationController.setAgentRunning(false);\n      liveOutput.dataset.assistantResponseCount = String(Number(liveOutput.dataset.assistantResponseCount) + 1);\n      markCurrentSessionRead();\n    }"
-      assert_includes APP_JAVASCRIPT, "assistant_response_count: liveOutput.dataset.assistantResponseCount"
-      assert_includes APP_JAVASCRIPT, "if (document.hidden || !document.hasFocus())"
-      assert_includes APP_JAVASCRIPT, "markReadAfterVisible = true;"
-      assert_includes APP_JAVASCRIPT, "if (markReadAfterVisible) markCurrentSessionRead();"
+      assert_includes APP_JAVASCRIPT, "assistant_response_count: pending.responseCount"
+      assert_includes APP_JAVASCRIPT, "session_generation: pending.sessionGeneration"
+      assert_includes APP_JAVASCRIPT, "document.hidden || !document.hasFocus()"
+      assert_includes APP_JAVASCRIPT, "markReadAfterVisible = pending.sessionPath;"
+      assert_includes APP_JAVASCRIPT, "if (markReadAfterVisible) markCurrentSessionReadAfterVisible();"
     end
   end
 

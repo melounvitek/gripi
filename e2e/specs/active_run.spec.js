@@ -42,6 +42,7 @@ test("keep sidebar metadata refreshes fast while an active run is deferred", asy
 
 test("mark a final reply read without a sidebar refresh", async ({ page }) => {
   await page.goto("/");
+  const otherSessionUrl = page.url();
   await selectSession(page, sessions.markRead);
   const sessionOnlyUrl = new URL(page.url());
   sessionOnlyUrl.searchParams.set("session_only", "1");
@@ -49,15 +50,20 @@ test("mark a final reply read without a sidebar refresh", async ({ page }) => {
 
   const liveOutput = page.locator("#live-output");
   const initialCount = Number(await liveOutput.getAttribute("data-assistant-response-count"));
-  const markReadRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/sessions/mark_read");
+  const markReadResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/sessions/mark_read");
   await sendPrompt(page, prompts.standard);
   await expect(message(page, "assistant", replies.standard)).toBeVisible();
   await expectRunFinished(page);
 
-  const request = await markReadRequest;
-  const body = new URLSearchParams(request.postData());
+  const response = await markReadResponse;
+  expect(response.status()).toBe(204);
+  const body = new URLSearchParams(response.request().postData());
   expect(body.get("assistant_response_count")).toBe(String(initialCount + 1));
   await expect(liveOutput).toHaveAttribute("data-assistant-response-count", String(initialCount + 1));
+
+  await page.goto(otherSessionUrl);
+  const sessionLink = page.locator("a.session", { hasText: sessions.markRead });
+  await expect(sessionLink).not.toHaveClass(/unread/);
 });
 
 test("abort an active run", async ({ page }) => {

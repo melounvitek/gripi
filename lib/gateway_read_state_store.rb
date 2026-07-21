@@ -45,7 +45,7 @@ class GatewayReadStateStore
   def mark_read_count(path, response_count)
     @mutex.synchronize do
       state = read_state
-      count = [state.fetch(path, 0), response_count.to_i].max
+      count = [state.fetch(path, 0), response_count].max
       return if state[path] == count
 
       state[path] = count

@@ -162,6 +162,10 @@ module Web
         !PiSessionStore.new(root: settings.sessions_root).cwd_for_session(session_path).nil?
       end
 
+      def session_generation(session_path)
+        PiSessionStore.new(root: settings.sessions_root).session_generation(session_path)
+      end
+
       def commands_for(session_path)
         response = with_synchronized_rpc_client(session_path) { |client| client.get_commands }
         Rpc::CommandCatalog.commands_from(response)
@@ -691,11 +695,14 @@ module Web
       app.post "/sessions/mark_read" do
         session_path = require_current_workspace_session!(params.fetch("session"))
         response_count = params["assistant_response_count"]
-        halt 400 unless response_count&.match?(/\A\d+\z/)
+        generation = params["session_generation"]
+        halt 400 unless response_count&.match?(/\A\d{1,10}\z/) && generation && generation.bytesize <= 256
 
         response_count = Integer(response_count, 10)
         halt 400 if response_count > ASSISTANT_RESPONSE_COUNT_LIMIT
-        halt 404 unless known_session_path?(session_path)
+        current_generation = session_generation(session_path)
+        halt 404 unless current_generation
+        halt 409 unless generation == current_generation
 
         read_state_store.mark_read_count(session_path, response_count)
         status 204
