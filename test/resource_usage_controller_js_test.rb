@@ -52,13 +52,13 @@ class ResourceUsageControllerJsTest < Minitest::Test
     JS
 
     assert_equal false, result.dig("first", "hidden")
-    assert_equal "RAM ~480 MB working · CPU —", result.dig("first", "total")
-    assert_equal "Puma 362 MB · Pi 357 MB (2) · inactive cache 128 MB", result.dig("first", "breakdown")
-    assert_equal "Cgroup total 608 MB; approximate working set excludes inactive file cache; CPU 100% equals one logical core", result.dig("first", "title")
+    assert_equal "RAM ~480 MB working set · CPU —", result.dig("first", "total")
+    assert_equal "Puma 362 MB · Pi 357 MB (2) · inactive file cache 128 MB", result.dig("first", "breakdown")
+    assert_equal "Cgroup total 608 MB; approximate working set excludes inactive file cache; Puma and Pi RSS do not sum to the cgroup working set; CPU 100% equals one logical core", result.dig("first", "title")
     assert_equal 1_000, result.dig("first", "delay")
-    assert_equal "RAM ~1.5 GB working · CPU 10%", result.dig("second", "total")
-    assert_equal "Puma 1.25 GB · Pi 358 MB (2) · inactive cache 512 MB", result.dig("second", "breakdown")
-    assert_equal "Cgroup total 2 GB; approximate working set excludes inactive file cache; CPU 100% equals one logical core", result.dig("second", "title")
+    assert_equal "RAM ~1.5 GB working set · CPU 10%", result.dig("second", "total")
+    assert_equal "Puma 1.25 GB · Pi 358 MB (2) · inactive file cache 512 MB", result.dig("second", "breakdown")
+    assert_equal "Cgroup total 2 GB; approximate working set excludes inactive file cache; Puma and Pi RSS do not sum to the cgroup working set; CPU 100% equals one logical core", result.dig("second", "title")
     assert_equal 10_000, result.dig("second", "delay")
     assert_equal [["/resource-usage", "no-store", "application/json"], ["/resource-usage", "no-store", "application/json"]], result.fetch("requests")
   end
@@ -79,7 +79,7 @@ class ResourceUsageControllerJsTest < Minitest::Test
       const { ResourceUsageController } = await import(#{module_url.to_json});
       const controller = new ResourceUsageController(document, window, async () => {
         requests += 1;
-        return { ok: true, json: async () => ({ supported: true, memoryBytes: 1, cpuUsageUsec: requests * 100, pumaRssBytes: 1, piRssBytes: 0, piProcessCount: 0 }) };
+        return { ok: true, json: async () => ({ supported: true, memoryBytes: 1, workingSetBytes: 1, inactiveFileBytes: 0, cpuUsageUsec: requests * 100, pumaRssBytes: 1, piRssBytes: 0, piProcessCount: 0 }) };
       }, () => requests * 1000);
 
       await controller.start();
@@ -106,7 +106,7 @@ class ResourceUsageControllerJsTest < Minitest::Test
       const timers = [];
       const window = { addEventListener() {}, setTimeout(callback) { timers.push(callback); return timers.length; }, clearTimeout() {} };
       const payloads = [
-        { supported: true, memoryBytes: 1, cpuUsageUsec: 1, pumaRssBytes: 1, piRssBytes: 0, piProcessCount: 0 },
+        { supported: true, memoryBytes: 1, workingSetBytes: 1, inactiveFileBytes: 0, cpuUsageUsec: 1, pumaRssBytes: 1, piRssBytes: 0, piProcessCount: 0 },
         { supported: false }
       ];
       const { ResourceUsageController } = await import(#{module_url.to_json});
@@ -135,7 +135,7 @@ class ResourceUsageControllerJsTest < Minitest::Test
       const { ResourceUsageController } = await import(#{module_url.to_json});
       const controller = new ResourceUsageController(document, window, async () => {
         requests += 1;
-        return { ok: true, json: async () => ({ supported: true, memoryBytes: 1, cpuUsageUsec: 1, pumaRssBytes: 1, piRssBytes: 0, piProcessCount: 0 }) };
+        return { ok: true, json: async () => ({ supported: true, memoryBytes: 1, workingSetBytes: 1, inactiveFileBytes: 0, cpuUsageUsec: 1, pumaRssBytes: 1, piRssBytes: 0, piProcessCount: 0 }) };
       }, () => 0);
 
       await controller.start();

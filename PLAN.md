@@ -1,6 +1,6 @@
 # Reduce misleading RAM reporting and session metadata read amplification
 
-Status: awaiting implementation approval
+Status: implementation complete; production restart verification pending
 
 ## Goal
 
@@ -132,6 +132,16 @@ Verification:
    - working-set and inactive-cache values should match `memory.stat` within sampling races;
    - Puma RSS should be evaluated from the clean restart rather than expecting glibc to return all existing high-water allocations.
 7. Move this completed plan to `plans/reduce_memory_read_amplification.md`.
+
+## Implementation results
+
+- Working-set reporting was implemented in `3d6e28e`.
+- Busy-session metadata deferral was implemented in `c179ca8`.
+- The implemented real-session benchmark recorded 457 MiB logical reads, 66 MiB peak RSS, and 0.9 seconds for eight threads with 40 appends each.
+- The full Ruby suite passed with 1,030 runs and 6,832 assertions.
+- Five E2E support tests and 25 managed Chromium tests passed, including feature-specific working-set and deferred-metadata coverage.
+- Independent final review found no correctness blockers; its wording and browser-coverage improvements were applied.
+- `gripi.service` has not been restarted. Clean-process production observation remains pending explicit restart approval.
 
 ## Out of scope / follow-up only if evidence remains
 

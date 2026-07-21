@@ -40,6 +40,7 @@ const serverEnv = {
   GRIPI_BROWSER_AUTH_DISABLED: realPi ? "1" : "",
   GRIPI_MULTI_USER_MODE: "",
   GRIPI_AUTO_APPROVE_PROJECTS: "0",
+  GRIPI_RESOURCE_MONITORING: "1",
   GRIPI_ENV_PATH: path.join(runtimeRoot, "missing-env"),
   GRIPI_BIND_HOST: "127.0.0.1",
   GRIPI_SESSIONS_ROOT: fixture.sessionsRoot,

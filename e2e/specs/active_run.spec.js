@@ -26,6 +26,20 @@ test("queue a follow-up for an active run", async ({ page }) => {
   await expectRunFinished(page);
 });
 
+test("keep sidebar metadata refreshes fast while an active run is deferred", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.controlsSteer);
+  await sendPrompt(page, prompts.steerStart);
+  const abort = page.getByRole("button", { name: "Abort running Pi" });
+  await expect(abort).toBeVisible();
+
+  const sidebar = page.locator(".session-sidebar");
+  await expect(sidebar).toHaveAttribute("data-sidebar-metadata-deferred", "");
+  await abort.click();
+  await expectRunFinished(page);
+  await expect(sidebar).not.toHaveAttribute("data-sidebar-metadata-deferred", "");
+});
+
 test("abort an active run", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.controlsAbort);
