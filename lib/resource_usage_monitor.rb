@@ -12,6 +12,8 @@ class ResourceUsageMonitor
     cgroup_directory = File.expand_path(cgroup_path.delete_prefix("/"), @cgroup_root)
     return unless cgroup_directory.start_with?("#{File.expand_path(@cgroup_root)}/")
 
+    memory_bytes = integer_file(File.join(cgroup_directory, "memory.current"))
+    inactive_file_bytes = stat_value(File.join(cgroup_directory, "memory.stat"), "inactive_file")
     pi_rss_bytes = 0
     pi_process_count = 0
     process_ids(cgroup_directory).each do |pid|
@@ -25,7 +27,9 @@ class ResourceUsageMonitor
     end
 
     {
-      memory_bytes: integer_file(File.join(cgroup_directory, "memory.current")),
+      memory_bytes: memory_bytes,
+      working_set_bytes: [memory_bytes - inactive_file_bytes, 0].max,
+      inactive_file_bytes: inactive_file_bytes,
       cpu_usage_usec: cpu_usage_usec(cgroup_directory),
       puma_rss_bytes: process_rss_bytes(@pid),
       pi_rss_bytes: pi_rss_bytes,
@@ -73,7 +77,11 @@ class ResourceUsageMonitor
   end
 
   def cpu_usage_usec(cgroup_directory)
-    line = File.foreach(File.join(cgroup_directory, "cpu.stat")).find { |entry| entry.start_with?("usage_usec ") }
+    stat_value(File.join(cgroup_directory, "cpu.stat"), "usage_usec")
+  end
+
+  def stat_value(path, key)
+    line = File.foreach(path).find { |entry| entry.start_with?("#{key} ") }
     Integer(line&.split&.last, 10)
   end
 end

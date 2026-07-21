@@ -14,6 +14,8 @@ module Web
         JSON.generate(
           supported: true,
           memoryBytes: snapshot.fetch(:memory_bytes),
+          workingSetBytes: snapshot.fetch(:working_set_bytes),
+          inactiveFileBytes: snapshot.fetch(:inactive_file_bytes),
           cpuUsageUsec: snapshot.fetch(:cpu_usage_usec),
           pumaRssBytes: snapshot.fetch(:puma_rss_bytes),
           piRssBytes: snapshot.fetch(:pi_rss_bytes),

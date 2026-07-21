@@ -28,8 +28,8 @@ class ResourceUsageControllerJsTest < Minitest::Test
         clearTimeout() {}
       };
       const payloads = [
-        { supported: true, memoryBytes: 637181952, cpuUsageUsec: 1000000, pumaRssBytes: 380030976, piRssBytes: 374632448, piProcessCount: 2 },
-        { supported: true, memoryBytes: 2147483648, cpuUsageUsec: 1100000, pumaRssBytes: 1342177280, piRssBytes: 375390208, piProcessCount: 2 }
+        { supported: true, memoryBytes: 637181952, workingSetBytes: 502964224, inactiveFileBytes: 134217728, cpuUsageUsec: 1000000, pumaRssBytes: 380030976, piRssBytes: 374632448, piProcessCount: 2 },
+        { supported: true, memoryBytes: 2147483648, workingSetBytes: 1610612736, inactiveFileBytes: 536870912, cpuUsageUsec: 1100000, pumaRssBytes: 1342177280, piRssBytes: 375390208, piProcessCount: 2 }
       ];
       const sampleTimes = [0, 1000];
       const requests = [];
@@ -44,19 +44,21 @@ class ResourceUsageControllerJsTest < Minitest::Test
       );
 
       await controller.start();
-      const first = { hidden: control.hidden, total: total.textContent, breakdown: breakdown.textContent, delay: timers.at(-1).delay };
+      const first = { hidden: control.hidden, total: total.textContent, breakdown: breakdown.textContent, title: control.title, delay: timers.at(-1).delay };
       await timers.at(-1).callback();
-      const second = { hidden: control.hidden, total: total.textContent, breakdown: breakdown.textContent, delay: timers.at(-1).delay };
+      const second = { hidden: control.hidden, total: total.textContent, breakdown: breakdown.textContent, title: control.title, delay: timers.at(-1).delay };
 
       console.log(JSON.stringify({ first, second, requests }));
     JS
 
     assert_equal false, result.dig("first", "hidden")
-    assert_equal "RAM 608 MB · CPU —", result.dig("first", "total")
-    assert_equal "Puma 362 MB · Pi 357 MB (2)", result.dig("first", "breakdown")
+    assert_equal "RAM ~480 MB working · CPU —", result.dig("first", "total")
+    assert_equal "Puma 362 MB · Pi 357 MB (2) · inactive cache 128 MB", result.dig("first", "breakdown")
+    assert_equal "Cgroup total 608 MB; approximate working set excludes inactive file cache; CPU 100% equals one logical core", result.dig("first", "title")
     assert_equal 1_000, result.dig("first", "delay")
-    assert_equal "RAM 2 GB · CPU 10%", result.dig("second", "total")
-    assert_equal "Puma 1.25 GB · Pi 358 MB (2)", result.dig("second", "breakdown")
+    assert_equal "RAM ~1.5 GB working · CPU 10%", result.dig("second", "total")
+    assert_equal "Puma 1.25 GB · Pi 358 MB (2) · inactive cache 512 MB", result.dig("second", "breakdown")
+    assert_equal "Cgroup total 2 GB; approximate working set excludes inactive file cache; CPU 100% equals one logical core", result.dig("second", "title")
     assert_equal 10_000, result.dig("second", "delay")
     assert_equal [["/resource-usage", "no-store", "application/json"], ["/resource-usage", "no-store", "application/json"]], result.fetch("requests")
   end

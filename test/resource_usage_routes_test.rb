@@ -44,6 +44,8 @@ class ResourceUsageRoutesTest < Minitest::Test
     Gripi.set :resource_monitoring_enabled, true
     @monitor = FakeMonitor.new(
       memory_bytes: 637_181_952,
+      working_set_bytes: 502_964_224,
+      inactive_file_bytes: 134_217_728,
       cpu_usage_usec: 1_234_567,
       puma_rss_bytes: 371_124 * 1024,
       pi_rss_bytes: 365_852 * 1024,
@@ -69,6 +71,8 @@ class ResourceUsageRoutesTest < Minitest::Test
       {
         "supported" => true,
         "memoryBytes" => 637_181_952,
+        "workingSetBytes" => 502_964_224,
+        "inactiveFileBytes" => 134_217_728,
         "cpuUsageUsec" => 1_234_567,
         "pumaRssBytes" => 371_124 * 1024,
         "piRssBytes" => 365_852 * 1024,

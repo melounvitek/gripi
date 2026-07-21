@@ -12,6 +12,7 @@ class ResourceUsageMonitorTest < Minitest::Test
     File.write(File.join(@proc_root, "self", "cgroup"), "0::/user.slice/gripi.service\n")
     FileUtils.mkdir_p(File.join(@cgroup_root, "user.slice", "gripi.service"))
     File.write(File.join(@cgroup_root, "user.slice", "gripi.service", "memory.current"), "637181952\n")
+    File.write(File.join(@cgroup_root, "user.slice", "gripi.service", "memory.stat"), "anon 400000000\nfile 200000000\ninactive_file 134217728\n")
     File.write(File.join(@cgroup_root, "user.slice", "gripi.service", "cpu.stat"), "usage_usec 1234567\nuser_usec 1000000\nsystem_usec 234567\n")
     File.write(File.join(@cgroup_root, "user.slice", "gripi.service", "cgroup.procs"), "100\n101\n102\n103\n")
     write_process(100, "ruby", 371_124)
@@ -30,6 +31,8 @@ class ResourceUsageMonitorTest < Minitest::Test
     assert_equal(
       {
         memory_bytes: 637_181_952,
+        working_set_bytes: 502_964_224,
+        inactive_file_bytes: 134_217_728,
         cpu_usage_usec: 1_234_567,
         puma_rss_bytes: 371_124 * 1024,
         pi_rss_bytes: (183_184 + 182_668) * 1024,
@@ -60,8 +63,20 @@ class ResourceUsageMonitorTest < Minitest::Test
     assert_nil monitor.snapshot
   end
 
+  def test_clamps_working_set_when_inactive_file_exceeds_current_memory
+    File.write(File.join(@cgroup_root, "user.slice", "gripi.service", "memory.stat"), "inactive_file 700000000\n")
+
+    assert_equal 0, monitor.snapshot.fetch(:working_set_bytes)
+  end
+
   def test_returns_nil_when_required_cgroup_data_is_invalid
     File.write(File.join(@cgroup_root, "user.slice", "gripi.service", "memory.current"), "invalid\n")
+
+    assert_nil monitor.snapshot
+  end
+
+  def test_returns_nil_when_inactive_file_data_is_missing
+    File.write(File.join(@cgroup_root, "user.slice", "gripi.service", "memory.stat"), "anon 400000000\n")
 
     assert_nil monitor.snapshot
   end

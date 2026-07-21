@@ -88,8 +88,9 @@ export class ResourceUsageController {
     if (!element || !total || !breakdown) return;
 
     element.hidden = false;
-    total.textContent = `RAM ${formatBytes(payload.memoryBytes)} · CPU ${cpuPercent === null ? "—" : `${cpuPercent}%`}`;
-    breakdown.textContent = `Puma ${formatBytes(payload.pumaRssBytes)} · Pi ${formatBytes(payload.piRssBytes)} (${payload.piProcessCount})`;
+    element.title = `Cgroup total ${formatBytes(payload.memoryBytes)}; approximate working set excludes inactive file cache; CPU 100% equals one logical core`;
+    total.textContent = `RAM ~${formatBytes(payload.workingSetBytes)} working · CPU ${cpuPercent === null ? "—" : `${cpuPercent}%`}`;
+    breakdown.textContent = `Puma ${formatBytes(payload.pumaRssBytes)} · Pi ${formatBytes(payload.piRssBytes)} (${payload.piProcessCount}) · inactive cache ${formatBytes(payload.inactiveFileBytes)}`;
   }
 
   element() {
