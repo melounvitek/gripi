@@ -169,7 +169,7 @@ module Web
       end
 
       def live_session_status(session_path)
-        responses = rpc_clients.with_existing_client(session_path, touch: false) do |client|
+        responses = rpc_clients.with_active_client(session_path, touch: false) do |client|
           [client.get_state, client.get_session_stats]
         end
         return unless responses

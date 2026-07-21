@@ -3754,6 +3754,70 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_overlapping_status_requests_use_live_rpc_without_disk_fallback
+    Dir.mktmpdir do |dir|
+      path = write_session_with_raw_messages(dir, [
+        { type: "message", message: { role: "assistant", content: [], usage: { totalTokens: 1 } } }
+      ])
+      started = Queue.new
+      release = Queue.new
+      calls = []
+      call_mutex = Mutex.new
+      client = FakeRpcClient.new(calls)
+      client.define_singleton_method(:get_state) do
+        first = call_mutex.synchronize do
+          calls << [:get_state]
+          calls.count([:get_state]) == 1
+        end
+        if first
+          started << true
+          release.pop
+        end
+        {
+          "success" => true,
+          "data" => {
+            "model" => { "provider" => "openai-codex", "id" => "gpt-5.6-sol" },
+            "thinkingLevel" => "high"
+          }
+        }
+      end
+      client.define_singleton_method(:get_session_stats) do
+        call_mutex.synchronize { calls << [:get_session_stats] }
+        { "success" => true, "data" => { "contextUsage" => { "tokens" => 8_597, "contextWindow" => 372_000, "percent" => 2.311021505376344 } } }
+      end
+      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" })
+      registry.register(path, client)
+      Gripi.set :sessions_root, dir
+      Gripi.set :rpc_client_registry, registry
+
+      disk_status_reads = 0
+      original_status = PiSessionStore.instance_method(:status)
+      replacement = lambda do |session_path|
+        disk_status_reads += 1
+        original_status.bind_call(self, session_path)
+      end
+      first_request = nil
+      replace_instance_method(PiSessionStore, :status, replacement) do
+        first_request = Thread.new { Rack::MockRequest.new(Gripi).get("/status", params: { "session" => path }) }
+        started.pop
+        second_response = Rack::MockRequest.new(Gripi).get("/status", params: { "session" => path })
+        release << true
+        first_response = first_request.value
+
+        [first_response, second_response].each do |response|
+          assert_equal 200, response.status
+          assert_equal({ "context" => "2.3%/372.0k", "model" => "openai-codex/gpt-5.6-sol", "thinking" => "high" }, JSON.parse(response.body))
+        end
+      ensure
+        release << true if first_request&.alive?
+        first_request&.join
+      end
+      assert_equal 0, disk_status_reads
+      assert_equal 2, calls.count([:get_state])
+      assert_equal 2, calls.count([:get_session_stats])
+    end
+  end
+
   def test_uses_live_context_when_live_state_is_unavailable
     Dir.mktmpdir do |dir|
       path = write_session_with_raw_messages(dir, [
