@@ -20,11 +20,8 @@ class PiAttachmentStoreTest < Minitest::Test
       message = PiSessionStore::Message.new(role: "user", text: "Look\n\n#{paths.first}")
 
       store.migrate_session(pending_path, real_path)
-      store.migrate_session(pending_path, real_path)
 
-      duplicate_message = PiSessionStore::Message.new(role: "user", text: "Look\n\n#{paths.first}")
       assert_equal image_data, File.binread(paths.first)
-      assert_equal 1, store.counts_for_messages(real_path, [message, duplicate_message]).length
       assert_equal 1, store.counts_for_messages(real_path, [message]).fetch(message.object_id)
       assert_equal paths.first, store.images_for_messages(real_path, [message]).fetch(message.object_id).first.fetch(:path)
     end

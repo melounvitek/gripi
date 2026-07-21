@@ -3,12 +3,9 @@ require "digest"
 require_relative "secure_state_file"
 
 class WorkspaceSessionOwnershipStore
-  MUTEXES = {}
-  MUTEXES_MUTEX = Mutex.new
-
   def initialize(path:)
     @file = SecureStateFile.new(path)
-    @mutex = MUTEXES_MUTEX.synchronize { MUTEXES[File.expand_path(path)] ||= Mutex.new }
+    @mutex = Mutex.new
   end
 
   def claim(session_path, workspace_id)
@@ -16,14 +13,6 @@ class WorkspaceSessionOwnershipStore
 
     update do |state|
       state.fetch("sessions")[canonical_path(session_path)] = workspace_id
-    end
-  end
-
-  def copy(from_session_path, to_session_path)
-    update do |state|
-      sessions = state.fetch("sessions")
-      owner = sessions[canonical_path(from_session_path)]
-      sessions[canonical_path(to_session_path)] = owner if owner
     end
   end
 

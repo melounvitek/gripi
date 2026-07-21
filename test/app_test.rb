@@ -4755,7 +4755,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_idle_pending_session_expires_after_rpc_timeout
+  def test_idle_cleanup_leaves_pending_sessions_for_request_driven_remapping
     Dir.mktmpdir do |dir|
       now = Time.at(1_000)
       selected_path = write_session(dir)
@@ -4770,76 +4770,13 @@ class AppTest < Minitest::Test
       Gripi.set :rpc_idle_timeout_seconds, 1_800
 
       now = Time.at(2_801)
-      Gripi.cleanup_idle_rpc_clients
+      assert_empty Gripi.cleanup_idle_rpc_clients
       response = Rack::MockRequest.new(Gripi).get("/sidebar", params: { "session" => selected_path })
 
       assert_equal 200, response.status
-      refute registry.active?(pending_path)
-      refute_includes pending_sessions.paths, pending_path
-      refute_includes response.body, pending_path
-      assert_equal [[:get_state], [:close]], calls
-    end
-  end
-
-  def test_idle_persisted_pending_session_preserves_its_workspace_alias_after_retirement
-    Dir.mktmpdir do |dir|
-      now = Time.at(1_000)
-      persisted_path = write_session(dir)
-      pending_path = File.join(dir, "pending-session.jsonl")
-      calls = []
-      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
-      registry.register(pending_path, FakeRpcClient.new(calls, [], persisted_path))
-      pending_sessions = Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) }, clock: -> { now })
-      cookie = workspace_cookie_for("Idle Pending Workspace")
-      owner = workspace_id_from_cookie(cookie)
-      ownership = WorkspaceSessionOwnershipStore.new(path: Gripi.settings.workspace_ownership_path)
-      ownership.claim(pending_path, owner)
-      Gripi.set :sessions_root, dir
-      Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, pending_sessions
-      Gripi.set :rpc_idle_timeout_seconds, 1_800
-      Gripi.set :multi_user_mode, true
-
-      now = Time.at(2_801)
-      assert_equal [persisted_path], Gripi.cleanup_idle_rpc_clients
-
-      refute registry.active?(pending_path)
-      refute registry.active?(persisted_path)
-      refute_includes pending_sessions.paths, pending_path
-      assert_equal persisted_path, pending_sessions.persisted_path_for(pending_path)
-      assert ownership.owned_by?(pending_path, owner)
-      assert ownership.owned_by?(persisted_path, owner)
-      assert_includes calls, [:get_state]
-      assert_includes calls, [:close]
-
-      response = Rack::MockRequest.new(Gripi).get("/status", params: { "session" => pending_path }, "HTTP_COOKIE" => cookie)
-      assert_equal 200, response.status
-    end
-  end
-
-  def test_recently_used_pending_session_is_not_retired_from_a_stale_candidate
-    Dir.mktmpdir do |dir|
-      now = Time.at(1_000)
-      persisted_path = write_session(dir)
-      pending_path = File.join(dir, "pending-session.jsonl")
-      calls = []
-      client = FakeRpcClient.new(calls, [], persisted_path)
-      registry = PiRpcClientRegistry.new(factory: ->(_session_path) { raise "unexpected start" }, clock: -> { now })
-      original_get_state = client.method(:get_state)
-      client.define_singleton_method(:get_state) do
-        registry.touch(pending_path)
-        original_get_state.call
-      end
-      registry.register(pending_path, client)
-      Gripi.set :sessions_root, dir
-      Gripi.set :rpc_client_registry, registry
-      Gripi.set :pending_session_registry, Rpc::PendingSessionRegistry.new({ pending_path => project_cwd(dir) }, clock: -> { now })
-      Gripi.set :rpc_idle_timeout_seconds, 1_800
-
-      now = Time.at(2_801)
-      assert_empty Gripi.cleanup_idle_rpc_clients
-
       assert registry.active?(pending_path)
+      assert_includes pending_sessions.paths, pending_path
+      assert_includes response.body, pending_path
       refute_includes calls, [:close]
     end
   end
@@ -4892,7 +4829,7 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_polled_pending_session_expires_during_scheduled_cleanup
+  def test_polled_pending_session_remains_available_for_remapping
     Dir.mktmpdir do |dir|
       now = Time.at(1_000)
       pending_path = File.join(dir, "pending-session.jsonl")
@@ -4912,11 +4849,11 @@ class AppTest < Minitest::Test
       assert registry.active?(pending_path)
       refute_includes calls, [:close]
 
-      Gripi.cleanup_idle_rpc_clients
+      assert_empty Gripi.cleanup_idle_rpc_clients
 
-      refute registry.active?(pending_path)
-      refute_includes pending_sessions.paths, pending_path
-      assert_includes calls, [:close]
+      assert registry.active?(pending_path)
+      assert_includes pending_sessions.paths, pending_path
+      refute_includes calls, [:close]
     end
   end
 
@@ -9909,11 +9846,11 @@ class AppTest < Minitest::Test
       assert_includes pending_sessions.paths, pending_path
       refute_includes calls, [:close]
 
-      Gripi.cleanup_idle_rpc_clients
+      assert_empty Gripi.cleanup_idle_rpc_clients
 
-      refute registry.active?(pending_path)
-      refute_includes pending_sessions.paths, pending_path
-      assert_equal [[:get_state], [:close]], calls
+      assert registry.active?(pending_path)
+      assert_includes pending_sessions.paths, pending_path
+      refute_includes calls, [:close]
     end
   end
 

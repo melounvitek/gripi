@@ -228,6 +228,20 @@ class PiRpcClientTest < Minitest::Test
     second&.join
   end
 
+  def test_close_retries_process_termination_after_a_failure
+    client = PiRpcClient.new(stdin: StringIO.new, stdout: StringIO.new)
+    attempts = 0
+    client.define_singleton_method(:terminate_process) do
+      attempts += 1
+      raise Errno::EPERM if attempts == 1
+    end
+
+    assert_raises(Errno::EPERM) { client.close }
+    client.close
+
+    assert_equal 2, attempts
+  end
+
   def test_close_does_not_signal_a_pid_after_the_original_waiter_has_exited
     unrelated_pid = spawn(RbConfig.ruby, "-e", "sleep 60")
     waiter = Struct.new(:pid) do

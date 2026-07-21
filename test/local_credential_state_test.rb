@@ -44,36 +44,6 @@ class LocalCredentialStateTest < Minitest::Test
     paths.each_value { |path| assert_equal 0o600, File.stat(path).mode & 0o777, path }
   end
 
-  def test_copies_session_ownership_to_a_persisted_alias
-    store = WorkspaceSessionOwnershipStore.new(path: credential_paths.fetch(:owners))
-    store.claim("/tmp/pending.jsonl", "workspace")
-
-    store.copy("/tmp/pending.jsonl", "/tmp/persisted.jsonl")
-
-    assert store.owned_by?("/tmp/pending.jsonl", "workspace")
-    assert store.owned_by?("/tmp/persisted.jsonl", "workspace")
-  end
-
-  def test_store_instances_do_not_lose_concurrent_ownership_claims
-    path = credential_paths.fetch(:owners)
-    stores = [WorkspaceSessionOwnershipStore.new(path: path), WorkspaceSessionOwnershipStore.new(path: path)]
-    ready = Queue.new
-    start = Queue.new
-    threads = 20.times.map do |index|
-      Thread.new do
-        ready << true
-        start.pop
-        stores[index % stores.length].claim("/tmp/session-#{index}.jsonl", "workspace-#{index}")
-      end
-    end
-    20.times { ready.pop }
-    20.times { start << true }
-    threads.each(&:join)
-
-    verifier = WorkspaceSessionOwnershipStore.new(path: path)
-    20.times { |index| assert verifier.owned_by?("/tmp/session-#{index}.jsonl", "workspace-#{index}") }
-  end
-
   def test_concurrent_workspace_secret_creation_returns_one_persisted_secret
     path = credential_paths.fetch(:secret)
     ready = Queue.new

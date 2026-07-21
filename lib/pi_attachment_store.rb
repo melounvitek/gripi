@@ -63,18 +63,9 @@ class PiAttachmentStore
     return unless File.exist?(from_path)
 
     FileUtils.mkdir_p(@root)
-    File.open(metadata_path(to_session_path), "a+") do |to_file|
+    File.open(metadata_path(to_session_path), "a") do |to_file|
       to_file.flock(File::LOCK_EX)
-      to_file.rewind
-      existing_lines = to_file.each_line(chomp: true).tally
-      to_file.seek(0, IO::SEEK_END)
-      File.readlines(from_path, chomp: true).each do |line|
-        if existing_lines.fetch(line, 0).positive?
-          existing_lines[line] -= 1
-        else
-          to_file.puts(line)
-        end
-      end
+      File.readlines(from_path, chomp: true).each { |line| to_file.puts(line) }
     end
   end
 

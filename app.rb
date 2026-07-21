@@ -235,20 +235,7 @@ class Gripi < Sinatra::Base
     errors = []
     registry.idle_client_paths(idle_timeout: timeout).each do |candidate_path|
       begin
-        if settings.pending_session_registry.cwd_for(candidate_path)
-          persisted_path = prepare_idle_pending_rpc_client(candidate_path, registry)
-          next if persisted_path == :defer
-
-          if registry.close_client_if_expired(candidate_path, idle_timeout: timeout)
-            if persisted_path == :unpersisted
-              settings.pending_session_registry.forget(candidate_path)
-              closed_paths << candidate_path
-            else
-              closed_paths << persisted_path
-            end
-          end
-          next
-        end
+        next if settings.pending_session_registry.cwd_for(candidate_path)
 
         closed = false
         if File.exist?(candidate_path)
@@ -270,30 +257,6 @@ class Gripi < Sinatra::Base
     raise errors.first if errors.any?
 
     closed_paths
-  end
-
-  def self.prepare_idle_pending_rpc_client(session_path, registry)
-    pending_sessions = settings.pending_session_registry
-    persisted_path = pending_sessions.persisted_path_for(session_path)
-    return persisted_path if persisted_path
-
-    cwd = pending_sessions.cwd_for(session_path)
-    response = registry.with_existing_client(session_path, touch: false) { |client| client.get_state }
-    data = response.is_a?(Hash) && response["data"].is_a?(Hash) ? response["data"] : response
-    persisted_path = data["sessionFile"] || data["session_file"] || data["path"] if data.is_a?(Hash)
-    return :unpersisted unless persisted_path
-    return :defer unless File.exist?(persisted_path)
-    return :defer unless PiSessionStore.new(root: settings.sessions_root).cwd_for_session(persisted_path) == cwd
-
-    PiAttachmentStore.new(root: settings.attachments_root).migrate_session(session_path, persisted_path)
-    if settings.multi_user_mode
-      WorkspaceSessionOwnershipStore.new(path: settings.workspace_ownership_path).copy(session_path, persisted_path)
-    end
-    pending_sessions.remember_persisted_path(session_path, persisted_path)
-    persisted_path
-  rescue PiRpcClientRegistry::OperationPending, PiRpcClientRegistry::ClientRetiring, PiRpcClientRegistry::ClientStarting,
-    PiRpcClient::RequestTimeout, IOError, SystemCallError
-    :defer
   end
 
   set :rpc_idle_client_maintenance, Rpc::IdleClientMaintenance.new(

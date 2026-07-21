@@ -10,7 +10,7 @@ Reclaim memory from settled Pi RPC clients without relying on browser requests, 
 - Retire clients five minutes after their latest use or settlement.
 - Browser polling does not renew the idle timer.
 - Busy agent turns, compaction, gateway bash, and active request leases remain protected.
-- Reconcile persisted session state before retirement and remove expired pending-session metadata.
+- Reconcile persisted session state before retirement and leave temporary pending paths to the existing request-driven remapping flow.
 - Start maintenance when Puma boots and stop it cleanly with Puma.
 - Preserve environment overrides for the timeout and sweep interval.
 

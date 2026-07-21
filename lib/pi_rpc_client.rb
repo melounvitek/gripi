@@ -403,7 +403,6 @@ class PiRpcClient
     @close_mutex.synchronize do
       return if @closed
 
-      @closed = true
       close_io(@stdin)
       close_io(@stdout)
       close_io(@stderr)
@@ -411,6 +410,7 @@ class PiRpcClient
       @reader&.join(0.2)
       @stderr_reader&.join(0.2)
       @process_watcher&.join(@process_kill_timeout)
+      @closed = true
     end
   end
 

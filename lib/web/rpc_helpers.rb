@@ -159,12 +159,7 @@ module Web
       remapped_path = remap_active_pending_rpc_client(session_path)
       return remapped_path if remapped_path
 
-      unless rpc_clients.active?(session_path)
-        persisted_path = pending_session_registry.persisted_path_for(session_path)
-        return persisted_path if persisted_path && File.exist?(persisted_path) && session_cwd(persisted_path) == pending_rpc_cwd(session_path)
-
-        remap_pending_rpc_client(session_path)
-      end
+      remap_pending_rpc_client(session_path) unless rpc_clients.active?(session_path)
       session_path
     end
 

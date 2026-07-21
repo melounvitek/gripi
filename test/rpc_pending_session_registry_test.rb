@@ -24,18 +24,6 @@ class RpcPendingSessionRegistryTest < Minitest::Test
     assert_equal ["/tmp/pending-2.jsonl"], registry.paths
   end
 
-  def test_preserves_a_persisted_alias_without_listing_it_as_pending
-    registry = Rpc::PendingSessionRegistry.new({ "/tmp/pending.jsonl" => "/tmp/project" })
-
-    registry.remember_persisted_path("/tmp/pending.jsonl", "/tmp/persisted.jsonl")
-
-    assert_equal "/tmp/project", registry.cwd_for("/tmp/pending.jsonl")
-    assert_equal "/tmp/persisted.jsonl", registry.persisted_path_for("/tmp/pending.jsonl")
-    assert_empty registry.paths
-    assert_empty registry.entries
-    assert_empty registry.entries_with_created_at
-  end
-
   def test_remembering_the_same_path_preserves_its_creation_time
     now = Time.at(1_000)
     registry = Rpc::PendingSessionRegistry.new(clock: -> { now })
