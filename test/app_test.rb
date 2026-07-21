@@ -5949,7 +5949,9 @@ class AppTest < Minitest::Test
       refute_includes APP_JAVASCRIPT, "history.replaceState(history.state"
       assert_includes APP_JAVASCRIPT, "controlsActive()"
       assert_includes APP_JAVASCRIPT, "if (!force && (this.pinOperationActive || this.controlsActive() || this.recentlyInteracted()))"
-      assert_includes APP_JAVASCRIPT, "async changeProjectFilter(select)"
+      assert_includes APP_JAVASCRIPT, "changeProjectFilter(select)"
+      assert_includes APP_JAVASCRIPT, "changeSearchFilter(form)"
+      assert_includes APP_JAVASCRIPT, "async applyFilters(targetUrl)"
       assert_includes APP_JAVASCRIPT, "this.replace(html, { scrollTop: 0, notify: false });"
     end
   end

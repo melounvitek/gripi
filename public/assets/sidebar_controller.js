@@ -58,7 +58,10 @@ export class SidebarController {
       this.changeProjectFilter(select).catch(() => select.form?.submit());
     });
     this.document.addEventListener("submit", (event) => {
-      if (event.target.closest?.(".sidebar-session-search")) this.setFiltering(true);
+      const form = event.target.closest?.(".sidebar-session-search");
+      if (!form) return;
+      event.preventDefault();
+      this.changeSearchFilter(form).catch(() => form.submit());
     });
     this.document.addEventListener("click", (event) => {
       if (event.target.closest?.("[data-sidebar-filters-clear]")) this.setFiltering(true);
@@ -223,13 +226,27 @@ export class SidebarController {
     });
   }
 
-  async changeProjectFilter(select) {
+  changeProjectFilter(select) {
     if (!select) return null;
 
-    this.setFiltering(true);
     const targetUrl = new URL(this.window.location.href);
     if (select.value) targetUrl.searchParams.set("project", select.value);
     else targetUrl.searchParams.delete("project");
+    return this.applyFilters(targetUrl);
+  }
+
+  changeSearchFilter(form) {
+    if (!form) return null;
+
+    const targetUrl = new URL(this.window.location.href);
+    const query = form.querySelector('input[name="session_search"]')?.value.trim() || "";
+    if (query) targetUrl.searchParams.set("session_search", query);
+    else targetUrl.searchParams.delete("session_search");
+    return this.applyFilters(targetUrl);
+  }
+
+  async applyFilters(targetUrl) {
+    this.setFiltering(true);
     targetUrl.searchParams.delete("sidebar_sessions_limit");
     this.temporarySessionsLimit = null;
 
@@ -240,7 +257,7 @@ export class SidebarController {
       fetch(newSessionModalUrl(targetUrl.href))
     ]);
     if (!this.current(epoch, boundElement)) return null;
-    if (!sidebarResponse.ok || !modalResponse.ok) throw new Error("Project filter refresh failed");
+    if (!sidebarResponse.ok || !modalResponse.ok) throw new Error("Sidebar filter refresh failed");
     const [html, modalHtml] = await Promise.all([sidebarResponse.text(), modalResponse.text()]);
     if (!this.current(epoch, boundElement)) return null;
 
