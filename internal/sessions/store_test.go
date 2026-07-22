@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+	"unsafe"
 )
 
 func TestWindowIndexesLargeNativeEntriesWithoutMaterializingThemIntoTheConversation(t *testing.T) {
@@ -488,6 +491,299 @@ func userLine(id, parent, timestamp, text string) string {
 	return `{"type":"message","id":"` + id + `","parentId":` + parentValue + `,"timestamp":"` + timestamp + `","message":{"role":"user","content":[{"type":"text","text":"` + text + `"}]}}`
 }
 
+func TestSessionsRetainMetadataBeyondTheConversationIndexLimit(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	paths := make([]string, maxCacheEntries+1)
+	for number := range paths {
+		path := filepath.Join(root, fmt.Sprintf("session-%03d.jsonl", number))
+		paths[number] = path
+		writeSessionLines(t, path, []string{
+			sessionLine(project),
+			userLine(fmt.Sprintf("user-%d", number), "", "2026-01-01T00:00:01Z", fmt.Sprintf("Message %d", number)),
+		})
+	}
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	initial, err := store.Sessions()
+	if err != nil || len(initial) != len(paths) {
+		t.Fatalf("initial sessions = %d, err = %v", len(initial), err)
+	}
+	store.Cache.mu.Lock()
+	if len(store.Cache.items) != maxCacheEntries || len(store.Cache.metadataItems) != len(paths) {
+		indexCount, metadataCount := len(store.Cache.items), len(store.Cache.metadataItems)
+		store.Cache.mu.Unlock()
+		t.Fatalf("cache counts = indexes %d, metadata %d", indexCount, metadataCount)
+	}
+	indexesBefore := make(map[string]*index, len(store.Cache.items))
+	for path, item := range store.Cache.items {
+		indexesBefore[path] = item.index
+	}
+	metadataBefore := make(map[string]*metadataCacheItem, len(store.Cache.metadataItems))
+	for path, item := range store.Cache.metadataItems {
+		metadataBefore[path] = item
+	}
+	store.Cache.mu.Unlock()
+
+	repeated, err := store.Sessions()
+	if err != nil || len(repeated) != len(paths) {
+		t.Fatalf("repeated sessions = %d, err = %v", len(repeated), err)
+	}
+	store.Cache.mu.Lock()
+	for path, before := range indexesBefore {
+		if store.Cache.items[path] == nil || store.Cache.items[path].index != before {
+			store.Cache.mu.Unlock()
+			t.Fatalf("unchanged conversation index was rebuilt for %s", path)
+		}
+	}
+	for path, before := range metadataBefore {
+		if store.Cache.metadataItems[path] != before {
+			store.Cache.mu.Unlock()
+			t.Fatalf("unchanged metadata was rebuilt for %s", path)
+		}
+	}
+	store.Cache.mu.Unlock()
+
+	changedPath := paths[0]
+	appendSessionLine(t, changedPath, userLine("changed", "user-0", "2026-01-01T00:00:02Z", "Changed"))
+	stale, deferred, err := store.SessionsDeferringMetadata(func(path string) bool { return path == changedPath })
+	if err != nil || !deferred || len(stale) != len(paths) {
+		t.Fatalf("deferred sessions = %d, deferred = %v, err = %v", len(stale), deferred, err)
+	}
+	for _, session := range stale {
+		if session.Path == changedPath && session.MessageCount != 1 {
+			t.Fatalf("deferred message count = %d", session.MessageCount)
+		}
+	}
+	store.Cache.mu.Lock()
+	for path, before := range metadataBefore {
+		if store.Cache.metadataItems[path] != before {
+			store.Cache.mu.Unlock()
+			t.Fatalf("deferred metadata was refreshed for %s", path)
+		}
+	}
+	store.Cache.mu.Unlock()
+
+	refreshed, err := store.Sessions()
+	if err != nil || len(refreshed) != len(paths) {
+		t.Fatalf("refreshed sessions = %d, err = %v", len(refreshed), err)
+	}
+	for _, session := range refreshed {
+		expected := 1
+		if session.Path == changedPath {
+			expected = 2
+		}
+		if session.MessageCount != expected {
+			t.Fatalf("message count for %s = %d, want %d", session.Path, session.MessageCount, expected)
+		}
+	}
+	store.Cache.mu.Lock()
+	for path, before := range metadataBefore {
+		if changed := store.Cache.metadataItems[path] != before; changed != (path == changedPath) {
+			store.Cache.mu.Unlock()
+			t.Fatalf("metadata refresh for %s = %v", path, changed)
+		}
+	}
+	store.Cache.mu.Unlock()
+}
+
+func TestSessionMetadataCacheRequiresAnExactFileSignature(t *testing.T) {
+	_, project, path := sessionFixture(t)
+	writeSessionLines(t, path, []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Message")})
+	cache := NewCache()
+	if _, err := cache.Index(path); err != nil {
+		t.Fatal(err)
+	}
+	stat, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache.mu.Lock()
+	original := *cache.metadataItems[path]
+	cache.mu.Unlock()
+	tests := []struct {
+		name   string
+		change func(*metadataCacheItem)
+	}{
+		{"device", func(item *metadataCacheItem) { item.device++ }},
+		{"inode", func(item *metadataCacheItem) { item.inode++ }},
+		{"size", func(item *metadataCacheItem) { item.size++ }},
+		{"mtime", func(item *metadataCacheItem) { item.mtime = item.mtime.Add(time.Nanosecond) }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			changed := original
+			test.change(&changed)
+			cache.mu.Lock()
+			cache.metadataItems[path] = &changed
+			cache.mu.Unlock()
+			if _, found := cache.sessionMetadata(path, stat, false); found {
+				t.Fatal("metadata cache accepted an inexact signature")
+			}
+			if metadata, found := cache.sessionMetadata(path, stat, true); !found || metadata == nil {
+				t.Fatal("stale metadata was unavailable for busy-session deferral")
+			}
+		})
+	}
+}
+
+func TestSessionMetadataCacheRetainsKnownInvalidOutcomes(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	validPath := filepath.Join(root, "valid.jsonl")
+	malformedPath := filepath.Join(root, "malformed.jsonl")
+	unsupportedPath := filepath.Join(root, "unsupported.jsonl")
+	writeSessionLines(t, validPath, []string{sessionLine(project)})
+	writeSessionLines(t, malformedPath, []string{"not json"})
+	writeSessionLines(t, unsupportedPath, []string{sessionLine(project), `{"type":"unknown","payload":"` + strings.Repeat("x", MaxIndexedEntryBytes+1) + `"}`})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	for scan := 0; scan < 2; scan++ {
+		listed, err := store.Sessions()
+		if err != nil || len(listed) != 1 || listed[0].Path != validPath {
+			t.Fatalf("scan %d sessions = %#v, err = %v", scan, listed, err)
+		}
+	}
+	store.Cache.mu.Lock()
+	defer store.Cache.mu.Unlock()
+	if len(store.Cache.metadataItems) != 3 {
+		t.Fatalf("metadata count = %d", len(store.Cache.metadataItems))
+	}
+	if item := store.Cache.metadataItems[malformedPath]; item == nil || item.session != nil {
+		t.Fatalf("malformed metadata outcome = %#v", item)
+	}
+	if item := store.Cache.metadataItems[unsupportedPath]; item == nil || item.session != nil {
+		t.Fatalf("unsupported metadata outcome = %#v", item)
+	}
+}
+
+func TestSessionMetadataCacheIsBounded(t *testing.T) {
+	cache := NewCache()
+	for number := 0; number < 10_000; number++ {
+		path := fmt.Sprintf("/sessions/session-%05d.jsonl", number)
+		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), supported: true, sessionMetadataSupported: true, session: &Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
+		cache.mu.Lock()
+		cache.cacheSessionMetadataLocked(path, indexed)
+		cache.mu.Unlock()
+	}
+	cache.mu.Lock()
+	ordinaryCount := len(cache.metadataItems)
+	cache.mu.Unlock()
+	if ordinaryCount != 10_000 {
+		t.Fatalf("ordinary metadata count = %d", ordinaryCount)
+	}
+
+	for number := 10_000; number <= maxMetadataCacheEntries; number++ {
+		path := fmt.Sprintf("/sessions/session-%05d.jsonl", number)
+		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), supported: true, sessionMetadataSupported: true, session: &Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
+		cache.mu.Lock()
+		cache.cacheSessionMetadataLocked(path, indexed)
+		cache.mu.Unlock()
+	}
+	cache.mu.Lock()
+	metadataCount, metadataBytes := len(cache.metadataItems), cache.metadataBytes
+	cache.mu.Unlock()
+	if metadataCount > maxMetadataCacheEntries || metadataBytes > maxMetadataCacheBytes {
+		t.Fatalf("metadata cache exceeds bounds: count %d, bytes %d", metadataCount, metadataBytes)
+	}
+
+	path := "/sessions/over-budget.jsonl"
+	indexed := &index{path: path, device: 1, inode: 99_999, size: 100, mtime: time.Unix(1, 0), supported: true, sessionMetadataSupported: true, session: &Session{Path: path, CWD: "/project", DisplayName: strings.Repeat("x", maxMetadataCacheBytes)}}
+	cache.mu.Lock()
+	cache.cacheSessionMetadataLocked(path, indexed)
+	_, cached := cache.metadataItems[path]
+	cache.mu.Unlock()
+	if cached {
+		t.Fatal("individually over-budget metadata was cached")
+	}
+}
+
+func TestMetadataIsCachedWhenTheConversationIndexExceedsItsCacheBudget(t *testing.T) {
+	cache := NewCache()
+	path := "/sessions/large-index.jsonl"
+	indexed := &index{path: path, device: 1, inode: 2, size: 100, mtime: time.Unix(1, 0), bytes: maxCacheBytes + 1, supported: true, sessionMetadataSupported: true, session: &Session{Path: path, CWD: "/project", DisplayName: "Large conversation"}}
+	cache.cacheBuiltIndex(path, indexed)
+	cache.mu.Lock()
+	metadata := cache.metadataItems[path]
+	fullIndex := cache.items[path]
+	cache.mu.Unlock()
+	if metadata == nil || metadata.session == nil || metadata.session.DisplayName != "Large conversation" {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+	if fullIndex != nil {
+		t.Fatal("over-budget conversation index was cached")
+	}
+}
+
+func TestSessionMetadataCacheDetachesRetainedStrings(t *testing.T) {
+	paddedName := strings.Repeat(" ", MaxIndexedEntryBytes) + "name" + strings.Repeat(" ", MaxIndexedEntryBytes)
+	largeResponse := strings.Repeat("x", MaxIndexedEntryBytes)
+	indexed := &index{
+		path: "/sessions/detached.jsonl", device: 1, inode: 2, size: 100, mtime: time.Unix(1, 0),
+		supported: true, sessionMetadataSupported: true,
+		session: &Session{DisplayName: strings.TrimSpace(paddedName), LatestAssistantResponsePreview: largeResponse[len(largeResponse)-16:]},
+	}
+	cached := sessionFromIndex(indexed)
+	if cached == nil || cached.DisplayName != "name" || cached.LatestAssistantResponsePreview != strings.Repeat("x", 16) {
+		t.Fatalf("cached session = %#v", cached)
+	}
+	if unsafe.StringData(cached.DisplayName) == unsafe.StringData(indexed.session.DisplayName) {
+		t.Fatal("cached display name retains its padded source allocation")
+	}
+	if unsafe.StringData(cached.LatestAssistantResponsePreview) == unsafe.StringData(indexed.session.LatestAssistantResponsePreview) {
+		t.Fatal("cached response preview retains its large source allocation")
+	}
+}
+
+func TestSessionMetadataCacheSupportsConcurrentScans(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	paths := make([]string, 32)
+	for number := range paths {
+		paths[number] = filepath.Join(root, fmt.Sprintf("session-%02d.jsonl", number))
+		writeSessionLines(t, paths[number], []string{sessionLine(project), userLine(fmt.Sprintf("user-%d", number), "", "2026-01-01T00:00:01Z", "Message")})
+	}
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+	if sessions, err := store.Sessions(); err != nil || len(sessions) != len(paths) {
+		t.Fatalf("initial sessions = %d, err = %v", len(sessions), err)
+	}
+
+	errors := make(chan error, 8)
+	var wait sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wait.Add(1)
+		go func(worker int) {
+			defer wait.Done()
+			for iteration := 0; iteration < 10; iteration++ {
+				sessions, err := store.Sessions()
+				if err != nil || len(sessions) != len(paths) {
+					errors <- fmt.Errorf("sessions = %d, err = %v", len(sessions), err)
+					return
+				}
+				if _, err := store.Cache.Index(paths[(worker+iteration)%len(paths)]); err != nil {
+					errors <- err
+					return
+				}
+			}
+		}(worker)
+	}
+	wait.Wait()
+	close(errors)
+	for err := range errors {
+		t.Error(err)
+	}
+}
+
 func TestSessionsCanDeferBusyMetadataRefresh(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	writeSessionLines(t, path, []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Initial")})
@@ -496,6 +792,20 @@ func TestSessionsCanDeferBusyMetadataRefresh(t *testing.T) {
 	if err != nil || len(initial) != 1 || initial[0].MessageCount != 1 {
 		t.Fatalf("initial sessions = %#v, %v", initial, err)
 	}
+	store.Cache.mu.Lock()
+	metadata := store.Cache.metadataItems[path]
+	if metadata == nil {
+		store.Cache.mu.Unlock()
+		t.Fatal("metadata was not cached")
+	}
+	store.Cache.metadataBytes -= metadata.bytes
+	delete(store.Cache.metadataItems, path)
+	store.Cache.metadataOrder.Remove(metadata.element)
+	if store.Cache.items[path] == nil {
+		store.Cache.mu.Unlock()
+		t.Fatal("full index was not cached")
+	}
+	store.Cache.mu.Unlock()
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)

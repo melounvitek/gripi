@@ -3,6 +3,7 @@ package sessions
 import (
 	"bufio"
 	"bytes"
+	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,15 +24,19 @@ import (
 )
 
 const (
-	MaxIndexedEntryBytes   = 256 << 10
-	MaxRenderedEntryBytes  = 64 << 20
-	MaxRetainedWindowBytes = 64 << 20
-	WindowMinMessages      = 20
-	WindowMaxMessages      = 150
-	WindowByteBudget       = 128 << 10
-	maxCacheEntries        = 256
-	maxCacheBytes          = 32 << 20
-	maxBuiltIndexBytes     = 64 << 20
+	MaxIndexedEntryBytes      = 256 << 10
+	MaxRenderedEntryBytes     = 64 << 20
+	MaxRetainedWindowBytes    = 64 << 20
+	WindowMinMessages         = 20
+	WindowMaxMessages         = 150
+	WindowByteBudget          = 128 << 10
+	maxCacheEntries           = 256
+	maxCacheBytes             = 32 << 20
+	maxMetadataCacheEntries   = 16 << 10
+	maxMetadataCacheBytes     = 8 << 20
+	metadataCacheItemOverhead = 192
+	sessionMetadataOverhead   = 208
+	maxBuiltIndexBytes        = 64 << 20
 )
 
 var imageMIMETypes = map[string]bool{
@@ -176,15 +181,30 @@ type cacheItem struct {
 	used  uint64
 }
 
-type Cache struct {
-	mu      sync.Mutex
-	buildMu sync.Mutex
-	clock   uint64
+type metadataCacheItem struct {
+	session *Session
+	device  uint64
+	inode   uint64
+	size    int64
+	mtime   time.Time
 	bytes   int64
-	items   map[string]*cacheItem
+	element *list.Element
 }
 
-func NewCache() *Cache { return &Cache{items: make(map[string]*cacheItem)} }
+type Cache struct {
+	mu            sync.Mutex
+	buildMu       sync.Mutex
+	clock         uint64
+	bytes         int64
+	items         map[string]*cacheItem
+	metadataBytes int64
+	metadataItems map[string]*metadataCacheItem
+	metadataOrder list.List
+}
+
+func NewCache() *Cache {
+	return &Cache{items: make(map[string]*cacheItem), metadataItems: make(map[string]*metadataCacheItem)}
+}
 
 func (cache *Cache) Index(path string) (*index, error) {
 	stat, err := os.Stat(path)
@@ -197,6 +217,7 @@ func (cache *Cache) Index(path string) (*index, error) {
 	if item := cache.items[path]; item != nil && item.index.device == device && item.index.inode == inode && item.index.size == stat.Size() && item.index.mtime.Equal(stat.ModTime()) {
 		item.used = cache.clock
 		result := item.index
+		cache.cacheSessionMetadataLocked(path, result)
 		cache.mu.Unlock()
 		return result, nil
 	}
@@ -214,6 +235,7 @@ func (cache *Cache) Index(path string) (*index, error) {
 	if item := cache.items[path]; item != nil && item.index.device == device && item.index.inode == inode && item.index.size == stat.Size() && item.index.mtime.Equal(stat.ModTime()) {
 		item.used = cache.clock
 		result := item.index
+		cache.cacheSessionMetadataLocked(path, result)
 		cache.mu.Unlock()
 		return result, nil
 	}
@@ -222,16 +244,21 @@ func (cache *Cache) Index(path string) (*index, error) {
 	if err != nil {
 		return nil, err
 	}
+	cache.cacheBuiltIndex(path, built)
+	return built, nil
+}
+
+func (cache *Cache) cacheBuiltIndex(path string, built *index) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.cacheSessionMetadataLocked(path, built)
 	if built.bytes > maxCacheBytes {
-		cache.mu.Lock()
 		if old := cache.items[path]; old != nil {
 			cache.bytes -= old.index.bytes
 			delete(cache.items, path)
 		}
-		cache.mu.Unlock()
-		return built, nil
+		return
 	}
-	cache.mu.Lock()
 	cache.clock++
 	if old := cache.items[path]; old != nil {
 		cache.bytes -= old.index.bytes
@@ -252,25 +279,93 @@ func (cache *Cache) Index(path string) (*index, error) {
 		cache.bytes -= cache.items[oldestPath].index.bytes
 		delete(cache.items, oldestPath)
 	}
-	cache.mu.Unlock()
-	return built, nil
+}
+
+func (cache *Cache) cacheSessionMetadataLocked(path string, indexed *index) *Session {
+	if old := cache.metadataItems[path]; old != nil && old.device == indexed.device && old.inode == indexed.inode && old.size == indexed.size && old.mtime.Equal(indexed.mtime) {
+		cache.metadataOrder.MoveToBack(old.element)
+		return old.session
+	}
+	session := sessionFromIndex(indexed)
+	bytes := estimatedSessionMetadataBytes(path, session)
+	if old := cache.metadataItems[path]; old != nil {
+		cache.metadataBytes -= old.bytes
+		cache.metadataOrder.Remove(old.element)
+		delete(cache.metadataItems, path)
+	}
+	if bytes > maxMetadataCacheBytes {
+		return session
+	}
+	item := &metadataCacheItem{
+		session: session,
+		device:  indexed.device, inode: indexed.inode, size: indexed.size, mtime: indexed.mtime,
+		bytes: bytes,
+	}
+	item.element = cache.metadataOrder.PushBack(path)
+	cache.metadataItems[path] = item
+	cache.metadataBytes += bytes
+	for cache.metadataBytes > maxMetadataCacheBytes || len(cache.metadataItems) > maxMetadataCacheEntries {
+		oldest := cache.metadataOrder.Front()
+		oldestPath := oldest.Value.(string)
+		cache.metadataBytes -= cache.metadataItems[oldestPath].bytes
+		delete(cache.metadataItems, oldestPath)
+		cache.metadataOrder.Remove(oldest)
+	}
+	return session
+}
+
+func estimatedSessionMetadataBytes(path string, session *Session) int64 {
+	bytes := metadataCacheItemOverhead + len(path)
+	if session != nil {
+		bytes += sessionMetadataOverhead + len(session.Path) + len(session.CWD) + len(session.ID) + len(session.DisplayName) + len(session.FirstUserMessage) + len(session.LatestAssistantResponsePreview) + len(session.ParentSessionPath)
+	}
+	return int64(bytes)
+}
+
+func (cache *Cache) sessionMetadata(path string, stat os.FileInfo, stale bool) (*Session, bool) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	item := cache.metadataItems[path]
+	if item != nil {
+		if stale {
+			cache.metadataOrder.MoveToBack(item.element)
+			return item.session, true
+		}
+		device, inode := fileIdentity(stat)
+		if item.device == device && item.inode == inode && item.size == stat.Size() && item.mtime.Equal(stat.ModTime()) {
+			cache.metadataOrder.MoveToBack(item.element)
+			return item.session, true
+		}
+	}
+	if stale {
+		if full := cache.items[path]; full != nil {
+			cache.clock++
+			full.used = cache.clock
+			return cache.cacheSessionMetadataLocked(path, full.index), true
+		}
+	}
+	return nil, false
+}
+
+func sessionFromIndex(indexed *index) *Session {
+	if !indexed.supported || !indexed.sessionMetadataSupported || indexed.session == nil {
+		return nil
+	}
+	copy := *indexed.session
+	copy.Path = strings.Clone(copy.Path)
+	copy.CWD = strings.Clone(copy.CWD)
+	copy.ID = strings.Clone(copy.ID)
+	copy.DisplayName = strings.Clone(copy.DisplayName)
+	copy.FirstUserMessage = strings.Clone(copy.FirstUserMessage)
+	copy.LatestAssistantResponsePreview = strings.Clone(copy.LatestAssistantResponsePreview)
+	copy.ParentSessionPath = strings.Clone(copy.ParentSessionPath)
+	return &copy
 }
 
 type Store struct {
 	Root  string
 	Home  string
 	Cache *Cache
-}
-
-func (cache *Cache) cachedIndex(path string) *index {
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	if item := cache.items[path]; item != nil {
-		cache.clock++
-		item.used = cache.clock
-		return item.index
-	}
-	return nil
 }
 
 func (store Store) Sessions() ([]*Session, error) {
@@ -306,23 +401,25 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*Ses
 		if err != nil || !stat.Mode().IsRegular() {
 			return nil
 		}
-		indexed := (*index)(nil)
-		if deferFor != nil && deferFor(realPath) {
-			indexed = store.Cache.cachedIndex(realPath)
-			if indexed != nil {
-				deferred = true
+		busy := deferFor != nil && deferFor(realPath)
+		session, found := store.Cache.sessionMetadata(realPath, stat, busy)
+		if found && busy {
+			deferred = true
+		}
+		if !found {
+			indexed, indexErr := store.Cache.Index(realPath)
+			if indexErr != nil {
+				return nil
 			}
+			session = sessionFromIndex(indexed)
 		}
-		if indexed == nil {
-			indexed, err = store.Cache.Index(realPath)
-		}
-		if err != nil || !indexed.supported || !indexed.sessionMetadataSupported || indexed.session == nil || indexed.session.CWD == "" || !filepath.IsAbs(indexed.session.CWD) {
+		if session == nil || session.CWD == "" || !filepath.IsAbs(session.CWD) {
 			return nil
 		}
-		if stat, err := os.Stat(indexed.session.CWD); err != nil || !stat.IsDir() {
+		if stat, err := os.Stat(session.CWD); err != nil || !stat.IsDir() {
 			return nil
 		}
-		copy := *indexed.session
+		copy := *session
 		result = append(result, &copy)
 		return nil
 	})
