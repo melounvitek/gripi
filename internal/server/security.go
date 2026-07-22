@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	maxRequestBodyBytes = int64(64 << 20)
-	securityErrorCSP    = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+	maxRequestBodyBytes     = int64(64 << 20)
+	unknownBodySpoolLimit   = 2
+	unknownBodyOverloadBody = "Request body processing is busy"
+	securityErrorCSP        = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
 )
 
 type nonceContextKey struct{}
@@ -89,6 +91,14 @@ func (app *application) limitRequestBody(next http.Handler) http.Handler {
 			return
 		}
 
+		select {
+		case app.unknownBodySpools <- struct{}{}:
+			defer func() { <-app.unknownBodySpools }()
+		default:
+			rejectUnknownBodyOverload(response, request)
+			return
+		}
+
 		originalBody := request.Body
 		defer originalBody.Close()
 		bodyFile, err := os.CreateTemp("", "gripi-request-body-*")
@@ -116,6 +126,32 @@ func (app *application) limitRequestBody(next http.Handler) http.Handler {
 		request.Body = http.MaxBytesReader(response, bodyFile, maxRequestBodyBytes)
 		next.ServeHTTP(response, request)
 	})
+}
+
+func rejectUnknownBodyOverload(response http.ResponseWriter, request *http.Request) {
+	if request.ProtoMajor == 1 {
+		connection, buffered, err := http.NewResponseController(response).Hijack()
+		if err == nil {
+			defer connection.Close()
+			version := "HTTP/1.1"
+			if request.ProtoMinor == 0 {
+				version = "HTTP/1.0"
+			}
+			_, _ = buffered.WriteString(version + " 503 Service Unavailable\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: " + strconv.Itoa(len(unknownBodyOverloadBody)) + "\r\nConnection: close\r\n\r\n" + unknownBodyOverloadBody)
+			_ = buffered.Flush()
+			return
+		}
+		response.Header().Set("Connection", "close")
+	}
+
+	request.Close = true
+	response.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	response.Header().Set("Content-Length", strconv.Itoa(len(unknownBodyOverloadBody)))
+	response.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = io.WriteString(response, unknownBodyOverloadBody)
+	if request.ProtoMajor > 1 {
+		_ = request.Body.Close()
+	}
 }
 
 func (app *application) authorizeHost(next http.Handler) http.Handler {

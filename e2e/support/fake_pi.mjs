@@ -277,6 +277,15 @@ function acceptPrompt(command) {
     });
     return;
   }
+  if (command.message === prompts.extensionRace) {
+    schedule(150, () => {
+      pendingExtensionRequest = "e2e-extension-final";
+      emit({ type: "extension_ui_request", id: "e2e-extension-expiring", method: "confirm", title: "Expiring request", timeout: 2000 });
+      emit({ type: "extension_ui_request", id: "e2e-extension-retry", method: "confirm", title: "Retry request" });
+      emit({ type: "extension_ui_request", id: pendingExtensionRequest, method: "confirm", title: "Final queued request" });
+    });
+    return;
+  }
   if ([prompts.steerStart, prompts.followUpStart, prompts.abortStart].includes(command.message)) return;
 
   const reply = path.basename(process.cwd()).startsWith("new-session-") ? replies.newSession : replies.standard;
@@ -490,6 +499,10 @@ function persistDeferredBashMessages() {
 function acceptExtensionResponse(command) {
   if (command.id !== pendingExtensionRequest) return;
   pendingExtensionRequest = null;
+  if (activeScenario === prompts.extensionRace) {
+    completeAssistant(replies.extensionRaceComplete);
+    return;
+  }
   completeAssistant(command.confirmed ? replies.extensionApproved : "Release approval was declined.");
 }
 

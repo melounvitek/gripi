@@ -210,7 +210,7 @@ func TestGoGatewayRejectsInvalidMutationValuesBeforeStartingPi(t *testing.T) {
 		{"fork entry", "/sessions/fork", map[string]string{"session": path, "entry_id": strings.Repeat("x", treeEntryIDTestBytes+1)}, "Fork entry id is too long"},
 		{"tree label", "/sessions/tree/label", map[string]string{"session": path, "entry_id": "entry", "label": strings.Repeat("x", treeLabelTestBytes+1)}, "Label is too long"},
 		{"extension id", "/extension_ui_response", map[string]string{"session": path, "id": strings.Repeat("x", extensionIDTestBytes+1), "cancelled": "true"}, "Missing extension UI request id"},
-		// Ruby relies on the global body cap here; Go's lower per-value cap avoids retaining a giant editor response while preserving normal Pi editor workflows.
+		// The lower per-value cap avoids retaining a giant editor response while preserving normal Pi editor workflows.
 		{"extension value", "/extension_ui_response", map[string]string{"session": path, "id": "dialog", "value": strings.Repeat("x", extensionValueTestBytes+1)}, "Extension UI response is too long"},
 	}
 	for _, test := range tests {

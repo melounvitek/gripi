@@ -544,8 +544,7 @@ func TestPendingRemapWaitsForPromptAttachmentBoundary(t *testing.T) {
 	pending := rpc.NewPendingSessionRegistry(nil)
 	pending.Remember(from, "/project")
 	app := &application{config: config.Config{AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
-	boundary := app.imagePromptLock(from)
-	boundary.Lock()
+	unlockBoundary := app.imagePromptLocks.Lock(from)
 	moved := make(chan error, 1)
 	go func() {
 		moved <- app.movePendingRPCClient(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), from, to)
@@ -555,12 +554,15 @@ func TestPendingRemapWaitsForPromptAttachmentBoundary(t *testing.T) {
 		t.Fatalf("remap crossed prompt boundary: %v", err)
 	case <-time.After(20 * time.Millisecond):
 	}
-	boundary.Unlock()
+	unlockBoundary()
 	if err := <-moved; err != nil {
 		t.Fatal(err)
 	}
 	if remapped, ok := pending.Resolve(from); !ok || remapped != to {
 		t.Fatalf("remap = %q, %v", remapped, ok)
+	}
+	if app.imagePromptLocks.Len() != 0 {
+		t.Fatalf("image prompt lock entries = %d", app.imagePromptLocks.Len())
 	}
 }
 

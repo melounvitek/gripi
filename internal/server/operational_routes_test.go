@@ -40,7 +40,7 @@ func TestResourceUsagePreservesFrontendJSONContract(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"supported", "memoryBytes", "workingSetBytes", "inactiveFileBytes", "cpuUsageUsec", "pumaRssBytes", "piRssBytes", "piProcessCount"} {
+	for _, key := range []string{"supported", "memoryBytes", "workingSetBytes", "inactiveFileBytes", "cpuUsageUsec", "gatewayRssBytes", "piRssBytes", "piProcessCount"} {
 		if _, ok := payload[key]; !ok {
 			t.Fatalf("missing %s in %v", key, payload)
 		}

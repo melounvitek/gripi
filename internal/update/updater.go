@@ -21,7 +21,7 @@ const (
 	fetchStepTimeout     = 2 * time.Minute
 	worktreeStepTimeout  = 2 * time.Minute
 	miseInstallTimeout   = 5 * time.Minute
-	goTestTimeout        = 15 * time.Minute
+	testTimeout          = 15 * time.Minute
 	goBuildTimeout       = 5 * time.Minute
 	updateCleanupTimeout = 5 * time.Second
 )
@@ -441,7 +441,7 @@ func validateCheckout(ctx context.Context, directory, target string) error {
 		args    []string
 	}{
 		{miseInstallTimeout, []string{"mise", "install"}},
-		{goTestTimeout, []string{"mise", "exec", "--", "go", "test", "./..."}},
+		{testTimeout, []string{"mise", "run", "test"}},
 		{goBuildTimeout, []string{"mise", "exec", "--", "go", "build", "-o", target, "./cmd/gripi"}},
 	}
 	for _, step := range steps {

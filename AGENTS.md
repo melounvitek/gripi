@@ -18,7 +18,7 @@ Keep gateway features aligned with native Pi CLI behavior. Preserve Pi-owned dat
 
 ## UI rendering
 
-For changes affecting conversation/message rendering, check both server-rendered history and live-appended event rendering. Many message shapes are rendered twice: once by Ruby/ERB for page load, and once by JavaScript for live events. A fix that looks correct after a reload may still need a matching live-renderer update.
+For changes affecting conversation/message rendering, check both server-rendered history and live-appended event rendering. Many message shapes are rendered twice: once by Go templates for page load, and once by JavaScript for live events. A fix that looks correct after a reload may still need a matching live-renderer update.
 
 ## Local server
 

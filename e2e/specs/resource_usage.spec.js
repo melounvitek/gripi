@@ -9,7 +9,7 @@ test("shows systemctl cgroup memory with inactive file cache context", async ({ 
       workingSetBytes: 1610612736,
       inactiveFileBytes: 536870912,
       cpuUsageUsec: 1000000,
-      pumaRssBytes: 1342177280,
+      gatewayRssBytes: 1342177280,
       piRssBytes: 375390208,
       piProcessCount: 2
     })

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/melounvitek/gripi/internal/keyedlock"
 	"github.com/melounvitek/gripi/internal/rpc"
 )
 
@@ -50,29 +51,27 @@ type syncState struct {
 type Synchronizer struct {
 	store    Store
 	clients  *rpc.Registry
-	locksMu  sync.Mutex
-	locks    map[string]*sync.Mutex
+	locks    keyedlock.Mutexes
 	statesMu sync.Mutex
 	states   map[string]syncState
 }
 
 func NewSynchronizer(root, home string, cache *Cache, clients *rpc.Registry) *Synchronizer {
-	return &Synchronizer{store: Store{Root: root, Home: home, Cache: cache}, clients: clients, locks: make(map[string]*sync.Mutex), states: make(map[string]syncState)}
+	return &Synchronizer{store: Store{Root: root, Home: home, Cache: cache}, clients: clients, states: make(map[string]syncState)}
 }
 
 func (synchronizer *Synchronizer) Inspect(ctx context.Context, path string, includePosition bool) (SyncResult, error) {
-	lock := synchronizer.lockFor(path)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := synchronizer.locks.Lock(path)
+	defer unlock()
 	return synchronizer.inspectRecovering(ctx, path, includePosition)
 }
 
 func (synchronizer *Synchronizer) InspectIfAvailable(ctx context.Context, path string, includePosition bool) *SyncResult {
-	lock := synchronizer.lockFor(path)
-	if !lock.TryLock() {
+	unlock, locked := synchronizer.locks.TryLock(path)
+	if !locked {
 		return nil
 	}
-	defer lock.Unlock()
+	defer unlock()
 	result := synchronizer.inspectRecoveringAvailable(ctx, path, includePosition)
 	return result
 }
@@ -103,11 +102,11 @@ func (synchronizer *Synchronizer) Message(result SyncResult) string {
 }
 
 func (synchronizer *Synchronizer) WithMutableClient(ctx context.Context, path string, call func(rpc.RPCClient) error) error {
-	lock := synchronizer.lockFor(path)
-	if !lock.TryLock() {
+	unlock, locked := synchronizer.locks.TryLock(path)
+	if !locked {
 		return ErrSyncBusy
 	}
-	defer lock.Unlock()
+	defer unlock()
 	before, resultErr := synchronizer.verificationSnapshot(ctx, path)
 	if resultErr != nil {
 		return resultErr
@@ -120,11 +119,11 @@ func (synchronizer *Synchronizer) WithMutableClient(ctx context.Context, path st
 	})
 }
 func (synchronizer *Synchronizer) WithClientMove(ctx context.Context, path string, touch bool, call func(rpc.RPCClient) (string, error), prepare func(string, string) (func() error, error), commit func(string, string)) (string, error) {
-	lock := synchronizer.lockFor(path)
-	if !lock.TryLock() {
+	unlock, locked := synchronizer.locks.TryLock(path)
+	if !locked {
 		return path, ErrSyncBusy
 	}
-	defer lock.Unlock()
+	defer unlock()
 	before, err := synchronizer.verificationSnapshot(ctx, path)
 	if err != nil {
 		return path, err
@@ -138,14 +137,13 @@ func (synchronizer *Synchronizer) WithClientMove(ctx context.Context, path strin
 }
 
 func (synchronizer *Synchronizer) WithBashClient(ctx context.Context, path string, call func(rpc.RPCClient) error) error {
-	lock := synchronizer.lockFor(path)
-	if !lock.TryLock() {
+	unlock, locked := synchronizer.locks.TryLock(path)
+	if !locked {
 		return ErrSyncBusy
 	}
-	locked := true
 	defer func() {
 		if locked {
-			lock.Unlock()
+			unlock()
 		}
 	}()
 	before, err := synchronizer.verificationSnapshot(ctx, path)
@@ -156,17 +154,17 @@ func (synchronizer *Synchronizer) WithBashClient(ctx context.Context, path strin
 		if err := synchronizer.verifyClient(ctx, path, before, client); err != nil {
 			return err
 		}
-		lock.Unlock()
+		unlock()
 		locked = false
 		return call(client)
 	})
 }
 func (synchronizer *Synchronizer) WithInterruptClient(ctx context.Context, path string, call func(rpc.RPCClient) error) error {
-	lock := synchronizer.lockFor(path)
-	if !lock.TryLock() {
+	unlock, locked := synchronizer.locks.TryLock(path)
+	if !locked {
 		return synchronizer.clients.WithExistingInterruptClient(ctx, path, call)
 	}
-	defer lock.Unlock()
+	defer unlock()
 	if synchronizer.clients.Busy(path) {
 		return synchronizer.clients.WithExistingInterruptClient(ctx, path, call)
 	}
@@ -187,9 +185,8 @@ func (synchronizer *Synchronizer) WithInterruptClient(ctx context.Context, path 
 }
 
 func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string) (SyncResult, error) {
-	lock := synchronizer.lockFor(path)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := synchronizer.locks.Lock(path)
+	defer unlock()
 	if synchronizer.clients.Busy(path) {
 		return SyncResult{}, fmt.Errorf("%w: wait for the gateway task to finish before taking over", ErrSyncBusy)
 	}
@@ -469,14 +466,6 @@ func (synchronizer *Synchronizer) setState(path string, state syncState) {
 func (synchronizer *Synchronizer) update(path string, snapshot FileSnapshot, mode SyncMode, leaf, message string) {
 	copy := snapshot
 	synchronizer.setState(path, syncState{Snapshot: &copy, Mode: mode, RPCLeafID: leaf, Error: message})
-}
-func (synchronizer *Synchronizer) lockFor(path string) *sync.Mutex {
-	synchronizer.locksMu.Lock()
-	defer synchronizer.locksMu.Unlock()
-	if synchronizer.locks[path] == nil {
-		synchronizer.locks[path] = &sync.Mutex{}
-	}
-	return synchronizer.locks[path]
 }
 func resultFor(state syncState) SyncResult {
 	result := SyncResult{Mode: state.Mode, RPCLeafID: state.RPCLeafID, Error: state.Error}

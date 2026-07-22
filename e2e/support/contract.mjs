@@ -18,6 +18,7 @@ export const sessions = {
   terminal: "E2E Terminal Desktop",
   settings: "E2E Settings Desktop",
   extension: "E2E Extension Desktop",
+  extensionRace: "E2E Extension Race Desktop",
   mobile: "E2E Prompt Mobile",
   bashIncluded: "E2E Bash Included Desktop",
   bashExcluded: "E2E Bash Excluded Desktop",
@@ -38,6 +39,7 @@ export const prompts = {
   abortStart: "Start the abort scenario",
   terminal: "Show terminal screen updates",
   extension: "Ask me for release approval",
+  extensionRace: "Exercise queued extension requests",
   newSession: "Create the first deterministic response",
   realPiPrefix: "Reply with exactly this token and nothing else:"
 };
@@ -73,5 +75,6 @@ export const replies = {
   followUp: "Queued follow-up completed.",
   aborted: "Run aborted by the browser.",
   extensionApproved: "Release approval was confirmed.",
+  extensionRaceComplete: "Queued extension requests completed.",
   newSession: "First session response complete."
 };

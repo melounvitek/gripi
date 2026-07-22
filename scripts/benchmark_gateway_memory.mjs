@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
@@ -9,9 +9,8 @@ import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 import { seedFixtures } from "../e2e/fixtures/seed.mjs";
 
-const implementation = process.argv[2];
-if (!["ruby", "go"].includes(implementation)) {
-  console.error("Usage: scripts/benchmark_gateway_memory.mjs ruby|go");
+if (process.argv.length > 2) {
+  console.error("Usage: scripts/benchmark_gateway_memory.mjs");
   process.exit(1);
 }
 if (process.platform !== "linux") {
@@ -25,25 +24,10 @@ const fixture = await seedFixtures(runtimeRoot);
 const port = await availablePort();
 const baseURL = `http://127.0.0.1:${port}`;
 const fakePiPath = path.join(repoRoot, "e2e", "support", "fake_pi.mjs");
-const inheritedEnv = { ...process.env };
-for (const key of [
-  "PUMA_WORKERS",
-  "PUMA_THREADS",
-  "MIN_THREADS",
-  "MAX_THREADS",
-  "RAILS_MAX_THREADS",
-  "RACKUP_HANDLER",
-  "RACK_HANDLER",
-  "SERVER"
-]) delete inheritedEnv[key];
 const env = {
-  ...inheritedEnv,
+  ...process.env,
   HOME: fixture.home,
   APP_ENV: "production",
-  RACK_ENV: "production",
-  WEB_CONCURRENCY: "0",
-  PUMA_MIN_THREADS: "0",
-  PUMA_MAX_THREADS: "5",
   GRIPI_ADMIN_PASSWORD: "memory-benchmark",
   GRIPI_BROWSER_AUTH_DISABLED: "1",
   GRIPI_MULTI_USER_MODE: "",
@@ -71,29 +55,28 @@ const env = {
   GRIPI_E2E_SESSIONS_ROOT: fixture.sessionsRoot
 };
 
-let command;
-let args;
-if (implementation === "ruby") {
-  command = "bundle";
-  args = ["exec", "rackup", "-s", "puma", "-o", "127.0.0.1", "-p", String(port)];
-} else {
-  const binary = path.join(runtimeRoot, "gripi");
-  const build = spawnSync("go", ["build", "-o", binary, "./cmd/gripi"], {
-    cwd: repoRoot,
-    env,
-    encoding: "utf8"
-  });
-  if (build.status !== 0) {
-    console.error(build.stderr || build.stdout);
-    await rm(runtimeRoot, { recursive: true, force: true });
-    process.exit(build.status ?? 1);
-  }
-  command = binary;
-  args = [];
+const executableRoot = path.join(runtimeRoot, "checkout");
+const command = path.join(executableRoot, "tmp", "gripi");
+await mkdir(path.dirname(command), { recursive: true });
+const initializeCheckout = spawnSync("git", ["init", "--quiet", executableRoot], { encoding: "utf8" });
+if (initializeCheckout.status !== 0) {
+  console.error(initializeCheckout.stderr || initializeCheckout.stdout);
+  await rm(runtimeRoot, { recursive: true, force: true });
+  process.exit(initializeCheckout.status ?? 1);
+}
+const build = spawnSync("go", ["build", "-o", command, "./cmd/gripi"], {
+  cwd: repoRoot,
+  env: process.env,
+  encoding: "utf8"
+});
+if (build.status !== 0) {
+  console.error(build.stderr || build.stdout);
+  await rm(runtimeRoot, { recursive: true, force: true });
+  process.exit(build.status ?? 1);
 }
 
 let logs = "";
-const child = spawn(command, args, {
+const child = spawn(command, [], {
   cwd: repoRoot,
   env,
   detached: true,
@@ -123,7 +106,7 @@ try {
   rssSamples.sort((left, right) => left - right);
   timings.sort((left, right) => left - right);
   const result = {
-    implementation,
+    implementation: "go",
     workload: "4 warmup and 100 measured GET requests across / and /sidebar with seeded E2E sessions",
     pid: child.pid,
     rssMiB: {

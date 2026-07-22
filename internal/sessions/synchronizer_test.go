@@ -184,9 +184,15 @@ func TestSynchronizerLifecycleIsSafeDuringConcurrentObservation(t *testing.T) {
 		}()
 	}
 	group.Wait()
+	if synchronizer.locks.Len() != 0 {
+		t.Fatalf("session lock entries after concurrent observation = %d", synchronizer.locks.Len())
+	}
 	result := inspectSync(t, synchronizer, path, true)
 	if result.Mode != SyncManaged {
 		t.Fatalf("final result = %#v", result)
+	}
+	if synchronizer.locks.Len() != 0 {
+		t.Fatalf("session lock entries after final inspection = %d", synchronizer.locks.Len())
 	}
 	if err := registry.CloseAll(); err != nil {
 		t.Fatal(err)

@@ -74,6 +74,52 @@ test("find, select, and pin a session with persisted history", async ({ page }) 
   await expect(page.getByRole("heading", { level: 2, name: "Pinned" })).toBeVisible();
 });
 
+test("a newer session switch wins when fragment responses arrive out of order", async ({ page }) => {
+  await page.goto("/");
+  const olderLink = page.getByRole("link", { name: new RegExp(sessions.marker) });
+  const newerLink = page.getByRole("link", { name: new RegExp(sessions.promptRetryCompact) });
+  await expect(olderLink).toBeVisible();
+  await expect(newerLink).toBeVisible();
+  const olderSession = new URL(await olderLink.getAttribute("href"), page.url()).searchParams.get("session");
+  const newerSession = new URL(await newerLink.getAttribute("href"), page.url()).searchParams.get("session");
+
+  let markOlderFragmentRequested;
+  const olderFragmentRequested = new Promise((resolve) => { markOlderFragmentRequested = resolve; });
+  let markNewerFragmentCompleted;
+  const newerFragmentCompleted = new Promise((resolve) => { markNewerFragmentCompleted = resolve; });
+  const fragmentCompletionOrder = [];
+  const eventSessions = [];
+  await page.route(/\/events(?:\?|$)/, async (route) => {
+    eventSessions.push(new URL(route.request().url()).searchParams.get("session"));
+    await route.continue();
+  });
+  await page.route(/\/session_fragment(?:\?|$)/, async (route) => {
+    const session = new URL(route.request().url()).searchParams.get("session");
+    if (session === olderSession) {
+      markOlderFragmentRequested();
+      await newerFragmentCompleted;
+    }
+    const response = await route.fetch();
+    await route.fulfill({ response });
+    fragmentCompletionOrder.push(session);
+    if (session === newerSession) markNewerFragmentCompleted();
+  });
+
+  await olderLink.click();
+  await olderFragmentRequested;
+  await page.evaluate((href) => {
+    history.pushState({}, "", href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, await newerLink.getAttribute("href"));
+
+  await expect(page.getByRole("heading", { level: 1, name: sessions.promptRetryCompact })).toBeVisible();
+  await expect.poll(() => fragmentCompletionOrder).toEqual([newerSession, olderSession]);
+  await expect(page.getByRole("heading", { level: 1, name: sessions.promptRetryCompact })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.get("session")).toBe(newerSession);
+  await expect.poll(() => eventSessions.at(-1)).toBe(newerSession);
+  await expect(page.locator("#live-output")).toHaveAttribute("data-events-url", new RegExp(encodeURIComponent(newerSession)));
+});
+
 async function searchSessions(page, query) {
   await page.getByRole("button", { name: "Search sessions" }).click();
   const search = page.getByRole("searchbox", { name: "Search sessions" });

@@ -359,26 +359,24 @@ func (app *application) lockResolvedImagePromptPath(request *http.Request, path 
 		if err != nil {
 			return "", nil, err
 		}
-		lock := app.imagePromptLock(resolved)
-		lock.Lock()
+		unlock := app.imagePromptLocks.Lock(resolved)
 		latest, _, err := app.resolveOwnedPendingPath(request, resolved)
 		if err != nil {
-			lock.Unlock()
+			unlock()
 			return "", nil, err
 		}
 		if latest == resolved {
-			return resolved, lock.Unlock, nil
+			return resolved, unlock, nil
 		}
-		lock.Unlock()
+		unlock()
 		path = latest
 	}
 	return "", nil, errors.New("pending session changed too many times")
 }
 
 func (app *application) movePendingRPCClient(request *http.Request, from, to string) error {
-	lock := app.imagePromptLock(from)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := app.imagePromptLocks.Lock(from)
+	defer unlock()
 	app.pendingRemapMu.Lock()
 	defer app.pendingRemapMu.Unlock()
 	if app.ownsSession != nil && !app.ownsSession(request, from) {

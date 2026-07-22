@@ -38,7 +38,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	server := newHTTPServer(handler)
 	listener, err := net.Listen("tcp", cfg.Address)
 	if err != nil {
 		log.Fatal(err)
@@ -85,6 +85,21 @@ func main() {
 	}
 }
 
+const (
+	// Ten minutes keeps the 64 MiB upload contract usable down to roughly 110 KiB/s on VPN links.
+	serverReadTimeout = 10 * time.Minute
+	serverIdleTimeout = 2 * time.Minute
+)
+
+func newHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       serverReadTimeout,
+		IdleTimeout:       serverIdleTimeout,
+	}
+}
+
 func ensurePassword() error {
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -118,9 +133,14 @@ func ensurePassword() error {
 		}
 	}
 	for _, line := range strings.Split(string(contents), "\n") {
-		if strings.HasPrefix(line, "GRIPI_ADMIN_PASSWORD=") {
-			return nil
+		password, found := configuredPassword(line)
+		if !found {
+			continue
 		}
+		if password == "" {
+			return fmt.Errorf("GRIPI_ADMIN_PASSWORD is empty in %s; remove the line or set a password", path)
+		}
+		return nil
 	}
 
 	value := make([]byte, 12)
@@ -141,6 +161,18 @@ func ensurePassword() error {
 	}
 	fmt.Printf("Generated GRIPI_ADMIN_PASSWORD in %s\nAdmin password: %s\nYou should change it by editing %s\n", path, password, path)
 	return nil
+}
+
+func configuredPassword(line string) (string, bool) {
+	key, value, found := strings.Cut(strings.TrimSpace(line), "=")
+	if !found || strings.TrimSpace(key) != "GRIPI_ADMIN_PASSWORD" {
+		return "", false
+	}
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"')) {
+		value = value[1 : len(value)-1]
+	}
+	return value, true
 }
 
 func writePasswordFile(path string, contents []byte, addition string) error {

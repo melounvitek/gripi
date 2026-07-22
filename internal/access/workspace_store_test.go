@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestWorkspaceStoresPreserveRubyStateFormats(t *testing.T) {
+func TestWorkspaceStoresPreserveExistingStateFormats(t *testing.T) {
 	root := t.TempDir()
 	accessPath := filepath.Join(root, "workspace-access.json")
 	now := time.Now().UTC().Format(time.RFC3339)

@@ -1,6 +1,6 @@
 # Frontend architecture
 
-The gateway uses server-rendered ERB with native JavaScript modules and no frontend build step. Sinatra serves the files in `public/assets/` with revalidation enabled. `views/index.erb` provides the page shell and server-owned data attributes.
+The Go gateway renders HTML templates from `internal/server/templates/` and serves native JavaScript modules from `public/assets/` with no frontend build step. `internal/server/templates/index.html` provides the page shell and server-owned data attributes.
 
 ## Lifecycles
 
@@ -22,17 +22,18 @@ Before replacing a session view, `app.js` resets controllers that hold session D
 
 Conversation messages have two rendering paths:
 
-- `views/_message_article.erb` renders persisted history.
+- `internal/server/templates/message.html` renders persisted history.
 - `LiveMessageParser` and `LiveMessageRenderer` render newly received events.
 
-Changes to message presentation or supported Pi event shapes must check both paths. Shared CSS classes and semantic parity are covered by regression tests, while intentional live-only state includes streaming, optimistic, and temporary tool progress markers.
+Changes to message presentation or supported Pi event shapes must check both paths. Shared CSS classes and server-rendered semantics are covered by Go rendering tests; native Node tests exercise representative live shapes and persisted-message deduplication; the browser contract checks the integrated paths. Intentional live-only state includes streaming, optimistic, and temporary tool progress markers.
 
 ## Testing
 
-Ruby tests exercise HTTP assets, HTML contracts, JavaScript modules through Node, controller lifecycle behavior, and representative SSR/live semantics. Run:
+Run the directly importable browser modules, demo, and JavaScript syntax checks with:
 
 ```sh
-mise run test
-npm run desktop:check
-for file in public/assets/*.js; do node --check "$file"; done
+mise run frontend-check
+mise run pi-extension-check
 ```
+
+The native suites cover Markdown cancellation, representative SSR/live shapes and deduplication, terminal update races, sidebar and history concurrency, first-touch project selection, and tree behavior. Managed Playwright covers out-of-order session orchestration and extension UI timeout/retry/queue behavior in the production app. The native suites do not replace integrated DOM coverage. The Pi extension check uses the installed Pi package to exercise the native tree bridge. Use `mise run test-go` for server-rendered HTML and route contracts, and `mise run e2e` for complete browser lifecycles. See [testing](testing.md) for the full matrix.

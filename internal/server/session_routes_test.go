@@ -388,7 +388,7 @@ func TestConversationPaginationAndAttachmentReadContract(t *testing.T) {
 	}
 }
 
-func TestPersistedSubagentAndToolPresentationMatchesRubyAndLiveRendering(t *testing.T) {
+func TestPersistedSubagentAndToolPresentationMatchesLiveRendering(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	project := filepath.Join(fixture.root, "projects", "subagent-project")
 	if err := os.MkdirAll(project, 0700); err != nil {

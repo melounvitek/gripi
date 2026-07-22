@@ -16,6 +16,7 @@ import (
 
 	"github.com/melounvitek/gripi/internal/access"
 	"github.com/melounvitek/gripi/internal/config"
+	"github.com/melounvitek/gripi/internal/keyedlock"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/resource"
 	"github.com/melounvitek/gripi/internal/rpc"
@@ -43,6 +44,7 @@ type application struct {
 	markdown           *rendering.Markdown
 	heavyRequests      chan struct{}
 	fdRequests         chan struct{}
+	unknownBodySpools  chan struct{}
 	sessionHashesMu    sync.Mutex
 	knownSessionHashes map[string]bool
 	sessionHashesAt    time.Time
@@ -51,7 +53,7 @@ type application struct {
 	rpcDiagnostics     *rpc.Diagnostics
 	pendingSessions    *rpc.PendingSessionRegistry
 	pendingRemapMu     sync.Mutex
-	imagePromptLocks   sync.Map
+	imagePromptLocks   keyedlock.Mutexes
 	synchronizer       *sessions.Synchronizer
 	rpcMaintenance     *rpc.Maintenance
 	resourceMonitor    resourceMonitor
@@ -151,6 +153,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		markdown:           markdown,
 		heavyRequests:      make(chan struct{}, 2),
 		fdRequests:         make(chan struct{}, 4),
+		unknownBodySpools:  make(chan struct{}, unknownBodySpoolLimit),
 		knownSessionHashes: make(map[string]bool),
 		pendingSessions:    rpc.NewPendingSessionRegistry(nil),
 	}
@@ -265,11 +268,6 @@ func (app *application) rpcExtensionPath() (string, error) {
 	}
 	app.extensionRoot, app.extensionPath = root, path
 	return path, nil
-}
-
-func (app *application) imagePromptLock(path string) *sync.Mutex {
-	lock, _ := app.imagePromptLocks.LoadOrStore(path, &sync.Mutex{})
-	return lock.(*sync.Mutex)
 }
 
 func filesOnly(root fs.FS, next http.Handler) http.Handler {

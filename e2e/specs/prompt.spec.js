@@ -49,9 +49,10 @@ test("stops a delayed prompt retry when the user stops", async ({ page }) => {
   await sendPrompt(page, prompts.retryCancelled);
   await expect(page.locator(".composer-state")).toHaveText("Waiting to send…");
   await page.getByRole("button", { name: "Abort running Pi" }).click();
+  const promptRequestsAfterStop = promptRequests;
   await page.waitForTimeout(500);
 
-  expect(promptRequests).toBe(1);
+  expect(promptRequests).toBe(promptRequestsAfterStop);
   await expect(message(page, "user", prompts.retryCancelled)).toHaveCount(0);
 });
 

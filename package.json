@@ -12,7 +12,11 @@
   "scripts": {
     "desktop": "electron .",
     "desktop:check": "node --test electron/*.test.js && node --check electron/main.js && node --check electron/preload.js && node --check electron/gateway_preload.js && node --check electron/shell.js",
-    "test:e2e:support": "node --test e2e/support/*.test.mjs",
+    "frontend:check": "node --test test/frontend*.test.mjs test/demo.test.mjs && for file in public/assets/*.js demo/*.js; do node --check \"$file\"; done",
+    "pi-extension:check": "node --test test/pi_extension.test.mjs",
+    "scripts:check": "node --test test/scripts.test.mjs",
+    "fake-pi:check": "node --test e2e/support/*.test.mjs && node --check e2e/support/fake_pi.mjs",
+    "test:e2e:support": "npm run fake-pi:check",
     "test:e2e": "npm run test:e2e:support && node e2e/support/managed_server.mjs",
     "test:e2e:external": "node e2e/support/external.mjs",
     "test:e2e:real": "node e2e/support/managed_server.mjs --real-pi --project=real-pi",

@@ -271,11 +271,11 @@ func startProcess(cwd string, command, args []string, diagnostics *Diagnostics) 
 }
 
 func ScrubbedEnvironment(environment []string) []string {
-	blocked := map[string]bool{"GEM_HOME": true, "GEM_PATH": true, "RUBYLIB": true, "RUBYOPT": true, "GRIPI_ADMIN_PASSWORD": true}
+	blocked := map[string]bool{"GRIPI_ADMIN_PASSWORD": true}
 	result := make([]string, 0, len(environment))
 	for _, entry := range environment {
 		key, _, _ := strings.Cut(entry, "=")
-		if blocked[key] || strings.HasPrefix(key, "BUNDLE_") || strings.HasPrefix(key, "BUNDLER_") {
+		if blocked[key] {
 			continue
 		}
 		result = append(result, entry)

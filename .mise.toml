@@ -1,5 +1,4 @@
 [tools]
-ruby = "4.0.2"
 node = "22.22.1"
 go = "1.26.5"
 
@@ -15,37 +14,37 @@ run = "bin/start"
 description = "Run the Go web gateway in development mode on port 4567"
 run = "APP_ENV=development GRIPI_BIND_HOST=127.0.0.1 go run ./cmd/gripi"
 
-[tasks.setup-ruby]
-description = "Install dependencies for the legacy Ruby gateway"
-run = "bundle install"
-
-[tasks.dev-ruby]
-description = "Run the legacy Ruby gateway in development mode"
-run = "RACK_ENV=development bundle exec rackup -o 127.0.0.1 -p 4567"
-
-[tasks.start-ruby]
-description = "Run the retained Ruby gateway in production mode"
-run = "RACK_ENV=production bundle exec rackup -o ${GRIPI_HOST:-127.0.0.1} -p ${GRIPI_PORT:-4567}"
-
 [tasks.test]
-description = "Run the Ruby and Go test suites"
-run = "bundle exec ruby -Itest -e 'Dir[\"test/*_test.rb\"].sort.each { |file| require File.expand_path(file) }' && go test ./..."
+description = "Run the Go gateway, frontend, shell script, and Pi extension tests"
+run = "go test ./... && npm run frontend:check && npm run scripts:check && npm run pi-extension:check"
 
 [tasks.test-go]
-description = "Run the Go gateway test suite"
+description = "Run the Go gateway tests"
 run = "go test ./..."
+
+[tasks.frontend-check]
+description = "Run native Node frontend and demo tests plus JavaScript syntax checks"
+run = "npm run frontend:check"
+
+[tasks.scripts-check]
+description = "Run shell launcher, setup, password wrapper, and desktop installer tests"
+run = "npm run scripts:check"
+
+[tasks.pi-extension-check]
+description = "Run the native Node Pi tree extension bridge test"
+run = "npm run pi-extension:check"
+
+[tasks.fake-pi-check]
+description = "Run deterministic fake-Pi RPC support tests"
+run = "npm run fake-pi:check"
 
 [tasks.build-go]
 description = "Build the Go gateway"
 run = "mkdir -p tmp && go build -o tmp/gripi ./cmd/gripi"
 
-[tasks.benchmark-ruby]
-description = "Measure the Ruby gateway under the seeded memory workload"
-run = "node scripts/benchmark_gateway_memory.mjs ruby"
-
 [tasks.benchmark-go]
 description = "Measure the Go gateway under the seeded memory workload"
-run = "node scripts/benchmark_gateway_memory.mjs go"
+run = "node scripts/benchmark_gateway_memory.mjs"
 
 [tasks.e2e]
 description = "Run the managed browser E2E contract suite"

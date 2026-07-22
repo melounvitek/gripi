@@ -563,16 +563,16 @@ func TestClientSnapshotsAndAnswersExtensionUIState(t *testing.T) {
 	}
 }
 
-func TestScrubbedEnvironmentRemovesGatewayAndRubyVariables(t *testing.T) {
-	environment := ScrubbedEnvironment([]string{"PATH=/bin", "GRIPI_ADMIN_PASSWORD=secret", "BUNDLE_GEMFILE=x", "BUNDLER_VERSION=x", "GEM_HOME=x", "GEM_PATH=x", "RUBYLIB=x", "RUBYOPT=x", "GRIPI_E2E_SESSIONS_ROOT=kept"})
+func TestScrubbedEnvironmentRemovesGatewayPasswordAndPreservesRuntimeVariables(t *testing.T) {
+	environment := ScrubbedEnvironment([]string{"PATH=/bin", "GRIPI_ADMIN_PASSWORD=secret", "TOOL_RUNTIME_PATH=kept", "GRIPI_E2E_SESSIONS_ROOT=kept"})
 	joined := strings.Join(environment, "\n")
-	for _, secret := range []string{"GRIPI_ADMIN_PASSWORD", "BUNDLE_", "BUNDLER_", "GEM_HOME", "GEM_PATH", "RUBYLIB", "RUBYOPT"} {
-		if strings.Contains(joined, secret) {
-			t.Errorf("environment retained %s: %q", secret, joined)
-		}
+	if strings.Contains(joined, "GRIPI_ADMIN_PASSWORD") {
+		t.Fatalf("environment retained gateway password: %q", joined)
 	}
-	if !strings.Contains(joined, "GRIPI_E2E_SESSIONS_ROOT=kept") {
-		t.Fatalf("environment = %q", joined)
+	for _, expected := range []string{"TOOL_RUNTIME_PATH=kept", "GRIPI_E2E_SESSIONS_ROOT=kept"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("environment = %q; missing %q", joined, expected)
+		}
 	}
 }
 

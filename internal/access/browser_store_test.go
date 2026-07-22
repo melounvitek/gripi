@@ -14,7 +14,7 @@ import (
 	"unicode/utf8"
 )
 
-func TestBrowserStorePersistsRubyCompatibleRequestsAndApprovalFlow(t *testing.T) {
+func TestBrowserStorePersistsRequestsAndApprovalFlow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "browser-access.json")
 	store := NewBrowserStore(path)
 	now := time.Date(2026, time.February, 3, 4, 5, 6, 789, time.UTC)

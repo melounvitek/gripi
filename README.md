@@ -96,17 +96,18 @@ If you do not already have a session-naming workflow, consider installing [`@fur
 pi install npm:@furbyhaxx/pi-session-naming
 ```
 
-## Gateway implementations
-
-The operational gateway is built in Go. The previous Ruby/Sinatra/Puma gateway remains available during the migration: prepare it with `mise run setup-ruby`, then use `mise run dev-ruby` or `mise run start-ruby`. It is not used by `mise run start`.
-
 ## Development
+
+The gateway is implemented in Go. The browser UI and demo use native JavaScript without a frontend build step, and the desktop shell uses Electron. Project setup and the canonical test suite require Pi CLI on `PATH`; `mise run setup` does not install Pi.
 
 ```sh
 mise run dev
-mise run setup-ruby # once, while the compatibility suite remains
 mise run test
+mise run frontend-check
+mise run pi-extension-check
+mise run desktop-check
+mise run fake-pi-check
 mise run e2e
 ```
 
-See [testing](docs/testing.md) for the managed browser suite, external implementation contract, and optional real-Pi smoke test.
+See [testing](docs/testing.md) for the complete check matrix, managed browser suite, external implementation contract, and optional real-Pi smoke test.

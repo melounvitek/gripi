@@ -40,15 +40,17 @@ Set proxy-header trust explicitly when using a reverse proxy:
 GRIPI_TRUST_PROXY_HEADERS=1
 ```
 
-Enable this only when Gripi is reachable through a trusted local/private reverse proxy that overwrites client-supplied `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-Port` headers. Gripi does not read the RFC `Forwarded` header. Also list every public proxy hostname in `GRIPI_PERMITTED_HOSTS`. Leave proxy support disabled for direct localhost, LAN, and VPN connections. Do not let clients bypass the proxy and reach a proxy-trusting listener directly, because they could spoof these headers.
+Enable this only when Gripi is reachable through a trusted local/private reverse proxy that overwrites client-supplied `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-Port` headers. Gripi defensively inspects the RFC `Forwarded` header when rejecting ambiguous authority input, but never trusts it for request scheme or host. Also list every public proxy hostname in `GRIPI_PERMITTED_HOSTS`. Leave proxy support disabled for direct localhost, LAN, and VPN connections. Do not let clients bypass the proxy and reach a proxy-trusting listener directly, because they could spoof these headers.
 
 Host authorization and proxy-header trust always use strict defaults. Before upgrading an older Tailscale Serve or reverse-proxy installation, set both its public hostname in `GRIPI_PERMITTED_HOSTS` and `GRIPI_TRUST_PROXY_HEADERS=1`; the previous automatic compatibility fallback has been removed. Direct connections must leave proxy-header trust disabled.
 
 If a request arrives for an unconfigured hostname, Gripi keeps it blocked and displays the exact validated hostname to add, the proxy setting when relevant, and the restart command. Only follow that diagnostic when you recognize the hostname as your intended Gripi address. A configured hostname with missing proxy trust similarly produces instructions after an unsafe browser action is rejected.
 
-## HTTP request body limit
+## HTTP limits
 
-The Go gateway enforces a fixed 64 MiB request-body limit before requests reach authentication or form parsing. The limit is not configurable. The legacy Puma gateway applies the same limit.
+The gateway enforces a fixed 64 MiB request-body limit before requests reach authentication or form parsing. The limit is not configurable. The server allows ten seconds for headers and ten minutes total to read a request, which keeps a full-size upload viable at roughly 110 KiB/s on slower VPN links while bounding incomplete-body connections. Idle keep-alive connections close after two minutes. Response writes have no server deadline because agent and shell RPC responses may legitimately remain open for a long time.
+
+Unknown-length/chunked bodies are validated through at most two concurrent temporary-file spools before authentication; excess requests receive `503 Service Unavailable` without creating a file. Known-length requests continue to stream through the 64 MiB limiter without occupying a spool slot.
 
 When running Gripi behind a reverse proxy, enforce a corresponding request-body cap there as well. Use a cap no greater than 64 MiB, lowering it only if valid Gripi requests still fit, and do not allow unbounded request-body buffering in the proxy.
 
@@ -170,6 +172,6 @@ Updates require the checkout to:
 - have no local commits
 - allow a fast-forward to `origin/master`
 
-Gripi fetches the update, creates an isolated temporary Git worktree, installs the declared Mise tools there, runs the Go tests, and stages a replacement gateway binary. It changes neither live dependencies nor the live checkout until validation succeeds. Gripi then records a private recoverable cutover, fast-forwards the checkout, and atomically installs the staged `tmp/gripi` binary. On any later failure it restores the previous tracked checkout and preserves the prior binary; after an interrupted cutover, `bin/start` completes the matching staged installation before launch.
+Gripi fetches the update, creates an isolated temporary Git worktree, installs the declared Go and Node Mise tools there, runs the canonical Go, frontend, and shell script checks, and stages a replacement gateway binary. It changes neither live dependencies nor the live checkout until validation succeeds. Gripi then records a private recoverable cutover, fast-forwards the checkout, and atomically installs the staged `tmp/gripi` binary. On any later failure it restores the previous tracked checkout and preserves the prior binary; after an interrupted cutover, `bin/start` completes the matching staged installation before launch.
 
 Automatic restart requires Gripi to be launched through `mise run start` or `bin/start`. The launcher consumes `~/.pi/gripi/restart-request` (or `GRIPI_RESTART_PATH`) and starts the newly built binary. A directly launched `tmp/gripi` process can update the checkout but cannot start its replacement.

@@ -53,8 +53,27 @@ install_mac() {
   log "Spotlight should find it after macOS indexes ~/Applications."
 }
 
+has_fuse_2() {
+  if command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep 'libfuse\.so\.2' >/dev/null; then
+    return 0
+  fi
+
+  local roots=(/lib /lib64 /usr/lib /usr/lib64)
+  if [[ -n "${GRIPI_FUSE_LIBRARY_ROOTS:-}" ]]; then
+    IFS=: read -r -a roots <<< "$GRIPI_FUSE_LIBRARY_ROOTS"
+  fi
+
+  local root library
+  for root in "${roots[@]}"; do
+    for library in "$root"/libfuse.so.2 "$root"/*/libfuse.so.2; do
+      [[ -e "$library" ]] && return 0
+    done
+  done
+  return 1
+}
+
 install_linux() {
-  if ! ruby -rfiddle -e 'Fiddle.dlopen("libfuse.so.2")' >/dev/null 2>&1; then
+  if ! has_fuse_2; then
     fail "Linux desktop app requires FUSE 2 (libfuse.so.2) to run AppImages. On Arch Linux, install it with: sudo pacman -S fuse2"
   fi
 

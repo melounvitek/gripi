@@ -14,6 +14,7 @@ test("complete one disposable prompt with the installed Pi CLI", async ({ page }
   await dialog.getByRole("combobox", { name: "Project" }).click();
   await page.getByRole("option", { name: /new-session-desktop/ }).click();
   await dialog.getByRole("button", { name: "Start session" }).click();
+  await expect(page).toHaveURL(/[?&]session=/);
 
   await sendPrompt(page, `${prompts.realPiPrefix} ${token}`);
   await expect(message(page, "assistant", token)).toBeVisible({ timeout: 150_000 });

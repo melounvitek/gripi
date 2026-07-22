@@ -90,7 +90,7 @@ export class ResourceUsageController {
     element.hidden = false;
     element.title = `Raw cgroup memory matching systemctl; approximate working set ${formatBytes(payload.workingSetBytes)} after inactive file cache; gateway and Pi RSS do not sum to the cgroup total; CPU 100% equals one logical core`;
     total.textContent = `RAM ${formatBytes(payload.memoryBytes)} · CPU ${cpuPercent === null ? "—" : `${cpuPercent}%`}`;
-    breakdown.textContent = `Gateway ${formatBytes(payload.pumaRssBytes)} · Pi ${formatBytes(payload.piRssBytes)} (${payload.piProcessCount}) · inactive file cache ${formatBytes(payload.inactiveFileBytes)}`;
+    breakdown.textContent = `Gateway ${formatBytes(payload.gatewayRssBytes)} · Pi ${formatBytes(payload.piRssBytes)} (${payload.piProcessCount}) · inactive file cache ${formatBytes(payload.inactiveFileBytes)}`;
   }
 
   element() {

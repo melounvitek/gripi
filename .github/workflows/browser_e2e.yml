@@ -16,8 +16,9 @@ jobs:
       - uses: jdx/mise-action@v3
         with:
           cache: true
-      - run: bundle install
+      - run: npm install --global @earendil-works/pi-coding-agent@0.81.1
       - run: npm ci
+      - run: mise run test
       - run: npx playwright install --with-deps chromium
       - run: mise run e2e
       - uses: actions/upload-artifact@v4

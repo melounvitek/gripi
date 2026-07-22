@@ -22,7 +22,7 @@ func TestPersistedAssistantThinkingAndFinalAnswerRemainSeparateLikeLiveMessages(
 	}
 }
 
-func TestPersistedCommentarySignatureMatchesRubyAndLiveParser(t *testing.T) {
+func TestPersistedCommentarySignatureMatchesLiveParser(t *testing.T) {
 	tests := []struct {
 		name      string
 		signature string

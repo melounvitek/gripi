@@ -41,7 +41,7 @@ func (app *application) resourceUsage(response http.ResponseWriter, request *htt
 		"workingSetBytes":   snapshot.WorkingSetBytes,
 		"inactiveFileBytes": snapshot.InactiveFileBytes,
 		"cpuUsageUsec":      snapshot.CPUUsageUsec,
-		"pumaRssBytes":      snapshot.GatewayRSSBytes,
+		"gatewayRssBytes":   snapshot.GatewayRSSBytes,
 		"piRssBytes":        snapshot.PiRSSBytes,
 		"piProcessCount":    snapshot.PiProcessCount,
 	})

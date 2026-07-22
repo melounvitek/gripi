@@ -1,4 +1,5 @@
 import { ESCAPE_STOP_CONFIRMATION_WINDOW_MS, STALE_SESSION_REFRESH_AFTER_MS } from "./constants.js";
+import { AsyncGeneration } from "./async_generation.js";
 import { parseNativeBash } from "./bash.js";
 import {
   compactNumber,
@@ -41,7 +42,8 @@ import { LiveMessageParser } from "./live_message_parser.js";
 import { LiveMessageRenderer } from "./live_message_renderer.js";
 import { ServerMarkdownRenderer } from "./server_markdown_renderer.js";
 import { activateToolOutputRegion, enhanceMarkdownCodeBlocks } from "./dom.js";
-import { eventPollingDelay } from "./polling.js";
+import { eventPollCurrent, eventPollingDelay } from "./polling.js";
+import { extensionUiRequestExpired, extensionUiResponseDisposition } from "./extension_ui.js";
 import { TreeSessionController } from "./tree_session_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window);
@@ -139,7 +141,7 @@ let extensionDocumentTitle = null;
 let lastBoundSessionPath = null;
 let emptyEventPollCount = 0;
 let sessionViewGeneration = 0;
-let sessionSwitchGeneration = 0;
+const sessionSwitchGeneration = new AsyncGeneration();
 let promptSubmissionGeneration = 0;
 let sessionStatusRequestVersion = 0;
 let notificationRegistration = null;
@@ -945,10 +947,6 @@ function extensionUiResponseBody(request, extra = {}) {
   return body;
 }
 
-function extensionUiRequestExpired(request) {
-  return request?.expiresAt && request.expiresAt <= Date.now();
-}
-
 function setExtensionUiDeliveryPending(pending) {
   extensionUiDeliveryPending = pending;
   extensionUiModal?.querySelectorAll("button, input, textarea").forEach((control) => { control.disabled = pending; });
@@ -974,11 +972,12 @@ async function sendExtensionUiResponse(extra = {}) {
   if (extensionUiError) extensionUiError.hidden = true;
   try {
     const response = await fetch("/extension_ui_response", { method: "POST", body, headers: { "Accept": "application/json" } });
-    if ([404, 422].includes(response.status)) {
+    const disposition = extensionUiResponseDisposition(response);
+    if (disposition === "definitive-rejection") {
       if (activeExtensionUiRequest === request) finishExtensionUiRequest(request);
       return false;
     }
-    if (!response.ok) throw new Error("Extension UI response was rejected");
+    if (disposition === "retry") throw new Error("Extension UI response was rejected");
     if (activeExtensionUiRequest === request) finishExtensionUiRequest(request);
     return true;
   } catch (_error) {
@@ -1575,10 +1574,10 @@ async function pollEvents() {
     const eventsUrl = new URL(liveOutput.dataset.eventsUrl, window.location.origin);
     eventsUrl.searchParams.set("after", lastEventSeq);
     const response = await fetch(eventsUrl, { signal: controller.signal });
-    if (!response.ok || generation !== sessionViewGeneration) return;
+    if (!response.ok || !eventPollCurrent(generation, sessionViewGeneration)) return;
 
     const payload = await response.json();
-    if (generation !== sessionViewGeneration) return;
+    if (!eventPollCurrent(generation, sessionViewGeneration)) return;
     lastEventPollSuccessAt = Date.now();
     pollSucceeded = true;
     hideReconnectBanner();
@@ -1601,11 +1600,11 @@ async function pollEvents() {
       renderEvent(event);
     });
   } catch (_error) {
-    if (!controller.piSuppressedAbort && generation === sessionViewGeneration && !document.hidden) showReconnectBanner();
+    if (!controller.piSuppressedAbort && eventPollCurrent(generation, sessionViewGeneration) && !document.hidden) showReconnectBanner();
   } finally {
     clearTimeout(pollTimeout);
     if (eventPollAbortController === controller) eventPollAbortController = null;
-    if (generation === sessionViewGeneration) {
+    if (eventPollCurrent(generation, sessionViewGeneration)) {
       eventPollInFlight = false;
       scheduleNextEventPoll(nextEventPollDelay(!pollSucceeded));
     }
@@ -1624,11 +1623,11 @@ function restoreSubmittedComposerInput(message, imageFiles) {
 
 async function submitBashPrompt(rawMessage, bashCommand) {
   const generation = sessionViewGeneration;
-  const switchGeneration = sessionSwitchGeneration;
+  const switchGeneration = sessionSwitchGeneration.capture();
   const submittedSession = promptSessionInput?.value;
   const submittedImageFiles = pendingImages.map((entry) => entry.file);
   const submissionGeneration = ++promptSubmissionGeneration;
-  const submittedViewChanged = () => generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value;
+  const submittedViewChanged = () => generation !== sessionViewGeneration || !sessionSwitchGeneration.current(switchGeneration) || submittedSession !== promptSessionInput?.value;
   const retryCancelled = () => submittedViewChanged() || submissionGeneration !== promptSubmissionGeneration;
   const formData = new FormData(promptForm);
   addSessionViewFormParams(formData);
@@ -1724,9 +1723,9 @@ async function submitPrompt(event) {
   const previousWaitingForOutputSince = waitingForOutputSince;
 
   const generation = sessionViewGeneration;
-  const switchGeneration = sessionSwitchGeneration;
+  const switchGeneration = sessionSwitchGeneration.capture();
   const submittedSession = promptSessionInput?.value;
-  const submittedViewChanged = () => generation !== sessionViewGeneration || switchGeneration !== sessionSwitchGeneration || submittedSession !== promptSessionInput?.value;
+  const submittedViewChanged = () => generation !== sessionViewGeneration || !sessionSwitchGeneration.current(switchGeneration) || submittedSession !== promptSessionInput?.value;
   const stopHandlingChangedSubmittedView = () => {
     if (!submittedViewChanged()) return false;
 
@@ -2075,7 +2074,7 @@ function moveHighlightedCommand(direction) {
 
 async function ensureCommandsLoaded() {
   const list = commandList;
-  const generation = sessionSwitchGeneration;
+  const generation = sessionSwitchGeneration.capture();
   if (!list || composingQueuedMessage() || list.dataset.loaded === "true") return;
   const url = list.dataset.commandsUrl;
   if (!url || list.dataset.loading === "true") return;
@@ -2083,9 +2082,9 @@ async function ensureCommandsLoaded() {
   list.dataset.loading = "true";
   try {
     const response = await fetch(url);
-    if (!response.ok || commandList !== list || !list.isConnected || generation !== sessionSwitchGeneration || list.dataset.commandsUrl !== url) return;
+    if (!response.ok || commandList !== list || !list.isConnected || !sessionSwitchGeneration.current(generation) || list.dataset.commandsUrl !== url) return;
     const html = await response.text();
-    if (commandList !== list || !list.isConnected || generation !== sessionSwitchGeneration || list.dataset.commandsUrl !== url) return;
+    if (commandList !== list || !list.isConnected || !sessionSwitchGeneration.current(generation) || list.dataset.commandsUrl !== url) return;
     list.outerHTML = html;
     commandList = document.getElementById("command-list");
     highlightedCommandIndex = 0;
@@ -2409,14 +2408,14 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   const scrollSnapshot = preserveScroll ? conversationScrollSnapshot() : null;
   persistStoredComposerDraft();
   sidebarController.invalidate({ clearSessionsLimit: true });
-  const switchGeneration = ++sessionSwitchGeneration;
+  const switchGeneration = sessionSwitchGeneration.next();
   const refreshRequestVersion = sidebarController.refreshRequestVersion;
   let navigatingAway = false;
   showSessionSwitching();
   resetSessionViewState();
   try {
     const response = await fetch(sessionFragmentUrl(url), { headers: { "Accept": "application/json" } });
-    if (switchGeneration !== sessionSwitchGeneration) return false;
+    if (!sessionSwitchGeneration.current(switchGeneration)) return false;
     if (!response.ok) {
       navigatingAway = true;
       window.location.href = url;
@@ -2424,7 +2423,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
     }
 
     const payload = await response.json();
-    if (switchGeneration !== sessionSwitchGeneration) return false;
+    if (!sessionSwitchGeneration.current(switchGeneration)) return false;
     resetSessionViewState();
     sidebarController.replace(payload.sidebar_html, { notify: false });
     conversationPanel.outerHTML = payload.conversation_html;
@@ -2446,12 +2445,12 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
     if (refreshRequestVersion !== sidebarController.refreshRequestVersion) sidebarController.scheduleRefresh(0);
     return true;
   } catch (_error) {
-    if (switchGeneration !== sessionSwitchGeneration) return false;
+    if (!sessionSwitchGeneration.current(switchGeneration)) return false;
     navigatingAway = true;
     window.location.href = url;
     return false;
   } finally {
-    if (!navigatingAway && switchGeneration === sessionSwitchGeneration) hideSessionSwitching();
+    if (!navigatingAway && sessionSwitchGeneration.current(switchGeneration)) hideSessionSwitching();
   }
 }
 
@@ -2981,7 +2980,7 @@ document.addEventListener("submit", async (event) => {
   if (!form) return;
 
   event.preventDefault();
-  const switchGeneration = sessionSwitchGeneration;
+  const switchGeneration = sessionSwitchGeneration.capture();
   const viewGeneration = sessionViewGeneration;
   let navigatingAway = false;
   showSessionSwitching();
@@ -2989,7 +2988,7 @@ document.addEventListener("submit", async (event) => {
     const formData = new FormData(form);
     addSessionViewFormParams(formData);
     const response = await fetch(form.action, { method: "POST", body: formData, headers: { "Accept": "application/json" } });
-    if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;
+    if (!sessionSwitchGeneration.current(switchGeneration) || viewGeneration !== sessionViewGeneration) return;
     if (!response.ok) {
       navigatingAway = true;
       form.submit();
@@ -2997,10 +2996,10 @@ document.addEventListener("submit", async (event) => {
     }
 
     const payload = await response.json();
-    if (switchGeneration !== sessionSwitchGeneration || viewGeneration !== sessionViewGeneration) return;
+    if (!sessionSwitchGeneration.current(switchGeneration) || viewGeneration !== sessionViewGeneration) return;
     await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
   } finally {
-    if (!navigatingAway && switchGeneration === sessionSwitchGeneration && viewGeneration === sessionViewGeneration) hideSessionSwitching();
+    if (!navigatingAway && sessionSwitchGeneration.current(switchGeneration) && viewGeneration === sessionViewGeneration) hideSessionSwitching();
   }
 });
 

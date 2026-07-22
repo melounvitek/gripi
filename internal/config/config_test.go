@@ -160,7 +160,7 @@ func TestLoadPinsTheConfiguredPiRuntime(t *testing.T) {
 		"GRIPI_NODE=/opt/node",
 		"GRIPI_PI=/opt/pi",
 		"GRIPI_AUTO_APPROVE_PROJECTS=0",
-		"RACK_ENV=development",
+		"APP_ENV=development",
 	})
 	if err != nil {
 		t.Fatal(err)

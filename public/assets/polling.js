@@ -1,3 +1,7 @@
+export function eventPollCurrent(generation, sessionGeneration) {
+  return generation === sessionGeneration;
+}
+
 export function eventPollingDelay(hidden, composerState, emptyPollCount, failed = false) {
   if (hidden) return 10000;
   if (failed) return Math.max(emptyPollDelay(emptyPollCount), 2000);

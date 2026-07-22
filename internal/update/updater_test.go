@@ -79,7 +79,7 @@ func TestUpdaterValidatesIsolatedTargetBeforeFastForwardAndAtomicallyInstallsBin
 	assertNoPendingCutover(t, fixture.checkout)
 }
 
-func TestDefaultValidationUsesMiseAndGoWithoutNodeDependencyMutation(t *testing.T) {
+func TestDefaultValidationUsesCanonicalChecksWithoutDependencyMutation(t *testing.T) {
 	directory := t.TempDir()
 	bin := filepath.Join(directory, "bin")
 	if err := os.MkdirAll(bin, 0755); err != nil {
@@ -104,13 +104,67 @@ done
 		t.Fatal(err)
 	}
 	calls, _ := os.ReadFile(record)
-	for _, expected := range []string{"install", "exec -- go test ./...", "exec -- go build -o " + target} {
+	for _, expected := range []string{"install", "run test", "exec -- go build -o " + target} {
 		if !strings.Contains(string(calls), expected) {
 			t.Fatalf("calls = %s; missing %q", calls, expected)
 		}
 	}
 	if strings.Contains(string(calls), "npm") {
 		t.Fatalf("validation mutated Node dependencies: %s", calls)
+	}
+}
+
+func TestUpdaterValidationChecksNeedNoNodeModules(t *testing.T) {
+	checkout := t.TempDir()
+	root := filepath.Clean(filepath.Join("..", ".."))
+	for _, directory := range []string{"bin", "demo", "pi_extensions", "public", "test"} {
+		if err := os.CopyFS(filepath.Join(checkout, directory), os.DirFS(filepath.Join(root, directory))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	packageJSON, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "package.json"), packageJSON, 0600); err != nil {
+		t.Fatal(err)
+	}
+	miseConfig, err := os.ReadFile(filepath.Join(root, ".mise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalTask := `run = "go test ./... && npm run frontend:check && npm run scripts:check && npm run pi-extension:check"`
+	if !strings.Contains(string(miseConfig), canonicalTask) {
+		t.Fatalf("mise test task does not use all dependency-self-contained checks: %s", miseConfig)
+	}
+	piExecutable, err := exec.LookPath("pi")
+	if err != nil {
+		t.Fatalf("Pi CLI is required for canonical validation: %v", err)
+	}
+	for _, script := range []string{"frontend:check", "scripts:check", "pi-extension:check"} {
+		command := exec.Command("npm", "run", script)
+		command.Dir = checkout
+		command.Env = append(os.Environ(), "GRIPI_PI="+piExecutable)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("dependency-self-contained %s failed without node_modules: %v\n%s", script, err, output)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(checkout, "node_modules")); !os.IsNotExist(err) {
+		t.Fatalf("validation created node_modules: %v", err)
+	}
+}
+
+func TestBrowserWorkflowInstallsPiBeforeCanonicalValidation(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "browser_e2e.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	piInstall := strings.Index(string(workflow), "npm install --global @earendil-works/pi-coding-agent@")
+	canonicalValidation := strings.Index(string(workflow), "mise run test")
+	if piInstall < 0 || canonicalValidation < 0 || piInstall > canonicalValidation {
+		t.Fatalf("browser workflow must install Pi before canonical validation: %s", workflow)
 	}
 }
 

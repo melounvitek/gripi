@@ -99,7 +99,7 @@ func Load(environ []string) (Config, error) {
 		return Config{}, fmt.Errorf("GRIPI_ADMIN_PASSWORD is required; set it in %s or in the gateway process environment", envPath)
 	}
 
-	environment := firstNonempty(process["APP_ENV"], process["RACK_ENV"], "production")
+	environment := firstNonempty(process["APP_ENV"], "production")
 	cfg := Config{
 		Address:                   net.JoinHostPort(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]"), strconv.Itoa(port)),
 		Environment:               environment,
