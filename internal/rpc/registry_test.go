@@ -1,12 +1,53 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestRegisterKeepsCommittedReplacementWhenDisplacedCloseFails(t *testing.T) {
+	old := newRegistryClient()
+	old.closeErr = errors.New("close failed")
+	replacement := newRegistryClient()
+	var diagnostics bytes.Buffer
+	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected factory") }, nil)
+	registry.SetDiagnostics(&Diagnostics{Enabled: true, Writer: &diagnostics})
+	if err := registry.Register("/session", old); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := registry.Register("/session", replacement); err != nil {
+		t.Fatalf("replacement = %v", err)
+	}
+	if registry.Client("/session") != replacement || replacement.closed() || !old.closed() {
+		t.Fatalf("registered=%v replacement_closed=%v old_closed=%v", registry.Client("/session") == replacement, replacement.closed(), old.closed())
+	}
+	if output := diagnostics.String(); !strings.Contains(output, `"event":"replaced_client_close_failed"`) || !strings.Contains(output, `"session":"/session"`) {
+		t.Fatalf("diagnostics = %q", output)
+	}
+}
+
+func TestRegisterDoesNotReplaceBusyClient(t *testing.T) {
+	old := newRegistryClient()
+	old.isBusy = true
+	replacement := newRegistryClient()
+	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected factory") }, nil)
+	if err := registry.Register("/session", old); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := registry.Register("/session", replacement); !errors.Is(err, ErrOperationPending) {
+		t.Fatalf("replacement = %v", err)
+	}
+	if registry.Client("/session") != old || old.closed() || replacement.closed() {
+		t.Fatalf("old_registered=%v old_closed=%v replacement_closed=%v", registry.Client("/session") == old, old.closed(), replacement.closed())
+	}
+}
 
 func TestDrainIfIdleAtomicallyStopsNewWork(t *testing.T) {
 	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected factory") }, nil)
@@ -384,6 +425,7 @@ type registryClient struct {
 	isBusy       bool
 	settled      *time.Time
 	isClosed     bool
+	closeErr     error
 	closeStarted chan struct{}
 	releaseClose chan struct{}
 }
@@ -400,7 +442,7 @@ func (client *registryClient) Close() error {
 	if release != nil {
 		<-release
 	}
-	return nil
+	return client.closeErr
 }
 func (client *registryClient) closed() bool {
 	client.mu.Lock()

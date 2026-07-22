@@ -33,6 +33,25 @@ func TestStartNewSessionRegistersAndTracksAPathBeforeItExists(t *testing.T) {
 	}
 }
 
+func TestStartNewSessionKeepsClientWhenDisplacedCloseFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "new.jsonl")
+	old := newRegistryClient()
+	old.closeErr = errors.New("close failed")
+	client := &workflowClient{registryClient: newRegistryClient(), state: map[string]any{"data": map[string]any{"sessionFile": path}}}
+	registry := NewRegistry(func(string) (RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(path, old); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := StartNewSession(context.Background(), t.TempDir(), t.TempDir(), func(string) (RPCClient, error) { return client, nil }, registry, NewPendingSessionRegistry(nil), nil)
+	if err != nil || result != path {
+		t.Fatalf("result=%q err=%v", result, err)
+	}
+	if registry.Client(path) != client || client.closed() || !old.closed() {
+		t.Fatalf("registered=%v client_closed=%v old_closed=%v", registry.Client(path) == client, client.closed(), old.closed())
+	}
+}
+
 func TestStartNewSessionClosesClientWhenOwnershipClaimFails(t *testing.T) {
 	client := &workflowClient{registryClient: newRegistryClient(), state: map[string]any{"data": map[string]any{"sessionFile": "/new"}}}
 	registry := NewRegistry(func(string) (RPCClient, error) { return nil, os.ErrNotExist }, nil)

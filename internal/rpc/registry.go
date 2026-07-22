@@ -89,7 +89,7 @@ func (registry *Registry) Register(path string, client RPCClient) error {
 		registry.mu.Unlock()
 		return ErrClientRetiring
 	}
-	if current != nil && current.client != client && current.activeRequests > 0 {
+	if current != nil && current.client != client && (current.activeRequests > 0 || current.client.Busy()) {
 		registry.mu.Unlock()
 		return ErrOperationPending
 	}
@@ -99,9 +99,12 @@ func (registry *Registry) Register(path string, client RPCClient) error {
 		}
 		registry.clients[path] = newClientEntry(client, registry.clock())
 	}
+	diagnostics := registry.diagnostics
 	registry.mu.Unlock()
 	if old != nil {
-		return old.Close()
+		if err := old.Close(); err != nil {
+			diagnostics.Log("replaced_client_close_failed", map[string]any{"session": path, "error": err.Error()})
+		}
 	}
 	return nil
 }
