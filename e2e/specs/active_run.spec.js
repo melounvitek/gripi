@@ -71,10 +71,17 @@ test("abort an active run", async ({ page }) => {
   await selectSession(page, sessions.controlsAbort);
   await sendPrompt(page, prompts.abortStart);
 
+  const activeSession = page.locator("a.session", { hasText: sessions.controlsAbort });
+  await expect(activeSession.locator(".session-running-indicator")).toBeVisible();
+  await selectSession(page, sessions.marker);
+  await expect(activeSession.locator(".session-running-indicator")).toBeVisible();
+  await selectSession(page, sessions.controlsAbort);
+
   const abort = page.getByRole("button", { name: "Abort running Pi" });
   await expect(abort).toBeVisible();
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   await abort.click();
   await expectRunFinished(page);
+  await expect(activeSession.locator(".session-running-indicator")).toHaveCount(0);
   await expect(message(page, "assistant", replies.aborted)).toHaveCount(0);
 });

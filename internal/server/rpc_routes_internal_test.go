@@ -269,6 +269,69 @@ func TestEventsContinuesResolvingACompletedPendingSessionRemap(t *testing.T) {
 	}
 }
 
+func TestSidebarRendersRPCActivityIndicators(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "session.jsonl")
+	header, err := json.Marshal(map[string]any{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := string(header) + "\n" + `{"type":"session_info","name":"Activity session"}` + "\n"
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name, expected, unexpected string
+		busy, compacting           bool
+	}{
+		{name: "idle"},
+		{name: "running", busy: true, expected: "session-running-indicator", unexpected: "session-compacting-indicator"},
+		{name: "compacting", busy: true, compacting: true, expected: "session-compacting-indicator", unexpected: "session-running-indicator"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &remapClient{busy: test.busy, compacting: test.compacting}
+			registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+			if err := registry.Register(path, client); err != nil {
+				t.Fatal(err)
+			}
+			cache := sessions.NewCache()
+			app := &application{
+				config:          config.Config{SessionsRoot: root, Home: root},
+				sessionCache:    cache,
+				gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json")),
+				rpcClients:      registry,
+				pendingSessions: rpc.NewPendingSessionRegistry(nil),
+			}
+			view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/sidebar?session="+url.QueryEscape(path), nil), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			app.templates, err = template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var rendered strings.Builder
+			if err := app.templates.ExecuteTemplate(&rendered, "sidebar", view); err != nil {
+				t.Fatal(err)
+			}
+			if test.expected != "" && !strings.Contains(rendered.String(), test.expected) {
+				t.Errorf("sidebar does not contain %q: %s", test.expected, rendered.String())
+			}
+			if test.unexpected != "" && strings.Contains(rendered.String(), test.unexpected) {
+				t.Errorf("sidebar contains %q: %s", test.unexpected, rendered.String())
+			}
+			if test.expected == "" && (strings.Contains(rendered.String(), "session-running-indicator") || strings.Contains(rendered.String(), "session-compacting-indicator")) {
+				t.Errorf("idle sidebar contains an activity indicator: %s", rendered.String())
+			}
+		})
+	}
+}
+
 func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
@@ -699,15 +762,17 @@ type remapClient struct {
 	state         map[string]any
 	position      rpc.SessionEntries
 	live          rpc.LiveSnapshot
+	busy          bool
+	compacting    bool
 	getStateCalls atomic.Int32
 }
 
 func (client *remapClient) Close() error             { return nil }
-func (client *remapClient) Busy() bool               { return false }
+func (client *remapClient) Busy() bool               { return client.busy }
 func (client *remapClient) BusySince() *time.Time    { return nil }
 func (client *remapClient) SettledAt() *time.Time    { return nil }
 func (client *remapClient) AgentRunning() bool       { return false }
-func (client *remapClient) Compacting() bool         { return false }
+func (client *remapClient) Compacting() bool         { return client.compacting }
 func (client *remapClient) EventSequence() int64     { return 0 }
 func (client *remapClient) EventReplayCursor() int64 { return 0 }
 func (client *remapClient) EventsAfter(int64) rpc.EventBatch {

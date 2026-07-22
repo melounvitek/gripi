@@ -98,6 +98,8 @@ type pageView struct {
 	SessionSyncError          string
 	SessionSyncBlocked        bool
 	SidebarMetadataDeferred   bool
+	BusySessions              map[string]bool
+	CompactingSessions        map[string]bool
 	LiveOutput                liveOutputData
 }
 
@@ -191,7 +193,11 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	markRead := request.URL.Path != "/sidebar" || params.Get("session") != ""
 	unread, pinned := app.gatewayState.ReadAndObserve(all, selected, markRead)
-	view := &pageView{Request: request, ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred}
+	view := &pageView{Request: request, ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, BusySessions: make(map[string]bool), CompactingSessions: make(map[string]bool)}
+	for _, session := range all {
+		view.BusySessions[session.Path] = app.rpcClients.Busy(session.Path)
+		view.CompactingSessions[session.Path] = app.rpcClients.Compacting(session.Path)
+	}
 	view.prepareSidebar()
 	view.KnownCWDs = knownCWDs(all)
 	view.NewSessionCWDs = app.newSessionCWDs(view)
@@ -690,6 +696,9 @@ func sessionClasses(view *pageView, session *sessions.Session) string {
 	}
 	if view.Unread[session.Path] && (view.Selected == nil || view.Selected.Path != session.Path) {
 		values = append(values, "unread")
+	}
+	if view.CompactingSessions[session.Path] {
+		values = append(values, "compacting")
 	}
 	return strings.Join(values, " ")
 }
