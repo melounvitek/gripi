@@ -20,6 +20,7 @@ let busy = false;
 let activeScenario = null;
 let pendingExtensionRequest = null;
 let activeBash = null;
+const treeLabels = new Map();
 const deferredBashMessages = [];
 let sessionPersisted = false;
 let entrySequence = 0;
@@ -146,6 +147,25 @@ function handleCommand(command) {
       appendEntry("thinking_level_change", { thinkingLevel });
       respond(command, true, { data: { level: thinkingLevel } });
       break;
+    case "set_session_name":
+      sessionName = command.name || null;
+      appendEntry("session_info", { name: sessionName });
+      respond(command, true);
+      break;
+    case "compact":
+      appendEntry("compaction", { summary: command.customInstructions || "Fixture compaction" });
+      respond(command, true);
+      emit({ type: "compaction_end" });
+      break;
+    case "get_fork_messages":
+      respond(command, true, { data: { messages: forkMessages() } });
+      break;
+    case "fork":
+      branchSession(command, command.entryId);
+      break;
+    case "clone":
+      branchSession(command, leafId);
+      break;
     case "prompt":
       acceptPrompt(command);
       break;
@@ -230,6 +250,7 @@ function setModel(command) {
 }
 
 function acceptPrompt(command) {
+  if (acceptTreeBridge(command)) return;
   if (busy) {
     respond(command, false, { error: "Agent is already streaming" });
     return;
@@ -264,6 +285,108 @@ function acceptPrompt(command) {
   } else {
     schedule(120, () => completeWithTool(reply));
   }
+}
+
+function acceptTreeBridge(command) {
+  const match = command.message?.match(/^\/(gripi_tree_(?:snapshot|navigate|label|leaf)) ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
+  if (!match) return false;
+  respond(command, true);
+  const [, name, requestId, encoded] = match;
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch (_error) {
+    emitTreeBridge(name, requestId, { ok: false, error: "Invalid extension request payload" });
+    return true;
+  }
+  if (name === "gripi_tree_snapshot") {
+    const filter = payload.filter || "default";
+    emitTreeBridge(name, requestId, {
+      ok: true,
+      entries: treeEntries(filter),
+      leafId,
+      truncated: false,
+      totalEntries: entries.length,
+      filter,
+      settings: { treeFilterMode: "default", branchSummary: { skipPrompt: false } }
+    });
+  } else if (name === "gripi_tree_leaf") {
+    emitTreeBridge(name, requestId, { ok: true, leafId });
+  } else if (name === "gripi_tree_navigate") {
+    const target = entries.find((entry) => entry.id === payload.entryId);
+    if (!target) emitTreeBridge(name, requestId, { ok: false, error: `Tree entry not found: ${payload.entryId}` });
+    else {
+      leafId = target.id;
+      emitTreeBridge(name, requestId, { ok: true, cancelled: false, ...(target.message?.role === "user" ? { editorText: textContent(target.message.content) } : {}) });
+    }
+  } else {
+    const target = entries.find((entry) => entry.id === payload.entryId);
+    if (!target) emitTreeBridge(name, requestId, { ok: false, error: `Tree entry not found: ${payload.entryId}` });
+    else {
+      if (payload.label) treeLabels.set(payload.entryId, payload.label);
+      else treeLabels.delete(payload.entryId);
+      emitTreeBridge(name, requestId, { ok: true, entryId: payload.entryId, label: payload.label || null });
+    }
+  }
+  return true;
+}
+
+function emitTreeBridge(name, requestId, result) {
+  emit({ type: "extension_ui_request", method: "setStatus", statusKey: `${name}:${requestId}`, statusText: JSON.stringify(result) });
+}
+
+function treeEntries(filter) {
+  const projected = [];
+  let visibleDepth = 0;
+  let visibleParent = null;
+  for (const entry of entries) {
+    const role = entry.message?.role || entry.type;
+    let visible;
+    if (filter === "all") visible = true;
+    else if (filter === "user-only") visible = entry.type === "message" && role === "user";
+    else if (filter === "labeled-only") visible = treeLabels.has(entry.id);
+    else if (filter === "no-tools") visible = entry.type !== "message" || role !== "toolResult";
+    else visible = !["label", "custom", "model_change", "thinking_level_change", "session_info"].includes(entry.type);
+    if (!visible) continue;
+    projected.push({
+      entryId: entry.id,
+      parentId: visibleParent,
+      depth: visibleDepth,
+      type: entry.type,
+      role,
+      text: textContent(entry.message?.content || entry.summary || "").replace(/\s+/g, " ").trim().slice(0, 512),
+      timestamp: entry.timestamp,
+      current: entry.id === leafId,
+      latest: entry === entries.at(-1),
+      ...(role === "user" ? { messageKind: "user" } : {}),
+      ...(treeLabels.has(entry.id) ? { label: treeLabels.get(entry.id) } : {})
+    });
+    visibleParent = entry.id;
+    visibleDepth += 1;
+  }
+  return projected;
+}
+
+function textContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.filter((part) => typeof part === "string" || part?.type === "text").map((part) => typeof part === "string" ? part : part.text).join("");
+}
+
+function forkMessages() {
+  return entries.filter((entry) => entry.type === "message" && entry.message?.role === "user").map((entry) => ({ entryId: entry.id, text: textContent(entry.message.content) }));
+}
+
+function branchSession(command, targetId) {
+  const targetIndex = entries.findIndex((entry) => entry.id === targetId);
+  const branchEntries = targetIndex < 0 ? [...entries] : entries.slice(0, targetIndex + 1);
+  sessionPath = path.join(sessionsRoot, "e2e", `generated-${randomUUID()}.jsonl`);
+  entries = branchEntries;
+  leafId = entries.at(-1)?.id || null;
+  mkdirSync(path.dirname(sessionPath), { recursive: true });
+  writeFileSync(sessionPath, `${[header, ...entries].map((record) => JSON.stringify(record)).join("\n")}\n`);
+  sessionPersisted = true;
+  respond(command, true, { data: { text: targetId ? textContent(entries.at(-1)?.message?.content) : "" } });
 }
 
 function acceptSteer(command) {

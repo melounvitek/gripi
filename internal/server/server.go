@@ -41,13 +41,19 @@ type application struct {
 	knownSessionHashes map[string]bool
 	sessionHashesAt    time.Time
 	rpcClients         *rpc.Registry
+	newRPCClient       func(string) (rpc.RPCClient, error)
 	rpcDiagnostics     *rpc.Diagnostics
 	pendingSessions    *rpc.PendingSessionRegistry
+	pendingRemapMu     sync.Mutex
+	imagePromptLocks   sync.Map
 	synchronizer       *sessions.Synchronizer
 	rpcMaintenance     *rpc.Maintenance
 	extensionMu        sync.Mutex
 	extensionPath      string
 	extensionRoot      string
+	ownsSession        func(*http.Request, string) bool
+	claimSession       func(*http.Request, string) error
+	releaseSession     func(*http.Request, string) error
 }
 
 type Handler struct {
@@ -140,6 +146,13 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		return rpc.Start(sessionPath, cfg.PiCommand, extensionPath, diagnostics)
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
+	app.newRPCClient = func(cwd string) (rpc.RPCClient, error) {
+		extensionPath, err := app.rpcExtensionPath()
+		if err != nil {
+			return nil, err
+		}
+		return rpc.StartInCWD(cwd, cfg.PiCommand, extensionPath, diagnostics)
+	}
 	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, app.sessionCache, app.rpcClients)
 	if cfg.RPCIdleTimeout > 0 && cfg.RPCIdleSweep > 0 {
 		app.rpcMaintenance, _ = rpc.NewMaintenance(cfg.RPCIdleSweep, app.cleanupIdleRPCClients, rpc.LogMaintenanceError(os.Stderr))
@@ -152,8 +165,12 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	app.registerBrowserAccessRoutes(mux)
 	app.registerPWARoutes(mux)
 	app.registerSessionRoutes(mux)
+	app.registerActionRoutes(mux)
 
 	var handler http.Handler = mux
+	if cfg.MultiUserMode {
+		handler = failClosedMultiUserRoutes(handler)
+	}
 	handler = app.enforceBrowserAccess(handler)
 	handler = app.protectUnsafeRequestOrigin(handler)
 	handler = app.enforceSecureRemoteTransport(handler)
@@ -186,6 +203,11 @@ func (app *application) rpcExtensionPath() (string, error) {
 	return path, nil
 }
 
+func (app *application) imagePromptLock(path string) *sync.Mutex {
+	lock, _ := app.imagePromptLocks.LoadOrStore(path, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
 func filesOnly(root fs.FS, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		file, err := fs.Stat(root, strings.TrimPrefix(request.URL.Path, "/"))
@@ -194,6 +216,23 @@ func filesOnly(root fs.FS, next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(response, request)
+	})
+}
+
+func failClosedMultiUserRoutes(next http.Handler) http.Handler {
+	staticPaths := map[string]bool{
+		"/apple-touch-icon.png":  true,
+		"/manifest.webmanifest":  true,
+		"/app-icon.svg":          true,
+		"/app-icon-maskable.svg": true,
+		"/service-worker.js":     true,
+	}
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/assets/") || staticPaths[request.URL.Path] {
+			next.ServeHTTP(response, request)
+			return
+		}
+		writeText(response, http.StatusServiceUnavailable, "Multi-user access is unavailable until ownership support is enabled")
 	})
 }
 

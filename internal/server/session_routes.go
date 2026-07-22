@@ -295,8 +295,12 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 	if !parseForm(response, request) {
 		return
 	}
+	path, ok := app.requireOwnedSession(response, request, request.FormValue("session"))
+	if !ok {
+		return
+	}
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, ok := store.Session(request.FormValue("session"))
+	session, ok := store.Session(path)
 	if !ok {
 		http.NotFound(response, request)
 		return
@@ -322,8 +326,12 @@ func (app *application) markSessionRead(response http.ResponseWriter, request *h
 	if !parseForm(response, request) {
 		return
 	}
+	path, ok := app.requireOwnedSession(response, request, request.FormValue("session"))
+	if !ok {
+		return
+	}
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, ok := store.Session(request.FormValue("session"))
+	session, ok := store.Session(path)
 	if !ok {
 		http.NotFound(response, request)
 		return
@@ -340,7 +348,7 @@ func (app *application) markSessionRead(response http.ResponseWriter, request *h
 		}
 	}
 	count, err := strconv.Atoi(countText)
-	if err != nil || count < 0 || count > 1_000_000_000 {
+	if err != nil || count < 0 || count > assistantResponseMax {
 		writeText(response, http.StatusBadRequest, "Invalid read state")
 		return
 	}

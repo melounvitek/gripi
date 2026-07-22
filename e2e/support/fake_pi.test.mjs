@@ -171,6 +171,35 @@ test("fake Pi serializes bash, cancels it while the agent runs, and defers its e
   assert.equal(bashEntry.message.cancelled, true);
 });
 
+test("fake Pi supports model, tree, compaction, and branch control contracts", { timeout: 5_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-controls-"));
+  const fixture = await seedFixtures(root);
+  const sessionPath = path.join(fixture.sessionsRoot, "e2e", "prompt.jsonl");
+  const child = spawnFake(fixture, ["--mode", "rpc", "--session", sessionPath]);
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+
+  child.stdin.write(`${JSON.stringify({ id: "models", type: "get_available_models" })}\n`);
+  assert.ok((await nextRecord(records)).data.models.some((model) => model.id === "contract-model"));
+  child.stdin.write(`${JSON.stringify({ id: "compact", type: "compact", customInstructions: "Keep decisions" })}\n`);
+  assert.equal((await nextRecord(records)).id, "compact");
+  assert.equal((await nextRecord(records)).type, "compaction_end");
+
+  const requestId = "abc123";
+  const payload = Buffer.from(JSON.stringify({ filter: "all" })).toString("base64url");
+  child.stdin.write(`${JSON.stringify({ id: "tree", type: "prompt", message: `/gripi_tree_snapshot ${requestId} ${payload}` })}\n`);
+  assert.equal((await nextRecord(records)).id, "tree");
+  const tree = await nextRecord(records);
+  assert.equal(tree.method, "setStatus");
+  assert.equal(tree.statusKey, `gripi_tree_snapshot:${requestId}`);
+  assert.ok(JSON.parse(tree.statusText).entries.length > 0);
+
+  child.stdin.write(`${JSON.stringify({ id: "clone", type: "clone" })}\n`);
+  assert.equal((await nextRecord(records)).success, true);
+  child.stdin.write(`${JSON.stringify({ id: "cloned-state", type: "get_state" })}\n`);
+  assert.notEqual((await nextRecord(records)).data.sessionFile, sessionPath);
+});
+
 test("fake Pi uses LF framing rather than Unicode line separators", { timeout: 5_000 }, async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-framing-"));
   const fixture = await seedFixtures(root);

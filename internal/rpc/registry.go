@@ -349,6 +349,50 @@ func (registry *Registry) Move(oldPath, newPath string) error {
 }
 
 func (registry *Registry) MoveWith(oldPath, newPath string, prepare func() (func() error, error)) error {
+	return registry.MoveWithCommit(oldPath, newPath, prepare, nil)
+}
+
+func (registry *Registry) MoveWithCommit(oldPath, newPath string, prepare func() (func() error, error), commit func()) error {
+	return registry.moveWithCommit(oldPath, newPath, prepare, commit, nil)
+}
+
+func (registry *Registry) WithClientMove(ctx context.Context, oldPath string, touch bool, call func(RPCClient) (string, error), prepare func(string, string) (func() error, error), commit func(string, string)) (string, error) {
+	entry, err := registry.acquire(oldPath, true, touch, false)
+	if err != nil || entry == nil {
+		return oldPath, err
+	}
+	defer registry.release(entry, touch, false)
+	select {
+	case <-entry.operationLane:
+		defer func() { entry.operationLane <- struct{}{} }()
+	default:
+		registry.logRejection(oldPath, laneOperation)
+		return oldPath, ErrOperationPending
+	}
+	newPath, err := call(entry.client)
+	if err != nil {
+		registry.discard(entry, err)
+		return newPath, err
+	}
+	if newPath == "" || newPath == oldPath {
+		return newPath, nil
+	}
+	var preparation func() (func() error, error)
+	if prepare != nil {
+		preparation = func() (func() error, error) { return prepare(oldPath, newPath) }
+	}
+	var committed func()
+	if commit != nil {
+		committed = func() { commit(oldPath, newPath) }
+	}
+	err = registry.moveWithCommit(oldPath, newPath, preparation, committed, entry)
+	if err != nil {
+		registry.discard(entry, err)
+	}
+	return newPath, err
+}
+
+func (registry *Registry) moveWithCommit(oldPath, newPath string, prepare func() (func() error, error), commit func(), allowedActive *clientEntry) error {
 	if oldPath == newPath {
 		return nil
 	}
@@ -367,17 +411,47 @@ func (registry *Registry) MoveWith(oldPath, newPath string, prepare func() (func
 			registry.mu.Unlock()
 			return nil
 		}
+		registry.nextCreation++
+		token := registry.nextCreation
+		registry.creating[oldPath], registry.creating[newPath] = token, token
 		registry.moveWG.Add(1)
 		registry.mu.Unlock()
 		defer registry.moveWG.Done()
-		_, err := prepare()
+		rollback, err := prepare()
+		registry.mu.Lock()
+		valid := registry.creating[oldPath] == token && registry.creating[newPath] == token
+		if registry.creating[oldPath] == token {
+			delete(registry.creating, oldPath)
+		}
+		if registry.creating[newPath] == token {
+			delete(registry.creating, newPath)
+		}
+		committed := err == nil && valid && !registry.closed && registry.clients[oldPath] == nil
+		if committed && commit != nil {
+			commit()
+		}
+		if err == nil && !committed {
+			if registry.closed {
+				err = ErrClientRetiring
+			} else {
+				err = ErrClientStarting
+			}
+		}
+		registry.mu.Unlock()
+		if err != nil && rollback != nil {
+			return errors.Join(err, rollback())
+		}
 		return err
 	}
 	if entry.retiring {
 		registry.mu.Unlock()
 		return ErrClientRetiring
 	}
-	if entry.activeRequests > entry.observers {
+	allowedRequests := entry.observers
+	if entry == allowedActive {
+		allowedRequests++
+	}
+	if entry.activeRequests > allowedRequests {
 		registry.mu.Unlock()
 		return fmt.Errorf("%w: source session operation is pending", ErrOperationPending)
 	}
@@ -413,6 +487,9 @@ func (registry *Registry) MoveWith(oldPath, newPath string, prepare func() (func
 	}
 	committed := err == nil && reservationValid && !registry.closed && registry.clients[oldPath] == entry && registry.clients[newPath] == destination
 	if committed {
+		if commit != nil {
+			commit()
+		}
 		delete(registry.clients, oldPath)
 		entry.lastUsedAt = registry.clock()
 		entry.retiring = false

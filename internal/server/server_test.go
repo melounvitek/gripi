@@ -47,6 +47,29 @@ func TestHandlerDoesNotListAssetDirectories(t *testing.T) {
 	}
 }
 
+func TestMultiUserModeFailsClosedForApplicationRoutesButServesStaticAssets(t *testing.T) {
+	handler, err := server.NewHandler(config.Config{MultiUserMode: true}, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"/", "/prompt", "/events?session=%2Ftmp%2Fsession"} {
+		method := http.MethodGet
+		if target == "/prompt" {
+			method = http.MethodPost
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(method, "http://app.test"+target, nil))
+		if response.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s = %d %s", target, response.Code, response.Body.String())
+		}
+	}
+	asset := httptest.NewRecorder()
+	handler.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "http://app.test/assets/app.css", nil))
+	if asset.Code != http.StatusOK {
+		t.Fatalf("asset = %d %s", asset.Code, asset.Body.String())
+	}
+}
+
 func TestHandlerDoesNotTreatUnknownPathsAsStaticFiles(t *testing.T) {
 	handler, err := server.NewHandler(config.Config{}, gripi.WebFiles)
 	if err != nil {

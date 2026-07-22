@@ -359,7 +359,7 @@ func parseForm(response http.ResponseWriter, request *http.Request) bool {
 	var err error
 	mediaType, _, mediaTypeErr := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if mediaTypeErr == nil && mediaType == "multipart/form-data" {
-		err = request.ParseMultipartForm(1 << 20)
+		err = request.ParseMultipartForm(0)
 	} else {
 		err = request.ParseForm()
 	}

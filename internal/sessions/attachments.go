@@ -5,8 +5,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -26,6 +29,32 @@ type AttachmentMatch struct {
 }
 
 type AttachmentStore struct{ Root string }
+
+func (store AttachmentStore) RecordPrompt(sessionPath, message string, imageCount int, timestamp time.Time, paths, mimeTypes []string) error {
+	if imageCount == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(store.Root, 0700); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(filepath.Join(store.Root, SessionHash(sessionPath)+".jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	unlock, err := lockAttachmentFile(file)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	record := Attachment{MessageHash: MessageHash(message), Timestamp: timestamp.UTC().Format("2006-01-02T15:04:05.000000Z"), Count: imageCount, Paths: paths, MIMETypes: mimeTypes}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(file, "%s\n", encoded)
+	return err
+}
 
 func (store AttachmentStore) Migrate(fromSessionPath, toSessionPath string) (func() error, error) {
 	if fromSessionPath == toSessionPath {
@@ -48,23 +77,115 @@ func (store AttachmentStore) Migrate(fromSessionPath, toSessionPath string) (fun
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if len(from) > 0 && bytes.HasSuffix(existing, from) {
+	migrated, rollbackImages, err := store.migrateAttachmentImages(fromSessionPath, toSessionPath, from)
+	if err != nil {
+		return nil, err
+	}
+	if len(migrated) > 0 && bytes.HasSuffix(existing, migrated) {
 		return nil, nil
 	}
-	if err := replaceFile(toPath, append(existing, from...)); err != nil {
+	if err := replaceFile(toPath, append(existing, migrated...)); err != nil {
+		_ = rollbackImages()
 		return nil, err
 	}
 	rollback := func() error {
+		var metadataErr error
 		if !existed {
-			err := os.Remove(toPath)
-			if errors.Is(err, os.ErrNotExist) {
-				return nil
+			metadataErr = os.Remove(toPath)
+			if errors.Is(metadataErr, os.ErrNotExist) {
+				metadataErr = nil
 			}
-			return err
+		} else {
+			metadataErr = replaceFile(toPath, existing)
 		}
-		return replaceFile(toPath, existing)
+		return errors.Join(metadataErr, rollbackImages())
 	}
 	return rollback, nil
+}
+
+func (store AttachmentStore) migrateAttachmentImages(fromSessionPath, toSessionPath string, metadata []byte) ([]byte, func() error, error) {
+	fromDirectory := filepath.Join(store.Root, SessionHash(fromSessionPath))
+	toDirectory := filepath.Join(store.Root, SessionHash(toSessionPath))
+	created := []string{}
+	rollback := func() error {
+		var first error
+		for _, path := range created {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) && first == nil {
+				first = err
+			}
+		}
+		_ = os.Remove(toDirectory)
+		return first
+	}
+	var migrated bytes.Buffer
+	for _, line := range bytes.Split(metadata, []byte{'\n'}) {
+		if len(line) == 0 {
+			continue
+		}
+		var attachment Attachment
+		if json.Unmarshal(line, &attachment) != nil {
+			migrated.Write(line)
+			migrated.WriteByte('\n')
+			continue
+		}
+		for index, source := range attachment.Paths {
+			relative, err := filepath.Rel(fromDirectory, source)
+			if err != nil || relative == ".." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				continue
+			}
+			destination := filepath.Join(toDirectory, relative)
+			if _, err := os.Stat(destination); errors.Is(err, os.ErrNotExist) {
+				if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+					return nil, func() error { return nil }, errors.Join(err, rollback())
+				}
+				if err := copyAttachmentImage(source, destination); err != nil {
+					return nil, func() error { return nil }, errors.Join(err, rollback())
+				}
+				created = append(created, destination)
+			} else if err != nil {
+				return nil, func() error { return nil }, errors.Join(err, rollback())
+			}
+			attachment.Paths[index] = destination
+		}
+		encoded, err := json.Marshal(attachment)
+		if err != nil {
+			return nil, func() error { return nil }, errors.Join(err, rollback())
+		}
+		migrated.Write(encoded)
+		migrated.WriteByte('\n')
+	}
+	return migrated.Bytes(), rollback, nil
+}
+
+func copyAttachmentImage(sourcePath, destinationPath string) error {
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	destination, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	succeeded := false
+	defer func() {
+		_ = destination.Close()
+		if !succeeded {
+			_ = os.Remove(destinationPath)
+		}
+	}()
+	buffer := make([]byte, 32<<10)
+	if _, err := io.CopyBuffer(destination, source, buffer); err != nil {
+		return err
+	}
+	if err := destination.Sync(); err != nil {
+		return err
+	}
+	if err := destination.Close(); err != nil {
+		return err
+	}
+	succeeded = true
+	return nil
 }
 
 func replaceFile(path string, contents []byte) error {

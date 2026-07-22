@@ -422,7 +422,7 @@ func (client *Client) SetThinkingLevel(ctx context.Context, level string) (map[s
 func (client *Client) CycleThinkingLevel(ctx context.Context) (map[string]any, error) {
 	return client.request(ctx, "cycle_thinking_level", client.nextID("cycle_thinking_level"), nil, client.requestTimeout, nil)
 }
-func (client *Client) Prompt(ctx context.Context, message string, images []any) (map[string]any, error) {
+func (client *Client) Prompt(ctx context.Context, message string, images []PromptImage) (map[string]any, error) {
 	deadline := client.now().Add(client.requestTimeout)
 	if err := client.waitForCompactionFlush(ctx, deadline); err != nil {
 		return nil, err
@@ -437,33 +437,43 @@ func (client *Client) Prompt(ctx context.Context, message string, images []any) 
 	}
 	return client.request(ctx, "prompt", client.nextID("prompt"), payload, remaining, nil)
 }
-func (client *Client) Steer(ctx context.Context, message string, images []any) (map[string]any, error) {
+func (client *Client) Steer(ctx context.Context, message string, images []PromptImage) (map[string]any, error) {
 	payload := map[string]any{"message": message}
 	if len(images) > 0 {
 		payload["images"] = images
 	}
 	return client.request(ctx, "steer", client.nextID("steer"), payload, client.requestTimeout, nil)
 }
-func (client *Client) FollowUp(ctx context.Context, message string, images []any) (map[string]any, error) {
+func (client *Client) FollowUp(ctx context.Context, message string, images []PromptImage) (map[string]any, error) {
+	if response, queued, err := client.QueueCompactionFollowUp(ctx, message, images); err != nil || queued {
+		return response, err
+	}
+	return client.request(ctx, "follow_up", client.nextID("follow_up"), promptPayload(message, images), client.requestTimeout, nil)
+}
+
+func (client *Client) QueueCompactionFollowUp(_ context.Context, message string, images []PromptImage) (map[string]any, bool, error) {
+	payload := promptPayload(message, images)
+	size := promptPayloadSize(payload)
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if !client.compacting && !client.flushingCompactionFollowUps {
+		return nil, false, nil
+	}
+	if client.compactionFollowUpCount >= MaxCompactionFollowUps || client.compactionFollowUpBytes+size > MaxCompactionFollowUpBytes {
+		return map[string]any{"type": "response", "command": "follow_up", "success": false, "error": "Too many follow-up messages are waiting for compaction to finish"}, true, nil
+	}
+	client.compactionFollowUps = append(client.compactionFollowUps, payload)
+	client.compactionFollowUpCount++
+	client.compactionFollowUpBytes += size
+	return map[string]any{"type": "response", "command": "follow_up", "success": true, "queued": true, "compacting": true}, true, nil
+}
+
+func promptPayload(message string, images []PromptImage) map[string]any {
 	payload := map[string]any{"message": message}
 	if len(images) > 0 {
 		payload["images"] = images
 	}
-	size := jsonSize(payload)
-	client.mu.Lock()
-	if client.compacting || client.flushingCompactionFollowUps {
-		if client.compactionFollowUpCount >= MaxCompactionFollowUps || client.compactionFollowUpBytes+size > MaxCompactionFollowUpBytes {
-			client.mu.Unlock()
-			return map[string]any{"type": "response", "command": "follow_up", "success": false, "error": "Too many follow-up messages are waiting for compaction to finish"}, nil
-		}
-		client.compactionFollowUps = append(client.compactionFollowUps, payload)
-		client.compactionFollowUpCount++
-		client.compactionFollowUpBytes += size
-		client.mu.Unlock()
-		return map[string]any{"type": "response", "command": "follow_up", "success": true, "queued": true, "compacting": true}, nil
-	}
-	client.mu.Unlock()
-	return client.request(ctx, "follow_up", client.nextID("follow_up"), payload, client.requestTimeout, nil)
+	return payload
 }
 func (client *Client) Abort(ctx context.Context) (map[string]any, error) {
 	return client.request(ctx, "abort", client.nextID("abort"), nil, client.abortTimeout, nil)
@@ -603,11 +613,6 @@ func (client *Client) writeCommand(ctx context.Context, value map[string]any, co
 }
 
 func (client *Client) writeCommandUnlocked(value map[string]any, command string, deadline time.Time) error {
-	encoded, err := marshalJSON(value)
-	if err != nil {
-		return err
-	}
-	encoded = append(encoded, '\n')
 	if !deadline.IsZero() {
 		if setter, ok := client.stdin.(interface{ SetWriteDeadline(time.Time) error }); ok {
 			remaining := deadline.Sub(client.now())
@@ -618,20 +623,136 @@ func (client *Client) writeCommandUnlocked(value map[string]any, command string,
 			defer setter.SetWriteDeadline(time.Time{})
 		}
 	}
-	for len(encoded) > 0 {
-		written, writeErr := client.stdin.Write(encoded)
-		if writeErr != nil {
-			if isNetTimeout(writeErr) {
-				return &RequestTimeoutError{Command: command}
-			}
-			return fmt.Errorf("%w before accepting command: %v", ErrProcessExited, writeErr)
-		}
-		if written == 0 {
-			return fmt.Errorf("%w before accepting command: short write", ErrProcessExited)
-		}
-		encoded = encoded[written:]
+	writer := &commandWriter{destination: client.stdin, command: command}
+	if images, ok := value["images"].([]PromptImage); ok && len(images) > 0 {
+		return writeImageCommand(writer, value, images)
 	}
-	return nil
+	encoded, err := marshalJSON(value)
+	if err != nil {
+		return err
+	}
+	_, err = writer.Write(append(encoded, '\n'))
+	return err
+}
+
+type commandWriter struct {
+	destination io.Writer
+	command     string
+}
+
+func (writer *commandWriter) Write(value []byte) (int, error) {
+	written := 0
+	for len(value) > 0 {
+		count, err := writer.destination.Write(value)
+		written += count
+		value = value[count:]
+		if err != nil {
+			if isNetTimeout(err) {
+				return written, &RequestTimeoutError{Command: writer.command}
+			}
+			return written, fmt.Errorf("%w before accepting command: %v", ErrProcessExited, err)
+		}
+		if count == 0 {
+			return written, fmt.Errorf("%w before accepting command: short write", ErrProcessExited)
+		}
+	}
+	return written, nil
+}
+
+func writeImageCommand(writer io.Writer, value map[string]any, images []PromptImage) error {
+	files := make([]*os.File, 0, len(images))
+	for _, image := range images {
+		file, err := os.Open(image.Path)
+		if err == nil {
+			var info os.FileInfo
+			info, err = file.Stat()
+			if err == nil && (image.Size < 0 || info.Size() != image.Size) {
+				err = errors.New("persisted prompt image size changed")
+			}
+		}
+		if err != nil {
+			if file != nil {
+				_ = file.Close()
+			}
+			for _, opened := range files {
+				_ = opened.Close()
+			}
+			return err
+		}
+		files = append(files, file)
+	}
+	defer func() {
+		for _, file := range files {
+			_ = file.Close()
+		}
+	}()
+	if _, err := io.WriteString(writer, `{`); err != nil {
+		return err
+	}
+	first := true
+	for _, key := range []string{"message", "id", "type"} {
+		item, exists := value[key]
+		if !exists {
+			continue
+		}
+		encoded, err := marshalJSON(item)
+		if err != nil {
+			return err
+		}
+		separator := ""
+		if !first {
+			separator = ","
+		}
+		if _, err := fmt.Fprintf(writer, `%s%q:`, separator, key); err != nil {
+			return err
+		}
+		if _, err := writer.Write(encoded); err != nil {
+			return err
+		}
+		first = false
+	}
+	separator := ""
+	if !first {
+		separator = ","
+	}
+	if _, err := fmt.Fprintf(writer, `%s"images":[`, separator); err != nil {
+		return err
+	}
+	for index, image := range images {
+		if index > 0 {
+			if _, err := io.WriteString(writer, ","); err != nil {
+				return err
+			}
+		}
+		mimeType, _ := marshalJSON(image.MIMEType)
+		if _, err := io.WriteString(writer, `{"type":"image","data":"`); err != nil {
+			return err
+		}
+		encoder := base64.NewEncoder(base64.StdEncoding, writer)
+		copied, copyErr := io.Copy(encoder, io.LimitReader(files[index], image.Size+1))
+		if copyErr != nil {
+			_ = encoder.Close()
+			return copyErr
+		}
+		if copied != image.Size {
+			_ = encoder.Close()
+			return fmt.Errorf("%w before accepting command: persisted prompt image size changed", ErrProcessExited)
+		}
+		if err := encoder.Close(); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(writer, `","mimeType":`); err != nil {
+			return err
+		}
+		if _, err := writer.Write(mimeType); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(writer, `}`); err != nil {
+			return err
+		}
+	}
+	_, err := io.WriteString(writer, "]}\n")
+	return err
 }
 
 func (client *Client) readStdout() {
@@ -1720,7 +1841,7 @@ func (client *Client) flushCompactionFollowUps(items []map[string]any, firstType
 				client.finishFailedCompactionFlush(id)
 				return
 			}
-			size := jsonSize(payload)
+			size := promptPayloadSize(payload)
 			client.mu.Lock()
 			if !client.flushingCompactionFollowUps {
 				client.mu.Unlock()
@@ -1890,6 +2011,19 @@ func marshalJSON(value any) ([]byte, error) {
 	return bytes.TrimSuffix(buffer.Bytes(), []byte{'\n'}), nil
 }
 func jsonSize(value any) int { encoded, _ := marshalJSON(value); return len(encoded) }
+func promptPayloadSize(payload map[string]any) int {
+	images, _ := payload["images"].([]PromptImage)
+	if len(images) == 0 {
+		return jsonSize(payload)
+	}
+	copy := cloneMap(payload)
+	delete(copy, "images")
+	size := jsonSize(copy) + len(`,"images":[]`)
+	for _, image := range images {
+		size += base64.StdEncoding.EncodedLen(int(image.Size)) + len(image.MIMEType) + 48
+	}
+	return size
+}
 func cloneMap(value map[string]any) map[string]any {
 	copy := make(map[string]any, len(value))
 	for key, item := range value {

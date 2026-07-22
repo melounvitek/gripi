@@ -488,6 +488,35 @@ func userLine(id, parent, timestamp, text string) string {
 	return `{"type":"message","id":"` + id + `","parentId":` + parentValue + `,"timestamp":"` + timestamp + `","message":{"role":"user","content":[{"type":"text","text":"` + text + `"}]}}`
 }
 
+func TestSessionsCanDeferBusyMetadataRefresh(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	writeSessionLines(t, path, []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Initial")})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+	initial, err := store.Sessions()
+	if err != nil || len(initial) != 1 || initial[0].MessageCount != 1 {
+		t.Fatalf("initial sessions = %#v, %v", initial, err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintln(file, userLine("new", "user", "2026-01-01T00:00:02Z", "New")); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	deferredSessions, deferred, err := store.SessionsDeferringMetadata(func(candidate string) bool { return candidate == path })
+	if err != nil || !deferred || deferredSessions[0].MessageCount != 1 {
+		t.Fatalf("deferred sessions = %#v, deferred=%v, err=%v", deferredSessions, deferred, err)
+	}
+	refreshed, deferred, err := store.SessionsDeferringMetadata(nil)
+	if err != nil || deferred || refreshed[0].MessageCount != 2 {
+		t.Fatalf("refreshed sessions = %#v, deferred=%v, err=%v", refreshed, deferred, err)
+	}
+}
+
 func writeSessionLines(t *testing.T, path string, lines []string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {

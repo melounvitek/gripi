@@ -14,7 +14,7 @@ The browser JavaScript, Electron shell, CSS, and Pi TypeScript extension remain 
 - [x] 2. Port HTTP security, browser approval, secure state stores, PWA endpoints, and Go templates.
 - [x] 3. Port session discovery/indexing, history rendering, attachments, Markdown, sidebar, search, and pagination.
 - [x] 4. Port Pi RPC subprocess management, event buffering, registry concurrency, idle retirement, and session synchronization.
-- [ ] 5. Port prompts, bash, streaming controls, model settings, trees, branches, extension UI, and remaining session actions.
+- [x] 5. Port prompts, bash, streaming controls, model settings, trees, branches, extension UI, and remaining session actions.
 - [ ] 6. Port multi-user ownership, resource monitoring, updates/restarts, setup tooling, and operational documentation.
 - [ ] 7. Pass all contract suites, benchmark the warmed implementation, run a real-Pi smoke test, remove Ruby/Puma, and complete independent review.
 

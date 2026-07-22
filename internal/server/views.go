@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -97,17 +98,54 @@ type pageView struct {
 	SessionSyncRevision       string
 	SessionSyncError          string
 	SessionSyncBlocked        bool
+	SidebarMetadataDeferred   bool
 	LiveOutput                liveOutputData
 }
 
 func (app *application) preparePage(request *http.Request, includeConversation bool) (*pageView, error) {
+	params := request.URL.Query()
+	selectedPath := params.Get("session")
+	if _, pending := app.pendingSessions.CWD(selectedPath); pending {
+		canonical, err := app.canonicalRPCSessionPath(request, selectedPath)
+		if err != nil {
+			return nil, err
+		}
+		params.Set("session", canonical)
+		request.URL.RawQuery = params.Encode()
+	} else if _, remapped := app.pendingSessions.Resolve(selectedPath); remapped {
+		canonical, err := app.canonicalRPCSessionPath(request, selectedPath)
+		if err != nil {
+			return nil, err
+		}
+		params.Set("session", canonical)
+		request.URL.RawQuery = params.Encode()
+	}
+	if remapped, ok := app.pendingSessions.Resolve(params.Get("session")); ok {
+		if app.ownsSession != nil && !app.ownsSession(request, params.Get("session")) {
+			return nil, errors.New("pending session is not owned by the requester")
+		}
+		params.Set("session", remapped)
+		request.URL.RawQuery = params.Encode()
+	}
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	all, err := store.Sessions()
+	all, metadataDeferred, err := store.SessionsDeferringMetadata(func(path string) bool {
+		return request.URL.Path == "/sidebar" && app.rpcClients.Busy(path)
+	})
 	if err != nil {
 		return nil, err
 	}
 	app.rememberSessionHashes(all)
-	params := request.URL.Query()
+	knownPaths := make(map[string]bool, len(all))
+	for _, session := range all {
+		knownPaths[session.Path] = true
+	}
+	for _, pending := range app.pendingSessions.Entries() {
+		if knownPaths[pending.Path] {
+			continue
+		}
+		all = append(all, &sessions.Session{Path: pending.Path, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt})
+	}
+	params = request.URL.Query()
 	selectedProject := params.Get("project")
 	knownProjects := make(map[string]bool)
 	for _, session := range all {
@@ -136,37 +174,51 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	markRead := request.URL.Path != "/sidebar" || params.Get("session") != ""
 	unread, pinned := app.gatewayState.ReadAndObserve(all, selected, markRead)
-	view := &pageView{Request: request, ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled}
+	view := &pageView{Request: request, ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred}
 	view.prepareSidebar()
 	view.KnownCWDs = knownCWDs(all)
 	view.NewSessionCWDs = app.newSessionCWDs(view)
 	if includeConversation && selected != nil {
 		leafID, leafSupplied := "", false
 		view.SessionSyncMode = sessions.SyncAvailable
-		if state := app.synchronizer.InspectIfAvailable(request.Context(), selected.Path, true); state != nil {
-			view.SessionSyncMode, view.SessionSyncRevision, view.SessionSyncError = state.Mode, state.Revision, state.Error
-			view.SessionSyncBlocked = state.Blocked()
-			if state.Mode == sessions.SyncManaged {
-				leafID, leafSupplied = state.RPCLeafID, true
-			} else if state.Blocked() {
-				leafID, leafSupplied = state.PersistedLeafID, true
+		_, statErr := os.Stat(selected.Path)
+		if statErr == nil {
+			if state := app.synchronizer.InspectIfAvailable(request.Context(), selected.Path, true); state != nil {
+				view.SessionSyncMode, view.SessionSyncRevision, view.SessionSyncError = state.Mode, state.Revision, state.Error
+				view.SessionSyncBlocked = state.Blocked()
+				if state.Mode == sessions.SyncManaged {
+					leafID, leafSupplied = state.RPCLeafID, true
+				} else if state.Blocked() {
+					leafID, leafSupplied = state.PersistedLeafID, true
+				}
 			}
 		}
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)
-		window, err := store.Window(selected.Path, leafID, leafSupplied, nil, nil)
-		if err != nil {
-			return nil, err
+		window := sessions.Window{}
+		if statErr == nil {
+			var err error
+			window, err = store.Window(selected.Path, leafID, leafSupplied, nil, nil)
+			if err != nil {
+				return nil, err
+			}
 		}
 		view.Window = window
-		view.Attachments = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Match(selected.Path, window.Messages)
-		view.SessionGeneration = store.Generation(selected.Path)
+		view.Attachments = make(map[*sessions.Message]sessions.AttachmentMatch)
+		if statErr == nil {
+			view.Attachments = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Match(selected.Path, window.Messages)
+			view.SessionGeneration = store.Generation(selected.Path)
+		}
 		activeToolIDs := make([]string, 0, len(snapshot.ActiveToolEvents))
 		for _, event := range snapshot.ActiveToolEvents {
 			if id := stringFromAny(event["toolCallId"]); id != "" {
 				activeToolIDs = append(activeToolIDs, id)
 			}
 		}
-		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, store.SubagentToolCallContext(selected.Path, activeToolIDs))
+		toolContext := map[string]sessions.ToolCallContext(nil)
+		if statErr == nil {
+			toolContext = store.SubagentToolCallContext(selected.Path, activeToolIDs)
+		}
+		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, toolContext)
 	}
 	return view, nil
 }

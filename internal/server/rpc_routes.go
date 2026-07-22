@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,7 +16,11 @@ import (
 )
 
 func (app *application) events(response http.ResponseWriter, request *http.Request) {
-	path, err := app.canonicalCommandSessionPath(request.Context(), request.URL.Query().Get("session"))
+	raw, ok := app.requireOwnedSession(response, request, request.URL.Query().Get("session"))
+	if !ok {
+		return
+	}
+	path, err := app.canonicalCommandSessionPath(request, raw)
 	if err != nil {
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
@@ -23,6 +28,9 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 	if path == "" {
 		http.NotFound(response, request)
 		return
+	}
+	if remapped, ok := app.pendingSessions.Resolve(path); ok {
+		path = remapped
 	}
 	after, _ := strconv.ParseInt(request.URL.Query().Get("after"), 10, 64)
 	batch := app.rpcClients.EventsAfter(path, after)
@@ -39,7 +47,11 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 }
 
 func (app *application) liveSessionStatus(response http.ResponseWriter, request *http.Request) {
-	path, err := app.canonicalCommandSessionPath(request.Context(), request.URL.Query().Get("session"))
+	raw, ok := app.requireOwnedSession(response, request, request.URL.Query().Get("session"))
+	if !ok {
+		return
+	}
+	path, err := app.canonicalCommandSessionPath(request, raw)
 	if err != nil {
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
@@ -47,6 +59,9 @@ func (app *application) liveSessionStatus(response http.ResponseWriter, request 
 	if path == "" {
 		http.NotFound(response, request)
 		return
+	}
+	if remapped, ok := app.pendingSessions.Resolve(path); ok {
+		path = remapped
 	}
 	live := app.readLiveStatus(request.Context(), path)
 	var status sessions.Status
@@ -77,7 +92,11 @@ func (app *application) liveSessionStatus(response http.ResponseWriter, request 
 }
 
 func (app *application) commands(response http.ResponseWriter, request *http.Request) {
-	path, err := app.canonicalCommandSessionPath(request.Context(), request.URL.Query().Get("session"))
+	raw, ok := app.requireOwnedSession(response, request, request.URL.Query().Get("session"))
+	if !ok {
+		return
+	}
+	path, err := app.canonicalCommandSessionPath(request, raw)
 	if err != nil {
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
@@ -95,7 +114,7 @@ func (app *application) commands(response http.ResponseWriter, request *http.Req
 	})
 	commands := rpc.CommandsFrom(rpcResponse)
 	if err != nil {
-		if app.writeRPCError(response, err) {
+		if !commandCatalogFallbackError(err) && app.writeRPCError(response, err) {
 			return
 		}
 		commands = rpc.BuiltinCommands()
@@ -201,6 +220,9 @@ func applyLiveStatus(status *sessions.Status, live *liveStatus) {
 }
 
 func (app *application) withSynchronizedClient(ctx context.Context, path string, call func(rpc.RPCClient) error) error {
+	if remapped, ok := app.pendingSessions.Resolve(path); ok {
+		path = remapped
+	}
 	if _, err := os.Stat(path); err == nil {
 		return app.synchronizer.WithMutableClient(ctx, path, call)
 	}
@@ -231,13 +253,20 @@ func (app *application) writeRPCError(response http.ResponseWriter, err error) b
 	}
 }
 
-func (app *application) canonicalCommandSessionPath(ctx context.Context, path string) (string, error) {
+func (app *application) canonicalCommandSessionPath(request *http.Request, path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	canonical, err := app.canonicalRPCSessionPath(ctx, path)
-	if err != nil || !app.commandSessionAvailable(canonical) {
+	canonical, err := app.canonicalRPCSessionPath(request, path)
+	if err != nil {
 		return "", err
+	}
+	if remapped, ok := app.pendingSessions.Resolve(canonical); ok {
+		canonical = remapped
+	}
+	available := app.commandSessionAvailable(canonical)
+	if !available {
+		return "", nil
 	}
 	return canonical, nil
 }
@@ -254,8 +283,12 @@ func (app *application) commandSessionAvailable(path string) bool {
 	return ok
 }
 
-func (app *application) canonicalRPCSessionPath(ctx context.Context, path string) (string, error) {
+func (app *application) canonicalRPCSessionPath(request *http.Request, path string) (string, error) {
+	ctx := request.Context()
 	if remapped, ok := app.pendingSessions.Resolve(path); ok {
+		if app.ownsSession != nil && !app.ownsSession(request, path) {
+			return path, errors.New("pending session is not owned by the requester")
+		}
 		return remapped, nil
 	}
 	if cwd, ok := app.pendingSessions.CWD(path); ok && app.rpcClients.Active(path) {
@@ -265,7 +298,7 @@ func (app *application) canonicalRPCSessionPath(ctx context.Context, path string
 			if real != "" {
 				store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
 				if session, ok := store.Session(real); ok && session.CWD == cwd {
-					if err := app.movePendingRPCClient(path, real); err != nil {
+					if err := app.movePendingRPCClient(request, path, real); err != nil {
 						return path, err
 					}
 					return real, nil
@@ -293,7 +326,7 @@ func (app *application) canonicalRPCSessionPath(ctx context.Context, path string
 			return requestErr
 		})
 		if err == nil && sessionFileFrom(state) == path {
-			if err := app.movePendingRPCClient(pending.Path, path); err != nil {
+			if err := app.movePendingRPCClient(request, pending.Path, path); err != nil {
 				return path, err
 			}
 			break
@@ -302,15 +335,53 @@ func (app *application) canonicalRPCSessionPath(ctx context.Context, path string
 	return path, nil
 }
 
-func (app *application) movePendingRPCClient(from, to string) error {
-	err := app.rpcClients.MoveWith(from, to, func() (func() error, error) {
-		return (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Migrate(from, to)
-	})
-	if err != nil {
-		return err
+func (app *application) movePendingRPCClient(request *http.Request, from, to string) error {
+	lock := app.imagePromptLock(from)
+	lock.Lock()
+	defer lock.Unlock()
+	app.pendingRemapMu.Lock()
+	defer app.pendingRemapMu.Unlock()
+	if app.ownsSession != nil && !app.ownsSession(request, from) {
+		return errors.New("pending session is not owned by the requester")
 	}
-	app.pendingSessions.Remap(from, to)
-	return nil
+	if from == to {
+		if app.claimSession != nil {
+			if err := app.claimSession(request, to); err != nil {
+				return err
+			}
+		}
+		app.pendingSessions.Forget(from)
+		return nil
+	}
+	return app.rpcClients.MoveWithCommit(from, to, func() (func() error, error) {
+		claimed := false
+		if app.claimSession != nil {
+			if err := app.claimSession(request, to); err != nil {
+				return nil, err
+			}
+			claimed = true
+		}
+		attachmentRollback, err := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Migrate(from, to)
+		if err != nil {
+			if claimed && app.releaseSession != nil {
+				err = errors.Join(err, app.releaseSession(request, to))
+			}
+			return nil, err
+		}
+		return func() error {
+			var attachmentErr error
+			if attachmentRollback != nil {
+				attachmentErr = attachmentRollback()
+			}
+			var ownershipErr error
+			if claimed && app.releaseSession != nil {
+				ownershipErr = app.releaseSession(request, to)
+			}
+			return errors.Join(attachmentErr, ownershipErr)
+		}, nil
+	}, func() {
+		app.pendingSessions.Remap(from, to)
+	})
 }
 
 func (app *application) cleanupIdleRPCClients(ctx context.Context) error {
@@ -393,6 +464,10 @@ func numericValue(value any) (float64, bool) {
 }
 func stringFromAny(value any) string  { result, _ := value.(string); return result }
 func nonemptyString(value any) string { return stringFromAny(value) }
+func commandCatalogFallbackError(err error) bool {
+	return errors.Is(err, rpc.ErrOperationPending) || errors.Is(err, rpc.ErrClientRetiring) || errors.Is(err, rpc.ErrClientStarting) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, rpc.ErrProcessExited)
+}
+
 func nullableString(value string) any {
 	if value == "" {
 		return nil

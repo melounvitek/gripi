@@ -1,7 +1,9 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -130,6 +132,91 @@ func TestProcessClientPreservesFinalResponseBeforeImmediateExit(t *testing.T) {
 		}
 	}
 }
+
+func TestQueueCompactionFollowUpAtomicallyReportsWhetherItQueued(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+
+	response, queued, err := client.QueueCompactionFollowUp(context.Background(), "before", nil)
+	if err != nil || queued || response != nil {
+		t.Fatalf("queue before compaction = %#v, %v, %v", response, queued, err)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start"})
+	waitSequence(t, client, 1)
+	response, queued, err = client.QueueCompactionFollowUp(context.Background(), "during", nil)
+	if err != nil || !queued || response["queued"] != true {
+		t.Fatalf("queue during compaction = %#v, %v, %v", response, queued, err)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_end"})
+	waitSequence(t, client, 2)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		client.mu.Lock()
+		flushing := client.flushingCompactionFollowUps
+		client.mu.Unlock()
+		if flushing {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	response, queued, err = client.QueueCompactionFollowUp(context.Background(), "while flushing", nil)
+	if err != nil || !queued || response["queued"] != true {
+		t.Fatalf("queue while flushing = %#v, %v, %v", response, queued, err)
+	}
+	_ = stdoutWriter.Close()
+}
+
+func TestImageCommandStreamsPersistedBytesWithoutLargeWrites(t *testing.T) {
+	root := t.TempDir()
+	imagePath := filepath.Join(root, "image.png")
+	contents := bytes.Repeat([]byte("image-data"), 1<<17)
+	if err := os.WriteFile(imagePath, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	writer := &boundedWriteCloser{}
+	client := NewClient(writer, io.NopCloser(strings.NewReader("")), nil, ClientOptions{})
+	<-client.readerDone
+	value := map[string]any{"id": "prompt-1", "type": "prompt", "message": "hello", "images": []PromptImage{{Path: imagePath, MIMEType: "image/png", Size: int64(len(contents))}}}
+	if err := client.writeCommandUnlocked(value, "prompt", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if writer.maximum > RPCReadChunkBytes {
+		t.Fatalf("largest write = %d", writer.maximum)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(writer.bytes, &payload); err != nil {
+		t.Fatal(err)
+	}
+	images := payload["images"].([]any)
+	image := images[0].(map[string]any)
+	if image["type"] != "image" || image["mimeType"] != "image/png" || image["data"] != base64.StdEncoding.EncodeToString(contents) {
+		t.Fatal("streamed payload changed native Pi image shape")
+	}
+
+	if err := os.WriteFile(imagePath, append(contents, 'x'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	changedWriter := &boundedWriteCloser{}
+	client.stdin = changedWriter
+	if err := client.writeCommandUnlocked(value, "prompt", time.Time{}); err == nil || len(changedWriter.bytes) != 0 {
+		t.Fatalf("changed persisted image was streamed: bytes=%d err=%v", len(changedWriter.bytes), err)
+	}
+}
+
+type boundedWriteCloser struct {
+	bytes   []byte
+	maximum int
+}
+
+func (writer *boundedWriteCloser) Write(value []byte) (int, error) {
+	writer.maximum = max(writer.maximum, len(value))
+	writer.bytes = append(writer.bytes, value...)
+	return len(value), nil
+}
+func (*boundedWriteCloser) Close() error { return nil }
 
 func TestClientCompactionFlushDoesNotBlockStdoutAndTimesOut(t *testing.T) {
 	stdinReader, stdinWriter, err := os.Pipe()

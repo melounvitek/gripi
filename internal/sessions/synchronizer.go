@@ -119,6 +119,24 @@ func (synchronizer *Synchronizer) WithMutableClient(ctx context.Context, path st
 		return call(client)
 	})
 }
+func (synchronizer *Synchronizer) WithClientMove(ctx context.Context, path string, touch bool, call func(rpc.RPCClient) (string, error), prepare func(string, string) (func() error, error), commit func(string, string)) (string, error) {
+	lock := synchronizer.lockFor(path)
+	if !lock.TryLock() {
+		return path, ErrSyncBusy
+	}
+	defer lock.Unlock()
+	before, err := synchronizer.verificationSnapshot(ctx, path)
+	if err != nil {
+		return path, err
+	}
+	return synchronizer.clients.WithClientMove(ctx, path, touch, func(client rpc.RPCClient) (string, error) {
+		if err := synchronizer.verifyClient(ctx, path, before, client); err != nil {
+			return path, err
+		}
+		return call(client)
+	}, prepare, commit)
+}
+
 func (synchronizer *Synchronizer) WithBashClient(ctx context.Context, path string, call func(rpc.RPCClient) error) error {
 	lock := synchronizer.lockFor(path)
 	if !lock.TryLock() {

@@ -91,7 +91,11 @@ func TestBrowserEnforcementIsDisabledForAuthDisabledAndMultiUserModes(t *testing
 
 			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://example.com/", nil))
 
-			if response.Code != http.StatusNotFound {
+			expected := http.StatusNotFound
+			if test.multiUser {
+				expected = http.StatusServiceUnavailable
+			}
+			if response.Code != expected {
 				t.Fatalf("status = %d, body = %q", response.Code, response.Body.String())
 			}
 			if strings.Contains(response.Body.String(), "Browser access required") {

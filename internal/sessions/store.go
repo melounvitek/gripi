@@ -263,15 +263,32 @@ type Store struct {
 	Cache *Cache
 }
 
+func (cache *Cache) cachedIndex(path string) *index {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if item := cache.items[path]; item != nil {
+		cache.clock++
+		item.used = cache.clock
+		return item.index
+	}
+	return nil
+}
+
 func (store Store) Sessions() ([]*Session, error) {
+	result, _, err := store.SessionsDeferringMetadata(nil)
+	return result, err
+}
+
+func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*Session, bool, error) {
 	root, err := filepath.EvalSymlinks(store.Root)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var result []*Session
+	deferred := false
 	err = filepath.WalkDir(root, func(path string, item os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if path == root {
@@ -290,7 +307,16 @@ func (store Store) Sessions() ([]*Session, error) {
 		if err != nil || !stat.Mode().IsRegular() {
 			return nil
 		}
-		indexed, err := store.Cache.Index(realPath)
+		indexed := (*index)(nil)
+		if deferFor != nil && deferFor(realPath) {
+			indexed = store.Cache.cachedIndex(realPath)
+			if indexed != nil {
+				deferred = true
+			}
+		}
+		if indexed == nil {
+			indexed, err = store.Cache.Index(realPath)
+		}
 		if err != nil || !indexed.supported || !indexed.sessionMetadataSupported || indexed.session == nil || indexed.session.CWD == "" || !filepath.IsAbs(indexed.session.CWD) {
 			return nil
 		}
@@ -302,12 +328,12 @@ func (store Store) Sessions() ([]*Session, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	sort.SliceStable(result, func(left, right int) bool {
 		return result[left].ConversationActivityAt.After(result[right].ConversationActivityAt)
 	})
-	return result, nil
+	return result, deferred, nil
 }
 
 func (store Store) Session(path string) (*Session, bool) {

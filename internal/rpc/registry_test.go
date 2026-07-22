@@ -114,6 +114,18 @@ func TestRegistryMovePreparationHidesBothPathsAndRollsBack(t *testing.T) {
 	}
 }
 
+func TestRegistryMoveCommitsMetadataWhenSourceClientAlreadyDisappeared(t *testing.T) {
+	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
+	prepared, committed := false, false
+	err := registry.MoveWithCommit("/pending", "/real", func() (func() error, error) {
+		prepared = true
+		return nil, nil
+	}, func() { committed = true })
+	if err != nil || !prepared || !committed {
+		t.Fatalf("prepared=%v committed=%v err=%v", prepared, committed, err)
+	}
+}
+
 func TestRegistryMoveReplacesAndClosesIdleDestination(t *testing.T) {
 	source := newRegistryClient()
 	destination := newRegistryClient()

@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"html/template"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -50,7 +53,7 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayAttachments(t *testi
 	}
 	app := &application{config: config.Config{SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
 
-	result, err := app.canonicalRPCSessionPath(context.Background(), pendingPath)
+	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), pendingPath)
 	if err != nil || result != realPath {
 		t.Fatalf("remapped path = %q, %v", result, err)
 	}
@@ -66,6 +69,99 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayAttachments(t *testi
 	migrated, err := os.ReadFile(filepath.Join(attachmentsRoot, sessions.SessionHash(realPath)+".jsonl"))
 	if err != nil || string(migrated) != "gateway metadata\n" {
 		t.Fatalf("migrated metadata = %q, %v", migrated, err)
+	}
+}
+
+func TestCanonicalRPCSessionPathFinalizesPendingSessionAtSamePath(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "materialized.jsonl")
+	writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "real", "cwd": project}})
+	client := &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": path}}}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember(path, project)
+	app := &application{config: config.Config{SessionsRoot: root, AttachmentsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+
+	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), path)
+	if err != nil || result != path || !registry.Active(path) {
+		t.Fatalf("result=%q active=%v err=%v", result, registry.Active(path), err)
+	}
+	if _, ok := pending.CWD(path); ok {
+		t.Fatal("materialized session remained pending")
+	}
+}
+
+func TestPreparePageCanonicalizesSelectedPendingSessionBeforeBuildingView(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	realPath := filepath.Join(root, "real.jsonl")
+	writeSessionRecords(t, realPath, []map[string]any{{"type": "session", "version": 3, "id": "real", "timestamp": "2026-01-01T00:00:00Z", "cwd": project}})
+	pendingPath := filepath.Join(root, "pending.jsonl")
+	client := &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": realPath}}}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(pendingPath, client); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember(pendingPath, project)
+	cache := sessions.NewCache()
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned")), rpcClients: registry, pendingSessions: pending}
+	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
+
+	view, err := app.preparePage(request, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Selected == nil || view.Selected.Path != realPath || request.URL.Query().Get("session") != realPath {
+		t.Fatalf("selected = %#v, query = %q", view.Selected, request.URL.Query().Get("session"))
+	}
+}
+
+func TestPendingRemapVerifiesSourceOwnershipAndClaimsDestination(t *testing.T) {
+	client := &remapClient{}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register("/pending", client); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember("/pending", "/project")
+	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
+	claimed := ""
+	app := &application{config: config.Config{AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending,
+		ownsSession:  func(_ *http.Request, path string) bool { return path == "/pending" },
+		claimSession: func(_ *http.Request, path string) error { claimed = path; return nil },
+	}
+	if err := app.movePendingRPCClient(request, "/pending", "/real"); err != nil {
+		t.Fatal(err)
+	}
+	if claimed != "/real" || registry.Active("/pending") || !registry.Active("/real") {
+		t.Fatalf("claimed=%q pending=%v real=%v", claimed, registry.Active("/pending"), registry.Active("/real"))
+	}
+
+	other := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := other.Register("/other-pending", &remapClient{}); err != nil {
+		t.Fatal(err)
+	}
+	otherPending := rpc.NewPendingSessionRegistry(nil)
+	otherPending.Remember("/other-pending", "/project")
+	app.rpcClients, app.pendingSessions = other, otherPending
+	app.ownsSession = func(*http.Request, string) bool { return false }
+	if err := app.movePendingRPCClient(request, "/other-pending", "/other-real"); err == nil {
+		t.Fatal("unowned pending session was remapped")
+	}
+	if !other.Active("/other-pending") || other.Active("/other-real") {
+		t.Fatal("rejected ownership changed clients")
 	}
 }
 
@@ -182,6 +278,140 @@ func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {
 	}
 }
 
+func TestAcceptedPromptImageSurvivesAttachmentMetadataFailure(t *testing.T) {
+	path := "/pending-image"
+	client := &followUpRaceClient{Client: (*rpc.Client)(nil)}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember(path, "/project")
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, sessions.SessionHash(path)+".jsonl"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cache := sessions.NewCache()
+	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
+	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), cache, registry)
+	temporary := t.TempDir()
+	t.Setenv("TMPDIR", temporary)
+	var invalidBody bytes.Buffer
+	invalidWriter := multipart.NewWriter(&invalidBody)
+	_ = invalidWriter.WriteField("session", path)
+	_ = invalidWriter.WriteField("message", "invalid image")
+	invalidHeader := textproto.MIMEHeader{"Content-Disposition": {`form-data; name="images[]"; filename="image.txt"`}, "Content-Type": {"text/plain"}}
+	invalidPart, err := invalidWriter.CreatePart(invalidHeader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = invalidPart.Write([]byte("invalid"))
+	_ = invalidWriter.Close()
+	invalidRequest := httptest.NewRequest(http.MethodPost, "http://app.test/prompt", &invalidBody)
+	invalidRequest.Header.Set("Content-Type", invalidWriter.FormDataContentType())
+	invalidResponse := httptest.NewRecorder()
+	app.prompt(invalidResponse, invalidRequest)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid response = %d %s", invalidResponse.Code, invalidResponse.Body.String())
+	}
+	spools, err := filepath.Glob(filepath.Join(temporary, "multipart-*"))
+	if err != nil || len(spools) != 0 {
+		t.Fatalf("multipart spool files = %#v, %v", spools, err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("session", path); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("message", "accepted image"); err != nil {
+		t.Fatal(err)
+	}
+	header := textproto.MIMEHeader{"Content-Disposition": {`form-data; name="images[]"; filename="image.png"`}, "Content-Type": {"image/png"}}
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("image")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "http://app.test/prompt", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+
+	app.prompt(response, request)
+	if response.Code != http.StatusInternalServerError || !client.prompted {
+		t.Fatalf("response = %d %s, prompted=%v", response.Code, response.Body.String(), client.prompted)
+	}
+	images, err := filepath.Glob(filepath.Join(root, sessions.SessionHash(path), "*.png"))
+	if err != nil || len(images) != 1 {
+		t.Fatalf("persisted images = %#v, %v", images, err)
+	}
+}
+
+func TestAbortAllowsTrackedSyntheticPendingSession(t *testing.T) {
+	path := "/synthetic-pending"
+	client := &followUpRaceClient{Client: (*rpc.Client)(nil)}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember(path, "/project")
+	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+
+	app.abortSession(response, request)
+	if response.Code != http.StatusOK || !client.aborted {
+		t.Fatalf("response = %d %s, aborted=%v", response.Code, response.Body.String(), client.aborted)
+	}
+}
+
+func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *testing.T) {
+	path := "/pending-follow-up"
+	started, release := make(chan struct{}), make(chan struct{})
+	client := &followUpRaceClient{Client: (*rpc.Client)(nil)}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	client.queue = func() {
+		go func() {
+			_ = registry.WithClient(context.Background(), path, func(rpc.RPCClient) error {
+				close(started)
+				<-release
+				return nil
+			})
+		}()
+		<-started
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember(path, t.TempDir())
+	cache := sessions.NewCache()
+	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: t.TempDir()}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
+	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), cache, registry)
+	request := httptest.NewRequest(http.MethodPost, "http://app.test/prompt", strings.NewReader(url.Values{"session": {path}, "message": {"after compaction"}, "streaming_behavior": {"follow_up"}}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+
+	app.prompt(response, request)
+	close(release)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "session_operation_pending") {
+		t.Fatalf("response = %d %s", response.Code, response.Body.String())
+	}
+	if client.followUpCalled {
+		t.Fatal("follow-up bypassed the synchronized operation lane")
+	}
+}
+
 func TestLiveOutputRecognizesNativeIntegerCompletedBashAsPersisted(t *testing.T) {
 	recorded := time.UnixMilli(1_750_000_000_500)
 	exitCode := 0
@@ -220,6 +450,72 @@ func TestHandlerCloseHonorsContextWhileMaintenanceFinishes(t *testing.T) {
 	}
 }
 
+func TestPendingRemapWaitsForPromptAttachmentBoundary(t *testing.T) {
+	from, to := "/pending-boundary", "/real-boundary"
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(from, &remapClient{}); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember(from, "/project")
+	app := &application{config: config.Config{AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
+	boundary := app.imagePromptLock(from)
+	boundary.Lock()
+	moved := make(chan error, 1)
+	go func() {
+		moved <- app.movePendingRPCClient(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), from, to)
+	}()
+	select {
+	case err := <-moved:
+		t.Fatalf("remap crossed prompt boundary: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	boundary.Unlock()
+	if err := <-moved; err != nil {
+		t.Fatal(err)
+	}
+	if remapped, ok := pending.Resolve(from); !ok || remapped != to {
+		t.Fatalf("remap = %q, %v", remapped, ok)
+	}
+}
+
+func TestAttachmentPromptRecordingCannotRacePendingMigration(t *testing.T) {
+	root := t.TempDir()
+	from, to := "/pending", "/real"
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(from, &remapClient{}); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember(from, "/project")
+	app := &application{config: config.Config{AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending}
+	started, record := make(chan struct{}), make(chan struct{})
+	recorded := make(chan error, 1)
+	go func() {
+		recorded <- registry.WithClient(context.Background(), from, func(rpc.RPCClient) error {
+			close(started)
+			<-record
+			return (sessions.AttachmentStore{Root: root}).RecordPrompt(from, "message", 1, time.Now(), []string{"/image"}, []string{"image/png"})
+		})
+	}()
+	<-started
+	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
+	if err := app.movePendingRPCClient(request, from, to); !errors.Is(err, rpc.ErrOperationPending) {
+		t.Fatalf("move during prompt recording = %v", err)
+	}
+	close(record)
+	if err := <-recorded; err != nil {
+		t.Fatal(err)
+	}
+	if err := app.movePendingRPCClient(request, from, to); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := os.ReadFile(filepath.Join(root, sessions.SessionHash(to)+".jsonl"))
+	if err != nil || !strings.Contains(string(metadata), sessions.MessageHash("message")) {
+		t.Fatalf("migrated metadata = %q, %v", metadata, err)
+	}
+}
+
 func TestPendingClientMoveRollsBackWhenAttachmentMigrationFails(t *testing.T) {
 	root := t.TempDir()
 	from, to := "/pending", "/real"
@@ -237,8 +533,12 @@ func TestPendingClientMoveRollsBackWhenAttachmentMigrationFails(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, sessions.SessionHash(to)+".jsonl"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	app := &application{config: config.Config{AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending}
-	if err := app.movePendingRPCClient(from, to); err == nil {
+	released := ""
+	app := &application{config: config.Config{AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending,
+		claimSession:   func(*http.Request, string) error { return nil },
+		releaseSession: func(_ *http.Request, path string) error { released = path; return nil },
+	}
+	if err := app.movePendingRPCClient(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), from, to); err == nil {
 		t.Fatal("attachment migration unexpectedly succeeded")
 	}
 	if !registry.Active(from) || registry.Active(to) {
@@ -246,6 +546,9 @@ func TestPendingClientMoveRollsBackWhenAttachmentMigrationFails(t *testing.T) {
 	}
 	if _, ok := pending.CWD(from); !ok {
 		t.Fatal("failed migration forgot pending metadata")
+	}
+	if released != to {
+		t.Fatalf("released ownership = %q", released)
 	}
 }
 
@@ -264,6 +567,36 @@ func writeSessionRecords(t *testing.T, path string, records []map[string]any) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type followUpRaceClient struct {
+	*rpc.Client
+	queue          func()
+	followUpCalled bool
+	aborted        bool
+	prompted       bool
+}
+
+func (*followUpRaceClient) Close() error { return nil }
+func (*followUpRaceClient) GetState(context.Context) (map[string]any, error) {
+	return map[string]any{"success": true}, nil
+}
+func (client *followUpRaceClient) QueueCompactionFollowUp(context.Context, string, []rpc.PromptImage) (map[string]any, bool, error) {
+	client.queue()
+	return nil, false, nil
+}
+func (client *followUpRaceClient) FollowUp(context.Context, string, []rpc.PromptImage) (map[string]any, error) {
+	client.followUpCalled = true
+	return map[string]any{"success": true}, nil
+}
+func (client *followUpRaceClient) Prompt(context.Context, string, []rpc.PromptImage) (map[string]any, error) {
+	client.prompted = true
+	return map[string]any{"success": true}, nil
+}
+func (*followUpRaceClient) ActiveBashCommand() string { return "" }
+func (client *followUpRaceClient) Abort(context.Context) (map[string]any, error) {
+	client.aborted = true
+	return map[string]any{"success": true}, nil
 }
 
 type remapClient struct {
