@@ -15,7 +15,11 @@ Wrap up the current work for this repo.
    - delete the feature branch if it was merged and is no longer needed
 5. If already on `master`:
    - push `master`
-6. If code changes require the local server to restart, finish all other wrap-up work first, then ask whether the user wants to restart it now. Never restart without explicit confirmation.
+6. If code changes require the local server to restart:
+   - finish all other wrap-up work first, then ask whether the user wants to restart it now
+   - never restart without explicit confirmation
+   - before restarting, verify whether the launcher rebuilds changed code; if it does not, rebuild the current code first
+   - after restarting, verify the service is running and responding
 7. Report:
    - commits created
    - branch/merge/push result
