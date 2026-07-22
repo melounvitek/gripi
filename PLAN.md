@@ -11,7 +11,7 @@ The browser JavaScript, Electron shell, CSS, and Pi TypeScript extension remain 
 ## Rounds
 
 - [x] 1. Establish the Ruby memory baseline, Go toolchain, configuration, embedded assets, process lifecycle, and migration test commands.
-- [ ] 2. Port HTTP security, browser approval, secure state stores, PWA endpoints, and Go templates.
+- [x] 2. Port HTTP security, browser approval, secure state stores, PWA endpoints, and Go templates.
 - [ ] 3. Port session discovery/indexing, history rendering, attachments, Markdown, sidebar, search, and pagination.
 - [ ] 4. Port Pi RPC subprocess management, event buffering, registry concurrency, idle retirement, and session synchronization.
 - [ ] 5. Port prompts, bash, streaming controls, model settings, trees, branches, extension UI, and remaining session actions.

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notification test</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#18181e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Gripi">
+  <style>
+    :root { color-scheme: dark; --bg: #18181e; --panel: #282832; --border: #505050; --text: #d4d4d4; --muted: #9a9a9a; --accent: #ff5a1f; --danger: #cc6666; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 1.25rem; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); }
+    main { width: min(34rem, 100%); display: grid; gap: 1rem; padding: 1.25rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--panel); }
+    h1 { margin: 0; font-size: 1.35rem; }
+    p { margin: 0; color: var(--muted); line-height: 1.45; }
+    button, a.button { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: 0.7rem 0.9rem; border: 0; border-radius: 0.65rem; background: var(--accent); color: #18181e; font: inherit; font-weight: 800; text-decoration: none; }
+    button:disabled { opacity: 0.5; }
+    .actions { display: grid; gap: 0.65rem; }
+    .status { min-height: 4rem; padding: 0.85rem; border: 1px solid var(--border); border-radius: 0.65rem; background: #1e1e24; white-space: pre-wrap; color: var(--text); }
+    .error { color: #ffb4b6; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Notification test</h1>
+    <p>This page checks whether this browser app can register a service worker, request notification permission, and display a local test notification.</p>
+    <div class="actions">
+      <button type="button" data-enable>Enable notifications</button>
+      <button type="button" data-send disabled>Send test notification</button>
+      <a class="button" href="/">Back to gateway</a>
+    </div>
+    <div class="status" data-status>Ready.</div>
+  </main>
+  <script nonce="{{.Nonce}}">
+    const enableButton = document.querySelector("[data-enable]");
+    const sendButton = document.querySelector("[data-send]");
+    const statusBox = document.querySelector("[data-status]");
+    let registration = null;
+
+    function setStatus(message, error = false) {
+      statusBox.textContent = message;
+      statusBox.classList.toggle("error", error);
+    }
+
+    function desktopNotificationAvailable() {
+      return Boolean(window.gripiElectron?.showNotification);
+    }
+
+    function webNotificationAvailable() {
+      return "Notification" in window && "serviceWorker" in navigator;
+    }
+
+    function notificationAvailable() {
+      return desktopNotificationAvailable() || webNotificationAvailable();
+    }
+
+    async function registerServiceWorker() {
+      registration ||= await navigator.serviceWorker.register("/service-worker.js");
+      registration = await navigator.serviceWorker.ready;
+      return registration;
+    }
+
+    async function refreshState() {
+      if (!notificationAvailable()) {
+        enableButton.disabled = true;
+        sendButton.disabled = true;
+        setStatus("This browser context does not expose Notification + serviceWorker APIs. Open this from an installed browser app or a browser that supports web notifications.", true);
+        return;
+      }
+
+      if (desktopNotificationAvailable()) {
+        sendButton.disabled = false;
+        setStatus("Desktop notifications are available. Tap Send test notification.");
+      } else if (Notification.permission === "granted") {
+        await registerServiceWorker();
+        sendButton.disabled = false;
+        setStatus("Permission is granted. Tap Send test notification.");
+      } else if (Notification.permission === "denied") {
+        enableButton.disabled = true;
+        sendButton.disabled = true;
+        setStatus("Notification permission is denied for this app/site. Re-enable it in your browser or system notification settings, then try again.", true);
+      } else {
+        sendButton.disabled = true;
+        setStatus("Permission has not been requested yet. Tap Enable notifications.");
+      }
+    }
+
+    enableButton.addEventListener("click", async () => {
+      try {
+        if (!notificationAvailable()) {
+          await refreshState();
+          return;
+        }
+        if (desktopNotificationAvailable()) {
+          await refreshState();
+          return;
+        }
+        setStatus("Registering service worker…");
+        await registerServiceWorker();
+        setStatus("Requesting notification permission…");
+        const permission = await Notification.requestPermission();
+        setStatus(`Permission result: ${permission}`);
+        await refreshState();
+      } catch (error) {
+        setStatus(`Enable failed: ${error.message || error}`, true);
+      }
+    });
+
+    sendButton.addEventListener("click", async () => {
+      try {
+        let worker = null;
+        if (!desktopNotificationAvailable()) {
+          worker = await registerServiceWorker();
+          if (Notification.permission !== "granted") {
+            await refreshState();
+            return;
+          }
+        }
+        const payload = {
+          type: "gripi-notification-test",
+          title: "Gripi test",
+          body: "If you can see this, local web notifications work here.",
+          tag: "gripi-notification-test",
+          url: "/notification-test"
+        };
+        if (desktopNotificationAvailable()) {
+          const result = await window.gripiElectron.showNotification(payload);
+          if (!result?.ok) throw new Error("Desktop notification bridge did not accept the request.");
+        } else if (worker.active) {
+          worker.active.postMessage(payload);
+        } else {
+          await worker.showNotification(payload.title, {
+            body: payload.body,
+            tag: payload.tag,
+            renotify: true,
+            icon: "/app-icon.svg",
+            badge: "/app-icon.svg",
+            data: { url: payload.url }
+          });
+        }
+        setStatus("Test notification requested. If nothing appeared, check this app/site in your browser or system notification settings and focus/do-not-disturb mode.");
+      } catch (error) {
+        setStatus(`Send failed: ${error.message || error}`, true);
+      }
+    });
+
+    refreshState().catch((error) => setStatus(`Setup failed: ${error.message || error}`, true));
+  </script>
+</body>
+</html>

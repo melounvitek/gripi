@@ -17,7 +17,7 @@ func TestHandlerServesEmbeddedFrontendAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/assets/app.css", nil)
+	request := httptest.NewRequest(http.MethodGet, "http://app.test/assets/app.css", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
@@ -38,7 +38,7 @@ func TestHandlerDoesNotListAssetDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/assets/", nil)
+	request := httptest.NewRequest(http.MethodGet, "http://app.test/assets/", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
@@ -53,7 +53,7 @@ func TestHandlerDoesNotTreatUnknownPathsAsStaticFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	request := httptest.NewRequest(http.MethodGet, "http://app.test/missing", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 

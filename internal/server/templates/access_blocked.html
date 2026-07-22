@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gripi Access</title>
+  <style>
+    :root { color-scheme: dark; --bg: #18181e; --panel: #1e1e24; --border: #50505066; --border-strong: #505050b3; --text: #d4d4d4; --muted: #808080; --accent: #ff5a1f; --accent-bright: #ff7a45; --danger: #cc6666; --danger-soft: #3c2828; --button-text: #18181e; --mono: "Commit Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace; }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 1rem; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background-color: var(--bg); background-image: linear-gradient(#ffffff08 1px, transparent 1px), linear-gradient(90deg, #ffffff08 1px, transparent 1px), linear-gradient(#ffffff04 1px, transparent 1px), linear-gradient(90deg, #ffffff04 1px, transparent 1px); background-size: 96px 96px, 96px 96px, 12px 12px, 12px 12px; }
+    main { width: min(32rem, 100%); display: grid; gap: 1rem; padding: 1.25rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: var(--panel); box-shadow: 0 8px 26px #00000047; }
+    h1 { margin: 0; font-family: var(--mono); font-size: 1.05rem; font-weight: 700; letter-spacing: 0.02em; }
+    h1::before { content: "❯ "; color: var(--accent); }
+    p { margin: 0; color: var(--muted); line-height: 1.5; }
+    form { display: grid; gap: 0.6rem; margin: 0; }
+    input { width: 100%; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; color: var(--text); background: var(--bg); font-family: var(--mono); font-size: 0.9rem; }
+    input:focus { border-color: #ff5a1f8c; outline: none; box-shadow: 0 0 0 2px #ff5a1f26; }
+    input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button { justify-self: start; padding: 0.55rem 0.9rem; border: 1px solid transparent; border-radius: 0.3rem; background: var(--accent); color: var(--button-text); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+    button:hover { background: var(--accent-bright); }
+    .secondary { background: transparent; border-color: var(--border-strong); color: var(--text); }
+    .secondary:hover { background: #ff5a1f0f; border-color: #ff5a1f8c; }
+    .error { padding: 0.7rem; border: 1px solid #cc666659; border-radius: 0.3rem; color: #e8a9a9; background: var(--danger-soft); }
+    .muted { font-size: 0.9rem; }
+    .code { display: inline-flex; justify-content: center; padding: 0.8rem 1rem; border: 1px solid #ff5a1f59; border-radius: 0.3rem; background: #ff5a1f0f; color: var(--accent); font-family: var(--mono); font-size: 1.6rem; font-weight: 700; letter-spacing: 0.08em; }
+    code { font-family: var(--mono); font-size: 0.88em; padding: 0.05rem 0.3rem; border: 1px solid #ff5a1f26; border-radius: 0.2rem; background: #ff5a1f0f; }
+  </style>
+</head>
+<body data-access-status-url="/browser-access/status">
+  <main>
+    <h1>Browser access required</h1>
+    <p>This browser is not approved for Gripi yet.</p>
+    {{with .Request}}<div class="code">{{.Code}}</div>{{end}}
+    {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+    <form method="post" action="/browser-access/request">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <button type="submit">Ask access</button>
+    </form>
+
+    <form method="post" action="/browser-access/admin-login">
+      <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+      <input type="password" name="password" placeholder="Admin password" autocomplete="current-password">
+      <button class="secondary" type="submit">Approve this browser</button>
+    </form>
+
+    {{if .Request}}<p class="muted">SSH fallback: edit <code>{{.BrowserAccessPath}}</code>, copy the pending request with this code into <code>approved_browsers</code>, remove it from <code>pending_requests</code>, then reload.</p>{{end}}
+  </main>
+  <script nonce="{{.Nonce}}">
+    async function pollAccessStatus() {
+      try {
+        const response = await fetch(document.body.dataset.accessStatusUrl, { headers: { "Accept": "application/json" } });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (payload.status === "approved") window.location.reload();
+      } catch (_error) {}
+      setTimeout(pollAccessStatus, 2000);
+    }
+    pollAccessStatus();
+  </script>
+</body>
+</html>
