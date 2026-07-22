@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -64,6 +65,15 @@ type application struct {
 	ownsSession        func(*http.Request, string) bool
 	claimSession       func(*http.Request, string) (bool, error)
 	releaseSession     func(*http.Request, string) error
+}
+
+func logInternalError(operation string, err error) {
+	log.Printf("%s: %v", operation, err)
+}
+
+func writeInternalError(response http.ResponseWriter, operation string, err error) {
+	logInternalError(operation, err)
+	writeText(response, http.StatusInternalServerError, "Internal Server Error")
 }
 
 type Handler struct {

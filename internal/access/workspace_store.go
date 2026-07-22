@@ -242,8 +242,8 @@ func (store *WorkspaceStore) read() (workspaceAccessState, error) {
 		return emptyWorkspaceAccessState(), err
 	}
 	var value workspaceAccessState
-	if json.Unmarshal(contents, &value) != nil {
-		return emptyWorkspaceAccessState(), nil
+	if err := json.Unmarshal(contents, &value); err != nil {
+		return workspaceAccessState{}, fmt.Errorf("parse workspace access state: %w", err)
 	}
 	if value.ApprovedWorkspaces == nil {
 		value.ApprovedWorkspaces = []WorkspaceApproval{}

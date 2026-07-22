@@ -14,6 +14,29 @@ import (
 	"unicode/utf8"
 )
 
+func TestBrowserStorePreservesMalformedState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "browser-access.json")
+	malformed := []byte(`{"approved_browsers":`)
+	if err := os.WriteFile(path, malformed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewBrowserStore(path)
+
+	if approved, err := store.Approved("browser"); err == nil || approved {
+		t.Fatalf("Approved() = %t, %v", approved, err)
+	}
+	if _, err := store.RequestAccess("browser", "127.0.0.1", "Browser"); err == nil {
+		t.Fatal("RequestAccess() succeeded")
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(persisted) != string(malformed) {
+		t.Fatalf("malformed state was rewritten: %q", persisted)
+	}
+}
+
 func TestBrowserStorePersistsRequestsAndApprovalFlow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "browser-access.json")
 	store := NewBrowserStore(path)
@@ -159,33 +182,6 @@ func TestBrowserStoreBoundsPersistedMetadataByUTF8Bytes(t *testing.T) {
 	readJSON(t, path, &persisted)
 	if label := persisted.ApprovedBrowsers[0].Label; len(label) > MaxUserAgentBytes || !utf8.ValidString(label) {
 		t.Fatalf("label is %d bytes or invalid UTF-8: %q", len(label), label)
-	}
-}
-
-func TestBrowserStoreRecoversFromCorruptedState(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "browser-access.json")
-	if err := os.WriteFile(path, []byte("{not JSON"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	request, err := NewBrowserStore(path).EnsurePending("recovered", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if request.Token != "recovered" {
-		t.Fatalf("request = %#v", request)
-	}
-	var persisted browserState
-	readJSON(t, path, &persisted)
-	if len(persisted.ApprovedBrowsers) != 0 || len(persisted.PendingRequests) != 1 {
-		t.Fatalf("recovered state = %#v", persisted)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %o", info.Mode().Perm())
 	}
 }
 

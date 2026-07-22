@@ -60,12 +60,12 @@ func (app *application) enforceBrowserAccess(next http.Handler) http.Handler {
 		}
 		token, err := app.browserToken(response, request)
 		if err != nil {
-			writeText(response, http.StatusInternalServerError, "Internal Server Error")
+			writeInternalError(response, "load browser token", err)
 			return
 		}
 		approved, err := app.browserStore.Approved(token)
 		if err != nil {
-			writeText(response, http.StatusInternalServerError, "Internal Server Error")
+			writeInternalError(response, "check browser approval", err)
 			return
 		}
 		if approved {
@@ -74,7 +74,7 @@ func (app *application) enforceBrowserAccess(next http.Handler) http.Handler {
 		}
 		pending, found, err := app.browserStore.PendingRequest(token)
 		if err != nil {
-			writeText(response, http.StatusInternalServerError, "Internal Server Error")
+			writeInternalError(response, "load browser access request", err)
 			return
 		}
 		var pendingPointer *access.PendingRequest
@@ -120,7 +120,7 @@ func (app *application) requestBrowserAccess(response http.ResponseWriter, reque
 			)
 			return
 		}
-		writeText(response, http.StatusInternalServerError, "Internal Server Error")
+		writeInternalError(response, "request browser access", err)
 		return
 	}
 	redirect(response, request, safeReturnTo(request.Form.Get("return_to")), app.config.TrustProxyHeaders)

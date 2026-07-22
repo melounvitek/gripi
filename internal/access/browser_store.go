@@ -359,7 +359,7 @@ func (s *BrowserStore) readState() (browserState, error) {
 	}
 	var current browserState
 	if err := json.Unmarshal(contents, &current); err != nil {
-		return emptyBrowserState(), nil
+		return browserState{}, fmt.Errorf("parse browser access state: %w", err)
 	}
 	if current.ApprovedBrowsers == nil {
 		current.ApprovedBrowsers = []ApprovedBrowser{}

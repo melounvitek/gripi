@@ -17,6 +17,32 @@ import (
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
+func TestWorkspaceAccessRejectsMalformedStateWithoutRewritingIt(t *testing.T) {
+	cfg := multiUserConfig(t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(cfg.WorkspaceAccessPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	malformed := []byte(`{"approved_workspaces":`)
+	if err := os.WriteFile(cfg.WorkspaceAccessPath, malformed, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil)
+	request.Header.Set("Cookie", "gripi_workspace=workspace")
+	response := httptest.NewRecorder()
+	multiUserHandler(t, cfg).ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || response.Body.String() != "Internal Server Error" {
+		t.Fatalf("response = %d %q", response.Code, response.Body.String())
+	}
+	persisted, err := os.ReadFile(cfg.WorkspaceAccessPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(persisted) != string(malformed) {
+		t.Fatalf("malformed state was rewritten: %q", persisted)
+	}
+}
+
 func TestMultiUserTokenApprovalRemainsBrowserBound(t *testing.T) {
 	root := t.TempDir()
 	cfg := multiUserConfig(root)

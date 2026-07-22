@@ -64,7 +64,7 @@ func (app *application) enforceWorkspaceAccess(next http.Handler) http.Handler {
 		}
 		approved, err := app.approvedWorkspace(request)
 		if err != nil {
-			writeText(response, http.StatusInternalServerError, "Internal Server Error")
+			writeInternalError(response, "check workspace approval", err)
 			return
 		}
 		if approved {
@@ -73,7 +73,7 @@ func (app *application) enforceWorkspaceAccess(next http.Handler) http.Handler {
 		}
 		bootstrap, err := app.workspaceBootstrapRequired()
 		if err != nil {
-			writeText(response, http.StatusInternalServerError, "Internal Server Error")
+			writeInternalError(response, "check workspace bootstrap state", err)
 			return
 		}
 		app.renderWorkspacePage(response, request, http.StatusForbidden, workspacePageData{ReturnTo: request.URL.RequestURI(), Bootstrap: bootstrap})

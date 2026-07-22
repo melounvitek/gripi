@@ -34,6 +34,30 @@ type nativeFixture struct {
 	markerTitle     string
 }
 
+func TestSessionRoutesRejectMalformedGatewayStateWithoutRewritingIt(t *testing.T) {
+	fixture := seedNativeFixture(t)
+	path := filepath.Join(fixture.root, "state", "read.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	malformed := []byte(`{"session":`)
+	if err := os.WriteFile(path, malformed, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	response := serve(t, fixtureHandler(t, fixture), http.MethodGet, "/", "")
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "Unable to read sessions") {
+		t.Fatalf("response = %d %q", response.Code, response.Body.String())
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(persisted) != string(malformed) {
+		t.Fatalf("malformed state was rewritten: %q", persisted)
+	}
+}
+
 func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	imageEntry := `{"type":"message","id":"image-entry","parentId":"21000005","timestamp":"2026-07-20T12:30:00.000Z","message":{"role":"user","content":[{"type":"image","data":"cG5n","mimeType":"image/png"}]}}` + "\n"

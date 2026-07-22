@@ -57,6 +57,7 @@ func (app *application) index(response http.ResponseWriter, request *http.Reques
 	}
 	view, err := app.preparePage(request, true)
 	if err != nil {
+		logInternalError("prepare session page", err)
 		http.Error(response, "Unable to read sessions", http.StatusInternalServerError)
 		return
 	}
@@ -73,6 +74,7 @@ func (app *application) sidebar(response http.ResponseWriter, request *http.Requ
 	defer releaseRequestSlot(app.heavyRequests)
 	view, err := app.preparePage(request, false)
 	if err != nil {
+		logInternalError("prepare sidebar", err)
 		http.Error(response, "Unable to read sessions", http.StatusInternalServerError)
 		return
 	}
@@ -87,6 +89,7 @@ func (app *application) newSessionModal(response http.ResponseWriter, request *h
 	defer releaseRequestSlot(app.heavyRequests)
 	view, err := app.preparePage(request, false)
 	if err != nil {
+		logInternalError("prepare new session modal", err)
 		http.Error(response, "Unable to read sessions", http.StatusInternalServerError)
 		return
 	}
@@ -101,6 +104,7 @@ func (app *application) sessionFragment(response http.ResponseWriter, request *h
 	defer releaseRequestSlot(app.heavyRequests)
 	view, err := app.preparePage(request, true)
 	if err != nil {
+		logInternalError("prepare session fragment", err)
 		http.Error(response, "Unable to read sessions", http.StatusInternalServerError)
 		return
 	}
@@ -325,6 +329,7 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 		return
 	}
 	if err := app.gatewayState.SetPinned(session.Path, pinned); err != nil {
+		logInternalError("update pinned sessions", err)
 		http.Error(response, "Unable to update pinned sessions", http.StatusInternalServerError)
 		return
 	}
@@ -366,6 +371,7 @@ func (app *application) markSessionRead(response http.ResponseWriter, request *h
 		return
 	}
 	if err := app.gatewayState.MarkRead(session.Path, count); err != nil {
+		logInternalError("update session read state", err)
 		http.Error(response, "Unable to update read state", http.StatusInternalServerError)
 		return
 	}

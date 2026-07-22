@@ -2,7 +2,10 @@ package sessions
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,13 +21,19 @@ func NewGatewayState(readPath, pinnedPath string) *GatewayState {
 	return &GatewayState{readPath: readPath, pinnedPath: pinnedPath}
 }
 
-func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool) (map[string]bool, map[string]bool) {
+func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool) (map[string]bool, map[string]bool, error) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	counts := map[string]int{}
-	_ = readJSON(state.readPath, &counts)
+	if err := readJSONIfExists(state.readPath, &counts); err != nil {
+		return nil, nil, fmt.Errorf("read session read state: %w", err)
+	}
 	if counts == nil {
 		counts = map[string]int{}
+	}
+	var paths []string
+	if err := readJSONIfExists(state.pinnedPath, &paths); err != nil {
+		return nil, nil, fmt.Errorf("read pinned sessions state: %w", err)
 	}
 	changed := false
 	for _, session := range all {
@@ -39,26 +48,28 @@ func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, mar
 		changed = true
 	}
 	if changed {
-		_ = writeJSON(state.readPath, counts)
+		if err := writeJSON(state.readPath, counts); err != nil {
+			return nil, nil, fmt.Errorf("write session read state: %w", err)
+		}
 	}
 	unread := make(map[string]bool)
 	for _, session := range all {
 		unread[session.Path] = counts[session.Path] < session.AssistantResponseCount
 	}
-	var paths []string
-	_ = readJSON(state.pinnedPath, &paths)
 	pinned := make(map[string]bool)
 	for _, path := range paths {
 		pinned[path] = true
 	}
-	return unread, pinned
+	return unread, pinned, nil
 }
 
 func (state *GatewayState) SetPinned(path string, pinned bool) error {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	var paths []string
-	_ = readJSON(state.pinnedPath, &paths)
+	if err := readJSONIfExists(state.pinnedPath, &paths); err != nil {
+		return fmt.Errorf("read pinned sessions state: %w", err)
+	}
 	result := make([]string, 0, len(paths)+1)
 	found := false
 	seen := make(map[string]bool)
@@ -78,21 +89,37 @@ func (state *GatewayState) SetPinned(path string, pinned bool) error {
 	if pinned && !found {
 		result = append(result, path)
 	}
-	return writeJSON(state.pinnedPath, result)
+	if err := writeJSON(state.pinnedPath, result); err != nil {
+		return fmt.Errorf("write pinned sessions state: %w", err)
+	}
+	return nil
 }
 
 func (state *GatewayState) MarkRead(path string, count int) error {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	values := map[string]int{}
-	_ = readJSON(state.readPath, &values)
+	if err := readJSONIfExists(state.readPath, &values); err != nil {
+		return fmt.Errorf("read session read state: %w", err)
+	}
 	if values == nil {
 		values = map[string]int{}
 	}
 	if values[path] < count {
 		values[path] = count
 	}
-	return writeJSON(state.readPath, values)
+	if err := writeJSON(state.readPath, values); err != nil {
+		return fmt.Errorf("write session read state: %w", err)
+	}
+	return nil
+}
+
+func readJSONIfExists(path string, target any) error {
+	err := readJSON(path, target)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func readJSON(path string, target any) error {
@@ -101,7 +128,17 @@ func readJSON(path string, target any) error {
 		return err
 	}
 	defer file.Close()
-	return json.NewDecoder(io.LimitReader(file, 8<<20)).Decode(target)
+	decoder := json.NewDecoder(io.LimitReader(file, 8<<20))
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("state contains multiple JSON values")
+		}
+		return err
+	}
+	return nil
 }
 
 func writeJSON(path string, value any) error {

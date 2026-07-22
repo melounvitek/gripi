@@ -192,7 +192,10 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		}
 	}
 	markRead := request.URL.Path != "/sidebar" || params.Get("session") != ""
-	unread, pinned := app.gatewayState.ReadAndObserve(all, selected, markRead)
+	unread, pinned, err := app.gatewayState.ReadAndObserve(all, selected, markRead)
+	if err != nil {
+		return nil, err
+	}
 	view := &pageView{Request: request, ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity)}
 	view.prepareSidebar()
 	renderedSessions := make([]*sessions.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)

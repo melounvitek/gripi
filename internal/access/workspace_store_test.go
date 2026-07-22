@@ -12,6 +12,29 @@ import (
 	"time"
 )
 
+func TestWorkspaceStorePreservesMalformedState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspace-access.json")
+	malformed := []byte(`{"approved_workspaces":`)
+	if err := os.WriteFile(path, malformed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewWorkspaceStore(path)
+
+	if approved, err := store.Approved("workspace"); err == nil || approved {
+		t.Fatalf("Approved() = %t, %v", approved, err)
+	}
+	if _, err := store.RequestAccess("workspace", "browser"); err == nil {
+		t.Fatal("RequestAccess() succeeded")
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(persisted) != string(malformed) {
+		t.Fatalf("malformed state was rewritten: %q", persisted)
+	}
+}
+
 func TestWorkspaceStoresPreserveExistingStateFormats(t *testing.T) {
 	root := t.TempDir()
 	accessPath := filepath.Join(root, "workspace-access.json")

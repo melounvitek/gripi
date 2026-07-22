@@ -7,11 +7,37 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/access"
 )
+
+func TestBrowserAccessRejectsMalformedStateWithoutRewritingIt(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.AdminPassword = "secret"
+	cfg.BrowserAuthDisabled = false
+	if err := os.MkdirAll(filepath.Dir(cfg.BrowserAccessPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	malformed := []byte(`{"approved_browsers":`)
+	if err := os.WriteFile(cfg.BrowserAccessPath, malformed, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	response := performRequest(newHandler(t, cfg), http.MethodGet, "/", "")
+	if response.Code != http.StatusInternalServerError || response.Body.String() != "Internal Server Error" {
+		t.Fatalf("response = %d %q", response.Code, response.Body.String())
+	}
+	persisted, err := os.ReadFile(cfg.BrowserAccessPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(persisted) != string(malformed) {
+		t.Fatalf("malformed state was rewritten: %q", persisted)
+	}
+}
 
 func TestUnknownBrowserGetsAnAccessCookieAndGateWithoutCreatingState(t *testing.T) {
 	cfg := testConfig(t)
