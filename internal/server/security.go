@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -355,16 +356,23 @@ func (app *application) writeSecurityError(response http.ResponseWriter, status 
 }
 
 func parseForm(response http.ResponseWriter, request *http.Request) bool {
-	if err := request.ParseForm(); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeText(response, http.StatusRequestEntityTooLarge, "Request body too large")
-		} else {
-			writeText(response, http.StatusBadRequest, "Invalid request body")
-		}
-		return false
+	var err error
+	mediaType, _, mediaTypeErr := mime.ParseMediaType(request.Header.Get("Content-Type"))
+	if mediaTypeErr == nil && mediaType == "multipart/form-data" {
+		err = request.ParseMultipartForm(1 << 20)
+	} else {
+		err = request.ParseForm()
 	}
-	return true
+	if err == nil {
+		return true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeText(response, http.StatusRequestEntityTooLarge, "Request body too large")
+	} else {
+		writeText(response, http.StatusBadRequest, "Invalid request body")
+	}
+	return false
 }
 
 func randomNonce() (string, error) {

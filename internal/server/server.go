@@ -7,22 +7,34 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/melounvitek/gripi/internal/access"
 	"github.com/melounvitek/gripi/internal/config"
+	"github.com/melounvitek/gripi/internal/rendering"
+	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 //go:embed templates/*.html
 var templateFiles embed.FS
 
 type application struct {
-	config          config.Config
-	templates       *template.Template
-	browserStore    *access.BrowserStore
-	accessLimiter   *access.RateLimiter
-	adminLimiter    *access.RateLimiter
-	newBrowserToken func() (string, error)
+	config             config.Config
+	templates          *template.Template
+	browserStore       *access.BrowserStore
+	accessLimiter      *access.RateLimiter
+	adminLimiter       *access.RateLimiter
+	newBrowserToken    func() (string, error)
+	instanceID         string
+	sessionCache       *sessions.Cache
+	gatewayState       *sessions.GatewayState
+	markdown           *rendering.Markdown
+	heavyRequests      chan struct{}
+	fdRequests         chan struct{}
+	sessionHashesMu    sync.Mutex
+	knownSessionHashes map[string]bool
+	sessionHashesAt    time.Time
 }
 
 func NewHandler(cfg config.Config, files fs.FS) (http.Handler, error) {
@@ -34,18 +46,30 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	if err != nil {
 		return nil, fmt.Errorf("open embedded public files: %w", err)
 	}
-	templates, err := template.ParseFS(templateFiles, "templates/*.html")
+	markdown := rendering.NewMarkdown()
+	templates, err := template.New("").Funcs(templateFunctions(markdown)).ParseFS(templateFiles, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
+	instanceID, err := randomBrowserToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate gateway instance ID: %w", err)
+	}
 
 	app := &application{
-		config:          cfg,
-		templates:       templates,
-		browserStore:    access.NewBrowserStore(cfg.BrowserAccessPath),
-		accessLimiter:   access.NewRateLimiter(30, time.Minute),
-		adminLimiter:    access.NewRateLimiter(10, 5*time.Minute),
-		newBrowserToken: newBrowserToken,
+		config:             cfg,
+		templates:          templates,
+		browserStore:       access.NewBrowserStore(cfg.BrowserAccessPath),
+		accessLimiter:      access.NewRateLimiter(30, time.Minute),
+		adminLimiter:       access.NewRateLimiter(10, 5*time.Minute),
+		newBrowserToken:    newBrowserToken,
+		instanceID:         instanceID,
+		sessionCache:       sessions.NewCache(),
+		gatewayState:       sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath),
+		markdown:           markdown,
+		heavyRequests:      make(chan struct{}, 2),
+		fdRequests:         make(chan struct{}, 4),
+		knownSessionHashes: make(map[string]bool),
 	}
 	mux := http.NewServeMux()
 	assets := filesOnly(public, http.StripPrefix("/", http.FileServerFS(public)))
@@ -53,6 +77,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	mux.Handle("GET /apple-touch-icon.png", noCache(assets))
 	app.registerBrowserAccessRoutes(mux)
 	app.registerPWARoutes(mux)
+	app.registerSessionRoutes(mux)
 
 	var handler http.Handler = mux
 	handler = app.enforceBrowserAccess(handler)
