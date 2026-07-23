@@ -200,28 +200,36 @@ func TestStartNewSessionNormalizesANotYetExistingNativePath(t *testing.T) {
 	}
 }
 
-func TestCanonicalRPCSessionPathFinalizesPendingSessionAtSamePath(t *testing.T) {
+func TestCanonicalRPCSessionPathFinalizesPendingSessionAtSameConfiguredPath(t *testing.T) {
 	root := t.TempDir()
+	physicalRoot := filepath.Join(root, "physical-sessions")
+	configuredRoot := filepath.Join(root, "configured-sessions")
 	project := filepath.Join(root, "project")
-	if err := os.Mkdir(project, 0700); err != nil {
+	for _, path := range []string{physicalRoot, project} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(physicalRoot, configuredRoot); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, "materialized.jsonl")
-	writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "real", "cwd": project}})
-	client := &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": path}}}
+	physicalPath := filepath.Join(physicalRoot, "materialized.jsonl")
+	configuredPath := filepath.Join(configuredRoot, "materialized.jsonl")
+	writeSessionRecords(t, physicalPath, []map[string]any{{"type": "session", "version": 3, "id": "real", "cwd": project}})
+	client := &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": physicalPath}}}
 	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
-	if err := registry.Register(path, client); err != nil {
+	if err := registry.Register(configuredPath, client); err != nil {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(path, project)
-	app := &application{config: config.Config{SessionsRoot: root, AttachmentsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	pending.Remember(configuredPath, project)
+	app := &application{config: config.Config{SessionsRoot: configuredRoot, AttachmentsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
 
-	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), path)
-	if err != nil || result != path || !registry.Active(path) {
-		t.Fatalf("result=%q active=%v err=%v", result, registry.Active(path), err)
+	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), physicalPath)
+	if err != nil || result != configuredPath || !registry.Active(configuredPath) {
+		t.Fatalf("result=%q active=%v err=%v", result, registry.Active(configuredPath), err)
 	}
-	if _, ok := pending.CWD(path); ok {
+	if _, ok := pending.CWD(configuredPath); ok {
 		t.Fatal("materialized session remained pending")
 	}
 }

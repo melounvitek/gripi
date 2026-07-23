@@ -284,12 +284,16 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 	} else if remapped {
 		return resolved, nil
 	}
+	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+	session, known := store.Session(path)
+	if known {
+		path = session.Path
+	}
 	if cwd, ok := app.pendingSessions.CWD(path); ok && app.rpcClients.Active(path) {
 		var state map[string]any
 		if app.rpcClients.WithExistingClient(ctx, path, true, func(client rpc.RPCClient) error { var err error; state, err = client.GetState(ctx); return err }) == nil {
 			reported := sessionFileFrom(state)
 			if reported != "" {
-				store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
 				if session, ok := store.Session(reported); ok && session.CWD == cwd {
 					if err := app.movePendingRPCClient(request, path, session.Path); err != nil {
 						return path, err
@@ -301,12 +305,9 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 		}
 		return path, nil
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, known := store.Session(path)
 	if !known {
 		return path, nil
 	}
-	path = session.Path
 	if app.rpcClients.Active(path) {
 		return path, nil
 	}
