@@ -294,7 +294,7 @@ function syncComposerFocus(state = composerState?.dataset.state) {
   if (!automaticComposerFocusEnabled() || modalIsOpen()) return;
   if (document.activeElement?.matches?.('[data-tool-output-body][role="region"]')) return;
 
-  const agentBusy = ["running", "sending"].includes(state);
+  const agentBusy = ["running", "sending", "exporting"].includes(state);
   if (!agentBusy && !conversationController.nearBottom()) return;
 
   const target = agentBusy ? conversationScroll : promptTextarea;
@@ -356,7 +356,7 @@ function updatePromptPlaceholder() {
     return;
   }
   if (promptTextarea.disabled) {
-    promptTextarea.placeholder = "Sending…";
+    promptTextarea.placeholder = composerState?.dataset.state === "exporting" ? "Exporting…" : "Sending…";
     return;
   }
   promptTextarea.placeholder = "Ask Pi…";
@@ -374,7 +374,7 @@ function setStatusItem(key, label, value) {
       item.type = "button";
       item.dataset.modalOpen = "model-settings-modal";
       item.setAttribute("aria-label", "Open model and thinking settings");
-      item.disabled = ["running", "sending"].includes(composerState?.dataset.state);
+      item.disabled = ["running", "sending", "exporting"].includes(composerState?.dataset.state);
     }
     const labelElement = document.createElement("span");
     labelElement.className = "session-status-label";
@@ -525,7 +525,7 @@ async function loadModelSettings(modal, operation) {
     }
     renderModelSettingsModels();
     renderThinkingOptions(selectedSettingsModel());
-    if (apply) apply.disabled = !selectedSettingsModel() || ["running", "sending"].includes(composerState?.dataset.state);
+    if (apply) apply.disabled = !selectedSettingsModel() || ["running", "sending", "exporting"].includes(composerState?.dataset.state);
   } catch (error) {
     if (operation === modelSettingsOperationGeneration && !modal.hidden && sessionPath === currentSessionPath()) {
       setModelSettingsStatus(error.message || "Could not load models.", true);
@@ -534,7 +534,7 @@ async function loadModelSettings(modal, operation) {
 }
 
 function openModelSettingsModal() {
-  if (["running", "sending"].includes(composerState?.dataset.state)) return false;
+  if (["running", "sending", "exporting"].includes(composerState?.dataset.state)) return false;
   const modal = document.querySelector('[data-modal="model-settings-modal"]');
   const search = modal?.querySelector("[data-model-search]");
   if (search) search.value = "";
@@ -787,12 +787,12 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   if (!["running", "sending"].includes(state)) stopWaitingForOutput();
   if (composerState) {
     composerState.dataset.state = state;
-    composerState.textContent = ["running", "bash", "sending", "stopping", "error"].includes(state) ? label : "";
+    composerState.textContent = ["running", "bash", "sending", "exporting", "stopping", "error"].includes(state) ? label : "";
     if (state === "running") updateWaitingForOutputStatus();
   }
   const taskBusy = ["running", "bash", "sending", "stopping"].includes(state);
-  const agentBusy = ["running", "sending", "stopping"].includes(state);
-  const submitting = state === "sending";
+  const agentBusy = ["running", "sending", "exporting", "stopping"].includes(state);
+  const submitting = ["sending", "exporting"].includes(state);
   const stopping = state === "stopping";
   if (!["running", "sending"].includes(state)) streamingBehaviorSelection = "steer";
   updateStreamingSendControl(state);
@@ -1234,7 +1234,7 @@ function startLiveBash(event) {
     startedAt
   };
   liveMessageRenderer.renderBashEvent(event);
-  if (!liveAgentRunning && liveOutput?.dataset.composerCompacting !== "true" && !["sending", "stopping"].includes(composerState?.dataset.state)) {
+  if (!liveAgentRunning && liveOutput?.dataset.composerCompacting !== "true" && !["sending", "exporting", "stopping"].includes(composerState?.dataset.state)) {
     setComposerState("bash", "Shell command running…");
   }
   resetEventPollBackoff();
@@ -1245,7 +1245,7 @@ function finishLiveBash(event) {
   liveMessageRenderer.renderBashEvent(event);
   stoppingSessionPaths.delete(currentSessionPath());
   if (liveBash?.id === event.bashId) liveBash = null;
-  if (composerState?.dataset.state !== "sending") {
+  if (!["sending", "exporting"].includes(composerState?.dataset.state)) {
     showCurrentActiveTask("done", event.type === "bash_error" ? "Shell command failed" : "Done");
   }
 }
@@ -1707,14 +1707,14 @@ async function submitExportPrompt(rawMessage, exportCommand) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
-  setComposerState("sending", "Exporting…");
+  setComposerState("exporting", "Exporting…");
   showStatus("Exporting session…", true);
 
   try {
     const result = await sendExportRequest(formData, {
       retryCancelled,
       onRetry: () => {
-        setComposerState("sending", "Waiting to export…");
+        setComposerState("exporting", "Waiting to export…");
         showStatus("Waiting to export…", true);
       }
     });

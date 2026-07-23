@@ -146,7 +146,7 @@ test("downloads a native HTML export with the requested filename", async ({ page
   expect(download.suggestedFilename()).toBe("pi-session-contract.html");
 });
 
-test("does not download an export after it is stopped", async ({ page }) => {
+test("does not expose the session abort control while exporting", async ({ page }) => {
   let releaseExport;
   const exportReleased = new Promise((resolve) => { releaseExport = resolve; });
   await page.route("**/sessions/export", async (route) => {
@@ -154,23 +154,22 @@ test("does not download an export after it is stopped", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "text/html",
-      headers: { "Content-Disposition": "attachment; filename=cancelled.html" },
-      body: "<!doctype html><title>Cancelled export</title>"
+      headers: { "Content-Disposition": "attachment; filename=delayed.html" },
+      body: "<!doctype html><title>Delayed export</title>"
     });
   });
-  const downloads = [];
-  page.on("download", (download) => downloads.push(download));
   await page.goto("/");
   await selectSession(page, sessions.marker);
 
-  await page.getByLabel("Message to Pi").fill("/export cancelled.html");
+  await page.getByLabel("Message to Pi").fill("/export delayed.html");
+  const downloadPromise = page.waitForEvent("download");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
-  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "sending");
-  await page.getByRole("button", { name: "Abort running Pi" }).click();
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "exporting");
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
   releaseExport();
-  await page.waitForTimeout(300);
 
-  expect(downloads).toHaveLength(0);
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("delayed.html");
 });
 
 test("restores the export command when generation fails", async ({ page }) => {
