@@ -25,6 +25,17 @@ export function sessionCompactSlashCommand(message) {
   return /^\/compact(?:[ \t]+[^\r\n]+)?$/.test(message.trim());
 }
 
+export function sessionExportSlashCommand(message) {
+  const match = message.trim().match(/^\/export(?:[ \t]+([^\r\n]+))?$/);
+  if (!match) return null;
+
+  let filename = match[1]?.trim() || "";
+  if (filename.length >= 2 && ["\"", "'"].includes(filename[0]) && filename.at(-1) === filename[0]) {
+    filename = filename.slice(1, -1).trim();
+  }
+  return { filename };
+}
+
 export function sessionForkSlashCommand(message) {
   return /^\/fork$/.test(message.trim());
 }

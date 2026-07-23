@@ -111,6 +111,96 @@ test("clears pending compaction UI after retry exhaustion", async ({ page }) => 
   await expect(page.locator('[data-pending-compaction="true"]')).toHaveCount(0);
 });
 
+test("downloads a native HTML export with the requested filename", async ({ page }) => {
+  let exportRequests = 0;
+  await page.route("**/sessions/export", async (route) => {
+    exportRequests += 1;
+    if (exportRequests === 1) {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "session_operation_pending", error: "Another session operation is pending. Please retry." })
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto("/");
+  await selectSession(page, sessions.marker);
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/export report");
+  let downloadPromise = page.waitForEvent("download");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  let download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toBe("report.html");
+  expect(exportRequests).toBeGreaterThanOrEqual(2);
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
+  await expect(message(page, "user", "/export report")).toHaveCount(0);
+
+  await composer.fill("/export");
+  downloadPromise = page.waitForEvent("download");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("pi-session-contract.html");
+});
+
+test("does not expose session abort or overwrite a newer cross-tab run while exporting", async ({ page }) => {
+  let releaseExport;
+  const exportReleased = new Promise((resolve) => { releaseExport = resolve; });
+  await page.route("**/sessions/export", async (route) => {
+    await exportReleased;
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      headers: { "Content-Disposition": "attachment; filename=delayed.html" },
+      body: "<!doctype html><title>Delayed export</title>"
+    });
+  });
+  await page.goto("/");
+  await selectSession(page, sessions.controlsAbort);
+
+  await page.getByLabel("Message to Pi").fill("/export delayed.html");
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "exporting");
+  await expect(page.locator(".composer-state")).toHaveText("Exporting…");
+  await expect(page.locator(".composer-state")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
+
+  const otherPage = await page.context().newPage();
+  await otherPage.goto("/");
+  await selectSession(otherPage, sessions.controlsAbort);
+  await sendPrompt(otherPage, prompts.abortStart);
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  releaseExport();
+
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("delayed.html");
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await otherPage.getByRole("button", { name: "Abort running Pi" }).click();
+  await expectRunFinished(otherPage);
+  await otherPage.close();
+});
+
+test("restores the export command when generation fails", async ({ page }) => {
+  await page.route("**/sessions/export", (route) => route.fulfill({
+    status: 500,
+    contentType: "application/json",
+    body: JSON.stringify({ error: "Export failed" })
+  }));
+  await page.goto("/");
+  await selectSession(page, sessions.marker);
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/export Failed report.html");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+
+  await expect(page.locator(".composer-state")).toHaveText("Export failed");
+  await expect(composer).toHaveValue("/export Failed report.html");
+});
+
 test("stream a tool-backed answer and render the persisted result after reload", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.prompt);

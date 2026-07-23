@@ -1,6 +1,7 @@
 import { ESCAPE_STOP_CONFIRMATION_WINDOW_MS, STALE_SESSION_REFRESH_AFTER_MS } from "./constants.js";
 import { AsyncGeneration } from "./async_generation.js";
 import { parseNativeBash } from "./bash.js";
+import { downloadResponse } from "./downloads.js";
 import {
   compactNumber,
   eventErrorText,
@@ -12,6 +13,7 @@ import {
   notificationReplyPreview,
   sessionCloneSlashCommand,
   sessionCompactSlashCommand,
+  sessionExportSlashCommand,
   sessionForkSlashCommand,
   sessionModelSlashCommand,
   sessionNameFromEvent,
@@ -292,7 +294,7 @@ function syncComposerFocus(state = composerState?.dataset.state) {
   if (!automaticComposerFocusEnabled() || modalIsOpen()) return;
   if (document.activeElement?.matches?.('[data-tool-output-body][role="region"]')) return;
 
-  const agentBusy = ["running", "sending"].includes(state);
+  const agentBusy = ["running", "sending", "exporting"].includes(state);
   if (!agentBusy && !conversationController.nearBottom()) return;
 
   const target = agentBusy ? conversationScroll : promptTextarea;
@@ -354,7 +356,7 @@ function updatePromptPlaceholder() {
     return;
   }
   if (promptTextarea.disabled) {
-    promptTextarea.placeholder = "Sending…";
+    promptTextarea.placeholder = composerState?.dataset.state === "exporting" ? "Exporting…" : "Sending…";
     return;
   }
   promptTextarea.placeholder = "Ask Pi…";
@@ -372,7 +374,7 @@ function setStatusItem(key, label, value) {
       item.type = "button";
       item.dataset.modalOpen = "model-settings-modal";
       item.setAttribute("aria-label", "Open model and thinking settings");
-      item.disabled = ["running", "sending"].includes(composerState?.dataset.state);
+      item.disabled = ["running", "sending", "exporting"].includes(composerState?.dataset.state);
     }
     const labelElement = document.createElement("span");
     labelElement.className = "session-status-label";
@@ -523,7 +525,7 @@ async function loadModelSettings(modal, operation) {
     }
     renderModelSettingsModels();
     renderThinkingOptions(selectedSettingsModel());
-    if (apply) apply.disabled = !selectedSettingsModel() || ["running", "sending"].includes(composerState?.dataset.state);
+    if (apply) apply.disabled = !selectedSettingsModel() || ["running", "sending", "exporting"].includes(composerState?.dataset.state);
   } catch (error) {
     if (operation === modelSettingsOperationGeneration && !modal.hidden && sessionPath === currentSessionPath()) {
       setModelSettingsStatus(error.message || "Could not load models.", true);
@@ -532,7 +534,7 @@ async function loadModelSettings(modal, operation) {
 }
 
 function openModelSettingsModal() {
-  if (["running", "sending"].includes(composerState?.dataset.state)) return false;
+  if (["running", "sending", "exporting"].includes(composerState?.dataset.state)) return false;
   const modal = document.querySelector('[data-modal="model-settings-modal"]');
   const search = modal?.querySelector("[data-model-search]");
   if (search) search.value = "";
@@ -785,12 +787,12 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   if (!["running", "sending"].includes(state)) stopWaitingForOutput();
   if (composerState) {
     composerState.dataset.state = state;
-    composerState.textContent = ["running", "bash", "sending", "stopping", "error"].includes(state) ? label : "";
+    composerState.textContent = ["running", "bash", "sending", "exporting", "stopping", "error"].includes(state) ? label : "";
     if (state === "running") updateWaitingForOutputStatus();
   }
   const taskBusy = ["running", "bash", "sending", "stopping"].includes(state);
-  const agentBusy = ["running", "sending", "stopping"].includes(state);
-  const submitting = state === "sending";
+  const agentBusy = ["running", "sending", "exporting", "stopping"].includes(state);
+  const submitting = ["sending", "exporting"].includes(state);
   const stopping = state === "stopping";
   if (!["running", "sending"].includes(state)) streamingBehaviorSelection = "steer";
   updateStreamingSendControl(state);
@@ -1232,7 +1234,7 @@ function startLiveBash(event) {
     startedAt
   };
   liveMessageRenderer.renderBashEvent(event);
-  if (!liveAgentRunning && liveOutput?.dataset.composerCompacting !== "true" && !["sending", "stopping"].includes(composerState?.dataset.state)) {
+  if (!liveAgentRunning && liveOutput?.dataset.composerCompacting !== "true" && !["sending", "exporting", "stopping"].includes(composerState?.dataset.state)) {
     setComposerState("bash", "Shell command running…");
   }
   resetEventPollBackoff();
@@ -1243,7 +1245,7 @@ function finishLiveBash(event) {
   liveMessageRenderer.renderBashEvent(event);
   stoppingSessionPaths.delete(currentSessionPath());
   if (liveBash?.id === event.bashId) liveBash = null;
-  if (composerState?.dataset.state !== "sending") {
+  if (!["sending", "exporting"].includes(composerState?.dataset.state)) {
     showCurrentActiveTask("done", event.type === "bash_error" ? "Shell command failed" : "Done");
   }
 }
@@ -1686,7 +1688,71 @@ async function submitBashPrompt(rawMessage, bashCommand) {
   }
 }
 
+async function submitExportPrompt(rawMessage, exportCommand) {
+  const generation = sessionViewGeneration;
+  const switchGeneration = sessionSwitchGeneration.capture();
+  const submittedSession = promptSessionInput?.value;
+  const submittedImageFiles = pendingImages.map((entry) => entry.file);
+  const submissionGeneration = ++promptSubmissionGeneration;
+  const submittedViewChanged = () => generation !== sessionViewGeneration || !sessionSwitchGeneration.current(switchGeneration) || submittedSession !== promptSessionInput?.value;
+  const retryCancelled = () => submittedViewChanged() || submissionGeneration !== promptSubmissionGeneration;
+  const formData = new FormData();
+  formData.set("session", submittedSession);
+  formData.set("filename", exportCommand.filename);
+
+  promptTextarea.value = "";
+  clearStoredComposerDraft(submittedSession);
+  clearAttachments();
+  commandList?.classList.remove("is-visible");
+  commandList?.removeAttribute("open");
+  resetCommandSelection();
+  resizePromptTextarea();
+  setComposerState("exporting", "Exporting…");
+  showStatus("Exporting session…", true);
+
+  try {
+    const result = await sendExportRequest(formData, {
+      retryCancelled,
+      onRetry: () => {
+        setComposerState("exporting", "Waiting to export…");
+        showStatus("Waiting to export…", true);
+      }
+    });
+    if (result.cancelled || retryCancelled()) return;
+    if (!result.response.ok) throw new Error(result.payload?.error || "Session could not be exported");
+
+    const filename = await downloadResponse(result.response, exportCommand.filename || "pi-session.html", { cancelled: retryCancelled });
+    if (!filename || retryCancelled()) return;
+
+    if (composerState?.dataset.state === "exporting") setComposerState("done", "Exported");
+    showStatus(`Downloaded ${filename}`, true);
+  } catch (error) {
+    if (submittedViewChanged()) return;
+
+    restoreSubmittedComposerInput(rawMessage, submittedImageFiles);
+    if (composerState?.dataset.state === "exporting") setComposerState("error", error.message || "Session could not be exported");
+    showStatus(error.message || "Session could not be exported", true);
+  }
+}
+
 const PROMPT_RETRY_DELAYS = [250, 500, 1_000];
+
+async function sendExportRequest(formData, { retryCancelled, onRetry }) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch("/sessions/export", { method: "POST", body: formData, headers: { "Accept": "application/json" } });
+    if (response.ok) return { response, payload: null };
+
+    const payload = await response.json().catch(() => null);
+    const retryDelay = PROMPT_RETRY_DELAYS[attempt];
+    const retryable = response.status === 409 && payload?.code === "session_operation_pending" && retryDelay !== undefined;
+    if (!retryable) return { response, payload };
+    if (retryCancelled()) return { cancelled: true };
+
+    onRetry();
+    await new Promise((resolve) => setTimeout(resolve, retryDelay));
+    if (retryCancelled()) return { cancelled: true };
+  }
+}
 
 async function sendPromptRequest(action, formData, { retryCancelled, onRetry }) {
   for (let attempt = 0; ; attempt += 1) {
@@ -1716,6 +1782,9 @@ async function submitPrompt(event) {
   if (bashCommand) return submitBashPrompt(rawMessage, bashCommand);
 
   const streamingBehavior = submittedStreamingBehavior();
+  const exportCommand = streamingBehavior ? null : sessionExportSlashCommand(rawMessage);
+  if (exportCommand) return submitExportPrompt(rawMessage, exportCommand);
+
   const queuedPrompt = !!streamingBehavior;
   const followUp = streamingBehavior === "follow_up";
   const steer = streamingBehavior === "steer";

@@ -76,6 +76,15 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	}
 
 	waitForFakePiSettled(t, handler, sessionPath)
+	exported := serveAction(handler, formActionRequest("/sessions/export", map[string]string{"session": sessionPath, "filename": `..\Quarterly report`}, false))
+	if exported.Code != http.StatusOK || exported.Header().Get("Content-Type") != "text/html; charset=utf-8" || exported.Header().Get("Content-Disposition") != `attachment; filename="Quarterly report.html"` || !strings.Contains(exported.Body.String(), "Fixture session export") {
+		t.Fatalf("export = %d %#v %s", exported.Code, exported.Header(), exported.Body.String())
+	}
+	defaultExport := serveAction(handler, formActionRequest("/sessions/export", map[string]string{"session": sessionPath}, false))
+	if defaultExport.Code != http.StatusOK || defaultExport.Header().Get("Content-Disposition") != `attachment; filename=pi-session-fixture.html` {
+		t.Fatalf("default export = %d %#v %s", defaultExport.Code, defaultExport.Header(), defaultExport.Body.String())
+	}
+
 	reloaded := serveAction(handler, getActionRequest("/?session="+url.QueryEscape(sessionPath)))
 	if reloaded.Code != http.StatusOK || !strings.Contains(reloaded.Body.String(), "/attachments/"+sessions.SessionHash(sessionPath)+"/") || !strings.Contains(reloaded.Body.String(), `alt="Attached image"`) {
 		t.Fatalf("reloaded attachment = %d %s", reloaded.Code, reloaded.Body.String())
@@ -172,9 +181,22 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{`"type":"prompt"`, `"mimeType":"image/png"`, `"type":"bash"`, `"excludeFromContext":true`, `"type":"set_model"`, `"modelId":"contract-model"`, `/gripi_tree_snapshot`, `"type":"compact"`, `"type":"clone"`, `"type":"fork"`} {
+	for _, expected := range []string{`"type":"prompt"`, `"mimeType":"image/png"`, `"type":"export_html"`, `"type":"bash"`, `"excludeFromContext":true`, `"type":"set_model"`, `"modelId":"contract-model"`, `/gripi_tree_snapshot`, `"type":"compact"`, `"type":"clone"`, `"type":"fork"`} {
 		if !strings.Contains(string(log), expected) {
 			t.Errorf("fake Pi log does not contain %s", expected)
+		}
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(log)), "\n") {
+		var entry struct {
+			Command struct {
+				Type       string `json:"type"`
+				OutputPath string `json:"outputPath"`
+			} `json:"command"`
+		}
+		if json.Unmarshal([]byte(line), &entry) == nil && entry.Command.Type == "export_html" {
+			if _, err := os.Stat(entry.Command.OutputPath); !os.IsNotExist(err) {
+				t.Fatalf("temporary export was not removed: %s (%v)", entry.Command.OutputPath, err)
+			}
 		}
 	}
 }
@@ -206,6 +228,7 @@ func TestGoGatewayRejectsInvalidMutationValuesBeforeStartingPi(t *testing.T) {
 		{"thinking level", "/sessions/model_settings", map[string]string{"session": path, "provider": "e2e", "model": "fixture", "thinking": "extreme"}, "Invalid thinking level"},
 		{"provider bytes", "/sessions/model_settings", map[string]string{"session": path, "provider": strings.Repeat("p", providerIDTestBytes+1), "model": "fixture", "thinking": "off"}, "Provider is too long"},
 		{"model bytes", "/sessions/model_settings", map[string]string{"session": path, "provider": "e2e", "model": strings.Repeat("m", modelIDTestBytes+1), "thinking": "off"}, "Model is too long"},
+		{"export filename", "/sessions/export", map[string]string{"session": path, "filename": strings.Repeat("x", exportFilenameTestBytes)}, "Export filename is too long"},
 		{"tree entry", "/sessions/tree", map[string]string{"session": path, "entry_id": strings.Repeat("x", treeEntryIDTestBytes+1)}, "Tree entry id is too long"},
 		{"fork entry", "/sessions/fork", map[string]string{"session": path, "entry_id": strings.Repeat("x", treeEntryIDTestBytes+1)}, "Fork entry id is too long"},
 		{"tree label", "/sessions/tree/label", map[string]string{"session": path, "entry_id": "entry", "label": strings.Repeat("x", treeLabelTestBytes+1)}, "Label is too long"},
@@ -230,6 +253,7 @@ const (
 	providerIDTestBytes     = 4_096
 	modelIDTestBytes        = 4_096
 	extensionValueTestBytes = 1 << 20
+	exportFilenameTestBytes = 256
 )
 
 func TestGoGatewayRejectsForgedSessionPathsWithoutStartingPi(t *testing.T) {
@@ -248,7 +272,7 @@ func TestGoGatewayRejectsForgedSessionPathsWithoutStartingPi(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range []string{"/sessions/new", "/abort"} {
+	for _, route := range []string{"/sessions/new", "/sessions/export", "/abort"} {
 		response := serveAction(handler, formActionRequest(route, map[string]string{"session": filepath.Join(root, "forged.jsonl")}, true))
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("%s = %d %s", route, response.Code, response.Body.String())

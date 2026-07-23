@@ -507,6 +507,9 @@ func (client *Client) Fork(ctx context.Context, entryID string) (map[string]any,
 func (client *Client) CloneSession(ctx context.Context) (map[string]any, error) {
 	return client.request(ctx, "clone", client.nextID("clone"), nil, LongRequestTimeout, nil)
 }
+func (client *Client) ExportHTML(ctx context.Context, outputPath string) (map[string]any, error) {
+	return client.request(ctx, "export_html", client.nextID("export_html"), map[string]any{"outputPath": outputPath}, LongRequestTimeout, nil)
+}
 func (client *Client) SetSessionName(ctx context.Context, name string) (map[string]any, error) {
 	return client.request(ctx, "set_session_name", client.nextID("set_session_name"), map[string]any{"name": name}, client.requestTimeout, nil)
 }

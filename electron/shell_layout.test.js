@@ -77,6 +77,17 @@ test("desktop gateway webviews install the notification bridge", () => {
   assert.match(preload, /gateway-notification:show/);
 });
 
+test("desktop gateway downloads open a native save dialog for trusted session exports", () => {
+  const main = read("electron/main.js");
+  const downloads = read("electron/downloads.js");
+
+  assert.match(main, /gatewaySession\.on\("will-download"/);
+  assert.match(main, /gatewayWebContents\.get\(webContents\.id\)/);
+  assert.match(main, /configureSessionExportDownload\(item, gateway\.allowedOrigin, app\.getPath\("downloads"\)\)/);
+  assert.match(downloads, /item\.setSaveDialogOptions/);
+  assert.match(downloads, /defaultPath:/);
+});
+
 test("desktop gateway webviews allow same-origin clipboard writes", () => {
   const main = read("electron/main.js");
 

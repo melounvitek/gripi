@@ -9,6 +9,7 @@ const {
   writeGatewayConfig
 } = require("./gateway_config");
 const { gatewayUrl } = require("./gateway_url");
+const { configureSessionExportDownload } = require("./downloads");
 
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 const GATEWAY_PRELOAD_PATH = path.join(__dirname, "gateway_preload.js");
@@ -16,6 +17,7 @@ const SHELL_PAGE_PATH = path.join(__dirname, "shell.html");
 const WINDOW_ICON_PATH = path.join(__dirname, "assets", "icons", "1024x1024.png");
 const popupWindows = new Set();
 const gatewayWebContents = new Map();
+const downloadHandlerSessions = new WeakSet();
 
 let config = null;
 let mainWindow = null;
@@ -253,6 +255,7 @@ function installGatewayNavigationGuard(guestContents, allowedOrigin, partition) 
   gatewayWebContents.set(guestContents.id, { allowedOrigin, gatewayId: gatewayIdFromPartition(partition), partition });
   guestContents.once("destroyed", () => gatewayWebContents.delete(guestContents.id));
   installGatewayPermissionHandlers(partition, allowedOrigin);
+  installGatewayDownloadHandler(partition);
 
   guestContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown" || !input.control || input.shift || input.alt || input.meta || input.key !== "Tab") return;
@@ -291,6 +294,19 @@ function installGatewayPermissionHandlers(partition, allowedOrigin) {
   });
   gatewaySession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
     callback(allowedGatewayPermissions.has(permission) && details.requestingOrigin === allowedOrigin);
+  });
+}
+
+function installGatewayDownloadHandler(partition) {
+  const gatewaySession = partition ? session.fromPartition(partition) : session.defaultSession;
+  if (downloadHandlerSessions.has(gatewaySession)) return;
+
+  downloadHandlerSessions.add(gatewaySession);
+  gatewaySession.on("will-download", (_event, item, webContents) => {
+    const gateway = gatewayWebContents.get(webContents.id);
+    if (!gateway) return;
+
+    configureSessionExportDownload(item, gateway.allowedOrigin, app.getPath("downloads"));
   });
 }
 

@@ -3,15 +3,18 @@ package server
 import (
 	"errors"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/melounvitek/gripi/internal/prompts"
@@ -30,6 +33,7 @@ const (
 	providerIDBytes         = 4_096
 	modelIDBytes            = 4_096
 	extensionValueBytes     = 1 << 20
+	exportFilenameBytes     = 255
 )
 
 var thinkingLevels = map[string]bool{
@@ -55,6 +59,7 @@ func (app *application) registerActionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sessions/tree/label", app.setTreeLabel)
 	mux.HandleFunc("POST /sessions/fork", app.forkSession)
 	mux.HandleFunc("POST /sessions/clone", app.cloneSession)
+	mux.HandleFunc("POST /sessions/export", app.exportSession)
 	mux.HandleFunc("POST /extension_ui_response", app.extensionUIResponse)
 	mux.HandleFunc("POST /sessions/takeover", app.takeOverSession)
 }
@@ -884,6 +889,91 @@ func (app *application) cloneSession(response http.ResponseWriter, request *http
 		return
 	}
 	app.branchFromAction(response, request, path, true, "")
+}
+
+func (app *application) exportSession(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	path, ok := app.actionSessionPath(response, request, request.FormValue("session"), true)
+	if !ok {
+		return
+	}
+	filename, ok := exportDownloadFilename(request.FormValue("filename"), path)
+	if !ok {
+		app.writeRequestError(response, request, http.StatusBadRequest, "Export filename is too long")
+		return
+	}
+	temporary, err := os.CreateTemp("", "gripi-export-*.html")
+	if err != nil {
+		writeInternalError(response, "create temporary session export", err)
+		return
+	}
+	temporaryPath := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(temporaryPath)
+		writeInternalError(response, "close temporary session export", err)
+		return
+	}
+	defer os.Remove(temporaryPath)
+
+	var result map[string]any
+	err = app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+		actions, err := checkedActionClient(client)
+		if err != nil {
+			return err
+		}
+		result, err = actions.ExportHTML(request.Context(), temporaryPath)
+		return err
+	})
+	if err != nil {
+		app.writeActionRPCError(response, err)
+		return
+	}
+	if !successfulRPCResponse(result) {
+		app.writeRPCFailure(response, request, result, true)
+		return
+	}
+	file, err := os.Open(temporaryPath)
+	if err != nil {
+		writeInternalError(response, "open temporary session export", err)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		writeInternalError(response, "inspect temporary session export", err)
+		return
+	}
+
+	response.Header().Set("Content-Type", "text/html; charset=utf-8")
+	response.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	response.Header().Set("Cache-Control", "private, no-store")
+	http.ServeContent(response, request, filename, info.ModTime(), file)
+}
+
+func exportDownloadFilename(raw, sessionPath string) (string, bool) {
+	name := strings.TrimSpace(raw)
+	if name != "" {
+		name = path.Base(strings.ReplaceAll(name, `\`, "/"))
+		name = strings.TrimSpace(strings.Map(func(character rune) rune {
+			if unicode.IsControl(character) {
+				return -1
+			}
+			return character
+		}, name))
+	}
+	if name == "" || name == "." || name == "/" {
+		base := strings.TrimSuffix(filepath.Base(sessionPath), filepath.Ext(sessionPath))
+		if base == "" || base == "." {
+			base = "session"
+		}
+		name = "pi-session-" + base
+	}
+	if !strings.EqualFold(filepath.Ext(name), ".html") {
+		name += ".html"
+	}
+	return name, len(name) <= exportFilenameBytes
 }
 
 func (app *application) extensionUIResponse(response http.ResponseWriter, request *http.Request) {

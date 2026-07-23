@@ -376,8 +376,8 @@
     .command code { font-family: var(--mono); font-weight: 600; color: var(--accent); }
     .composer-state { display: none; align-items: center; gap: 0.4rem; min-height: 1.1rem; font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
     .composer-state::before { content: ""; width: 0.48rem; height: 0.48rem; border-radius: 999px; background: var(--muted-soft); }
-    .composer-state[data-state="running"], .composer-state[data-state="bash"], .composer-state[data-state="sending"] { display: inline-flex; color: var(--accent); font-weight: 600; }
-    .composer-state[data-state="running"]::before, .composer-state[data-state="bash"]::before, .composer-state[data-state="sending"]::before { background: var(--success); box-shadow: 0 0 0 4px #b5bd6826; }
+    .composer-state[data-state="running"], .composer-state[data-state="bash"], .composer-state[data-state="sending"], .composer-state[data-state="exporting"] { display: inline-flex; color: var(--accent); font-weight: 600; }
+    .composer-state[data-state="running"]::before, .composer-state[data-state="bash"]::before, .composer-state[data-state="sending"]::before, .composer-state[data-state="exporting"]::before { background: var(--success); box-shadow: 0 0 0 4px #b5bd6826; }
     .composer-state[data-state="error"] { display: inline-flex; color: var(--danger); }
     .composer-state[data-state="error"]::before { background: var(--danger); }
     .send-control { position: relative; display: flex; align-items: stretch; justify-self: end; }

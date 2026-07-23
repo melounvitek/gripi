@@ -134,6 +134,10 @@ function handleCommand(command) {
     case "get_commands":
       respond(command, true, { data: { commands: [] } });
       break;
+    case "export_html":
+      writeFileSync(command.outputPath, "<!doctype html><title>Fixture session export</title>", "utf8");
+      respond(command, true, { data: { path: command.outputPath } });
+      break;
     case "set_model":
       setModel(command);
       break;
