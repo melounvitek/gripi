@@ -32,15 +32,19 @@ func TestAttachmentMatchReadsMetadataStoredForThePhysicalSessionPath(t *testing.
 		t.Fatal(err)
 	}
 	record, _ := json.Marshal(Attachment{MessageHash: MessageHash("prompt"), Count: 1, Paths: []string{image}, MIMETypes: []string{"image/png"}})
-	if err := os.WriteFile(filepath.Join(attachmentsRoot, physicalHash+".jsonl"), append(record, '\n'), 0600); err != nil {
+	metadata := append(append(append([]byte{}, record...), '\n'), record...)
+	if err := os.WriteFile(filepath.Join(attachmentsRoot, physicalHash+".jsonl"), append(metadata, '\n'), 0600); err != nil {
 		t.Fatal(err)
 	}
-	message := &Message{Role: "user", Text: "prompt"}
+	first := &Message{Role: "user", Text: "prompt"}
+	second := &Message{Role: "user", Text: "prompt"}
 
-	matches := (AttachmentStore{Root: attachmentsRoot, SessionsRoot: configuredRoot}).Match(configuredPath, []*Message{message})
-	match, ok := matches[message]
-	if !ok || len(match.Images) != 1 || match.Images[0].Src != "/attachments/"+physicalHash+"/image.png" {
-		t.Fatalf("match = %#v, %v", match, ok)
+	matches := (AttachmentStore{Root: attachmentsRoot, SessionsRoot: configuredRoot}).Match(configuredPath, []*Message{first, second})
+	for _, message := range []*Message{first, second} {
+		match, ok := matches[message]
+		if !ok || len(match.Images) != 1 || match.Images[0].Src != "/attachments/"+physicalHash+"/image.png" {
+			t.Fatalf("match = %#v, %v", match, ok)
+		}
 	}
 }
 

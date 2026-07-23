@@ -998,6 +998,12 @@ func (app *application) branchFromAction(response http.ResponseWriter, request *
 			return actions.CloneSession(request.Context())
 		}
 		return actions.Fork(request.Context(), entryID)
+	}, func(path string) (string, error) {
+		configured, ok := sessions.ConfiguredSessionPath(app.config.SessionsRoot, path)
+		if !ok {
+			return "", errors.New("Pi reported a session path outside the configured sessions root")
+		}
+		return configured, nil
 	}, func(from, to string) (func() error, error) {
 		if app.ownsSession != nil && !app.ownsSession(request, from) {
 			return nil, errors.New("pending session is not owned by the requester")
@@ -1013,7 +1019,7 @@ func (app *application) branchFromAction(response http.ResponseWriter, request *
 		var attachmentRollback func() error
 		if wasPending {
 			var err error
-			attachmentRollback, err = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}).Migrate(from, to)
+			attachmentRollback, err = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Migrate(from, to)
 			if err != nil {
 				if claimed && app.releaseSession != nil {
 					err = errors.Join(err, app.releaseSession(request, to))

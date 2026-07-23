@@ -273,26 +273,30 @@ func (store AttachmentStore) read(sessionPath string) []Attachment {
 		}
 	}
 	var result []Attachment
-	seen := make(map[string]bool)
+	seenInEarlierFiles := make(map[string]bool)
 	for _, path := range paths {
 		file, err := os.Open(filepath.Join(store.Root, SessionHash(path)+".jsonl"))
 		if err != nil {
 			continue
 		}
+		seenInThisFile := make(map[string]bool)
 		scanner := bufio.NewScanner(file)
 		scanner.Buffer(make([]byte, 4096), 1<<20)
 		for scanner.Scan() {
 			encoded := scanner.Text()
-			if seen[encoded] {
+			if seenInEarlierFiles[encoded] {
 				continue
 			}
 			var attachment Attachment
 			if json.Unmarshal([]byte(encoded), &attachment) == nil {
 				result = append(result, attachment)
-				seen[encoded] = true
+				seenInThisFile[encoded] = true
 			}
 		}
 		_ = file.Close()
+		for encoded := range seenInThisFile {
+			seenInEarlierFiles[encoded] = true
+		}
 	}
 	return result
 }

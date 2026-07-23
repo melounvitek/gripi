@@ -56,7 +56,7 @@ func StartNewSession(ctx context.Context, cwd, sessionsRoot string, factory Clie
 	return path, nil
 }
 
-func BranchSession(ctx context.Context, previous, cwd string, clients SessionClientMover, pending *PendingSessionRegistry, switchSession func(RPCClient) (map[string]any, error), prepare func(string, string) (func() error, error)) (string, map[string]any, error) {
+func BranchSession(ctx context.Context, previous, cwd string, clients SessionClientMover, pending *PendingSessionRegistry, switchSession func(RPCClient) (map[string]any, error), normalize func(string) (string, error), prepare func(string, string) (func() error, error)) (string, map[string]any, error) {
 	_, wasPending := pending.CWD(previous)
 	var actionResponse map[string]any
 	path, err := clients.WithClientMove(ctx, previous, true, func(client RPCClient) (string, error) {
@@ -70,7 +70,16 @@ func BranchSession(ctx context.Context, previous, cwd string, clients SessionCli
 			return "", err
 		}
 		path := sessionFileFromResponse(state)
-		if path == "" || path == previous {
+		if path == "" {
+			return "", errors.New("Pi did not report the switched session path")
+		}
+		if normalize != nil {
+			path, err = normalize(path)
+			if err != nil {
+				return "", err
+			}
+		}
+		if path == previous {
 			return "", errors.New("Pi did not report the switched session path")
 		}
 		return path, nil

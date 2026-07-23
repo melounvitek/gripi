@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,12 +85,50 @@ func TestBranchSessionMovesAndTracksTheClient(t *testing.T) {
 
 	result, response, err := BranchSession(context.Background(), previous, root, registry, pending, func(RPCClient) (map[string]any, error) {
 		return map[string]any{"success": true}, nil
-	}, nil)
+	}, nil, nil)
 	if err != nil || response["success"] != true || result != next || registry.Active(previous) || !registry.Active(next) {
 		t.Fatalf("result=%q previous=%v next=%v err=%v", result, registry.Active(previous), registry.Active(next), err)
 	}
 	if cwd, ok := pending.CWD(next); !ok || cwd != root {
 		t.Fatalf("pending cwd = %q, %v", cwd, ok)
+	}
+}
+
+func TestBranchSessionNormalizesMaterializedAndPendingNativePaths(t *testing.T) {
+	for _, materialized := range []bool{false, true} {
+		t.Run(fmt.Sprintf("materialized=%v", materialized), func(t *testing.T) {
+			root := t.TempDir()
+			previous := filepath.Join(root, "previous.jsonl")
+			reported := filepath.Join(root, "physical.jsonl")
+			configured := filepath.Join(root, "configured.jsonl")
+			if materialized {
+				if err := os.WriteFile(configured, []byte("session\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			client := &workflowClient{registryClient: newRegistryClient(), state: map[string]any{"data": map[string]any{"sessionFile": reported}}}
+			registry := NewRegistry(func(string) (RPCClient, error) { return nil, os.ErrNotExist }, nil)
+			if err := registry.Register(previous, client); err != nil {
+				t.Fatal(err)
+			}
+			pending := NewPendingSessionRegistry(nil)
+
+			result, _, err := BranchSession(context.Background(), previous, root, registry, pending, func(RPCClient) (map[string]any, error) {
+				return map[string]any{"success": true}, nil
+			}, func(path string) (string, error) {
+				if path != reported {
+					t.Fatalf("reported path = %q", path)
+				}
+				return configured, nil
+			}, nil)
+			if err != nil || result != configured || registry.Active(previous) || registry.Active(reported) || !registry.Active(configured) {
+				t.Fatalf("result=%q previous=%v reported=%v configured=%v err=%v", result, registry.Active(previous), registry.Active(reported), registry.Active(configured), err)
+			}
+			_, pendingFound := pending.CWD(configured)
+			if pendingFound == materialized {
+				t.Fatalf("pending = %v, materialized = %v", pendingFound, materialized)
+			}
+		})
 	}
 }
 
@@ -101,7 +140,7 @@ func TestBranchSessionPreservesClientWhenNativeSwitchIsRejected(t *testing.T) {
 	}
 	path, response, err := BranchSession(context.Background(), "/previous", "/project", registry, NewPendingSessionRegistry(nil), func(RPCClient) (map[string]any, error) {
 		return map[string]any{"success": false, "error": "Entry not found"}, nil
-	}, nil)
+	}, nil, nil)
 	if err != nil || path != "/previous" || response["success"] != false || !registry.Active("/previous") || registry.Active("/unexpected") {
 		t.Fatalf("path=%q response=%#v active=%v err=%v", path, response, registry.Active("/previous"), err)
 	}
@@ -121,7 +160,7 @@ func TestBranchSessionFetchesPostSwitchStateInsideTheOriginalLaneAndDoesNotFallB
 			close(switchStarted)
 			<-releaseSwitch
 			return map[string]any{"success": true}, nil
-		}, nil)
+		}, nil, nil)
 		result <- err
 	}()
 	<-switchStarted
@@ -141,7 +180,7 @@ func TestBranchSessionFetchesPostSwitchStateInsideTheOriginalLaneAndDoesNotFallB
 	if err := missingRegistry.Register(previous, missing); err != nil {
 		t.Fatal(err)
 	}
-	path, _, err := BranchSession(context.Background(), previous, "/project", missingRegistry, NewPendingSessionRegistry(nil), func(RPCClient) (map[string]any, error) { return map[string]any{"success": true}, nil }, nil)
+	path, _, err := BranchSession(context.Background(), previous, "/project", missingRegistry, NewPendingSessionRegistry(nil), func(RPCClient) (map[string]any, error) { return map[string]any{"success": true}, nil }, nil, nil)
 	if err == nil || path != "" || missingRegistry.Active(previous) {
 		t.Fatalf("missing native path = %q, %v", path, err)
 	}

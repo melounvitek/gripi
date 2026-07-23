@@ -18,11 +18,7 @@ type GatewayState struct {
 	mu           sync.Mutex
 }
 
-func NewGatewayState(readPath, pinnedPath string, sessionsRoots ...string) *GatewayState {
-	sessionsRoot := ""
-	if len(sessionsRoots) > 0 {
-		sessionsRoot = sessionsRoots[0]
-	}
+func NewGatewayState(readPath, pinnedPath, sessionsRoot string) *GatewayState {
 	return &GatewayState{readPath: readPath, pinnedPath: pinnedPath, sessionsRoot: sessionsRoot}
 }
 

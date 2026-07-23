@@ -234,7 +234,7 @@ func TestPreparePageCanonicalizesSelectedPendingSessionBeforeBuildingView(t *tes
 	pending := rpc.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project)
 	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned")), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), root), rpcClients: registry, pendingSessions: pending}
 	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
 
@@ -392,7 +392,7 @@ func TestSidebarRendersRPCActivityIndicators(t *testing.T) {
 			app := &application{
 				config:          config.Config{SessionsRoot: root, Home: root},
 				sessionCache:    cache,
-				gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json")),
+				gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root),
 				rpcClients:      registry,
 				pendingSessions: rpc.NewPendingSessionRegistry(nil),
 				heavyRequests:   make(chan struct{}, 1),
@@ -453,7 +453,7 @@ func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json")), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
 	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	view, err := app.preparePage(request, true)
@@ -494,7 +494,7 @@ func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {
 	writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": project}, {"type": "message", "id": "old", "parentId": nil, "timestamp": "2026-01-01T00:00:01Z", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Old"}}}}})
 	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
 	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json")), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
 	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	if _, err := app.preparePage(request, true); err != nil {

@@ -403,7 +403,7 @@ func (app *application) movePendingRPCClient(request *http.Request, from, to str
 				return nil, err
 			}
 		}
-		attachmentRollback, err := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}).Migrate(from, to)
+		attachmentRollback, err := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Migrate(from, to)
 		if err != nil {
 			if claimed && app.releaseSession != nil {
 				err = errors.Join(err, app.releaseSession(request, to))

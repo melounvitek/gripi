@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -487,8 +488,11 @@ func TestSymlinkedSessionsRootPreservesConfiguredPathIdentity(t *testing.T) {
 	configuredPath := filepath.Join(configuredRoot, "project", "session.jsonl")
 	physicalParent := filepath.Join(physicalRoot, "project", "parent.jsonl")
 	configuredParent := filepath.Join(configuredRoot, "project", "parent.jsonl")
-	header := `{"type":"session","version":3,"id":"session","timestamp":"2026-01-01T00:00:00Z","cwd":"` + project + `","parentSession":"` + physicalParent + `"}`
-	writeSessionLines(t, physicalPath, []string{header})
+	header, err := json.Marshal(map[string]any{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": project, "parentSession": physicalParent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSessionLines(t, physicalPath, []string{string(header)})
 	store := Store{Root: configuredRoot, Home: root, Cache: NewCache()}
 
 	deferredPath := ""
