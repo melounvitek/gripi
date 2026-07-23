@@ -1724,13 +1724,13 @@ async function submitExportPrompt(rawMessage, exportCommand) {
     const filename = await downloadResponse(result.response, exportCommand.filename || "pi-session.html", { cancelled: retryCancelled });
     if (!filename || retryCancelled()) return;
 
-    setComposerState("done", "Exported");
+    if (composerState?.dataset.state === "exporting") setComposerState("done", "Exported");
     showStatus(`Downloaded ${filename}`, true);
   } catch (error) {
     if (submittedViewChanged()) return;
 
     restoreSubmittedComposerInput(rawMessage, submittedImageFiles);
-    setComposerState("error", error.message || "Session could not be exported");
+    if (composerState?.dataset.state === "exporting") setComposerState("error", error.message || "Session could not be exported");
     showStatus(error.message || "Session could not be exported", true);
   }
 }

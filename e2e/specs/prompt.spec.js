@@ -146,7 +146,7 @@ test("downloads a native HTML export with the requested filename", async ({ page
   expect(download.suggestedFilename()).toBe("pi-session-contract.html");
 });
 
-test("does not expose the session abort control while exporting", async ({ page }) => {
+test("does not expose session abort or overwrite a newer cross-tab run while exporting", async ({ page }) => {
   let releaseExport;
   const exportReleased = new Promise((resolve) => { releaseExport = resolve; });
   await page.route("**/sessions/export", async (route) => {
@@ -159,17 +159,29 @@ test("does not expose the session abort control while exporting", async ({ page 
     });
   });
   await page.goto("/");
-  await selectSession(page, sessions.marker);
+  await selectSession(page, sessions.controlsAbort);
 
   await page.getByLabel("Message to Pi").fill("/export delayed.html");
   const downloadPromise = page.waitForEvent("download");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "exporting");
+  await expect(page.locator(".composer-state")).toHaveText("Exporting…");
+  await expect(page.locator(".composer-state")).toBeVisible();
   await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
+
+  const otherPage = await page.context().newPage();
+  await otherPage.goto("/");
+  await selectSession(otherPage, sessions.controlsAbort);
+  await sendPrompt(otherPage, prompts.abortStart);
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   releaseExport();
 
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe("delayed.html");
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await otherPage.getByRole("button", { name: "Abort running Pi" }).click();
+  await expectRunFinished(otherPage);
+  await otherPage.close();
 });
 
 test("restores the export command when generation fails", async ({ page }) => {
