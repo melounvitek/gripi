@@ -7,6 +7,7 @@ type Command map[string]any
 var builtinCommands = []Command{
 	{"name": "name", "source": "other", "description": "Set session display name"},
 	{"name": "compact", "source": "other", "description": "Manually compact context, optional custom instructions"},
+	{"name": "export", "source": "other", "description": "Download this session as HTML, with an optional filename"},
 	{"name": "fork", "source": "other", "description": "Open the fork picker for this session"},
 	{"name": "tree", "source": "other", "description": "Navigate the current session tree"},
 	{"name": "clone", "source": "other", "description": "Clone this session and switch to the clone"},

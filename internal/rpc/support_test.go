@@ -15,7 +15,7 @@ func TestCommandCatalogPreservesBuiltinsAndFiltersPrivateExtensionCommands(t *te
 		map[string]any{"name": "compact", "source": "skill", "description": "override"},
 		map[string]any{"name": "gripi_tree_snapshot", "source": "extension"},
 	}}})
-	if len(commands) != 8 || commands[1]["name"] != "compact" || commands[1]["description"] != "Manually compact context, optional custom instructions" || commands[7]["name"] != "review" {
+	if len(commands) != 9 || commands[1]["name"] != "compact" || commands[2]["name"] != "export" || commands[8]["name"] != "review" {
 		t.Fatalf("commands = %#v", commands)
 	}
 }
