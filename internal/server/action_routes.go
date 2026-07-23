@@ -955,7 +955,7 @@ func (app *application) exportSession(response http.ResponseWriter, request *htt
 func exportDownloadFilename(raw, sessionPath string) (string, bool) {
 	name := strings.TrimSpace(raw)
 	if name != "" {
-		name = path.Base(strings.ReplaceAll(name, `\\`, "/"))
+		name = path.Base(strings.ReplaceAll(name, `\`, "/"))
 		name = strings.TrimSpace(strings.Map(func(character rune) rune {
 			if unicode.IsControl(character) {
 				return -1

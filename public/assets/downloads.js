@@ -25,5 +25,6 @@ function downloadFilename(disposition, fallback) {
   const quoted = disposition?.match(/filename="([^"]+)"/i)?.[1];
   if (quoted) return quoted;
 
-  return fallback;
+  const unquoted = disposition?.match(/(?:^|;)\s*filename=([^;]+)/i)?.[1]?.trim();
+  return unquoted || fallback;
 }

@@ -38,6 +38,7 @@ test("formatting and message helpers preserve browser-facing semantics", () => {
   assert.equal(sessionNameSlashCommand("/name Useful name"), true);
   assert.equal(sessionNameSlashCommand("/rename Useful name"), false);
   assert.deepEqual(sessionExportSlashCommand(" /export Quarterly report "), { filename: "Quarterly report" });
+  assert.deepEqual(sessionExportSlashCommand('/export "Quarterly report.html"'), { filename: "Quarterly report.html" });
   assert.deepEqual(sessionExportSlashCommand("/export"), { filename: "" });
   assert.equal(sessionExportSlashCommand("/export\nreport"), null);
   assert.equal(sessionNameFromEvent({ type: "session_info_changed", name: "Changed" }), "Changed");
@@ -88,11 +89,14 @@ test("download responses use the server filename and release temporary browser U
   };
 
   const filename = await downloadResponse(response, "session.html", document, urls);
+  response.headers.get = () => "attachment; filename=report.html";
+  const unquotedFilename = await downloadResponse(response, "report", document, urls);
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(filename, "Quarterly report.html");
-  assert.deepEqual(clicked, [["blob:export", "Quarterly report.html"]]);
-  assert.deepEqual(revoked, ["blob:export"]);
+  assert.equal(unquotedFilename, "report.html");
+  assert.deepEqual(clicked, [["blob:export", "Quarterly report.html"], ["blob:export", "report.html"]]);
+  assert.deepEqual(revoked, ["blob:export", "blob:export"]);
 });
 
 test("tool output keyboard helpers apply and remove accessible region state", () => {

@@ -1718,7 +1718,7 @@ async function submitExportPrompt(rawMessage, exportCommand) {
         showStatus("Waiting to export…", true);
       }
     });
-    if (result.cancelled) return;
+    if (result.cancelled || retryCancelled()) return;
     if (!result.response.ok) throw new Error(result.payload?.error || "Session could not be exported");
 
     const filename = await downloadResponse(result.response, exportCommand.filename || "pi-session.html");

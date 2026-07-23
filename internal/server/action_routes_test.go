@@ -76,7 +76,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	}
 
 	waitForFakePiSettled(t, handler, sessionPath)
-	exported := serveAction(handler, formActionRequest("/sessions/export", map[string]string{"session": sessionPath, "filename": "../Quarterly report"}, false))
+	exported := serveAction(handler, formActionRequest("/sessions/export", map[string]string{"session": sessionPath, "filename": `..\Quarterly report`}, false))
 	if exported.Code != http.StatusOK || exported.Header().Get("Content-Type") != "text/html; charset=utf-8" || exported.Header().Get("Content-Disposition") != `attachment; filename="Quarterly report.html"` || !strings.Contains(exported.Body.String(), "Fixture session export") {
 		t.Fatalf("export = %d %#v %s", exported.Code, exported.Header(), exported.Body.String())
 	}

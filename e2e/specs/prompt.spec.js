@@ -129,15 +129,48 @@ test("downloads a native HTML export with the requested filename", async ({ page
   await selectSession(page, sessions.marker);
 
   const composer = page.getByLabel("Message to Pi");
-  await composer.fill("/export Browser report");
-  const downloadPromise = page.waitForEvent("download");
+  await composer.fill("/export report");
+  let downloadPromise = page.waitForEvent("download");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
-  const download = await downloadPromise;
+  let download = await downloadPromise;
 
-  expect(download.suggestedFilename()).toBe("Browser report.html");
+  expect(download.suggestedFilename()).toBe("report.html");
   expect(exportRequests).toBeGreaterThanOrEqual(2);
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
-  await expect(message(page, "user", "/export Browser report")).toHaveCount(0);
+  await expect(message(page, "user", "/export report")).toHaveCount(0);
+
+  await composer.fill("/export");
+  downloadPromise = page.waitForEvent("download");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("pi-session-contract.html");
+});
+
+test("does not download an export after it is stopped", async ({ page }) => {
+  let releaseExport;
+  const exportReleased = new Promise((resolve) => { releaseExport = resolve; });
+  await page.route("**/sessions/export", async (route) => {
+    await exportReleased;
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      headers: { "Content-Disposition": "attachment; filename=cancelled.html" },
+      body: "<!doctype html><title>Cancelled export</title>"
+    });
+  });
+  const downloads = [];
+  page.on("download", (download) => downloads.push(download));
+  await page.goto("/");
+  await selectSession(page, sessions.marker);
+
+  await page.getByLabel("Message to Pi").fill("/export cancelled.html");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "sending");
+  await page.getByRole("button", { name: "Abort running Pi" }).click();
+  releaseExport();
+  await page.waitForTimeout(300);
+
+  expect(downloads).toHaveLength(0);
 });
 
 test("restores the export command when generation fails", async ({ page }) => {
