@@ -1228,7 +1228,8 @@ func (app *application) abortMatchingPending(request *http.Request, requested st
 				unavailable = true
 				return nil
 			}
-			if sessionFileFrom(state) == requested {
+			reported, found := store.Session(sessionFileFrom(state))
+			if found && reported.Path == session.Path {
 				matched = true
 				return abort(client)
 			}

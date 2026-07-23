@@ -681,6 +681,58 @@ func TestAbortAllowsTrackedSyntheticPendingSession(t *testing.T) {
 	}
 }
 
+func TestAbortMatchesPendingClientReportingPhysicalSessionPath(t *testing.T) {
+	root := t.TempDir()
+	physicalRoot := filepath.Join(root, "physical-sessions")
+	configuredRoot := filepath.Join(root, "configured-sessions")
+	project := filepath.Join(root, "project")
+	for _, path := range []string{physicalRoot, project} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(physicalRoot, configuredRoot); err != nil {
+		t.Fatal(err)
+	}
+	physicalPath := filepath.Join(physicalRoot, "active.jsonl")
+	configuredPath := filepath.Join(configuredRoot, "active.jsonl")
+	writeSessionRecords(t, physicalPath, []map[string]any{{"type": "session", "version": 3, "id": "active", "cwd": project}})
+	pendingPath := filepath.Join(configuredRoot, "pending.jsonl")
+	client := &followUpRaceClient{Client: (*rpc.Client)(nil), interruptState: map[string]any{"success": true, "data": map[string]any{"sessionFile": physicalPath}}}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(pendingPath, client); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember(pendingPath, project)
+	cache := sessions.NewCache()
+	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
+	app.synchronizer = sessions.NewSynchronizer(configuredRoot, root, cache, registry)
+	started, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- registry.WithExistingClient(context.Background(), pendingPath, true, func(rpc.RPCClient) error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {configuredPath}}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+
+	app.abortSession(response, request)
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || !client.aborted {
+		t.Fatalf("response = %d %s, aborted=%v", response.Code, response.Body.String(), client.aborted)
+	}
+}
+
 func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *testing.T) {
 	path := "/pending-follow-up"
 	started, release := make(chan struct{}), make(chan struct{})
@@ -941,6 +993,7 @@ func writeSessionRecords(t *testing.T, path string, records []map[string]any) {
 type followUpRaceClient struct {
 	*rpc.Client
 	queue          func()
+	interruptState map[string]any
 	followUpCalled bool
 	aborted        bool
 	prompted       bool
@@ -961,6 +1014,9 @@ func (client *followUpRaceClient) FollowUp(context.Context, string, []rpc.Prompt
 func (client *followUpRaceClient) Prompt(context.Context, string, []rpc.PromptImage) (map[string]any, error) {
 	client.prompted = true
 	return map[string]any{"success": true}, nil
+}
+func (client *followUpRaceClient) GetStateForInterrupt(context.Context) (map[string]any, error) {
+	return client.interruptState, nil
 }
 func (*followUpRaceClient) ActiveBashCommand() string { return "" }
 func (client *followUpRaceClient) Abort(context.Context) (map[string]any, error) {
