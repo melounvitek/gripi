@@ -112,6 +112,19 @@ test("clears pending compaction UI after retry exhaustion", async ({ page }) => 
 });
 
 test("downloads a native HTML export with the requested filename", async ({ page }) => {
+  let exportRequests = 0;
+  await page.route("**/sessions/export", async (route) => {
+    exportRequests += 1;
+    if (exportRequests === 1) {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "session_operation_pending", error: "Another session operation is pending. Please retry." })
+      });
+      return;
+    }
+    await route.continue();
+  });
   await page.goto("/");
   await selectSession(page, sessions.marker);
 
@@ -122,6 +135,7 @@ test("downloads a native HTML export with the requested filename", async ({ page
   const download = await downloadPromise;
 
   expect(download.suggestedFilename()).toBe("Browser report.html");
+  expect(exportRequests).toBeGreaterThanOrEqual(2);
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
   await expect(message(page, "user", "/export Browser report")).toHaveCount(0);
 });

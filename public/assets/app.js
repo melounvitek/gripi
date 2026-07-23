@@ -1693,7 +1693,9 @@ async function submitExportPrompt(rawMessage, exportCommand) {
   const switchGeneration = sessionSwitchGeneration.capture();
   const submittedSession = promptSessionInput?.value;
   const submittedImageFiles = pendingImages.map((entry) => entry.file);
+  const submissionGeneration = ++promptSubmissionGeneration;
   const submittedViewChanged = () => generation !== sessionViewGeneration || !sessionSwitchGeneration.current(switchGeneration) || submittedSession !== promptSessionInput?.value;
+  const retryCancelled = () => submittedViewChanged() || submissionGeneration !== promptSubmissionGeneration;
   const formData = new FormData();
   formData.set("session", submittedSession);
   formData.set("filename", exportCommand.filename);
@@ -1709,12 +1711,17 @@ async function submitExportPrompt(rawMessage, exportCommand) {
   showStatus("Exporting session…", true);
 
   try {
-    const response = await fetch("/sessions/export", { method: "POST", body: formData, headers: { "Accept": "application/json" } });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      throw new Error(payload?.error || "Session could not be exported");
-    }
-    const filename = await downloadResponse(response, exportCommand.filename || "pi-session.html");
+    const result = await sendExportRequest(formData, {
+      retryCancelled,
+      onRetry: () => {
+        setComposerState("sending", "Waiting to export…");
+        showStatus("Waiting to export…", true);
+      }
+    });
+    if (result.cancelled) return;
+    if (!result.response.ok) throw new Error(result.payload?.error || "Session could not be exported");
+
+    const filename = await downloadResponse(result.response, exportCommand.filename || "pi-session.html");
     if (submittedViewChanged()) return;
 
     setComposerState("done", "Exported");
@@ -1729,6 +1736,23 @@ async function submitExportPrompt(rawMessage, exportCommand) {
 }
 
 const PROMPT_RETRY_DELAYS = [250, 500, 1_000];
+
+async function sendExportRequest(formData, { retryCancelled, onRetry }) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch("/sessions/export", { method: "POST", body: formData, headers: { "Accept": "application/json" } });
+    if (response.ok) return { response, payload: null };
+
+    const payload = await response.json().catch(() => null);
+    const retryDelay = PROMPT_RETRY_DELAYS[attempt];
+    const retryable = response.status === 409 && payload?.code === "session_operation_pending" && retryDelay !== undefined;
+    if (!retryable) return { response, payload };
+    if (retryCancelled()) return { cancelled: true };
+
+    onRetry();
+    await new Promise((resolve) => setTimeout(resolve, retryDelay));
+    if (retryCancelled()) return { cancelled: true };
+  }
+}
 
 async function sendPromptRequest(action, formData, { retryCancelled, onRetry }) {
   for (let attempt = 0; ; attempt += 1) {
