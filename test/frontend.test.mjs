@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { parseNativeBash } from "../public/assets/bash.js";
 import { applyComposerPathCompletion, composerPathContext } from "../public/assets/composer_autocomplete_controller.js";
+import { downloadResponse } from "../public/assets/downloads.js";
 import { activateToolOutputRegion, deactivateToolOutputRegion } from "../public/assets/dom.js";
 import {
   compactNumber,
@@ -15,6 +16,7 @@ import {
   messageRoleKey,
   messageRoleLabel,
   notificationReplyPreview,
+  sessionExportSlashCommand,
   sessionNameFromEvent,
   sessionNameSlashCommand,
 } from "../public/assets/formatting.js";
@@ -35,6 +37,9 @@ test("formatting and message helpers preserve browser-facing semantics", () => {
   assert.deepEqual([messageRoleKey("bashExecution"), messageRoleLabel("bashExecution")], ["tool", "shell"]);
   assert.equal(sessionNameSlashCommand("/name Useful name"), true);
   assert.equal(sessionNameSlashCommand("/rename Useful name"), false);
+  assert.deepEqual(sessionExportSlashCommand(" /export Quarterly report "), { filename: "Quarterly report" });
+  assert.deepEqual(sessionExportSlashCommand("/export"), { filename: "" });
+  assert.equal(sessionExportSlashCommand("/export\nreport"), null);
   assert.equal(sessionNameFromEvent({ type: "session_info_changed", name: "Changed" }), "Changed");
   assert.equal(sessionNameFromEvent({ type: "custom_message", content: "Changed" }), null);
   assert.equal(eventTimestamp({ gatewayTimestamp: 1234, timestamp: "native" }), 1234);
@@ -63,6 +68,31 @@ test("native bash, polling, shortcut, and URL helpers remain directly importable
   assert.equal(sessionUrl("new path", location), "/?session=new+path&project=demo");
   assert.equal(sessionFragmentUrl("/?session=next&project=demo", location).href, "https://example.test/session_fragment?session=next&project=demo");
   assert.equal(newSessionModalUrl(undefined, location).href, "https://example.test/new_session_modal?project=demo&session=old");
+});
+
+test("download responses use the server filename and release temporary browser URLs", async () => {
+  const clicked = [];
+  const revoked = [];
+  const anchor = { click() { clicked.push([this.href, this.download]); }, remove() {} };
+  const document = {
+    body: { append(element) { assert.equal(element, anchor); } },
+    createElement(tag) { assert.equal(tag, "a"); return anchor; },
+  };
+  const urls = {
+    createObjectURL(blob) { assert.equal(blob, "export contents"); return "blob:export"; },
+    revokeObjectURL(url) { revoked.push(url); },
+  };
+  const response = {
+    blob: async () => "export contents",
+    headers: { get: () => "attachment; filename*=utf-8''Quarterly%20report.html" },
+  };
+
+  const filename = await downloadResponse(response, "session.html", document, urls);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(filename, "Quarterly report.html");
+  assert.deepEqual(clicked, [["blob:export", "Quarterly report.html"]]);
+  assert.deepEqual(revoked, ["blob:export"]);
 });
 
 test("tool output keyboard helpers apply and remove accessible region state", () => {

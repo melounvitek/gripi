@@ -111,6 +111,38 @@ test("clears pending compaction UI after retry exhaustion", async ({ page }) => 
   await expect(page.locator('[data-pending-compaction="true"]')).toHaveCount(0);
 });
 
+test("downloads a native HTML export with the requested filename", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.marker);
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/export Browser report");
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  const download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toBe("Browser report.html");
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
+  await expect(message(page, "user", "/export Browser report")).toHaveCount(0);
+});
+
+test("restores the export command when generation fails", async ({ page }) => {
+  await page.route("**/sessions/export", (route) => route.fulfill({
+    status: 500,
+    contentType: "application/json",
+    body: JSON.stringify({ error: "Export failed" })
+  }));
+  await page.goto("/");
+  await selectSession(page, sessions.marker);
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/export Failed report.html");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+
+  await expect(page.locator(".composer-state")).toHaveText("Export failed");
+  await expect(composer).toHaveValue("/export Failed report.html");
+});
+
 test("stream a tool-backed answer and render the persisted result after reload", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.prompt);

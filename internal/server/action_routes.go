@@ -901,7 +901,7 @@ func (app *application) exportSession(response http.ResponseWriter, request *htt
 	}
 	filename, ok := exportDownloadFilename(request.FormValue("filename"), path)
 	if !ok {
-		writeText(response, http.StatusBadRequest, "Export filename is too long")
+		app.writeRequestError(response, request, http.StatusBadRequest, "Export filename is too long")
 		return
 	}
 	temporary, err := os.CreateTemp("", "gripi-export-*.html")

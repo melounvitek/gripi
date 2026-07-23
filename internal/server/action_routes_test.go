@@ -80,6 +80,10 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if exported.Code != http.StatusOK || exported.Header().Get("Content-Type") != "text/html; charset=utf-8" || exported.Header().Get("Content-Disposition") != `attachment; filename="Quarterly report.html"` || !strings.Contains(exported.Body.String(), "Fixture session export") {
 		t.Fatalf("export = %d %#v %s", exported.Code, exported.Header(), exported.Body.String())
 	}
+	defaultExport := serveAction(handler, formActionRequest("/sessions/export", map[string]string{"session": sessionPath}, false))
+	if defaultExport.Code != http.StatusOK || defaultExport.Header().Get("Content-Disposition") != `attachment; filename=pi-session-fixture.html` {
+		t.Fatalf("default export = %d %#v %s", defaultExport.Code, defaultExport.Header(), defaultExport.Body.String())
+	}
 
 	reloaded := serveAction(handler, getActionRequest("/?session="+url.QueryEscape(sessionPath)))
 	if reloaded.Code != http.StatusOK || !strings.Contains(reloaded.Body.String(), "/attachments/"+sessions.SessionHash(sessionPath)+"/") || !strings.Contains(reloaded.Body.String(), `alt="Attached image"`) {

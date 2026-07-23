@@ -1,6 +1,7 @@
 import { ESCAPE_STOP_CONFIRMATION_WINDOW_MS, STALE_SESSION_REFRESH_AFTER_MS } from "./constants.js";
 import { AsyncGeneration } from "./async_generation.js";
 import { parseNativeBash } from "./bash.js";
+import { downloadResponse } from "./downloads.js";
 import {
   compactNumber,
   eventErrorText,
@@ -12,6 +13,7 @@ import {
   notificationReplyPreview,
   sessionCloneSlashCommand,
   sessionCompactSlashCommand,
+  sessionExportSlashCommand,
   sessionForkSlashCommand,
   sessionModelSlashCommand,
   sessionNameFromEvent,
@@ -1686,6 +1688,46 @@ async function submitBashPrompt(rawMessage, bashCommand) {
   }
 }
 
+async function submitExportPrompt(rawMessage, exportCommand) {
+  const generation = sessionViewGeneration;
+  const switchGeneration = sessionSwitchGeneration.capture();
+  const submittedSession = promptSessionInput?.value;
+  const submittedImageFiles = pendingImages.map((entry) => entry.file);
+  const submittedViewChanged = () => generation !== sessionViewGeneration || !sessionSwitchGeneration.current(switchGeneration) || submittedSession !== promptSessionInput?.value;
+  const formData = new FormData();
+  formData.set("session", submittedSession);
+  formData.set("filename", exportCommand.filename);
+
+  promptTextarea.value = "";
+  clearStoredComposerDraft(submittedSession);
+  clearAttachments();
+  commandList?.classList.remove("is-visible");
+  commandList?.removeAttribute("open");
+  resetCommandSelection();
+  resizePromptTextarea();
+  setComposerState("sending", "Exporting…");
+  showStatus("Exporting session…", true);
+
+  try {
+    const response = await fetch("/sessions/export", { method: "POST", body: formData, headers: { "Accept": "application/json" } });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.error || "Session could not be exported");
+    }
+    const filename = await downloadResponse(response, exportCommand.filename || "pi-session.html");
+    if (submittedViewChanged()) return;
+
+    setComposerState("done", "Exported");
+    showStatus(`Downloaded ${filename}`, true);
+  } catch (error) {
+    if (submittedViewChanged()) return;
+
+    restoreSubmittedComposerInput(rawMessage, submittedImageFiles);
+    setComposerState("error", error.message || "Session could not be exported");
+    showStatus(error.message || "Session could not be exported", true);
+  }
+}
+
 const PROMPT_RETRY_DELAYS = [250, 500, 1_000];
 
 async function sendPromptRequest(action, formData, { retryCancelled, onRetry }) {
@@ -1716,6 +1758,9 @@ async function submitPrompt(event) {
   if (bashCommand) return submitBashPrompt(rawMessage, bashCommand);
 
   const streamingBehavior = submittedStreamingBehavior();
+  const exportCommand = streamingBehavior ? null : sessionExportSlashCommand(rawMessage);
+  if (exportCommand) return submitExportPrompt(rawMessage, exportCommand);
+
   const queuedPrompt = !!streamingBehavior;
   const followUp = streamingBehavior === "follow_up";
   const steer = streamingBehavior === "steer";
