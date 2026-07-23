@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { nativeBash, prompts, sessions } from "../support/contract.mjs";
-import { expectRunFinished, selectSession, sendPrompt } from "../support/ui.mjs";
+import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
 test("automatically retries transient contention for native bash", async ({ page }) => {
   const command = "printf 'retried native bash'";
@@ -71,6 +71,11 @@ test("cancel a long-running bash command with one click", async ({ page }) => {
   await sendPrompt(page, `!${nativeBash.cancel.command}`);
   const card = bashCard(page, nativeBash.cancel.command);
   await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("running");
+
+  await page.getByLabel("Message to Pi").fill("/logout");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(message(page, "gateway", "restart the Gripi gateway")).toBeVisible();
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "bash");
 
   await page.reload();
   await expect(card).toHaveCount(1);

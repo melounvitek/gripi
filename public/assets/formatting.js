@@ -56,6 +56,13 @@ export function sessionModelSlashCommand(message) {
   return /^\/model$/.test(message.trim());
 }
 
+export function sessionAuthGuidanceSlashCommand(message) {
+  const trimmed = message.trim();
+  if (/^\/login(?: +[^\r\n]+)?$/.test(trimmed)) return "login";
+  if (trimmed === "/logout") return "logout";
+  return null;
+}
+
 export function sessionNameFromEvent(event) {
   return ["session_info", "session_info_changed"].includes(event.type) ? event.name : null;
 }

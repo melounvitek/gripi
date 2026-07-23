@@ -26,6 +26,33 @@ test("queue a follow-up for an active run", async ({ page }) => {
   await expectRunFinished(page);
 });
 
+test("shows login guidance without steering an active run", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.controlsAbort);
+  await sendPrompt(page, prompts.steerStart);
+
+  const abort = page.getByRole("button", { name: "Abort running Pi" });
+  await expect(abort).toBeVisible();
+  await sendPrompt(page, "/login anthropic");
+  await expect(message(page, "gateway", "restart the Gripi gateway")).toBeVisible();
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(abort).toBeVisible();
+  await abort.click();
+  await expectRunFinished(page);
+
+  await page.route("**/prompt", async (route) => {
+    if (route.request().postData()?.includes("/login xai")) await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+  await sendPrompt(page, prompts.standard);
+  await expect(abort).toBeVisible();
+  const delayedGuidance = page.waitForResponse((response) => response.request().postData()?.includes("/login xai"));
+  await sendPrompt(page, "/login xai");
+  await expect(abort).toBeHidden();
+  await delayedGuidance;
+  await expectRunFinished(page);
+});
+
 test("keep sidebar metadata refreshes fast while an active run is deferred", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.controlsSteer);

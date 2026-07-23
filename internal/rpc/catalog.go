@@ -13,6 +13,8 @@ var builtinCommands = []Command{
 	{"name": "clone", "source": "other", "description": "Clone this session and switch to the clone"},
 	{"name": "new", "source": "other", "description": "Start a new session in this folder"},
 	{"name": "model", "source": "other", "description": "Choose the model and thinking level"},
+	{"name": "login", "source": "other", "description": "Show Pi CLI login instructions"},
+	{"name": "logout", "source": "other", "description": "Show Pi CLI logout instructions"},
 }
 
 var internalCommandNames = []string{"gripi_tree_navigate", "gripi_tree_snapshot", "gripi_tree_leaf", "gripi_tree_label"}

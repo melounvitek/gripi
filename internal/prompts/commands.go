@@ -46,6 +46,12 @@ func ParseSlashCommand(message string) SlashCommand {
 	if strings.ContainsAny(trimmed, "\r\n") {
 		return SlashCommand{}
 	}
+	if trimmed == "/login" || strings.HasPrefix(trimmed, "/login ") {
+		return SlashCommand{Type: "login"}
+	}
+	if trimmed == "/logout" {
+		return SlashCommand{Type: "logout"}
+	}
 	for _, kind := range []string{"fork", "tree", "clone", "new", "model"} {
 		if trimmed == "/"+kind {
 			return SlashCommand{Type: kind}

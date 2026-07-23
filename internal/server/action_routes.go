@@ -92,6 +92,14 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		app.runBash(response, request, path, command.Command, command.ExcludeFromContext)
 		return
 	}
+	if command := prompts.ParseSlashCommand(message); command.Type == "login" || command.Type == "logout" {
+		guidance := map[string]string{
+			"login":  "`/login` isn’t available in Gripi. Run `/login` in the Pi CLI, then restart the Gripi gateway to load the new credentials.",
+			"logout": "`/logout` isn’t available in Gripi. Run `/logout` in the Pi CLI, then restart the Gripi gateway to reload credentials.",
+		}
+		app.writePromptResult(response, request, path, map[string]any{"command": command.Type, "message": guidance[command.Type]})
+		return
+	}
 
 	behavior := request.FormValue("streaming_behavior")
 	if behavior != "" && behavior != "steer" && behavior != "follow_up" {

@@ -11,6 +11,7 @@ import {
   formatWaitDuration,
   imageAttachmentLabel,
   notificationReplyPreview,
+  sessionAuthGuidanceSlashCommand,
   sessionCloneSlashCommand,
   sessionCompactSlashCommand,
   sessionExportSlashCommand,
@@ -1823,7 +1824,8 @@ async function submitPrompt(event) {
   const cloneCommand = queuedPrompt ? null : sessionCloneSlashCommand(message);
   const newCommand = queuedPrompt ? null : sessionNewSlashCommand(message);
   const modelCommand = queuedPrompt ? null : sessionModelSlashCommand(message);
-  if (!nameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand) {
+  const authGuidanceCommand = sessionAuthGuidanceSlashCommand(message);
+  if (!nameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand && !authGuidanceCommand) {
     if (!queuedPrompt) {
       liveMessageRenderer.resetLiveAssistantTracking();
       document.querySelectorAll(".tree-position-banner").forEach((banner) => banner.remove());
@@ -1847,8 +1849,8 @@ async function submitPrompt(event) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
-  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering…" : "Sending…");
-  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering Pi…" : "Sending…", true);
+  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening instructions…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering…" : "Sending…");
+  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening authentication instructions…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering Pi…" : "Sending…", true);
   if (cloneCommand || newCommand) showSessionSwitching();
 
   const restoreSubmittedPromptInput = () => {
@@ -1986,6 +1988,12 @@ async function submitPrompt(event) {
     if (payload?.command === "model") {
       setComposerState("idle", "", { focus: false });
       openModelSettingsModal();
+      return;
+    }
+    if (payload?.command === "login" || payload?.command === "logout") {
+      showCurrentActiveTask("done", "Instructions shown");
+      if (queuedPrompt && composerState?.dataset.state === "running") selectStreamingBehavior(streamingBehavior, { focus: false });
+      liveMessageRenderer.appendMessage("gateway", payload.message, true, true, new Date(), { markdown: true });
       return;
     }
     if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {

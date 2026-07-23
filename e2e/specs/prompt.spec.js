@@ -2,6 +2,31 @@ import { expect, test } from "@playwright/test";
 import { prompts, replies, sessions, tool } from "../support/contract.mjs";
 import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
+const loginGuidance = "/login isn’t available in Gripi. Run /login in the Pi CLI, then restart the Gripi gateway to load the new credentials.";
+const logoutGuidance = "/logout isn’t available in Gripi. Run /logout in the Pi CLI, then restart the Gripi gateway to reload credentials.";
+
+test("shows Pi CLI guidance for login and logout commands", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.prompt);
+
+  await page.getByRole("combobox", { name: "Transcript view" }).click();
+  await page.getByRole("option", { name: "Messages only" }).click();
+  await page.getByLabel("Message to Pi").fill("/");
+  await expect(page.locator('[data-command-name="login"]')).toBeVisible();
+  await expect(page.locator('[data-command-name="logout"]')).toBeVisible();
+
+  await sendPrompt(page, "/login anthropic");
+  await expect(message(page, "gateway", loginGuidance)).toBeVisible();
+  await expectRunFinished(page);
+  await expect(message(page, "user", "/login anthropic")).toHaveCount(0);
+
+  await page.getByLabel("Message to Pi").fill("/logout");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(message(page, "gateway", logoutGuidance)).toBeVisible();
+  await expectRunFinished(page);
+  await expect(message(page, "user", "/logout")).toHaveCount(0);
+});
+
 test("automatically retries transient session contention", async ({ page }) => {
   let promptRequests = 0;
   await page.route("**/prompt", async (route) => {
