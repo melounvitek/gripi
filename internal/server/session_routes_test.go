@@ -91,7 +91,8 @@ func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T
 	}
 
 	sidebar := serve(t, handler, http.MethodGet, "/sidebar?session="+url.QueryEscape(fixture.markerPath), "")
-	if sidebar.Code != http.StatusOK || !strings.Contains(sidebar.Body.String(), `aria-current="page"`) {
+	titleTooltip := `class="session-title" title="` + fixture.markerTitle + `">`
+	if sidebar.Code != http.StatusOK || !strings.Contains(sidebar.Body.String(), `aria-current="page"`) || !strings.Contains(sidebar.Body.String(), titleTooltip) {
 		t.Fatalf("sidebar contract missing: status=%d", sidebar.Code)
 	}
 	modal := serve(t, handler, http.MethodGet, "/new_session_modal?session="+url.QueryEscape(fixture.markerPath), "")
