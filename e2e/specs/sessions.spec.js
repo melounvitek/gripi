@@ -54,6 +54,21 @@ test("opens conversation find for a known session search match without trapping 
   await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBe(manualTop);
 });
 
+test("clears session filters without reloading the page", async ({ page }) => {
+  await page.goto("/");
+
+  await searchSessions(page, "History Desktop");
+  const clearFilters = page.getByRole("link", { name: "Clear filters" });
+  await expect(clearFilters).toBeVisible();
+  await page.evaluate(() => { window.__clearFiltersPageSentinel = true; });
+
+  await clearFilters.click();
+
+  await expect.poll(() => new URL(page.url()).searchParams.get("session_search")).toBe(null);
+  await expect(clearFilters).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.__clearFiltersPageSentinel)).toBe(true);
+});
+
 test("find, select, and pin a session with persisted history", async ({ page }) => {
   await page.goto("/");
 

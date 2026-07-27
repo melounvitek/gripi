@@ -66,7 +66,13 @@ export class SidebarController {
       this.changeSearchFilter(form).catch(() => form.submit());
     });
     this.document.addEventListener("click", (event) => {
-      if (event.target.closest?.("[data-sidebar-filters-clear]")) this.setFiltering(true);
+      const clearFiltersLink = event.target.closest?.("[data-sidebar-filters-clear]");
+      if (clearFiltersLink && this.normalLeftClick(event)) {
+        event.preventDefault();
+        const targetUrl = new URL(clearFiltersLink.href, this.window.location.href);
+        this.applyFilters(targetUrl).catch(() => { this.window.location.href = targetUrl.href; });
+        return;
+      }
 
       const pinButton = event.target.closest?.("[data-session-pin-toggle]");
       if (pinButton) {
