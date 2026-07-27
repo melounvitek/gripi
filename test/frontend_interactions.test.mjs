@@ -1,9 +1,28 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { renderTextWithLinks } from "../public/assets/dom.js";
 import { ProjectSelectController } from "../public/assets/project_select_controller.js";
 import { TREE_FILTERS, TREE_SUMMARY_CHOICES, TreeSessionController, TreeSessionModel } from "../public/assets/tree_session_controller.js";
 import { FakeDocument, FakeElement, FakeEventTarget } from "./helpers/fake_dom.mjs";
+
+test("plain message URLs become safe new-window links without changing surrounding text", () => {
+  const document = new FakeDocument();
+  document.createTextNode = (text) => ({ textContent: text, parentElement: null, remove() {}, contains() { return false; }, querySelectorAll() { return []; } });
+  const body = new FakeElement("pre");
+  const text = "Open https://example.test/tasks?q=1, then http://localhost:8080/a_(b). <script> javascript:alert(1)";
+
+  renderTextWithLinks(body, text, document);
+
+  const links = body.children.filter((child) => child.tagName === "A");
+  assert.deepEqual(links.map((link) => link.textContent), ["https://example.test/tasks?q=1", "http://localhost:8080/a_(b)"]);
+  assert.deepEqual(links.map((link) => link.getAttribute("href")), ["https://example.test/tasks?q=1", "http://localhost:8080/a_(b)"]);
+  for (const link of links) {
+    assert.equal(link.getAttribute("target"), "_blank");
+    assert.equal(link.getAttribute("rel"), "nofollow noreferrer noopener");
+  }
+  assert.equal(body.children.map((child) => child.textContent).join(""), text);
+});
 
 test("project selector opens on the first valid touch without sticky-hover behavior", () => {
   const document = new FakeDocument();
