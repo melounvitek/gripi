@@ -54,7 +54,7 @@ func NewMarkdown() *Markdown {
 		engine: goldmark.New(
 			goldmark.WithExtensions(extension.GFM),
 			goldmark.WithParserOptions(parser.WithAutoHeadingID()),
-			goldmark.WithRendererOptions(goldhtml.WithHardWraps(), goldhtml.WithUnsafe(), renderer.WithNodeRenderers(util.Prioritized(fencedCodeRenderer{}, 100))),
+			goldmark.WithRendererOptions(goldhtml.WithHardWraps(), goldhtml.WithUnsafe(), extension.WithTableCellAlignMethod(extension.TableCellAlignAttribute), renderer.WithNodeRenderers(util.Prioritized(fencedCodeRenderer{}, 100))),
 		),
 		policy: policy,
 	}

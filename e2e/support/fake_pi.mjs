@@ -292,7 +292,10 @@ function acceptPrompt(command) {
   }
   if ([prompts.steerStart, prompts.followUpStart, prompts.abortStart].includes(command.message)) return;
 
-  const reply = path.basename(process.cwd()).startsWith("new-session-") ? replies.newSession : replies.standard;
+  let reply = replies.standard;
+  if (path.basename(process.cwd()).startsWith("new-session-")) reply = replies.newSession;
+  else if (command.message === prompts.markdownTable) reply = replies.markdownTable;
+
   if (command.message === prompts.terminal) {
     schedule(120, () => completeWithTool(reply, { command: tool.terminalCommand, updates: tool.terminalUpdates, updateDelay: 350, completionDelay: 800 }));
   } else {

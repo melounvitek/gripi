@@ -5,6 +5,33 @@ import { expectRunFinished, message, selectSession, sendPrompt } from "../suppor
 const loginGuidance = "/login isn’t available in Gripi. Run /login in the Pi CLI, then restart the Gripi gateway to load the new credentials.";
 const logoutGuidance = "/logout isn’t available in Gripi. Run /logout in the Pi CLI, then restart the Gripi gateway to reload credentials.";
 
+async function expectReadableMarkdownTable(table) {
+  await expect(table).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "Revised status" })).toBeVisible();
+  await expect(table.getByRole("cell", { name: "10" })).toBeVisible();
+
+  const layout = await table.evaluate((element) => {
+    const numberCell = Array.from(element.querySelectorAll("td")).find((cell) => cell.textContent.trim() === "10");
+    const range = document.createRange();
+    range.selectNodeContents(numberCell);
+    const style = getComputedStyle(numberCell);
+
+    return {
+      numberLines: Array.from(range.getClientRects()).filter((rect) => rect.width > 0).length,
+      paddingLeft: parseFloat(style.paddingLeft),
+      separatorWidth: parseFloat(style.borderBottomWidth),
+      textAlign: style.textAlign,
+      verticalAlign: style.verticalAlign
+    };
+  });
+
+  expect(layout.numberLines).toBe(1);
+  expect(layout.paddingLeft).toBeGreaterThanOrEqual(8);
+  expect(layout.separatorWidth).toBeGreaterThanOrEqual(1);
+  expect(layout.textAlign).toMatch(/right$/);
+  expect(layout.verticalAlign).toBe("top");
+}
+
 test("shows Pi CLI guidance for login and logout commands", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.prompt);
@@ -224,6 +251,23 @@ test("restores the export command when generation fails", async ({ page }) => {
 
   await expect(page.locator(".composer-state")).toHaveText("Export failed");
   await expect(composer).toHaveValue("/export Failed report.html");
+});
+
+test("renders readable Markdown tables live and after reload", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.markdownTable);
+
+  await sendPrompt(page, prompts.markdownTable);
+  await expectRunFinished(page);
+  const liveResponse = message(page, "assistant", "Table row ten");
+  await expectReadableMarkdownTable(liveResponse.getByRole("table"));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectReadableMarkdownTable(liveResponse.getByRole("table"));
+
+  await page.reload();
+  const persistedResponse = message(page, "assistant", "Table row ten");
+  await expectReadableMarkdownTable(persistedResponse.getByRole("table"));
 });
 
 test("stream a tool-backed answer and render the persisted result after reload", async ({ page }) => {

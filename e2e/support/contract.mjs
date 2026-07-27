@@ -5,6 +5,7 @@ export const sessions = {
   marker: FIXTURE_MARKER,
   history: "E2E History Desktop",
   prompt: "E2E Prompt Desktop",
+  markdownTable: "E2E Markdown Table Desktop",
   markRead: "E2E Mark Read Desktop",
   idleClient: "E2E Idle Client Desktop",
   promptRetry: "E2E Prompt Retry Desktop",
@@ -38,6 +39,7 @@ export const prompts = {
   followUpMessage: "Continue with the queued follow-up",
   abortStart: "Start the abort scenario",
   terminal: "Show terminal screen updates",
+  markdownTable: "Show a detailed Markdown status table",
   extension: "Ask me for release approval",
   extensionRace: "Exercise queued extension requests",
   newSession: "Create the first deterministic response",
@@ -71,6 +73,10 @@ export const tool = {
 
 export const replies = {
   standard: "Deterministic browser response complete.",
+  markdownTable: `| # | Revised status | What we can infer |
+|---:|---|---|
+| 9 | **Clear** | Table row nine remains readable alongside a detailed explanation. |
+| 10 | **Clear enough** | Table row ten keeps its multi-digit identifier together while this longer prose wraps naturally within the available conversation width. |`,
   steer: "Steered direction accepted.",
   followUp: "Queued follow-up completed.",
   aborted: "Run aborted by the browser.",

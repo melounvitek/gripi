@@ -346,6 +346,10 @@
     .message-body--markdown h3 { font-size: 1rem; }
     .message-body--markdown ul, .message-body--markdown ol { padding-left: 1.4rem; }
     .message-body--markdown blockquote { margin: 0.75rem 0; padding-left: 1rem; border-left: 3px solid #80808073; color: var(--muted); }
+    .message-body--markdown table { width: 100%; margin: 0.75rem 0; border: 1px solid var(--border-strong); border-collapse: collapse; font-size: 0.94em; line-height: 1.5; }
+    .message-body--markdown th, .message-body--markdown td { padding: 0.5rem 0.65rem; border: 1px solid var(--border); vertical-align: top; overflow-wrap: break-word; word-break: normal; }
+    .message-body--markdown th:not([align]), .message-body--markdown td:not([align]) { text-align: left; }
+    .message-body--markdown th { background: var(--accent-tint-04); color: var(--text); font-weight: 650; }
     .message-body--markdown code { padding: 0.1rem 0.3rem; border: 1px solid var(--accent-tint-14); border-radius: 0.2rem; background: var(--accent-tint-04); color: var(--accent); font-family: var(--mono); font-size: 0.88em; }
     .message-code-block { position: relative; }
     .message-body--markdown pre { padding: 0.85rem; border-radius: 0.3rem; background: var(--code); color: var(--success); overflow-x: auto; white-space: pre; border: 1px solid var(--border-strong); }
