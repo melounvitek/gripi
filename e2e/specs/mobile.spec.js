@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { nativeBash, prompts, replies, sessions } from "../support/contract.mjs";
+import { nativeBash, replies, sessions } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
 test("keep native Tab order for coarse pointers", async ({ page }) => {
@@ -57,13 +57,24 @@ test("navigate and complete a conversation from the mobile session drawer", asyn
   await expect(page.getByRole("heading", { level: 1, name: sessions.mobile })).toBeVisible();
   await expect(page.locator("#mobile-session-toggle")).not.toBeChecked();
 
-  await sendPrompt(page, prompts.standard);
+  const url = new URL("/notification-test", page.url()).href;
+  const prompt = `Open ${url}.`;
+  await sendPrompt(page, prompt);
+  const userMessage = message(page, "user", prompt);
+  const link = userMessage.getByRole("link", { name: url });
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "nofollow noreferrer noopener");
+  const popupPromise = page.waitForEvent("popup");
+  await link.tap();
+  const popup = await popupPromise;
+  await expect(popup).toHaveURL(url);
+  await popup.close();
   await expect(message(page, "assistant", replies.standard)).toBeVisible();
   await expectRunFinished(page);
 
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: sessions.mobile })).toBeVisible();
-  await expect(message(page, "user", prompts.standard)).toBeVisible();
+  await expect(message(page, "user", prompt).getByRole("link", { name: url })).toBeVisible();
   await expect(message(page, "assistant", replies.standard)).toBeVisible();
 });
 

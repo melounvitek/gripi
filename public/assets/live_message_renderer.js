@@ -1,4 +1,5 @@
 import { PAIRED_TOOL_NAMES, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES } from "./constants.js";
+import { renderTextWithLinks } from "./dom.js";
 import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimestampKey, normalizedMessageText, stableTextHash } from "./formatting.js";
 import { hasTerminalControls, renderTerminalOutput } from "./terminal_output_renderer.js";
 
@@ -156,6 +157,8 @@ export class LiveMessageRenderer {
     body.className = options.thinking ? "message-body message-body--thinking message-body--markdown" : (markdownMessage ? "message-body message-body--markdown" : "message-body");
     if (markdownMessage) {
       this.markdownRenderer.render(body, text);
+    } else if (roleName === "user") {
+      renderTextWithLinks(body, text, this.document);
     } else {
       body.textContent = text;
     }
@@ -751,6 +754,8 @@ export class LiveMessageRenderer {
     } else {
       if (["assistant", "custom"].includes(roleName)) {
         this.markdownRenderer.render(entry.body, segment.text);
+      } else if (roleName === "user") {
+        renderTextWithLinks(entry.body, displayText, this.document);
       } else {
         entry.body.textContent = displayText;
       }

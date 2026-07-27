@@ -1,4 +1,4 @@
-import { enhanceMarkdownCodeBlocks } from "./dom.js";
+import { enhanceMarkdownCodeBlocks, enhanceMessageLinks } from "./dom.js";
 
 const FOCUSED_ACTIVITY_ITEM_LIMIT = 10;
 
@@ -606,6 +606,7 @@ export class ConversationController {
     const template = this.document.createElement("template");
     template.innerHTML = html;
     enhanceMarkdownCodeBlocks(template.content, this.document);
+    enhanceMessageLinks(template.content, this.document);
     const element = this.element;
     const bindingEpoch = this.bindingEpoch;
     const historyRequestGeneration = this.historyRequestGeneration;

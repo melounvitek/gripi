@@ -44,7 +44,7 @@ import { CurrentSessionFindController } from "./current_session_find_controller.
 import { LiveMessageParser } from "./live_message_parser.js";
 import { LiveMessageRenderer } from "./live_message_renderer.js";
 import { ServerMarkdownRenderer } from "./server_markdown_renderer.js";
-import { activateToolOutputRegion, enhanceMarkdownCodeBlocks } from "./dom.js";
+import { activateToolOutputRegion, enhanceMarkdownCodeBlocks, enhanceMessageLinks } from "./dom.js";
 import { eventPollCurrent, eventPollingDelay } from "./polling.js";
 import { extensionUiRequestExpired, extensionUiResponseDisposition } from "./extension_ui.js";
 import { TreeSessionController } from "./tree_session_controller.js";
@@ -3147,6 +3147,7 @@ function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery 
   workspaceAccessController.resume();
   if (liveOutput) {
     enhanceMarkdownCodeBlocks(conversationScroll);
+    enhanceMessageLinks(conversationScroll);
     resetEventCursor();
     refreshSessionStatus(generation).catch(() => {});
     const initialComposerState = liveOutput.dataset.composerState;

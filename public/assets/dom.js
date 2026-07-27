@@ -52,6 +52,12 @@ export function renderTextWithLinks(element, text, document = element?.ownerDocu
   element.replaceChildren(...nodes);
 }
 
+export function enhanceMessageLinks(root, document = root?.ownerDocument || globalThis.document) {
+  root?.querySelectorAll?.(".message--user:not(.message--compact) > .message-body:not(.message-body--markdown)").forEach((body) => {
+    renderTextWithLinks(body, body.textContent, document);
+  });
+}
+
 export function activateToolOutputRegion(body, { focus = false } = {}) {
   if (!body) return;
   body.tabIndex = 0;

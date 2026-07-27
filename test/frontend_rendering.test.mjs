@@ -5,7 +5,24 @@ import { messageFingerprint } from "../public/assets/formatting.js";
 import { LiveMessageParser } from "../public/assets/live_message_parser.js";
 import { LiveMessageRenderer } from "../public/assets/live_message_renderer.js";
 import { ServerMarkdownRenderer } from "../public/assets/server_markdown_renderer.js";
-import { deferred, settle } from "./helpers/fake_dom.mjs";
+import { FakeDocument, FakeElement, deferred, settle } from "./helpers/fake_dom.mjs";
+
+test("live user messages render plain URLs as links", () => {
+  const document = new FakeDocument();
+  document.createTextNode = (text) => ({ textContent: text, parentElement: null, remove() {}, contains() { return false; }, querySelectorAll() { return []; } });
+  const conversation = {
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+  };
+  const renderer = new LiveMessageRenderer(document, conversation, {}, { bind() {} });
+  renderer.liveOutput = new FakeElement("div");
+
+  const entry = renderer.appendMessage("user", "Open https://example.test/task/42.");
+
+  const link = entry.body.children.find((child) => child.tagName === "A");
+  assert.equal(link?.getAttribute("href"), "https://example.test/task/42");
+  assert.equal(link?.getAttribute("target"), "_blank");
+});
 
 function markdownBody() {
   return {

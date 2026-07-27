@@ -338,7 +338,7 @@
     .message-body--markdown code.highlight .syntax-number, .message-body--markdown code.highlight .syntax-symbol, .message-body--markdown code.highlight .syntax-literal { color: #b5cea8; }
     .message-body--markdown code.highlight .syntax-function, .message-body--markdown code.highlight .syntax-key, .message-body--markdown code.highlight .syntax-variable { color: #9cdcfe; }
     .code-block-copy-button { position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; background: #18181ee0; }
-    .message-body--markdown a { color: var(--link); }
+    .message-body--markdown a, .message--user > .message-body a { color: var(--link); }
     .message-images { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.65rem; }
     .message-image { max-width: min(100%, 28rem); max-height: 28rem; border-radius: 0.3rem; border: 1px solid var(--border); object-fit: contain; background: var(--panel-soft); }
     .message-attachments { display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.6rem; padding: 0.25rem 0.45rem; border: 1px solid var(--accent-tint-14); border-radius: 0.2rem; background: var(--accent-tint-04); color: var(--muted); font-family: var(--mono); font-size: 0.74rem; font-weight: 500; }
