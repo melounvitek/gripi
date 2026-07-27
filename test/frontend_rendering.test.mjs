@@ -7,9 +7,8 @@ import { LiveMessageRenderer } from "../public/assets/live_message_renderer.js";
 import { ServerMarkdownRenderer } from "../public/assets/server_markdown_renderer.js";
 import { FakeDocument, FakeElement, deferred, settle } from "./helpers/fake_dom.mjs";
 
-test("live user messages render plain URLs as links", () => {
+test("live user messages render and update plain URLs as links", () => {
   const document = new FakeDocument();
-  document.createTextNode = (text) => ({ textContent: text, parentElement: null, remove() {}, contains() { return false; }, querySelectorAll() { return []; } });
   const conversation = {
     followLiveOutput: () => false,
     afterLiveOutputChange() {},
@@ -22,6 +21,10 @@ test("live user messages render plain URLs as links", () => {
   const link = entry.body.children.find((child) => child.tagName === "A");
   assert.equal(link?.getAttribute("href"), "https://example.test/task/42");
   assert.equal(link?.getAttribute("target"), "_blank");
+
+  renderer.updateLiveSegment(entry, "user", { compact: false, text: "Use https://example.test/task/43." }, false);
+  const updatedLink = entry.body.children.find((child) => child.tagName === "A");
+  assert.equal(updatedLink?.getAttribute("href"), "https://example.test/task/43");
 });
 
 function markdownBody() {

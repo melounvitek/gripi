@@ -8,15 +8,14 @@ import { FakeDocument, FakeElement, FakeEventTarget } from "./helpers/fake_dom.m
 
 test("plain message URLs become safe new-window links without changing surrounding text", () => {
   const document = new FakeDocument();
-  document.createTextNode = (text) => ({ textContent: text, parentElement: null, remove() {}, contains() { return false; }, querySelectorAll() { return []; } });
   const body = new FakeElement("pre");
-  const text = "Open https://example.test/tasks?q=1, then http://localhost:8080/a_(b). <script> javascript:alert(1)";
+  const text = "Open https://example.test/tasks?q=1, then http://localhost:8080/a_(b). See “https://example.test/quoted”. <script> javascript:alert(1)";
 
   renderTextWithLinks(body, text, document);
 
   const links = body.children.filter((child) => child.tagName === "A");
-  assert.deepEqual(links.map((link) => link.textContent), ["https://example.test/tasks?q=1", "http://localhost:8080/a_(b)"]);
-  assert.deepEqual(links.map((link) => link.getAttribute("href")), ["https://example.test/tasks?q=1", "http://localhost:8080/a_(b)"]);
+  assert.deepEqual(links.map((link) => link.textContent), ["https://example.test/tasks?q=1", "http://localhost:8080/a_(b)", "https://example.test/quoted"]);
+  assert.deepEqual(links.map((link) => link.getAttribute("href")), ["https://example.test/tasks?q=1", "http://localhost:8080/a_(b)", "https://example.test/quoted"]);
   for (const link of links) {
     assert.equal(link.getAttribute("target"), "_blank");
     assert.equal(link.getAttribute("rel"), "nofollow noreferrer noopener");

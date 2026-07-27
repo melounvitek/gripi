@@ -1,18 +1,26 @@
 const messageURLPattern = /\bhttps?:\/\/[^\s<>"']+/giu;
+const closingURLBrackets = { ")": "(", "]": "[", "}": "{", "）": "（", "］": "［", "｝": "｛" };
+const openingURLBrackets = new Set(Object.values(closingURLBrackets));
+const trailingURLPunctuation = new Set(".,!?;:…。，、！？；：”’»›」』】》〉");
 
 function linkEnd(text) {
+  const balance = Object.fromEntries([...openingURLBrackets].map((opening) => [opening, 0]));
+  for (const character of text) {
+    if (openingURLBrackets.has(character)) balance[character] += 1;
+    const opening = closingURLBrackets[character];
+    if (opening) balance[opening] -= 1;
+  }
+
   let end = text.length;
-  const pairs = { ")": "(", "]": "[", "}": "{" };
   while (end > 0) {
     const last = text[end - 1];
-    if (".,!?;:".includes(last)) {
+    if (trailingURLPunctuation.has(last)) {
       end -= 1;
       continue;
     }
-    const opening = pairs[last];
-    if (!opening) break;
-    const value = text.slice(0, end);
-    if ([...value].filter((character) => character === last).length <= [...value].filter((character) => character === opening).length) break;
+    const opening = closingURLBrackets[last];
+    if (!opening || balance[opening] >= 0) break;
+    balance[opening] += 1;
     end -= 1;
   }
   return end;

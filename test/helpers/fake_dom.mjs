@@ -1,3 +1,18 @@
+class FakeTextNode {
+  constructor(text) {
+    this.textContent = text;
+    this.parentElement = null;
+  }
+  remove() {
+    if (!this.parentElement) return;
+    this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
+    this.parentElement = null;
+  }
+  contains() { return false; }
+  matches() { return false; }
+  querySelectorAll() { return []; }
+}
+
 export class FakeEventTarget {
   constructor() { this.listeners = new Map(); }
   addEventListener(type, listener) {
@@ -75,6 +90,7 @@ export class FakeDocument extends FakeEventTarget {
     this.activeElement = null;
   }
   createElement(tagName) { return new FakeElement(tagName); }
+  createTextNode(text) { return new FakeTextNode(text); }
   getElementById() { return null; }
   querySelectorAll(selector) { return this.body.querySelectorAll(selector); }
   querySelector(selector) { return this.body.querySelector(selector); }
