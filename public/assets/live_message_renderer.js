@@ -13,6 +13,7 @@ export class LiveMessageRenderer {
     this.markdownRenderer = markdownRenderer;
     this.liveOutput = null;
     this.conversationScroll = null;
+    this.hideThinkingBlock = false;
     this.pendingMessages = null;
     this.lastLiveCompaction = null;
     this.terminalRenderStates = new WeakMap();
@@ -28,6 +29,7 @@ export class LiveMessageRenderer {
     this.markdownRenderer.bind();
     this.liveOutput = this.document.getElementById("live-output");
     this.conversationScroll = this.conversationController.element;
+    this.hideThinkingBlock = this.liveOutput?.dataset.hideThinkingBlock === "true";
     this.pendingMessages = this.document.querySelector("[data-pending-messages]");
     this.lastLiveCompaction = null;
     this.liveBashExecutions = new Map();
@@ -159,14 +161,15 @@ export class LiveMessageRenderer {
     role.textContent = options.customType ? `[${options.customType}]` : messageRoleLabel(roleName);
 
     const markdownMessage = ["assistant", "custom"].includes(roleName) || options.markdown;
+    const displayText = options.thinking && this.hideThinkingBlock ? "Thinking..." : text;
     const body = this.document.createElement(markdownMessage ? "div" : "pre");
     body.className = options.thinking ? "message-body message-body--thinking message-body--markdown" : (markdownMessage ? "message-body message-body--markdown" : "message-body");
     if (markdownMessage) {
-      this.markdownRenderer.render(body, text);
+      this.markdownRenderer.render(body, displayText);
     } else if (roleName === "user") {
-      renderTextWithLinks(body, text, this.document);
+      renderTextWithLinks(body, displayText, this.document);
     } else {
-      body.textContent = text;
+      body.textContent = displayText;
     }
 
     const meta = this.document.createElement("div");
@@ -752,14 +755,16 @@ export class LiveMessageRenderer {
 
   updateLiveSegment(entry, roleName, segment, shouldScroll, timestamp = null) {
     if (entry.compact !== segment.compact) return null;
-    const displayText = roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text;
+    const displayText = segment.thinking && this.hideThinkingBlock ?
+      "Thinking..." :
+      (roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text);
 
     if (segment.compact) {
       this.renderToolSummary(entry.summaryText, segment.summaryParts, segment.summary);
       this.renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });
     } else {
       if (["assistant", "custom"].includes(roleName)) {
-        this.markdownRenderer.render(entry.body, segment.text);
+        this.markdownRenderer.render(entry.body, displayText);
       } else if (roleName === "user") {
         renderTextWithLinks(entry.body, displayText, this.document);
       } else {

@@ -328,7 +328,7 @@ func TestThinkingDisplayFollowsPiSettingsAcrossHistoryRenderingPaths(t *testing.
 
 	handler := fixtureHandler(t, fixture)
 	page := serve(t, handler, http.MethodGet, "/?session="+url.QueryEscape(path), "")
-	if !strings.Contains(page.Body.String(), "Thinking...") || !strings.Contains(page.Body.String(), "Visible final answer") || strings.Contains(page.Body.String(), "Latest private reasoning") {
+	if !strings.Contains(page.Body.String(), "Thinking...") || !strings.Contains(page.Body.String(), "Visible final answer") || !strings.Contains(page.Body.String(), `data-hide-thinking-block="true"`) || strings.Contains(page.Body.String(), "Latest private reasoning") {
 		t.Fatalf("page thinking display = %q", page.Body.String())
 	}
 
@@ -339,7 +339,7 @@ func TestThinkingDisplayFollowsPiSettingsAcrossHistoryRenderingPaths(t *testing.
 	if err := json.Unmarshal(fragment.Body.Bytes(), &fragmentPayload); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(fragmentPayload.ConversationHTML, "Thinking...") || strings.Contains(fragmentPayload.ConversationHTML, "Latest private reasoning") {
+	if !strings.Contains(fragmentPayload.ConversationHTML, "Thinking...") || !strings.Contains(fragmentPayload.ConversationHTML, `data-hide-thinking-block="true"`) || strings.Contains(fragmentPayload.ConversationHTML, "Latest private reasoning") {
 		t.Fatalf("fragment thinking display = %q", fragmentPayload.ConversationHTML)
 	}
 

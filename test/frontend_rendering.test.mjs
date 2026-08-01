@@ -36,6 +36,42 @@ function markdownBody() {
   };
 }
 
+test("live thinking follows the bound Pi display setting through streaming updates", () => {
+  const document = new FakeDocument();
+  const conversation = {
+    element: new FakeElement("section"),
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+  };
+  let output = new FakeElement("section");
+  output.dataset.hideThinkingBlock = "true";
+  document.getElementById = () => output;
+  const rendered = [];
+  const markdown = {
+    bind() {},
+    render(body, text) {
+      rendered.push(text);
+      body.textContent = text;
+    },
+  };
+  const renderer = new LiveMessageRenderer(document, conversation, {}, markdown);
+
+  renderer.bind();
+  const entry = renderer.appendMessage("assistant", "Private reasoning", true, false, null, { thinking: true });
+  assert.equal(entry.body.textContent, "Thinking...");
+  assert.deepEqual(rendered, ["Thinking..."]);
+
+  renderer.updateLiveSegment(entry, "assistant", { compact: false, thinking: true, text: "Longer private reasoning" }, false);
+  assert.equal(entry.body.textContent, "Thinking...");
+  assert.deepEqual(rendered, ["Thinking...", "Thinking..."]);
+
+  output = new FakeElement("section");
+  output.dataset.hideThinkingBlock = "false";
+  renderer.bind();
+  const visible = renderer.appendMessage("assistant", "Visible reasoning", true, false, null, { thinking: true });
+  assert.equal(visible.body.textContent, "Visible reasoning");
+});
+
 test("Markdown binding aborts stale work and superseded failures cannot replace current output", async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];
