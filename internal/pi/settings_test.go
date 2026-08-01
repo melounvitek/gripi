@@ -60,6 +60,32 @@ func TestDisplaySettingsUseNativeProjectTrustFallbacks(t *testing.T) {
 	}
 }
 
+func TestDisplaySettingsRejectMalformedTrustWithoutUsingPartialDecisions(t *testing.T) {
+	root := t.TempDir()
+	agentDir := filepath.Join(root, "agent")
+	project := filepath.Join(root, "project")
+	writeJSON(t, filepath.Join(agentDir, "settings.json"), `{"hideThinkingBlock":true}`)
+	writeJSON(t, filepath.Join(agentDir, "trust.json"), `{"`+filepath.ToSlash(project)+`":true,"invalid":"yes"}`)
+	writeJSON(t, filepath.Join(project, ".pi", "settings.json"), `{"hideThinkingBlock":false}`)
+
+	settings := (SettingsResolver{AgentDir: agentDir}).DisplaySettings(project)
+	if !settings.HideThinkingBlock {
+		t.Fatalf("settings = %#v", settings)
+	}
+}
+
+func TestDisplaySettingsReadNativeSizedSettingsFiles(t *testing.T) {
+	root := t.TempDir()
+	agentDir := filepath.Join(root, "agent")
+	settings := `{"padding":"` + strings.Repeat("x", 1<<20) + `","hideThinkingBlock":true}`
+	writeJSON(t, filepath.Join(agentDir, "settings.json"), settings)
+
+	resolved := (SettingsResolver{AgentDir: agentDir}).DisplaySettings(root)
+	if !resolved.HideThinkingBlock {
+		t.Fatalf("settings = %#v", resolved)
+	}
+}
+
 func TestDisplaySettingsIgnoreMissingMalformedAndInvalidFiles(t *testing.T) {
 	root := t.TempDir()
 	agentDir := filepath.Join(root, "agent")

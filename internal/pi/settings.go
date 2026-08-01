@@ -2,12 +2,9 @@ package pi
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 )
-
-const maxSettingsBytes = 1 << 20
 
 type DisplaySettings struct {
 	HideThinkingBlock bool
@@ -47,8 +44,10 @@ func (resolver SettingsResolver) projectTrusted(cwd, defaultTrust string) bool {
 	}
 
 	decisions := make(map[string]*bool)
-	if data, ok := readBounded(filepath.Join(resolver.AgentDir, "trust.json")); ok {
-		_ = json.Unmarshal(data, &decisions)
+	if data, ok := readFile(filepath.Join(resolver.AgentDir, "trust.json")); ok {
+		if json.Unmarshal(data, &decisions) != nil {
+			decisions = make(map[string]*bool)
+		}
 	}
 	for current := canonicalPath(cwd); ; current = filepath.Dir(current) {
 		if decision := decisions[current]; decision != nil {
@@ -62,7 +61,7 @@ func (resolver SettingsResolver) projectTrusted(cwd, defaultTrust string) bool {
 }
 
 func readSettings(path string) (settingsFile, bool) {
-	data, ok := readBounded(path)
+	data, ok := readFile(path)
 	if !ok {
 		return settingsFile{}, false
 	}
@@ -73,18 +72,9 @@ func readSettings(path string) (settingsFile, bool) {
 	return settings, true
 }
 
-func readBounded(path string) ([]byte, bool) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, false
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(io.LimitReader(file, maxSettingsBytes+1))
-	if err != nil || len(data) > maxSettingsBytes {
-		return nil, false
-	}
-	return data, true
+func readFile(path string) ([]byte, bool) {
+	data, err := os.ReadFile(path)
+	return data, err == nil
 }
 
 func absolutePath(path string) string {
