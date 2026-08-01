@@ -29,6 +29,40 @@ import { hasTerminalControls, renderTerminalOutput } from "../public/assets/term
 import { TREE_FILTERS, TREE_SUMMARY_CHOICES, TreeSessionModel } from "../public/assets/tree_session_controller.js";
 import { newSessionModalUrl, sessionFragmentUrl, sessionUrl } from "../public/assets/urls.js";
 
+test("notification previews preserve literal Markdown punctuation", () => {
+  assert.equal(notificationReplyPreview("Branch: feat/my_branch_name"), "Branch: feat/my_branch_name");
+  assert.equal(notificationReplyPreview("Use snake_case at https://example.test/a_b"), "Use snake_case at https://example.test/a_b");
+  assert.equal(notificationReplyPreview("URLs: https://example.test/a(*b*) and <https://example.test/a_b>"), "URLs: https://example.test/a(*b*) and https://example.test/a_b");
+  assert.equal(notificationReplyPreview("Calculate 3 * 4 and open ~/project"), "Calculate 3 * 4 and open ~/project");
+  assert.equal(notificationReplyPreview("Keep unmatched *stars, _underscores, and ~tildes"), "Keep unmatched *stars, _underscores, and ~tildes");
+  assert.equal(notificationReplyPreview("Use `code_with_*_markers` and ``more_`code`_*``"), "Use code_with_*_markers and more_`code`_*");
+  assert.equal(notificationReplyPreview("See https://example.test`code`"), "See https://example.testcode");
+  assert.equal(notificationReplyPreview("```js\nconst foo_bar = 1 * 2\n```"), "const foo_bar = 1 * 2");
+  assert.equal(notificationReplyPreview("```js\r\nconst windows_path = 1 * 2\r\n```"), "const windows_path = 1 * 2");
+  assert.equal(notificationReplyPreview("```js title=sample\nconst marker = \"```\";\n```"), "const marker = \"```\";");
+  assert.equal(notificationReplyPreview("~~~js\nconst foo_bar = 1 * 2\n~~~"), "const foo_bar = 1 * 2");
+  assert.equal(notificationReplyPreview("**Bold**, *italic*, __strong__, _emphasis_, and ~~strike~~"), "Bold, italic, strong, emphasis, and strike");
+  assert.equal(notificationReplyPreview("***Bold italic***, **three *four***, and ~~**nested**~~"), "Bold italic, three four, and nested");
+});
+
+test("notification previews handle large unclosed code fences", { timeout: 1000 }, () => {
+  const preview = notificationReplyPreview(`\`\`\`js\n${"foo_bar * ".repeat(10_000)}`);
+
+  assert.equal(preview, `${"foo_bar * ".repeat(17)}foo_bar…`);
+});
+
+test("notification preview placeholders cannot be created by cleanup", () => {
+  const marker = "\uE000";
+
+  assert.equal(notificationReplyPreview(`${marker}![](x)${marker}0${marker}![](y)${marker}`), `${marker}${marker}0${marker}${marker}`);
+});
+
+test("notification preview truncation preserves complete Unicode characters", () => {
+  const reply = "🙂".repeat(180);
+
+  assert.equal(notificationReplyPreview(reply), reply);
+});
+
 test("formatting and message helpers preserve browser-facing semantics", () => {
   assert.equal(compactNumber(1500), "1.5k");
   assert.equal(formatWaitDuration(125000), "2m 05s");
