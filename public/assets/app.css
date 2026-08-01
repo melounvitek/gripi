@@ -317,6 +317,9 @@
     }
     .message-body--thinking { font-size: 0.95rem; font-style: italic; line-height: 1.5; color: var(--muted); }
     .message-body--thinking.message-body--markdown h1, .message-body--thinking.message-body--markdown h2, .message-body--thinking.message-body--markdown h3 { color: inherit; font-size: 1em; }
+    .message-body--thinking.message-body--markdown code:not(.highlight) { color: inherit; }
+    .message-body--thinking.message-body--markdown pre { opacity: 0.65; }
+    .message-body--thinking .code-block-copy-button { display: none; }
     .message-body--markdown { max-width: 100%; overflow-x: auto; line-height: 1.6; overflow-wrap: anywhere; }
     .message-body--markdown[data-rendering="pending"]:empty::before { content: "…"; color: var(--muted); }
     .message-body--markdown > :first-child { margin-top: 0; }
