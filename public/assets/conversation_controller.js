@@ -153,6 +153,7 @@ export class ConversationController {
     } : null;
 
     this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
+    if (!this.focusedView && preserveScroll) this.refreshToolSummaryToggles();
     if (this.viewSelect) {
       const value = this.focusedView ? "conversation" : "full";
       if (this.viewSelect.value !== value) {
@@ -876,22 +877,26 @@ export class ConversationController {
     summary.dataset.toolSummaryExpanded = expanded ? "false" : "true";
     toggle.textContent = expanded ? "Show" : "Hide";
     toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+    if (expanded) this.refreshToolSummaryToggle(summary);
+  }
+
+  refreshToolSummaryToggle(summary) {
+    const toggle = summary?.querySelector?.("[data-tool-summary-toggle]");
+    const text = summary?.querySelector?.(".compact-summary");
+    if (!toggle || !text) return;
+    if (summary.dataset.toolSummaryExpanded === "true") {
+      toggle.hidden = false;
+      return;
+    }
+    toggle.hidden = true;
+    const clamped = text.scrollHeight > text.clientHeight + 1;
+    toggle.hidden = !clamped;
   }
 
   refreshToolSummaryToggles() {
     if (!this.element?.querySelectorAll) return;
     const summaries = this.element.querySelectorAll(".message--tool .message-details-summary, .message--tool-call .message-details-summary, .message--tool-transcript .message-details-summary");
-    for (const summary of summaries) {
-      const toggle = summary.querySelector("[data-tool-summary-toggle]");
-      const text = summary.querySelector(".compact-summary");
-      if (!toggle || !text) continue;
-      if (summary.dataset.toolSummaryExpanded === "true") {
-        toggle.hidden = false;
-        continue;
-      }
-      const clamped = text.scrollHeight > text.clientHeight + 1;
-      toggle.hidden = !clamped;
-    }
+    for (const summary of summaries) this.refreshToolSummaryToggle(summary);
   }
 
   stopAutoFollow() {

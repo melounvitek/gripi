@@ -16,6 +16,7 @@ export class CurrentSessionFindController {
     this.preparationEpoch = 0;
     this.historyStatus = "complete";
     this.expandedToolOutput = null;
+    this.expandedToolSummary = null;
   }
 
   bind() {
@@ -148,6 +149,44 @@ export class CurrentSessionFindController {
     else body.replaceChildren(...expanded.originalBodyNodes.map((node) => node.cloneNode(true)));
   }
 
+  restoreToolSummary(exceptSummary = null) {
+    const expanded = this.expandedToolSummary;
+    if (!expanded || expanded.summary === exceptSummary) return;
+    this.expandedToolSummary = null;
+    const { summary, toggle, originalExpanded, originalText, originalAriaExpanded } = expanded;
+    if (!summary.isConnected) return;
+    if (originalExpanded === undefined) delete summary.dataset.toolSummaryExpanded;
+    else summary.dataset.toolSummaryExpanded = originalExpanded;
+    toggle.textContent = originalText;
+    toggle.setAttribute("aria-expanded", originalAriaExpanded);
+    this.conversation.refreshToolSummaryToggle?.(summary);
+  }
+
+  revealToolSummary(match) {
+    const root = match?.root;
+    if (!root?.matches?.(".compact-summary")) return null;
+    const summary = root.closest(".message-details-summary");
+    const toggle = summary?.querySelector("[data-tool-summary-toggle]");
+    if (!summary || !toggle) return null;
+    if (summary.dataset.toolSummaryExpanded === "true") return summary;
+    this.conversation.refreshToolSummaryToggle?.(summary);
+    if (toggle.hidden) return summary;
+    if (this.expandedToolSummary?.summary !== summary) {
+      this.expandedToolSummary = {
+        summary,
+        toggle,
+        originalExpanded: summary.dataset.toolSummaryExpanded,
+        originalText: toggle.textContent,
+        originalAriaExpanded: toggle.getAttribute("aria-expanded") || "false"
+      };
+    }
+    summary.dataset.toolSummaryExpanded = "true";
+    toggle.hidden = false;
+    toggle.textContent = "Hide";
+    toggle.setAttribute("aria-expanded", "true");
+    return summary;
+  }
+
   revealToolOutput(match) {
     const collapse = match?.collapse;
     if (!collapse || collapse.dataset.collapsed !== "true") return false;
@@ -212,6 +251,9 @@ export class CurrentSessionFindController {
     this.removeHighlights();
     const activeMatch = this.matches[this.index];
     this.restoreToolOutput(activeMatch?.collapse);
+    const activeSummary = activeMatch?.root?.closest?.(".message-details-summary") || null;
+    this.restoreToolSummary(activeSummary);
+    this.revealToolSummary(activeMatch);
     this.revealToolOutput(activeMatch);
     if (activeMatch && activeMatch.collapse?.dataset.collapsed !== "true") {
       this.highlight(activeMatch);
@@ -287,6 +329,7 @@ export class CurrentSessionFindController {
     this.observer?.disconnect();
     this.removeHighlights();
     this.restoreToolOutput();
+    this.restoreToolSummary();
     this.matches = [];
     this.index = -1;
     if (this.count && message) this.count.textContent = message;
@@ -360,6 +403,7 @@ export class CurrentSessionFindController {
     if (this.historyStatus !== "complete") this.historyStatus = "pending";
     this.removeHighlights();
     this.restoreToolOutput();
+    this.restoreToolSummary();
     this.matches = [];
     this.index = -1;
     this.updateCount();
