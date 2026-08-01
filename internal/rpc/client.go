@@ -1486,6 +1486,9 @@ func (client *Client) updateActiveToolsLocked(response map[string]any, serialize
 	}
 	if response["type"] == "tool_execution_end" {
 		if response["toolName"] == snapshotToolName {
+			if client.activeToolEvents[id] == nil && len(client.activeToolEvents) >= MaxActiveToolSnapshots {
+				return
+			}
 			if snapshot := boundedActiveToolEvent(response, serializedBytes); snapshot != nil {
 				client.activeToolEvents[id] = snapshot
 			}
@@ -1613,10 +1616,12 @@ func subagentFallbackSnapshot(response, result map[string]any) map[string]any {
 		text = stringValue(content[0].(map[string]any)["text"])
 	}
 	if text == "" {
-		if response["type"] == "tool_execution_end" {
-			text = "Subagent completed"
-		} else {
+		if response["type"] != "tool_execution_end" {
 			text = "Subagent is still running…"
+		} else if isError, _ := response["isError"].(bool); isError {
+			text = "Subagent failed"
+		} else {
+			text = "Subagent completed"
 		}
 	}
 	return subagentSnapshotEvent(response, map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}})

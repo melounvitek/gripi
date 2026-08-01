@@ -461,6 +461,47 @@ func TestClientRetainsCompletedSubagentSnapshotsUntilAgentEnd(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestClientBoundsCompletedSubagentSnapshotsAndLabelsErrorFallbacks(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+
+	for index := range MaxActiveToolSnapshots {
+		writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": fmt.Sprintf("tracked-%02d", index), "toolName": "subagent"})
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "untracked", "toolName": "subagent", "result": map[string]any{}})
+	waitSequence(t, client, MaxActiveToolSnapshots+1)
+
+	snapshot := client.LiveSnapshot()
+	if len(snapshot.ActiveToolEvents) != MaxActiveToolSnapshots {
+		t.Fatalf("snapshot count = %d", len(snapshot.ActiveToolEvents))
+	}
+	for _, event := range snapshot.ActiveToolEvents {
+		if event["toolCallId"] == "untracked" {
+			t.Fatal("untracked completion bypassed the snapshot bound")
+		}
+	}
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "tracked-00", "toolName": "subagent", "result": map[string]any{"details": map[string]any{"ignored": strings.Repeat("x", MaxActiveToolSnapshotBytes)}}, "isError": true})
+	waitSequence(t, client, MaxActiveToolSnapshots+2)
+	for _, event := range client.LiveSnapshot().ActiveToolEvents {
+		if event["toolCallId"] != "tracked-00" {
+			continue
+		}
+		result, _ := event["result"].(map[string]any)
+		content, _ := result["content"].([]any)
+		part, _ := content[0].(map[string]any)
+		if part["text"] != "Subagent failed" {
+			t.Fatalf("error fallback = %#v", event)
+		}
+		_ = stdoutWriter.Close()
+		return
+	}
+	t.Fatal("tracked completion snapshot is missing")
+}
+
 func TestClientAllowsOnlyOneExtensionUIAnswer(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
