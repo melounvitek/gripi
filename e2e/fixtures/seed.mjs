@@ -141,7 +141,6 @@ export async function seedFixtures(root) {
   await Promise.all(Object.values(projects).map((project) => mkdir(project, { recursive: true })));
 
   const definitions = [
-    ["mobile-project", "parallel-subagents-mobile", sessions.parallelSubagentsMobile],
     ["prompt-project", "idle-client", sessions.idleClient],
     ["history-project", "history", sessions.history, { question: "Persisted browser question", answer: "Persisted browser answer" }],
     ["prompt-project", "prompt", sessions.prompt],
@@ -173,6 +172,7 @@ export async function seedFixtures(root) {
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
     await writeSession(root, projects[projectName], slug, title, index + 1, history);
   }
+  await writeSession(root, projects["mobile-project"], "parallel-subagents-mobile", sessions.parallelSubagentsMobile, 0);
   await writePaginatedSubagentSession(root, projects["controls-project"], 0);
 
   const configuredCwdsPath = path.join(state, "configured-cwds");

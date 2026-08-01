@@ -576,14 +576,13 @@ function abortParallelSubagents() {
 
 function startPaginatedSubagent() {
   const toolMessage = assistantMessage([
-    { type: "toolCall", id: paginatedSubagent.matchingCallId, name: "subagent", arguments: { task: "Restore paginated work" } },
     { type: "toolCall", id: paginatedSubagent.unrelatedCallId, name: "subagent", arguments: { task: "Keep unrelated work" } }
   ], "toolUse");
   emit({ type: "message_start", message: { ...toolMessage, content: [] } });
-  emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 1, toolCall: toolMessage.content[1], partial: toolMessage } });
+  emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: toolMessage.content[0], partial: toolMessage } });
   emit({ type: "message_end", message: toolMessage });
   appendMessage(toolMessage);
-  emit({ type: "tool_execution_start", toolCallId: paginatedSubagent.matchingCallId, toolName: "subagent", args: { task: "Restore paginated work" } });
+  emit({ type: "tool_execution_start", toolCallId: paginatedSubagent.matchingCallId, toolName: "subagent", args: { task: "Persisted paginated task" } });
   emit({ type: "tool_execution_update", toolCallId: paginatedSubagent.matchingCallId, toolName: "subagent", partialResult: subagentExecutionResult("running", paginatedSubagent.liveProgress) });
   emit({ type: "tool_execution_start", toolCallId: paginatedSubagent.unrelatedCallId, toolName: "subagent", args: { task: "Keep unrelated work" } });
   schedule(1200, () => {

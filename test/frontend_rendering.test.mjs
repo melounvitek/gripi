@@ -173,6 +173,16 @@ test("canonical subagent timestamps replace provisional card timestamps", () => 
   renderer.renderToolExecutionEvent({ type: "tool_execution_update", toolCallId: "subagent-1", toolName: "subagent", gatewayTimestamp: "2026-01-01T10:00:00Z", partialResult: {} });
 
   assert.equal(entry.article.dataset.messageTimestamp, String(Date.parse("2026-01-01T10:00:00Z") / 1000));
+  assert.match(entry.article.dataset.messageFingerprint, /^tool:1767261600:/);
+});
+
+test("persisted tool replay suppression remains bounded", () => {
+  const renderer = new LiveMessageRenderer({}, {}, {}, { bind() {} });
+  for (let index = 0; index < 20; index += 1) renderer.rememberPersistedToolResult(`tool-${index}`);
+
+  assert.equal(renderer.persistedToolResultIDs.size, 16);
+  assert.equal(renderer.persistedToolResultIDs.has("tool-0"), false);
+  assert.equal(renderer.persistedToolResultIDs.has("tool-19"), true);
 });
 
 test("paged persisted subagents replace matching live cards and suppress replay", () => {

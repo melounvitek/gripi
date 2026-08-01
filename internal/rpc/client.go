@@ -944,10 +944,14 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		}
 		if (typeName == "tool_execution_start" || typeName == "tool_execution_update" || typeName == "tool_execution_end") && response["toolName"] == snapshotToolName {
 			gatewayTimestamp := int64(0)
+			timestampKnown := false
 			if active := client.activeToolEvents[stringValue(response["toolCallId"])]; active != nil {
-				gatewayTimestamp = int64(numberOrZero(active["gatewayTimestamp"]))
+				if value, ok := numberValue(active["gatewayTimestamp"]); ok {
+					gatewayTimestamp = int64(value)
+					timestampKnown = true
+				}
 			}
-			if gatewayTimestamp == 0 {
+			if !timestampKnown {
 				gatewayTimestamp = client.clock().UnixMilli()
 			}
 			response = cloneMap(response)

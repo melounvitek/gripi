@@ -4,6 +4,7 @@ import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, me
 import { hasTerminalControls, renderTerminalOutput } from "./terminal_output_renderer.js";
 
 const TERMINAL_OUTPUT_EXCLUDED_TOOLS = new Set(["read", "edit", "write"]);
+const PERSISTED_TOOL_REPLAY_LIMIT = 16;
 
 export class LiveMessageRenderer {
   constructor(document, conversationController, parser, markdownRenderer) {
@@ -36,7 +37,6 @@ export class LiveMessageRenderer {
     this.liveBashExecutions = new Map();
     this.completedBashExecutionIds = new Set();
     this.persistedToolResultIDs = new Set();
-    this.rememberPersistedToolResults(this.conversationScroll);
     this.resetLiveAssistantTracking();
     this.terminalHydration = this.hydrateTerminalOutputs(this.conversationScroll) || Promise.resolve();
     try {
@@ -72,37 +72,45 @@ export class LiveMessageRenderer {
     return [...(this.conversationScroll?.querySelectorAll(".message:not(.message--live)[data-message-fingerprint]") || [])].some((message) => message.dataset.messageFingerprint === fingerprint);
   }
 
-  rememberPersistedToolResults(root) {
-    const messages = [...(root?.querySelectorAll(".message:not(.message--live)[data-tool-call-id]") || [])]
+  persistedToolResults(root) {
+    return [...(root?.querySelectorAll(".message:not(.message--live)[data-tool-call-id]") || [])]
       .filter((message) => message.dataset.role === "toolResult" && message.dataset.toolCallId);
-    messages.forEach((message) => this.persistedToolResultIDs.add(message.dataset.toolCallId));
-    return messages;
+  }
+
+  rememberPersistedToolResult(id) {
+    this.persistedToolResultIDs.delete(id);
+    this.persistedToolResultIDs.add(id);
+    while (this.persistedToolResultIDs.size > PERSISTED_TOOL_REPLAY_LIMIT) {
+      this.persistedToolResultIDs.delete(this.persistedToolResultIDs.values().next().value);
+    }
   }
 
   persistedToolResultAlreadyRendered(segment) {
     if (!segment.isToolResult || !segment.toolCallId) return false;
     if (this.persistedToolResultIDs.has(segment.toolCallId)) return true;
-    return this.rememberPersistedToolResults(this.conversationScroll)
+    return this.persistedToolResults(this.conversationScroll)
       .some((message) => message.dataset.toolCallId === segment.toolCallId);
   }
 
   reconcilePersistedToolResults(root) {
-    const messages = this.rememberPersistedToolResults(root);
+    const liveArticles = new Map();
+    [...(this.conversationScroll?.querySelectorAll(".message--live[data-tool-call-id]") || [])].forEach((article) => {
+      const articles = liveArticles.get(article.dataset.toolCallId) || [];
+      articles.push(article);
+      liveArticles.set(article.dataset.toolCallId, articles);
+    });
     let removed = false;
-    messages.forEach((message) => {
+    this.persistedToolResults(root).forEach((message) => {
       const id = message.dataset.toolCallId;
       const entry = this.liveToolExecutions.get(id);
-      if (entry) {
-        entry.article.remove();
-        this.forgetLiveEntry(entry);
-        removed = true;
-      }
-      [...(this.conversationScroll?.querySelectorAll(".message--live[data-tool-call-id]") || [])]
-        .filter((article) => article.dataset.toolCallId === id)
-        .forEach((article) => {
-          article.remove();
-          removed = true;
-        });
+      const articles = new Set(liveArticles.get(id) || []);
+      if (entry) articles.add(entry.article);
+      if (articles.size === 0) return;
+
+      this.rememberPersistedToolResult(id);
+      articles.forEach((article) => article.remove());
+      if (entry) this.forgetLiveEntry(entry);
+      removed = true;
     });
     if (removed) this.conversationController.scheduleFocusedActivityRefresh?.();
   }
@@ -926,6 +934,7 @@ export class LiveMessageRenderer {
   }
 
   updateLiveToolExecution(entry, event, shouldScroll, timestamp = eventTimestamp(event)) {
+    let text;
     if (event.toolName === "subagent") {
       this.renderSubagentPrompt(entry, this.parser.subagentPromptFromEvent(event));
       const finalStatus = event.type === "tool_execution_end" ? (event.isError ? "error" : "done") : null;
@@ -935,16 +944,20 @@ export class LiveMessageRenderer {
       this.setToolTranscript(entry, this.parser.generalSubagentDetails(details));
       const fallback = this.parser.toolExecutionText(event);
       this.renderToolSummary(entry.summaryText, null, details ? this.parser.subagentSummary(details, this.parser.subagentRunning(event)) : this.parser.toolExecutionSummary(event));
-      this.renderToolTranscriptBody(entry.body, details ? this.parser.subagentDisplayText(details, fallback, this.parser.subagentRunning(event), !freshDetails) : fallback, event.toolName);
+      text = details ? this.parser.subagentDisplayText(details, fallback, this.parser.subagentRunning(event), !freshDetails) : fallback;
+      this.renderToolTranscriptBody(entry.body, text, event.toolName);
     } else {
       this.renderToolSummary(entry.summaryText, null, this.parser.toolExecutionSummary(event));
-      this.renderToolTranscriptBody(entry.body, this.parser.toolExecutionText(event), event.toolName || entry.toolName);
+      text = this.parser.toolExecutionText(event);
+      this.renderToolTranscriptBody(entry.body, text, event.toolName || entry.toolName);
     }
-    const timestampKey = messageTimestampKey(timestamp);
-    if (timestampKey) {
-      entry.article.dataset.messageTimestamp = timestampKey;
+    const eventTimestampKey = messageTimestampKey(timestamp);
+    if (eventTimestampKey) {
+      entry.article.dataset.messageTimestamp = eventTimestampKey;
       entry.meta.textContent = formatTimestamp(timestamp);
     }
+    const timestampKey = eventTimestampKey || entry.article.dataset.messageTimestamp;
+    entry.article.dataset.messageFingerprint = messageFingerprint(entry.article.dataset.role, text, timestampKey);
     const errorChanged = entry.article.classList.contains("message--tool-error") !== (event.isError === true);
     entry.article.classList.toggle("message--tool-error", event.isError === true);
     this.conversationController.afterLiveOutputChange(shouldScroll, true, errorChanged);

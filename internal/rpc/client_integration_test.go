@@ -463,11 +463,11 @@ func TestClientRetainsCompletedSubagentSnapshotsUntilAgentEnd(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
-func TestClientKeepsOneGatewayTimestampAcrossSubagentEventsAndCompaction(t *testing.T) {
+func TestClientKeepsOneGatewayTimestampAcrossSubagentEventsAndBoundedCompaction(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
 	stdoutReader, stdoutWriter := io.Pipe()
-	observed := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	observed := time.UnixMilli(0)
 	clockCalls := 0
 	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{Clock: func() time.Time {
 		value := observed.Add(time.Duration(clockCalls) * time.Hour)
