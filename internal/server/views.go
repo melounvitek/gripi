@@ -863,9 +863,13 @@ func compactTailLines(text string, trimCharacters bool) []string {
 		lines = lines[len(lines)-toolOutputDesktopTailLines:]
 	}
 
+	if !trimCharacters {
+		return lines
+	}
+
 	characters := []rune(strings.Join(lines, "\n"))
 
-	if trimCharacters && len(characters) > toolOutputTailCharacters {
+	if len(characters) > toolOutputTailCharacters {
 		lines = strings.Split("…"+string(characters[len(characters)-toolOutputTailCharacters+1:]), "\n")
 	}
 

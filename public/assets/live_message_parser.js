@@ -453,6 +453,7 @@ export class LiveMessageParser {
     this.subagentRunning = subagentRunning;
     this.subagentSummary = subagentSummary;
     this.subagentDisplayText = subagentDisplayText;
+    this.generalSubagentDetails = generalSubagentDetails;
     this.richSubagentDetails = richSubagentDetails;
     this.retainedSubagentDetails = retainedSubagentDetails;
     this.toolExecutionContentText = toolExecutionContentText;

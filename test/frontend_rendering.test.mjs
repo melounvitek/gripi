@@ -206,6 +206,36 @@ test("live long single-line tool output collapses to its latest suffix", () => {
   assert.match(fullTemplate.content.childNodes[0].children[0].textContent, /^oldest-output/);
 });
 
+test("live general subagent output uses the non-wrapping transcript policy", () => {
+  const conversation = { afterLiveOutputChange() {} };
+  const renderer = new LiveMessageRenderer(new FakeDocument(), conversation, new LiveMessageParser(), { bind() {} });
+  const entry = {
+    article: new FakeElement("article"),
+    output: new FakeElement("div"),
+    body: new FakeElement("pre"),
+    summaryText: new FakeElement("span"),
+    toolName: "subagent",
+  };
+  let policyAtRender;
+  renderer.renderSubagentPrompt = () => {};
+  renderer.renderToolSummary = () => {};
+  renderer.renderToolTranscriptBody = () => { policyAtRender = entry.output.dataset.toolOutputWraps; };
+  const event = {
+    type: "tool_execution_update",
+    toolName: "subagent",
+    partialResult: {
+      content: [{ type: "text", text: "general progress" }],
+      details: { status: "running", tools: [], usage: {} },
+    },
+  };
+
+  renderer.updateLiveToolExecution(entry, event, false);
+
+  assert.equal(entry.article.classList.contains("message--tool-transcript"), true);
+  assert.equal(entry.output.dataset.toolOutputWraps, "false");
+  assert.equal(policyAtRender, "false");
+});
+
 test("terminal updates coalesce to the latest screen and stale bindings do not render", async () => {
   const changes = [];
   const conversation = {

@@ -132,7 +132,8 @@ export class CurrentSessionFindController {
     if (body.dataset.rawText !== undefined) {
       const lines = String(body.dataset.rawText).split("\n");
       if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-      if (lines.length <= TOOL_OUTPUT_DESKTOP_TAIL_LINES && Array.from(body.dataset.rawText).length <= TOOL_OUTPUT_COLLAPSE_CHARACTERS) {
+      const shortOutput = collapse.dataset.toolOutputWraps === "false" || Array.from(body.dataset.rawText).length <= TOOL_OUTPUT_COLLAPSE_CHARACTERS;
+      if (lines.length <= TOOL_OUTPUT_DESKTOP_TAIL_LINES && shortOutput) {
         delete collapse.dataset.expanded;
         collapse.dataset.collapsed = "false";
         if (button) button.setAttribute("aria-expanded", expanded.originalAriaExpanded);

@@ -29,7 +29,7 @@ func TestMessageTemplateCollapsesLongSingleLineToolOutput(t *testing.T) {
 
 	html := rendered.String()
 	fullTemplate := strings.Index(html, `<template data-tool-output-full>`)
-	if fullTemplate < 0 || !strings.Contains(html, `data-collapsed="true"`) || !strings.Contains(html, `>Expand</button>`) {
+	if fullTemplate < 0 || !strings.Contains(html, `data-tool-output-wraps="true"`) || !strings.Contains(html, `data-collapsed="true"`) || !strings.Contains(html, `>Expand</button>`) {
 		t.Fatalf("long single-line output is not collapsible: %s", html)
 	}
 	collapsed := html[:fullTemplate]
@@ -73,7 +73,7 @@ func TestMessageTemplatePreservesLongDiffTail(t *testing.T) {
 	}
 
 	collapsed := html[:fullTemplate]
-	if !strings.Contains(collapsed, `tool-diff-line--add`) || !strings.Contains(collapsed, "+diff-start-") || !strings.Contains(collapsed, "-diff-end") {
+	if !strings.Contains(collapsed, `data-tool-output-wraps="false"`) || !strings.Contains(collapsed, `tool-diff-line--add`) || !strings.Contains(collapsed, "+diff-start-") || !strings.Contains(collapsed, "-diff-end") {
 		t.Fatalf("collapsed diff does not retain its complete classified tail: %s", collapsed)
 	}
 }

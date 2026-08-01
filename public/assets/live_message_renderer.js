@@ -426,6 +426,11 @@ export class LiveMessageRenderer {
     }
   }
 
+  setToolTranscript(entry, enabled) {
+    entry.article.classList.toggle("message--tool-transcript", enabled);
+    if (entry.output) entry.output.dataset.toolOutputWraps = enabled ? "false" : "true";
+  }
+
   renderSubagentPrompt(entry, prompt) {
     if (typeof prompt !== "string" || !prompt.trim() || !entry?.details || entry.subagentPromptElement) return;
     entry.subagentPrompt = prompt;
@@ -895,6 +900,7 @@ export class LiveMessageRenderer {
       const eventDetails = this.parser.subagentDetailsFromEvent(event);
       const freshDetails = this.parser.richSubagentDetails(eventDetails);
       const details = this.retainSubagentDetails(entry, eventDetails, finalStatus);
+      this.setToolTranscript(entry, this.parser.generalSubagentDetails(details));
       const fallback = this.parser.toolExecutionText(event);
       this.renderToolSummary(entry.summaryText, null, details ? this.parser.subagentSummary(details, this.parser.subagentRunning(event)) : this.parser.toolExecutionSummary(event));
       this.renderToolTranscriptBody(entry.body, details ? this.parser.subagentDisplayText(details, fallback, this.parser.subagentRunning(event), !freshDetails) : fallback, event.toolName);
@@ -930,7 +936,8 @@ export class LiveMessageRenderer {
       return;
     }
 
-    const entry = this.appendCompactMessage("tool", this.parser.toolExecutionSummary(event), this.parser.toolExecutionText(event), true, shouldScroll, timestamp, { toolName: event.toolName, toolCallId: event.toolCallId, toolPrompt: event.toolName === "subagent" ? this.parser.subagentPromptFromEvent(event, restoredPrompt) : "", error: event.isError === true, timestampFallback });
+    const toolTranscript = event.toolName === "subagent" && this.parser.generalSubagentDetails(this.parser.subagentDetailsFromEvent(event));
+    const entry = this.appendCompactMessage("tool", this.parser.toolExecutionSummary(event), this.parser.toolExecutionText(event), true, shouldScroll, timestamp, { toolName: event.toolName, toolCallId: event.toolCallId, toolPrompt: event.toolName === "subagent" ? this.parser.subagentPromptFromEvent(event, restoredPrompt) : "", toolTranscript, error: event.isError === true, timestampFallback });
     if (entry) {
       if (event.toolName === "subagent") this.retainSubagentDetails(entry, this.parser.subagentDetailsFromEvent(event));
       this.liveToolExecutions.set(event.toolCallId, entry);
@@ -1016,6 +1023,7 @@ export class LiveMessageRenderer {
         if (toolExecutionEntry && segment.isToolResult) {
           const freshSubagentDetails = segment.toolName === "subagent" && this.parser.richSubagentDetails(message.details);
           const subagentDetails = segment.toolName === "subagent" ? this.retainSubagentDetails(toolExecutionEntry, message.details, message.isError ? "error" : "done") : null;
+          if (segment.toolName === "subagent") this.setToolTranscript(toolExecutionEntry, this.parser.generalSubagentDetails(subagentDetails));
           const resultText = subagentDetails ? this.parser.subagentDisplayText(subagentDetails, segment.text, false, !freshSubagentDetails) : segment.text;
           const resultSummary = subagentDetails ? this.parser.subagentSummary(subagentDetails, false) : segment.summary;
           this.renderSubagentPrompt(toolExecutionEntry, segment.toolPrompt || this.parser.subagentPromptFromDetails(message.details));
