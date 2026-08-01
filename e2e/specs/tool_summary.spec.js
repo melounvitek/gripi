@@ -43,6 +43,23 @@ async function fitsWithoutHorizontalScroll(summary) {
   return summary.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
 }
 
+test("toggle follows viewport width changes", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.toolSummary);
+  await sendPrompt(page, prompts.wrapCommand);
+  await expectRunFinished(page);
+
+  const card = message(page, "assistant", tool.wrapCommand).last();
+  await expect(card).toBeVisible();
+  await expect(card.getByRole("button", { name: "Show" })).toBeHidden();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(card.getByRole("button", { name: "Show" })).toBeVisible();
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(card.getByRole("button", { name: "Show" })).toBeHidden();
+});
+
 test("keep short tool commands free of the toggle", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.toolSummary);

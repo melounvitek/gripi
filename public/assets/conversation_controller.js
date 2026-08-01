@@ -866,7 +866,6 @@ export class ConversationController {
     if (activityChanged) this.scheduleFocusedActivityRefresh();
     if (shouldScroll && this.autoScrollEnabled) this.scheduleAutoScroll();
     else if (live) this.updateJumpControls();
-    this.refreshToolSummaryToggles();
   }
 
   toggleToolSummary(toggle) {
@@ -890,7 +889,7 @@ export class ConversationController {
         toggle.hidden = false;
         continue;
       }
-      const clamped = typeof text.scrollHeight === "number" && typeof text.clientHeight === "number" && text.scrollHeight > text.clientHeight + 1;
+      const clamped = text.scrollHeight > text.clientHeight + 1;
       toggle.hidden = !clamped;
     }
   }

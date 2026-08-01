@@ -282,6 +282,7 @@ export class LiveMessageRenderer {
     article.append(header, details);
     this.renderMessageImages(article, options.images);
     this.liveOutput.append(article);
+    this.conversationController.refreshToolSummaryToggles?.();
     this.conversationController.afterLiveOutputChange(shouldScroll, live, true);
     return entry;
   }
@@ -760,6 +761,7 @@ export class LiveMessageRenderer {
     if (segment.compact) {
       this.renderToolSummary(entry.summaryText, segment.summaryParts, segment.summary);
       this.renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });
+      this.conversationController.refreshToolSummaryToggles?.();
     } else {
       if (["assistant", "custom"].includes(roleName)) {
         this.markdownRenderer.render(entry.body, segment.text);
