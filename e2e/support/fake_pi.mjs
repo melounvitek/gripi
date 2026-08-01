@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-import { nativeBash, prompts, replies, tool } from "./contract.mjs";
+import { nativeBash, prompts, replies, subagents, tool } from "./contract.mjs";
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
@@ -268,6 +268,10 @@ function acceptPrompt(command) {
   emitMessage(user);
   emit({ type: "turn_start" });
 
+  if (command.message === prompts.parallelSubagents) {
+    schedule(120, startParallelSubagents);
+    return;
+  }
   if (command.message === prompts.extension) {
     schedule(150, () => {
       pendingExtensionRequest = "e2e-release-approval";
@@ -443,6 +447,10 @@ function acceptAbort(command) {
   respond(command, true);
   if (!busy) return;
   clearTimers();
+  if (activeScenario === prompts.parallelSubagents) {
+    abortParallelSubagents();
+    return;
+  }
   busy = false;
   activeScenario = null;
   pendingExtensionRequest = null;
@@ -513,6 +521,58 @@ function acceptExtensionResponse(command) {
     return;
   }
   completeAssistant(command.confirmed ? replies.extensionApproved : "Release approval was declined.");
+}
+
+function startParallelSubagents() {
+  const toolMessage = assistantMessage([
+    { type: "toolCall", id: subagents.firstCallId, name: "subagent", arguments: { task: subagents.firstPrompt } },
+    { type: "toolCall", id: subagents.secondCallId, name: "subagent", arguments: { task: subagents.secondPrompt } }
+  ], "toolUse");
+  emit({ type: "message_start", message: { ...toolMessage, content: [] } });
+  emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 1, toolCall: toolMessage.content[1], partial: toolMessage } });
+  emit({ type: "message_end", message: toolMessage });
+  appendMessage(toolMessage);
+
+  emit({ type: "tool_execution_start", toolCallId: subagents.firstCallId, toolName: "subagent", args: { task: subagents.firstPrompt } });
+  emit({ type: "tool_execution_start", toolCallId: subagents.secondCallId, toolName: "subagent", args: { task: subagents.secondPrompt } });
+  emit({ type: "tool_execution_update", toolCallId: subagents.secondCallId, toolName: "subagent", partialResult: subagentExecutionResult("running", subagents.secondProgress) });
+  schedule(150, () => {
+    emit({ type: "tool_execution_end", toolCallId: subagents.firstCallId, toolName: "subagent", result: subagentExecutionResult("done", subagents.firstResult), isError: false });
+  });
+}
+
+function abortParallelSubagents() {
+  const firstResult = subagentExecutionResult("done", subagents.firstResult);
+  const secondResult = subagentExecutionResult("error", subagents.secondResult);
+  emit({ type: "tool_execution_end", toolCallId: subagents.secondCallId, toolName: "subagent", result: secondResult, isError: true });
+
+  const toolResults = [
+    { role: "toolResult", toolCallId: subagents.firstCallId, toolName: "subagent", content: firstResult.content, details: firstResult.details, isError: false, timestamp: Date.now() },
+    { role: "toolResult", toolCallId: subagents.secondCallId, toolName: "subagent", content: secondResult.content, details: secondResult.details, isError: true, timestamp: Date.now() }
+  ];
+  toolResults.forEach((result) => {
+    appendMessage(result);
+    emitMessage(result);
+  });
+  emit({ type: "turn_end", toolResults });
+  busy = false;
+  activeScenario = null;
+  emit({ type: "agent_end", messages: toolResults, willRetry: false });
+  persistDeferredBashMessages();
+  emit({ type: "agent_settled" });
+}
+
+function subagentExecutionResult(status, text) {
+  return {
+    content: [{ type: "text", text }],
+    details: {
+      status,
+      tools: [],
+      textItems: [text],
+      usage: { turns: 1, input: 10, output: 5, contextTokens: 15 },
+      model: "fixture-model"
+    }
+  };
 }
 
 function completeWithTool(reply, options = {}) {

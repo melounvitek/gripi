@@ -779,6 +779,19 @@ func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *
 	}
 }
 
+func TestLiveOutputOmitsCompletedSubagentSnapshotsWithPersistedResults(t *testing.T) {
+	messages := []*sessions.Message{{Role: "toolResult", ToolCallID: "first", ToolName: "subagent"}}
+	snapshot := rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
+		{"type": "tool_execution_end", "toolCallId": "first", "toolName": "subagent"},
+		{"type": "tool_execution_start", "toolCallId": "second", "toolName": "subagent"},
+	}}
+
+	output := liveOutputFrom(snapshot, messages, "/home/test", nil)
+	if strings.Contains(output.ActiveToolEventsJSON, "first") || !strings.Contains(output.ActiveToolEventsJSON, "second") {
+		t.Fatalf("active tools = %s", output.ActiveToolEventsJSON)
+	}
+}
+
 func TestLiveOutputRecognizesNativeIntegerCompletedBashAsPersisted(t *testing.T) {
 	recorded := time.UnixMilli(1_750_000_000_500)
 	exitCode := 0

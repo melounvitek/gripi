@@ -264,6 +264,19 @@ func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, hom
 	if activeTools == nil {
 		activeTools = []map[string]any{}
 	}
+	persistedToolResults := map[string]bool{}
+	for _, message := range messages {
+		if message.Role == "toolResult" && message.ToolCallID != "" {
+			persistedToolResults[message.ToolCallID] = true
+		}
+	}
+	remainingActiveTools := activeTools[:0]
+	for _, event := range activeTools {
+		if !persistedToolResults[stringFromAny(event["toolCallId"])] {
+			remainingActiveTools = append(remainingActiveTools, event)
+		}
+	}
+	activeTools = remainingActiveTools
 	completedBash := snapshot.CompletedBashEvents
 	if completedBash == nil {
 		completedBash = []map[string]any{}

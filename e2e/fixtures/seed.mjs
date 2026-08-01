@@ -117,7 +117,8 @@ export async function seedFixtures(root) {
     ["bash-project", "bash-retry", sessions.bashRetry],
     ["extension-project", "extension-race", sessions.extensionRace],
     ["prompt-project", "markdown-table", sessions.markdownTable],
-    ["prompt-project", "tool-summary", sessions.toolSummary]
+    ["prompt-project", "tool-summary", sessions.toolSummary],
+    ["controls-project", "parallel-subagents", sessions.parallelSubagents]
   ];
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
     await writeSession(root, projects[projectName], slug, title, index + 1, history);

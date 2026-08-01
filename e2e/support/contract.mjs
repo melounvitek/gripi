@@ -17,6 +17,7 @@ export const sessions = {
   controlsSteer: "E2E Steer Desktop",
   controlsFollowUp: "E2E Follow-up Desktop",
   controlsAbort: "E2E Abort Desktop",
+  parallelSubagents: "E2E Parallel Subagents Desktop",
   terminal: "E2E Terminal Desktop",
   settings: "E2E Settings Desktop",
   extension: "E2E Extension Desktop",
@@ -39,6 +40,7 @@ export const prompts = {
   followUpStart: "Start the follow-up scenario",
   followUpMessage: "Continue with the queued follow-up",
   abortStart: "Start the abort scenario",
+  parallelSubagents: "Run parallel subagent display scenario",
   terminal: "Show terminal screen updates",
   longCommand: "Run the long tool command scenario",
   markdownTable: "Show a detailed Markdown status table",
@@ -64,6 +66,16 @@ export const nativeBash = {
   cancel: { command: "sleep 30 # e2e-cancel" },
   overlap: { command: "sleep 30 # e2e-overlap" },
   mobileCancel: { command: "sleep 30 # e2e-mobile-cancel" }
+};
+
+export const subagents = {
+  firstCallId: "e2e-subagent-first",
+  secondCallId: "e2e-subagent-second",
+  firstPrompt: "Analyze deterministic strengths",
+  secondPrompt: "Analyze deterministic weaknesses",
+  firstResult: "Deterministic strengths complete",
+  secondProgress: "Deterministic weaknesses still running",
+  secondResult: "Deterministic weaknesses aborted"
 };
 
 export const tool = {
