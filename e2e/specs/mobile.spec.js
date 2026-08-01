@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { nativeBash, replies, sessions } from "../support/contract.mjs";
+import { nativeBash, prompts, replies, sessions, tool } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
 test("keep native Tab order for coarse pointers", async ({ page }) => {
@@ -80,6 +80,30 @@ test("navigate and complete a conversation from the mobile session drawer", asyn
   await expect(message(page, "assistant", replies.standard)).toBeVisible();
 });
 
+test("keep wrapped tool output short until the first Expand tap", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator('label[aria-label="Open sessions"]').click();
+  const wrappedOutputLink = page.getByRole("link", { name: new RegExp(sessions.wrappedToolOutput) });
+  if (!await wrappedOutputLink.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
+  await wrappedOutputLink.click();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.wrappedToolOutput })).toBeVisible();
+
+  await sendPrompt(page, prompts.wrappedToolOutput);
+  const card = page.locator(".message--tool-call").filter({ hasText: `$ ${tool.wrappedCommand}` }).last();
+  await expectWrappedOutputCollapsed(card);
+
+  await card.getByRole("button", { name: "Expand" }).tap();
+  await expect(card.locator("[data-tool-output-toggle]")).toHaveAttribute("aria-expanded", "true");
+  const region = card.getByRole("region", { name: "Expanded tool output" });
+  await expect(region).toContainText("oldest-wrapped-output");
+  await expect(region).toContainText("latest-wrapped-output");
+  await expectRunFinished(page);
+
+  await page.reload();
+  await expectWrappedOutputCollapsed(page.locator(".message--tool-call").filter({ hasText: `$ ${tool.wrappedCommand}` }).last());
+});
+
 test("cancel a native bash command on the first mobile tap", async ({ page }) => {
   await page.goto("/");
 
@@ -99,3 +123,31 @@ test("cancel a native bash command on the first mobile tap", async ({ page }) =>
   await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("cancelled");
   await expectRunFinished(page);
 });
+
+async function expectWrappedOutputCollapsed(card) {
+  const body = card.locator("[data-tool-output-body]");
+  await expect(card.getByRole("button", { name: "Expand" })).toBeVisible();
+  await expect(body).not.toContainText("oldest-wrapped-output");
+  await expect(body).toContainText("latest-wrapped-output");
+
+  const height = await body.evaluate((element) => element.getBoundingClientRect().height);
+  expect(height).toBeLessThanOrEqual(300);
+  expect(await textIsVisible(body, "latest-wrapped-output")).toBe(true);
+}
+
+async function textIsVisible(container, text) {
+  return container.evaluate((element, expectedText) => {
+    const node = [...element.querySelectorAll(".tool-output-line")]
+      .map((line) => line.firstChild)
+      .find((candidate) => candidate?.textContent.includes(expectedText));
+    if (!node) return false;
+
+    const start = node.textContent.indexOf(expectedText);
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, start + expectedText.length);
+    const containerRect = element.getBoundingClientRect();
+    const textRect = range.getBoundingClientRect();
+    return textRect.top >= containerRect.top && textRect.bottom <= containerRect.bottom;
+  }, text);
+}

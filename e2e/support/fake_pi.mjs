@@ -304,6 +304,8 @@ function acceptPrompt(command) {
     schedule(120, () => completeWithTool(reply, { command: tool.longCommand }));
   } else if (command.message === prompts.terminal) {
     schedule(120, () => completeWithTool(reply, { command: tool.terminalCommand, updates: tool.terminalUpdates, updateDelay: 350, completionDelay: 800 }));
+  } else if (command.message === prompts.wrappedToolOutput) {
+    schedule(120, () => completeWithTool(reply, { command: tool.wrappedCommand, updates: [tool.wrappedOutput] }));
   } else {
     schedule(120, () => completeWithTool(reply));
   }

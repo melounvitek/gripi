@@ -27,7 +27,8 @@ export const sessions = {
   bashExcluded: "E2E Bash Excluded Desktop",
   bashCancel: "E2E Bash Cancel Desktop",
   bashOverlap: "E2E Bash Overlap Desktop",
-  bashMobile: "E2E Bash Cancel Mobile"
+  bashMobile: "E2E Bash Cancel Mobile",
+  wrappedToolOutput: "E2E Wrapped Tool Output Mobile"
 };
 
 export const prompts = {
@@ -46,6 +47,7 @@ export const prompts = {
   markdownTable: "Show a detailed Markdown status table",
   extension: "Ask me for release approval",
   extensionRace: "Exercise queued extension requests",
+  wrappedToolOutput: "Show wrapped tool output",
   newSession: "Create the first deterministic response",
   realPiPrefix: "Reply with exactly this token and nothing else:"
 };
@@ -83,7 +85,9 @@ export const tool = {
   longCommand: "pi --no-session -p \"You are doing an independent review of the tool summary display. Read the full diff, check server-rendered history and live-appended rendering, identify possible simplifications, verify the project philosophy, and report deterministic-review-tail-marker findings back.\"",
   result: "deterministic-tool-result",
   terminalCommand: "capture terminal screen",
-  terminalUpdates: [terminalFirstFrame, `${terminalFirstFrame}${terminalLatestFrame}`]
+  terminalUpdates: [terminalFirstFrame, `${terminalFirstFrame}${terminalLatestFrame}`],
+  wrappedCommand: "print minified output",
+  wrappedOutput: `oldest-wrapped-output-${"x".repeat(12_000)}-latest-wrapped-output`
 };
 
 export const replies = {
