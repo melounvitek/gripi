@@ -1499,7 +1499,15 @@ func (client *Client) updateActiveToolsLocked(response map[string]any, serialize
 	}
 	if (response["type"] == "tool_execution_start" || response["type"] == "tool_execution_update") && response["toolName"] == snapshotToolName {
 		if client.activeToolEvents[id] == nil && len(client.activeToolEvents) >= MaxActiveToolSnapshots {
-			return
+			for completedID, event := range client.activeToolEvents {
+				if event["type"] == "tool_execution_end" {
+					delete(client.activeToolEvents, completedID)
+					break
+				}
+			}
+			if len(client.activeToolEvents) >= MaxActiveToolSnapshots {
+				return
+			}
 		}
 		if snapshot := boundedActiveToolEvent(response, serializedBytes); snapshot != nil {
 			client.activeToolEvents[id] = snapshot

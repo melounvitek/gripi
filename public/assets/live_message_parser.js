@@ -416,7 +416,7 @@ export class LiveMessageParser {
 
     function toolExecutionText(event) {
       if (event.type === "tool_execution_start") return "(running…)";
-      const fallback = toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
+      const fallback = toolExecutionContentText(event) || (event.type === "tool_execution_end" ? (event.isError ? "(failed)" : "(done)") : "(running…)");
       if (event.toolName === "subagent") return subagentDisplayText(subagentDetailsFromEvent(event), fallback, subagentRunning(event));
       return fallback;
     }

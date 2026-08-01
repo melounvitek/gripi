@@ -67,6 +67,12 @@ export class LiveMessageRenderer {
     return [...(this.conversationScroll?.querySelectorAll(".message:not(.message--live)[data-message-fingerprint]") || [])].some((message) => message.dataset.messageFingerprint === fingerprint);
   }
 
+  persistedToolResultAlreadyRendered(segment) {
+    if (!segment.isToolResult || !segment.toolCallId) return false;
+    return [...(this.conversationScroll?.querySelectorAll(".message:not(.message--live)[data-tool-call-id]") || [])]
+      .some((message) => message.dataset.role === "toolResult" && message.dataset.toolCallId === segment.toolCallId);
+  }
+
   optimisticUserMessage(text) {
     const targetText = normalizedMessageText(text);
     return [...(this.conversationScroll?.querySelectorAll('.message--live[data-role="user"][data-optimistic="true"]') || [])]
@@ -872,7 +878,7 @@ export class LiveMessageRenderer {
       const eventDetails = this.parser.subagentDetailsFromEvent(event);
       const freshDetails = this.parser.richSubagentDetails(eventDetails);
       const details = this.retainSubagentDetails(entry, eventDetails, finalStatus);
-      const fallback = this.parser.toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
+      const fallback = this.parser.toolExecutionText(event);
       this.renderToolSummary(entry.summaryText, null, details ? this.parser.subagentSummary(details, this.parser.subagentRunning(event)) : this.parser.toolExecutionSummary(event));
       this.renderToolTranscriptBody(entry.body, details ? this.parser.subagentDisplayText(details, fallback, this.parser.subagentRunning(event), !freshDetails) : fallback, event.toolName);
     } else {
@@ -987,6 +993,7 @@ export class LiveMessageRenderer {
 
     if (roleName !== "assistant") {
       segments.forEach((segment, index) => {
+        if (this.persistedToolResultAlreadyRendered(segment)) return;
         const toolExecutionEntry = segment.toolCallId && this.liveToolExecutions.get(segment.toolCallId);
         const pairedToolCallEntry = PAIRED_TOOL_NAMES.has(segment.toolName) && segment.toolCallId && this.livePairedToolCalls.get(segment.toolCallId);
         if (toolExecutionEntry && segment.isToolResult) {

@@ -82,6 +82,7 @@ test("live parser preserves representative SSR shapes and renderer deduplicates 
   assert.equal(thinking[0].thinking, true);
   assert.deepEqual(tool[0].summaryParts, { name: "read", path: "~/a", range: "" });
   assert.equal(subagent[0].toolPrompt, "Review");
+  assert.equal(parser.toolExecutionText({ type: "tool_execution_end", toolName: "subagent", result: {}, isError: true }), "(failed)");
   assert.equal(user[0].images[0].src, "data:image/png;base64,cG5n");
 
   const timestamp = "2026-01-01T00:00:00.000Z";
@@ -95,6 +96,28 @@ test("live parser preserves representative SSR shapes and renderer deduplicates 
   renderer.conversationScroll = renderer.conversationController.element;
   assert.equal(renderer.liveMessageAlreadyRendered("assistant", "Answer", timestamp), true);
   assert.equal(renderer.liveMessageAlreadyRendered("assistant", "Different", timestamp), false);
+});
+
+test("persisted tool results ignore replayed message events with the same tool identity", () => {
+  const persisted = { dataset: { role: "toolResult", toolCallId: "subagent-1" } };
+  const conversation = {
+    element: {
+      querySelectorAll(selector) {
+        if (selector === ".message:not(.message--live)[data-tool-call-id]") return [persisted];
+        if (selector === ".message:not(.message--live)[data-message-fingerprint]") return [];
+        return [];
+      },
+    },
+    followLiveOutput: () => false,
+  };
+  const renderer = new LiveMessageRenderer({}, conversation, new LiveMessageParser("/home/tester"), { bind() {} });
+  renderer.conversationScroll = conversation.element;
+  let appended = 0;
+  renderer.appendCompactMessage = () => { appended += 1; };
+
+  renderer.renderMessageEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "subagent-1", toolName: "subagent", content: [{ type: "text", text: "Done" }] } });
+
+  assert.equal(appended, 0);
 });
 
 test("terminal updates coalesce to the latest screen and stale bindings do not render", async () => {

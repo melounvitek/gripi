@@ -486,20 +486,39 @@ func TestClientBoundsCompletedSubagentSnapshotsAndLabelsErrorFallbacks(t *testin
 
 	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "tracked-00", "toolName": "subagent", "result": map[string]any{"details": map[string]any{"ignored": strings.Repeat("x", MaxActiveToolSnapshotBytes)}}, "isError": true})
 	waitSequence(t, client, MaxActiveToolSnapshots+2)
+	completedFound := false
 	for _, event := range client.LiveSnapshot().ActiveToolEvents {
 		if event["toolCallId"] != "tracked-00" {
 			continue
 		}
+		completedFound = true
 		result, _ := event["result"].(map[string]any)
 		content, _ := result["content"].([]any)
 		part, _ := content[0].(map[string]any)
 		if part["text"] != "Subagent failed" {
 			t.Fatalf("error fallback = %#v", event)
 		}
-		_ = stdoutWriter.Close()
-		return
 	}
-	t.Fatal("tracked completion snapshot is missing")
+	if !completedFound {
+		t.Fatal("tracked completion snapshot is missing")
+	}
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": "new-running", "toolName": "subagent"})
+	waitSequence(t, client, MaxActiveToolSnapshots+3)
+	snapshot = client.LiveSnapshot()
+	if len(snapshot.ActiveToolEvents) != MaxActiveToolSnapshots {
+		t.Fatalf("snapshot count after newer start = %d", len(snapshot.ActiveToolEvents))
+	}
+	for _, event := range snapshot.ActiveToolEvents {
+		if event["toolCallId"] == "tracked-00" {
+			t.Fatal("completed snapshot was retained ahead of a newer running subagent")
+		}
+		if event["toolCallId"] == "new-running" {
+			_ = stdoutWriter.Close()
+			return
+		}
+	}
+	t.Fatal("newer running subagent snapshot is missing")
 }
 
 func TestClientAllowsOnlyOneExtensionUIAnswer(t *testing.T) {
