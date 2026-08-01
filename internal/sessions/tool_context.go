@@ -10,11 +10,12 @@ import (
 )
 
 type ToolCallContext struct {
-	Prompt    string
-	Timestamp time.Time
+	Prompt          string
+	Timestamp       time.Time
+	ResultPersisted bool
 }
 
-func (store Store) SubagentToolCallContext(path string, ids []string) map[string]ToolCallContext {
+func (store Store) SubagentToolCallContext(path, leafID string, ids []string) map[string]ToolCallContext {
 	requested := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		if id != "" {
@@ -33,12 +34,25 @@ func (store Store) SubagentToolCallContext(path string, ids []string) map[string
 	if err != nil {
 		return result
 	}
+	branch, ok := indexed.entriesForLeaf(leafID, true)
+	if !ok {
+		return result
+	}
+	for _, entry := range branch {
+		for _, segment := range entry.Segments {
+			if segment.Role == "toolResult" && segment.ToolName == "subagent" && requested[segment.ToolCallID] {
+				details := result[segment.ToolCallID]
+				details.ResultPersisted = true
+				result[segment.ToolCallID] = details
+			}
+		}
+	}
 	file, err := os.Open(canonical)
 	if err != nil {
 		return result
 	}
 	defer file.Close()
-	for _, entry := range indexed.entries {
+	for _, entry := range branch {
 		needed := false
 		for _, id := range entry.SubagentIDs {
 			if requested[id] && result[id].Prompt == "" {
@@ -65,7 +79,10 @@ func (store Store) SubagentToolCallContext(path string, ids []string) map[string
 			call := asMap(part)
 			id := stringValue(call["id"])
 			if requested[id] && stringValue(call["type"]) == "toolCall" && stringValue(call["name"]) == "subagent" {
-				result[id] = ToolCallContext{Prompt: subagentPrompt(call["arguments"]), Timestamp: parseTime(stringValue(raw["timestamp"]))}
+				details := result[id]
+				details.Prompt = subagentPrompt(call["arguments"])
+				details.Timestamp = parseTime(stringValue(raw["timestamp"]))
+				result[id] = details
 			}
 		}
 	}

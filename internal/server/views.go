@@ -258,7 +258,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		}
 		toolContext := map[string]sessions.ToolCallContext(nil)
 		if statErr == nil {
-			toolContext = store.SubagentToolCallContext(selected.Path, activeToolIDs)
+			toolContext = store.SubagentToolCallContext(selected.Path, window.TreeLeafID, activeToolIDs)
 		}
 		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, toolContext)
 	}
@@ -284,7 +284,12 @@ func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, hom
 			persistedToolResults[message.ToolCallID] = true
 		}
 	}
-	remainingActiveTools := activeTools[:0]
+	for id, details := range toolContext {
+		if details.ResultPersisted {
+			persistedToolResults[id] = true
+		}
+	}
+	remainingActiveTools := make([]map[string]any, 0, len(activeTools))
 	for _, event := range activeTools {
 		if !persistedToolResults[stringFromAny(event["toolCallId"])] {
 			remainingActiveTools = append(remainingActiveTools, event)

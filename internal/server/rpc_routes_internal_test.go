@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"mime/multipart"
 	"net/http"
@@ -776,6 +777,64 @@ func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *
 	}
 	if client.followUpCalled {
 		t.Fatal("follow-up bypassed the synchronized operation lane")
+	}
+}
+
+func TestPreparePageOmitsCompletedSubagentSnapshotPersistedOutsideInitialWindow(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "session.jsonl")
+	records := []map[string]any{
+		{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": project},
+		{"type": "message", "id": "completed-call", "parentId": nil, "timestamp": "2026-01-01T00:00:01Z", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "toolCall", "id": "completed", "name": "subagent", "arguments": map[string]any{"task": "Completed work"}}}}},
+		{"type": "message", "id": "completed-result", "parentId": "completed-call", "timestamp": "2026-01-01T00:00:02Z", "message": map[string]any{"role": "toolResult", "toolCallId": "completed", "toolName": "subagent", "content": []any{map[string]any{"type": "text", "text": "Completed result"}}, "isError": false}},
+	}
+	parent := "completed-result"
+	for index := 0; index < 24; index++ {
+		id := fmt.Sprintf("filler-%02d", index)
+		records = append(records, map[string]any{"type": "message", "id": id, "parentId": parent, "timestamp": "2026-01-01T00:00:03Z", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": strings.Repeat(fmt.Sprintf("filler-%02d ", index), 700)}}}})
+		parent = id
+	}
+	records = append(records, map[string]any{"type": "message", "id": "running-call", "parentId": parent, "timestamp": "2026-01-01T00:01:00Z", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "toolCall", "id": "running", "name": "subagent", "arguments": map[string]any{"task": "Running work"}}}}})
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoder := json.NewEncoder(file)
+	for _, record := range records {
+		if err := encoder.Encode(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "running-call"}, live: rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
+		{"type": "tool_execution_end", "toolCallId": "completed", "toolName": "subagent"},
+		{"type": "tool_execution_start", "toolCallId": "running", "toolName": "subagent"},
+		{"type": "tool_execution_end", "toolCallId": "unpersisted", "toolName": "subagent"},
+	}}}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	cache := sessions.NewCache()
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+
+	view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Window.StartIndex == 0 {
+		t.Fatal("completed result unexpectedly remained inside the bounded initial window")
+	}
+	if strings.Contains(view.LiveOutput.ActiveToolEventsJSON, `"completed"`) || !strings.Contains(view.LiveOutput.ActiveToolEventsJSON, `"running"`) || !strings.Contains(view.LiveOutput.ActiveToolEventsJSON, `"unpersisted"`) {
+		t.Fatalf("active tools = %s", view.LiveOutput.ActiveToolEventsJSON)
 	}
 }
 
