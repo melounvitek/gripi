@@ -218,6 +218,15 @@ export class LiveMessageRenderer {
       action.className = "compaction-details-action";
       action.setAttribute("aria-hidden", "true");
       summaryElement.append(action);
+    } else {
+      const summaryToggle = this.document.createElement("button");
+      summaryToggle.type = "button";
+      summaryToggle.className = "tool-summary-toggle";
+      summaryToggle.dataset.toolSummaryToggle = "";
+      summaryToggle.setAttribute("aria-expanded", "false");
+      summaryToggle.hidden = true;
+      summaryToggle.textContent = "Show";
+      summaryElement.append(summaryToggle);
     }
     let status = null;
     if (options.bashExecution) {

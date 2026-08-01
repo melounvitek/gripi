@@ -63,10 +63,13 @@ export class ConversationController {
     this.scrollDirection = null;
     this.followOversizedMessageBottom = false;
     if (!this.element) return;
+    this.refreshToolSummaryToggles();
 
     this.listen(this.element, "click", (event) => {
       const toggle = event.target.closest?.("[data-focus-activity-toggle]");
       if (toggle) this.toggleFocusedActivity(toggle);
+      const summaryToggle = event.target.closest?.("[data-tool-summary-toggle]");
+      if (summaryToggle) this.toggleToolSummary(summaryToggle);
     });
     this.refreshFocusedActivity();
 
@@ -616,6 +619,7 @@ export class ConversationController {
       const previousHeight = element.scrollHeight;
       element.insertBefore(template.content, insertionPoint);
       this.refreshFocusedActivity();
+      this.refreshToolSummaryToggles();
       if (preserveViewport) element.scrollTop = previousTop + (element.scrollHeight - previousHeight);
       this.lastScrollTop = element.scrollTop;
       this.updateJumpControls();
@@ -862,6 +866,33 @@ export class ConversationController {
     if (activityChanged) this.scheduleFocusedActivityRefresh();
     if (shouldScroll && this.autoScrollEnabled) this.scheduleAutoScroll();
     else if (live) this.updateJumpControls();
+    this.refreshToolSummaryToggles();
+  }
+
+  toggleToolSummary(toggle) {
+    const summary = toggle.closest(".message-details-summary");
+    if (!summary) return;
+
+    const expanded = summary.dataset.toolSummaryExpanded === "true";
+    summary.dataset.toolSummaryExpanded = expanded ? "false" : "true";
+    toggle.textContent = expanded ? "Show" : "Hide";
+    toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+  }
+
+  refreshToolSummaryToggles() {
+    if (!this.element?.querySelectorAll) return;
+    const summaries = this.element.querySelectorAll(".message--tool .message-details-summary, .message--tool-call .message-details-summary, .message--tool-transcript .message-details-summary");
+    for (const summary of summaries) {
+      const toggle = summary.querySelector("[data-tool-summary-toggle]");
+      const text = summary.querySelector(".compact-summary");
+      if (!toggle || !text) continue;
+      if (summary.dataset.toolSummaryExpanded === "true") {
+        toggle.hidden = false;
+        continue;
+      }
+      const clamped = typeof text.scrollHeight === "number" && typeof text.clientHeight === "number" && text.scrollHeight > text.clientHeight + 1;
+      toggle.hidden = !clamped;
+    }
   }
 
   stopAutoFollow() {

@@ -3193,6 +3193,14 @@ function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery 
 }
 
 window.addEventListener("resize", updatePromptPlaceholder);
+let toolSummaryToggleResizeFrame = 0;
+window.addEventListener("resize", () => {
+  if (toolSummaryToggleResizeFrame) return;
+  toolSummaryToggleResizeFrame = requestAnimationFrame(() => {
+    toolSummaryToggleResizeFrame = 0;
+    conversationController.refreshToolSummaryToggles();
+  });
+});
 window.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     hiddenAt = Date.now();
