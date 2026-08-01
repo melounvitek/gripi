@@ -193,7 +193,7 @@ export function stableTextHash(text) {
 }
 
 export function messageTimestampKey(timestamp) {
-  if (!timestamp) return "";
+  if (timestamp === null || timestamp === undefined) return "";
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "";
   return String(Math.floor(date.getTime() / 1000));
@@ -239,7 +239,7 @@ export function eventStatusText(event) {
 }
 
 export function formatTimestamp(timestamp, fallbackToNow = true) {
-  const date = timestamp ? new Date(timestamp) : (fallbackToNow ? new Date() : null);
+  const date = timestamp !== null && timestamp !== undefined ? new Date(timestamp) : (fallbackToNow ? new Date() : null);
   if (!date || Number.isNaN(date.getTime())) return "";
   const pad = (value) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;

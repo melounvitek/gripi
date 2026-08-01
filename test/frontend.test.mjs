@@ -10,11 +10,13 @@ import {
   eventErrorText,
   eventTimestamp,
   extensionUiRequestNotice,
+  formatTimestamp,
   formatWaitDuration,
   imageAttachmentLabel,
   messageFingerprint,
   messageRoleKey,
   messageRoleLabel,
+  messageTimestampKey,
   notificationReplyPreview,
   sessionAuthGuidanceSlashCommand,
   sessionExportSlashCommand,
@@ -84,6 +86,9 @@ test("formatting and message helpers preserve browser-facing semantics", () => {
   assert.equal(sessionNameFromEvent({ type: "session_info_changed", name: "Changed" }), "Changed");
   assert.equal(sessionNameFromEvent({ type: "custom_message", content: "Changed" }), null);
   assert.equal(eventTimestamp({ gatewayTimestamp: 1234, timestamp: "native" }), 1234);
+  assert.equal(messageTimestampKey(0), "0");
+  assert.equal(formatTimestamp(0, false), formatTimestamp(new Date(0), false));
+  assert.notEqual(formatTimestamp(0, false), "");
 });
 
 test("extension notices and errors distinguish supported and terminal-only UI", () => {

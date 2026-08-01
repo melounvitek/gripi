@@ -791,7 +791,11 @@ func waitSequence(t *testing.T, client *Client, want int64) {
 }
 func assertSubagentGatewayTimestamp(t *testing.T, events []map[string]any, want int64) {
 	t.Helper()
-	if len(events) != 1 || int64(numberOrZero(events[0]["gatewayTimestamp"])) != want {
+	if len(events) != 1 {
+		t.Fatalf("subagent events = %#v, timestamp want %d", events, want)
+	}
+	value, ok := numberValue(events[0]["gatewayTimestamp"])
+	if !ok || value != float64(want) {
 		t.Fatalf("subagent events = %#v, timestamp want %d", events, want)
 	}
 }
