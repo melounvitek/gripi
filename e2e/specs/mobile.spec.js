@@ -1,6 +1,47 @@
 import { expect, test } from "@playwright/test";
-import { nativeBash, prompts, replies, sessions, tool } from "../support/contract.mjs";
+import { mobileSubagents, nativeBash, prompts, replies, sessions, tool } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
+
+test("keep parallel subagent order and timestamps stable on mobile", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  let session = page.getByRole("link", { name: new RegExp(sessions.parallelSubagentsMobile) });
+  if (!await session.isVisible()) {
+    await page.getByRole("button", { name: "Search sessions" }).tap();
+    const search = page.getByRole("searchbox", { name: "Search sessions" });
+    await search.fill(sessions.parallelSubagentsMobile);
+    await search.press("Enter");
+    session = page.getByRole("link", { name: new RegExp(sessions.parallelSubagentsMobile) });
+  }
+  await session.tap();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.parallelSubagentsMobile })).toBeVisible();
+  await sendPrompt(page, prompts.parallelSubagentsMobile);
+
+  const ids = [mobileSubagents.firstCallId, mobileSubagents.secondCallId];
+  const cards = page.locator(ids.map((id) => `article[data-tool-call-id="${id}"]`).join(","));
+  await expect(page.locator(`article[data-tool-call-id="${mobileSubagents.firstCallId}"]`)).toContainText(mobileSubagents.firstResult);
+  await expect(page.locator(`article[data-tool-call-id="${mobileSubagents.secondCallId}"]`)).toContainText(mobileSubagents.secondProgress);
+  const activeState = await cards.evaluateAll((entries) => entries.map((entry) => ({
+    id: entry.dataset.toolCallId,
+    timestamp: entry.dataset.messageTimestamp,
+    label: entry.querySelector(".message-meta")?.textContent || ""
+  })));
+  expect(activeState.map(({ id }) => id)).toEqual(ids);
+  expect(activeState.every(({ timestamp, label }) => timestamp && label)).toBe(true);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.parallelSubagentsMobile })).toBeVisible();
+  await expect(cards).toHaveCount(2);
+  expect(await cards.evaluateAll((entries) => entries.map((entry) => ({
+    id: entry.dataset.toolCallId,
+    timestamp: entry.dataset.messageTimestamp,
+    label: entry.querySelector(".message-meta")?.textContent || ""
+  })))).toEqual(activeState);
+
+  await page.getByRole("button", { name: "Abort running Pi" }).tap();
+  await expectRunFinished(page);
+  await expect(cards).toHaveCount(2);
+});
 
 test("keep native Tab order for coarse pointers", async ({ page }) => {
   await page.goto("/");

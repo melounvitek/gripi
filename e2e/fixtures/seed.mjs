@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { sessions } from "../support/contract.mjs";
+import { paginatedSubagent, sessions } from "../support/contract.mjs";
 
 const BASE_TIME = Date.parse("2026-07-20T12:00:00.000Z");
 
@@ -62,6 +62,54 @@ async function writeSession(root, project, slug, title, index, history = {}) {
   return sessionPath;
 }
 
+async function writePaginatedSubagentSession(root, project, index) {
+  const sessionDirectory = path.join(root, "sessions", "e2e");
+  await mkdir(sessionDirectory, { recursive: true });
+  const sessionPath = path.join(sessionDirectory, "paginated-subagent.jsonl");
+  const startedAt = BASE_TIME + index * 60_000;
+  let parentId = null;
+  let sequence = 0;
+  const nextEntry = (type, fields) => {
+    sequence += 1;
+    const id = `paginated-${String(sequence).padStart(4, "0")}`;
+    const entry = { type, id, parentId, timestamp: new Date(startedAt + sequence * 1000).toISOString(), ...fields };
+    parentId = id;
+    return entry;
+  };
+  const entries = [
+    { type: "session", version: 3, id: "e2e-paginated-subagent", timestamp: new Date(startedAt).toISOString(), cwd: project },
+    nextEntry("message", {
+      message: assistantMessageWithSubagentCall(paginatedSubagent.matchingCallId, startedAt + 1000)
+    }),
+    nextEntry("message", {
+      message: message("toolResult", [{ type: "text", text: paginatedSubagent.persistedResult }], startedAt + 2000, {
+        toolCallId: paginatedSubagent.matchingCallId,
+        toolName: "subagent",
+        details: { task: "Persisted paginated task", status: "done", tools: [], textItems: [paginatedSubagent.persistedResult], usage: { turns: 1 } },
+        isError: false
+      })
+    })
+  ];
+  for (let position = 1; position <= 180; position += 1) {
+    entries.push(nextEntry("message", {
+      message: message("user", [{ type: "text", text: `Paginated filler ${position}` }], startedAt + (position + 2) * 1000)
+    }));
+  }
+  entries.push(nextEntry("session_info", { name: sessions.paginatedSubagent }));
+  await writeFile(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  return sessionPath;
+}
+
+function assistantMessageWithSubagentCall(toolCallId, timestampMs) {
+  return message("assistant", [{ type: "toolCall", id: toolCallId, name: "subagent", arguments: { task: "Persisted paginated task" } }], timestampMs, {
+    api: "openai-responses",
+    provider: "e2e",
+    model: "fixture-model",
+    usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "toolUse"
+  });
+}
+
 export async function seedFixtures(root) {
   const home = path.join(root, "home");
   const state = path.join(root, "state");
@@ -93,6 +141,7 @@ export async function seedFixtures(root) {
   await Promise.all(Object.values(projects).map((project) => mkdir(project, { recursive: true })));
 
   const definitions = [
+    ["mobile-project", "parallel-subagents-mobile", sessions.parallelSubagentsMobile],
     ["prompt-project", "idle-client", sessions.idleClient],
     ["history-project", "history", sessions.history, { question: "Persisted browser question", answer: "Persisted browser answer" }],
     ["prompt-project", "prompt", sessions.prompt],
@@ -124,6 +173,7 @@ export async function seedFixtures(root) {
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
     await writeSession(root, projects[projectName], slug, title, index + 1, history);
   }
+  await writePaginatedSubagentSession(root, projects["controls-project"], 0);
 
   const configuredCwdsPath = path.join(state, "configured-cwds");
   await writeFile(configuredCwdsPath, `${projects["new-session-desktop"]}\n${projects["new-session-mobile"]}\n`);

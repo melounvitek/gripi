@@ -18,6 +18,8 @@ export const sessions = {
   controlsFollowUp: "E2E Follow-up Desktop",
   controlsAbort: "E2E Abort Desktop",
   parallelSubagents: "E2E Parallel Subagents Desktop",
+  parallelSubagentsMobile: "E2E Parallel Subagents Mobile",
+  paginatedSubagent: "E2E Paginated Subagent Desktop",
   terminal: "E2E Terminal Desktop",
   settings: "E2E Settings Desktop",
   extension: "E2E Extension Desktop",
@@ -42,6 +44,8 @@ export const prompts = {
   followUpMessage: "Continue with the queued follow-up",
   abortStart: "Start the abort scenario",
   parallelSubagents: "Run parallel subagent display scenario",
+  parallelSubagentsMobile: "Run mobile parallel subagent display scenario",
+  paginatedSubagent: "Run paginated subagent display scenario",
   terminal: "Show terminal screen updates",
   longCommand: "Run the long tool command scenario",
   markdownTable: "Show a detailed Markdown status table",
@@ -78,6 +82,23 @@ export const subagents = {
   firstResult: "Deterministic strengths complete",
   secondProgress: "Deterministic weaknesses still running",
   secondResult: "Deterministic weaknesses aborted"
+};
+
+export const mobileSubagents = {
+  firstCallId: "e2e-mobile-subagent-first",
+  secondCallId: "e2e-mobile-subagent-second",
+  firstPrompt: "Analyze mobile strengths",
+  secondPrompt: "Analyze mobile weaknesses",
+  firstResult: "Mobile strengths complete",
+  secondProgress: "Mobile weaknesses still running",
+  secondResult: "Mobile weaknesses aborted"
+};
+
+export const paginatedSubagent = {
+  matchingCallId: "e2e-paginated-subagent",
+  unrelatedCallId: "e2e-paginated-unrelated",
+  persistedResult: "Persisted paginated subagent result",
+  liveProgress: "Paginated subagent replay still running"
 };
 
 export const tool = {

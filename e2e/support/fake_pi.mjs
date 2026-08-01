@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-import { nativeBash, prompts, replies, subagents, tool } from "./contract.mjs";
+import { mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool } from "./contract.mjs";
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
@@ -268,8 +268,12 @@ function acceptPrompt(command) {
   emitMessage(user);
   emit({ type: "turn_start" });
 
-  if (command.message === prompts.parallelSubagents) {
+  if ([prompts.parallelSubagents, prompts.parallelSubagentsMobile].includes(command.message)) {
     schedule(120, startParallelSubagents);
+    return;
+  }
+  if (command.message === prompts.paginatedSubagent) {
+    schedule(120, startPaginatedSubagent);
     return;
   }
   if (command.message === prompts.extension) {
@@ -449,8 +453,12 @@ function acceptAbort(command) {
   respond(command, true);
   if (!busy) return;
   clearTimers();
-  if (activeScenario === prompts.parallelSubagents) {
+  if ([prompts.parallelSubagents, prompts.parallelSubagentsMobile].includes(activeScenario)) {
     abortParallelSubagents();
+    return;
+  }
+  if (activeScenario === prompts.paginatedSubagent) {
+    abortPaginatedSubagent();
     return;
   }
   busy = false;
@@ -526,31 +534,33 @@ function acceptExtensionResponse(command) {
 }
 
 function startParallelSubagents() {
+  const scenario = activeScenario === prompts.parallelSubagentsMobile ? mobileSubagents : subagents;
   const toolMessage = assistantMessage([
-    { type: "toolCall", id: subagents.firstCallId, name: "subagent", arguments: { task: subagents.firstPrompt } },
-    { type: "toolCall", id: subagents.secondCallId, name: "subagent", arguments: { task: subagents.secondPrompt } }
+    { type: "toolCall", id: scenario.firstCallId, name: "subagent", arguments: { task: scenario.firstPrompt } },
+    { type: "toolCall", id: scenario.secondCallId, name: "subagent", arguments: { task: scenario.secondPrompt } }
   ], "toolUse");
   emit({ type: "message_start", message: { ...toolMessage, content: [] } });
   emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 1, toolCall: toolMessage.content[1], partial: toolMessage } });
   emit({ type: "message_end", message: toolMessage });
   appendMessage(toolMessage);
 
-  emit({ type: "tool_execution_start", toolCallId: subagents.firstCallId, toolName: "subagent", args: { task: subagents.firstPrompt } });
-  emit({ type: "tool_execution_start", toolCallId: subagents.secondCallId, toolName: "subagent", args: { task: subagents.secondPrompt } });
-  emit({ type: "tool_execution_update", toolCallId: subagents.secondCallId, toolName: "subagent", partialResult: subagentExecutionResult("running", subagents.secondProgress) });
+  emit({ type: "tool_execution_start", toolCallId: scenario.firstCallId, toolName: "subagent", args: { task: scenario.firstPrompt } });
+  emit({ type: "tool_execution_start", toolCallId: scenario.secondCallId, toolName: "subagent", args: { task: scenario.secondPrompt } });
+  emit({ type: "tool_execution_update", toolCallId: scenario.secondCallId, toolName: "subagent", partialResult: subagentExecutionResult("running", scenario.secondProgress) });
   schedule(150, () => {
-    emit({ type: "tool_execution_end", toolCallId: subagents.firstCallId, toolName: "subagent", result: subagentExecutionResult("done", subagents.firstResult), isError: false });
+    emit({ type: "tool_execution_end", toolCallId: scenario.firstCallId, toolName: "subagent", result: subagentExecutionResult("done", scenario.firstResult), isError: false });
   });
 }
 
 function abortParallelSubagents() {
-  const firstResult = subagentExecutionResult("done", subagents.firstResult);
-  const secondResult = subagentExecutionResult("error", subagents.secondResult);
-  emit({ type: "tool_execution_end", toolCallId: subagents.secondCallId, toolName: "subagent", result: secondResult, isError: true });
+  const scenario = activeScenario === prompts.parallelSubagentsMobile ? mobileSubagents : subagents;
+  const firstResult = subagentExecutionResult("done", scenario.firstResult);
+  const secondResult = subagentExecutionResult("error", scenario.secondResult);
+  emit({ type: "tool_execution_end", toolCallId: scenario.secondCallId, toolName: "subagent", result: secondResult, isError: true });
 
   const toolResults = [
-    { role: "toolResult", toolCallId: subagents.firstCallId, toolName: "subagent", content: firstResult.content, details: firstResult.details, isError: false, timestamp: Date.now() },
-    { role: "toolResult", toolCallId: subagents.secondCallId, toolName: "subagent", content: secondResult.content, details: secondResult.details, isError: true, timestamp: Date.now() }
+    { role: "toolResult", toolCallId: scenario.firstCallId, toolName: "subagent", content: firstResult.content, details: firstResult.details, isError: false, timestamp: Date.now() },
+    { role: "toolResult", toolCallId: scenario.secondCallId, toolName: "subagent", content: secondResult.content, details: secondResult.details, isError: true, timestamp: Date.now() }
   ];
   toolResults.forEach((result) => {
     appendMessage(result);
@@ -561,6 +571,32 @@ function abortParallelSubagents() {
   activeScenario = null;
   emit({ type: "agent_end", messages: toolResults, willRetry: false });
   persistDeferredBashMessages();
+  emit({ type: "agent_settled" });
+}
+
+function startPaginatedSubagent() {
+  const toolMessage = assistantMessage([
+    { type: "toolCall", id: paginatedSubagent.matchingCallId, name: "subagent", arguments: { task: "Restore paginated work" } },
+    { type: "toolCall", id: paginatedSubagent.unrelatedCallId, name: "subagent", arguments: { task: "Keep unrelated work" } }
+  ], "toolUse");
+  emit({ type: "message_start", message: { ...toolMessage, content: [] } });
+  emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 1, toolCall: toolMessage.content[1], partial: toolMessage } });
+  emit({ type: "message_end", message: toolMessage });
+  appendMessage(toolMessage);
+  emit({ type: "tool_execution_start", toolCallId: paginatedSubagent.matchingCallId, toolName: "subagent", args: { task: "Restore paginated work" } });
+  emit({ type: "tool_execution_update", toolCallId: paginatedSubagent.matchingCallId, toolName: "subagent", partialResult: subagentExecutionResult("running", paginatedSubagent.liveProgress) });
+  emit({ type: "tool_execution_start", toolCallId: paginatedSubagent.unrelatedCallId, toolName: "subagent", args: { task: "Keep unrelated work" } });
+  schedule(1200, () => {
+    emit({ type: "tool_execution_end", toolCallId: paginatedSubagent.matchingCallId, toolName: "subagent", result: subagentExecutionResult("done", "Paginated replay completed"), isError: false });
+  });
+}
+
+function abortPaginatedSubagent() {
+  emit({ type: "tool_execution_end", toolCallId: paginatedSubagent.unrelatedCallId, toolName: "subagent", result: subagentExecutionResult("error", "Paginated unrelated work aborted"), isError: true });
+  emit({ type: "turn_end", toolResults: [] });
+  busy = false;
+  activeScenario = null;
+  emit({ type: "agent_end", messages: [], willRetry: false });
   emit({ type: "agent_settled" });
 }
 
