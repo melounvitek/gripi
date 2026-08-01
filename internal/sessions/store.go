@@ -1994,11 +1994,21 @@ func parseTime(value string) time.Time {
 	return parsed
 }
 func preview(value string) string {
-	value = strings.Join(strings.Fields(strings.ReplaceAll(value, "javascript:", "")), " ")
+	value = strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
+	lines := strings.Split(strings.ReplaceAll(value, "javascript:", ""), "\n")
+
+	for index := range lines {
+		lines[index] = strings.Join(strings.Fields(lines[index]), " ")
+	}
+
+	value = strings.TrimSpace(strings.Join(lines, "\n"))
+
 	if len([]rune(value)) > 180 {
 		chars := []rune(value)
+
 		return string(chars[:177]) + "…"
 	}
+
 	return value
 }
 func stringValue(value any) string { result, _ := value.(string); return result }

@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { renderTextWithLinks } from "../public/assets/dom.js";
 import { ProjectSelectController } from "../public/assets/project_select_controller.js";
+import { SidebarController } from "../public/assets/sidebar_controller.js";
 import { TREE_FILTERS, TREE_SUMMARY_CHOICES, TreeSessionController, TreeSessionModel } from "../public/assets/tree_session_controller.js";
 import { FakeDocument, FakeElement, FakeEventTarget } from "./helpers/fake_dom.mjs";
 
@@ -21,6 +22,32 @@ test("plain message URLs become safe new-window links without changing surroundi
     assert.equal(link.getAttribute("rel"), "nofollow noreferrer noopener");
   }
   assert.equal(body.children.map((child) => child.textContent).join(""), text);
+});
+
+test("background reply notifications preserve literal Markdown punctuation", () => {
+  const originalWindow = globalThis.window;
+  const window = { location: { href: "https://example.test/?session=current", origin: "https://example.test", search: "?session=current" } };
+  const notifications = [];
+  const controller = new SidebarController({}, window, {}, {}, (...notification) => notifications.push(notification));
+  const link = {
+    dataset: {
+      assistantResponseCount: "2",
+      latestAssistantResponsePreview: "Finished feat/my_branch_name",
+      sessionPath: "background",
+    },
+    querySelector: () => ({ textContent: "Background task" }),
+  };
+  controller.element = { querySelector: () => null, querySelectorAll: () => [link] };
+  globalThis.window = window;
+
+  try {
+    controller.notifyBackgroundFinalReplies(new Map([["background", 1]]));
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+
+  assert.deepEqual(notifications, [["Background task", "Finished feat/my_branch_name", "/?session=background", "gripi-final-reply:background"]]);
 });
 
 test("project selector opens on the first valid touch without sticky-hover behavior", () => {

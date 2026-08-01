@@ -71,7 +71,7 @@ func TestOversizedMultipartMessagesPreserveSegmentsWindowsAndSessionMetadata(t *
 	if !ok {
 		t.Fatal("session was not discovered")
 	}
-	if session.MessageCount != 27 || session.AssistantResponseCount != 1 || session.LatestAssistantResponsePreview != "First answer continued Final answer" {
+	if session.MessageCount != 27 || session.AssistantResponseCount != 1 || session.LatestAssistantResponsePreview != "First answer\ncontinued\nFinal answer" {
 		t.Fatalf("session metadata = %#v", session)
 	}
 	if !strings.HasPrefix(session.FirstUserMessage, strings.Repeat("x", 100)) || len(session.FirstUserMessage) > indexCaptureBytes+30 {
@@ -83,6 +83,15 @@ func TestOversizedMultipartMessagesPreserveSegmentsWindowsAndSessionMetadata(t *
 	}
 	if indexed.bytes > 1<<20 {
 		t.Fatalf("oversized content was retained in the index: %d bytes", indexed.bytes)
+	}
+}
+
+func TestSessionPreviewPreservesMarkdownLineBoundaries(t *testing.T) {
+	value := "```js\r\n  const branch = 'feat/my_branch_name';  \r\n```"
+	want := "```js\nconst branch = 'feat/my_branch_name';\n```"
+
+	if got := preview(value); got != want {
+		t.Fatalf("preview = %q, want %q", got, want)
 	}
 }
 
