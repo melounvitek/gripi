@@ -53,7 +53,9 @@ test("navigate and complete a conversation from the mobile session drawer", asyn
 
   await page.locator('label[aria-label="Open sessions"]').click();
   await expect(page.getByRole("complementary", { name: "Sessions" })).toBeVisible();
-  await page.getByRole("link", { name: new RegExp(sessions.mobile) }).click();
+  const mobileLink = page.getByRole("link", { name: new RegExp(sessions.mobile) });
+  if (!await mobileLink.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
+  await mobileLink.click();
   await expect(page.getByRole("heading", { level: 1, name: sessions.mobile })).toBeVisible();
   await expect(page.locator("#mobile-session-toggle")).not.toBeChecked();
 
@@ -82,7 +84,9 @@ test("cancel a native bash command on the first mobile tap", async ({ page }) =>
   await page.goto("/");
 
   await page.locator('label[aria-label="Open sessions"]').click();
-  await page.getByRole("link", { name: new RegExp(sessions.bashMobile) }).click();
+  const bashMobileLink = page.getByRole("link", { name: new RegExp(sessions.bashMobile) });
+  if (!await bashMobileLink.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
+  await bashMobileLink.click();
   await expect(page.getByRole("heading", { level: 1, name: sessions.bashMobile })).toBeVisible();
 
   await sendPrompt(page, `!${nativeBash.mobileCancel.command}`);
