@@ -893,7 +893,7 @@ export class LiveMessageRenderer {
     return entry.subagentDetails;
   }
 
-  updateLiveToolExecution(entry, event, shouldScroll) {
+  updateLiveToolExecution(entry, event, shouldScroll, timestamp = eventTimestamp(event)) {
     if (event.toolName === "subagent") {
       this.renderSubagentPrompt(entry, this.parser.subagentPromptFromEvent(event));
       const finalStatus = event.type === "tool_execution_end" ? (event.isError ? "error" : "done") : null;
@@ -907,6 +907,11 @@ export class LiveMessageRenderer {
     } else {
       this.renderToolSummary(entry.summaryText, null, this.parser.toolExecutionSummary(event));
       this.renderToolTranscriptBody(entry.body, this.parser.toolExecutionText(event), event.toolName || entry.toolName);
+    }
+    const timestampKey = messageTimestampKey(timestamp);
+    if (timestampKey) {
+      entry.article.dataset.messageTimestamp = timestampKey;
+      entry.meta.textContent = formatTimestamp(timestamp);
     }
     const errorChanged = entry.article.classList.contains("message--tool-error") !== (event.isError === true);
     entry.article.classList.toggle("message--tool-error", event.isError === true);
@@ -932,7 +937,7 @@ export class LiveMessageRenderer {
     const shouldScroll = this.conversationController.followLiveOutput();
     const existing = this.liveToolExecutions.get(event.toolCallId);
     if (existing) {
-      this.updateLiveToolExecution(existing, event, shouldScroll);
+      this.updateLiveToolExecution(existing, event, shouldScroll, timestamp);
       return;
     }
 
@@ -958,7 +963,7 @@ export class LiveMessageRenderer {
       const timestamps = JSON.parse(serializedTimestamps);
       const prompts = JSON.parse(serializedPrompts);
       if (!Array.isArray(events) || !timestamps || typeof timestamps !== "object" || Array.isArray(timestamps) || !prompts || typeof prompts !== "object" || Array.isArray(prompts)) return;
-      events.forEach((event) => this.renderToolExecutionEvent(event, timestamps[event.toolCallId], false, prompts[event.toolCallId]));
+      events.forEach((event) => this.renderToolExecutionEvent(event, eventTimestamp(event) ?? timestamps[event.toolCallId], false, prompts[event.toolCallId]));
     } catch (_error) {
     }
   }

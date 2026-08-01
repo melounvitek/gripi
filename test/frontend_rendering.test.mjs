@@ -134,6 +134,47 @@ test("live parser preserves representative SSR shapes and renderer deduplicates 
   assert.equal(renderer.liveMessageAlreadyRendered("assistant", "Different", timestamp), false);
 });
 
+test("restored subagents prefer gateway timestamps and retain persisted-call fallback", () => {
+  const renderer = new LiveMessageRenderer({}, {}, {}, { bind() {} });
+  renderer.liveOutput = { dataset: {
+    activeToolEvents: JSON.stringify([
+      { type: "tool_execution_start", toolCallId: "current", toolName: "subagent", gatewayTimestamp: "2026-01-01T10:00:00Z" },
+      { type: "tool_execution_start", toolCallId: "legacy", toolName: "subagent" },
+    ]),
+    activeToolTimestamps: JSON.stringify({ current: "2025-01-01T10:00:00Z", legacy: "2026-01-01T11:00:00Z" }),
+    activeToolPrompts: "{}",
+  } };
+  const restored = [];
+  renderer.renderToolExecutionEvent = (event, timestamp, fallback) => restored.push({ id: event.toolCallId, timestamp, fallback });
+
+  renderer.restoreActiveToolExecutions();
+
+  assert.deepEqual(restored, [
+    { id: "current", timestamp: "2026-01-01T10:00:00Z", fallback: false },
+    { id: "legacy", timestamp: "2026-01-01T11:00:00Z", fallback: false },
+  ]);
+});
+
+test("canonical subagent timestamps replace provisional card timestamps", () => {
+  const document = new FakeDocument();
+  const conversation = {
+    element: new FakeElement("section"),
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+  };
+  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser(), { bind() {} });
+  renderer.liveOutput = new FakeElement("section");
+  renderer.conversationScroll = conversation.element;
+  renderer.renderToolExecutionEvent({ type: "tool_execution_start", toolCallId: "subagent-1", toolName: "subagent" }, "2025-01-01T10:00:00Z", false);
+
+  const entry = renderer.liveToolExecutions.get("subagent-1");
+  assert.equal(entry.article.dataset.messageTimestamp, String(Date.parse("2025-01-01T10:00:00Z") / 1000));
+
+  renderer.renderToolExecutionEvent({ type: "tool_execution_update", toolCallId: "subagent-1", toolName: "subagent", gatewayTimestamp: "2026-01-01T10:00:00Z", partialResult: {} });
+
+  assert.equal(entry.article.dataset.messageTimestamp, String(Date.parse("2026-01-01T10:00:00Z") / 1000));
+});
+
 test("persisted tool results ignore replayed message events with the same tool identity", () => {
   const persisted = { dataset: { role: "toolResult", toolCallId: "subagent-1" } };
   const conversation = {

@@ -942,6 +942,18 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 			response["gatewayTimestamp"] = client.clock().UnixMilli()
 			serializedBytes = jsonSize(response)
 		}
+		if (typeName == "tool_execution_start" || typeName == "tool_execution_update" || typeName == "tool_execution_end") && response["toolName"] == snapshotToolName {
+			gatewayTimestamp := int64(0)
+			if active := client.activeToolEvents[stringValue(response["toolCallId"])]; active != nil {
+				gatewayTimestamp = int64(numberOrZero(active["gatewayTimestamp"]))
+			}
+			if gatewayTimestamp == 0 {
+				gatewayTimestamp = client.clock().UnixMilli()
+			}
+			response = cloneMap(response)
+			response["gatewayTimestamp"] = gatewayTimestamp
+			serializedBytes = jsonSize(response)
+		}
 		client.updateBusyStateLocked(response)
 		client.updateQueuedMessagesLocked(response)
 		client.updateExtensionUILocked(response)
@@ -1659,6 +1671,9 @@ func subagentSnapshotEvent(response, result map[string]any) map[string]any {
 	snapshot := map[string]any{"type": response["type"], "toolCallId": response["toolCallId"], "toolName": snapshotToolName, toolExecutionResultKey(response): result}
 	if response["isError"] != nil {
 		snapshot["isError"] = response["isError"]
+	}
+	if response["gatewayTimestamp"] != nil {
+		snapshot["gatewayTimestamp"] = response["gatewayTimestamp"]
 	}
 	return snapshot
 }

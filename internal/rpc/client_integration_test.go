@@ -463,6 +463,39 @@ func TestClientRetainsCompletedSubagentSnapshotsUntilAgentEnd(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestClientKeepsOneGatewayTimestampAcrossSubagentEventsAndCompaction(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	observed := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	clockCalls := 0
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{Clock: func() time.Time {
+		value := observed.Add(time.Duration(clockCalls) * time.Hour)
+		clockCalls++
+		return value
+	}})
+	t.Cleanup(func() { _ = client.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": "subagent-1", "toolName": "subagent"})
+	waitSequence(t, client, 1)
+	assertSubagentGatewayTimestamp(t, client.EventsAfter(0).Events, observed.UnixMilli())
+
+	payload := strings.Repeat("x", MaxActiveToolSnapshotBytes*2)
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_update", "toolCallId": "subagent-1", "toolName": "subagent", "partialResult": map[string]any{"content": []any{map[string]any{"type": "text", "text": payload}}, "details": map[string]any{"status": "running", "tools": []any{}, "usage": map[string]any{"turns": 1}}}})
+	waitSequence(t, client, 2)
+	assertSubagentGatewayTimestamp(t, client.EventsAfter(1).Events, observed.UnixMilli())
+	assertSubagentGatewayTimestamp(t, client.LiveSnapshot().ActiveToolEvents, observed.UnixMilli())
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "subagent-1", "toolName": "subagent", "result": map[string]any{}})
+	waitSequence(t, client, 3)
+	assertSubagentGatewayTimestamp(t, client.EventsAfter(2).Events, observed.UnixMilli())
+	assertSubagentGatewayTimestamp(t, client.LiveSnapshot().ActiveToolEvents, observed.UnixMilli())
+	if clockCalls != 1 {
+		t.Fatalf("gateway clock calls = %d", clockCalls)
+	}
+	_ = stdoutWriter.Close()
+}
+
 func TestClientKeepsSubagentSnapshotsInInvocationOrder(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
@@ -756,6 +789,13 @@ func waitSequence(t *testing.T, client *Client, want int64) {
 	}
 	t.Fatalf("event sequence = %d, want %d", client.EventSequence(), want)
 }
+func assertSubagentGatewayTimestamp(t *testing.T, events []map[string]any, want int64) {
+	t.Helper()
+	if len(events) != 1 || int64(numberOrZero(events[0]["gatewayTimestamp"])) != want {
+		t.Fatalf("subagent events = %#v, timestamp want %d", events, want)
+	}
+}
+
 func activeToolEventIDs(events []map[string]any) []string {
 	ids := make([]string, 0, len(events))
 	for _, event := range events {

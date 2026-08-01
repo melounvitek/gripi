@@ -510,7 +510,7 @@ func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 	if view.Window.TreeLeafID != "source" || len(view.Window.Messages) < 1 || view.Window.Messages[0].Text != "Branch A" {
 		t.Fatalf("managed window = %#v", view.Window)
 	}
-	if view.LiveOutput.EventAfter != 9 || view.LiveOutput.ComposerState != "running" || !strings.Contains(view.LiveOutput.ActiveToolEventsJSON, "tool-1") || !strings.Contains(view.LiveOutput.ActiveToolPromptsJSON, "Review active work") || !strings.Contains(view.LiveOutput.ActiveToolTimestampsJSON, "tool-1") {
+	if view.LiveOutput.EventAfter != 9 || view.LiveOutput.ComposerState != "running" || !strings.Contains(view.LiveOutput.ActiveToolEventsJSON, "tool-1") || !strings.Contains(view.LiveOutput.ActiveToolPromptsJSON, "Review active work") || view.LiveOutput.ActiveToolTimestampsJSON != `{"tool-1":"2026-01-01T00:00:02Z"}` {
 		t.Fatalf("live output = %#v", view.LiveOutput)
 	}
 	if view.SessionSyncMode != sessions.SyncManaged {
