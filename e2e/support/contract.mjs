@@ -6,6 +6,7 @@ export const sessions = {
   history: "E2E History Desktop",
   prompt: "E2E Prompt Desktop",
   markdownTable: "E2E Markdown Table Desktop",
+  toolSummary: "E2E Tool Summary Desktop",
   markRead: "E2E Mark Read Desktop",
   idleClient: "E2E Idle Client Desktop",
   promptRetry: "E2E Prompt Retry Desktop",
@@ -39,6 +40,7 @@ export const prompts = {
   followUpMessage: "Continue with the queued follow-up",
   abortStart: "Start the abort scenario",
   terminal: "Show terminal screen updates",
+  longCommand: "Run the long tool command scenario",
   markdownTable: "Show a detailed Markdown status table",
   extension: "Ask me for release approval",
   extensionRace: "Exercise queued extension requests",
@@ -66,6 +68,7 @@ export const nativeBash = {
 
 export const tool = {
   command: "printf tool-command-ran",
+  longCommand: "pi --no-session -p \"You are doing an independent review of the tool summary display. Read the full diff, check server-rendered history and live-appended rendering, identify possible simplifications, verify the project philosophy, and report deterministic-review-tail-marker findings back.\"",
   result: "deterministic-tool-result",
   terminalCommand: "capture terminal screen",
   terminalUpdates: [terminalFirstFrame, `${terminalFirstFrame}${terminalLatestFrame}`]
