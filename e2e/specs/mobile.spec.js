@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { nativeBash, prompts, replies, sessions } from "../support/contract.mjs";
-import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
+import { nativeBash, replies, sessions } from "../support/contract.mjs";
+import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
 test("keep native Tab order for coarse pointers", async ({ page }) => {
   await page.goto("/");
@@ -78,23 +78,6 @@ test("navigate and complete a conversation from the mobile session drawer", asyn
   await expect(page.getByRole("heading", { level: 1, name: sessions.mobile })).toBeVisible();
   await expect(message(page, "user", prompt).getByRole("link", { name: url })).toBeVisible();
   await expect(message(page, "assistant", replies.standard)).toBeVisible();
-});
-
-test("expand a clamped tool command on the first mobile tap", async ({ page }) => {
-  await page.goto("/");
-
-  await page.locator('label[aria-label="Open sessions"]').click();
-  await selectSession(page, sessions.toolSummaryMobile);
-
-  await sendPrompt(page, prompts.longCommand);
-  await expectRunFinished(page);
-
-  const card = message(page, "assistant", "pi --no-session").last();
-  const toggle = card.getByRole("button", { name: "Expand" });
-  await expect(toggle).toBeVisible();
-  await toggle.tap();
-  await expect(card.getByRole("button", { name: "Collapse" })).toBeVisible();
-  await expect.poll(() => card.locator(".compact-summary").evaluate((element) => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
 });
 
 test("cancel a native bash command on the first mobile tap", async ({ page }) => {

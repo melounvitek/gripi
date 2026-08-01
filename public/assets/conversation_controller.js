@@ -63,13 +63,10 @@ export class ConversationController {
     this.scrollDirection = null;
     this.followOversizedMessageBottom = false;
     if (!this.element) return;
-    this.refreshToolSummaryToggles();
 
     this.listen(this.element, "click", (event) => {
       const toggle = event.target.closest?.("[data-focus-activity-toggle]");
       if (toggle) this.toggleFocusedActivity(toggle);
-      const summaryToggle = event.target.closest?.("[data-tool-summary-toggle]");
-      if (summaryToggle) this.toggleToolSummary(summaryToggle);
     });
     this.refreshFocusedActivity();
 
@@ -153,7 +150,6 @@ export class ConversationController {
     } : null;
 
     this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
-    if (!this.focusedView && preserveScroll) this.refreshToolSummaryToggles();
     if (this.viewSelect) {
       const value = this.focusedView ? "conversation" : "full";
       if (this.viewSelect.value !== value) {
@@ -620,7 +616,6 @@ export class ConversationController {
       const previousHeight = element.scrollHeight;
       element.insertBefore(template.content, insertionPoint);
       this.refreshFocusedActivity();
-      this.refreshToolSummaryToggles();
       if (preserveViewport) element.scrollTop = previousTop + (element.scrollHeight - previousHeight);
       this.lastScrollTop = element.scrollTop;
       this.updateJumpControls();
@@ -867,36 +862,6 @@ export class ConversationController {
     if (activityChanged) this.scheduleFocusedActivityRefresh();
     if (shouldScroll && this.autoScrollEnabled) this.scheduleAutoScroll();
     else if (live) this.updateJumpControls();
-  }
-
-  toggleToolSummary(toggle) {
-    const summary = toggle.closest(".message-details-summary");
-    if (!summary) return;
-
-    const expanded = summary.dataset.toolSummaryExpanded === "true";
-    summary.dataset.toolSummaryExpanded = expanded ? "false" : "true";
-    toggle.textContent = expanded ? "Expand" : "Collapse";
-    toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
-    if (expanded) this.refreshToolSummaryToggle(summary);
-  }
-
-  refreshToolSummaryToggle(summary) {
-    const toggle = summary?.querySelector?.("[data-tool-summary-toggle]");
-    const text = summary?.querySelector?.(".compact-summary");
-    if (!toggle || !text) return;
-    if (summary.dataset.toolSummaryExpanded === "true") {
-      toggle.hidden = false;
-      return;
-    }
-    toggle.hidden = true;
-    const clamped = text.scrollHeight > text.clientHeight + 1;
-    toggle.hidden = !clamped;
-  }
-
-  refreshToolSummaryToggles() {
-    if (!this.element?.querySelectorAll) return;
-    const summaries = this.element.querySelectorAll(".message--tool .message-details-summary, .message--tool-call .message-details-summary, .message--tool-transcript .message-details-summary");
-    for (const summary of summaries) this.refreshToolSummaryToggle(summary);
   }
 
   stopAutoFollow() {

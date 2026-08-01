@@ -3192,15 +3192,7 @@ function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery 
   gatewayUpdateController.check({ refresh: true }).catch(() => {});
 }
 
-let toolSummaryToggleResizeFrame = 0;
-window.addEventListener("resize", () => {
-  updatePromptPlaceholder();
-  if (toolSummaryToggleResizeFrame) return;
-  toolSummaryToggleResizeFrame = requestAnimationFrame(() => {
-    toolSummaryToggleResizeFrame = 0;
-    conversationController.refreshToolSummaryToggles();
-  });
-});
+window.addEventListener("resize", updatePromptPlaceholder);
 window.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     hiddenAt = Date.now();
