@@ -226,7 +226,7 @@ export class LiveMessageRenderer {
       summaryToggle.dataset.toolSummaryToggle = "";
       summaryToggle.setAttribute("aria-expanded", "false");
       summaryToggle.hidden = true;
-      summaryToggle.textContent = "Show";
+      summaryToggle.textContent = "Expand";
       summaryElement.append(summaryToggle);
     }
     let status = null;

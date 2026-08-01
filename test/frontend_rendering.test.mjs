@@ -97,7 +97,7 @@ test("live parser preserves representative SSR shapes and renderer deduplicates 
   assert.equal(renderer.liveMessageAlreadyRendered("assistant", "Different", timestamp), false);
 });
 
-test("compact tool summaries render a hidden Show toggle, compaction summaries do not", () => {
+test("compact tool summaries render a hidden Expand toggle, compaction summaries do not", () => {
   const document = new FakeDocument();
   const conversation = {
     followLiveOutput: () => false,
@@ -108,7 +108,7 @@ test("compact tool summaries render a hidden Show toggle, compaction summaries d
 
   const tool = renderer.appendCompactMessage("assistant", "$ pi --no-session -p review", "", false, false, null, { toolName: "bash" });
   const toggle = tool.details.querySelectorAll("button").find((button) => button.classList.contains("tool-summary-toggle"));
-  assert.equal(toggle?.textContent, "Show");
+  assert.equal(toggle?.textContent, "Expand");
   assert.equal(toggle?.hidden, true);
   assert.equal(toggle?.getAttribute("aria-expanded"), "false");
   assert.equal(toggle?.parentElement.classList.contains("message-details-summary"), true);

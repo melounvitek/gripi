@@ -17,14 +17,14 @@ test("collapsing a shortened tool summary hides its stale toggle", () => {
   text.scrollHeight = 20;
   text.clientHeight = 20;
   const toggle = new FakeElement("button", ["[data-tool-summary-toggle]"]);
-  toggle.textContent = "Hide";
+  toggle.textContent = "Collapse";
   toggle.setAttribute("aria-expanded", "true");
   summary.append(text, toggle);
 
   controller.toggleToolSummary(toggle);
 
   assert.equal(summary.dataset.toolSummaryExpanded, "false");
-  assert.equal(toggle.textContent, "Show");
+  assert.equal(toggle.textContent, "Expand");
   assert.equal(toggle.getAttribute("aria-expanded"), "false");
   assert.equal(toggle.hidden, true);
 });

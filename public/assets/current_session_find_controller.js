@@ -182,7 +182,7 @@ export class CurrentSessionFindController {
     }
     summary.dataset.toolSummaryExpanded = "true";
     toggle.hidden = false;
-    toggle.textContent = "Hide";
+    toggle.textContent = "Collapse";
     toggle.setAttribute("aria-expanded", "true");
     return summary;
   }

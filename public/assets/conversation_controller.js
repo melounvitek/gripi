@@ -875,7 +875,7 @@ export class ConversationController {
 
     const expanded = summary.dataset.toolSummaryExpanded === "true";
     summary.dataset.toolSummaryExpanded = expanded ? "false" : "true";
-    toggle.textContent = expanded ? "Show" : "Hide";
+    toggle.textContent = expanded ? "Expand" : "Collapse";
     toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
     if (expanded) this.refreshToolSummaryToggle(summary);
   }

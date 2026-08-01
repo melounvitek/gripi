@@ -20,18 +20,18 @@ test("clamp a long tool command behind a toggle, live and after reload", async (
 async function expectClampedToggleBehavior(page) {
   const card = longCommandCard(page);
   const summary = card.locator(".compact-summary");
-  const showToggle = card.getByRole("button", { name: "Show" });
-  await expect(showToggle).toBeVisible();
+  const expandToggle = card.getByRole("button", { name: "Expand" });
+  await expect(expandToggle).toBeVisible();
   await expect.poll(() => isClamped(summary)).toBe(true);
 
-  await showToggle.click();
-  const hideToggle = card.getByRole("button", { name: "Hide" });
-  await expect(hideToggle).toBeVisible();
+  await expandToggle.click();
+  const collapseToggle = card.getByRole("button", { name: "Collapse" });
+  await expect(collapseToggle).toBeVisible();
   await expect.poll(() => isClamped(summary)).toBe(false);
   expect(await fitsWithoutHorizontalScroll(summary)).toBe(true);
 
-  await hideToggle.click();
-  await expect(showToggle).toBeVisible();
+  await collapseToggle.click();
+  await expect(expandToggle).toBeVisible();
   await expect.poll(() => isClamped(summary)).toBe(true);
 }
 
@@ -51,13 +51,13 @@ test("toggle follows viewport width changes", async ({ page }) => {
 
   const card = message(page, "assistant", tool.wrapCommand).last();
   await expect(card).toBeVisible();
-  await expect(card.getByRole("button", { name: "Show" })).toBeHidden();
+  await expect(card.getByRole("button", { name: "Expand" })).toBeHidden();
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(card.getByRole("button", { name: "Show" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Expand" })).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(card.getByRole("button", { name: "Show" })).toBeHidden();
+  await expect(card.getByRole("button", { name: "Expand" })).toBeHidden();
 
   const borderlineWidth = await card.evaluate((article) => {
     const summary = article.querySelector(".compact-summary");
@@ -78,13 +78,13 @@ test("toggle follows viewport width changes", async ({ page }) => {
     article.style.width = "320px";
     window.dispatchEvent(new Event("resize"));
   });
-  await expect(card.getByRole("button", { name: "Show" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Expand" })).toBeVisible();
 
   await card.evaluate((article, width) => {
     article.style.width = `${width}px`;
     window.dispatchEvent(new Event("resize"));
   }, borderlineWidth);
-  await expect(card.getByRole("button", { name: "Show" })).toBeHidden();
+  await expect(card.getByRole("button", { name: "Expand" })).toBeHidden();
 });
 
 test("conversation find reveals a clamped tail match and restores the summary", async ({ page }) => {
@@ -94,7 +94,7 @@ test("conversation find reveals a clamped tail match and restores the summary", 
   await expectRunFinished(page);
 
   const card = message(page, "assistant", "pi --no-session").last();
-  await expect(card.getByRole("button", { name: "Show" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Expand" })).toBeVisible();
   await page.keyboard.press("Control+f");
   const find = page.getByRole("searchbox", { name: "Find in conversation" });
   await expect(find).toBeVisible();
@@ -102,12 +102,12 @@ test("conversation find reveals a clamped tail match and restores the summary", 
   const activeMatch = page.locator("mark.current-session-find-match.is-active");
   await expect(activeMatch).toHaveText("deterministic-review-tail-marker");
   const matchedCard = page.locator("article.message--tool-call").filter({ has: activeMatch });
-  await expect(matchedCard.getByRole("button", { name: "Hide" })).toBeVisible();
+  await expect(matchedCard.getByRole("button", { name: "Collapse" })).toBeVisible();
   const fingerprint = await matchedCard.getAttribute("data-message-fingerprint");
   const restoredCard = page.locator(`article[data-message-fingerprint=${JSON.stringify(fingerprint)}]`);
 
   await page.getByRole("button", { name: "Close find" }).click();
-  await expect(restoredCard.getByRole("button", { name: "Show" })).toBeVisible();
+  await expect(restoredCard.getByRole("button", { name: "Expand" })).toBeVisible();
   await expect.poll(() => isClamped(restoredCard.locator(".compact-summary"))).toBe(true);
 
   await sendPrompt(page, prompts.standard);
@@ -132,7 +132,7 @@ test("remeasure a live tool summary when returning from messages-only view", asy
 
   await view.selectOption("full");
   await expect(card).toBeVisible();
-  await expect(card.getByRole("button", { name: "Show" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Expand" })).toBeVisible();
 });
 
 test("keep short tool commands free of the toggle", async ({ page }) => {
@@ -143,5 +143,5 @@ test("keep short tool commands free of the toggle", async ({ page }) => {
 
   const card = message(page, "assistant", tool.command).last();
   await expect(card).toBeVisible();
-  await expect(card.getByRole("button", { name: "Show" })).toBeHidden();
+  await expect(card.getByRole("button", { name: "Expand" })).toBeHidden();
 });

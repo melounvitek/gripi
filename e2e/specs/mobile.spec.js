@@ -90,10 +90,10 @@ test("expand a clamped tool command on the first mobile tap", async ({ page }) =
   await expectRunFinished(page);
 
   const card = message(page, "assistant", "pi --no-session").last();
-  const toggle = card.getByRole("button", { name: "Show" });
+  const toggle = card.getByRole("button", { name: "Expand" });
   await expect(toggle).toBeVisible();
   await toggle.tap();
-  await expect(card.getByRole("button", { name: "Hide" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Collapse" })).toBeVisible();
   await expect.poll(() => card.locator(".compact-summary").evaluate((element) => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
 });
 
