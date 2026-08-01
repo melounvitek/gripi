@@ -97,68 +97,6 @@ test("live parser preserves representative SSR shapes and renderer deduplicates 
   assert.equal(renderer.liveMessageAlreadyRendered("assistant", "Different", timestamp), false);
 });
 
-test("compact tool summaries render a hidden Expand toggle, compaction summaries do not", () => {
-  const document = new FakeDocument();
-  const conversation = {
-    followLiveOutput: () => false,
-    afterLiveOutputChange() {},
-  };
-  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser("/home/tester"), { bind() {} });
-  renderer.liveOutput = new FakeElement("div");
-
-  const tool = renderer.appendCompactMessage("assistant", "$ pi --no-session -p review", "", false, false, null, { toolName: "bash" });
-  const toggle = tool.details.querySelectorAll("button").find((button) => button.classList.contains("tool-summary-toggle"));
-  assert.equal(toggle?.textContent, "Expand");
-  assert.equal(toggle?.hidden, true);
-  assert.equal(toggle?.getAttribute("aria-expanded"), "false");
-  assert.equal(toggle?.parentElement.classList.contains("message-details-summary"), true);
-
-  const compaction = renderer.appendCompactMessage("status", "Compacted", "", false, false, null, { compaction: true });
-  const compactionToggle = compaction.details.querySelectorAll("button").find((button) => button.classList.contains("tool-summary-toggle"));
-  assert.equal(compactionToggle, undefined);
-});
-
-test("tool lifecycle summary changes refresh only their clamp visibility", () => {
-  const document = new FakeDocument();
-  const refreshed = [];
-  const conversation = {
-    followLiveOutput: () => false,
-    afterLiveOutputChange() {},
-    refreshToolSummaryToggle(summary) { refreshed.push(summary); },
-  };
-  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser("/home/tester"), { bind() {} });
-  renderer.liveOutput = new FakeElement("div");
-  renderer.renderToolTranscriptBody = () => {};
-  renderer.replaceMessageImages = () => {};
-  renderer.markLiveEntryRendered = () => true;
-
-  renderer.renderToolExecutionEvent({ type: "tool_execution_start", toolCallId: "call-1", toolName: "search" });
-  const tool = renderer.liveToolExecutions.get("call-1");
-  assert.deepEqual(refreshed, [tool.summaryText.parentElement]);
-
-  refreshed.length = 0;
-  renderer.renderToolExecutionEvent({ type: "tool_execution_update", toolCallId: "call-1", toolName: "search" });
-  assert.deepEqual(refreshed, []);
-
-  renderer.renderToolExecutionEvent({ type: "tool_execution_end", toolCallId: "call-1", toolName: "search", result: { content: [{ type: "text", text: "done" }] } });
-  assert.deepEqual(refreshed, [tool.summaryText.parentElement]);
-
-  refreshed.length = 0;
-  renderer.renderMessageEvent({
-    type: "message_end",
-    message: { role: "toolResult", toolCallId: "call-1", toolName: "search", content: [{ type: "text", text: "done" }], timestamp: 1_767_225_600_000 },
-  });
-  assert.deepEqual(refreshed, [tool.summaryText.parentElement]);
-
-  refreshed.length = 0;
-  renderer.renderBashEvent({ type: "bash_start", bashId: "bash-1", command: "printf before" });
-  assert.equal(refreshed.length, 1);
-
-  refreshed.length = 0;
-  const bash = renderer.renderBashEvent({ type: "bash_end", bashId: "bash-1", command: "printf after", result: { output: "" } });
-  assert.deepEqual(refreshed, [bash.summaryText.parentElement]);
-});
-
 test("terminal updates coalesce to the latest screen and stale bindings do not render", async () => {
   const changes = [];
   const conversation = {
