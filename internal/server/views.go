@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/melounvitek/gripi/internal/pi"
 	"github.com/melounvitek/gripi/internal/rpc"
@@ -26,6 +27,7 @@ const (
 	sessionPageSize            = 20
 	toolOutputDesktopTailLines = 18
 	toolOutputMobileTailLines  = 12
+	toolOutputTailCharacters   = 2000
 )
 
 var projectColors = [][2]string{
@@ -582,13 +584,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 		"compactBody": compactBody, "compactTail": compactTail, "toolSummary": func(value string) template.HTML { return template.HTML(value) },
 		"imageSource": imageSource,
 		"statusItems": statusItems, "bashStatusItems": bashStatusItems, "attachmentLabel": attachmentLabel,
-		"visibleImages": visibleImages, "attachmentCount": attachmentCount, "collapsible": collapsible,
-		"lineCount": func(message *sessions.Message) int {
-			if message.Text == "" {
-				return 0
-			}
-			return len(strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n"))
-		},
+		"visibleImages": visibleImages, "attachmentCount": attachmentCount, "collapsible": collapsible, "toolOutputHiddenLabel": toolOutputHiddenLabel,
 		"terminalOutput": terminalOutput, "terminalSource": terminalSource, "terminalTruncated": func(message *sessions.Message) bool { return len(message.Text) > 262144 },
 		"conversationSearch": conversationSearch, "newCWDLabel": newCWDLabel,
 	}
@@ -854,11 +850,25 @@ func compactBody(view *pageView, message *sessions.Message) template.HTML {
 	return renderCompactLines(message, strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n"), 0, view.Home)
 }
 func compactTail(view *pageView, message *sessions.Message) template.HTML {
-	lines := strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n")
+	lines := compactTailLines(message.Text)
+
+	return renderCompactLines(message, lines, max(len(lines)-toolOutputMobileTailLines, 0), view.Home)
+}
+
+func compactTailLines(text string) []string {
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+
 	if len(lines) > toolOutputDesktopTailLines {
 		lines = lines[len(lines)-toolOutputDesktopTailLines:]
 	}
-	return renderCompactLines(message, lines, max(len(lines)-toolOutputMobileTailLines, 0), view.Home)
+
+	characters := []rune(strings.Join(lines, "\n"))
+
+	if len(characters) > toolOutputTailCharacters {
+		lines = strings.Split("…"+string(characters[len(characters)-toolOutputTailCharacters+1:]), "\n")
+	}
+
+	return lines
 }
 func renderCompactLines(message *sessions.Message, lines []string, desktop int, home string) template.HTML {
 	diff := message.ToolTranscript && (message.ToolName == "edit" || message.ToolName == "write")
@@ -979,7 +989,19 @@ func attachmentCount(view *pageView, message *sessions.Message) int {
 	return view.Attachments[message].Count
 }
 func collapsible(message *sessions.Message) bool {
-	return message.Compact && !message.Thinking && !message.FinalAssistantResponse && len(strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n")) > toolOutputDesktopTailLines
+	lines := strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n")
+
+	return message.Compact && !message.Thinking && !message.FinalAssistantResponse && (len(lines) > toolOutputDesktopTailLines || utf8.RuneCountInString(message.Text) > toolOutputTailCharacters)
+}
+
+func toolOutputHiddenLabel(message *sessions.Message, tailLines int) string {
+	if utf8.RuneCountInString(message.Text) > toolOutputTailCharacters {
+		return "… (earlier output)"
+	}
+
+	lines := len(strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n"))
+
+	return fmt.Sprintf("… (%d earlier lines)", lines-tailLines)
 }
 func terminalOutput(message *sessions.Message) bool {
 	if !message.Compact || message.ToolName == "read" || message.ToolName == "edit" || message.ToolName == "write" {

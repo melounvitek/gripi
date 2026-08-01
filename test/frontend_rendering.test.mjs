@@ -156,6 +156,56 @@ test("persisted tool results ignore replayed message events with the same tool i
   assert.equal(appended, 0);
 });
 
+test("live long single-line tool output collapses to its latest suffix", () => {
+  const fragment = () => ({
+    childNodes: [],
+    replaceChildren(...nodes) { this.childNodes = nodes; },
+    cloneNode() { return { childNodes: [...this.childNodes] }; },
+  });
+  const fullTemplate = { content: fragment() };
+  const tailTemplate = { content: fragment() };
+  const control = { hidden: true };
+  const collapse = {
+    dataset: { toolOutputCollapsible: "true", collapsed: "false" },
+    hidden: false,
+    querySelector(selector) {
+      return {
+        "[data-tool-output-full]": fullTemplate,
+        "[data-tool-output-tail]": tailTemplate,
+        "[data-tool-output-collapse-control]": control,
+        ".tool-output-hidden-count--desktop": { textContent: "" },
+        ".tool-output-hidden-count--mobile": { textContent: "" },
+      }[selector];
+    },
+  };
+  const body = {
+    dataset: {},
+    classList: { toggle() {} },
+    closest: () => collapse,
+    replaceChildren(...nodes) { this.children = nodes; },
+  };
+  const renderer = Object.create(LiveMessageRenderer.prototype);
+  renderer.parser = { displayHomePath: (text) => text };
+  renderer.document = {
+    createElement: () => ({
+      children: [],
+      className: "",
+      textContent: "",
+      classList: { add() {} },
+      append(...nodes) { this.children.push(...nodes); },
+    }),
+  };
+  const output = `oldest-output-${"x".repeat(2500)}-latest-output`;
+
+  renderer.renderToolTranscriptBody(body, output, "bash");
+
+  assert.equal(collapse.dataset.collapsed, "true");
+  assert.equal(control.hidden, false);
+  assert.doesNotMatch(body.children[0].children[0].textContent, /oldest-output/);
+  assert.match(body.children[0].children.at(-1).textContent, /latest-output$/);
+  assert.match(fullTemplate.content.childNodes[0].children[0].textContent, /^oldest-output/);
+});
+
 test("terminal updates coalesce to the latest screen and stale bindings do not render", async () => {
   const changes = [];
   const conversation = {

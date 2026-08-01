@@ -1,4 +1,4 @@
-import { PAIRED_TOOL_NAMES, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES } from "./constants.js";
+import { PAIRED_TOOL_NAMES, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES, TOOL_OUTPUT_TAIL_CHARACTERS } from "./constants.js";
 import { renderTextWithLinks } from "./dom.js";
 import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimestampKey, normalizedMessageText, stableTextHash } from "./formatting.js";
 import { hasTerminalControls, renderTerminalOutput } from "./terminal_output_renderer.js";
@@ -559,7 +559,8 @@ export class LiveMessageRenderer {
     }
 
     const expanded = collapse.dataset.expanded === "true";
-    const shouldCollapse = collapse.dataset.toolOutputCollapsible === "true" && lines.length > TOOL_OUTPUT_DESKTOP_TAIL_LINES;
+    const longOutput = Array.from(rawText).length > TOOL_OUTPUT_TAIL_CHARACTERS;
+    const shouldCollapse = collapse.dataset.toolOutputCollapsible === "true" && (lines.length > TOOL_OUTPUT_DESKTOP_TAIL_LINES || longOutput);
     const fullTemplate = collapse.querySelector("[data-tool-output-full]");
     const tailTemplate = collapse.querySelector("[data-tool-output-tail]");
     const control = collapse.querySelector("[data-tool-output-collapse-control]");
@@ -568,16 +569,26 @@ export class LiveMessageRenderer {
 
     fullTemplate?.content.replaceChildren(this.toolOutputContentNode(lines, toolName, preview, 0));
     if (shouldCollapse) {
-      const tailLines = lines.slice(-TOOL_OUTPUT_DESKTOP_TAIL_LINES);
+      const tailLines = this.toolOutputTailLines(lines);
       const desktopExtraCount = Math.max(tailLines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0);
       tailTemplate?.content.replaceChildren(this.toolOutputContentNode(tailLines, toolName, preview, desktopExtraCount));
-      if (desktopCount) desktopCount.textContent = `… (${Math.max(lines.length - TOOL_OUTPUT_DESKTOP_TAIL_LINES, 0)} earlier lines)`;
-      if (mobileCount) mobileCount.textContent = `… (${Math.max(lines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0)} earlier lines)`;
+      if (desktopCount) desktopCount.textContent = longOutput ? "… (earlier output)" : `… (${Math.max(lines.length - TOOL_OUTPUT_DESKTOP_TAIL_LINES, 0)} earlier lines)`;
+      if (mobileCount) mobileCount.textContent = longOutput ? "… (earlier output)" : `… (${Math.max(lines.length - TOOL_OUTPUT_MOBILE_TAIL_LINES, 0)} earlier lines)`;
     }
 
     control.hidden = !shouldCollapse;
     collapse.dataset.collapsed = shouldCollapse && !expanded ? "true" : "false";
     body.replaceChildren(...Array.from((shouldCollapse && !expanded ? tailTemplate : fullTemplate).content.cloneNode(true).childNodes));
+  }
+
+  toolOutputTailLines(lines) {
+    const tailLines = lines.slice(-TOOL_OUTPUT_DESKTOP_TAIL_LINES);
+    if (tailLines.some((line) => typeof line !== "string")) return tailLines;
+
+    const characters = Array.from(tailLines.join("\n"));
+    if (characters.length <= TOOL_OUTPUT_TAIL_CHARACTERS) return tailLines;
+
+    return `…${characters.slice(-TOOL_OUTPUT_TAIL_CHARACTERS + 1).join("")}`.split("\n");
   }
 
   toolOutputContentNode(lines, toolName, preview, desktopOnlyCount) {
