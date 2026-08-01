@@ -47,7 +47,7 @@ func (resolver SettingsResolver) projectTrusted(cwd, defaultTrust string) bool {
 	decisions := make(map[string]*bool)
 	data, err := os.ReadFile(filepath.Join(resolver.AgentDir, "trust.json"))
 	if err == nil {
-		if json.Unmarshal(data, &decisions) != nil {
+		if json.Unmarshal(data, &decisions) != nil || decisions == nil {
 			return false
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -65,8 +65,8 @@ func (resolver SettingsResolver) projectTrusted(cwd, defaultTrust string) bool {
 }
 
 func readSettings(path string) (settingsFile, bool) {
-	data, ok := readFile(path)
-	if !ok {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return settingsFile{}, false
 	}
 	var settings settingsFile
@@ -74,11 +74,6 @@ func readSettings(path string) (settingsFile, bool) {
 		return settingsFile{}, false
 	}
 	return settings, true
-}
-
-func readFile(path string) ([]byte, bool) {
-	data, err := os.ReadFile(path)
-	return data, err == nil
 }
 
 func absolutePath(path string) string {

@@ -70,7 +70,13 @@ func TestDisplaySettingsRejectMalformedTrustWithoutUsingPartialDecisions(t *test
 
 	settings := (SettingsResolver{AgentDir: agentDir}).DisplaySettings(project)
 	if !settings.HideThinkingBlock {
-		t.Fatalf("settings = %#v", settings)
+		t.Fatalf("partially malformed trust settings = %#v", settings)
+	}
+
+	writeJSON(t, filepath.Join(agentDir, "trust.json"), `null`)
+	settings = (SettingsResolver{AgentDir: agentDir}).DisplaySettings(project)
+	if !settings.HideThinkingBlock {
+		t.Fatalf("null trust settings = %#v", settings)
 	}
 }
 
