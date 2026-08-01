@@ -421,6 +421,46 @@ func TestClientSamplesOversizedNativeToolUpdatesAndBoundsActiveSnapshots(t *test
 	_ = stdoutWriter.Close()
 }
 
+func TestClientRetainsCompletedSubagentSnapshotsUntilAgentEnd(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+	payload := strings.Repeat("x", RPCReadChunkBytes)
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": "first", "toolName": "subagent"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": "second", "toolName": "subagent"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "first", "toolName": "subagent", "result": map[string]any{"content": []any{map[string]any{"type": "text", "text": payload}}, "details": map[string]any{"status": "done", "tools": []any{map[string]any{"name": "read", "output": payload}}, "usage": map[string]any{"turns": 2}}}})
+	waitSequence(t, client, 3)
+
+	snapshot := client.LiveSnapshot()
+	if len(snapshot.ActiveToolEvents) != 2 {
+		t.Fatalf("completed sibling disappeared from snapshot: %#v", snapshot.ActiveToolEvents)
+	}
+	byID := map[string]map[string]any{}
+	for _, event := range snapshot.ActiveToolEvents {
+		byID[stringValue(event["toolCallId"])] = event
+		encoded, _ := json.Marshal(event)
+		if len(encoded) > MaxActiveToolSnapshotBytes {
+			t.Fatalf("snapshot bytes = %d", len(encoded))
+		}
+	}
+	if byID["first"]["type"] != "tool_execution_end" {
+		t.Fatalf("completed snapshot = %#v", byID["first"])
+	}
+	if byID["second"]["type"] != "tool_execution_start" {
+		t.Fatalf("running snapshot = %#v", byID["second"])
+	}
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "agent_end"})
+	waitSequence(t, client, 4)
+	if events := client.LiveSnapshot().ActiveToolEvents; len(events) != 0 {
+		t.Fatalf("snapshots after agent end = %#v", events)
+	}
+	_ = stdoutWriter.Close()
+}
+
 func TestClientAllowsOnlyOneExtensionUIAnswer(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()

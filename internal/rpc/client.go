@@ -1485,7 +1485,13 @@ func (client *Client) updateActiveToolsLocked(response map[string]any, serialize
 		return
 	}
 	if response["type"] == "tool_execution_end" {
-		delete(client.activeToolEvents, id)
+		if response["toolName"] == snapshotToolName {
+			if snapshot := boundedActiveToolEvent(response, serializedBytes); snapshot != nil {
+				client.activeToolEvents[id] = snapshot
+			}
+		} else {
+			delete(client.activeToolEvents, id)
+		}
 		return
 	}
 	if (response["type"] == "tool_execution_start" || response["type"] == "tool_execution_update") && response["toolName"] == snapshotToolName {
@@ -1512,7 +1518,7 @@ func boundedActiveToolEvent(response map[string]any, serializedBytes int) map[st
 	if serializedBytes <= MaxActiveToolSnapshotBytes {
 		return response
 	}
-	result, _ := response["partialResult"].(map[string]any)
+	result, _ := response[toolExecutionResultKey(response)].(map[string]any)
 	details, _ := result["details"].(map[string]any)
 	if _, tools := details["tools"].([]any); tools {
 		if _, usage := details["usage"].(map[string]any); usage {
@@ -1564,7 +1570,7 @@ func generalSubagentSnapshot(response, result, details map[string]any) map[strin
 	if usage, ok := details["usage"].(map[string]any); ok {
 		compact["usage"] = compactValues(usage)
 	}
-	return map[string]any{"type": "tool_execution_update", "toolCallId": response["toolCallId"], "toolName": snapshotToolName, "partialResult": map[string]any{"content": compactContent(result["content"]), "details": compact}}
+	return subagentSnapshotEvent(response, map[string]any{"content": compactContent(result["content"]), "details": compact})
 }
 func compactContent(raw any) []any {
 	values, _ := raw.([]any)
@@ -1607,9 +1613,26 @@ func subagentFallbackSnapshot(response, result map[string]any) map[string]any {
 		text = stringValue(content[0].(map[string]any)["text"])
 	}
 	if text == "" {
-		text = "Subagent is still running…"
+		if response["type"] == "tool_execution_end" {
+			text = "Subagent completed"
+		} else {
+			text = "Subagent is still running…"
+		}
 	}
-	return map[string]any{"type": "tool_execution_update", "toolCallId": response["toolCallId"], "toolName": snapshotToolName, "partialResult": map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}}}
+	return subagentSnapshotEvent(response, map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}})
+}
+func toolExecutionResultKey(response map[string]any) string {
+	if response["type"] == "tool_execution_end" {
+		return "result"
+	}
+	return "partialResult"
+}
+func subagentSnapshotEvent(response, result map[string]any) map[string]any {
+	snapshot := map[string]any{"type": response["type"], "toolCallId": response["toolCallId"], "toolName": snapshotToolName, toolExecutionResultKey(response): result}
+	if response["isError"] != nil {
+		snapshot["isError"] = response["isError"]
+	}
+	return snapshot
 }
 func boundedText(value string, limit int) string {
 	if len(value) <= limit {
