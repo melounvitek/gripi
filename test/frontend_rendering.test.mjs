@@ -175,6 +175,44 @@ test("canonical subagent timestamps replace provisional card timestamps", () => 
   assert.equal(entry.article.dataset.messageTimestamp, String(Date.parse("2026-01-01T10:00:00Z") / 1000));
 });
 
+test("paged persisted subagents replace matching live cards and suppress replay", () => {
+  const document = new FakeDocument();
+  const conversation = {
+    element: new FakeElement("section"),
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+    scheduleFocusedActivityRefresh() {},
+  };
+  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser(), { bind() {} });
+  renderer.liveOutput = new FakeElement("section");
+  conversation.element.append(renderer.liveOutput);
+  renderer.conversationScroll = conversation.element;
+  renderer.renderToolExecutionEvent({ type: "tool_execution_start", toolCallId: "matching", toolName: "subagent" });
+  renderer.renderToolExecutionEvent({ type: "tool_execution_start", toolCallId: "unrelated", toolName: "other" });
+  const matching = renderer.liveToolExecutions.get("matching");
+  const unrelated = renderer.liveToolExecutions.get("unrelated");
+  renderer.resetLiveAssistantTracking();
+  conversation.element.querySelectorAll = (selector) => selector === ".message--live[data-tool-call-id]" ? [matching.article, unrelated.article] : [];
+  const persisted = { dataset: { role: "toolResult", toolCallId: "matching" } };
+  const unrelatedPersisted = { dataset: { role: "toolResult", toolCallId: "historical-other" } };
+  const history = {
+    querySelectorAll(selector) {
+      assert.equal(selector, ".message:not(.message--live)[data-tool-call-id]");
+      return [persisted, unrelatedPersisted];
+    },
+  };
+
+  renderer.reconcilePersistedToolResults(history);
+
+  assert.equal(matching.article.parentElement, null);
+  assert.equal(renderer.liveToolExecutions.has("matching"), false);
+  assert.equal(unrelated.article.parentElement, renderer.liveOutput);
+  renderer.renderToolExecutionEvent({ type: "tool_execution_update", toolCallId: "matching", toolName: "subagent", partialResult: {} });
+  renderer.renderMessageEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "matching", toolName: "subagent", content: [{ type: "text", text: "Done" }] } });
+  assert.equal(renderer.liveToolExecutions.has("matching"), false);
+  assert.deepEqual(renderer.liveOutput.children, [unrelated.article]);
+});
+
 test("persisted tool results ignore replayed message events with the same tool identity", () => {
   const persisted = { dataset: { role: "toolResult", toolCallId: "subagent-1" } };
   const conversation = {

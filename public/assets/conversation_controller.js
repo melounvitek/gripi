@@ -614,6 +614,7 @@ export class ConversationController {
       if (element !== this.element || bindingEpoch !== this.bindingEpoch || historyRequestGeneration !== this.historyRequestGeneration) return;
       const previousTop = element.scrollTop;
       const previousHeight = element.scrollHeight;
+      this.historyReconciler?.(template.content);
       element.insertBefore(template.content, insertionPoint);
       this.refreshFocusedActivity();
       if (preserveViewport) element.scrollTop = previousTop + (element.scrollHeight - previousHeight);

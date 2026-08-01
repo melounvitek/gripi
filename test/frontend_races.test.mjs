@@ -176,6 +176,41 @@ test("obsolete sidebar filter failure does not cancel a newer filter", async () 
   }
 });
 
+test("history reconciliation is included in preserved viewport measurements", () => {
+  const fragment = { querySelectorAll: () => [] };
+  const document = {
+    createElement(tagName) {
+      assert.equal(tagName, "template");
+      return { content: fragment, innerHTML: "" };
+    },
+  };
+  const conversation = new ConversationController(document, {});
+  const sequence = [];
+  let scrollHeight = 1000;
+  conversation.bindingEpoch = 1;
+  conversation.element = {
+    scrollTop: 100,
+    get scrollHeight() { return scrollHeight; },
+    insertBefore(content) {
+      assert.equal(content, fragment);
+      sequence.push("insert");
+      scrollHeight = 1100;
+    },
+  };
+  conversation.historyReconciler = (root) => {
+    assert.equal(root, fragment);
+    sequence.push("reconcile");
+    scrollHeight = 900;
+  };
+  conversation.refreshFocusedActivity = () => {};
+  conversation.updateJumpControls = () => {};
+
+  conversation.insertHistoryHtml("<article>persisted</article>", {}, true);
+
+  assert.deepEqual(sequence, ["reconcile", "insert"]);
+  assert.equal(conversation.element.scrollTop, 200);
+});
+
 test("history pagination and find callers share in-flight work and use the latest query", async () => {
   const originalFetch = globalThis.fetch;
   const historyResponse = deferred();

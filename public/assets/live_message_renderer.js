@@ -21,6 +21,7 @@ export class LiveMessageRenderer {
     this.terminalHydration = Promise.resolve();
     this.liveBashExecutions = new Map();
     this.completedBashExecutionIds = new Set();
+    this.persistedToolResultIDs = new Set();
     this.resetLiveAssistantTracking();
   }
 
@@ -34,6 +35,8 @@ export class LiveMessageRenderer {
     this.lastLiveCompaction = null;
     this.liveBashExecutions = new Map();
     this.completedBashExecutionIds = new Set();
+    this.persistedToolResultIDs = new Set();
+    this.rememberPersistedToolResults(this.conversationScroll);
     this.resetLiveAssistantTracking();
     this.terminalHydration = this.hydrateTerminalOutputs(this.conversationScroll) || Promise.resolve();
     try {
@@ -69,10 +72,39 @@ export class LiveMessageRenderer {
     return [...(this.conversationScroll?.querySelectorAll(".message:not(.message--live)[data-message-fingerprint]") || [])].some((message) => message.dataset.messageFingerprint === fingerprint);
   }
 
+  rememberPersistedToolResults(root) {
+    const messages = [...(root?.querySelectorAll(".message:not(.message--live)[data-tool-call-id]") || [])]
+      .filter((message) => message.dataset.role === "toolResult" && message.dataset.toolCallId);
+    messages.forEach((message) => this.persistedToolResultIDs.add(message.dataset.toolCallId));
+    return messages;
+  }
+
   persistedToolResultAlreadyRendered(segment) {
     if (!segment.isToolResult || !segment.toolCallId) return false;
-    return [...(this.conversationScroll?.querySelectorAll(".message:not(.message--live)[data-tool-call-id]") || [])]
-      .some((message) => message.dataset.role === "toolResult" && message.dataset.toolCallId === segment.toolCallId);
+    if (this.persistedToolResultIDs.has(segment.toolCallId)) return true;
+    return this.rememberPersistedToolResults(this.conversationScroll)
+      .some((message) => message.dataset.toolCallId === segment.toolCallId);
+  }
+
+  reconcilePersistedToolResults(root) {
+    const messages = this.rememberPersistedToolResults(root);
+    let removed = false;
+    messages.forEach((message) => {
+      const id = message.dataset.toolCallId;
+      const entry = this.liveToolExecutions.get(id);
+      if (entry) {
+        entry.article.remove();
+        this.forgetLiveEntry(entry);
+        removed = true;
+      }
+      [...(this.conversationScroll?.querySelectorAll(".message--live[data-tool-call-id]") || [])]
+        .filter((article) => article.dataset.toolCallId === id)
+        .forEach((article) => {
+          article.remove();
+          removed = true;
+        });
+    });
+    if (removed) this.conversationController.scheduleFocusedActivityRefresh?.();
   }
 
   optimisticUserMessage(text) {
@@ -920,7 +952,7 @@ export class LiveMessageRenderer {
   }
 
   renderToolExecutionEvent(event, timestamp = eventTimestamp(event), timestampFallback = true, restoredPrompt = "") {
-    if (!event.toolCallId) return;
+    if (!event.toolCallId || this.persistedToolResultAlreadyRendered({ isToolResult: true, toolCallId: event.toolCallId })) return;
     if (event.toolName === "bash") {
       const entry = this.livePairedToolCalls.get(event.toolCallId);
       if (!entry) return;
