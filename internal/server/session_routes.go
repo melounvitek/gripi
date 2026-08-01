@@ -185,7 +185,7 @@ func (app *application) conversationOlder(response http.ResponseWriter, request 
 		return
 	}
 	matches := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}).Match(session.Path, window.Messages)
-	view := &pageView{Home: app.config.Home, Attachments: matches}
+	view := &pageView{Home: app.config.Home, Attachments: matches, HideThinkingBlock: app.piDisplaySettings(session.CWD).HideThinkingBlock}
 	var html bytes.Buffer
 	for _, message := range window.Messages {
 		_ = app.templates.ExecuteTemplate(&html, "message", struct {

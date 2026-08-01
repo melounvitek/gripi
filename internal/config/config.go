@@ -19,6 +19,7 @@ type Config struct {
 	Production                bool
 	Home                      string
 	EnvPath                   string
+	PiAgentDir                string
 	SessionsRoot              string
 	AttachmentsRoot           string
 	SessionCwdsPath           string
@@ -132,6 +133,7 @@ func Load(environ []string) (Config, error) {
 		Production:                environment != "development" && environment != "test",
 		Home:                      home,
 		EnvPath:                   envPath,
+		PiAgentDir:                piAgentDir(home, process["PI_CODING_AGENT_DIR"]),
 		SessionsRoot:              valueOr(values, "GRIPI_SESSIONS_ROOT", filepath.Join(home, ".pi", "agent", "sessions")),
 		AttachmentsRoot:           valueOr(values, "GRIPI_ATTACHMENTS_ROOT", filepath.Join(home, ".pi", "gripi", "attachments")),
 		SessionCwdsPath:           valueOr(values, "GRIPI_SESSION_CWDS_PATH", filepath.Join(home, ".config", "gripi", "pinned-dirs")),
@@ -156,6 +158,19 @@ func Load(environ []string) (Config, error) {
 		PiCommand:                 piCommand,
 	}
 	return cfg, nil
+}
+
+func piAgentDir(home, configured string) string {
+	if configured == "" {
+		return filepath.Join(home, ".pi", "agent")
+	}
+	if configured == "~" {
+		return home
+	}
+	if strings.HasPrefix(configured, "~/") || strings.HasPrefix(configured, `~\`) {
+		return filepath.Join(home, configured[2:])
+	}
+	return configured
 }
 
 func readEnvFile(path string) (map[string]string, error) {

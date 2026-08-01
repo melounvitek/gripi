@@ -290,6 +290,79 @@ func TestMarkdownAcceptsBrowserMultipartFormData(t *testing.T) {
 	}
 }
 
+func TestThinkingDisplayFollowsPiSettingsAcrossHistoryRenderingPaths(t *testing.T) {
+	fixture := seedNativeFixture(t)
+	project := filepath.Join(fixture.root, "projects", "history-project")
+	path := filepath.Join(fixture.sessionsRoot, "e2e", "thinking-history.jsonl")
+	entries := []string{`{"type":"session","version":3,"id":"thinking-history","timestamp":"2026-07-20T12:00:00Z","cwd":` + jsonString(project) + `}`}
+	parent := ""
+	for index := 1; index <= 180; index++ {
+		id := "thinking-message-" + strconvItoa(index)
+		parentJSON := "null"
+		if parent != "" {
+			parentJSON = jsonString(parent)
+		}
+		role := "user"
+		content := `[{"type":"text","text":` + jsonString("Message "+strconvItoa(index)) + `}]`
+		if index == 1 {
+			role = "assistant"
+			content = `[{"type":"thinking","thinking":"Earlier private reasoning"}]`
+		}
+		if index == 180 {
+			role = "assistant"
+			content = `[{"type":"thinking","thinking":"Latest private reasoning"},{"type":"text","text":"Visible final answer"}]`
+		}
+		entries = append(entries, `{"type":"message","id":`+jsonString(id)+`,"parentId":`+parentJSON+`,"timestamp":"2026-07-20T12:00:01Z","message":{"role":`+jsonString(role)+`,"content":`+content+`}}`)
+		parent = id
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(entries, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(fixture.home, ".pi", "agent", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"hideThinkingBlock":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := fixtureHandler(t, fixture)
+	page := serve(t, handler, http.MethodGet, "/?session="+url.QueryEscape(path), "")
+	if !strings.Contains(page.Body.String(), "Thinking...") || !strings.Contains(page.Body.String(), "Visible final answer") || strings.Contains(page.Body.String(), "Latest private reasoning") {
+		t.Fatalf("page thinking display = %q", page.Body.String())
+	}
+
+	fragment := serve(t, handler, http.MethodGet, "/session_fragment?session="+url.QueryEscape(path), "")
+	var fragmentPayload struct {
+		ConversationHTML string `json:"conversation_html"`
+	}
+	if err := json.Unmarshal(fragment.Body.Bytes(), &fragmentPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fragmentPayload.ConversationHTML, "Thinking...") || strings.Contains(fragmentPayload.ConversationHTML, "Latest private reasoning") {
+		t.Fatalf("fragment thinking display = %q", fragmentPayload.ConversationHTML)
+	}
+
+	older := serve(t, handler, http.MethodGet, "/conversation_older?session="+url.QueryEscape(path)+"&cursor=30", "")
+	var olderPayload struct {
+		HTML string `json:"html"`
+	}
+	if err := json.Unmarshal(older.Body.Bytes(), &olderPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(olderPayload.HTML, "Thinking...") || strings.Contains(olderPayload.HTML, "Earlier private reasoning") {
+		t.Fatalf("older thinking display = %q", olderPayload.HTML)
+	}
+
+	if err := os.WriteFile(settingsPath, []byte(`{"hideThinkingBlock":false}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	visible := serve(t, handler, http.MethodGet, "/?session="+url.QueryEscape(path), "")
+	if !strings.Contains(visible.Body.String(), "Latest private reasoning") {
+		t.Fatalf("visible thinking display = %q", visible.Body.String())
+	}
+}
+
 func TestSessionDiscoveryAndReadsRejectSymlinksOutsideTheSessionsRoot(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	outside := filepath.Join(t.TempDir(), "outside.jsonl")
@@ -463,7 +536,7 @@ func seedNativeFixture(t *testing.T) nativeFixture {
 
 func fixtureHandler(t *testing.T, fixture nativeFixture) http.Handler {
 	t.Helper()
-	cfg := config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: fixture.home, SessionsRoot: fixture.sessionsRoot, AttachmentsRoot: fixture.attachmentsRoot, SessionCwdsPath: fixture.configuredCWDs, ReadStatePath: filepath.Join(fixture.root, "state", "read.json"), PinnedSessionsPath: filepath.Join(fixture.root, "state", "pinned.json"), BrowserAccessPath: filepath.Join(fixture.root, "state", "browser.json"), BrowserAuthDisabled: true}
+	cfg := config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: fixture.home, PiAgentDir: filepath.Join(fixture.home, ".pi", "agent"), SessionsRoot: fixture.sessionsRoot, AttachmentsRoot: fixture.attachmentsRoot, SessionCwdsPath: fixture.configuredCWDs, ReadStatePath: filepath.Join(fixture.root, "state", "read.json"), PinnedSessionsPath: filepath.Join(fixture.root, "state", "pinned.json"), BrowserAccessPath: filepath.Join(fixture.root, "state", "browser.json"), BrowserAuthDisabled: true}
 	handler, err := server.NewHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)

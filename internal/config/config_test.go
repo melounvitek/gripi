@@ -80,6 +80,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.SessionsRoot != filepath.Join(home, ".pi", "agent", "sessions") {
 		t.Fatalf("SessionsRoot = %q", cfg.SessionsRoot)
 	}
+	if cfg.PiAgentDir != filepath.Join(home, ".pi", "agent") {
+		t.Fatalf("PiAgentDir = %q", cfg.PiAgentDir)
+	}
 	if cfg.AttachmentsRoot != filepath.Join(home, ".pi", "gripi", "attachments") {
 		t.Fatalf("AttachmentsRoot = %q", cfg.AttachmentsRoot)
 	}
@@ -91,6 +94,23 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if !cfg.Production {
 		t.Fatal("Production = false")
+	}
+}
+
+func TestLoadUsesThePiAgentDirectoryFromTheProcessEnvironment(t *testing.T) {
+	home := t.TempDir()
+	custom := filepath.Join(home, "custom-agent")
+	cfg, err := config.Load([]string{
+		"HOME=" + home,
+		"PI_CODING_AGENT_DIR=" + custom,
+		"GRIPI_ENV_PATH=" + filepath.Join(home, "missing"),
+		"GRIPI_ADMIN_PASSWORD=secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PiAgentDir != custom {
+		t.Fatalf("PiAgentDir = %q", cfg.PiAgentDir)
 	}
 }
 

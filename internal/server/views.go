@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/pi"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
@@ -99,6 +100,7 @@ type pageView struct {
 	SessionSyncError          string
 	SessionSyncBlocked        bool
 	SessionSyncGatewayBusy    bool
+	HideThinkingBlock         bool
 	SidebarMetadataDeferred   bool
 	SidebarActivity           map[string]sidebarActivity
 	LiveOutput                liveOutputData
@@ -214,6 +216,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	view.KnownCWDs = knownCWDs(all)
 	view.NewSessionCWDs = app.newSessionCWDs(view)
 	if includeConversation && selected != nil {
+		view.HideThinkingBlock = app.piDisplaySettings(selected.CWD).HideThinkingBlock
 		leafID, leafSupplied := "", false
 		view.SessionSyncMode = sessions.SyncAvailable
 		_, statErr := os.Stat(selected.Path)
@@ -257,6 +260,14 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, toolContext)
 	}
 	return view, nil
+}
+
+func (app *application) piDisplaySettings(cwd string) pi.DisplaySettings {
+	agentDir := app.config.PiAgentDir
+	if agentDir == "" {
+		agentDir = filepath.Join(app.config.Home, ".pi", "agent")
+	}
+	return (pi.SettingsResolver{AgentDir: agentDir, AutoApproveProjects: app.config.AutoApproveProjects}).DisplaySettings(cwd)
 }
 
 func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, home string, toolContext map[string]sessions.ToolCallContext) liveOutputData {
