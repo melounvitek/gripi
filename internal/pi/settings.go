@@ -2,6 +2,7 @@ package pi
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 )
@@ -44,10 +45,13 @@ func (resolver SettingsResolver) projectTrusted(cwd, defaultTrust string) bool {
 	}
 
 	decisions := make(map[string]*bool)
-	if data, ok := readFile(filepath.Join(resolver.AgentDir, "trust.json")); ok {
+	data, err := os.ReadFile(filepath.Join(resolver.AgentDir, "trust.json"))
+	if err == nil {
 		if json.Unmarshal(data, &decisions) != nil {
-			decisions = make(map[string]*bool)
+			return false
 		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false
 	}
 	for current := canonicalPath(cwd); ; current = filepath.Dir(current) {
 		if decision := decisions[current]; decision != nil {

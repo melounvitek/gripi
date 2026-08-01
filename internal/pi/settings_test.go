@@ -64,7 +64,7 @@ func TestDisplaySettingsRejectMalformedTrustWithoutUsingPartialDecisions(t *test
 	root := t.TempDir()
 	agentDir := filepath.Join(root, "agent")
 	project := filepath.Join(root, "project")
-	writeJSON(t, filepath.Join(agentDir, "settings.json"), `{"hideThinkingBlock":true}`)
+	writeJSON(t, filepath.Join(agentDir, "settings.json"), `{"hideThinkingBlock":true,"defaultProjectTrust":"always"}`)
 	writeJSON(t, filepath.Join(agentDir, "trust.json"), `{"`+filepath.ToSlash(project)+`":true,"invalid":"yes"}`)
 	writeJSON(t, filepath.Join(project, ".pi", "settings.json"), `{"hideThinkingBlock":false}`)
 
