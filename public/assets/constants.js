@@ -4,4 +4,5 @@ export const STALE_SESSION_REFRESH_AFTER_MS = 60 * 1000;
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 export const TOOL_OUTPUT_DESKTOP_TAIL_LINES = 18;
 export const TOOL_OUTPUT_MOBILE_TAIL_LINES = 12;
+export const TOOL_OUTPUT_COLLAPSE_CHARACTERS = 500;
 export const TOOL_OUTPUT_TAIL_CHARACTERS = 2000;

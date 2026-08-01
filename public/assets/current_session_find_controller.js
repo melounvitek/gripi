@@ -1,4 +1,4 @@
-import { TOOL_OUTPUT_DESKTOP_TAIL_LINES } from "./constants.js";
+import { TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES } from "./constants.js";
 import { activateToolOutputRegion, deactivateToolOutputRegion } from "./dom.js";
 
 export class CurrentSessionFindController {
@@ -132,7 +132,7 @@ export class CurrentSessionFindController {
     if (body.dataset.rawText !== undefined) {
       const lines = String(body.dataset.rawText).split("\n");
       if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-      if (lines.length <= TOOL_OUTPUT_DESKTOP_TAIL_LINES) {
+      if (lines.length <= TOOL_OUTPUT_DESKTOP_TAIL_LINES && Array.from(body.dataset.rawText).length <= TOOL_OUTPUT_COLLAPSE_CHARACTERS) {
         delete collapse.dataset.expanded;
         collapse.dataset.collapsed = "false";
         if (button) button.setAttribute("aria-expanded", expanded.originalAriaExpanded);

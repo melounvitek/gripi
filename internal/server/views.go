@@ -23,11 +23,12 @@ import (
 )
 
 const (
-	recentSessionLimit         = 20
-	sessionPageSize            = 20
-	toolOutputDesktopTailLines = 18
-	toolOutputMobileTailLines  = 12
-	toolOutputTailCharacters   = 2000
+	recentSessionLimit           = 20
+	sessionPageSize              = 20
+	toolOutputDesktopTailLines   = 18
+	toolOutputMobileTailLines    = 12
+	toolOutputCollapseCharacters = 500
+	toolOutputTailCharacters     = 2000
 )
 
 var projectColors = [][2]string{
@@ -850,12 +851,12 @@ func compactBody(view *pageView, message *sessions.Message) template.HTML {
 	return renderCompactLines(message, strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n"), 0, view.Home)
 }
 func compactTail(view *pageView, message *sessions.Message) template.HTML {
-	lines := compactTailLines(message.Text)
+	lines := compactTailLines(message.Text, !message.ToolTranscript)
 
 	return renderCompactLines(message, lines, max(len(lines)-toolOutputMobileTailLines, 0), view.Home)
 }
 
-func compactTailLines(text string) []string {
+func compactTailLines(text string, trimCharacters bool) []string {
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 
 	if len(lines) > toolOutputDesktopTailLines {
@@ -864,7 +865,7 @@ func compactTailLines(text string) []string {
 
 	characters := []rune(strings.Join(lines, "\n"))
 
-	if len(characters) > toolOutputTailCharacters {
+	if trimCharacters && len(characters) > toolOutputTailCharacters {
 		lines = strings.Split("…"+string(characters[len(characters)-toolOutputTailCharacters+1:]), "\n")
 	}
 
@@ -990,12 +991,13 @@ func attachmentCount(view *pageView, message *sessions.Message) int {
 }
 func collapsible(message *sessions.Message) bool {
 	lines := strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n")
+	longOutput := !message.ToolTranscript && utf8.RuneCountInString(message.Text) > toolOutputCollapseCharacters
 
-	return message.Compact && !message.Thinking && !message.FinalAssistantResponse && (len(lines) > toolOutputDesktopTailLines || utf8.RuneCountInString(message.Text) > toolOutputTailCharacters)
+	return message.Compact && !message.Thinking && !message.FinalAssistantResponse && (len(lines) > toolOutputDesktopTailLines || longOutput)
 }
 
 func toolOutputHiddenLabel(message *sessions.Message, tailLines int) string {
-	if utf8.RuneCountInString(message.Text) > toolOutputTailCharacters {
+	if !message.ToolTranscript && utf8.RuneCountInString(message.Text) > toolOutputCollapseCharacters {
 		return "… (earlier output)"
 	}
 

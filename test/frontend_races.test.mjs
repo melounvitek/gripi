@@ -6,6 +6,46 @@ import { CurrentSessionFindController } from "../public/assets/current_session_f
 import { SidebarController } from "../public/assets/sidebar_controller.js";
 import { deferred } from "./helpers/fake_dom.mjs";
 
+test("conversation find restores collapsed long single-line tool output", () => {
+  const tailNode = { cloneNode: () => ({ textContent: "latest output" }) };
+  const body = {
+    dataset: { rawText: "x".repeat(2500) },
+    isConnected: true,
+    removeAttribute() {},
+    replaceChildren(...nodes) { this.children = nodes; },
+  };
+  const collapse = { dataset: { expanded: "true", collapsed: "false" }, isConnected: true };
+  const control = { hidden: true };
+  const button = { setAttribute(name, value) { this[name] = value; } };
+  const tailTemplate = {
+    content: {
+      childNodes: [tailNode],
+      cloneNode: () => ({ childNodes: [tailNode.cloneNode(true)] }),
+    },
+  };
+  const find = new CurrentSessionFindController({}, {});
+  find.expandedToolOutput = {
+    collapse,
+    body,
+    tailTemplate,
+    control,
+    button,
+    originalExpanded: undefined,
+    originalCollapsed: "true",
+    originalControlHidden: false,
+    originalAriaExpanded: "false",
+    originalBodyNodes: [tailNode],
+  };
+
+  find.restoreToolOutput();
+
+  assert.equal(collapse.dataset.expanded, undefined);
+  assert.equal(collapse.dataset.collapsed, "true");
+  assert.equal(control.hidden, false);
+  assert.equal(button["aria-expanded"], "false");
+  assert.equal(body.children[0].textContent, "latest output");
+});
+
 test("sidebar ignores stale refreshes and admits only one pin mutation", async () => {
   const originalFetch = globalThis.fetch;
   const document = { hidden: false, querySelector: () => null, querySelectorAll: () => [], activeElement: null };
