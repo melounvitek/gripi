@@ -116,7 +116,9 @@ export async function seedFixtures(root) {
     ["contract-project", "contract", sessions.marker, { question: "Contract fixture marker", answer: "The external E2E target is disposable." }],
     ["bash-project", "bash-retry", sessions.bashRetry],
     ["extension-project", "extension-race", sessions.extensionRace],
-    ["prompt-project", "markdown-table", sessions.markdownTable]
+    ["prompt-project", "markdown-table", sessions.markdownTable],
+    ["prompt-project", "tool-summary", sessions.toolSummary],
+    ["mobile-project", "tool-summary-mobile", sessions.toolSummaryMobile]
   ];
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
     await writeSession(root, projects[projectName], slug, title, index + 1, history);

@@ -16,6 +16,7 @@ export class LiveMessageRenderer {
     this.pendingMessages = null;
     this.lastLiveCompaction = null;
     this.terminalRenderStates = new WeakMap();
+    this.toolSummarySignatures = new WeakMap();
     this.terminalBindingGeneration = 0;
     this.terminalHydration = Promise.resolve();
     this.liveBashExecutions = new Map();
@@ -218,6 +219,15 @@ export class LiveMessageRenderer {
       action.className = "compaction-details-action";
       action.setAttribute("aria-hidden", "true");
       summaryElement.append(action);
+    } else {
+      const summaryToggle = this.document.createElement("button");
+      summaryToggle.type = "button";
+      summaryToggle.className = "tool-summary-toggle";
+      summaryToggle.dataset.toolSummaryToggle = "";
+      summaryToggle.setAttribute("aria-expanded", "false");
+      summaryToggle.hidden = true;
+      summaryToggle.textContent = "Expand";
+      summaryElement.append(summaryToggle);
     }
     let status = null;
     if (options.bashExecution) {
@@ -273,6 +283,7 @@ export class LiveMessageRenderer {
     article.append(header, details);
     this.renderMessageImages(article, options.images);
     this.liveOutput.append(article);
+    this.conversationController.refreshToolSummaryToggle?.(summaryElement);
     this.conversationController.afterLiveOutputChange(shouldScroll, live, true);
     return entry;
   }
@@ -338,7 +349,9 @@ export class LiveMessageRenderer {
     }
 
     entry.article.dataset.bashId = bashId;
+    const summaryChanged = entry.summaryText.textContent !== summary;
     entry.summaryText.textContent = summary;
+    if (summaryChanged) this.conversationController.refreshToolSummaryToggle?.(entry.summaryText.parentElement);
     if (event.type !== "bash_start") {
       const timestampKey = messageTimestampKey(timestamp);
       entry.article.dataset.messageTimestamp = timestampKey;
@@ -653,10 +666,13 @@ export class LiveMessageRenderer {
   }
 
   renderToolSummary(container, parts, fallback) {
+    const signature = JSON.stringify(parts ? ["parts", parts.name || "", parts.path || "", parts.range || ""] : ["text", fallback ?? ""]);
+    if (this.toolSummarySignatures.get(container) === signature) return false;
+    this.toolSummarySignatures.set(container, signature);
     container.replaceChildren();
     if (!parts) {
       container.textContent = fallback;
-      return;
+      return true;
     }
 
     const command = this.document.createElement("span");
@@ -676,6 +692,7 @@ export class LiveMessageRenderer {
       range.textContent = `:${parts.range}`;
       container.append(range);
     }
+    return true;
   }
 
   makeCopyButton() {
@@ -749,8 +766,9 @@ export class LiveMessageRenderer {
     const displayText = roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text;
 
     if (segment.compact) {
-      this.renderToolSummary(entry.summaryText, segment.summaryParts, segment.summary);
+      const summaryChanged = this.renderToolSummary(entry.summaryText, segment.summaryParts, segment.summary);
       this.renderToolTranscriptBody(entry.body, segment.text, segment.toolName || entry.toolName, { preview: segment.toolPreview === true });
+      if (summaryChanged) this.conversationController.refreshToolSummaryToggle?.(entry.summaryText.parentElement);
     } else {
       if (["assistant", "custom"].includes(roleName)) {
         this.markdownRenderer.render(entry.body, segment.text);
@@ -866,6 +884,7 @@ export class LiveMessageRenderer {
   }
 
   updateLiveToolExecution(entry, event, shouldScroll) {
+    let summaryChanged;
     if (event.toolName === "subagent") {
       this.renderSubagentPrompt(entry, this.parser.subagentPromptFromEvent(event));
       const finalStatus = event.type === "tool_execution_end" ? (event.isError ? "error" : "done") : null;
@@ -873,12 +892,13 @@ export class LiveMessageRenderer {
       const freshDetails = this.parser.richSubagentDetails(eventDetails);
       const details = this.retainSubagentDetails(entry, eventDetails, finalStatus);
       const fallback = this.parser.toolExecutionContentText(event) || (event.type === "tool_execution_end" ? "(done)" : "(running…)");
-      this.renderToolSummary(entry.summaryText, null, details ? this.parser.subagentSummary(details, this.parser.subagentRunning(event)) : this.parser.toolExecutionSummary(event));
+      summaryChanged = this.renderToolSummary(entry.summaryText, null, details ? this.parser.subagentSummary(details, this.parser.subagentRunning(event)) : this.parser.toolExecutionSummary(event));
       this.renderToolTranscriptBody(entry.body, details ? this.parser.subagentDisplayText(details, fallback, this.parser.subagentRunning(event), !freshDetails) : fallback, event.toolName);
     } else {
-      this.renderToolSummary(entry.summaryText, null, this.parser.toolExecutionSummary(event));
+      summaryChanged = this.renderToolSummary(entry.summaryText, null, this.parser.toolExecutionSummary(event));
       this.renderToolTranscriptBody(entry.body, this.parser.toolExecutionText(event), event.toolName || entry.toolName);
     }
+    if (summaryChanged) this.conversationController.refreshToolSummaryToggle?.(entry.summaryText.parentElement);
     const errorChanged = entry.article.classList.contains("message--tool-error") !== (event.isError === true);
     entry.article.classList.toggle("message--tool-error", event.isError === true);
     this.conversationController.afterLiveOutputChange(shouldScroll, true, errorChanged);
@@ -996,7 +1016,8 @@ export class LiveMessageRenderer {
           const resultSummary = subagentDetails ? this.parser.subagentSummary(subagentDetails, false) : segment.summary;
           this.renderSubagentPrompt(toolExecutionEntry, segment.toolPrompt || this.parser.subagentPromptFromDetails(message.details));
           this.renderToolTranscriptBody(toolExecutionEntry.body, resultText, segment.toolName || toolExecutionEntry.toolName, { preview: segment.toolPreview === true });
-          this.renderToolSummary(toolExecutionEntry.summaryText, segment.summaryParts, resultSummary);
+          const summaryChanged = this.renderToolSummary(toolExecutionEntry.summaryText, segment.summaryParts, resultSummary);
+          if (summaryChanged) this.conversationController.refreshToolSummaryToggle?.(toolExecutionEntry.summaryText.parentElement);
           const errorChanged = toolExecutionEntry.article.classList.contains("message--tool-error") !== (segment.error === true);
           toolExecutionEntry.article.classList.toggle("message--tool-error", segment.error === true);
           if (!this.markLiveEntryRendered(toolExecutionEntry, toolExecutionEntry.article.dataset.role || "toolResult", segment.text, timestamp)) return;

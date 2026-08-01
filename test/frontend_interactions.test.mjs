@@ -1,10 +1,33 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { ConversationController } from "../public/assets/conversation_controller.js";
 import { renderTextWithLinks } from "../public/assets/dom.js";
 import { ProjectSelectController } from "../public/assets/project_select_controller.js";
 import { TREE_FILTERS, TREE_SUMMARY_CHOICES, TreeSessionController, TreeSessionModel } from "../public/assets/tree_session_controller.js";
 import { FakeDocument, FakeElement, FakeEventTarget } from "./helpers/fake_dom.mjs";
+
+test("collapsing a shortened tool summary hides its stale toggle", () => {
+  const controller = new ConversationController(new FakeDocument(), {});
+  const summary = new FakeElement("div");
+  summary.className = "message-details-summary";
+  summary.dataset.toolSummaryExpanded = "true";
+  const text = new FakeElement("span");
+  text.className = "compact-summary";
+  text.scrollHeight = 20;
+  text.clientHeight = 20;
+  const toggle = new FakeElement("button", ["[data-tool-summary-toggle]"]);
+  toggle.textContent = "Collapse";
+  toggle.setAttribute("aria-expanded", "true");
+  summary.append(text, toggle);
+
+  controller.toggleToolSummary(toggle);
+
+  assert.equal(summary.dataset.toolSummaryExpanded, "false");
+  assert.equal(toggle.textContent, "Expand");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(toggle.hidden, true);
+});
 
 test("plain message URLs become safe new-window links without changing surrounding text", () => {
   const document = new FakeDocument();

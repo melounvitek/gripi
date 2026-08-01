@@ -296,7 +296,11 @@ function acceptPrompt(command) {
   if (path.basename(process.cwd()).startsWith("new-session-")) reply = replies.newSession;
   else if (command.message === prompts.markdownTable) reply = replies.markdownTable;
 
-  if (command.message === prompts.terminal) {
+  if (command.message === prompts.longCommand) {
+    schedule(120, () => completeWithTool(reply, { command: tool.longCommand }));
+  } else if (command.message === prompts.wrapCommand) {
+    schedule(120, () => completeWithTool(reply, { command: tool.wrapCommand }));
+  } else if (command.message === prompts.terminal) {
     schedule(120, () => completeWithTool(reply, { command: tool.terminalCommand, updates: tool.terminalUpdates, updateDelay: 350, completionDelay: 800 }));
   } else {
     schedule(120, () => completeWithTool(reply));
