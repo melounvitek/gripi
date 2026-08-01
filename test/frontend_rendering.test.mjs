@@ -156,6 +156,42 @@ test("persisted tool results ignore replayed message events with the same tool i
   assert.equal(appended, 0);
 });
 
+test("result-first general subagent output keeps its transcript display", () => {
+  const conversation = {
+    element: { querySelectorAll: () => [] },
+    followLiveOutput: () => false,
+  };
+  const parser = new LiveMessageParser();
+  const renderer = new LiveMessageRenderer({}, conversation, parser, { bind() {} });
+  renderer.conversationScroll = conversation.element;
+  let rendered;
+  renderer.appendCompactMessage = (role, summary, text, _live, _scroll, _timestamp, options) => {
+    rendered = { role, summary, text, options };
+  };
+  const details = {
+    status: "done",
+    tools: [{ name: "read", status: "done", args: { path: "file.txt" }, output: "contents" }],
+    textItems: ["review complete"],
+    usage: { turns: 1 },
+  };
+
+  renderer.renderMessageEvent({
+    type: "message_end",
+    message: {
+      role: "toolResult",
+      toolCallId: "general-1",
+      toolName: "subagent",
+      content: [{ type: "text", text: "review complete" }],
+      details,
+    },
+  });
+
+  assert.equal(rendered.role, "toolResult");
+  assert.equal(rendered.summary, "subagent general");
+  assert.match(rendered.text, /^✓ general\n✓ read file\.txt\n  contents/);
+  assert.equal(rendered.options.toolTranscript, true);
+});
+
 test("live long single-line tool output collapses to its latest suffix", () => {
   const fragment = () => ({
     childNodes: [],

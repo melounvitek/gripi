@@ -1048,7 +1048,8 @@ export class LiveMessageRenderer {
         } else if (customMessage && !segment.compact) {
           this.upsertLiveCustomSegment(message, segment, index, shouldScroll, timestamp);
         } else if (segment.compact) {
-          this.appendCompactMessage(roleName, segment.summary, segment.text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolCallId: segment.toolCallId, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, error: segment.error, images: segment.images });
+          const text = segment.generalSubagent ? this.parser.subagentDisplayText(message.details, segment.text, false) : segment.text;
+          this.appendCompactMessage(roleName, segment.summary, text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolCallId: segment.toolCallId, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, error: segment.error, images: segment.images });
         } else {
           this.appendMessage(roleName, segment.text, true, shouldScroll, timestamp, { images: segment.images });
         }

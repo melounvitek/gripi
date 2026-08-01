@@ -171,12 +171,13 @@ export class LiveMessageParser {
         const labels = group.parts.map(contentPartLabel).filter(Boolean);
         const toolPart = group.parts.find((part) => part && typeof part === "object" && ["toolCall", "toolResult"].includes(part.type));
         const toolName = message.toolName || toolPart?.name || toolPart?.toolName;
+        const generalSubagent = toolName === "subagent" && generalSubagentDetails(message.details);
         const summaryParts = toolSummaryParts(toolName, toolPart?.arguments || {});
         return {
           text,
           compact: group.compact,
           thinking: group.parts.length === 1 && thinkingPart(group.parts[0]) && message.role !== "toolResult",
-          summary: message.toolName || [...new Set(labels)].join(" + ") || "tool output",
+          summary: generalSubagent ? "subagent general" : message.toolName || [...new Set(labels)].join(" + ") || "tool output",
           summaryParts,
           error: message.isError === true,
           startIndex: group.startIndex,
@@ -184,7 +185,8 @@ export class LiveMessageParser {
           toolCallId: message.toolCallId || toolPart?.id || toolPart?.toolCallId,
           toolName,
           isToolResult: message.role === "toolResult" || toolPart?.type === "toolResult",
-          toolTranscript: ["read", "edit", "write"].includes(toolName),
+          generalSubagent,
+          toolTranscript: generalSubagent || ["read", "edit", "write"].includes(toolName),
           toolPreview: toolPart?.type === "toolCall" && toolName === "edit",
           toolPrompt: toolName === "subagent" ? subagentPromptFromDetails(message.details) : "",
           finalAssistantResponse: !group.compact && group.parts.some(finalAssistantTextPart),
