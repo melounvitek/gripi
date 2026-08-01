@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -461,6 +463,50 @@ func TestClientRetainsCompletedSubagentSnapshotsUntilAgentEnd(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestClientKeepsSubagentSnapshotsInInvocationOrder(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": "first", "toolName": "subagent"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": "second", "toolName": "subagent"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": "third", "toolName": "subagent"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_update", "toolCallId": "second", "toolName": "subagent", "partialResult": map[string]any{}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "first", "toolName": "subagent", "result": map[string]any{}})
+	waitSequence(t, client, 5)
+
+	for attempt := 0; attempt < 3; attempt++ {
+		if ids := activeToolEventIDs(client.LiveSnapshot().ActiveToolEvents); !reflect.DeepEqual(ids, []string{"first", "second", "third"}) {
+			t.Fatalf("snapshot %d order = %#v", attempt, ids)
+		}
+	}
+	_ = stdoutWriter.Close()
+}
+
+func TestClientEvictsOldestCompletedSubagentInInvocationOrder(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+
+	for index := range MaxActiveToolSnapshots {
+		writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": fmt.Sprintf("tracked-%02d", index), "toolName": "subagent"})
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "tracked-03", "toolName": "subagent", "result": map[string]any{}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "tracked-01", "toolName": "subagent", "result": map[string]any{}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_start", "toolCallId": "new-running", "toolName": "subagent"})
+	waitSequence(t, client, MaxActiveToolSnapshots+3)
+
+	ids := activeToolEventIDs(client.LiveSnapshot().ActiveToolEvents)
+	if slices.Contains(ids, "tracked-01") || !slices.Contains(ids, "tracked-03") || ids[len(ids)-1] != "new-running" {
+		t.Fatalf("snapshot order after eviction = %#v", ids)
+	}
+	_ = stdoutWriter.Close()
+}
+
 func TestClientBoundsCompletedSubagentSnapshotsAndLabelsErrorFallbacks(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
@@ -709,6 +755,13 @@ func waitSequence(t *testing.T, client *Client, want int64) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("event sequence = %d, want %d", client.EventSequence(), want)
+}
+func activeToolEventIDs(events []map[string]any) []string {
+	ids := make([]string, 0, len(events))
+	for _, event := range events {
+		ids = append(ids, stringValue(event["toolCallId"]))
+	}
+	return ids
 }
 func containsEvent(events []map[string]any, want string) bool { return countEvent(events, want) > 0 }
 func countEvent(events []map[string]any, want string) int {

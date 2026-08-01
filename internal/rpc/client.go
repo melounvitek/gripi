@@ -182,6 +182,7 @@ type Client struct {
 	coalesced        map[string]*replayEntry
 
 	activeToolEvents     map[string]map[string]any
+	activeToolOrder      []string
 	queuedMessages       map[string][]string
 	pendingDialogs       map[string]*extensionDialog
 	pendingDialogOrder   []string
@@ -886,6 +887,7 @@ func (client *Client) readerStopped() {
 	client.flushingCompactionFollowUps = false
 	client.deferredCommandIDs = make(map[string]bool)
 	client.activeToolEvents = make(map[string]map[string]any)
+	client.activeToolOrder = nil
 	client.completedBashEvents = make(map[string]map[string]any)
 	client.completedBashOrder = nil
 	client.queuedMessages = map[string][]string{"steering": {}, "followUp": {}}
@@ -1032,8 +1034,10 @@ func (client *Client) LiveSnapshot() LiveSnapshot {
 	defer client.mu.Unlock()
 	client.pruneExpiredDialogsLocked()
 	result := LiveSnapshot{EventSequence: client.eventSequence, EventReplayCursor: client.eventReplayFloor, ActiveToolEvents: make([]map[string]any, 0, len(client.activeToolEvents))}
-	for _, event := range client.activeToolEvents {
-		result.ActiveToolEvents = append(result.ActiveToolEvents, event)
+	for _, id := range client.activeToolOrder {
+		if event := client.activeToolEvents[id]; event != nil {
+			result.ActiveToolEvents = append(result.ActiveToolEvents, event)
+		}
 	}
 	result.Busy = client.busy || client.activeBashToken != nil
 	result.BusySince = copyTime(client.busySinceLocked())
@@ -1478,6 +1482,7 @@ func (client *Client) discardReplayLocked() {
 func (client *Client) updateActiveToolsLocked(response map[string]any, serializedBytes int) {
 	if response["type"] == "agent_end" {
 		client.activeToolEvents = make(map[string]map[string]any)
+		client.activeToolOrder = nil
 		return
 	}
 	id := stringValue(response["toolCallId"])
@@ -1486,22 +1491,29 @@ func (client *Client) updateActiveToolsLocked(response map[string]any, serialize
 	}
 	if response["type"] == "tool_execution_end" {
 		if response["toolName"] == snapshotToolName {
-			if client.activeToolEvents[id] == nil && len(client.activeToolEvents) >= MaxActiveToolSnapshots {
+			isNew := client.activeToolEvents[id] == nil
+			if isNew && len(client.activeToolEvents) >= MaxActiveToolSnapshots {
 				return
 			}
 			if snapshot := boundedActiveToolEvent(response, serializedBytes); snapshot != nil {
 				client.activeToolEvents[id] = snapshot
+				if isNew {
+					client.activeToolOrder = append(client.activeToolOrder, id)
+				}
 			}
 		} else {
 			delete(client.activeToolEvents, id)
+			client.activeToolOrder = removeOrder(client.activeToolOrder, id)
 		}
 		return
 	}
 	if (response["type"] == "tool_execution_start" || response["type"] == "tool_execution_update") && response["toolName"] == snapshotToolName {
-		if client.activeToolEvents[id] == nil && len(client.activeToolEvents) >= MaxActiveToolSnapshots {
-			for completedID, event := range client.activeToolEvents {
-				if event["type"] == "tool_execution_end" {
+		isNew := client.activeToolEvents[id] == nil
+		if isNew && len(client.activeToolEvents) >= MaxActiveToolSnapshots {
+			for _, completedID := range client.activeToolOrder {
+				if event := client.activeToolEvents[completedID]; event != nil && event["type"] == "tool_execution_end" {
 					delete(client.activeToolEvents, completedID)
+					client.activeToolOrder = removeOrder(client.activeToolOrder, completedID)
 					break
 				}
 			}
@@ -1511,6 +1523,9 @@ func (client *Client) updateActiveToolsLocked(response map[string]any, serialize
 		}
 		if snapshot := boundedActiveToolEvent(response, serializedBytes); snapshot != nil {
 			client.activeToolEvents[id] = snapshot
+			if isNew {
+				client.activeToolOrder = append(client.activeToolOrder, id)
+			}
 		}
 	}
 }
