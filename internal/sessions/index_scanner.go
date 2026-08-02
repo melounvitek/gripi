@@ -433,6 +433,10 @@ func (scanner *indexJSONScanner) startValue(value byte) {
 			return
 		}
 	}
+	if scanner.inGeneralTools() && generalToolItemPath(path) && value != '{' {
+		scanner.valid = false
+		return
+	}
 	if scanner.inGeneralTools() && generalToolFieldPath(path) {
 		scanner.validateGeneralToolValue(path, value)
 	}
@@ -553,7 +557,11 @@ func (scanner *indexJSONScanner) closeContainer(kind byte) {
 		return
 	}
 	frame := scanner.stack[len(scanner.stack)-1]
-	if frame.generalToolItem && frame.generalToolValid && frame.generalToolFields == generalToolRequiredFields {
+	if frame.generalToolItem {
+		if !frame.generalToolValid || frame.generalToolFields != generalToolRequiredFields {
+			scanner.valid = false
+			return
+		}
 		scanner.collector.generalToolCount++
 	}
 	scanner.stack = scanner.stack[:len(scanner.stack)-1]

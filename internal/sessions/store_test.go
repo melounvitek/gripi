@@ -575,7 +575,7 @@ func TestSmallNativeGeneralSubagentRenderingRemainsUnchanged(t *testing.T) {
 	}
 }
 
-func TestOversizedNativeGeneralSubagentCountsOnlyValidToolItems(t *testing.T) {
+func TestOversizedNativeGeneralSubagentRejectsInvalidToolItems(t *testing.T) {
 	encodedOutput, err := json.Marshal(strings.Repeat("x", MaxIndexedEntryBytes))
 	if err != nil {
 		t.Fatal(err)
@@ -616,12 +616,12 @@ func TestOversizedNativeGeneralSubagentCountsOnlyValidToolItems(t *testing.T) {
 			}
 			writeSessionLines(t, path, []string{sessionLine(project), line})
 
-			indexed, err := (Store{Root: root, Home: root, Cache: NewCache()}).Cache.Index(path)
-			if err != nil {
-				t.Fatal(err)
+			store := Store{Root: root, Home: root, Cache: NewCache()}
+			if _, err := store.Window(path, "", false, nil, nil); err == nil {
+				t.Fatal("invalid oversized general subagent tool was accepted")
 			}
-			if len(indexed.entries) != 2 || indexed.entries[1].General == nil || indexed.entries[1].GeneralToolCount != 1 {
-				t.Fatalf("indexed general projection = %#v", indexed.entries[1])
+			if _, ok := store.Session(path); ok {
+				t.Fatal("session with invalid oversized general subagent tool was discovered")
 			}
 		})
 	}
