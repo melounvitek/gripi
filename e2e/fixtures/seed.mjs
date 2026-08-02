@@ -147,6 +147,7 @@ export async function seedFixtures(root) {
     ["prompt-project", "mark-read", sessions.markRead],
     ["controls-project", "steer", sessions.controlsSteer],
     ["controls-project", "follow-up", sessions.controlsFollowUp],
+    ["controls-project", "compaction-follow-up", sessions.compactionFollowUp],
     ["controls-project", "abort", sessions.controlsAbort],
     ["controls-project", "terminal", sessions.terminal],
     ["settings-project", "settings", sessions.settings],

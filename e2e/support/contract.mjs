@@ -16,6 +16,7 @@ export const sessions = {
   bashRetry: "E2E Bash Retry Desktop",
   controlsSteer: "E2E Steer Desktop",
   controlsFollowUp: "E2E Follow-up Desktop",
+  compactionFollowUp: "E2E Compaction Follow-up Desktop",
   controlsAbort: "E2E Abort Desktop",
   parallelSubagents: "E2E Parallel Subagents Desktop",
   parallelSubagentsMobile: "E2E Parallel Subagents Mobile",

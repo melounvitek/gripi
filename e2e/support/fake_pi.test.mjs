@@ -182,6 +182,7 @@ test("fake Pi supports model, tree, compaction, and branch control contracts", {
   child.stdin.write(`${JSON.stringify({ id: "models", type: "get_available_models" })}\n`);
   assert.ok((await nextRecord(records)).data.models.some((model) => model.id === "contract-model"));
   child.stdin.write(`${JSON.stringify({ id: "compact", type: "compact", customInstructions: "Keep decisions" })}\n`);
+  assert.equal((await nextRecord(records)).type, "compaction_start");
   assert.equal((await nextRecord(records)).id, "compact");
   assert.equal((await nextRecord(records)).type, "compaction_end");
 
@@ -237,7 +238,7 @@ async function nextRecord(records) {
   try {
     const result = await Promise.race([
       records.next(),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Timed out waiting for fake Pi output")), 2_000); })
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Timed out waiting for fake Pi output")), 5_000); })
     ]);
     assert.equal(result.done, false, "Fake Pi exited before emitting the expected record");
     return result.value;

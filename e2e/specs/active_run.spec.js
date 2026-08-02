@@ -26,6 +26,22 @@ test("queue a follow-up for an active run", async ({ page }) => {
   await expectRunFinished(page);
 });
 
+test("shows a follow-up queued during compaction", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.compactionFollowUp);
+
+  await sendPrompt(page, "/compact");
+  await expect(page.locator(".composer-state")).toHaveText("Compacting…");
+  await sendPrompt(page, prompts.standard);
+
+  const queuedFollowUp = page.locator(".pending-message--follow-up");
+  await expect(queuedFollowUp).toHaveText(`Follow-up: ${prompts.standard}`);
+  await expect(page.locator('[data-pending-compaction="true"]')).toBeVisible();
+  await expect(message(page, "assistant", replies.standard)).toBeVisible();
+  await expect(queuedFollowUp).toHaveCount(0);
+  await expectRunFinished(page);
+});
+
 test("shows login guidance without steering an active run", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.controlsAbort);

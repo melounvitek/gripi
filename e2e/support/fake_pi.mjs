@@ -17,6 +17,7 @@ let sessionName = null;
 let model = fakeModels()[0];
 let thinkingLevel = "medium";
 let busy = false;
+let compacting = false;
 let activeScenario = null;
 let pendingExtensionRequest = null;
 let activeBash = null;
@@ -157,9 +158,14 @@ function handleCommand(command) {
       respond(command, true);
       break;
     case "compact":
-      appendEntry("compaction", { summary: command.customInstructions || "Fixture compaction" });
-      respond(command, true);
-      emit({ type: "compaction_end" });
+      compacting = true;
+      emit({ type: "compaction_start" });
+      schedule(2500, () => {
+        appendEntry("compaction", { summary: command.customInstructions || "Fixture compaction" });
+        compacting = false;
+        respond(command, true);
+        emit({ type: "compaction_end" });
+      });
       break;
     case "get_fork_messages":
       respond(command, true, { data: { messages: forkMessages() } });
@@ -201,7 +207,7 @@ function state() {
     model,
     thinkingLevel,
     isStreaming: busy,
-    isCompacting: false,
+    isCompacting: compacting,
     steeringMode: "one-at-a-time",
     followUpMode: "one-at-a-time",
     sessionFile: sessionPath,
