@@ -30,7 +30,8 @@ test("shows a follow-up queued during compaction", async ({ page, context }) => 
   await page.goto("/");
   await selectSession(page, sessions.compactionFollowUp);
 
-  await sendPrompt(page, "/compact");
+  await page.getByLabel("Message to Pi").fill("/compact");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   await expect(page.locator(".composer-state")).toContainText("Compacting…");
   await sendPrompt(page, prompts.standard);
