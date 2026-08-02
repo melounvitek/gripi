@@ -147,7 +147,6 @@ export async function seedFixtures(root) {
     ["prompt-project", "mark-read", sessions.markRead],
     ["controls-project", "steer", sessions.controlsSteer],
     ["controls-project", "follow-up", sessions.controlsFollowUp],
-    ["controls-project", "compaction-follow-up", sessions.compactionFollowUp],
     ["controls-project", "abort", sessions.controlsAbort],
     ["controls-project", "terminal", sessions.terminal],
     ["settings-project", "settings", sessions.settings],
@@ -168,7 +167,8 @@ export async function seedFixtures(root) {
     ["prompt-project", "markdown-table", sessions.markdownTable],
     ["prompt-project", "tool-summary", sessions.toolSummary],
     ["controls-project", "parallel-subagents", sessions.parallelSubagents],
-    ["mobile-project", "wrapped-tool-output", sessions.wrappedToolOutput]
+    ["mobile-project", "wrapped-tool-output", sessions.wrappedToolOutput],
+    ["controls-project", "compaction-follow-up", sessions.compactionFollowUp]
   ];
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
     await writeSession(root, projects[projectName], slug, title, index + 1, history);

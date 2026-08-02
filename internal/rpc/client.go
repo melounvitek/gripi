@@ -1190,38 +1190,22 @@ func (client *Client) updateQueuedMessagesLocked(response map[string]any) {
 }
 
 func (client *Client) visibleQueuedMessagesLocked() map[string][]string {
-	perTypeCount := MaxQueuedMessageCount / 2
-	perTypeBytes := (MaxQueuedMessageBytes - 128) / 2
-	compactionFollowUps := make([]string, 0, len(client.compactionFollowUps))
+	result := map[string][]string{
+		"steering": append([]string{}, client.queuedMessages["steering"]...),
+		"followUp": append([]string{}, client.queuedMessages["followUp"]...),
+	}
 	for _, payload := range client.compactionFollowUps {
-		if message, ok := payload["message"].(string); ok {
-			compactionFollowUps = append(compactionFollowUps, message)
+		message, ok := payload["message"].(string)
+		if !ok {
+			continue
 		}
-	}
-	compactionFollowUps, compactionBytes := boundedStringSlice(compactionFollowUps, perTypeCount, perTypeBytes)
-
-	remainingCount := perTypeCount - len(compactionFollowUps)
-	remainingBytes := perTypeBytes - compactionBytes
-	nativeFollowUps, _ := boundedStringSlice(client.queuedMessages["followUp"], remainingCount, remainingBytes)
-
-	return map[string][]string{
-		"steering": append([]string(nil), client.queuedMessages["steering"]...),
-		"followUp": append(nativeFollowUps, compactionFollowUps...),
-	}
-}
-
-func boundedStringSlice(messages []string, maxCount, maxBytes int) ([]string, int) {
-	result := make([]string, 0, min(len(messages), maxCount))
-	used := 0
-	for _, message := range messages {
-		message = boundedText(message, MaxSnapshotStringBytes)
-		if len(result) >= maxCount || used+len(message)+3 > maxBytes {
+		result["followUp"] = append(result["followUp"], boundedText(message, MaxSnapshotStringBytes))
+		if len(result["steering"])+len(result["followUp"]) > MaxQueuedMessageCount || jsonSize(result) > MaxQueuedMessageBytes-128 {
+			result["followUp"] = result["followUp"][:len(result["followUp"])-1]
 			break
 		}
-		result = append(result, message)
-		used += len(message) + 3
 	}
-	return result, used
+	return result
 }
 
 func (client *Client) queuedMessagesEventLocked() map[string]any {
@@ -1299,18 +1283,22 @@ func (client *Client) updateExtensionUILocked(response map[string]any) {
 func boundedStringArray(value any, maxCount, maxBytes int) []string {
 	raw, _ := value.([]any)
 	result := make([]string, 0, min(len(raw), maxCount))
-	used := 0
+	used := 2
 	for _, item := range raw {
 		text, ok := item.(string)
 		if !ok {
 			continue
 		}
 		text = boundedText(text, MaxSnapshotStringBytes)
-		if len(result) >= maxCount || used+len(text)+3 > maxBytes {
+		itemBytes := jsonSize(text)
+		if len(result) > 0 {
+			itemBytes++
+		}
+		if len(result) >= maxCount || used+itemBytes > maxBytes {
 			break
 		}
 		result = append(result, text)
-		used += len(text) + 3
+		used += itemBytes
 	}
 	return result
 }

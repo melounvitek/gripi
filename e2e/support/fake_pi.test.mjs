@@ -183,8 +183,11 @@ test("fake Pi supports model, tree, compaction, and branch control contracts", {
   assert.ok((await nextRecord(records)).data.models.some((model) => model.id === "contract-model"));
   child.stdin.write(`${JSON.stringify({ id: "compact", type: "compact", customInstructions: "Keep decisions" })}\n`);
   assert.equal((await nextRecord(records)).type, "compaction_start");
+  const compactionEnd = await nextRecord(records);
+  assert.equal(compactionEnd.type, "compaction_end");
+  assert.equal(compactionEnd.result.summary, "Keep decisions");
+  assert.equal(compactionEnd.aborted, false);
   assert.equal((await nextRecord(records)).id, "compact");
-  assert.equal((await nextRecord(records)).type, "compaction_end");
 
   const requestId = "abc123";
   const payload = Buffer.from(JSON.stringify({ filter: "all" })).toString("base64url");
