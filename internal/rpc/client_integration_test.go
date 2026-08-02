@@ -135,6 +135,48 @@ func TestProcessClientPreservesFinalResponseBeforeImmediateExit(t *testing.T) {
 	}
 }
 
+func TestQueueCompactionFollowUpPublishesMergedQueueState(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "queue_update", "steering": []any{"adjust"}, "followUp": []any{"native"}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start"})
+	waitSequence(t, client, 2)
+
+	response, queued, err := client.QueueCompactionFollowUp(context.Background(), "after compaction", nil)
+	if err != nil || !queued || response["queued"] != true {
+		t.Fatalf("queued follow-up = %#v, %v, %v", response, queued, err)
+	}
+	waitSequence(t, client, 3)
+
+	batch := client.EventsAfter(2)
+	if len(batch.Events) != 1 || batch.Events[0]["type"] != "queue_update" {
+		t.Fatalf("queue events = %#v", batch.Events)
+	}
+	if got := batch.Events[0]["steering"]; !reflect.DeepEqual(got, []string{"adjust"}) {
+		t.Fatalf("steering queue = %#v", got)
+	}
+	if got := batch.Events[0]["followUp"]; !reflect.DeepEqual(got, []string{"native", "after compaction"}) {
+		t.Fatalf("follow-up queue = %#v", got)
+	}
+
+	snapshot := client.LiveSnapshot()
+	if !reflect.DeepEqual(snapshot.QueuedMessages, map[string][]string{"steering": {"adjust"}, "followUp": {"native", "after compaction"}}) {
+		t.Fatalf("queued snapshot = %#v", snapshot.QueuedMessages)
+	}
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_end"})
+	waitSequence(t, client, 5)
+	batch = client.EventsAfter(3)
+	if len(batch.Events) != 2 || batch.Events[1]["type"] != "queue_update" || !reflect.DeepEqual(batch.Events[1]["followUp"], []string{"native"}) {
+		t.Fatalf("compaction completion events = %#v", batch.Events)
+	}
+	_ = stdoutWriter.Close()
+}
+
 func TestQueueCompactionFollowUpAtomicallyReportsWhetherItQueued(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
@@ -282,6 +324,10 @@ func TestClientBoundsFollowUpsWaitingForCompaction(t *testing.T) {
 	client.mu.Unlock()
 	if count != MaxCompactionFollowUps || bytes > MaxCompactionFollowUpBytes {
 		t.Fatalf("bounded follow-ups: count=%d bytes=%d", count, bytes)
+	}
+	snapshot := client.LiveSnapshot()
+	if len(snapshot.QueuedMessages["followUp"]) == 0 || len(snapshot.QueuedMessages["followUp"]) > MaxQueuedMessageCount/2 || jsonSize(snapshot.QueuedMessages) > MaxQueuedMessageBytes {
+		t.Fatalf("visible follow-ups are not bounded: %#v", snapshot.QueuedMessages)
 	}
 	_ = stdoutWriter.Close()
 }

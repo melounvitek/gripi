@@ -466,6 +466,7 @@ func (client *Client) QueueCompactionFollowUp(_ context.Context, message string,
 	client.compactionFollowUps = append(client.compactionFollowUps, payload)
 	client.compactionFollowUpCount++
 	client.compactionFollowUpBytes += size
+	client.appendQueuedMessagesEventLocked()
 	return map[string]any{"type": "response", "command": "follow_up", "success": true, "queued": true, "compacting": true}, true, nil
 }
 
@@ -914,6 +915,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 
 	var followUps []map[string]any
 	firstType := "prompt"
+	compactionQueueChanged := false
 	client.mu.Lock()
 	storeAsEvent := false
 	if key := internalBridgeStatusKey(response); key != "" {
@@ -960,11 +962,16 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		}
 		client.updateBusyStateLocked(response)
 		client.updateQueuedMessagesLocked(response)
+		if typeName == "queue_update" {
+			response = client.queuedMessagesEventLocked()
+			serializedBytes = jsonSize(response)
+		}
 		client.updateExtensionUILocked(response)
 		if (typeName == "compaction" || typeName == "compaction_end") && !client.flushingCompactionFollowUps && len(client.compactionFollowUps) > 0 {
 			followUps = client.compactionFollowUps
 			client.compactionFollowUps = nil
 			client.flushingCompactionFollowUps = true
+			compactionQueueChanged = true
 			if typeName == "compaction_end" && response["willRetry"] == true {
 				firstType = "follow_up"
 			}
@@ -977,6 +984,9 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 			client.appendReplayLocked(replay, size, replayCoalesceKey(response))
 		} else {
 			client.discardReplayLocked()
+		}
+		if compactionQueueChanged {
+			client.appendQueuedMessagesEventLocked()
 		}
 	}
 	client.mu.Unlock()
@@ -1069,8 +1079,9 @@ func (client *Client) LiveSnapshot() LiveSnapshot {
 	}
 	result.Compacting = client.compacting
 	result.CompactingSince = copyTime(client.compactingSince)
-	if len(client.queuedMessages["steering"]) > 0 || len(client.queuedMessages["followUp"]) > 0 {
-		result.QueuedMessages = map[string][]string{"steering": append([]string(nil), client.queuedMessages["steering"]...), "followUp": append([]string(nil), client.queuedMessages["followUp"]...)}
+	queuedMessages := client.visibleQueuedMessagesLocked()
+	if len(queuedMessages["steering"]) > 0 || len(queuedMessages["followUp"]) > 0 {
+		result.QueuedMessages = queuedMessages
 	}
 	if len(client.pendingDialogs) > 0 || len(client.extensionStatuses) > 0 || len(client.extensionWidgets) > 0 || client.extensionTitle != nil {
 		dialogs := []map[string]any{}
@@ -1176,6 +1187,50 @@ func (client *Client) updateQueuedMessagesLocked(response map[string]any) {
 		"steering": boundedStringArray(response["steering"], perTypeCount, perTypeBytes),
 		"followUp": boundedStringArray(response["followUp"], perTypeCount, perTypeBytes),
 	}
+}
+
+func (client *Client) visibleQueuedMessagesLocked() map[string][]string {
+	perTypeCount := MaxQueuedMessageCount / 2
+	perTypeBytes := (MaxQueuedMessageBytes - 128) / 2
+	compactionFollowUps := make([]string, 0, len(client.compactionFollowUps))
+	for _, payload := range client.compactionFollowUps {
+		if message, ok := payload["message"].(string); ok {
+			compactionFollowUps = append(compactionFollowUps, message)
+		}
+	}
+	compactionFollowUps, compactionBytes := boundedStringSlice(compactionFollowUps, perTypeCount, perTypeBytes)
+
+	remainingCount := perTypeCount - len(compactionFollowUps)
+	remainingBytes := perTypeBytes - compactionBytes
+	nativeFollowUps, _ := boundedStringSlice(client.queuedMessages["followUp"], remainingCount, remainingBytes)
+
+	return map[string][]string{
+		"steering": append([]string(nil), client.queuedMessages["steering"]...),
+		"followUp": append(nativeFollowUps, compactionFollowUps...),
+	}
+}
+
+func boundedStringSlice(messages []string, maxCount, maxBytes int) ([]string, int) {
+	result := make([]string, 0, min(len(messages), maxCount))
+	used := 0
+	for _, message := range messages {
+		message = boundedText(message, MaxSnapshotStringBytes)
+		if len(result) >= maxCount || used+len(message)+3 > maxBytes {
+			break
+		}
+		result = append(result, message)
+		used += len(message) + 3
+	}
+	return result, used
+}
+
+func (client *Client) queuedMessagesEventLocked() map[string]any {
+	queuedMessages := client.visibleQueuedMessagesLocked()
+	return map[string]any{"type": "queue_update", "steering": queuedMessages["steering"], "followUp": queuedMessages["followUp"]}
+}
+
+func (client *Client) appendQueuedMessagesEventLocked() {
+	client.appendGatewayEventLocked(client.queuedMessagesEventLocked())
 }
 
 func (client *Client) updateExtensionUILocked(response map[string]any) {
@@ -1932,6 +1987,7 @@ func (client *Client) flushCompactionFollowUps(items []map[string]any, firstType
 		}
 		items, client.compactionFollowUps = client.compactionFollowUps, nil
 		firstType = "follow_up"
+		client.appendQueuedMessagesEventLocked()
 		client.mu.Unlock()
 		if !client.now().Before(deadline) {
 			client.finishFailedCompactionFlush("")
@@ -1943,10 +1999,14 @@ func (client *Client) flushCompactionFollowUps(items []map[string]any, firstType
 func (client *Client) finishFailedCompactionFlush(_ string) {
 	client.mu.Lock()
 	client.deferredCommandIDs = make(map[string]bool)
+	queueChanged := len(client.compactionFollowUps) > 0
 	client.compactionFollowUps = nil
 	client.compactionFollowUpCount = 0
 	client.compactionFollowUpBytes = 0
 	client.flushingCompactionFollowUps = false
+	if queueChanged {
+		client.appendQueuedMessagesEventLocked()
+	}
 	client.mu.Unlock()
 }
 
