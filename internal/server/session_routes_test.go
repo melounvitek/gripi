@@ -22,6 +22,7 @@ import (
 	gripi "github.com/melounvitek/gripi"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/server"
+	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 type nativeFixture struct {
@@ -512,6 +513,160 @@ func TestPersistedSubagentAndToolPresentationMatchesLiveRendering(t *testing.T) 
 	} {
 		if !strings.Contains(page.Body.String(), expected) {
 			t.Errorf("SSR output does not contain %q: %s", expected, page.Body.String())
+		}
+	}
+}
+
+func TestOversizedNativeGeneralSubagentSessionRoutesRenderBoundedProjection(t *testing.T) {
+	fixture := seedOversizedNativeGeneralSubagentFixture(t, 0)
+	handler := fixtureHandler(t, fixture.nativeFixture)
+	before := snapshotJSONL(t, fixture.sessionsRoot)
+	query := url.QueryEscape(fixture.path)
+
+	sidebar := serve(t, handler, http.MethodGet, "/sidebar?session="+query, "")
+	if sidebar.Code != http.StatusOK || !strings.Contains(sidebar.Body.String(), `data-session-path="`+fixture.path+`"`) {
+		t.Fatalf("oversized session missing from sidebar: %d %q", sidebar.Code, sidebar.Body.String())
+	}
+	pinned := serve(t, handler, http.MethodPost, "/sessions/pin", url.Values{"session": {fixture.path}, "pinned": {"true"}}.Encode())
+	if pinned.Code != http.StatusOK {
+		t.Fatalf("pin oversized session: %d %q", pinned.Code, pinned.Body.String())
+	}
+	pinnedSidebar := serve(t, handler, http.MethodGet, "/sidebar?session="+query, "")
+	if pinnedSidebar.Code != http.StatusOK || !strings.Contains(pinnedSidebar.Body.String(), "pinned-sessions-section") || !strings.Contains(pinnedSidebar.Body.String(), `data-session-path="`+fixture.path+`"`) {
+		t.Fatalf("pinned oversized session missing from sidebar: %d %q", pinnedSidebar.Code, pinnedSidebar.Body.String())
+	}
+
+	page := serve(t, handler, http.MethodGet, "/?session="+query, "")
+	if page.Code != http.StatusOK {
+		t.Fatalf("oversized session page: %d %q", page.Code, page.Body.String())
+	}
+	assertOversizedGeneralProjection(t, page.Body.String(), fixture)
+
+	fragment := serve(t, handler, http.MethodGet, "/session_fragment?session="+query, "")
+	var payload struct {
+		ConversationHTML string `json:"conversation_html"`
+	}
+	if fragment.Code != http.StatusOK || json.Unmarshal(fragment.Body.Bytes(), &payload) != nil {
+		t.Fatalf("oversized session fragment: %d %q", fragment.Code, fragment.Body.String())
+	}
+	assertOversizedGeneralProjection(t, payload.ConversationHTML, fixture)
+
+	assertJSONLSnapshotUnchanged(t, before, snapshotJSONL(t, fixture.sessionsRoot))
+}
+
+func TestOversizedNativeGeneralSubagentSessionPaginationReturnsBoundedProjection(t *testing.T) {
+	fixture := seedOversizedNativeGeneralSubagentFixture(t, 151)
+	handler := fixtureHandler(t, fixture.nativeFixture)
+	before := snapshotJSONL(t, fixture.sessionsRoot)
+	query := url.QueryEscape(fixture.path)
+
+	page := serve(t, handler, http.MethodGet, "/?session="+query, "")
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Later 151") || strings.Contains(page.Body.String(), fixture.hiddenStepsNote) || strings.Contains(page.Body.String(), fixture.rawOutputMarker) {
+		t.Fatalf("oversized session was not moved out of the initial window: %d %q", page.Code, page.Body.String())
+	}
+
+	fragment := serve(t, handler, http.MethodGet, "/session_fragment?session="+query, "")
+	if fragment.Code != http.StatusOK || strings.Contains(fragment.Body.String(), fixture.hiddenStepsNote) || strings.Contains(fragment.Body.String(), fixture.rawOutputMarker) {
+		t.Fatalf("oversized session fragment initial window: %d %q", fragment.Code, fragment.Body.String())
+	}
+
+	older := serve(t, handler, http.MethodGet, "/conversation_older?session="+query+"&cursor=2", "")
+	var payload struct {
+		HTML string `json:"html"`
+	}
+	if older.Code != http.StatusOK || json.Unmarshal(older.Body.Bytes(), &payload) != nil {
+		t.Fatalf("oversized session older conversation: %d %q", older.Code, older.Body.String())
+	}
+	assertOversizedGeneralProjection(t, payload.HTML, fixture)
+
+	assertJSONLSnapshotUnchanged(t, before, snapshotJSONL(t, fixture.sessionsRoot))
+}
+
+type oversizedGeneralFixture struct {
+	nativeFixture
+	path            string
+	rawOutputMarker string
+	hiddenStepsNote string
+	finalResponse   string
+	usageAndModel   string
+}
+
+func seedOversizedNativeGeneralSubagentFixture(t *testing.T, laterMessages int) oversizedGeneralFixture {
+	t.Helper()
+	fixture := seedNativeFixture(t)
+	project := filepath.Join(fixture.root, "projects", "oversized-general-project")
+	if err := os.MkdirAll(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(fixture.sessionsRoot, "e2e", "oversized-general.jsonl")
+	const toolCount = 400
+	if toolCount*8 <= 2000 {
+		t.Fatal("oversized fixture does not contain enough structural tool values")
+	}
+	rawOutputMarker := "UNIQUE_OVERSIZED_GENERAL_RAW_TOOL_OUTPUT_MARKER"
+	result := oversizedNativeGeneralSubagentLine(project, toolCount, rawOutputMarker+strings.Repeat("raw tool output ", 128))
+	if len(result) <= sessions.MaxIndexedEntryBytes {
+		t.Fatalf("oversized native general subagent line is only %d bytes", len(result))
+	}
+	lines := []string{
+		`{"type":"session","version":3,"id":"oversized-general","timestamp":"2026-07-20T12:00:00.000Z","cwd":` + jsonString(project) + `}`,
+		oversizedNativeSubagentCallLine(),
+		result,
+	}
+	parent := "general-result"
+	for index := 1; index <= laterMessages; index++ {
+		id := fmt.Sprintf("later-%d", index)
+		lines = append(lines, nativeLaterUserLine(id, parent, fmt.Sprintf("Later %d", index)))
+		parent = id
+	}
+	lines = append(lines, `{"type":"session_info","id":"oversized-general-info","parentId":`+jsonString(parent)+`,"timestamp":"2026-07-20T12:01:00.000Z","name":"Oversized general subagent"}`)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return oversizedGeneralFixture{nativeFixture: fixture, path: path, rawOutputMarker: rawOutputMarker, hiddenStepsNote: fmt.Sprintf("%d detailed tool steps hidden", toolCount), finalResponse: "Review complete", usageAndModel: "2 turns ↑1.2k ↓34 $0.1250 ctx:2.0k review-model"}
+}
+
+func oversizedNativeSubagentCallLine() string {
+	return `{"type":"message","id":"subagent-call","parentId":null,"timestamp":"2026-07-20T12:00:01.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"subagent-1","name":"subagent","arguments":{"task":"Review the changed files"}}]}}`
+}
+
+func oversizedNativeGeneralSubagentLine(project string, toolCount int, output string) string {
+	var line strings.Builder
+	fmt.Fprintf(&line, `{"type":"message","id":"general-result","parentId":"subagent-call","timestamp":"2026-07-20T12:00:02.000Z","message":{"role":"toolResult","toolCallId":"subagent-1","toolName":"subagent","content":[{"type":"text","text":%s}],"details":{"status":"done","tools":[`, jsonString("fallback"))
+	for index := 0; index < toolCount; index++ {
+		if index > 0 {
+			line.WriteByte(',')
+		}
+		fmt.Fprintf(&line, `{"status":"done","name":"read","args":{"path":%s,"offset":%d,"limit":20},"output":%s}`, jsonString(filepath.Join(project, fmt.Sprintf("file-%d.go", index))), index+1, jsonString(output))
+	}
+	line.WriteString(`],"textItems":["Review complete"],"usage":{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000},"model":"review-model"},"isError":false}}`)
+	return line.String()
+}
+
+func nativeLaterUserLine(id, parent, text string) string {
+	return `{"type":"message","id":` + jsonString(id) + `,"parentId":` + jsonString(parent) + `,"timestamp":"2026-07-20T12:01:00.000Z","message":{"role":"user","content":[{"type":"text","text":` + jsonString(text) + `}]}}`
+}
+
+func assertOversizedGeneralProjection(t *testing.T, rendered string, fixture oversizedGeneralFixture) {
+	t.Helper()
+	for _, expected := range []string{"✓ general", fixture.hiddenStepsNote, fixture.finalResponse, fixture.usageAndModel} {
+		if !strings.Contains(rendered, expected) {
+			t.Errorf("bounded projection does not contain %q", expected)
+		}
+	}
+	if strings.Contains(rendered, fixture.rawOutputMarker) {
+		t.Errorf("bounded projection contains raw tool output marker %q", fixture.rawOutputMarker)
+	}
+}
+
+func assertJSONLSnapshotUnchanged(t *testing.T, before, after map[string][]byte) {
+	t.Helper()
+	if len(before) != len(after) {
+		t.Fatalf("session file count changed: %d -> %d", len(before), len(after))
+	}
+	for path, contents := range before {
+		if !bytes.Equal(after[path], contents) {
+			t.Fatalf("Pi JSONL changed at %s", path)
 		}
 	}
 }
