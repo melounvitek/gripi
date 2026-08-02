@@ -251,12 +251,13 @@ type scanPathPart struct {
 }
 
 type scanFrame struct {
-	kind  byte
-	path  []scanPathPart
-	state byte
-	key   string
-	index int
-	keys  map[string]bool
+	kind         byte
+	path         []scanPathPart
+	state        byte
+	key          string
+	index        int
+	keys         map[string]bool
+	generalTools bool
 }
 
 type indexJSONScanner struct {
@@ -269,6 +270,7 @@ type indexJSONScanner struct {
 	stringKey        bool
 	structuralKeys   int
 	structuralValues int
+	generalSubagent  bool
 	valid            bool
 }
 
@@ -325,7 +327,12 @@ func (scanner *indexJSONScanner) consume(value byte) bool {
 				frame.state = scanColon
 				scanner.collector.objectKey(frame.path, key)
 			} else {
-				scanner.collector.stringValue(scanner.currentPath(), scanner.string)
+				path := scanner.currentPath()
+				scanner.collector.stringValue(path, scanner.string)
+				if pathEquals(path, "message", "toolName") {
+					name, exact := scanner.string.exact()
+					scanner.generalSubagent = exact && name == "subagent"
+				}
 				scanner.completeValue()
 			}
 			return true
@@ -405,10 +412,18 @@ func (scanner *indexJSONScanner) consume(value byte) bool {
 }
 
 func (scanner *indexJSONScanner) startValue(value byte) {
-	scanner.structuralValues++
-	if scanner.structuralValues > indexMaxValues {
-		scanner.valid = false
-		return
+	path := scanner.currentPath()
+	inGeneralTools := scanner.inGeneralTools() || scanner.generalSubagent && pathEquals(path, "message", "details", "tools") && value == '['
+	if !inGeneralTools {
+		scanner.structuralValues++
+		if scanner.structuralValues > indexMaxValues {
+			scanner.valid = false
+			return
+		}
+	}
+	if scanner.inGeneralTools() && generalToolItemPath(path) {
+		scanner.collector.startGeneralTool()
+		scanner.collector.generalToolCount++
 	}
 	switch {
 	case value == '{' || value == '[':
@@ -416,12 +431,11 @@ func (scanner *indexJSONScanner) startValue(value byte) {
 			scanner.valid = false
 			return
 		}
-		path := scanner.currentPath()
 		scanner.collector.startContainer(path, value)
-		frame := scanFrame{kind: value, path: path}
+		frame := scanFrame{kind: value, path: path, generalTools: inGeneralTools}
 		if value == '{' {
 			frame.state = scanKeyOrEnd
-			if canonicalKeyPath(path) {
+			if canonicalKeyPath(path) && !inGeneralTools {
 				frame.keys = make(map[string]bool)
 			}
 		} else {
@@ -504,6 +518,15 @@ func (scanner *indexJSONScanner) completeValue() {
 	frame.state = scanCommaOrEnd
 }
 
+func (scanner *indexJSONScanner) inGeneralTools() bool {
+	for index := len(scanner.stack) - 1; index >= 0; index-- {
+		if scanner.stack[index].generalTools {
+			return true
+		}
+	}
+	return false
+}
+
 func (scanner *indexJSONScanner) currentPath() []scanPathPart {
 	if len(scanner.stack) == 0 {
 		return nil
@@ -522,6 +545,9 @@ func (scanner *indexJSONScanner) currentPath() []scanPathPart {
 func (scanner *indexJSONScanner) finish() (entry, bool) {
 	if scanner.token == scanNumber || scanner.token == scanLiteral {
 		scanner.finishScalar()
+	}
+	if scanner.collector.generalTools {
+		scanner.collector.finishGeneralTool()
 	}
 	if !scanner.valid || scanner.token != 0 || len(scanner.stack) != 0 || scanner.rootState != scanDone || !scanner.collector.valid {
 		return entry{}, false
@@ -580,30 +606,37 @@ func validJSONNumber(value string) bool {
 }
 
 type indexCollector struct {
-	keys                 map[string][]string
-	strings              map[string]*scannedString
-	scalars              map[string]any
-	containers           map[string]byte
-	seen                 map[string]byte
-	argumentBytes        map[int]int
-	argumentCommands     map[int]*scannedString
-	generalToolNames     map[int]string
-	generalToolArguments map[int]map[string]*scannedString
-	generalOutputBytes   int
-	generalStreaming     *scannedString
-	generalLastTextItem  *scannedString
-	generalAmbiguous     bool
-	allJSONMinimum       int64
-	tracked              int
-	valid                bool
+	keys                     map[string][]string
+	strings                  map[string]*scannedString
+	scalars                  map[string]any
+	containers               map[string]byte
+	seen                     map[string]byte
+	argumentBytes            map[int]int
+	argumentCommands         map[int]*scannedString
+	generalSubagent          bool
+	generalTools             bool
+	generalToolCount         int
+	generalToolActive        bool
+	generalToolName          string
+	generalToolCommandBytes  int
+	generalToolPathBytes     int
+	generalToolFilePathBytes int
+	generalToolPatternBytes  int
+	generalArgumentBytes     int
+	generalOutputBytes       int
+	generalStreaming         *scannedString
+	generalLastTextItem      *scannedString
+	generalAmbiguous         bool
+	allJSONMinimum           int64
+	tracked                  int
+	valid                    bool
 }
 
 func newIndexCollector() *indexCollector {
 	return &indexCollector{
 		keys: make(map[string][]string), strings: make(map[string]*scannedString), scalars: make(map[string]any),
 		containers: make(map[string]byte), seen: make(map[string]byte), argumentBytes: make(map[int]int),
-		argumentCommands: make(map[int]*scannedString), generalToolNames: make(map[int]string),
-		generalToolArguments: make(map[int]map[string]*scannedString), valid: true,
+		argumentCommands: make(map[int]*scannedString), valid: true,
 	}
 }
 
@@ -621,11 +654,18 @@ func (collector *indexCollector) startContainer(path []scanPathPart, kind byte) 
 		return
 	}
 	collector.allJSONMinimum++
+	if pathEquals(path, "message", "details", "tools") && kind == '[' && collector.generalSubagent {
+		collector.generalTools = true
+	}
 	if generalScalarStringPath(path) {
 		collector.generalAmbiguous = true
 	}
-	if interestingContainer(path) && collector.reserve() {
-		collector.containers[pathCode(path)] = kind
+	if interestingContainer(path) {
+		if collector.generalTools && generalToolsPath(path) {
+			collector.containers[pathCode(path)] = kind
+		} else if collector.reserve() {
+			collector.containers[pathCode(path)] = kind
+		}
 	}
 	collector.markContentItem(path, kind)
 }
@@ -635,6 +675,9 @@ func (collector *indexCollector) objectKey(path []scanPathPart, key string) {
 		return
 	}
 	collector.allJSONMinimum += int64(len(key))
+	if collector.generalTools && generalToolsPath(path) {
+		return
+	}
 	if !canonicalKeyPath(path) || !collector.reserve() {
 		return
 	}
@@ -649,12 +692,19 @@ func (collector *indexCollector) stringValue(path []scanPathPart, value *scanned
 	}
 	collector.allJSONMinimum += int64(value.bytes)
 	collector.markContentItem(path, 's')
+	if pathEquals(path, "message", "toolName") {
+		name, exact := value.exact()
+		collector.generalSubagent = exact && name == "subagent"
+	}
 	collector.trackGeneralString(path, value)
 	if argumentStringPath(path) {
 		collector.argumentBytes[path[2].index] += value.bytes
 		if len(path) == 5 && path[4].key == "command" {
 			collector.argumentCommands[path[2].index] = value
 		}
+	}
+	if collector.generalTools && generalToolsPath(path) {
+		return
 	}
 	if interestingString(path) && collector.reserve() {
 		collector.strings[pathCode(path)] = value
@@ -674,23 +724,53 @@ func (collector *indexCollector) trackGeneralString(path []scanPathPart, value *
 		collector.generalOutputBytes += value.nonTrimWhitespace
 		return
 	}
-	if len(path) == 5 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array && path[4].key == "name" {
-		if name, exact := value.exact(); exact && collector.reserve() {
-			collector.generalToolNames[path[3].index] = name
+	if !collector.generalTools || !generalToolsPath(path) {
+		return
+	}
+	if len(path) == 5 && path[4].key == "name" {
+		if name, exact := value.exact(); exact {
+			collector.generalToolName = name
 		}
 		return
 	}
-	if len(path) == 6 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array && path[4].key == "args" && contains([]string{"command", "path", "file_path", "pattern"}, path[5].key) {
-		if !collector.reserve() {
-			return
-		}
-		arguments := collector.generalToolArguments[path[3].index]
-		if arguments == nil {
-			arguments = make(map[string]*scannedString)
-			collector.generalToolArguments[path[3].index] = arguments
-		}
-		arguments[path[5].key] = value
+	if len(path) != 6 || path[4].key != "args" {
+		return
 	}
+	switch path[5].key {
+	case "command":
+		collector.generalToolCommandBytes = value.bytes
+	case "path":
+		collector.generalToolPathBytes = value.bytes
+	case "file_path":
+		collector.generalToolFilePathBytes = value.bytes
+	case "pattern":
+		collector.generalToolPatternBytes = value.bytes
+	}
+}
+
+func (collector *indexCollector) startGeneralTool() {
+	collector.finishGeneralTool()
+	collector.generalToolActive = true
+	collector.generalToolName = ""
+	collector.generalToolCommandBytes = 0
+	collector.generalToolPathBytes = 0
+	collector.generalToolFilePathBytes = 0
+	collector.generalToolPatternBytes = 0
+}
+
+func (collector *indexCollector) finishGeneralTool() {
+	if !collector.generalToolActive {
+		return
+	}
+	switch collector.generalToolName {
+	case "bash":
+		collector.generalArgumentBytes += collector.generalToolCommandBytes
+	case "read", "write", "edit", "ls":
+		collector.generalArgumentBytes += max(collector.generalToolPathBytes, collector.generalToolFilePathBytes)
+	case "grep", "find":
+		collector.generalArgumentBytes += collector.generalToolPatternBytes + collector.generalToolPathBytes
+	}
+	collector.generalToolActive = false
 }
 
 func (collector *indexCollector) scalarValue(path []scanPathPart, value any) {
@@ -703,6 +783,9 @@ func (collector *indexCollector) scalarValue(path []scanPathPart, value any) {
 		if len(path) == 4 && pathEqualsPrefix(path, "message", "details", "textItems") && path[3].array {
 			collector.generalLastTextItem = nil
 		}
+	}
+	if collector.generalTools && generalToolsPath(path) {
+		return
 	}
 	collector.markContentItem(path, 'v')
 	if interestingScalar(path) && collector.reserve() {
@@ -797,12 +880,16 @@ func (collector *indexCollector) messageMetadata() (entry, bool) {
 			visible = diff != nil && diff.bytes > 0
 		}
 		generalSubagent := toolName == "subagent" && collector.container("message", "details", "tools") == '[' && collector.container("message", "details", "usage") == '{'
+		if collector.generalTools && !generalSubagent {
+			return entry{}, false
+		}
 		if !visible && generalSubagent {
 			visible = true
 		}
 		if visible {
 			minimum := scannedContentMinimum(parts)
 			if generalSubagent {
+				result.GeneralToolCount = collector.generalToolCount
 				minimum = collector.generalSubagentMinimum(parts)
 			}
 			if toolName == "edit" {
@@ -885,26 +972,7 @@ func (collector *indexCollector) generalSubagentMinimum(parts []scannedPart) int
 	} else {
 		finalBytes = int(scannedContentMinimum(parts) / 2)
 	}
-	argumentBytes := 0
-	for index, arguments := range collector.generalToolArguments {
-		bytesFor := func(keys ...string) int {
-			for _, key := range keys {
-				if value := arguments[key]; value != nil {
-					return value.bytes
-				}
-			}
-			return 0
-		}
-		switch collector.generalToolNames[index] {
-		case "bash":
-			argumentBytes += bytesFor("command")
-		case "read", "write", "edit", "ls":
-			argumentBytes += bytesFor("path", "file_path")
-		case "grep", "find":
-			argumentBytes += bytesFor("pattern") + bytesFor("path")
-		}
-	}
-	return int64((collector.generalOutputBytes + finalBytes + argumentBytes) * 2)
+	return int64((collector.generalOutputBytes + finalBytes + collector.generalArgumentBytes) * 2)
 }
 
 func (collector *indexCollector) assistantStatus(parts []scannedPart) statusData {
@@ -1362,6 +1430,15 @@ func canonicalKeyPath(path []scanPathPart) bool {
 	return len(path) == 0 || pathEquals(path, "message") || pathEquals(path, "message", "details") || messagePartPath(path) || customPartPath(path) ||
 		(len(path) == 4 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array) ||
 		(len(path) == 5 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array && path[4].key == "args")
+}
+
+func generalToolsPath(path []scanPathPart) bool {
+	return pathEquals(path, "message", "details", "tools") || generalToolItemPath(path) ||
+		len(path) > 4 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array
+}
+
+func generalToolItemPath(path []scanPathPart) bool {
+	return len(path) == 4 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array
 }
 
 func interestingContainer(path []scanPathPart) bool {

@@ -125,18 +125,19 @@ type segment struct {
 }
 
 type entry struct {
-	Ordinal     int
-	Offset      int64
-	Length      int64
-	Type        string
-	ID          string
-	ParentID    string
-	TargetID    string
-	Role        string
-	Segments    []segment
-	SubagentIDs []string
-	Status      statusData
-	Session     indexedSessionData
+	Ordinal          int
+	Offset           int64
+	Length           int64
+	Type             string
+	ID               string
+	ParentID         string
+	TargetID         string
+	Role             string
+	GeneralToolCount int
+	Segments         []segment
+	SubagentIDs      []string
+	Status           statusData
+	Session          indexedSessionData
 }
 
 type indexedSessionData struct {
@@ -820,6 +821,9 @@ func readIndexedLine(reader *bufio.Reader) ([]byte, int64, *entry, error) {
 
 func estimatedEntryBytes(item entry) int64 {
 	value := 176 + len(item.Type) + len(item.ID) + len(item.ParentID) + len(item.TargetID) + len(item.Role)
+	if item.GeneralToolCount > 0 {
+		value += 8
+	}
 	for _, segment := range item.Segments {
 		value += 64 + len(segment.Role) + len(segment.ToolCallID) + len(segment.ToolName)
 	}

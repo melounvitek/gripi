@@ -322,6 +322,65 @@ func TestOversizedAssistantSessionMetadataExcludesCommentaryAndUnicodeWhitespace
 	}
 }
 
+func TestOversizedNativeGeneralSubagentEntriesRemainDiscoverable(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	toolCount := 400
+	line := nativeGeneralSubagentLine(project, toolCount, strings.Repeat("output ", 160))
+	if len(line) <= MaxIndexedEntryBytes {
+		t.Fatalf("native general subagent line is only %d bytes", len(line))
+	}
+	writeSessionLines(t, path, []string{sessionLine(project), line})
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	session, ok := store.Session(path)
+	if !ok {
+		t.Fatal("oversized native general subagent session was not discovered")
+	}
+	if session.Path != path || session.CWD != project {
+		t.Fatalf("session = %#v", session)
+	}
+	sessions, err := (Store{Root: root, Home: root, Cache: NewCache()}).Sessions()
+	if err != nil || len(sessions) != 1 || sessions[0].Path != path {
+		t.Fatalf("sessions = %#v, err = %v", sessions, err)
+	}
+	indexed, err := store.Cache.Index(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !indexed.supported || len(indexed.entries) != 2 || indexed.entries[1].GeneralToolCount != toolCount {
+		t.Fatalf("indexed = %#v", indexed)
+	}
+	if indexed.bytes > 1<<20 {
+		t.Fatalf("oversized native details retained in the index: %d bytes", indexed.bytes)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("indexing changed the native session JSONL")
+	}
+}
+
+func TestOversizedNativeGeneralSubagentMalformedToolsRemainRejected(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	line := nativeGeneralSubagentLine(project, 400, strings.Repeat("output ", 160))
+	line = strings.Replace(line, `],"textItems"`, `,],"textItems"`, 1)
+	writeSessionLines(t, path, []string{sessionLine(project), line})
+
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+	if _, err := store.Status(path); err == nil {
+		t.Fatal("malformed native general subagent entry was accepted")
+	}
+	if _, ok := store.Session(path); ok {
+		t.Fatal("malformed native general subagent session was discovered")
+	}
+}
+
 func TestOversizedIgnoredToolResultDetailsDoNotPushSmallPairedOutputOutOfTheWindow(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	ignored := strings.Repeat("i", MaxIndexedEntryBytes+1024)
@@ -540,6 +599,23 @@ func userLine(id, parent, timestamp, text string) string {
 		parentValue = "null"
 	}
 	return `{"type":"message","id":"` + id + `","parentId":` + parentValue + `,"timestamp":"` + timestamp + `","message":{"role":"user","content":[{"type":"text","text":"` + text + `"}]}}`
+}
+
+func nativeGeneralSubagentLine(project string, toolCount int, output string) string {
+	quotedOutput, _ := json.Marshal(output)
+	var line strings.Builder
+	fmt.Fprintf(&line, `{"type":"message","id":"general-result","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"toolResult","toolCallId":"subagent-1","toolName":"subagent","content":[{"type":"text","text":"fallback"}],"details":{"status":"done","tools":[`)
+	for index := 0; index < toolCount; index++ {
+		if index > 0 {
+			line.WriteByte(',')
+		}
+		quotedPath, _ := json.Marshal(filepath.Join(project, fmt.Sprintf("file-%d.go", index)))
+		fmt.Fprintf(&line, `{"status":"done","name":"read","args":{"path":%s,"offset":%d,"limit":20},"output":`, quotedPath, index+1)
+		line.Write(quotedOutput)
+		line.WriteByte('}')
+	}
+	fmt.Fprintf(&line, `],"textItems":["Review complete"],"usage":{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000},"model":"review-model"},"isError":false}}`)
+	return line.String()
 }
 
 func TestSessionsRetainMetadataBeyondTheConversationIndexLimit(t *testing.T) {
