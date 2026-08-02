@@ -195,7 +195,7 @@ func TestOversizedHiddenSubagentCallDoesNotPushItsSmallResultOutOfTheWindow(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if window.StartIndex != 0 || window.TotalMessageCount != 1 || len(window.Messages) != 1 || window.Messages[0].Text != "No findings" || window.Messages[0].ToolPrompt != prompt {
+	if window.StartIndex != 0 || window.TotalMessageCount != 1 || len(window.Messages) != 1 || window.Messages[0].Text != "No findings" || !strings.HasPrefix(window.Messages[0].ToolPrompt, prompt[:indexCaptureBytes]) || !strings.HasSuffix(window.Messages[0].ToolPrompt, "\n…") || len(window.Messages[0].ToolPrompt) > indexCaptureBytes+len("\n…") {
 		t.Fatalf("window = start %d of %d, messages %#v", window.StartIndex, window.TotalMessageCount, window.Messages)
 	}
 }
@@ -363,6 +363,168 @@ func TestOversizedNativeGeneralSubagentEntriesRemainDiscoverable(t *testing.T) {
 	}
 	if !bytes.Equal(after, before) {
 		t.Fatal("indexing changed the native session JSONL")
+	}
+}
+
+func TestOversizedNativeGeneralSubagentResultsRenderBoundedHistoricalProjections(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	toolCount := 368
+	rawOutput := "RAW_TOOL_OUTPUT_" + strings.Repeat("x", 1024)
+	rawPath := filepath.Join(project, "file-0.go")
+	result := strings.Replace(nativeGeneralSubagentLine(project, toolCount, rawOutput), `"parentId":null`, `"parentId":"call"`, 1)
+	task := "Review the changed files"
+	lines := []string{sessionLine(project), nativeSubagentCallLine("call", task), result}
+	parent := "general-result"
+	for index := 0; index < 25; index++ {
+		id := fmt.Sprintf("later-%d", index)
+		lines = append(lines, userLine(id, parent, "2026-01-01T00:02:00Z", fmt.Sprintf("Later %d", index)))
+		parent = id
+	}
+	writeSessionLines(t, path, lines)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if window.StartIndex != 0 || window.TotalMessageCount != 26 || len(window.Messages) != 26 {
+		t.Fatalf("window = start %d of %d, messages %d", window.StartIndex, window.TotalMessageCount, len(window.Messages))
+	}
+	message := window.Messages[0]
+	wantText := "✓ general\n368 detailed tool steps hidden\n\nReview complete\n\n2 turns ↑1.2k ↓34 $0.1250 ctx:2.0k review-model"
+	if message.Text != wantText {
+		t.Fatalf("historical text = %q, want %q", message.Text, wantText)
+	}
+	if strings.Contains(message.Text, rawOutput) || strings.Contains(message.Text, rawPath) {
+		t.Fatalf("historical text retained hidden tool data: %q", message.Text)
+	}
+	if len(message.Text) > indexCaptureBytes+256 || message.ToolCallID != "subagent-1" || message.ToolName != "subagent" || message.ToolPrompt != task || message.Summary != "subagent general" || !message.Compact || !message.ToolTranscript || message.Error {
+		t.Fatalf("historical metadata = %#v", message)
+	}
+	indexed, err := (Store{Root: root, Home: root, Cache: NewCache()}).Cache.Index(path)
+	if err != nil || indexed.entries[2].General == nil || indexed.entries[2].GeneralToolCount != toolCount {
+		t.Fatalf("indexed general projection = %#v, err = %v", indexed.entries[2], err)
+	}
+	if len(indexed.entries[2].Segments) != 1 || indexed.entries[2].Segments[0].Minimum >= WindowByteBudget || indexed.entries[2].Segments[0].PairedMinimum >= WindowByteBudget {
+		t.Fatalf("general segment estimate = %#v", indexed.entries[2].Segments)
+	}
+	if indexed.bytes > 1<<20 {
+		t.Fatalf("bounded projection retained too much index data: %d bytes", indexed.bytes)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("rendering changed the native session JSONL")
+	}
+}
+
+func TestOversizedNativeGeneralSubagentResultUsesSingularHiddenToolGrammar(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	line := nativeGeneralSubagentLine(project, 1, strings.Repeat("hidden output ", 20000))
+	writeSessionLines(t, path, []string{sessionLine(project), line})
+
+	window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
+	if err != nil || len(window.Messages) != 1 {
+		t.Fatalf("window = %#v, err = %v", window, err)
+	}
+	if !strings.Contains(window.Messages[0].Text, "1 detailed tool step hidden") || strings.Contains(window.Messages[0].Text, "1 detailed tool steps hidden") {
+		t.Fatalf("hidden tool grammar = %q", window.Messages[0].Text)
+	}
+}
+
+func TestOversizedNativeGeneralSubagentResultPreservesStatusAndError(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+		icon   string
+		error  bool
+	}{
+		{name: "done", status: "done", icon: "✓"},
+		{name: "error", status: "error", icon: "✗", error: true},
+		{name: "running", status: "running", icon: "⏳"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, project, path := sessionFixture(t)
+			line := nativeGeneralSubagentLineWithOptions(project, 1, strings.Repeat("hidden output ", 20000), nativeGeneralSubagentOptions{status: test.status, isError: test.error, textItems: []string{"Result"}})
+			writeSessionLines(t, path, []string{sessionLine(project), line})
+
+			window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
+			if err != nil || len(window.Messages) != 1 {
+				t.Fatalf("window = %#v, err = %v", window, err)
+			}
+			message := window.Messages[0]
+			if !strings.HasPrefix(message.Text, test.icon+" general\n1 detailed tool step hidden") || message.Error != test.error || message.ToolCallID != "subagent-1" || message.ToolName != "subagent" {
+				t.Fatalf("historical message = %#v", message)
+			}
+		})
+	}
+}
+
+func TestOversizedNativeGeneralSubagentResultUsesFinalResponsePrecedence(t *testing.T) {
+	tests := []struct {
+		name      string
+		streaming bool
+		textItems []string
+		content   string
+		want      string
+	}{
+		{name: "streaming text", streaming: true, textItems: []string{"text item"}, content: "content fallback", want: "streaming final"},
+		{name: "last text item", textItems: []string{"text item"}, content: "content fallback", want: "text item"},
+		{name: "content fallback", content: "content fallback", want: "content fallback"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, project, path := sessionFixture(t)
+			line := nativeGeneralSubagentLineWithOptions(project, 1, strings.Repeat("hidden output ", 20000), nativeGeneralSubagentOptions{
+				content: test.content, includeStreamingText: test.streaming, streamingText: "streaming final", textItems: test.textItems,
+			})
+			writeSessionLines(t, path, []string{sessionLine(project), line})
+
+			window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
+			if err != nil || len(window.Messages) != 1 {
+				t.Fatalf("window = %#v, err = %v", window, err)
+			}
+			if !strings.Contains(window.Messages[0].Text, "\n\n"+test.want+"\n\n") {
+				t.Fatalf("historical final text = %q", window.Messages[0].Text)
+			}
+		})
+	}
+}
+
+func TestOversizedNativeGeneralSubagentResultMarksClippedFinalResponse(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	final := strings.Repeat("f", MaxIndexedEntryBytes+1024)
+	line := nativeGeneralSubagentLineWithOptions(project, 1, "hidden", nativeGeneralSubagentOptions{textItems: []string{final}})
+	writeSessionLines(t, path, []string{sessionLine(project), line})
+
+	window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
+	if err != nil || len(window.Messages) != 1 {
+		t.Fatalf("window = %#v, err = %v", window, err)
+	}
+	text := window.Messages[0].Text
+	if !strings.Contains(text, strings.Repeat("f", indexCaptureBytes)) || !strings.Contains(text, "…") || strings.Contains(text, strings.Repeat("f", indexCaptureBytes+100)) || len(text) > indexCaptureBytes+256 {
+		t.Fatalf("clipped historical text = %q (len %d)", text, len(text))
+	}
+}
+
+func TestSmallNativeGeneralSubagentRenderingRemainsUnchanged(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	line := nativeGeneralSubagentLine(project, 1, "output")
+	writeSessionLines(t, path, []string{sessionLine(project), line})
+
+	window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
+	if err != nil || len(window.Messages) != 1 {
+		t.Fatalf("window = %#v, err = %v", window, err)
+	}
+	want := "✓ general\n✓ read " + filepath.Join(project, "file-0.go") + ":1-20\n  output\n\nReview complete\n\n2 turns ↑1.2k ↓34 $0.1250 ctx:2.0k review-model"
+	if window.Messages[0].Text != want {
+		t.Fatalf("small historical text = %q, want %q", window.Messages[0].Text, want)
 	}
 }
 
@@ -601,10 +763,27 @@ func userLine(id, parent, timestamp, text string) string {
 	return `{"type":"message","id":"` + id + `","parentId":` + parentValue + `,"timestamp":"` + timestamp + `","message":{"role":"user","content":[{"type":"text","text":"` + text + `"}]}}`
 }
 
+type nativeGeneralSubagentOptions struct {
+	status               string
+	content              string
+	textItems            []string
+	includeStreamingText bool
+	streamingText        string
+	isError              bool
+}
+
 func nativeGeneralSubagentLine(project string, toolCount int, output string) string {
+	return nativeGeneralSubagentLineWithOptions(project, toolCount, output, nativeGeneralSubagentOptions{
+		status: "done", content: "fallback", textItems: []string{"Review complete"},
+	})
+}
+
+func nativeGeneralSubagentLineWithOptions(project string, toolCount int, output string, options nativeGeneralSubagentOptions) string {
 	quotedOutput, _ := json.Marshal(output)
+	quotedContent, _ := json.Marshal(options.content)
+	quotedStatus, _ := json.Marshal(options.status)
 	var line strings.Builder
-	fmt.Fprintf(&line, `{"type":"message","id":"general-result","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"toolResult","toolCallId":"subagent-1","toolName":"subagent","content":[{"type":"text","text":"fallback"}],"details":{"status":"done","tools":[`)
+	fmt.Fprintf(&line, `{"type":"message","id":"general-result","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"toolResult","toolCallId":"subagent-1","toolName":"subagent","content":[{"type":"text","text":%s}],"details":{"status":%s,"tools":[`, quotedContent, quotedStatus)
 	for index := 0; index < toolCount; index++ {
 		if index > 0 {
 			line.WriteByte(',')
@@ -614,8 +793,26 @@ func nativeGeneralSubagentLine(project string, toolCount int, output string) str
 		line.Write(quotedOutput)
 		line.WriteByte('}')
 	}
-	fmt.Fprintf(&line, `],"textItems":["Review complete"],"usage":{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000},"model":"review-model"},"isError":false}}`)
+	line.WriteString(`]`)
+	if options.includeStreamingText {
+		quotedStreaming, _ := json.Marshal(options.streamingText)
+		fmt.Fprintf(&line, `,"streamingText":%s`, quotedStreaming)
+	}
+	line.WriteString(`,"textItems":[`)
+	for index, text := range options.textItems {
+		if index > 0 {
+			line.WriteByte(',')
+		}
+		quotedText, _ := json.Marshal(text)
+		line.Write(quotedText)
+	}
+	fmt.Fprintf(&line, `],"usage":{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000},"model":"review-model"},"isError":%t}}`, options.isError)
 	return line.String()
+}
+
+func nativeSubagentCallLine(id, task string) string {
+	quotedTask, _ := json.Marshal(task)
+	return fmt.Sprintf(`{"type":"message","id":%q,"parentId":null,"timestamp":"2026-01-01T00:00:00Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"subagent-1","name":"subagent","arguments":{"task":%s}}]}}`, id, quotedTask)
 }
 
 func TestSessionsRetainMetadataBeyondTheConversationIndexLimit(t *testing.T) {

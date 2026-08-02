@@ -134,10 +134,22 @@ type entry struct {
 	TargetID         string
 	Role             string
 	GeneralToolCount int
+	General          *generalSubagentProjection
 	Segments         []segment
 	SubagentIDs      []string
+	SubagentPrompts  map[string]string
 	Status           statusData
 	Session          indexedSessionData
+}
+
+type generalSubagentProjection struct {
+	Status    string
+	ToolCount int
+	FinalText string
+	Usage     map[string]any
+	Model     string
+	Prompt    string
+	Error     bool
 }
 
 type indexedSessionData struct {
@@ -824,6 +836,12 @@ func estimatedEntryBytes(item entry) int64 {
 	if item.GeneralToolCount > 0 {
 		value += 8
 	}
+	if item.General != nil {
+		value += 64 + len(item.General.Status) + len(item.General.FinalText) + len(item.General.Model) + len(item.General.Prompt) + len(item.General.Usage)*64
+	}
+	for id, prompt := range item.SubagentPrompts {
+		value += 40 + len(id) + len(prompt)
+	}
 	for _, segment := range item.Segments {
 		value += 64 + len(segment.Role) + len(segment.ToolCallID) + len(segment.ToolName)
 	}
@@ -1353,6 +1371,23 @@ func renderUnits(path string, indexed *index, selected []unit, home string) ([]*
 	subagents := make(map[string]subagentContext)
 	for _, ordinal := range ordinals {
 		item := needed[ordinal]
+		for id, prompt := range item.SubagentPrompts {
+			if prompt != "" {
+				subagents[id] = subagentContext{prompt: prompt, timestamp: parseTime(item.Session.Timestamp)}
+			}
+		}
+	}
+	for _, ordinal := range ordinals {
+		item := needed[ordinal]
+		if item.General != nil {
+			message := historicalGeneralSubagentMessage(item)
+			message.Key = [2]int{item.Ordinal, 0}
+			messages = append(messages, message)
+			continue
+		}
+		if len(item.Segments) == 0 && retainedSubagentPrompts(item) {
+			continue
+		}
 		if item.Length > MaxRenderedEntryBytes {
 			return nil, errors.New("selected session entry exceeds rendering bound")
 		}
@@ -1401,6 +1436,59 @@ func renderUnits(path string, indexed *index, selected []unit, home string) ([]*
 		}
 	}
 	return result, nil
+}
+
+func retainedSubagentPrompts(item entry) bool {
+	if len(item.SubagentIDs) == 0 || len(item.SubagentPrompts) != len(item.SubagentIDs) {
+		return false
+	}
+	for _, id := range item.SubagentIDs {
+		if item.SubagentPrompts[id] == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func historicalGeneralSubagentMessage(item entry) *Message {
+	part := segment{Role: "toolResult", ToolCallID: item.ID, ToolName: "subagent"}
+	if len(item.Segments) > 0 {
+		part = item.Segments[0]
+	}
+	return &Message{
+		Role:           "toolResult",
+		Text:           generalSubagentHistoricalText(item.General),
+		Timestamp:      parseTime(item.Session.Timestamp),
+		EntryID:        item.ID,
+		Compact:        true,
+		Summary:        "subagent general",
+		Error:          item.General.Error,
+		ToolCallID:     part.ToolCallID,
+		ToolName:       part.ToolName,
+		ToolTranscript: true,
+		ToolPrompt:     item.General.Prompt,
+	}
+}
+
+func generalSubagentHistoricalText(projection *generalSubagentProjection) string {
+	statusIcon := "⏳"
+	if projection.Status == "done" {
+		statusIcon = "✓"
+	} else if projection.Status == "error" {
+		statusIcon = "✗"
+	}
+	stepLabel := "steps"
+	if projection.ToolCount == 1 {
+		stepLabel = "step"
+	}
+	lines := []string{statusIcon + " general", fmt.Sprintf("%d detailed tool %s hidden", projection.ToolCount, stepLabel)}
+	if projection.FinalText != "" {
+		lines = append(lines, "", projection.FinalText)
+	}
+	if usage := generalSubagentUsageText(projection.Usage, projection.Model); usage != "" {
+		lines = append(lines, "", usage)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func messagesFromRaw(raw map[string]any, home string) []*Message {

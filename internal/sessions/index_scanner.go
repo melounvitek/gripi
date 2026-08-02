@@ -422,7 +422,6 @@ func (scanner *indexJSONScanner) startValue(value byte) {
 		}
 	}
 	if scanner.inGeneralTools() && generalToolItemPath(path) {
-		scanner.collector.startGeneralTool()
 		scanner.collector.generalToolCount++
 	}
 	switch {
@@ -546,9 +545,6 @@ func (scanner *indexJSONScanner) finish() (entry, bool) {
 	if scanner.token == scanNumber || scanner.token == scanLiteral {
 		scanner.finishScalar()
 	}
-	if scanner.collector.generalTools {
-		scanner.collector.finishGeneralTool()
-	}
 	if !scanner.valid || scanner.token != 0 || len(scanner.stack) != 0 || scanner.rootState != scanDone || !scanner.collector.valid {
 		return entry{}, false
 	}
@@ -606,37 +602,33 @@ func validJSONNumber(value string) bool {
 }
 
 type indexCollector struct {
-	keys                     map[string][]string
-	strings                  map[string]*scannedString
-	scalars                  map[string]any
-	containers               map[string]byte
-	seen                     map[string]byte
-	argumentBytes            map[int]int
-	argumentCommands         map[int]*scannedString
-	generalSubagent          bool
-	generalTools             bool
-	generalToolCount         int
-	generalToolActive        bool
-	generalToolName          string
-	generalToolCommandBytes  int
-	generalToolPathBytes     int
-	generalToolFilePathBytes int
-	generalToolPatternBytes  int
-	generalArgumentBytes     int
-	generalOutputBytes       int
-	generalStreaming         *scannedString
-	generalLastTextItem      *scannedString
-	generalAmbiguous         bool
-	allJSONMinimum           int64
-	tracked                  int
-	valid                    bool
+	keys                map[string][]string
+	strings             map[string]*scannedString
+	scalars             map[string]any
+	containers          map[string]byte
+	seen                map[string]byte
+	argumentBytes       map[int]int
+	argumentCommands    map[int]*scannedString
+	argumentTasks       map[int]*scannedString
+	generalSubagent     bool
+	generalTools        bool
+	generalToolCount    int
+	generalStreaming    *scannedString
+	generalLastTextItem *scannedString
+	generalStatus       *scannedString
+	generalModel        *scannedString
+	generalPrompt       *scannedString
+	generalUsage        map[string]any
+	allJSONMinimum      int64
+	tracked             int
+	valid               bool
 }
 
 func newIndexCollector() *indexCollector {
 	return &indexCollector{
 		keys: make(map[string][]string), strings: make(map[string]*scannedString), scalars: make(map[string]any),
 		containers: make(map[string]byte), seen: make(map[string]byte), argumentBytes: make(map[int]int),
-		argumentCommands: make(map[int]*scannedString), valid: true,
+		argumentCommands: make(map[int]*scannedString), argumentTasks: make(map[int]*scannedString), valid: true,
 	}
 }
 
@@ -657,8 +649,8 @@ func (collector *indexCollector) startContainer(path []scanPathPart, kind byte) 
 	if pathEquals(path, "message", "details", "tools") && kind == '[' && collector.generalSubagent {
 		collector.generalTools = true
 	}
-	if generalScalarStringPath(path) {
-		collector.generalAmbiguous = true
+	if len(path) == 4 && pathEqualsPrefix(path, "message", "details", "textItems") && path[3].array {
+		collector.generalLastTextItem = nil
 	}
 	if interestingContainer(path) {
 		if collector.generalTools && generalToolsPath(path) {
@@ -702,6 +694,9 @@ func (collector *indexCollector) stringValue(path []scanPathPart, value *scanned
 		if len(path) == 5 && path[4].key == "command" {
 			collector.argumentCommands[path[2].index] = value
 		}
+		if len(path) == 5 && path[4].key == "task" {
+			collector.argumentTasks[path[2].index] = value
+		}
 	}
 	if collector.generalTools && generalToolsPath(path) {
 		return
@@ -712,6 +707,18 @@ func (collector *indexCollector) stringValue(path []scanPathPart, value *scanned
 }
 
 func (collector *indexCollector) trackGeneralString(path []scanPathPart, value *scannedString) {
+	if pathEquals(path, "message", "details", "status") {
+		collector.generalStatus = value
+		return
+	}
+	if pathEquals(path, "message", "details", "model") {
+		collector.generalModel = value
+		return
+	}
+	if pathEquals(path, "message", "details", "task") {
+		collector.generalPrompt = value
+		return
+	}
 	if pathEquals(path, "message", "details", "streamingText") {
 		collector.generalStreaming = value
 		return
@@ -720,57 +727,6 @@ func (collector *indexCollector) trackGeneralString(path []scanPathPart, value *
 		collector.generalLastTextItem = value
 		return
 	}
-	if len(path) == 5 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array && path[4].key == "output" {
-		collector.generalOutputBytes += value.nonTrimWhitespace
-		return
-	}
-	if !collector.generalTools || !generalToolsPath(path) {
-		return
-	}
-	if len(path) == 5 && path[4].key == "name" {
-		if name, exact := value.exact(); exact {
-			collector.generalToolName = name
-		}
-		return
-	}
-	if len(path) != 6 || path[4].key != "args" {
-		return
-	}
-	switch path[5].key {
-	case "command":
-		collector.generalToolCommandBytes = value.bytes
-	case "path":
-		collector.generalToolPathBytes = value.bytes
-	case "file_path":
-		collector.generalToolFilePathBytes = value.bytes
-	case "pattern":
-		collector.generalToolPatternBytes = value.bytes
-	}
-}
-
-func (collector *indexCollector) startGeneralTool() {
-	collector.finishGeneralTool()
-	collector.generalToolActive = true
-	collector.generalToolName = ""
-	collector.generalToolCommandBytes = 0
-	collector.generalToolPathBytes = 0
-	collector.generalToolFilePathBytes = 0
-	collector.generalToolPatternBytes = 0
-}
-
-func (collector *indexCollector) finishGeneralTool() {
-	if !collector.generalToolActive {
-		return
-	}
-	switch collector.generalToolName {
-	case "bash":
-		collector.generalArgumentBytes += collector.generalToolCommandBytes
-	case "read", "write", "edit", "ls":
-		collector.generalArgumentBytes += max(collector.generalToolPathBytes, collector.generalToolFilePathBytes)
-	case "grep", "find":
-		collector.generalArgumentBytes += collector.generalToolPatternBytes + collector.generalToolPathBytes
-	}
-	collector.generalToolActive = false
 }
 
 func (collector *indexCollector) scalarValue(path []scanPathPart, value any) {
@@ -778,11 +734,14 @@ func (collector *indexCollector) scalarValue(path []scanPathPart, value any) {
 		return
 	}
 	collector.allJSONMinimum++
-	if generalScalarStringPath(path) {
-		collector.generalAmbiguous = true
-		if len(path) == 4 && pathEqualsPrefix(path, "message", "details", "textItems") && path[3].array {
-			collector.generalLastTextItem = nil
+	if len(path) == 4 && pathEqualsPrefix(path, "message", "details", "usage") && !path[3].array {
+		if collector.generalUsage == nil {
+			collector.generalUsage = make(map[string]any)
 		}
+		collector.generalUsage[path[3].key] = value
+	}
+	if len(path) == 4 && pathEqualsPrefix(path, "message", "details", "textItems") && path[3].array {
+		collector.generalLastTextItem = nil
 	}
 	if collector.generalTools && generalToolsPath(path) {
 		return
@@ -860,6 +819,7 @@ func (collector *indexCollector) messageMetadata() (entry, bool) {
 		if !ok {
 			return entry{}, false
 		}
+		result.SubagentPrompts = assistantSubagentPrompts(parts, collector.argumentTasks)
 		result.Status = collector.assistantStatus(parts)
 		result.Session.FinalText, result.Session.HasFinalText, result.Session.MetadataKnown = finalScannedAssistantText(parts)
 	case "user":
@@ -890,7 +850,8 @@ func (collector *indexCollector) messageMetadata() (entry, bool) {
 			minimum := scannedContentMinimum(parts)
 			if generalSubagent {
 				result.GeneralToolCount = collector.generalToolCount
-				minimum = collector.generalSubagentMinimum(parts)
+				result.General = collector.generalSubagentProjection(parts)
+				minimum = collector.generalSubagentMinimum(result.General)
 			}
 			if toolName == "edit" {
 				if diff := collector.stringStats("message", "details", "diff"); diff != nil && diff.bytes > 0 {
@@ -960,19 +921,75 @@ func (collector *indexCollector) messageMetadata() (entry, bool) {
 	return result, true
 }
 
-func (collector *indexCollector) generalSubagentMinimum(parts []scannedPart) int64 {
-	if collector.generalAmbiguous {
-		return 0
+func (collector *indexCollector) generalSubagentProjection(parts []scannedPart) *generalSubagentProjection {
+	var usage map[string]any
+	if collector.generalUsage != nil {
+		usage = make(map[string]any, len(collector.generalUsage))
+		for key, value := range collector.generalUsage {
+			usage[key] = value
+		}
 	}
-	finalBytes := 0
-	if collector.generalStreaming != nil && collector.generalStreaming.bytes > 0 {
-		finalBytes = collector.generalStreaming.bytes
-	} else if collector.generalLastTextItem != nil && collector.generalLastTextItem.bytes > 0 {
-		finalBytes = collector.generalLastTextItem.bytes
-	} else {
-		finalBytes = int(scannedContentMinimum(parts) / 2)
+	return &generalSubagentProjection{
+		Status:    boundedScannedString(collector.generalStatus),
+		ToolCount: collector.generalToolCount,
+		FinalText: collector.generalSubagentFinalText(parts),
+		Usage:     usage,
+		Model:     boundedScannedString(collector.generalModel),
+		Prompt:    boundedScannedString(collector.generalPrompt),
+		Error:     collector.scalar("message", "isError") == true,
 	}
-	return int64((collector.generalOutputBytes + finalBytes + collector.generalArgumentBytes) * 2)
+}
+
+func (collector *indexCollector) generalSubagentFinalText(parts []scannedPart) string {
+	final := boundedScannedString(collector.generalStreaming)
+	if final == "" {
+		final = boundedScannedString(collector.generalLastTextItem)
+	}
+	if final == "" {
+		final = boundedScannedContent(parts)
+	}
+	return final
+}
+
+func (collector *indexCollector) generalSubagentMinimum(projection *generalSubagentProjection) int64 {
+	return int64(len(generalSubagentHistoricalText(projection)) * 2)
+}
+
+func boundedScannedString(value *scannedString) string {
+	if value == nil {
+		return ""
+	}
+	result := value.prefix()
+	if value.truncated {
+		result += "\n…"
+	}
+	return result
+}
+
+func boundedScannedContent(parts []scannedPart) string {
+	result := joinedScannedContent(parts)
+	used := 0
+	count := 0
+	clipped := false
+	for _, part := range parts {
+		stats := scannedContentStats(part)
+		if stats == nil {
+			continue
+		}
+		used += len(stats.sessionPrefix())
+		count++
+		clipped = clipped || stats.truncated
+	}
+	if count > 1 {
+		used += count - 1
+	}
+	if used > indexCaptureBytes {
+		clipped = true
+	}
+	if clipped {
+		result += "\n…"
+	}
+	return result
 }
 
 func (collector *indexCollector) assistantStatus(parts []scannedPart) statusData {
@@ -1166,6 +1183,20 @@ type scannedPart struct {
 	mimeType                        string
 	direct, text, thinking          *scannedString
 	output, result, data, signature *scannedString
+}
+
+func assistantSubagentPrompts(parts []scannedPart, argumentTasks map[int]*scannedString) map[string]string {
+	var result map[string]string
+	for _, part := range parts {
+		if part.typeName != "toolCall" || part.name != "subagent" || part.id == "" {
+			continue
+		}
+		if result == nil {
+			result = make(map[string]string)
+		}
+		result[part.id] = boundedScannedString(argumentTasks[part.index])
+	}
+	return result
 }
 
 func assistantScanSegments(parts []scannedPart, argumentBytes map[int]int, argumentCommands map[int]*scannedString) ([]segment, []string, bool) {
@@ -1464,13 +1495,6 @@ func interestingScalar(path []scanPathPart) bool {
 	return pathEquals(path, "parentId") || pathEquals(path, "display") || pathEquals(path, "message", "isError") ||
 		(len(path) == 2 && pathEqualsPrefix(path, "message") && contains([]string{"exitCode", "cancelled", "truncated", "timestamp", "excludeFromContext", "fullOutputPath"}, path[1].key)) ||
 		pathEqualsPrefix(path, "message", "usage") || messageContentItem(path) || customContentItem(path)
-}
-
-func generalScalarStringPath(path []scanPathPart) bool {
-	return pathEquals(path, "message", "details", "streamingText") ||
-		(len(path) == 4 && pathEqualsPrefix(path, "message", "details", "textItems") && path[3].array) ||
-		(len(path) == 5 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array && contains([]string{"name", "output"}, path[4].key)) ||
-		(len(path) == 6 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array && path[4].key == "args" && contains([]string{"command", "path", "file_path", "pattern"}, path[5].key))
 }
 
 func argumentStringPath(path []scanPathPart) bool {
