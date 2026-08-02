@@ -423,6 +423,53 @@ func TestOversizedNativeGeneralSubagentResultsRenderBoundedHistoricalProjections
 	}
 }
 
+func TestOversizedNativeGeneralSubagentProjectionRetainsDisplayedUsageOnly(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	var unknown strings.Builder
+	for index := 0; index < 128; index++ {
+		if index > 0 {
+			unknown.WriteByte(',')
+		}
+		fmt.Fprintf(&unknown, "%q:1", "unknown-"+strings.Repeat("k", 4096)+fmt.Sprintf("-%03d", index))
+	}
+	usage := `{"turns":"2","input":1200,"output":"34","cacheRead":5,"cacheWrite":"6","cost":0.125,"contextTokens":"2000",` + unknown.String() + `}`
+	line := nativeGeneralSubagentLine(project, 1, strings.Repeat("hidden output ", 20000))
+	line = strings.Replace(line, `{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000}`, usage, 1)
+	if len(line) <= MaxIndexedEntryBytes {
+		t.Fatalf("usage fixture is only %d bytes", len(line))
+	}
+	writeSessionLines(t, path, []string{sessionLine(project), line})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	window, err := store.Window(path, "", false, nil, nil)
+	if err != nil || len(window.Messages) != 1 {
+		t.Fatalf("window = %#v, err = %v", window, err)
+	}
+	wantText := "✓ general\n1 detailed tool step hidden\n\nReview complete\n\n2 turns ↑1.2k ↓34 R5 W6 $0.1250 ctx:2.0k review-model"
+	if window.Messages[0].Text != wantText {
+		t.Fatalf("historical text = %q, want %q", window.Messages[0].Text, wantText)
+	}
+	indexed, err := store.Cache.Index(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := indexed.entries[1].General
+	if projection == nil || len(projection.Usage) != 7 {
+		t.Fatalf("general usage = %#v", projection)
+	}
+	if projection.Usage["turns"] != "2" || projection.Usage["input"] != float64(1200) || projection.Usage["output"] != "34" || projection.Usage["cacheRead"] != float64(5) || projection.Usage["cacheWrite"] != "6" || projection.Usage["cost"] != float64(0.125) || projection.Usage["contextTokens"] != "2000" {
+		t.Fatalf("general usage forms = %#v", projection.Usage)
+	}
+	for key := range projection.Usage {
+		if strings.HasPrefix(key, "unknown-") {
+			t.Fatalf("unknown usage key retained: %q", key)
+		}
+	}
+	if indexed.bytes > 1<<20 {
+		t.Fatalf("unknown usage data retained in the index: %d bytes", indexed.bytes)
+	}
+}
+
 func TestOversizedNativeGeneralSubagentResultUsesSingularHiddenToolGrammar(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	line := nativeGeneralSubagentLine(project, 1, strings.Repeat("hidden output ", 20000))
@@ -525,6 +572,58 @@ func TestSmallNativeGeneralSubagentRenderingRemainsUnchanged(t *testing.T) {
 	want := "✓ general\n✓ read " + filepath.Join(project, "file-0.go") + ":1-20\n  output\n\nReview complete\n\n2 turns ↑1.2k ↓34 $0.1250 ctx:2.0k review-model"
 	if window.Messages[0].Text != want {
 		t.Fatalf("small historical text = %q, want %q", window.Messages[0].Text, want)
+	}
+}
+
+func TestOversizedNativeGeneralSubagentCountsOnlyValidToolItems(t *testing.T) {
+	encodedOutput, err := json.Marshal(strings.Repeat("x", MaxIndexedEntryBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(encodedOutput)
+	valid := `{"id":"valid","name":"read","args":{},"status":"done","output":` + output + `}`
+	tests := []struct {
+		name string
+		item string
+	}{
+		{name: "primitive null", item: `null`},
+		{name: "primitive number", item: `1`},
+		{name: "primitive string", item: `"tool"`},
+		{name: "array", item: `[]`},
+		{name: "missing id", item: `{"name":"read","args":{},"status":"done","output":` + output + `}`},
+		{name: "missing name", item: `{"id":"invalid","args":{},"status":"done","output":` + output + `}`},
+		{name: "missing args", item: `{"id":"invalid","name":"read","status":"done","output":` + output + `}`},
+		{name: "missing status", item: `{"id":"invalid","name":"read","args":{},"output":` + output + `}`},
+		{name: "missing output", item: `{"id":"invalid","name":"read","args":{},"status":"done"}`},
+		{name: "wrong id type", item: `{"id":1,"name":"read","args":{},"status":"done","output":` + output + `}`},
+		{name: "wrong name type", item: `{"id":"invalid","name":null,"args":{},"status":"done","output":` + output + `}`},
+		{name: "wrong args type", item: `{"id":"invalid","name":"read","args":[],"status":"done","output":` + output + `}`},
+		{name: "wrong status type", item: `{"id":"invalid","name":"read","args":{},"status":true,"output":` + output + `}`},
+		{name: "wrong output type", item: `{"id":"invalid","name":"read","args":{},"status":"done","output":null}`},
+		{name: "invalid status", item: `{"id":"invalid","name":"read","args":{},"status":"paused","output":` + output + `}`},
+		{name: "duplicate id", item: `{"id":"invalid","id":"duplicate","name":"read","args":{},"status":"done","output":` + output + `}`},
+		{name: "duplicate name", item: `{"id":"invalid","name":"read","name":"again","args":{},"status":"done","output":` + output + `}`},
+		{name: "duplicate args", item: `{"id":"invalid","name":"read","args":{},"args":{},"status":"done","output":` + output + `}`},
+		{name: "duplicate status", item: `{"id":"invalid","name":"read","args":{},"status":"done","status":"error","output":` + output + `}`},
+		{name: "duplicate output", item: `{"id":"invalid","name":"read","args":{},"status":"done","output":"first","output":` + output + `}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, project, path := sessionFixture(t)
+			line := nativeGeneralSubagentLineWithTools(test.item + "," + valid)
+			if len(line) <= MaxIndexedEntryBytes {
+				t.Fatalf("tool fixture is only %d bytes", len(line))
+			}
+			writeSessionLines(t, path, []string{sessionLine(project), line})
+
+			indexed, err := (Store{Root: root, Home: root, Cache: NewCache()}).Cache.Index(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(indexed.entries) != 2 || indexed.entries[1].General == nil || indexed.entries[1].GeneralToolCount != 1 {
+				t.Fatalf("indexed general projection = %#v", indexed.entries[1])
+			}
+		})
 	}
 }
 
@@ -789,7 +888,7 @@ func nativeGeneralSubagentLineWithOptions(project string, toolCount int, output 
 			line.WriteByte(',')
 		}
 		quotedPath, _ := json.Marshal(filepath.Join(project, fmt.Sprintf("file-%d.go", index)))
-		fmt.Fprintf(&line, `{"status":"done","name":"read","args":{"path":%s,"offset":%d,"limit":20},"output":`, quotedPath, index+1)
+		fmt.Fprintf(&line, `{"id":"tool-%d","name":"read","args":{"path":%s,"offset":%d,"limit":20},"status":"done","output":`, index, quotedPath, index+1)
 		line.Write(quotedOutput)
 		line.WriteByte('}')
 	}
@@ -808,6 +907,10 @@ func nativeGeneralSubagentLineWithOptions(project string, toolCount int, output 
 	}
 	fmt.Fprintf(&line, `],"usage":{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000},"model":"review-model"},"isError":%t}}`, options.isError)
 	return line.String()
+}
+
+func nativeGeneralSubagentLineWithTools(tools string) string {
+	return `{"type":"message","id":"general-result","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"toolResult","toolCallId":"subagent-1","toolName":"subagent","content":[{"type":"text","text":"fallback"}],"details":{"status":"done","tools":[` + tools + `],"textItems":["Review complete"],"usage":{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000},"model":"review-model"},"isError":false}}`
 }
 
 func nativeSubagentCallLine(id, task string) string {

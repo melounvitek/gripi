@@ -498,7 +498,7 @@ func TestPersistedSubagentAndToolPresentationMatchesLiveRendering(t *testing.T) 
 		`{"type":"session","version":3,"id":"subagent-rendering","timestamp":"2026-07-20T12:00:00Z","cwd":` + jsonString(project) + `}`,
 		`{"type":"message","id":"read-call","parentId":null,"timestamp":"2026-07-20T12:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"read-1","name":"read","arguments":{"path":` + jsonString(filepath.Join(fixture.home, "src", "file.go")) + `,"offset":5,"limit":3}}]}}`,
 		`{"type":"message","id":"read-result","parentId":"read-call","timestamp":"2026-07-20T12:00:02Z","message":{"role":"toolResult","toolCallId":"read-1","toolName":"read","content":[{"type":"text","text":"contents"}],"isError":false}}`,
-		`{"type":"message","id":"subagent-result","parentId":"read-result","timestamp":"2026-07-20T12:00:03Z","message":{"role":"toolResult","toolCallId":"subagent-1","toolName":"subagent","content":[{"type":"text","text":"fallback"}],"details":{"status":"done","tools":[{"status":"done","name":"read","args":{"path":` + jsonString(filepath.Join(fixture.home, "review.go")) + `,"offset":5,"limit":3},"output":` + jsonString("checked "+fixture.home+"/review.go and /prefix"+fixture.home+"/kept.go") + `}],"textItems":["Review complete"],"usage":{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000},"model":"review-model"},"isError":false}}`,
+		`{"type":"message","id":"subagent-result","parentId":"read-result","timestamp":"2026-07-20T12:00:03Z","message":{"role":"toolResult","toolCallId":"subagent-1","toolName":"subagent","content":[{"type":"text","text":"fallback"}],"details":{"status":"done","tools":[{"id":"subagent-tool-1","status":"done","name":"read","args":{"path":` + jsonString(filepath.Join(fixture.home, "review.go")) + `,"offset":5,"limit":3},"output":` + jsonString("checked "+fixture.home+"/review.go and /prefix"+fixture.home+"/kept.go") + `}],"textItems":["Review complete"],"usage":{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000},"model":"review-model"},"isError":false}}`,
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -637,7 +637,7 @@ func oversizedNativeGeneralSubagentLine(project string, toolCount int, output st
 		if index > 0 {
 			line.WriteByte(',')
 		}
-		fmt.Fprintf(&line, `{"status":"done","name":"read","args":{"path":%s,"offset":%d,"limit":20},"output":%s}`, jsonString(filepath.Join(project, fmt.Sprintf("file-%d.go", index))), index+1, jsonString(output))
+		fmt.Fprintf(&line, `{"id":"tool-%d","name":"read","args":{"path":%s,"offset":%d,"limit":20},"status":"done","output":%s}`, index, jsonString(filepath.Join(project, fmt.Sprintf("file-%d.go", index))), index+1, jsonString(output))
 	}
 	line.WriteString(`],"textItems":["Review complete"],"usage":{"turns":2,"input":1200,"output":34,"cost":0.125,"contextTokens":2000},"model":"review-model"},"isError":false}}`)
 	return line.String()

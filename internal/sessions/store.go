@@ -837,7 +837,13 @@ func estimatedEntryBytes(item entry) int64 {
 		value += 8
 	}
 	if item.General != nil {
-		value += 64 + len(item.General.Status) + len(item.General.FinalText) + len(item.General.Model) + len(item.General.Prompt) + len(item.General.Usage)*64
+		value += 64 + len(item.General.Status) + len(item.General.FinalText) + len(item.General.Model) + len(item.General.Prompt)
+		for key, usage := range item.General.Usage {
+			value += 64 + len(key)
+			if text, ok := usage.(string); ok {
+				value += len(text)
+			}
+		}
 	}
 	for id, prompt := range item.SubagentPrompts {
 		value += 40 + len(id) + len(prompt)

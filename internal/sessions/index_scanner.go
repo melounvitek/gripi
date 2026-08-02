@@ -251,13 +251,16 @@ type scanPathPart struct {
 }
 
 type scanFrame struct {
-	kind         byte
-	path         []scanPathPart
-	state        byte
-	key          string
-	index        int
-	keys         map[string]bool
-	generalTools bool
+	kind              byte
+	path              []scanPathPart
+	state             byte
+	key               string
+	index             int
+	keys              map[string]bool
+	generalTools      bool
+	generalToolItem   bool
+	generalToolFields uint8
+	generalToolValid  bool
 }
 
 type indexJSONScanner struct {
@@ -323,12 +326,21 @@ func (scanner *indexJSONScanner) consume(value byte) bool {
 					frame.keys[key] = true
 					scanner.structuralKeys++
 				}
+				if frame.generalToolItem {
+					if field := generalToolField(key); field != 0 {
+						if frame.generalToolFields&field != 0 {
+							frame.generalToolValid = false
+						}
+						frame.generalToolFields |= field
+					}
+				}
 				frame.key = key
 				frame.state = scanColon
 				scanner.collector.objectKey(frame.path, key)
 			} else {
 				path := scanner.currentPath()
 				scanner.collector.stringValue(path, scanner.string)
+				scanner.validateGeneralToolString(path, scanner.string)
 				if pathEquals(path, "message", "toolName") {
 					name, exact := scanner.string.exact()
 					scanner.generalSubagent = exact && name == "subagent"
@@ -421,8 +433,8 @@ func (scanner *indexJSONScanner) startValue(value byte) {
 			return
 		}
 	}
-	if scanner.inGeneralTools() && generalToolItemPath(path) {
-		scanner.collector.generalToolCount++
+	if scanner.inGeneralTools() && generalToolFieldPath(path) {
+		scanner.validateGeneralToolValue(path, value)
 	}
 	switch {
 	case value == '{' || value == '[':
@@ -434,6 +446,8 @@ func (scanner *indexJSONScanner) startValue(value byte) {
 		frame := scanFrame{kind: value, path: path, generalTools: inGeneralTools}
 		if value == '{' {
 			frame.state = scanKeyOrEnd
+			frame.generalToolItem = scanner.inGeneralTools() && generalToolItemPath(path)
+			frame.generalToolValid = frame.generalToolItem
 			if canonicalKeyPath(path) && !inGeneralTools {
 				frame.keys = make(map[string]bool)
 			}
@@ -458,6 +472,45 @@ func (scanner *indexJSONScanner) startString(key bool) {
 	scanner.token = scanString
 	scanner.string = newScannedString()
 	scanner.stringKey = key
+}
+
+func (scanner *indexJSONScanner) validateGeneralToolValue(path []scanPathPart, value byte) {
+	if !generalToolFieldPath(path) {
+		return
+	}
+	field := generalToolField(path[4].key)
+	if field == generalToolArgs {
+		if value != '{' {
+			if frame := scanner.generalToolFrame(); frame != nil {
+				frame.generalToolValid = false
+			}
+		}
+		return
+	}
+	if value != '"' {
+		if frame := scanner.generalToolFrame(); frame != nil {
+			frame.generalToolValid = false
+		}
+	}
+}
+
+func (scanner *indexJSONScanner) validateGeneralToolString(path []scanPathPart, value *scannedString) {
+	if !scanner.inGeneralTools() || !generalToolFieldPath(path) || path[4].key != "status" {
+		return
+	}
+	status, exact := value.exact()
+	if !exact || status != "running" && status != "done" && status != "error" {
+		if frame := scanner.generalToolFrame(); frame != nil {
+			frame.generalToolValid = false
+		}
+	}
+}
+
+func (scanner *indexJSONScanner) generalToolFrame() *scanFrame {
+	if len(scanner.stack) == 0 || !scanner.stack[len(scanner.stack)-1].generalToolItem {
+		return nil
+	}
+	return &scanner.stack[len(scanner.stack)-1]
 }
 
 func (scanner *indexJSONScanner) finishScalar() {
@@ -498,6 +551,10 @@ func (scanner *indexJSONScanner) closeContainer(kind byte) {
 	if len(scanner.stack) == 0 || scanner.stack[len(scanner.stack)-1].kind != kind {
 		scanner.valid = false
 		return
+	}
+	frame := scanner.stack[len(scanner.stack)-1]
+	if frame.generalToolItem && frame.generalToolValid && frame.generalToolFields == generalToolRequiredFields {
+		scanner.collector.generalToolCount++
 	}
 	scanner.stack = scanner.stack[:len(scanner.stack)-1]
 	scanner.completeValue()
@@ -688,6 +745,11 @@ func (collector *indexCollector) stringValue(path []scanPathPart, value *scanned
 		name, exact := value.exact()
 		collector.generalSubagent = exact && name == "subagent"
 	}
+	if key, ok := generalUsageKey(path); ok {
+		if text, exact := value.exact(); exact {
+			collector.setGeneralUsage(key, text)
+		}
+	}
 	collector.trackGeneralString(path, value)
 	if argumentStringPath(path) {
 		collector.argumentBytes[path[2].index] += value.bytes
@@ -704,6 +766,13 @@ func (collector *indexCollector) stringValue(path []scanPathPart, value *scanned
 	if interestingString(path) && collector.reserve() {
 		collector.strings[pathCode(path)] = value
 	}
+}
+
+func (collector *indexCollector) setGeneralUsage(key string, value any) {
+	if collector.generalUsage == nil {
+		collector.generalUsage = make(map[string]any)
+	}
+	collector.generalUsage[key] = value
 }
 
 func (collector *indexCollector) trackGeneralString(path []scanPathPart, value *scannedString) {
@@ -734,11 +803,11 @@ func (collector *indexCollector) scalarValue(path []scanPathPart, value any) {
 		return
 	}
 	collector.allJSONMinimum++
-	if len(path) == 4 && pathEqualsPrefix(path, "message", "details", "usage") && !path[3].array {
-		if collector.generalUsage == nil {
-			collector.generalUsage = make(map[string]any)
+	if key, ok := generalUsageKey(path); ok {
+		switch value.(type) {
+		case float64, string:
+			collector.setGeneralUsage(key, value)
 		}
-		collector.generalUsage[path[3].key] = value
 	}
 	if len(path) == 4 && pathEqualsPrefix(path, "message", "details", "textItems") && path[3].array {
 		collector.generalLastTextItem = nil
@@ -1461,6 +1530,49 @@ func canonicalKeyPath(path []scanPathPart) bool {
 	return len(path) == 0 || pathEquals(path, "message") || pathEquals(path, "message", "details") || messagePartPath(path) || customPartPath(path) ||
 		(len(path) == 4 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array) ||
 		(len(path) == 5 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array && path[4].key == "args")
+}
+
+const (
+	generalToolID uint8 = 1 << iota
+	generalToolName
+	generalToolArgs
+	generalToolStatus
+	generalToolOutput
+)
+
+const generalToolRequiredFields = generalToolID | generalToolName | generalToolArgs | generalToolStatus | generalToolOutput
+
+func generalToolField(key string) uint8 {
+	switch key {
+	case "id":
+		return generalToolID
+	case "name":
+		return generalToolName
+	case "args":
+		return generalToolArgs
+	case "status":
+		return generalToolStatus
+	case "output":
+		return generalToolOutput
+	default:
+		return 0
+	}
+}
+
+func generalToolFieldPath(path []scanPathPart) bool {
+	return len(path) == 5 && pathEqualsPrefix(path, "message", "details", "tools") && path[3].array && !path[4].array && generalToolField(path[4].key) != 0
+}
+
+func generalUsageKey(path []scanPathPart) (string, bool) {
+	if len(path) != 4 || !pathEqualsPrefix(path, "message", "details", "usage") || path[3].array {
+		return "", false
+	}
+	switch path[3].key {
+	case "turns", "input", "output", "cacheRead", "cacheWrite", "cost", "contextTokens":
+		return path[3].key, true
+	default:
+		return "", false
+	}
 }
 
 func generalToolsPath(path []scanPathPart) bool {
