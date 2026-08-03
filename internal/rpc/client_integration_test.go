@@ -768,6 +768,20 @@ func TestClientRejectsReloadWhileCompactionFollowUpsAreFlushing(t *testing.T) {
 	}
 }
 
+func TestClientRejectsBashDuringReload(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	client.mu.Lock()
+	client.reloading = true
+	client.mu.Unlock()
+
+	if _, err := client.Bash(context.Background(), "sleep 1", false); !errors.Is(err, ErrOperationPending) {
+		t.Fatalf("bash error = %v", err)
+	}
+}
+
 func TestClientTimesOutResponsesAndDiscardsLateRPCReplies(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
