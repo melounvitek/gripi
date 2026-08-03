@@ -113,6 +113,7 @@ type ClientOptions struct {
 	Clock                             func() time.Time
 	Now                               func() time.Time
 	Diagnostics                       *Diagnostics
+	EventObserver                     func(*Client, map[string]any)
 }
 
 type responseResult struct {
@@ -159,6 +160,7 @@ type Client struct {
 	clock                func() time.Time
 	now                  func() time.Time
 	diagnostics          *Diagnostics
+	eventObserver        func(*Client, map[string]any)
 
 	writeLane  chan struct{}
 	closeMu    sync.Mutex
@@ -215,17 +217,17 @@ type Client struct {
 	sampleInterval     time.Duration
 }
 
-func Start(sessionPath string, command []string, extensionPath string, diagnostics *Diagnostics) (*Client, error) {
+func Start(sessionPath string, command []string, extensionPath string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath, "--session", sessionPath}
-	return startProcess("", command, args, diagnostics)
+	return startProcess("", command, args, diagnostics, observer)
 }
 
-func StartInCWD(cwd string, command []string, extensionPath string, diagnostics *Diagnostics) (*Client, error) {
+func StartInCWD(cwd string, command []string, extensionPath string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath}
-	return startProcess(cwd, command, args, diagnostics)
+	return startProcess(cwd, command, args, diagnostics, observer)
 }
 
-func startProcess(cwd string, command, args []string, diagnostics *Diagnostics) (*Client, error) {
+func startProcess(cwd string, command, args []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	if len(command) == 0 {
 		return nil, errors.New("Pi RPC command is empty")
 	}
@@ -263,7 +265,7 @@ func startProcess(cwd string, command, args []string, diagnostics *Diagnostics) 
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("attach Pi RPC process group: %w", err)
 	}
-	client := NewClient(stdin, stdout, stderr, ClientOptions{Diagnostics: diagnostics})
+	client := NewClient(stdin, stdout, stderr, ClientOptions{Diagnostics: diagnostics, EventObserver: observer})
 	client.process = cmd
 	client.processGroup = group
 	client.pid = cmd.Process.Pid
@@ -323,7 +325,7 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser,
 		stdin: stdin, stdout: stdout, stderr: stderr,
 		processTermTimeout: options.ProcessTermTimeout, processKillTimeout: options.ProcessKillTimeout,
 		requestTimeout: options.RequestTimeout, abortTimeout: options.AbortTimeout, fallbackRPCLineBytes: options.FallbackRPCLineBytes, treeBridgeTimeout: options.TreeBridgeTimeout,
-		clock: options.Clock, now: options.Now, diagnostics: options.Diagnostics,
+		clock: options.Clock, now: options.Now, diagnostics: options.Diagnostics, eventObserver: options.EventObserver,
 		writeLane: make(chan struct{}, 1), readerDone: make(chan struct{}), stderrDone: make(chan struct{}),
 		pending: make(map[string]chan responseResult), bridgePending: make(map[string]chan string), deferredCommandIDs: make(map[string]bool),
 		eventBufferLimit: options.EventBufferLimit, eventBufferBytes: options.EventBufferBytes, coalesced: make(map[string]*replayEntry),
@@ -985,6 +987,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 	}
 
 	var followUps []map[string]any
+	var observed map[string]any
 	firstType := "prompt"
 	compactionQueueChanged := false
 	client.mu.Lock()
@@ -1059,8 +1062,14 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		if compactionQueueChanged {
 			client.appendQueuedMessagesEventLocked()
 		}
+		if client.eventObserver != nil {
+			observed = response
+		}
 	}
 	client.mu.Unlock()
+	if observed != nil {
+		client.eventObserver(client, observed)
+	}
 	if len(followUps) > 0 {
 		go client.flushCompactionFollowUps(followUps, firstType)
 	}

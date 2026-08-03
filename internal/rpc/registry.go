@@ -118,6 +118,16 @@ func (registry *Registry) Client(path string) RPCClient {
 	}
 	return nil
 }
+func (registry *Registry) PathForClient(client RPCClient) string {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	for path, entry := range registry.clients {
+		if entry.client == client {
+			return path
+		}
+	}
+	return ""
+}
 func (registry *Registry) Active(path string) bool { return registry.Client(path) != nil }
 func (registry *Registry) Touch(path string) bool {
 	registry.mu.Lock()

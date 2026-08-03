@@ -52,6 +52,8 @@ const serverEnv = {
   GRIPI_WORKSPACE_SECRET_PATH: path.join(fixture.state, "workspace-secret"),
   GRIPI_WORKSPACE_ACCESS_PATH: path.join(fixture.state, "workspace-access.json"),
   GRIPI_WORKSPACE_OWNERSHIP_PATH: path.join(fixture.state, "session-owners.json"),
+  GRIPI_WEB_PUSH_VAPID_PATH: path.join(fixture.state, "web-push-vapid.json"),
+  GRIPI_PUSH_SUBSCRIPTIONS_PATH: path.join(fixture.state, "push-subscriptions.json"),
   GRIPI_RPC_IDLE_TIMEOUT_SECONDS: process.env.GRIPI_E2E_RPC_IDLE_TIMEOUT_SECONDS || (realPi ? "0" : "2"),
   GRIPI_RPC_IDLE_SWEEP_SECONDS: process.env.GRIPI_E2E_RPC_IDLE_SWEEP_SECONDS || (realPi ? "30" : "0.1"),
   GRIPI_NODE: realPi ? "" : process.execPath,

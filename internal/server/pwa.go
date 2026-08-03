@@ -5,7 +5,9 @@ import "net/http"
 const (
 	gripiIconGrip = `<path fill="#F24405" d="M0 0H200V100H100V200H0ZM600 0H800V200H700V100H600ZM0 600H100V700H200V800H0ZM700 600H800V800H600V700H700Z"/>`
 	gripiIconPI   = `<g fill="#F1EFE9" transform="translate(200 200)"><path fill-rule="evenodd" d="M0 0H300V200H200V300H100V400H0ZM100 100V200H200V100Z"/><path d="M300 200H400V400H300Z"/></g>`
-	serviceWorker = `self.addEventListener("install", (event) => {
+	serviceWorker = `importScripts("/assets/notification_preview.js", "/assets/web_push_worker.js");
+
+self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
 
@@ -13,20 +15,25 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+function displayNotification(data) {
+  return self.gripiDisplayPushNotification(data, self);
+}
+
 self.addEventListener("message", (event) => {
   const data = event.data || {};
   if (!["gripi-notification", "gripi-notification-test"].includes(data.type)) return;
+  event.waitUntil(displayNotification(data));
+});
 
-  const defaultUrl = data.type === "gripi-notification-test" ? "/notification-test" : "/";
-  const defaultTag = data.type === "gripi-notification-test" ? "gripi-notification-test" : "gripi-notification";
-  event.waitUntil(self.registration.showNotification(data.title || "Gripi", {
-    body: data.body || "Notifications are working.",
-    tag: data.tag || defaultTag,
-    renotify: true,
-    icon: "/app-icon.svg",
-    badge: "/app-icon.svg",
-    data: { url: data.url || defaultUrl }
-  }));
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data?.json() || {};
+  } catch (_error) {
+    return;
+  }
+  if (!["gripi-notification", "gripi-notification-test"].includes(data.type)) return;
+  event.waitUntil(displayNotification(data));
 });
 
 self.addEventListener("notificationclick", (event) => {

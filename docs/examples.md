@@ -38,7 +38,7 @@ Then bind Gripi to the gateway machine's Tailscale address:
 GRIPI_HOST=100.x.y.z mise run start
 ```
 
-Open `http://100.x.y.z:4567` in a browser, or add it from the desktop app's **Add Server…** menu. Use this override only for an encrypted, access-controlled network such as Tailscale—not ordinary LAN or Wi-Fi HTTP.
+Open `http://100.x.y.z:4567` in a browser, or add it from the desktop app's **Add Server…** menu. Use this override only for an encrypted, access-controlled network such as Tailscale—not ordinary LAN or Wi-Fi HTTP. This HTTP URL is not a secure browser context, so it cannot install a service worker or use Web Push; use Tailscale Serve below for iPhone Home Screen notifications.
 
 ### HTTPS through Tailscale Serve
 
@@ -62,7 +62,7 @@ tailscale serve --bg --yes 4567
 tailscale serve status
 ```
 
-Open the configured `https://…ts.net` URL, or add it to the desktop app. Older installations must add both settings before updating because automatic legacy proxy compatibility has been removed. Do not enable proxy-header support when clients can bypass the trusted proxy and connect to the same listener with arbitrary `X-Forwarded-*` headers.
+Open the configured `https://…ts.net` URL, or add it to the desktop app. This is the recommended setup for an iPhone Home Screen installation and closed-app Web Push notifications. Older installations must add both settings before updating because automatic legacy proxy compatibility has been removed. Do not enable proxy-header support when clients can bypass the trusted proxy and connect to the same listener with arbitrary `X-Forwarded-*` headers.
 
 If Tailscale requires elevated permissions, run this once and retry:
 

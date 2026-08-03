@@ -58,7 +58,17 @@ When running Gripi behind a reverse proxy, enforce a corresponding request-body 
 
 ## Parallel development instances
 
-A second gateway may read the same Pi session directory, but it must not mutate a session being used by another gateway or Pi process. Isolate gateway-owned metadata with `GRIPI_ATTACHMENTS_ROOT`, `GRIPI_SESSION_CWDS_PATH`, `GRIPI_READ_STATE_PATH`, `GRIPI_PINNED_SESSIONS_PATH`, `GRIPI_BROWSER_ACCESS_PATH`, `GRIPI_WORKSPACE_SECRET_PATH`, `GRIPI_WORKSPACE_ACCESS_PATH`, `GRIPI_WORKSPACE_OWNERSHIP_PATH`, and the process-only `GRIPI_RESTART_PATH`. Use a separate port and limit mutations to sessions dedicated to that instance.
+A second gateway may read the same Pi session directory, but it must not mutate a session being used by another gateway or Pi process. Isolate gateway-owned metadata with `GRIPI_ATTACHMENTS_ROOT`, `GRIPI_SESSION_CWDS_PATH`, `GRIPI_READ_STATE_PATH`, `GRIPI_PINNED_SESSIONS_PATH`, `GRIPI_BROWSER_ACCESS_PATH`, `GRIPI_WORKSPACE_SECRET_PATH`, `GRIPI_WORKSPACE_ACCESS_PATH`, `GRIPI_WORKSPACE_OWNERSHIP_PATH`, `GRIPI_WEB_PUSH_VAPID_PATH`, `GRIPI_PUSH_SUBSCRIPTIONS_PATH`, and the process-only `GRIPI_RESTART_PATH`. Use a separate port and limit mutations to sessions dedicated to that instance.
+
+## Web Push notifications
+
+Browsers with Web Push support can subscribe from the **Notifications** control. On iPhone and iPad this requires iOS/iPadOS 16.4 or newer, Gripi installed on the Home Screen, and notification permission granted from the control's first tap. Completed assistant replies are delivered while the web app is closed. If the target session is open and focused on a device, that device suppresses its notification; other subscribed devices still receive it.
+
+Web Push requires a secure browser context. Use HTTPS, such as [Tailscale Serve](examples.md#https-through-tailscale-serve), for remote mobile access. The gateway also needs outbound HTTPS access to the endpoint supplied by the browser. Delivery is best-effort through the browser push service; conversation history remains authoritative.
+
+Gripi lazily generates a VAPID identity on first use and stores it separately from subscriptions. The owner-only state files default to `~/.pi/gripi/web-push-vapid.json` and `~/.pi/gripi/push-subscriptions.json`. They normally need no configuration; parallel instances can override them with absolute paths through `GRIPI_WEB_PUSH_VAPID_PATH` and `GRIPI_PUSH_SUBSCRIPTIONS_PATH`.
+
+Keep the VAPID file stable: deleting or replacing it invalidates existing browser subscriptions, which must then be enabled again. Malformed state is preserved and reported instead of silently regenerated. Subscription endpoints and keys are sensitive bearer data; do not publish either state file. The `/notification-test` page can register the current browser and send a test through the gateway.
 
 ## Gateway state recovery
 

@@ -49,9 +49,11 @@ import { activateToolOutputRegion, enhanceMarkdownCodeBlocks, enhanceMessageLink
 import { eventPollCurrent, eventPollingDelay } from "./polling.js";
 import { extensionUiRequestExpired, extensionUiResponseDisposition } from "./extension_ui.js";
 import { TreeSessionController } from "./tree_session_controller.js";
+import { WebPushController } from "./web_push.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window);
 const resourceUsageController = new ResourceUsageController(document, window);
+const webPushController = new WebPushController(window, navigator);
 const notifyAccessRequest = (title, body, tag) =>
   showGripiNotification(title, body, window.location.href, tag).catch(() => {});
 const browserAccessController = new BrowserAccessRequestController(document, notifyAccessRequest);
@@ -63,7 +65,10 @@ const sidebarController = new SidebarController(
   window,
   projectSelectController,
   gatewayUpdateController,
-  (name, body, url, tag) => showGripiNotification(name, body, url, tag).catch(() => {})
+  (name, body, url, tag) => {
+    if (webPushController.enabled()) return;
+    showGripiNotification(name, body, url, tag).catch(() => {});
+  }
 );
 
 let conversationPanel = null;
@@ -149,6 +154,7 @@ const sessionSwitchGeneration = new AsyncGeneration();
 let promptSubmissionGeneration = 0;
 let sessionStatusRequestVersion = 0;
 let notificationRegistration = null;
+let webPushEnabled = false;
 const notifiedFinalReplyKeys = new Set();
 const MAIN_SESSION_HISTORY_KEY = "gripi-main-session-history";
 const conversationController = new ConversationController(document, window);
@@ -600,7 +606,10 @@ function notificationsDisabled() {
 }
 
 function notificationsEnabled() {
-  return !notificationsDisabled() && (desktopNotificationAvailable() || (("Notification" in window) && Notification.permission === "granted"));
+  if (notificationsDisabled()) return false;
+  if (desktopNotificationAvailable()) return true;
+  if (webPushController.available()) return webPushEnabled;
+  return ("Notification" in window) && Notification.permission === "granted";
 }
 
 function notificationToggleState() {
@@ -627,7 +636,9 @@ function updateNotificationToggle() {
 async function toggleNotifications() {
   if (notificationsEnabled()) {
     localStorage.setItem("gripi:notifications-disabled", "true");
+    webPushEnabled = false;
     updateNotificationToggle();
+    if (webPushController.available()) await webPushController.disable();
     return;
   }
 
@@ -642,7 +653,11 @@ async function toggleNotifications() {
     return;
   }
 
-  if (Notification.permission === "default") await Notification.requestPermission();
+  if (webPushController.available()) {
+    webPushEnabled = await webPushController.enable();
+  } else if (Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
   updateNotificationToggle();
 }
 
@@ -681,6 +696,8 @@ function finalAssistantReplyKey(sessionPath, event) {
 }
 
 function notifyFinalAssistantReply(event) {
+  if (webPushController.enabled()) return;
+
   const message = liveMessageParser.eventMessage(event);
   const roleName = liveMessageParser.liveEventRole(event, message);
   if (roleName !== "assistant" || event.type !== "message_end") return;
@@ -3269,6 +3286,11 @@ window.addEventListener("popstate", () => switchSession(window.location.href, { 
 
 function bootstrapPage() {
   gatewayUpdateController.cleanNavigation();
+  webPushController.prepare().catch(() => {});
+  webPushController.reconcile().then((enabled) => {
+    webPushEnabled = enabled;
+    updateNotificationToggle();
+  }).catch(() => {});
   sidebarController.initialize();
   bindPageLifetimeControls();
   bindSessionDom();

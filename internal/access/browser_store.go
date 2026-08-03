@@ -2,6 +2,8 @@ package access
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -91,6 +93,22 @@ func (s *BrowserStore) Approved(token string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func (s *BrowserStore) ApprovedTokenDigests() (map[string]bool, error) {
+	if err := s.pruneIfDue(); err != nil {
+		return nil, err
+	}
+	current, err := s.data()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]bool, len(current.ApprovedBrowsers))
+	for _, browser := range current.ApprovedBrowsers {
+		digest := sha256.Sum256([]byte(browser.Token))
+		result[hex.EncodeToString(digest[:])] = true
+	}
+	return result, nil
 }
 
 func (s *BrowserStore) EnsurePending(token, ip, userAgent string) (PendingRequest, error) {

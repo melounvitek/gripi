@@ -50,6 +50,8 @@ const env = {
   GRIPI_WORKSPACE_SECRET_PATH: path.join(fixture.state, "workspace-secret"),
   GRIPI_WORKSPACE_ACCESS_PATH: path.join(fixture.state, "workspace-access.json"),
   GRIPI_WORKSPACE_OWNERSHIP_PATH: path.join(fixture.state, "session-owners.json"),
+  GRIPI_WEB_PUSH_VAPID_PATH: path.join(fixture.state, "web-push-vapid.json"),
+  GRIPI_PUSH_SUBSCRIPTIONS_PATH: path.join(fixture.state, "push-subscriptions.json"),
   GRIPI_NODE: process.execPath,
   GRIPI_PI: fakePiPath,
   GRIPI_E2E_SESSIONS_ROOT: fixture.sessionsRoot

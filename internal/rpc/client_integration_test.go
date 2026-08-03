@@ -41,7 +41,7 @@ func TestClientUsesNativeFakePiRPCWithoutRewritingSessionOnReads(t *testing.T) {
 	logPath := filepath.Join(root, "fake.log")
 	t.Setenv("GRIPI_E2E_FAKE_PI_LOG", logPath)
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", root)
-	client, err := Start(path, []string{node, filepath.Join(repo, "e2e", "support", "fake_pi.mjs")}, filepath.Join(repo, "pi_extensions", "gripi-tree.ts"), nil)
+	client, err := Start(path, []string{node, filepath.Join(repo, "e2e", "support", "fake_pi.mjs")}, filepath.Join(repo, "pi_extensions", "gripi-tree.ts"), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +111,30 @@ func TestClientUsesNativeFakePiRPCWithoutRewritingSessionOnReads(t *testing.T) {
 	}
 }
 
+func TestClientObservesStoredEventsAfterReleasingItsLock(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	t.Cleanup(func() { _ = stdinReader.Close() })
+	stdoutReader, stdoutWriter := io.Pipe()
+	observed := make(chan map[string]any, 1)
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{EventObserver: func(client *Client, event map[string]any) {
+		_ = client.EventSequence()
+		observed <- event
+	}})
+	t.Cleanup(func() { _ = client.Close() })
+
+	if _, err := io.WriteString(stdoutWriter, `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-observed:
+		if event["type"] != "message_end" {
+			t.Fatalf("observed event = %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("event observer was not called outside the client lock")
+	}
+}
+
 func TestProcessClientPreservesFinalResponseBeforeImmediateExit(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -123,7 +147,7 @@ func TestProcessClientPreservesFinalResponseBeforeImmediateExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for iteration := 0; iteration < 20; iteration++ {
-		client, err := Start(filepath.Join(root, "unused.jsonl"), []string{node, script}, script, nil)
+		client, err := Start(filepath.Join(root, "unused.jsonl"), []string{node, script}, script, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
