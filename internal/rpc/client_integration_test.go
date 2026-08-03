@@ -693,6 +693,8 @@ func TestClientReloadsThroughThePrivateExtensionBridge(t *testing.T) {
 	stdoutReader, stdoutWriter := io.Pipe()
 	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
 	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setStatus", "statusKey": "old", "statusText": "stale"})
+	waitSequence(t, client, 1)
 	result := make(chan map[string]any, 1)
 	errors := make(chan error, 1)
 	go func() {
@@ -718,6 +720,35 @@ func TestClientReloadsThroughThePrivateExtensionBridge(t *testing.T) {
 	}
 	if response := <-result; response["success"] != true {
 		t.Fatalf("response = %#v", response)
+	}
+	if snapshot := client.LiveSnapshot(); snapshot.ExtensionUI != nil {
+		t.Fatalf("extension UI was not reset: %#v", snapshot.ExtensionUI)
+	}
+	if events := client.EventsAfter(1).Events; len(events) != 1 || events[0]["type"] != "extension_ui_reset" {
+		t.Fatalf("reload events = %#v", events)
+	}
+}
+
+func TestClientRejectsReloadDuringCompaction(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{RequestTimeout: 20 * time.Millisecond})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start", "reason": "manual"})
+	waitSequence(t, client, 1)
+	go func() {
+		var command map[string]any
+		if json.NewDecoder(stdinReader).Decode(&command) == nil {
+			response, _ := json.Marshal(map[string]any{"id": command["id"], "type": "response", "command": "prompt", "success": true})
+			_, _ = stdoutWriter.Write(append(response, '\n'))
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	response, err := client.Reload(ctx)
+	if err != nil || response["success"] != false || response["error"] != "Wait for compaction to finish before reloading" {
+		t.Fatalf("response = %#v, %v", response, err)
 	}
 }
 

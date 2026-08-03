@@ -516,7 +516,33 @@ func (client *Client) SetSessionName(ctx context.Context, name string) (map[stri
 	return client.request(ctx, "set_session_name", client.nextID("set_session_name"), map[string]any{"name": name}, client.requestTimeout, nil)
 }
 func (client *Client) Reload(ctx context.Context) (map[string]any, error) {
+	if failure := client.beginReload(); failure != nil {
+		return failure, nil
+	}
 	return client.extensionRequest(ctx, "gripi_reload", map[string]any{}, LongRequestTimeout, "Pi resources reload timed out")
+}
+
+func (client *Client) beginReload() map[string]any {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.compacting {
+		return map[string]any{"type": "response", "command": "prompt", "success": false, "error": "Wait for compaction to finish before reloading"}
+	}
+	if client.busy || client.activeBashToken != nil {
+		return map[string]any{"type": "response", "command": "prompt", "success": false, "error": "Session is busy"}
+	}
+
+	client.pendingDialogs = make(map[string]*extensionDialog)
+	client.pendingDialogOrder = nil
+	client.extensionStatuses = make(map[string]map[string]any)
+	client.extensionStatusOrder = nil
+	client.extensionWidgets = make(map[string]map[string]any)
+	client.extensionWidgetOrder = nil
+	client.extensionTitle = nil
+	event := map[string]any{"type": "extension_ui_reset"}
+	client.eventSequence++
+	client.appendReplayLocked(event, jsonSize(event), "")
+	return nil
 }
 
 func (client *Client) request(ctx context.Context, command, id string, payload map[string]any, timeout time.Duration, accepted func()) (map[string]any, error) {

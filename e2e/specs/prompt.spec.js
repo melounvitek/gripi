@@ -33,6 +33,20 @@ async function expectReadableMarkdownTable(table) {
 }
 
 test("reload Pi resources and refresh the slash command catalog", async ({ page }) => {
+  let commandRequests = 0;
+  let releaseStaleCatalog;
+  let staleCatalogReady;
+  const staleCatalog = new Promise((resolve) => { staleCatalogReady = resolve; });
+  const staleCatalogRelease = new Promise((resolve) => { releaseStaleCatalog = resolve; });
+  await page.route("**/commands?**", async (route) => {
+    commandRequests += 1;
+    if (commandRequests !== 2) return route.continue();
+    const response = await route.fetch();
+    staleCatalogReady();
+    await staleCatalogRelease;
+    await route.fulfill({ response });
+  });
+
   await page.goto("/");
   await selectSession(page, sessions.marker);
 
@@ -40,11 +54,19 @@ test("reload Pi resources and refresh the slash command catalog", async ({ page 
   await composer.fill("/");
   await expect(page.locator('.command[data-command-name="reload"]')).toBeVisible();
   await expect(page.locator('.command[data-command-name="fresh-resource"]')).toHaveCount(0);
+  await expect(page.locator('[data-status-key="extension:stale-resource"]')).toBeVisible();
+  await composer.evaluate((element) => {
+    document.getElementById("command-list").dataset.loaded = "false";
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await staleCatalog;
 
   await composer.fill("/reload");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
   await expect(message(page, "user", "/reload")).toHaveCount(0);
+  await expect(page.locator('[data-status-key="extension:stale-resource"]')).toHaveCount(0);
+  releaseStaleCatalog();
 
   await composer.fill("/fresh");
   await expect(page.locator('.command[data-command-name="fresh-resource"]')).toBeVisible();

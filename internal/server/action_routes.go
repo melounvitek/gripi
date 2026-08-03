@@ -92,12 +92,13 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		app.runBash(response, request, path, command.Command, command.ExcludeFromContext)
 		return
 	}
-	if command := prompts.ParseSlashCommand(message); command.Type == "login" || command.Type == "logout" {
+	parsedCommand := prompts.ParseSlashCommand(message)
+	if parsedCommand.Type == "login" || parsedCommand.Type == "logout" {
 		guidance := map[string]string{
 			"login":  "`/login` isn’t available in Gripi. Run `/login` in the Pi CLI, then restart the Gripi gateway to load the new credentials.",
 			"logout": "`/logout` isn’t available in Gripi. Run `/logout` in the Pi CLI, then restart the Gripi gateway to reload credentials.",
 		}
-		app.writePromptResult(response, request, path, map[string]any{"command": command.Type, "message": guidance[command.Type]})
+		app.writePromptResult(response, request, path, map[string]any{"command": parsedCommand.Type, "message": guidance[parsedCommand.Type]})
 		return
 	}
 
@@ -106,7 +107,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		writeText(response, http.StatusBadRequest, "Invalid streaming behavior")
 		return
 	}
-	if prompts.ParseSlashCommand(message).Type == "reload" {
+	if parsedCommand.Type == "reload" {
 		behavior = ""
 	}
 	if behavior == "steer" && app.rpcClients.Compacting(path) {
@@ -115,7 +116,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	}
 	command := prompts.SlashCommand{}
 	if behavior == "" {
-		command = prompts.ParseSlashCommand(message)
+		command = parsedCommand
 	}
 	if command.Type == "fork" || command.Type == "tree" || command.Type == "model" {
 		app.writePromptResult(response, request, path, map[string]any{"command": command.Type})

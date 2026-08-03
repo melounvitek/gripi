@@ -1174,6 +1174,21 @@ function updateExtensionWidget(event) {
   renderExtensionWidgets();
 }
 
+function resetExtensionUiState() {
+  clearTimeout(extensionUiTimeoutTimer);
+  extensionUiTimeoutTimer = null;
+  extensionUiRequestQueue = [];
+  activeExtensionUiRequest = null;
+  closeModal(extensionUiModal);
+  resetExtensionUiModal();
+  extensionStatuses.clear();
+  extensionWidgets.clear();
+  extensionDocumentTitle = null;
+  renderExtensionStatuses();
+  renderExtensionWidgets();
+  renderDocumentTitle();
+}
+
 function hydrateExtensionUiState() {
   extensionStatuses.clear();
   extensionWidgets.clear();
@@ -1309,6 +1324,11 @@ function renderEvent(event) {
     showCurrentActiveTask();
     refreshSessionStatus().catch(() => {});
     sidebarController.refresh().catch(() => {});
+    return;
+  }
+
+  if (event.type === "extension_ui_reset") {
+    resetExtensionUiState();
     return;
   }
 
@@ -1975,9 +1995,8 @@ async function submitPrompt(event) {
     }
     clearStoredComposerDraft(submittedSession);
     if (payload?.command === "reload") {
-      if (commandList) commandList.dataset.loaded = "false";
-      ensureCommandsLoaded();
       setComposerState("done", "Reloaded");
+      refreshCommandsAfterReload();
       showStatus("Pi resources reloaded", true);
       return;
     }
@@ -2187,8 +2206,24 @@ async function ensureCommandsLoaded() {
     }
   } catch (_error) {
   } finally {
+    const reloadAfterLoading = list.dataset.reloadAfterLoading === "true";
     delete list.dataset.loading;
+    delete list.dataset.reloadAfterLoading;
+    if (reloadAfterLoading && commandList && sessionSwitchGeneration.current(generation) && commandList.dataset.commandsUrl === url) {
+      commandList.dataset.loaded = "false";
+      ensureCommandsLoaded();
+    }
   }
+}
+
+function refreshCommandsAfterReload() {
+  if (!commandList) return;
+  commandList.dataset.loaded = "false";
+  if (commandList.dataset.loading === "true") {
+    commandList.dataset.reloadAfterLoading = "true";
+    return;
+  }
+  ensureCommandsLoaded();
 }
 
 function updateCommandListForPrompt() {

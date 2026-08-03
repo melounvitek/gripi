@@ -134,6 +134,7 @@ function handleCommand(command) {
       respond(command, true, { data: { models: fakeModels() } });
       break;
     case "get_commands":
+      if (!resourcesReloaded) emit({ type: "extension_ui_request", method: "setStatus", statusKey: "stale-resource", statusText: "loaded" });
       respond(command, true, { data: { commands: resourcesReloaded ? [{ name: "fresh-resource", description: "Loaded after reload", source: "prompt" }] : [] } });
       break;
     case "export_html":
@@ -328,8 +329,10 @@ function acceptReloadBridge(command) {
   const match = command.message?.match(/^\/gripi_reload ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
   if (!match) return false;
   respond(command, true);
-  const result = busy ? { ok: false, error: "Session is busy" } : { ok: true };
-  if (!busy) resourcesReloaded = true;
+  let result = { ok: true };
+  if (compacting) result = { ok: false, error: "Wait for compaction to finish before reloading" };
+  else if (busy) result = { ok: false, error: "Session is busy" };
+  if (result.ok) resourcesReloaded = true;
   emit({ type: "extension_ui_request", method: "setStatus", statusKey: `gripi_reload:${match[1]}`, statusText: JSON.stringify(result) });
   return true;
 }
