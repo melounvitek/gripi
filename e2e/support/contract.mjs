@@ -29,6 +29,7 @@ export const sessions = {
   bashIncluded: "E2E Bash Included Desktop",
   bashExcluded: "E2E Bash Excluded Desktop",
   bashCancel: "E2E Bash Cancel Desktop",
+  bashReload: "E2E Bash Reload Desktop",
   bashOverlap: "E2E Bash Overlap Desktop",
   bashMobile: "E2E Bash Cancel Mobile",
   wrappedToolOutput: "E2E Wrapped Tool Output Mobile"

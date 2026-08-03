@@ -89,7 +89,7 @@ test("cancel a long-running bash command with one click", async ({ page }) => {
 
 test("reject reload without hiding controls for active native bash", async ({ page }) => {
   await page.goto("/");
-  await selectSession(page, sessions.bashCancel);
+  await selectSession(page, sessions.bashReload);
   await sendPrompt(page, `!${nativeBash.cancel.command}`);
 
   const card = bashCard(page, nativeBash.cancel.command);
