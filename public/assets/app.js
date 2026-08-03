@@ -656,10 +656,10 @@ async function toggleNotifications() {
 
   localStorage.removeItem("gripi:notifications-disabled");
   if (nativeNotificationAvailable()) {
+    const requiresPermission = nativeNotificationsRequirePermission(window);
     const requestPermission = nativeBridgeMethod(window, "requestNotificationPermission");
-    if (!nativeNotificationsRequirePermission(window) || (await requestPermission?.())?.ok) {
-      localStorage.setItem("gripi:native-notifications-enabled", "true");
-    }
+    const granted = !requiresPermission || (await requestPermission?.())?.ok;
+    localStorage.setItem("gripi:native-notifications-enabled", granted ? "true" : "false");
     updateNotificationToggle();
     return;
   }

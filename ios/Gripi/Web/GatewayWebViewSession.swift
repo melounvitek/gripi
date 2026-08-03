@@ -127,6 +127,10 @@ final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
         failureMessage = error.localizedDescription
     }
 
+    fileprivate func cancelledNavigation() {
+        isLoading = false
+    }
+
     fileprivate func startedDownload() {
         isLoading = false
         failureMessage = nil
@@ -185,9 +189,11 @@ final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
             decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
         case .openExternally:
             decisionHandler(.cancel)
+            session?.cancelledNavigation()
             UIApplication.shared.open(url)
         case .reject:
             decisionHandler(.cancel)
+            session?.cancelledNavigation()
         }
     }
 
@@ -196,12 +202,23 @@ final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
         decidePolicyFor navigationResponse: WKNavigationResponse,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
     ) {
-        guard let url = navigationResponse.response.url, originPolicy.contains(url) else {
+        guard let url = navigationResponse.response.url else {
             decisionHandler(.cancel)
+            session?.cancelledNavigation()
             return
         }
 
-        decisionHandler(navigationResponse.canShowMIMEType ? .allow : .download)
+        switch originPolicy.decision(for: url) {
+        case .allow:
+            decisionHandler(navigationResponse.canShowMIMEType ? .allow : .download)
+        case .openExternally:
+            decisionHandler(.cancel)
+            session?.cancelledNavigation()
+            UIApplication.shared.open(url)
+        case .reject:
+            decisionHandler(.cancel)
+            session?.cancelledNavigation()
+        }
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {

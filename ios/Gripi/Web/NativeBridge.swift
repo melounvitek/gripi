@@ -4,7 +4,6 @@ import UserNotifications
 import WebKit
 
 struct NativeNotificationPayload: Equatable {
-    let type: String
     let title: String
     let body: String
     let url: URL
@@ -25,7 +24,6 @@ struct NativeNotificationPayload: Equatable {
             return nil
         }
 
-        self.type = type
         self.title = title
         self.body = body
         self.url = url
