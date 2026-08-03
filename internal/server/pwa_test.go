@@ -47,7 +47,7 @@ func TestHandlerServesThePWAResources(t *testing.T) {
 	if worker.Code != http.StatusOK || worker.Header().Get("Content-Type") != "application/javascript;charset=utf-8" || worker.Header().Get("Cache-Control") != "no-cache" {
 		t.Fatalf("worker response = %d, Content-Type %q, Cache-Control %q", worker.Code, worker.Header().Get("Content-Type"), worker.Header().Get("Cache-Control"))
 	}
-	for _, text := range []string{"self.registration.showNotification", `["gripi-notification", "gripi-notification-test"].includes(data.type)`, `addEventListener("push"`, "notificationclick"} {
+	for _, text := range []string{`importScripts("/assets/notification_preview.js", "/assets/web_push_worker.js")`, "self.gripiDisplayPushNotification", `["gripi-notification", "gripi-notification-test"].includes(data.type)`, `addEventListener("push"`, "notificationclick"} {
 		if !strings.Contains(worker.Body.String(), text) {
 			t.Fatalf("worker does not contain %q", text)
 		}

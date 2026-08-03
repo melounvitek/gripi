@@ -7,6 +7,8 @@ export class WebPushController {
     this.fetch = fetchFunction;
     this.preparation = null;
     this.active = false;
+    this.generation = 0;
+    this.mutations = Promise.resolve();
   }
 
   available() {
@@ -19,22 +21,43 @@ export class WebPushController {
 
   prepare() {
     if (!this.available()) return Promise.resolve(null);
-    this.preparation ||= Promise.all([
+    if (this.preparation) return this.preparation;
+
+    const attempt = Promise.all([
       this.navigator.serviceWorker.register("/service-worker.js").then(() => this.navigator.serviceWorker.ready),
       this.fetchJSON("/web-push/config")
     ]).then(([registration, config]) => ({ registration, publicKey: config.public_key }));
-    return this.preparation;
+    const retryable = attempt.catch((error) => {
+      if (this.preparation === retryable) this.preparation = null;
+      throw error;
+    });
+    this.preparation = retryable;
+    return retryable;
   }
 
-  async reconcile() {
+  reconcile() {
+    const generation = ++this.generation;
+    return this.mutate(() => this.reconcileGeneration(generation));
+  }
+
+  async reconcileGeneration(generation) {
     if (!this.available() || this.disabled() || this.window.Notification.permission !== "granted") {
-      this.active = false;
+      if (generation === this.generation) this.active = false;
       return false;
     }
 
     const prepared = await this.prepare();
+    if (generation !== this.generation) return false;
     const subscription = await this.currentOrNewSubscription(prepared);
+    if (generation !== this.generation) {
+      if (this.disabled()) await this.remove(subscription).catch(() => {});
+      return false;
+    }
     await this.store(subscription);
+    if (generation !== this.generation) {
+      if (this.disabled()) await this.remove(subscription).catch(() => {});
+      return false;
+    }
     this.active = true;
     return true;
   }
@@ -42,41 +65,42 @@ export class WebPushController {
   async enable() {
     if (!this.available()) return false;
 
+    const generation = ++this.generation;
     this.window.localStorage.removeItem(NOTIFICATIONS_DISABLED_KEY);
     const permission = this.window.Notification.permission === "default"
       ? await this.window.Notification.requestPermission()
       : this.window.Notification.permission;
-    if (permission !== "granted") {
-      this.active = false;
+    if (permission !== "granted" || generation !== this.generation) {
+      if (generation === this.generation) this.active = false;
       return false;
     }
 
-    return this.reconcile();
+    return this.mutate(() => this.reconcileGeneration(generation));
   }
 
   async disable() {
+    ++this.generation;
     this.window.localStorage.setItem(NOTIFICATIONS_DISABLED_KEY, "true");
     this.active = false;
     if (!this.available()) return;
 
-    let registration = null;
-    try {
-      registration = await this.navigator.serviceWorker.getRegistration("/");
-    } catch (_error) {
-      return;
-    }
-    const subscription = await registration?.pushManager?.getSubscription();
-    if (!subscription) return;
+    return this.mutate(async () => {
+      let registration = null;
+      try {
+        registration = await this.navigator.serviceWorker.getRegistration("/");
+      } catch (_error) {
+        return;
+      }
+      const subscription = await registration?.pushManager?.getSubscription();
+      if (!subscription) return;
+      await this.remove(subscription);
+    });
+  }
 
-    try {
-      await this.fetchOK("/web-push/subscription", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint: subscription.endpoint })
-      });
-    } finally {
-      await subscription.unsubscribe();
-    }
+  mutate(operation) {
+    const result = this.mutations.catch(() => {}).then(operation);
+    this.mutations = result.catch(() => {});
+    return result;
   }
 
   disabled() {
@@ -92,6 +116,18 @@ export class WebPushController {
     }
     subscription ||= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
     return subscription;
+  }
+
+  async remove(subscription) {
+    try {
+      await this.fetchOK("/web-push/subscription", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription.endpoint })
+      });
+    } finally {
+      await subscription.unsubscribe();
+    }
   }
 
   async store(subscription) {

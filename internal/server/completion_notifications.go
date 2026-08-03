@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
@@ -14,11 +16,16 @@ import (
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
-const completionNotificationQueueSize = 64
+const (
+	completionNotificationQueueSize = 64
+	maxNotificationURLBytes         = 512
+)
 
 type completedReply struct {
 	client rpc.RPCClient
+	path   string
 	text   string
+	id     string
 }
 
 type completionNotifier struct {
@@ -45,6 +52,12 @@ func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string
 	if !completed {
 		return
 	}
+	path := notifier.app.rpcClients.PathForClient(client)
+	if path == "" {
+		log.Print("drop completed-reply notification: session is no longer registered")
+		return
+	}
+	reply := completedReply{client: client, path: path, text: text, id: completedReplyID(event)}
 
 	notifier.mu.Lock()
 	if notifier.closed {
@@ -58,7 +71,7 @@ func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string
 	notifier.mu.Unlock()
 
 	select {
-	case notifier.queue <- completedReply{client: client, text: text}:
+	case notifier.queue <- reply:
 	default:
 		log.Print("drop completed-reply notification: delivery queue is full")
 	}
@@ -102,7 +115,7 @@ func (notifier *completionNotifier) run() {
 }
 
 func (notifier *completionNotifier) deliver(ctx context.Context, reply completedReply) error {
-	path, err := notifier.sessionPath(ctx, reply.client)
+	path, err := notifier.sessionPath(ctx, reply)
 	if err != nil {
 		return err
 	}
@@ -117,38 +130,44 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	title := "current session"
 	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
 	if session, found := store.Session(path); found && strings.TrimSpace(session.DisplayName) != "" {
-		title = session.DisplayName
+		title = sessions.NotificationPreview(session.DisplayName)
 	}
 	payload, err := json.Marshal(map[string]string{
 		"type":  "gripi-notification",
 		"title": title,
 		"body":  sessions.NotificationPreview(reply.text),
-		"tag":   "gripi-final-reply:" + sessions.SessionHash(path),
-		"url":   "/?session=" + url.QueryEscape(path),
+		"tag":   completedReplyTag(path, reply.id),
+		"url":   completedReplyURL(path),
 	})
 	if err != nil {
 		return err
 	}
 
 	var failures []error
+	var failuresMu sync.Mutex
+	var deliveries sync.WaitGroup
 	for _, owner := range owners {
-		if err := notifier.app.pushNotifier.Deliver(ctx, owner, payload); err != nil {
-			failures = append(failures, err)
-		}
+		deliveries.Add(1)
+		go func(owner string) {
+			defer deliveries.Done()
+			if err := notifier.app.pushNotifier.Deliver(ctx, owner, payload); err != nil {
+				failuresMu.Lock()
+				failures = append(failures, err)
+				failuresMu.Unlock()
+			}
+		}(owner)
 	}
+	deliveries.Wait()
 	return errors.Join(failures...)
 }
 
-func (notifier *completionNotifier) sessionPath(ctx context.Context, client rpc.RPCClient) (string, error) {
-	path := notifier.app.rpcClients.PathForClient(client)
-	if path == "" {
-		return "", errors.New("completed reply has no registered session")
-	}
-	if _, pending := notifier.app.pendingSessions.CWD(path); !pending {
+func (notifier *completionNotifier) sessionPath(ctx context.Context, reply completedReply) (string, error) {
+	path, pendingCWD, pending := notifier.app.pendingSessions.Current(reply.path)
+	if !pending {
 		return path, nil
 	}
 
-	state, err := client.GetState(ctx)
+	state, err := reply.client.GetState(ctx)
 	if err != nil {
 		return path, nil
 	}
@@ -158,6 +177,12 @@ func (notifier *completionNotifier) sessionPath(ctx context.Context, client rpc.
 	} else {
 		return path, nil
 	}
+	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
+	session, found := store.Session(reported)
+	if !found || session.CWD != pendingCWD {
+		return path, nil
+	}
+	reported = session.Path
 	if !notifier.app.config.MultiUserMode {
 		return reported, nil
 	}
@@ -213,6 +238,36 @@ func (notifier *completionNotifier) owners(path string) ([]string, error) {
 	return result, nil
 }
 
+func completedReplyURL(path string) string {
+	result := "/?session=" + url.QueryEscape(path)
+	if len(result) > maxNotificationURLBytes {
+		return "/"
+	}
+	return result
+}
+
+func completedReplyTag(path, replyID string) string {
+	digest := sha256.Sum256([]byte(path + "\x00" + replyID))
+	return "gripi-final-reply:" + hex.EncodeToString(digest[:16])
+}
+
+func completedReplyID(event map[string]any) string {
+	message, _ := event["message"].(map[string]any)
+	for _, value := range []any{message["id"], message["messageId"], event["id"], event["messageId"]} {
+		if encoded, err := json.Marshal(value); err == nil && string(encoded) != "null" && string(encoded) != `""` {
+			digest := sha256.Sum256(encoded)
+			return hex.EncodeToString(digest[:16])
+		}
+	}
+	stable := any(message)
+	if len(message) == 0 {
+		stable = event
+	}
+	encoded, _ := json.Marshal(stable)
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:16])
+}
+
 func completedAssistantReply(event map[string]any) (string, bool) {
 	if event["type"] != "message_end" {
 		return "", false
@@ -222,6 +277,9 @@ func completedAssistantReply(event map[string]any) (string, bool) {
 		message = nested
 	}
 	if role, _ := message["role"].(string); role != "" && role != "assistant" {
+		return "", false
+	}
+	if stopReason, _ := message["stopReason"].(string); stopReason != "" && stopReason != "stop" && stopReason != "length" {
 		return "", false
 	}
 	text := sessions.FinalAssistantText(message["content"])

@@ -2,9 +2,12 @@ package push
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -55,6 +58,8 @@ func (delivery *WebPushDelivery) Deliver(ctx context.Context, subscription Subsc
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	topicDigest := sha256.Sum256(payload)
+	topic := base64.RawURLEncoding.EncodeToString(topicDigest[:18])
 	response, err := webpush.SendNotificationWithContext(ctx, payload, &webpush.Subscription{
 		Endpoint: subscription.Endpoint,
 		Keys: webpush.Keys{
@@ -64,6 +69,7 @@ func (delivery *WebPushDelivery) Deliver(ctx context.Context, subscription Subsc
 	}, &webpush.Options{
 		HTTPClient:      delivery.client,
 		Subscriber:      delivery.subscriber,
+		Topic:           topic,
 		TTL:             DefaultWebPushTTL,
 		VAPIDPublicKey:  keys.PublicKey,
 		VAPIDPrivateKey: keys.PrivateKey,
@@ -118,22 +124,29 @@ func (notifier *Notifier) Deliver(ctx context.Context, owner string, payload []b
 		attempts = 1
 	}
 	var failures []error
+	var failuresMu sync.Mutex
+	var deliveries sync.WaitGroup
 	for _, subscription := range subscriptions {
-		if err := ctx.Err(); err != nil {
-			failures = append(failures, err)
-			break
-		}
-		result, err := notifier.deliverOne(ctx, subscription, payload, attempts)
-		if isStaleStatus(result.StatusCode) {
-			if _, removeErr := notifier.store.remove(owner, subscription.Endpoint, &subscription); removeErr != nil {
-				failures = append(failures, fmt.Errorf("remove stale push subscription: %w", removeErr))
+		deliveries.Add(1)
+		go func(subscription Subscription) {
+			defer deliveries.Done()
+			result, err := notifier.deliverOne(ctx, subscription, payload, attempts)
+			if isStaleStatus(result.StatusCode) {
+				if _, removeErr := notifier.store.remove(owner, subscription.Endpoint, &subscription); removeErr != nil {
+					failuresMu.Lock()
+					failures = append(failures, fmt.Errorf("remove stale push subscription: %w", removeErr))
+					failuresMu.Unlock()
+				}
+				return
 			}
-			continue
-		}
-		if err != nil {
-			failures = append(failures, fmt.Errorf("deliver push subscription: %w", err))
-		}
+			if err != nil {
+				failuresMu.Lock()
+				failures = append(failures, fmt.Errorf("deliver push subscription: %w", err))
+				failuresMu.Unlock()
+			}
+		}(subscription)
 	}
+	deliveries.Wait()
 	return errors.Join(failures...)
 }
 
@@ -152,19 +165,15 @@ func (notifier *Notifier) deliverOne(ctx context.Context, subscription Subscript
 		if err == nil && isSuccessfulStatus(result.StatusCode) {
 			return result, nil
 		}
-		if err != nil && ctx.Err() != nil {
-			return result, ctx.Err()
+		if err != nil {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return result, err
 		}
-		if err == nil {
-			lastError = fmt.Errorf("delivery returned HTTP status %d", result.StatusCode)
-			if !isTransientStatus(result.StatusCode) {
-				return result, lastError
-			}
-		} else {
-			lastError = err
-			if result.StatusCode != 0 && !isTransientStatus(result.StatusCode) {
-				return result, err
-			}
+		lastError = fmt.Errorf("delivery returned HTTP status %d", result.StatusCode)
+		if !isTransientStatus(result.StatusCode) {
+			return result, lastError
 		}
 		if attempt == attempts {
 			break

@@ -48,6 +48,25 @@ func (registry *PendingSessionRegistry) CWD(path string) (string, bool) {
 	return entry.CWD, exists
 }
 
+func (registry *PendingSessionRegistry) Current(path string) (string, string, bool) {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	current := path
+	seen := make(map[string]bool)
+	for range 256 {
+		if entry, exists := registry.entries[current]; exists {
+			return current, entry.CWD, true
+		}
+		next, remapped := registry.remaps[current]
+		if !remapped || seen[current] {
+			return current, "", false
+		}
+		seen[current] = true
+		current = next
+	}
+	return current, "", false
+}
+
 func (registry *PendingSessionRegistry) Entries() []PendingSession {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()

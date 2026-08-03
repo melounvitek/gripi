@@ -45,6 +45,74 @@ test("Web Push disable removes the server record and browser subscription", asyn
   assert.deepEqual(sequence, ["get-registration", "get-subscription", "remove-subscription", "unsubscribe"]);
 });
 
+test("Web Push setup can retry after a transient preparation failure", async () => {
+  const fixture = webPushFixture([], { permission: "granted" });
+  const baseFetch = fixture.fetch;
+  let configAttempts = 0;
+  fixture.fetch = async (url, options) => {
+    if (url === "/web-push/config" && configAttempts++ === 0) return response(null, 503);
+    return baseFetch(url, options);
+  };
+  const controller = new WebPushController(fixture.window, fixture.navigator, fixture.fetch);
+
+  await assert.rejects(controller.prepare(), /503/);
+  assert.ok(await controller.prepare());
+});
+
+test("disabling wins over an in-flight subscription reconciliation", async () => {
+  const sequence = [];
+  const fixture = webPushFixture(sequence, { permission: "granted", existing: true });
+  const baseFetch = fixture.fetch;
+  let releaseStore;
+  const storeStarted = new Promise((resolve) => {
+    fixture.fetch = async (url, options = {}) => {
+      if (options.method !== "PUT") return baseFetch(url, options);
+      sequence.push("store-subscription");
+      resolve();
+      await new Promise((release) => { releaseStore = release; });
+      return response(null, 204);
+    };
+  });
+  const controller = new WebPushController(fixture.window, fixture.navigator, fixture.fetch);
+  const reconciling = controller.reconcile();
+  await storeStarted;
+
+  const disabling = controller.disable();
+  releaseStore();
+  await disabling;
+
+  assert.equal(await reconciling, false);
+  assert.equal(controller.enabled(), false);
+  assert.equal(fixture.storage.get("gripi:notifications-disabled"), "true");
+  assert.ok(sequence.filter((step) => step === "remove-subscription").length >= 1);
+});
+
+test("a later enable waits for an earlier disable to finish", async () => {
+  const sequence = [];
+  const fixture = webPushFixture(sequence, { permission: "granted", existing: true });
+  const originalGetRegistration = fixture.navigator.serviceWorker.getRegistration;
+  let releaseDisable;
+  let disableStarted;
+  const started = new Promise((resolve) => { disableStarted = resolve; });
+  fixture.navigator.serviceWorker.getRegistration = async () => {
+    disableStarted();
+    await new Promise((resolve) => { releaseDisable = resolve; });
+    return originalGetRegistration();
+  };
+  const controller = new WebPushController(fixture.window, fixture.navigator, fixture.fetch);
+
+  const disabling = controller.disable();
+  await started;
+  const enabling = controller.enable();
+  releaseDisable();
+
+  await disabling;
+  assert.equal(await enabling, true);
+  assert.equal(controller.enabled(), true);
+  assert.equal(fixture.storage.has("gripi:notifications-disabled"), false);
+  assert.ok(sequence.lastIndexOf("store-subscription") > sequence.lastIndexOf("remove-subscription"));
+});
+
 test("Web Push respects denied, disabled, and unsupported browser states", async () => {
   const denied = webPushFixture([], { permission: "denied" });
   const deniedController = new WebPushController(denied.window, denied.navigator, denied.fetch);
@@ -65,7 +133,7 @@ test("Web Push respects denied, disabled, and unsupported browser states", async
 function webPushFixture(sequence, { permission = "default", existing = false } = {}) {
   const storage = new Map();
   const key = decodeApplicationServerKey(publicKey);
-  let currentSubscription = existing ? subscription(sequence, key) : null;
+  let currentSubscription = existing ? subscription(sequence, key, () => { currentSubscription = null; }) : null;
   const fixture = {
     storage,
     subscriptionOptions: null,
@@ -78,7 +146,7 @@ function webPushFixture(sequence, { permission = "default", existing = false } =
     async subscribe(options) {
       sequence.push("subscribe");
       fixture.subscriptionOptions = options;
-      currentSubscription = subscription(sequence, options.applicationServerKey);
+      currentSubscription = subscription(sequence, options.applicationServerKey, () => { currentSubscription = null; });
       return currentSubscription;
     }
   };
@@ -124,15 +192,16 @@ function webPushFixture(sequence, { permission = "default", existing = false } =
   return fixture;
 }
 
-function subscription(sequence, applicationServerKey) {
+function subscription(sequence, applicationServerKey, onUnsubscribe) {
   return {
     endpoint: "https://push.example/device",
     options: { applicationServerKey },
     toJSON() {
-      return { endpoint: this.endpoint, keys: { auth: "auth", p256dh: "p256dh" } };
+      return { endpoint: this.endpoint, expirationTime: null, keys: { auth: "auth", p256dh: "p256dh" } };
     },
     async unsubscribe() {
       sequence.push("unsubscribe");
+      onUnsubscribe();
       return true;
     }
   };

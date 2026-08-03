@@ -41,6 +41,38 @@ func TestNotifierUsesFakeDeliveryForEverySubscriptionOwnedByTheUser(t *testing.T
 	}
 }
 
+func TestNotifierDoesNotLetOneSlowDeviceBlockOtherSubscriptions(t *testing.T) {
+	store := NewSubscriptionStore(filepath.Join(t.TempDir(), "subscriptions.json"))
+	for _, suffix := range []string{"slow", "fast"} {
+		if err := store.Upsert("owner", testSubscription(suffix)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	releaseSlow := make(chan struct{})
+	fastCalled := make(chan struct{})
+	delivery := deliveryFunc(func(_ context.Context, subscription Subscription, _ []byte) (DeliveryResult, error) {
+		if strings.HasSuffix(subscription.Endpoint, "/slow") {
+			<-releaseSlow
+		} else {
+			close(fastCalled)
+		}
+		return DeliveryResult{StatusCode: http.StatusCreated}, nil
+	})
+	notifier := NewNotifier(store, delivery)
+	done := make(chan error, 1)
+	go func() { done <- notifier.Deliver(context.Background(), "owner", []byte("payload")) }()
+
+	select {
+	case <-fastCalled:
+	case <-time.After(time.Second):
+		t.Fatal("fast subscription was blocked by another device")
+	}
+	close(releaseSlow)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNotifierRemovesSubscriptionsReturning404Or410(t *testing.T) {
 	store := NewSubscriptionStore(filepath.Join(t.TempDir(), "subscriptions.json"))
 	for _, suffix := range []string{"gone", "expired", "active"} {
@@ -48,7 +80,11 @@ func TestNotifierRemovesSubscriptionsReturning404Or410(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	fake := &fakeDelivery{statuses: []int{http.StatusNotFound, http.StatusGone, http.StatusCreated}}
+	fake := &fakeDelivery{statusesByEndpoint: map[string]int{
+		testSubscription("gone").Endpoint:    http.StatusNotFound,
+		testSubscription("expired").Endpoint: http.StatusGone,
+		testSubscription("active").Endpoint:  http.StatusCreated,
+	}}
 	notifier := NewNotifier(store, fake)
 	notifier.sleep = noWait
 
@@ -105,6 +141,26 @@ func TestNotifierRetriesTransientFailuresWithBoundedAttempts(t *testing.T) {
 	}
 }
 
+func TestNotifierDoesNotRetryAmbiguousNetworkFailures(t *testing.T) {
+	store := NewSubscriptionStore(filepath.Join(t.TempDir(), "subscriptions.json"))
+	if err := store.Upsert("owner", testSubscription("network")); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	notifier := NewNotifier(store, deliveryFunc(func(context.Context, Subscription, []byte) (DeliveryResult, error) {
+		calls++
+		return DeliveryResult{}, errors.New("connection reset after request")
+	}))
+	notifier.sleep = noWait
+
+	if err := notifier.Deliver(context.Background(), "owner", []byte("payload")); err == nil {
+		t.Fatal("network failure succeeded")
+	}
+	if calls != 1 {
+		t.Fatalf("network failure calls = %d", calls)
+	}
+}
+
 func TestNotifierDoesNotRetryPermanentFailures(t *testing.T) {
 	store := NewSubscriptionStore(filepath.Join(t.TempDir(), "subscriptions.json"))
 	if err := store.Upsert("owner", testSubscription("permanent")); err != nil {
@@ -134,6 +190,9 @@ func TestWebPushDeliveryUsesVAPIDIdentityAndMaintainedWebPushPackage(t *testing.
 		if request.Header.Get("TTL") != "86400" {
 			return nil, errors.New("missing TTL")
 		}
+		if request.Header.Get("Topic") == "" || len(request.Header.Get("Topic")) > 32 {
+			return nil, errors.New("missing bounded topic")
+		}
 		return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(""))}, nil
 	})
 	delivery := NewWebPushDelivery(identity, "gripi@example.test", client)
@@ -157,9 +216,10 @@ type deliveryCall struct {
 }
 
 type fakeDelivery struct {
-	mu       sync.Mutex
-	statuses []int
-	callsLog []deliveryCall
+	mu                 sync.Mutex
+	statuses           []int
+	statusesByEndpoint map[string]int
+	callsLog           []deliveryCall
 }
 
 func (fake *fakeDelivery) Deliver(_ context.Context, subscription Subscription, payload []byte) (DeliveryResult, error) {
@@ -167,9 +227,12 @@ func (fake *fakeDelivery) Deliver(_ context.Context, subscription Subscription, 
 	defer fake.mu.Unlock()
 	fake.callsLog = append(fake.callsLog, deliveryCall{subscription: subscription, payload: append([]byte(nil), payload...)})
 	index := len(fake.callsLog) - 1
-	status := fake.statuses[len(fake.statuses)-1]
-	if index < len(fake.statuses) {
-		status = fake.statuses[index]
+	status, found := fake.statusesByEndpoint[subscription.Endpoint]
+	if !found {
+		status = fake.statuses[len(fake.statuses)-1]
+		if index < len(fake.statuses) {
+			status = fake.statuses[index]
+		}
 	}
 	return DeliveryResult{StatusCode: status}, nil
 }
@@ -189,6 +252,12 @@ func (fn httpClientFunc) Do(request *http.Request) (*http.Response, error) {
 }
 
 type httpClientFunc func(*http.Request) (*http.Response, error)
+
+type deliveryFunc func(context.Context, Subscription, []byte) (DeliveryResult, error)
+
+func (fn deliveryFunc) Deliver(ctx context.Context, subscription Subscription, payload []byte) (DeliveryResult, error) {
+	return fn(ctx, subscription, payload)
+}
 
 func testCryptographicSubscription(suffix string) Subscription {
 	return Subscription{

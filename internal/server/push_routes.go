@@ -42,10 +42,15 @@ func (app *application) webPushConfig(response http.ResponseWriter, _ *http.Requ
 }
 
 func (app *application) upsertPushSubscription(response http.ResponseWriter, request *http.Request) {
-	var subscription push.Subscription
-	if !decodePushJSON(response, request, &subscription) {
+	var input struct {
+		Endpoint       string                `json:"endpoint"`
+		ExpirationTime json.RawMessage       `json:"expirationTime"`
+		Keys           push.SubscriptionKeys `json:"keys"`
+	}
+	if !decodePushJSON(response, request, &input) {
 		return
 	}
+	subscription := push.Subscription{Endpoint: input.Endpoint, Keys: input.Keys}
 	owner, ok := app.pushOwner(request)
 	if !ok {
 		writeText(response, http.StatusForbidden, "Forbidden")

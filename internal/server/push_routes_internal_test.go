@@ -32,7 +32,9 @@ func TestWebPushRoutesRegisterAndRemoveTheCurrentOwnersSubscription(t *testing.T
 		t.Fatalf("config = %#v, %v", pushConfig, err)
 	}
 
-	registered := pushRequest(handler, http.MethodPut, "/web-push/subscription", pushJSON(t, subscription), "")
+	registered := pushRequest(handler, http.MethodPut, "/web-push/subscription", pushJSON(t, map[string]any{
+		"endpoint": subscription.Endpoint, "expirationTime": nil, "keys": subscription.Keys,
+	}), "")
 	if registered.Code != http.StatusNoContent {
 		t.Fatalf("register response = %d %s", registered.Code, registered.Body.String())
 	}
