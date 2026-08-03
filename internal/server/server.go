@@ -18,6 +18,7 @@ import (
 	"github.com/melounvitek/gripi/internal/access"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/keyedlock"
+	"github.com/melounvitek/gripi/internal/push"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/resource"
 	"github.com/melounvitek/gripi/internal/rpc"
@@ -36,6 +37,9 @@ type application struct {
 	workspaceStore     *access.WorkspaceStore
 	ownershipStore     *access.WorkspaceOwnershipStore
 	workspaceSecret    string
+	pushIdentity       *push.VAPIDIdentity
+	pushSubscriptions  *push.SubscriptionStore
+	pushNotifier       pushNotifier
 	accessLimiter      *access.RateLimiter
 	adminLimiter       *access.RateLimiter
 	newBrowserToken    func() (string, error)
@@ -151,6 +155,10 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		}
 	}
 
+	pushIdentity := push.NewVAPIDIdentity(cfg.WebPushVAPIDPath)
+	pushSubscriptions := push.NewSubscriptionStore(cfg.PushSubscriptionsPath)
+	pushDelivery := push.NewWebPushDelivery(pushIdentity, "https://github.com/melounvitek/gripi", &http.Client{Timeout: 15 * time.Second})
+
 	app := &application{
 		config:             cfg,
 		files:              files,
@@ -159,6 +167,9 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		workspaceStore:     access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
 		ownershipStore:     access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
 		workspaceSecret:    workspaceSecret,
+		pushIdentity:       pushIdentity,
+		pushSubscriptions:  pushSubscriptions,
+		pushNotifier:       push.NewNotifier(pushSubscriptions, pushDelivery),
 		accessLimiter:      access.NewRateLimiter(30, time.Minute),
 		adminLimiter:       access.NewRateLimiter(10, 5*time.Minute),
 		newBrowserToken:    newBrowserToken,
@@ -230,6 +241,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	app.registerBrowserAccessRoutes(mux)
 	app.registerWorkspaceRoutes(mux)
 	app.registerPWARoutes(mux)
+	app.registerPushRoutes(mux)
 	app.registerOperationalRoutes(mux)
 	app.registerSessionRoutes(mux)
 	app.registerActionRoutes(mux)

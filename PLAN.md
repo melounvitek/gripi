@@ -7,7 +7,7 @@ Deliver completed assistant-reply notifications to installed iOS PWAs while Grip
 ## TDD rounds
 
 - [x] Round 1: Persistent VAPID identity, subscription store, and Web Push delivery foundation.
-- [ ] Round 2: Authenticated subscription and test-delivery API with single-user and multi-user isolation.
+- [x] Round 2: Authenticated subscription and test-delivery API with single-user and multi-user isolation.
 - [ ] Round 3: First-tap browser subscription lifecycle and notification-test flow.
 - [ ] Round 4: Server-side completed-assistant event observation and owner-targeted delivery.
 - [ ] Round 5: Service-worker push display, focused-session suppression, documentation, full verification, and independent review.
