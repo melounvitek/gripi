@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class GatewaySwitchingUITests: XCTestCase {
     func testGatewaySwitchActivatesOnTheFirstTap() {
         let app = XCUIApplication()
@@ -15,10 +16,17 @@ final class GatewaySwitchingUITests: XCTestCase {
 
         let firstGateway = app.buttons["First"]
         XCTAssertTrue(firstGateway.waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: firstGateway)], timeout: 5),
+            .completed
+        )
 
         firstGateway.tap()
 
-        XCTAssertTrue(firstGateway.isSelected)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: firstGateway)], timeout: 5),
+            .completed
+        )
     }
 
     private func addInitialGateway(named name: String, url: String, in app: XCUIApplication) {

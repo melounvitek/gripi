@@ -103,7 +103,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
     func userContentController(
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage,
-        replyHandler: @escaping (Any?, String?) -> Void
+        replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void
     ) {
         guard message.frameInfo.isMainFrame,
               let frameURL = message.frameInfo.request.url,

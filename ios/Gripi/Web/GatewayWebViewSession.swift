@@ -126,6 +126,15 @@ final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
         isLoading = false
         failureMessage = error.localizedDescription
     }
+
+    fileprivate func startedDownload() {
+        isLoading = false
+        failureMessage = nil
+    }
+
+    fileprivate func failedDownload() {
+        isLoading = false
+    }
 }
 
 @MainActor
@@ -157,10 +166,14 @@ final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
         session?.failedLoading(error)
     }
 
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        session?.retry()
+    }
+
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
         guard let url = navigationAction.request.url else {
             decisionHandler(.cancel)
@@ -181,7 +194,7 @@ final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse,
-        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
     ) {
         guard let url = navigationResponse.response.url, originPolicy.contains(url) else {
             decisionHandler(.cancel)
@@ -192,10 +205,12 @@ final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        session?.startedDownload()
         download.delegate = self
     }
 
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        session?.startedDownload()
         download.delegate = self
     }
 
@@ -203,11 +218,24 @@ final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
         _ download: WKDownload,
         decideDestinationUsing response: URLResponse,
         suggestedFilename: String,
-        completionHandler: @escaping (URL?) -> Void
+        completionHandler: @escaping @MainActor @Sendable (URL?) -> Void
     ) {
         let destination = DownloadDestination.temporaryURL(for: suggestedFilename)
         downloadDestinations[ObjectIdentifier(download)] = destination
         completionHandler(destination)
+    }
+
+    func download(
+        _ download: WKDownload,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        decisionHandler: @escaping @MainActor @Sendable (WKDownload.RedirectPolicy) -> Void
+    ) {
+        guard let url = request.url, originPolicy.contains(url) else {
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
     }
 
     func downloadDidFinish(_ download: WKDownload) {
@@ -216,8 +244,10 @@ final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        downloadDestinations.removeValue(forKey: ObjectIdentifier(download))
-        session?.failedLoading(error)
+        if let destination = downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) {
+            try? FileManager.default.removeItem(at: destination.deletingLastPathComponent())
+        }
+        session?.failedDownload()
     }
 
     func webView(

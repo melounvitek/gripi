@@ -19,6 +19,7 @@ jobs:
       - run: npm install --global @earendil-works/pi-coding-agent@0.81.1
       - run: npm ci
       - run: mise run test
+      - run: mise run desktop-check
       - run: npx playwright install --with-deps chromium
       - run: mise run e2e
       - uses: actions/upload-artifact@v4
