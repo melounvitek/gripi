@@ -1,6 +1,7 @@
 import XCTest
 @testable import Gripi
 
+@MainActor
 final class NativeIntegrationTests: XCTestCase {
     func testNotificationPayloadResolvesOnlyGatewayURLs() throws {
         let gatewayURL = try XCTUnwrap(URL(string: "https://gateway.example/"))
@@ -28,6 +29,18 @@ final class NativeIntegrationTests: XCTestCase {
             "type": "untrusted",
             "url": "/"
         ], gatewayURL: gatewayURL))
+    }
+
+    func testRenamingAGatewayPreservesItsWebViewSession() throws {
+        let gateway = try Gateway.from(name: "Original", url: "https://gateway.example")
+        let renamed = try Gateway.from(id: gateway.id, name: "Renamed", url: gateway.url.absoluteString)
+        let sessions = GatewaySessionStore()
+
+        let originalSession = sessions.session(for: gateway)
+        let renamedSession = sessions.session(for: renamed)
+
+        XCTAssertTrue(originalSession === renamedSession)
+        XCTAssertEqual(renamedSession.gateway.name, "Renamed")
     }
 
     func testDownloadFilenameCannotEscapeTheTemporaryDirectory() {

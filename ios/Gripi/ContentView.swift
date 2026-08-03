@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var gatewayStore: GatewayStore
     @EnvironmentObject private var gatewaySessions: GatewaySessionStore
+    @EnvironmentObject private var notificationRouter: NotificationRouter
 
     @State private var editor: GatewayEditor?
     @State private var pendingRemoval: Gateway?
@@ -46,8 +47,10 @@ struct ContentView: View {
         .onChange(of: gatewayStore.configuration.gateways) { _, gateways in
             gatewaySessions.synchronize(with: gateways)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openGripiNotification)) { notification in
-            openNotification(notification.userInfo)
+        .onChange(of: notificationRouter.route, initial: true) { _, route in
+            guard let route else { return }
+            openNotification(route)
+            notificationRouter.consume()
         }
     }
 
@@ -55,7 +58,7 @@ struct ContentView: View {
         ZStack {
             ForEach(gatewayStore.configuration.gateways) { gateway in
                 let session = gatewaySessions.session(for: gateway)
-                GatewayScreen(session: session)
+                GatewayScreen(session: session, isActive: gateway.id == gatewayStore.activeGateway?.id)
                     .id(session.id)
                     .opacity(gateway.id == gatewayStore.activeGateway?.id ? 1 : 0)
                     .allowsHitTesting(gateway.id == gatewayStore.activeGateway?.id)
@@ -71,11 +74,9 @@ struct ContentView: View {
         )
     }
 
-    private func openNotification(_ userInfo: [AnyHashable: Any]?) {
-        guard let idValue = userInfo?["gatewayID"] as? String,
-              let gatewayID = UUID(uuidString: idValue),
-              let urlValue = userInfo?["url"] as? String,
-              let url = URL(string: urlValue),
+    private func openNotification(_ route: NotificationRoute) {
+        guard let gatewayID = UUID(uuidString: route.gatewayID),
+              let url = URL(string: route.url),
               let gateway = gatewayStore.configuration.gateways.first(where: { $0.id == gatewayID }),
               OriginPolicy(gatewayURL: gateway.url)?.contains(url) == true else {
             return

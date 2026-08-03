@@ -18,7 +18,10 @@ final class GatewaySessionStore: ObservableObject {
     private var subscriptions: [UUID: AnyCancellable] = [:]
 
     func session(for gateway: Gateway) -> GatewayWebViewSession {
-        if let session = sessions[gateway.id], session.gateway == gateway { return session }
+        if let session = sessions[gateway.id], session.gateway.url == gateway.url {
+            session.update(gateway)
+            return session
+        }
 
         let session = GatewayWebViewSession(gateway: gateway)
         sessions[gateway.id] = session

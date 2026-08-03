@@ -48,6 +48,11 @@ final class NativeNotificationService {
 
     private let center = UNUserNotificationCenter.current()
 
+    func permissionGranted() async -> Bool {
+        let settings = await center.notificationSettings()
+        return settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+    }
+
     func requestPermission() async -> Bool {
         do {
             return try await center.requestAuthorization(options: [.alert, .badge, .sound])
@@ -57,8 +62,7 @@ final class NativeNotificationService {
     }
 
     func show(_ payload: NativeNotificationPayload, gatewayID: UUID) async -> Bool {
-        let settings = await center.notificationSettings()
-        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return false }
+        guard await permissionGranted() else { return false }
 
         let content = UNMutableNotificationContent()
         content.title = payload.title
@@ -70,7 +74,7 @@ final class NativeNotificationService {
         ]
 
         let request = UNNotificationRequest(
-            identifier: payload.tag ?? UUID().uuidString,
+            identifier: "\(gatewayID.uuidString):\(payload.tag ?? UUID().uuidString)",
             content: content,
             trigger: nil
         )
@@ -118,6 +122,11 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
             UIPasteboard.general.string = text
             replyHandler(["ok": true], nil)
+        case "notificationPermission":
+            Task {
+                let granted = await NativeNotificationService.shared.permissionGranted()
+                replyHandler(["ok": granted], nil)
+            }
         case "requestNotificationPermission":
             Task {
                 let granted = await NativeNotificationService.shared.requestPermission()
@@ -143,9 +152,11 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
       const handler = window.webkit?.messageHandlers?.gripiNative;
       if (!handler) return;
       const call = (action, payload = {}) => Promise.resolve(handler.postMessage({ action, payload }));
+      window.gripiNativeViewActive = false;
       window.gripiNative = Object.freeze({
         notificationsRequirePermission: true,
         copyText: (text) => call("copyText", { text }),
+        notificationPermission: () => call("notificationPermission"),
         requestNotificationPermission: () => call("requestNotificationPermission"),
         showNotification: (payload) => call("showNotification", payload)
       });

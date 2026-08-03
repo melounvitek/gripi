@@ -28,6 +28,16 @@ final class GatewayRepositoryTests: XCTestCase {
         XCTAssertEqual(repository.load(), configuration)
     }
 
+    func testDropsDecodedGatewaysWithUnsafeURLs() throws {
+        let gateway = Gateway(name: "Unsafe", url: try XCTUnwrap(URL(string: "file:///tmp/gripi")))
+        let data = try JSONEncoder().encode(GatewayConfiguration(gateways: [gateway]))
+        defaults.set(data, forKey: "gatewayConfiguration")
+
+        let configuration = UserDefaultsGatewayRepository(defaults: defaults).load()
+
+        XCTAssertTrue(configuration.gateways.isEmpty)
+    }
+
     func testMissingOrMalformedDataLoadsEmptyConfiguration() {
         let repository = UserDefaultsGatewayRepository(defaults: defaults)
         XCTAssertTrue(repository.load().gateways.isEmpty)

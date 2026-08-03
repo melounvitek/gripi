@@ -16,11 +16,14 @@ struct UserDefaultsGatewayRepository: GatewayConfigurationRepository {
 
     func load() -> GatewayConfiguration {
         guard let data = defaults.data(forKey: key),
-              let configuration = try? JSONDecoder().decode(GatewayConfiguration.self, from: data) else {
+              let decoded = try? JSONDecoder().decode(GatewayConfiguration.self, from: data) else {
             return GatewayConfiguration()
         }
 
-        return configuration
+        let gateways = decoded.gateways.compactMap { gateway in
+            try? Gateway.from(id: gateway.id, name: gateway.name, url: gateway.url.absoluteString)
+        }
+        return GatewayConfiguration(gateways: gateways, activeGatewayID: decoded.activeGatewayID)
     }
 
     func save(_ configuration: GatewayConfiguration) throws {

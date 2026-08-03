@@ -1,10 +1,32 @@
+import Combine
 import UIKit
 import UserNotifications
 
-extension Notification.Name {
-    static let openGripiNotification = Notification.Name("openGripiNotification")
+struct NotificationRoute: Equatable {
+    let gatewayID: String
+    let url: String
 }
 
+@MainActor
+final class NotificationRouter: ObservableObject {
+    static let shared = NotificationRouter()
+
+    @Published private(set) var route: NotificationRoute?
+
+    func receive(_ userInfo: [AnyHashable: Any]) {
+        guard let gatewayID = userInfo["gatewayID"] as? String,
+              let url = userInfo["url"] as? String else {
+            return
+        }
+        route = NotificationRoute(gatewayID: gatewayID, url: url)
+    }
+
+    func consume() {
+        route = nil
+    }
+}
+
+@MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
@@ -27,11 +49,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        NotificationCenter.default.post(
-            name: .openGripiNotification,
-            object: nil,
-            userInfo: response.notification.request.content.userInfo
-        )
+        NotificationRouter.shared.receive(response.notification.request.content.userInfo)
         completionHandler()
     }
 }

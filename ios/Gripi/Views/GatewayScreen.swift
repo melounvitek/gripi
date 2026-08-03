@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GatewayScreen: View {
     @ObservedObject var session: GatewayWebViewSession
+    var isActive = true
 
     var body: some View {
         ZStack {
@@ -15,6 +16,8 @@ struct GatewayScreen: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
             }
         }
+        .onAppear { session.setActive(isActive) }
+        .onChange(of: isActive) { _, active in session.setActive(active) }
         .sheet(item: $session.popupRequest) { request in
             PopupGatewayView(request: request)
         }

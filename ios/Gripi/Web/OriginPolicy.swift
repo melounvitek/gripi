@@ -42,7 +42,6 @@ struct OriginPolicy {
     }
 
     func decision(for url: URL) -> NavigationDecision {
-        if url.absoluteString == "about:blank" { return .allow }
         if WebOrigin(url: url) == origin { return .allow }
         if ["http", "https", "mailto", "tel"].contains(url.scheme?.lowercased() ?? "") { return .openExternally }
         return .reject

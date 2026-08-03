@@ -12,7 +12,7 @@ struct PopupRequest: Identifiable {
 @MainActor
 final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
     let id = UUID()
-    let gateway: Gateway
+    private(set) var gateway: Gateway
     let webView: WKWebView
 
     @Published private(set) var isLoading = true
@@ -24,13 +24,14 @@ final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
     private let coordinator: GatewayWebCoordinator
     private let nativeBridge: NativeBridge
     private var unreadTimer: AnyCancellable?
+    private var isActive = false
 
     init(gateway: Gateway, initialURL: URL? = nil) {
         self.gateway = gateway
 
         let contentController = WKUserContentController()
         nativeBridge = NativeBridge(gateway: gateway)
-        contentController.add(nativeBridge, contentWorld: .page, name: NativeBridge.handlerName)
+        contentController.addScriptMessageHandler(nativeBridge, contentWorld: .page, name: NativeBridge.handlerName)
         contentController.addUserScript(WKUserScript(
             source: NativeBridge.source,
             injectionTime: .atDocumentStart,
@@ -52,6 +53,16 @@ final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.keyboardDismissMode = .interactive
         load(initialURL ?? gateway.url)
+    }
+
+    func update(_ gateway: Gateway) {
+        guard self.gateway.id == gateway.id, self.gateway.url == gateway.url else { return }
+        self.gateway = gateway
+    }
+
+    func setActive(_ active: Bool) {
+        isActive = active
+        updateNativeVisibility()
     }
 
     func load(_ url: URL) {
@@ -91,11 +102,16 @@ final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
         failureMessage = nil
         isLoading = false
         refreshUnreadCount()
+        updateNativeVisibility()
         if unreadTimer == nil {
             unreadTimer = Timer.publish(every: 5, on: .main, in: .common)
                 .autoconnect()
                 .sink { [weak self] _ in self?.refreshUnreadCount() }
         }
+    }
+
+    private func updateNativeVisibility() {
+        webView.evaluateJavaScript("window.gripiNativeViewActive = \(isActive ? "true" : "false")")
     }
 
     private func refreshUnreadCount() {
@@ -214,7 +230,7 @@ final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
 
         switch originPolicy.decision(for: url) {
         case .allow:
-            session?.popupRequest = PopupRequest(gateway: gateway, url: url)
+            session?.popupRequest = PopupRequest(gateway: session?.gateway ?? gateway, url: url)
         case .openExternally:
             UIApplication.shared.open(url)
         case .reject:

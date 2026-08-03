@@ -14,12 +14,9 @@
 		3C2985FB32A54E6D9AF2DDED /* Gateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87C92DFAC476A18F708B911D /* Gateway.swift */; };
 		3EEE7C8E003BB7B06C959846 /* GatewayStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6BC608A9BC4242727C622EF /* GatewayStore.swift */; };
 		455F3159B3CCD88B136DBF8B /* GatewayConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64097602FA6E45DB66869991 /* GatewayConfiguration.swift */; };
-		495FEA66A938CB51580C36C0 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
 		50BCDE15D38DCE2F6BC1E9D0 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF0B833D6BA4B35A6F3A71E /* NativeBridge.swift */; };
-		5CA07ACEA614162D638CE951 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
 		7A8FB5D960AD9053A42EBA94 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE110B0C5DBEF409B0A4688 /* ContentView.swift */; };
 		7A93841F128F6929409F00C8 /* GatewayWebViewSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 307EC0976314E92216DB72DD /* GatewayWebViewSession.swift */; };
-		7D03CE88BF2B2FED90486333 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
 		8655F60AFBEFAF80084BF5D3 /* GatewaySwitchingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A83DBE44351A8956257A63 /* GatewaySwitchingUITests.swift */; };
 		870B7C01861C96A2D82884F6 /* GatewayWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 954E06743E9D55D1C793D0EB /* GatewayWebView.swift */; };
 		8B2115561B207D2347B93A46 /* GatewayConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */; };
@@ -65,7 +62,6 @@
 		66F07EA4601900128165C690 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		690761E80BD5FA248F9314BA /* GatewayEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayEditorView.swift; sourceTree = "<group>"; };
 		6DCA71DF49F68738AA0F4860 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		76D524E01176F793D7E8DEC6 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		7D045456BA578EC45EB5974A /* AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		8265AB4305C79F6AA6A9B327 /* Gripi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gripi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		87C92DFAC476A18F708B911D /* Gateway.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Gateway.swift; sourceTree = "<group>"; };
@@ -86,7 +82,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7D03CE88BF2B2FED90486333 /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -94,7 +89,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5CA07ACEA614162D638CE951 /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -102,7 +96,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				495FEA66A938CB51580C36C0 /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -122,7 +115,6 @@
 		16434B6736D584E447B24642 /* iOS */ = {
 			isa = PBXGroup;
 			children = (
-				76D524E01176F793D7E8DEC6 /* Foundation.framework */,
 			);
 			name = iOS;
 			sourceTree = "<group>";

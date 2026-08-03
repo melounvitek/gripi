@@ -636,6 +636,15 @@ function updateNotificationToggle() {
   if (stateLabel) stateLabel.textContent = state.label;
 }
 
+async function reconcileNativeNotificationPermission() {
+  const notificationPermission = nativeBridgeMethod(window, "notificationPermission");
+  if (!notificationPermission) return;
+
+  const result = await notificationPermission();
+  localStorage.setItem("gripi:native-notifications-enabled", result?.ok ? "true" : "false");
+  updateNotificationToggle();
+}
+
 async function toggleNotifications() {
   if (notificationsEnabled()) {
     localStorage.setItem("gripi:notifications-disabled", "true");
@@ -680,7 +689,11 @@ async function showGripiNotification(title, body, url, tag) {
 
   const showNotification = nativeBridgeMethod(window, "showNotification");
   if (showNotification) {
-    await showNotification({ type: "gripi-notification", title, body, url, tag });
+    const result = await showNotification({ type: "gripi-notification", title, body, url, tag });
+    if (!result?.ok && nativeNotificationsRequirePermission(window)) {
+      localStorage.setItem("gripi:native-notifications-enabled", "false");
+      updateNotificationToggle();
+    }
     return;
   }
 
@@ -694,7 +707,7 @@ async function showGripiNotification(title, body, url, tag) {
 }
 
 function sessionIsActivelyViewed(sessionPath) {
-  return sessionPath && sessionPath === currentSessionPath() && !document.hidden && document.hasFocus();
+  return sessionPath && sessionPath === currentSessionPath() && window.gripiNativeViewActive !== false && !document.hidden && document.hasFocus();
 }
 
 function finalAssistantReplyKey(sessionPath, event) {
@@ -3296,6 +3309,7 @@ window.addEventListener("popstate", () => switchSession(window.location.href, { 
 function bootstrapPage() {
   gatewayUpdateController.cleanNavigation();
   webPushController.prepare().catch(() => {});
+  reconcileNativeNotificationPermission().catch(() => {});
   webPushController.reconcile().then((enabled) => {
     webPushEnabled = enabled;
     updateNotificationToggle();

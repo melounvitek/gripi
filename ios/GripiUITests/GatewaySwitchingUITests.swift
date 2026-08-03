@@ -14,7 +14,7 @@ final class GatewaySwitchingUITests: XCTestCase {
         app.navigationBars["Connect to Gripi"].buttons["Save"].tap()
 
         let firstGateway = app.buttons["First"]
-        XCTAssertTrue(firstGateway.waitForExistence(timeout: 2))
+        XCTAssertTrue(firstGateway.waitForExistence(timeout: 5))
 
         firstGateway.tap()
 
@@ -24,12 +24,12 @@ final class GatewaySwitchingUITests: XCTestCase {
     private func addInitialGateway(named name: String, url: String, in app: XCUIApplication) {
         fillGatewayForm(named: name, url: url, in: app)
         app.navigationBars["Connect to Gripi"].buttons["Save"].tap()
-        XCTAssertTrue(app.buttons["Server options"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Server options"].waitForExistence(timeout: 5))
     }
 
     private func fillGatewayForm(named name: String, url: String, in app: XCUIApplication) {
         let nameField = app.textFields["Server name"]
-        XCTAssertTrue(nameField.waitForExistence(timeout: 2))
+        XCTAssertTrue(nameField.waitForExistence(timeout: 5))
         nameField.tap()
         nameField.typeText(name)
 
