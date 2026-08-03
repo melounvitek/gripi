@@ -13,20 +13,34 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener("message", (event) => {
-  const data = event.data || {};
-  if (!["gripi-notification", "gripi-notification-test"].includes(data.type)) return;
-
+function displayNotification(data) {
   const defaultUrl = data.type === "gripi-notification-test" ? "/notification-test" : "/";
   const defaultTag = data.type === "gripi-notification-test" ? "gripi-notification-test" : "gripi-notification";
-  event.waitUntil(self.registration.showNotification(data.title || "Gripi", {
+  return self.registration.showNotification(data.title || "Gripi", {
     body: data.body || "Notifications are working.",
     tag: data.tag || defaultTag,
     renotify: true,
     icon: "/app-icon.svg",
     badge: "/app-icon.svg",
     data: { url: data.url || defaultUrl }
-  }));
+  });
+}
+
+self.addEventListener("message", (event) => {
+  const data = event.data || {};
+  if (!["gripi-notification", "gripi-notification-test"].includes(data.type)) return;
+  event.waitUntil(displayNotification(data));
+});
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data?.json() || {};
+  } catch (_error) {
+    return;
+  }
+  if (!["gripi-notification", "gripi-notification-test"].includes(data.type)) return;
+  event.waitUntil(displayNotification(data));
 });
 
 self.addEventListener("notificationclick", (event) => {

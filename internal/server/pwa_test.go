@@ -47,7 +47,7 @@ func TestHandlerServesThePWAResources(t *testing.T) {
 	if worker.Code != http.StatusOK || worker.Header().Get("Content-Type") != "application/javascript;charset=utf-8" || worker.Header().Get("Cache-Control") != "no-cache" {
 		t.Fatalf("worker response = %d, Content-Type %q, Cache-Control %q", worker.Code, worker.Header().Get("Content-Type"), worker.Header().Get("Cache-Control"))
 	}
-	for _, text := range []string{"self.registration.showNotification", `["gripi-notification", "gripi-notification-test"].includes(data.type)`, "notificationclick"} {
+	for _, text := range []string{"self.registration.showNotification", `["gripi-notification", "gripi-notification-test"].includes(data.type)`, `addEventListener("push"`, "notificationclick"} {
 		if !strings.Contains(worker.Body.String(), text) {
 			t.Fatalf("worker does not contain %q", text)
 		}
@@ -84,20 +84,20 @@ func TestHandlerServesTheNotificationTestTemplateWithFirstTapControls(t *testing
 	}
 	for _, text := range []string{
 		"Notification test",
-		"navigator.serviceWorker.register",
-		"Notification.requestPermission",
-		"gripiElectron",
-		"worker.active.postMessage",
+		"even after Gripi is closed",
 		`<button type="button" data-enable>`,
-		`enableButton.addEventListener("click"`,
-		`sendButton.addEventListener("click"`,
+		`src="/assets/notification_test.js"`,
 	} {
 		if !strings.Contains(response.Body.String(), text) {
 			t.Fatalf("body does not contain %q", text)
 		}
 	}
-	if strings.Contains(response.Body.String(), "iPhone") || strings.Contains(response.Body.String(), "iOS") {
-		t.Fatal("notification template contains platform-specific instructions")
+
+	script := performRequest(handler, http.MethodGet, "http://example.com/assets/notification_test.js", "")
+	for _, text := range []string{"WebPushController", `enableButton.addEventListener("click"`, `fetch("/web-push/test"`} {
+		if !strings.Contains(script.Body.String(), text) {
+			t.Fatalf("notification test script does not contain %q", text)
+		}
 	}
 }
 
