@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -119,6 +120,48 @@ func (store *SubscriptionStore) List(owner string) ([]Subscription, error) {
 		}
 	}
 	return result, nil
+}
+
+func (store *SubscriptionStore) Owners() ([]string, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current, err := store.readState()
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	for _, subscription := range current.Subscriptions {
+		seen[subscription.Owner] = true
+	}
+	result := make([]string, 0, len(seen))
+	for owner := range seen {
+		result = append(result, owner)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func (store *SubscriptionStore) RemoveOwner(owner string) error {
+	if err := validateOwner(owner); err != nil {
+		return err
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current, err := store.readState()
+	if err != nil {
+		return err
+	}
+	filtered := current.Subscriptions[:0]
+	for _, subscription := range current.Subscriptions {
+		if subscription.Owner != owner {
+			filtered = append(filtered, subscription)
+		}
+	}
+	if len(filtered) == len(current.Subscriptions) {
+		return nil
+	}
+	current.Subscriptions = filtered
+	return store.writeState(current)
 }
 
 func (store *SubscriptionStore) Remove(owner, endpoint string) (bool, error) {

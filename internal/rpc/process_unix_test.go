@@ -29,7 +29,7 @@ process.stdin.resume(); setInterval(() => {}, 1000);`
 		t.Fatal(err)
 	}
 	t.Setenv("CHILD_PID_PATH", pidPath)
-	client, err := Start(filepath.Join(root, "unused.jsonl"), []string{node, scriptPath}, scriptPath, nil)
+	client, err := Start(filepath.Join(root, "unused.jsonl"), []string{node, scriptPath}, scriptPath, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -92,6 +93,30 @@ func TestSubscriptionStoreUpsertsRemovesAndScopesByOwner(t *testing.T) {
 	ownerB, err = store.List("owner-b")
 	if err != nil || len(ownerB) != 1 {
 		t.Fatalf("owner-b after removal = %#v, %v", ownerB, err)
+	}
+}
+
+func TestSubscriptionStoreListsAndRemovesOwners(t *testing.T) {
+	store := NewSubscriptionStore(filepath.Join(t.TempDir(), "subscriptions.json"))
+	for ownerIndex, owner := range []string{"owner-b", "owner-a"} {
+		for device := range 2 {
+			if err := store.Upsert(owner, testSubscription(fmt.Sprintf("%d-%d", ownerIndex, device))); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	owners, err := store.Owners()
+	if err != nil || !slices.Equal(owners, []string{"owner-a", "owner-b"}) {
+		t.Fatalf("owners = %#v, %v", owners, err)
+	}
+	if err := store.RemoveOwner("owner-a"); err != nil {
+		t.Fatal(err)
+	}
+	if subscriptions, err := store.List("owner-a"); err != nil || len(subscriptions) != 0 {
+		t.Fatalf("removed owner subscriptions = %#v, %v", subscriptions, err)
+	}
+	if subscriptions, err := store.List("owner-b"); err != nil || len(subscriptions) != 2 {
+		t.Fatalf("preserved owner subscriptions = %#v, %v", subscriptions, err)
 	}
 }
 

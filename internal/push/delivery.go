@@ -72,7 +72,10 @@ func (delivery *WebPushDelivery) Deliver(ctx context.Context, subscription Subsc
 		defer response.Body.Close()
 	}
 	if err != nil {
-		return DeliveryResult{}, err
+		if ctx.Err() != nil {
+			return DeliveryResult{}, ctx.Err()
+		}
+		return DeliveryResult{}, errors.New("Web Push request failed")
 	}
 	if response == nil {
 		return DeliveryResult{}, errors.New("Web Push delivery returned no response")

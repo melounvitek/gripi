@@ -392,6 +392,23 @@ func TestRegistryUsesSettlementAndFiveMinuteIdleBoundary(t *testing.T) {
 	}
 }
 
+func TestRegistryFindsAClientAtItsCurrentPathAfterMove(t *testing.T) {
+	registry := NewRegistry(nil, nil)
+	client := newRegistryClient()
+	if err := registry.Register("/pending", client); err != nil {
+		t.Fatal(err)
+	}
+	if path := registry.PathForClient(client); path != "/pending" {
+		t.Fatalf("initial client path = %q", path)
+	}
+	if err := registry.MoveWithCommit("/pending", "/session", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if path := registry.PathForClient(client); path != "/session" {
+		t.Fatalf("moved client path = %q", path)
+	}
+}
+
 func TestRegistryObserverAllowsMoveButPreventsRetirement(t *testing.T) {
 	client := newRegistryClient()
 	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)

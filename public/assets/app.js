@@ -64,7 +64,10 @@ const sidebarController = new SidebarController(
   window,
   projectSelectController,
   gatewayUpdateController,
-  (name, body, url, tag) => showGripiNotification(name, body, url, tag).catch(() => {})
+  (name, body, url, tag) => {
+    if (webPushController.enabled()) return;
+    showGripiNotification(name, body, url, tag).catch(() => {});
+  }
 );
 
 let conversationPanel = null;
@@ -692,6 +695,8 @@ function finalAssistantReplyKey(sessionPath, event) {
 }
 
 function notifyFinalAssistantReply(event) {
+  if (webPushController.enabled()) return;
+
   const message = liveMessageParser.eventMessage(event);
   const roleName = liveMessageParser.liveEventRole(event, message);
   if (roleName !== "assistant" || event.type !== "message_end") return;

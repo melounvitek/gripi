@@ -458,6 +458,18 @@ func (store *WorkspaceOwnershipStore) Release(sessionPath, workspaceID string) e
 	})
 }
 
+func (store *WorkspaceOwnershipStore) Owner(sessionPath string) (string, error) {
+	if sessionPath == "" {
+		return "", nil
+	}
+	canonical, err := store.canonicalPath(sessionPath)
+	if err != nil {
+		return "", err
+	}
+	value, err := store.data()
+	return value.Sessions[canonical], err
+}
+
 func (store *WorkspaceOwnershipStore) OwnedBy(sessionPath, workspaceID string) (bool, error) {
 	if sessionPath == "" || workspaceID == "" {
 		return false, nil

@@ -1725,6 +1725,10 @@ func contentImages(content any) []Image {
 	return result
 }
 
+func FinalAssistantText(content any) string {
+	return finalAssistantText(content)
+}
+
 func finalAssistantText(content any) string {
 	var values []string
 	for _, part := range arrayValue(content) {
@@ -2091,6 +2095,10 @@ func parseTime(value string) time.Time {
 	parsed, _ := time.Parse(time.RFC3339Nano, value)
 	return parsed
 }
+func NotificationPreview(value string) string {
+	return preview(value)
+}
+
 func preview(value string) string {
 	value = strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
 	lines := strings.Split(strings.ReplaceAll(value, "javascript:", ""), "\n")
