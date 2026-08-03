@@ -106,6 +106,9 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		writeText(response, http.StatusBadRequest, "Invalid streaming behavior")
 		return
 	}
+	if prompts.ParseSlashCommand(message).Type == "reload" {
+		behavior = ""
+	}
 	if behavior == "steer" && app.rpcClients.Compacting(path) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Steering is unavailable during compaction"})
 		return

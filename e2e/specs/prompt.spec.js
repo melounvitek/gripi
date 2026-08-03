@@ -32,6 +32,44 @@ async function expectReadableMarkdownTable(table) {
   expect(layout.verticalAlign).toBe("top");
 }
 
+test("reload Pi resources and refresh the slash command catalog", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.marker);
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/");
+  await expect(page.locator('.command[data-command-name="reload"]')).toBeVisible();
+  await expect(page.locator('.command[data-command-name="fresh-resource"]')).toHaveCount(0);
+
+  await composer.fill("/reload");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
+  await expect(message(page, "user", "/reload")).toHaveCount(0);
+
+  await composer.fill("/fresh");
+  await expect(page.locator('.command[data-command-name="fresh-resource"]')).toBeVisible();
+});
+
+test("reject reload while Pi is running without losing run controls", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.controlsAbort);
+  await sendPrompt(page, prompts.abortStart);
+
+  const abort = page.getByRole("button", { name: "Abort running Pi" });
+  await expect(abort).toBeVisible();
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/reload");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+
+  await expect(composer).toHaveValue("/reload");
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(abort).toBeVisible();
+  await expect(message(page, "user", "/reload")).toHaveCount(0);
+
+  await abort.click();
+  await expectRunFinished(page);
+});
+
 test("shows Pi CLI guidance for login and logout commands", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.prompt);

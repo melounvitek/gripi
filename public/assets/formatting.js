@@ -56,6 +56,10 @@ export function sessionModelSlashCommand(message) {
   return /^\/model$/.test(message.trim());
 }
 
+export function sessionReloadSlashCommand(message) {
+  return /^\/reload$/.test(message.trim());
+}
+
 export function sessionAuthGuidanceSlashCommand(message) {
   const trimmed = message.trim();
   if (/^\/login(?: +[^\r\n]+)?$/.test(trimmed)) return "login";

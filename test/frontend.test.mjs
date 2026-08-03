@@ -22,6 +22,7 @@ import {
   sessionExportSlashCommand,
   sessionNameFromEvent,
   sessionNameSlashCommand,
+  sessionReloadSlashCommand,
 } from "../public/assets/formatting.js";
 import { LiveMessageParser } from "../public/assets/live_message_parser.js";
 import { selectedThinkingLevel, supportedThinkingLevels } from "../public/assets/model.js";
@@ -74,6 +75,8 @@ test("formatting and message helpers preserve browser-facing semantics", () => {
   assert.deepEqual([messageRoleKey("bashExecution"), messageRoleLabel("bashExecution")], ["tool", "shell"]);
   assert.equal(sessionNameSlashCommand("/name Useful name"), true);
   assert.equal(sessionNameSlashCommand("/rename Useful name"), false);
+  assert.equal(sessionReloadSlashCommand(" /reload "), true);
+  assert.equal(sessionReloadSlashCommand("/reload now"), false);
   assert.deepEqual(sessionExportSlashCommand(" /export Quarterly report "), { filename: "Quarterly report" });
   assert.deepEqual(sessionExportSlashCommand('/export "Quarterly report.html"'), { filename: "Quarterly report.html" });
   assert.deepEqual(sessionExportSlashCommand("/export"), { filename: "" });
