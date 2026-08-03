@@ -48,6 +48,7 @@ type ActionClient interface {
 	CloneSession(context.Context) (map[string]any, error)
 	ExportHTML(context.Context, string) (map[string]any, error)
 	SetSessionName(context.Context, string) (map[string]any, error)
+	Reload(context.Context) (map[string]any, error)
 	Bash(context.Context, string, bool) (map[string]any, error)
 	ExtensionUIResponse(context.Context, string, *string, *bool, bool) (map[string]any, error)
 	TreeSnapshot(context.Context, string) (map[string]any, error)

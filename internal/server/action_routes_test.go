@@ -105,6 +105,18 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 		}
 	}
 
+	beforeReload, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reload := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "/reload"}, true))
+	if reload.Code != http.StatusOK || !strings.Contains(reload.Body.String(), `"command":"reload"`) {
+		t.Fatalf("reload = %d %s", reload.Code, reload.Body.String())
+	}
+	if afterReload, err := os.ReadFile(sessionPath); err != nil || !bytes.Equal(afterReload, beforeReload) {
+		t.Fatalf("reload changed Pi JSONL: %v", err)
+	}
+
 	settingsResponse := serveAction(handler, getActionRequest("/sessions/model_settings?session="+url.QueryEscape(sessionPath)))
 	if settingsResponse.Code != http.StatusOK || !strings.Contains(settingsResponse.Body.String(), `"fixture-model"`) {
 		t.Fatalf("model settings = %d %s", settingsResponse.Code, settingsResponse.Body.String())
@@ -191,7 +203,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{`"type":"prompt"`, `"mimeType":"image/png"`, `"type":"export_html"`, `"type":"bash"`, `"excludeFromContext":true`, `"type":"set_model"`, `"modelId":"contract-model"`, `/gripi_tree_snapshot`, `"type":"compact"`, `"type":"clone"`, `"type":"fork"`} {
+	for _, expected := range []string{`"type":"prompt"`, `"mimeType":"image/png"`, `"type":"export_html"`, `"type":"bash"`, `"excludeFromContext":true`, `"type":"set_model"`, `"modelId":"contract-model"`, `/gripi_reload`, `/gripi_tree_snapshot`, `"type":"compact"`, `"type":"clone"`, `"type":"fork"`} {
 		if !strings.Contains(string(log), expected) {
 			t.Errorf("fake Pi log does not contain %s", expected)
 		}

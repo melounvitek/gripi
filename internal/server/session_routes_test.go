@@ -145,7 +145,7 @@ func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T
 	}
 
 	commands := serve(t, handler, http.MethodGet, "/commands?session="+url.QueryEscape(fixture.markerPath), "")
-	if commands.Code != http.StatusOK || !strings.Contains(commands.Body.String(), "Slash commands (10)") || !strings.Contains(commands.Body.String(), "data-command-name=\"export\"") || !strings.Contains(commands.Body.String(), "data-command-name=\"login\"") || !strings.Contains(commands.Body.String(), "data-command-name=\"logout\"") {
+	if commands.Code != http.StatusOK || !strings.Contains(commands.Body.String(), "Slash commands (11)") || !strings.Contains(commands.Body.String(), "data-command-name=\"reload\"") || !strings.Contains(commands.Body.String(), "data-command-name=\"export\"") || !strings.Contains(commands.Body.String(), "data-command-name=\"login\"") || !strings.Contains(commands.Body.String(), "data-command-name=\"logout\"") {
 		t.Fatalf("commands = %d %q", commands.Code, commands.Body.String())
 	}
 
@@ -191,7 +191,7 @@ func TestRPCObservationRoutesUseFakePiAndPreserveJSONL(t *testing.T) {
 	}
 
 	commands := serve(t, handler, http.MethodGet, "/commands?session="+url.QueryEscape(fixture.markerPath), "")
-	if commands.Code != http.StatusOK || !strings.Contains(commands.Body.String(), "Slash commands (10)") {
+	if commands.Code != http.StatusOK || !strings.Contains(commands.Body.String(), "Slash commands (11)") {
 		t.Fatalf("commands = %d %q", commands.Code, commands.Body.String())
 	}
 	status := serve(t, handler, http.MethodGet, "/status?session="+url.QueryEscape(fixture.markerPath), "")

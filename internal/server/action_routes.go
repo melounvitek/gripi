@@ -215,6 +215,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 				}
 			case "compact":
 				rpcResponse, err = actions.Compact(request.Context(), command.Instructions)
+			case "reload":
+				rpcResponse, err = actions.Reload(request.Context())
 			default:
 				rpcResponse, err = actions.Prompt(request.Context(), rpcMessage, rpcImages)
 			}
