@@ -154,6 +154,7 @@ export async function seedFixtures(root) {
     ["bash-project", "bash-included", sessions.bashIncluded],
     ["bash-project", "bash-excluded", sessions.bashExcluded],
     ["bash-project", "bash-cancel", sessions.bashCancel],
+    ["bash-project", "bash-reload", sessions.bashReload],
     ["bash-project", "bash-overlap", sessions.bashOverlap],
     ["mobile-project", "mobile", sessions.mobile],
     ["mobile-bash-project", "bash-mobile", sessions.bashMobile],

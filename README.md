@@ -108,7 +108,7 @@ The composer supports Pi-style `@` file search and path completion. `!command` r
 
 While Pi is running, the send button steers by default; use its menu to select Follow-up mode for the next message. On desktop, Enter steers by default, Alt+Enter queues a follow-up, and Shift+Enter inserts a newline.
 
-Gripi supports RPC-compatible extension UI such as select, confirm, input, editor, notify, status, title, and editor-prefill requests. If a workflow depends on Pi’s native terminal UI, custom TUI components, terminal keybindings, or `ctx.mode === "tui"`, use Pi CLI directly.
+Gripi supports RPC-compatible extension UI such as select, confirm, input, editor, notify, status, title, and editor-prefill requests. `/reload` refreshes the current Pi process’s extensions, skills, prompts, themes, and context files, then refreshes Gripi’s slash-command catalog. Pi terminal keybindings are not reloaded because the web interface uses Gripi’s browser controls. If a workflow depends on Pi’s native terminal UI, custom TUI components, terminal keybindings, or `ctx.mode === "tui"`, use Pi CLI directly.
 
 ## Optional Pi setup
 

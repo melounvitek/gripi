@@ -688,6 +688,100 @@ func TestClientAllowsOnlyOneExtensionUIAnswer(t *testing.T) {
 	}
 }
 
+func TestClientReloadsThroughThePrivateExtensionBridge(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setStatus", "statusKey": "old", "statusText": "stale"})
+	waitSequence(t, client, 1)
+	result := make(chan map[string]any, 1)
+	errors := make(chan error, 1)
+	go func() {
+		response, err := client.Reload(context.Background())
+		result <- response
+		errors <- err
+	}()
+
+	decoder := json.NewDecoder(stdinReader)
+	var stateCommand map[string]any
+	if err := decoder.Decode(&stateCommand); err != nil {
+		t.Fatal(err)
+	}
+	if stateCommand["type"] != "get_state" {
+		t.Fatalf("state command = %#v", stateCommand)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"id": stateCommand["id"], "type": "response", "command": "get_state", "success": true, "data": map[string]any{"isStreaming": false, "isCompacting": false}})
+
+	var command map[string]any
+	if err := decoder.Decode(&command); err != nil {
+		t.Fatal(err)
+	}
+	message, _ := command["message"].(string)
+	parts := strings.Fields(message)
+	if command["type"] != "prompt" || len(parts) != 3 || parts[0] != "/gripi_reload" {
+		t.Fatalf("command = %#v", command)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setStatus", "statusKey": "gripi_reload:" + parts[1], "statusText": `{"ok":true}`})
+	writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": "prompt", "success": true})
+
+	if err := <-errors; err != nil {
+		t.Fatal(err)
+	}
+	if response := <-result; response["success"] != true {
+		t.Fatalf("response = %#v", response)
+	}
+	if snapshot := client.LiveSnapshot(); snapshot.ExtensionUI != nil {
+		t.Fatalf("extension UI was not reset: %#v", snapshot.ExtensionUI)
+	}
+	if events := client.EventsAfter(1).Events; len(events) != 1 || events[0]["type"] != "extension_ui_reset" {
+		t.Fatalf("reload events = %#v", events)
+	}
+}
+
+func TestClientRejectsReloadDuringCompaction(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{RequestTimeout: 20 * time.Millisecond})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start", "reason": "manual"})
+	waitSequence(t, client, 1)
+
+	response, err := client.Reload(context.Background())
+	if err != nil || response["success"] != false || response["error"] != "Wait for compaction to finish before reloading" {
+		t.Fatalf("response = %#v, %v", response, err)
+	}
+}
+
+func TestClientRejectsReloadWhileCompactionFollowUpsAreFlushing(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	client.mu.Lock()
+	client.flushingCompactionFollowUps = true
+	client.mu.Unlock()
+
+	response, err := client.Reload(context.Background())
+	if err != nil || response["success"] != false || response["error"] != "Session is busy" {
+		t.Fatalf("response = %#v, %v", response, err)
+	}
+}
+
+func TestClientRejectsBashDuringReload(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	client.mu.Lock()
+	client.reloading = true
+	client.mu.Unlock()
+
+	if _, err := client.Bash(context.Background(), "sleep 1", false); !errors.Is(err, ErrOperationPending) {
+		t.Fatalf("bash error = %v", err)
+	}
+}
+
 func TestClientTimesOutResponsesAndDiscardsLateRPCReplies(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()

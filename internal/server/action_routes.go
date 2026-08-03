@@ -92,12 +92,13 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		app.runBash(response, request, path, command.Command, command.ExcludeFromContext)
 		return
 	}
-	if command := prompts.ParseSlashCommand(message); command.Type == "login" || command.Type == "logout" {
+	parsedCommand := prompts.ParseSlashCommand(message)
+	if parsedCommand.Type == "login" || parsedCommand.Type == "logout" {
 		guidance := map[string]string{
 			"login":  "`/login` isn’t available in Gripi. Run `/login` in the Pi CLI, then restart the Gripi gateway to load the new credentials.",
 			"logout": "`/logout` isn’t available in Gripi. Run `/logout` in the Pi CLI, then restart the Gripi gateway to reload credentials.",
 		}
-		app.writePromptResult(response, request, path, map[string]any{"command": command.Type, "message": guidance[command.Type]})
+		app.writePromptResult(response, request, path, map[string]any{"command": parsedCommand.Type, "message": guidance[parsedCommand.Type]})
 		return
 	}
 
@@ -106,13 +107,16 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		writeText(response, http.StatusBadRequest, "Invalid streaming behavior")
 		return
 	}
+	if parsedCommand.Type == "reload" {
+		behavior = ""
+	}
 	if behavior == "steer" && app.rpcClients.Compacting(path) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Steering is unavailable during compaction"})
 		return
 	}
 	command := prompts.SlashCommand{}
 	if behavior == "" {
-		command = prompts.ParseSlashCommand(message)
+		command = parsedCommand
 	}
 	if command.Type == "fork" || command.Type == "tree" || command.Type == "model" {
 		app.writePromptResult(response, request, path, map[string]any{"command": command.Type})
@@ -215,6 +219,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 				}
 			case "compact":
 				rpcResponse, err = actions.Compact(request.Context(), command.Instructions)
+			case "reload":
+				rpcResponse, err = actions.Reload(request.Context())
 			default:
 				rpcResponse, err = actions.Prompt(request.Context(), rpcMessage, rpcImages)
 			}

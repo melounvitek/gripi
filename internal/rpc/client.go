@@ -209,6 +209,7 @@ type Client struct {
 	compactionFollowUpCount     int
 	compactionFollowUpBytes     int
 	flushingCompactionFollowUps bool
+	reloading                   bool
 
 	sampledToolUpdates map[string]time.Time
 	sampleInterval     time.Duration
@@ -514,6 +515,75 @@ func (client *Client) ExportHTML(ctx context.Context, outputPath string) (map[st
 }
 func (client *Client) SetSessionName(ctx context.Context, name string) (map[string]any, error) {
 	return client.request(ctx, "set_session_name", client.nextID("set_session_name"), map[string]any{"name": name}, client.requestTimeout, nil)
+}
+func (client *Client) Reload(ctx context.Context) (map[string]any, error) {
+	if failure := client.reloadFailure(); failure != nil {
+		return failure, nil
+	}
+	state, err := client.GetState(ctx)
+	if err != nil || state["success"] != true {
+		return state, err
+	}
+	if data, ok := state["data"].(map[string]any); ok {
+		if data["isCompacting"] == true {
+			return reloadFailureResponse("Wait for compaction to finish before reloading"), nil
+		}
+		if data["isStreaming"] == true {
+			return reloadFailureResponse("Session is busy"), nil
+		}
+	}
+	if failure := client.beginReload(); failure != nil {
+		return failure, nil
+	}
+	defer client.finishReload()
+	return client.extensionRequest(ctx, "gripi_reload", map[string]any{}, LongRequestTimeout, "Pi resources reload timed out")
+}
+
+func (client *Client) reloadFailure() map[string]any {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.reloadFailureLocked()
+}
+
+func (client *Client) reloadFailureLocked() map[string]any {
+	if client.compacting {
+		return reloadFailureResponse("Wait for compaction to finish before reloading")
+	}
+	if client.busy || client.activeBashToken != nil || client.flushingCompactionFollowUps || len(client.deferredCommandIDs) > 0 || client.reloading {
+		return reloadFailureResponse("Session is busy")
+	}
+	return nil
+}
+
+func reloadFailureResponse(message string) map[string]any {
+	return map[string]any{"type": "response", "command": "prompt", "success": false, "error": message}
+}
+
+func (client *Client) beginReload() map[string]any {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if failure := client.reloadFailureLocked(); failure != nil {
+		return failure
+	}
+
+	client.pendingDialogs = make(map[string]*extensionDialog)
+	client.pendingDialogOrder = nil
+	client.extensionStatuses = make(map[string]map[string]any)
+	client.extensionStatusOrder = nil
+	client.extensionWidgets = make(map[string]map[string]any)
+	client.extensionWidgetOrder = nil
+	client.extensionTitle = nil
+	client.reloading = true
+	event := map[string]any{"type": "extension_ui_reset"}
+	client.eventSequence++
+	client.appendReplayLocked(event, jsonSize(event), "")
+	return nil
+}
+
+func (client *Client) finishReload() {
+	client.mu.Lock()
+	client.reloading = false
+	client.mu.Unlock()
 }
 
 func (client *Client) request(ctx context.Context, command, id string, payload map[string]any, timeout time.Duration, accepted func()) (map[string]any, error) {
@@ -886,6 +956,7 @@ func (client *Client) readerStopped() {
 	client.compactionFollowUpCount = 0
 	client.compactionFollowUpBytes = 0
 	client.flushingCompactionFollowUps = false
+	client.reloading = false
 	client.deferredCommandIDs = make(map[string]bool)
 	client.activeToolEvents = make(map[string]map[string]any)
 	client.activeToolOrder = nil
@@ -1446,7 +1517,7 @@ func internalBridgeStatusKey(response map[string]any) string {
 		return ""
 	}
 	key := stringValue(response["statusKey"])
-	matched, _ := regexp.MatchString(`(?i)^gripi_tree_(snapshot|leaf|navigate|label):[a-f0-9]+$`, key)
+	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
 	if matched {
 		return key
 	}
@@ -1814,6 +1885,10 @@ func (client *Client) busySinceLocked() *time.Time {
 func (client *Client) Bash(ctx context.Context, command string, exclude bool) (response map[string]any, err error) {
 	token := &bashToken{id: randomID("bash-"), command: command, excludeFromContext: exclude, startedAt: client.clock()}
 	client.mu.Lock()
+	if client.reloading {
+		client.mu.Unlock()
+		return nil, ErrOperationPending
+	}
 	if client.activeBashToken != nil {
 		client.mu.Unlock()
 		return nil, ErrBashAlreadyRunning

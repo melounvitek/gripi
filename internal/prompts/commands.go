@@ -52,7 +52,7 @@ func ParseSlashCommand(message string) SlashCommand {
 	if trimmed == "/logout" {
 		return SlashCommand{Type: "logout"}
 	}
-	for _, kind := range []string{"fork", "tree", "clone", "new", "model"} {
+	for _, kind := range []string{"fork", "tree", "clone", "new", "model", "reload"} {
 		if trimmed == "/"+kind {
 			return SlashCommand{Type: kind}
 		}

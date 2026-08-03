@@ -21,6 +21,7 @@ let compacting = false;
 let activeScenario = null;
 let pendingExtensionRequest = null;
 let activeBash = null;
+let resourcesReloaded = false;
 const treeLabels = new Map();
 const deferredBashMessages = [];
 let sessionPersisted = false;
@@ -133,7 +134,8 @@ function handleCommand(command) {
       respond(command, true, { data: { models: fakeModels() } });
       break;
     case "get_commands":
-      respond(command, true, { data: { commands: [] } });
+      if (!resourcesReloaded) emit({ type: "extension_ui_request", method: "setStatus", statusKey: "stale-resource", statusText: "loaded" });
+      respond(command, true, { data: { commands: resourcesReloaded ? [{ name: "fresh-resource", description: "Loaded after reload", source: "prompt" }] : [] } });
       break;
     case "export_html":
       writeFileSync(command.outputPath, "<!doctype html><title>Fixture session export</title>", "utf8");
@@ -262,7 +264,7 @@ function setModel(command) {
 }
 
 function acceptPrompt(command) {
-  if (acceptTreeBridge(command)) return;
+  if (acceptReloadBridge(command) || acceptTreeBridge(command)) return;
   if (busy) {
     respond(command, false, { error: "Agent is already streaming" });
     return;
@@ -321,6 +323,18 @@ function acceptPrompt(command) {
   } else {
     schedule(120, () => completeWithTool(reply));
   }
+}
+
+function acceptReloadBridge(command) {
+  const match = command.message?.match(/^\/gripi_reload ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
+  if (!match) return false;
+  respond(command, true);
+  let result = { ok: true };
+  if (compacting) result = { ok: false, error: "Wait for compaction to finish before reloading" };
+  else if (busy) result = { ok: false, error: "Session is busy" };
+  if (result.ok) resourcesReloaded = true;
+  emit({ type: "extension_ui_request", method: "setStatus", statusKey: `gripi_reload:${match[1]}`, statusText: JSON.stringify(result) });
+  return true;
 }
 
 function acceptTreeBridge(command) {

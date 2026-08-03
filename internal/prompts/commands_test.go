@@ -32,6 +32,7 @@ func TestParseSlashCommandRecognizesOnlyCompleteControlCommands(t *testing.T) {
 		"/clone":               {Type: "clone"},
 		"/new":                 {Type: "new"},
 		"/model":               {Type: "model"},
+		"/reload":              {Type: "reload"},
 		"/login":               {Type: "login"},
 		"/login anthropic":     {Type: "login"},
 		"/logout":              {Type: "logout"},
@@ -43,6 +44,7 @@ func TestParseSlashCommandRecognizesOnlyCompleteControlCommands(t *testing.T) {
 		"/logins":              {},
 		"/logouts":             {},
 		"/fork later":          {},
+		"/reload now":          {},
 	}
 	for message, expected := range tests {
 		if result := ParseSlashCommand(message); result != expected {

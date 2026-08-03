@@ -20,6 +20,7 @@ import {
   sessionNameFromEvent,
   sessionNameSlashCommand,
   sessionNewSlashCommand,
+  sessionReloadSlashCommand,
   sessionTreeSlashCommand,
   stableTextHash
 } from "./formatting.js";
@@ -1173,6 +1174,21 @@ function updateExtensionWidget(event) {
   renderExtensionWidgets();
 }
 
+function resetExtensionUiState() {
+  clearTimeout(extensionUiTimeoutTimer);
+  extensionUiTimeoutTimer = null;
+  extensionUiRequestQueue = [];
+  activeExtensionUiRequest = null;
+  closeModal(extensionUiModal);
+  resetExtensionUiModal();
+  extensionStatuses.clear();
+  extensionWidgets.clear();
+  extensionDocumentTitle = null;
+  renderExtensionStatuses();
+  renderExtensionWidgets();
+  renderDocumentTitle();
+}
+
 function hydrateExtensionUiState() {
   extensionStatuses.clear();
   extensionWidgets.clear();
@@ -1308,6 +1324,11 @@ function renderEvent(event) {
     showCurrentActiveTask();
     refreshSessionStatus().catch(() => {});
     sidebarController.refresh().catch(() => {});
+    return;
+  }
+
+  if (event.type === "extension_ui_reset") {
+    resetExtensionUiState();
     return;
   }
 
@@ -1825,8 +1846,9 @@ async function submitPrompt(event) {
   const cloneCommand = queuedPrompt ? null : sessionCloneSlashCommand(message);
   const newCommand = queuedPrompt ? null : sessionNewSlashCommand(message);
   const modelCommand = queuedPrompt ? null : sessionModelSlashCommand(message);
+  const reloadCommand = sessionReloadSlashCommand(message);
   const authGuidanceCommand = sessionAuthGuidanceSlashCommand(message);
-  if (!nameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand && !authGuidanceCommand) {
+  if (!nameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand && !reloadCommand && !authGuidanceCommand) {
     if (!queuedPrompt) {
       liveMessageRenderer.resetLiveAssistantTracking();
       document.querySelectorAll(".tree-position-banner").forEach((banner) => banner.remove());
@@ -1850,8 +1872,8 @@ async function submitPrompt(event) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
-  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening instructions…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering…" : "Sending…");
-  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening authentication instructions…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering Pi…" : "Sending…", true);
+  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : reloadCommand ? "Reloading…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening instructions…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering…" : "Sending…");
+  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : reloadCommand ? "Reloading Pi resources…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening authentication instructions…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering Pi…" : "Sending…", true);
   if (cloneCommand || newCommand) showSessionSwitching();
 
   const restoreSubmittedPromptInput = () => {
@@ -1864,6 +1886,14 @@ async function submitPrompt(event) {
 
     liveMessageRenderer.removePendingCompactionMessage();
     sidebarController.refresh({ force: true }).catch(() => {});
+  };
+
+  const showControlCommandFailure = (message) => {
+    restoreSubmittedPromptInput();
+    if (reloadCommand && liveBash) setComposerState("bash", "Shell command running…");
+    else if (reloadCommand && queuedPrompt) setComposerState("running", message, { since: previousWaitingForOutputSince });
+    else setComposerState("error", message);
+    showStatus(message, true);
   };
 
   const showPromptFailure = (errorMessage, { retryableContention = false } = {}) => {
@@ -1906,10 +1936,8 @@ async function submitPrompt(event) {
   } catch (_error) {
     if (stopHandlingChangedSubmittedView()) return;
     if (submittedPromptSuperseded()) return;
-    if (nameCommand) {
-      restoreSubmittedPromptInput();
-      setComposerState("error", "Session name could not be changed");
-      showStatus("Session name could not be changed", true);
+    if (nameCommand || reloadCommand) {
+      showControlCommandFailure(nameCommand ? "Session name could not be changed" : "Pi resources could not be reloaded");
       return;
     }
     showPromptFailure("Prompt failed to send");
@@ -1928,10 +1956,8 @@ async function submitPrompt(event) {
       showStatus("Clone cancelled", true);
       return;
     }
-    if (nameCommand) {
-      restoreSubmittedPromptInput();
-      setComposerState("error", payload?.error || "Session name could not be changed");
-      showStatus(payload?.error || "Session name could not be changed", true);
+    if (nameCommand || reloadCommand) {
+      showControlCommandFailure(payload?.error || (nameCommand ? "Session name could not be changed" : "Pi resources could not be reloaded"));
       return;
     }
     const retryableContention = payload?.code === "session_operation_pending";
@@ -1968,6 +1994,12 @@ async function submitPrompt(event) {
       return;
     }
     clearStoredComposerDraft(submittedSession);
+    if (payload?.command === "reload") {
+      setComposerState("done", "Reloaded");
+      refreshCommandsAfterReload();
+      showStatus("Pi resources reloaded", true);
+      return;
+    }
     if (payload?.command === "compact") {
       sidebarController.refresh().catch(() => {});
       if (composerState?.dataset.state === "sending") setComposerState("running", "Compacting…");
@@ -2165,6 +2197,7 @@ async function ensureCommandsLoaded() {
     if (commandList !== list || !list.isConnected || !sessionSwitchGeneration.current(generation) || list.dataset.commandsUrl !== url) return;
     list.outerHTML = html;
     commandList = document.getElementById("command-list");
+    if (commandList) commandList.dataset.commandsUrl = url;
     highlightedCommandIndex = 0;
     if (promptTextarea?.value.startsWith("/")) {
       commandList?.classList.add("is-visible");
@@ -2173,8 +2206,24 @@ async function ensureCommandsLoaded() {
     }
   } catch (_error) {
   } finally {
+    const reloadAfterLoading = list.dataset.reloadAfterLoading === "true";
     delete list.dataset.loading;
+    delete list.dataset.reloadAfterLoading;
+    if (reloadAfterLoading && commandList && sessionSwitchGeneration.current(generation) && commandList.dataset.commandsUrl === url) {
+      commandList.dataset.loaded = "false";
+      ensureCommandsLoaded();
+    }
   }
+}
+
+function refreshCommandsAfterReload() {
+  if (!commandList) return;
+  commandList.dataset.loaded = "false";
+  if (commandList.dataset.loading === "true") {
+    commandList.dataset.reloadAfterLoading = "true";
+    return;
+  }
+  ensureCommandsLoaded();
 }
 
 function updateCommandListForPrompt() {
