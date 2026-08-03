@@ -22,6 +22,8 @@ type Config struct {
 	PiAgentDir                string
 	SessionsRoot              string
 	AttachmentsRoot           string
+	WebPushVAPIDPath          string
+	PushSubscriptionsPath     string
 	SessionCwdsPath           string
 	ReadStatePath             string
 	PinnedSessionsPath        string
@@ -136,6 +138,8 @@ func Load(environ []string) (Config, error) {
 		PiAgentDir:                piAgentDir(home, process["PI_CODING_AGENT_DIR"]),
 		SessionsRoot:              valueOr(values, "GRIPI_SESSIONS_ROOT", filepath.Join(home, ".pi", "agent", "sessions")),
 		AttachmentsRoot:           valueOr(values, "GRIPI_ATTACHMENTS_ROOT", filepath.Join(home, ".pi", "gripi", "attachments")),
+		WebPushVAPIDPath:          valueOr(values, "GRIPI_WEB_PUSH_VAPID_PATH", filepath.Join(home, ".pi", "gripi", "web-push-vapid.json")),
+		PushSubscriptionsPath:     valueOr(values, "GRIPI_PUSH_SUBSCRIPTIONS_PATH", filepath.Join(home, ".pi", "gripi", "push-subscriptions.json")),
 		SessionCwdsPath:           valueOr(values, "GRIPI_SESSION_CWDS_PATH", filepath.Join(home, ".config", "gripi", "pinned-dirs")),
 		ReadStatePath:             valueOr(values, "GRIPI_READ_STATE_PATH", filepath.Join(home, ".pi", "gripi", "read-state.json")),
 		PinnedSessionsPath:        valueOr(values, "GRIPI_PINNED_SESSIONS_PATH", filepath.Join(home, ".pi", "gripi", "pinned-sessions.json")),

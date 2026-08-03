@@ -86,6 +86,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AttachmentsRoot != filepath.Join(home, ".pi", "gripi", "attachments") {
 		t.Fatalf("AttachmentsRoot = %q", cfg.AttachmentsRoot)
 	}
+	if cfg.WebPushVAPIDPath != filepath.Join(home, ".pi", "gripi", "web-push-vapid.json") {
+		t.Fatalf("WebPushVAPIDPath = %q", cfg.WebPushVAPIDPath)
+	}
+	if cfg.PushSubscriptionsPath != filepath.Join(home, ".pi", "gripi", "push-subscriptions.json") {
+		t.Fatalf("PushSubscriptionsPath = %q", cfg.PushSubscriptionsPath)
+	}
 	if cfg.RPCIdleTimeout != 5*time.Minute || cfg.RPCIdleSweep != 30*time.Second {
 		t.Fatalf("RPC intervals = %s, %s", cfg.RPCIdleTimeout, cfg.RPCIdleSweep)
 	}
@@ -94,6 +100,23 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if !cfg.Production {
 		t.Fatal("Production = false")
+	}
+}
+
+func TestLoadUsesConfiguredWebPushStatePaths(t *testing.T) {
+	home := t.TempDir()
+	cfg, err := config.Load([]string{
+		"HOME=" + home,
+		"GRIPI_ENV_PATH=" + filepath.Join(home, "missing"),
+		"GRIPI_ADMIN_PASSWORD=secret",
+		"GRIPI_WEB_PUSH_VAPID_PATH=/state/vapid.json",
+		"GRIPI_PUSH_SUBSCRIPTIONS_PATH=/state/subscriptions.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WebPushVAPIDPath != "/state/vapid.json" || cfg.PushSubscriptionsPath != "/state/subscriptions.json" {
+		t.Fatalf("Web Push paths = %q, %q", cfg.WebPushVAPIDPath, cfg.PushSubscriptionsPath)
 	}
 }
 
