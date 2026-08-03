@@ -515,6 +515,9 @@ func (client *Client) ExportHTML(ctx context.Context, outputPath string) (map[st
 func (client *Client) SetSessionName(ctx context.Context, name string) (map[string]any, error) {
 	return client.request(ctx, "set_session_name", client.nextID("set_session_name"), map[string]any{"name": name}, client.requestTimeout, nil)
 }
+func (client *Client) Reload(ctx context.Context) (map[string]any, error) {
+	return client.extensionRequest(ctx, "gripi_reload", map[string]any{}, LongRequestTimeout, "Pi resources reload timed out")
+}
 
 func (client *Client) request(ctx context.Context, command, id string, payload map[string]any, timeout time.Duration, accepted func()) (map[string]any, error) {
 	if ctx == nil {
@@ -1446,7 +1449,7 @@ func internalBridgeStatusKey(response map[string]any) string {
 		return ""
 	}
 	key := stringValue(response["statusKey"])
-	matched, _ := regexp.MatchString(`(?i)^gripi_tree_(snapshot|leaf|navigate|label):[a-f0-9]+$`, key)
+	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
 	if matched {
 		return key
 	}

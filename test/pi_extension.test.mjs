@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -11,6 +11,75 @@ const piPackageRoot = path.resolve(path.dirname(await realpath(piExecutable)), "
 const { createJiti } = await import(pathToFileURL(path.join(piPackageRoot, "node_modules/jiti/lib/jiti.mjs")));
 const piIndex = path.join(piPackageRoot, "dist/index.js");
 const extensionPath = path.resolve("pi_extensions/gripi-tree.ts");
+
+test("reload bridge refreshes native Pi resources in RPC mode", { timeout: 20_000 }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-reload-extension-"));
+  const project = path.join(directory, "project");
+  const prompts = path.join(project, ".pi", "prompts");
+  await mkdir(prompts, { recursive: true });
+  const child = spawn(piExecutable, ["--mode", "rpc", "--no-session", "--extension", extensionPath, "--approve"], {
+    cwd: project,
+    env: { ...process.env, PI_CODING_AGENT_DIR: path.join(directory, "agent"), PI_SKIP_VERSION_CHECK: "1" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const records = rpcRecords(child);
+
+  try {
+    child.stdin.write(`${JSON.stringify({ id: "before", type: "get_commands" })}\n`);
+    const before = await records.next((record) => record.id === "before");
+    assert.ok(!before.data.commands.some((command) => command.name === "fresh-resource"));
+
+    await writeFile(path.join(prompts, "fresh-resource.md"), "Fresh resource\n", "utf8");
+    const reloadRequest = "abc";
+    child.stdin.write(`${JSON.stringify({ id: "reload", type: "prompt", message: `/gripi_reload ${reloadRequest} e30` })}\n`);
+    const [reload, status] = await Promise.all([
+      records.next((record) => record.id === "reload"),
+      records.next((record) => record.statusKey === `gripi_reload:${reloadRequest}`),
+    ]);
+    assert.equal(reload.success, true);
+    assert.deepEqual(JSON.parse(status.statusText), { ok: true });
+
+    child.stdin.write(`${JSON.stringify({ id: "after", type: "get_commands" })}\n`);
+    const after = await records.next((record) => record.id === "after");
+    assert.ok(after.data.commands.some((command) => command.name === "fresh-resource" && command.source === "prompt"));
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+function rpcRecords(child) {
+  let buffer = "";
+  let stderr = "";
+  const queued = [];
+  const waiting = [];
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk.toString();
+    while (buffer.includes("\n")) {
+      const newline = buffer.indexOf("\n");
+      const line = buffer.slice(0, newline).replace(/\r$/, "");
+      buffer = buffer.slice(newline + 1);
+      if (!line) continue;
+      const record = JSON.parse(line);
+      const index = waiting.findIndex(({ predicate }) => predicate(record));
+      if (index < 0) queued.push(record);
+      else waiting.splice(index, 1)[0].resolve(record);
+    }
+  });
+  child.on("exit", () => {
+    for (const waiter of waiting.splice(0)) waiter.reject(new Error(`Pi RPC exited before responding: ${stderr}`));
+  });
+
+  return {
+    next(predicate) {
+      const index = queued.findIndex(predicate);
+      if (index >= 0) return Promise.resolve(queued.splice(index, 1)[0]);
+      return new Promise((resolve, reject) => waiting.push({ predicate, resolve, reject }));
+    },
+  };
+}
 
 test("large native trees are compacted before crossing the extension bridge", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "gripi-tree-extension-"));
@@ -96,6 +165,24 @@ test("large native trees are compacted before crossing the extension bridge", as
     );
     assert.ok(!statusText.includes("RAW_IMAGE_DATA"));
     assert.ok(Buffer.byteLength(statusText, "utf8") < 1_000_000);
+
+    let reloadCalls = 0;
+    const reloadArgs = (requestId) => `${requestId} ${Buffer.from("{}").toString("base64url")}`;
+    await commands.get("gripi_reload").handler(reloadArgs("def"), {
+      isIdle: () => true,
+      reload: async () => { reloadCalls += 1; },
+      ui: { setStatus(_key, value) { statusText = value; } },
+    });
+    assert.equal(reloadCalls, 1);
+    assert.deepEqual(JSON.parse(statusText), { ok: true });
+
+    await commands.get("gripi_reload").handler(reloadArgs("fed"), {
+      isIdle: () => false,
+      reload: async () => { reloadCalls += 1; },
+      ui: { setStatus(_key, value) { statusText = value; } },
+    });
+    assert.equal(reloadCalls, 1);
+    assert.deepEqual(JSON.parse(statusText), { ok: false, error: "Session is busy" });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

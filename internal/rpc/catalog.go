@@ -17,7 +17,7 @@ var builtinCommands = []Command{
 	{"name": "logout", "source": "other", "description": "Show Pi CLI logout instructions"},
 }
 
-var internalCommandNames = []string{"gripi_tree_navigate", "gripi_tree_snapshot", "gripi_tree_leaf", "gripi_tree_label"}
+var internalCommandNames = []string{"gripi_reload", "gripi_tree_navigate", "gripi_tree_snapshot", "gripi_tree_leaf", "gripi_tree_label"}
 
 func BuiltinCommands() []Command {
 	result := make([]Command, len(builtinCommands))

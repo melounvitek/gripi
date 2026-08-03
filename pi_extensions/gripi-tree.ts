@@ -337,6 +337,25 @@ export default function (pi: ExtensionAPI) {
     settingsManager = SettingsManager.create(ctx.cwd, undefined, { projectTrusted: ctx.isProjectTrusted() });
   });
 
+  pi.registerCommand("gripi_reload", {
+    description: "Reload Pi resources from Gripi",
+    handler: async (args, ctx) => {
+      const requestId = requestIdFrom(args);
+      if (!requestId) return;
+      const ui = ctx.ui;
+
+      try {
+        parsePayload(args);
+        if (!ctx.isIdle()) throw new Error("Session is busy");
+
+        await ctx.reload();
+        ui.setStatus(`gripi_reload:${requestId}`, JSON.stringify({ ok: true }));
+      } catch (error) {
+        ui.setStatus(`gripi_reload:${requestId}`, JSON.stringify({ ok: false, error: errorMessage(error) }));
+      }
+    },
+  });
+
   registerBridgeCommand(pi, "gripi_tree_navigate", "Navigate the current session tree from Gripi", async (requestPayload, ctx) => {
     if (!ctx.isIdle()) throw new Error("Session is busy");
     const payload = requestPayload as NavigationPayload;

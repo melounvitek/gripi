@@ -688,6 +688,39 @@ func TestClientAllowsOnlyOneExtensionUIAnswer(t *testing.T) {
 	}
 }
 
+func TestClientReloadsThroughThePrivateExtensionBridge(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	result := make(chan map[string]any, 1)
+	errors := make(chan error, 1)
+	go func() {
+		response, err := client.Reload(context.Background())
+		result <- response
+		errors <- err
+	}()
+
+	var command map[string]any
+	if err := json.NewDecoder(stdinReader).Decode(&command); err != nil {
+		t.Fatal(err)
+	}
+	message, _ := command["message"].(string)
+	parts := strings.Fields(message)
+	if command["type"] != "prompt" || len(parts) != 3 || parts[0] != "/gripi_reload" {
+		t.Fatalf("command = %#v", command)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setStatus", "statusKey": "gripi_reload:" + parts[1], "statusText": `{"ok":true}`})
+	writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": "prompt", "success": true})
+
+	if err := <-errors; err != nil {
+		t.Fatal(err)
+	}
+	if response := <-result; response["success"] != true {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
 func TestClientTimesOutResponsesAndDiscardsLateRPCReplies(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
