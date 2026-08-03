@@ -162,7 +162,6 @@ export async function seedFixtures(root) {
     ["prompt-project", "prompt-retry-exhausted", sessions.promptRetryExhausted],
     ["prompt-project", "prompt-retry-compact", sessions.promptRetryCompact],
     ["contract-project", "contract", sessions.marker, { question: "Contract fixture marker", answer: "The external E2E target is disposable." }],
-    ["bash-project", "bash-reload", sessions.bashReload],
     ["bash-project", "bash-retry", sessions.bashRetry],
     ["extension-project", "extension-race", sessions.extensionRace],
     ["prompt-project", "markdown-table", sessions.markdownTable],
