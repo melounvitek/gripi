@@ -14,15 +14,23 @@
 		3C2985FB32A54E6D9AF2DDED /* Gateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87C92DFAC476A18F708B911D /* Gateway.swift */; };
 		3EEE7C8E003BB7B06C959846 /* GatewayStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6BC608A9BC4242727C622EF /* GatewayStore.swift */; };
 		455F3159B3CCD88B136DBF8B /* GatewayConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64097602FA6E45DB66869991 /* GatewayConfiguration.swift */; };
+		495FEA66A938CB51580C36C0 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
+		50BCDE15D38DCE2F6BC1E9D0 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF0B833D6BA4B35A6F3A71E /* NativeBridge.swift */; };
 		5CA07ACEA614162D638CE951 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
 		7A8FB5D960AD9053A42EBA94 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE110B0C5DBEF409B0A4688 /* ContentView.swift */; };
 		7A93841F128F6929409F00C8 /* GatewayWebViewSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 307EC0976314E92216DB72DD /* GatewayWebViewSession.swift */; };
 		7D03CE88BF2B2FED90486333 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
+		8655F60AFBEFAF80084BF5D3 /* GatewaySwitchingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A83DBE44351A8956257A63 /* GatewaySwitchingUITests.swift */; };
 		870B7C01861C96A2D82884F6 /* GatewayWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 954E06743E9D55D1C793D0EB /* GatewayWebView.swift */; };
 		8B2115561B207D2347B93A46 /* GatewayConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */; };
 		A775887C76F40AA4C3838381 /* GatewayRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E6AF4C71771A735A4E0BDF3 /* GatewayRepositoryTests.swift */; };
+		B304B9E4A27FB579F42FBF19 /* GatewayToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1189DDF4FA4BFE593DCD6E84 /* GatewayToolbar.swift */; };
+		C52715967E88207D39BE7000 /* NativeIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B4A7CB2B533A1D004E81881 /* NativeIntegrationTests.swift */; };
 		C5604342C493011B26639477 /* GatewayRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96EFF0EBE0F6798093332A8A /* GatewayRepository.swift */; };
+		C9AF2022843825325A4CF8ED /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F65FA43E9DFF7955A0D0680 /* ShareSheet.swift */; };
+		CD54367FAE2EB0CA625087CF /* DownloadDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A2008B6B17C496C7D3DE3E /* DownloadDestination.swift */; };
 		DC6A1B4628DFADA69FB9D00D /* GripiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E44093AE755FF826A47217B /* GripiApp.swift */; };
+		DF5001E723BACB6C899CA554 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D045456BA578EC45EB5974A /* AppDelegate.swift */; };
 		FB776F5061FCDE8B9F4D08A5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6DCA71DF49F68738AA0F4860 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -34,10 +42,20 @@
 			remoteGlobalIDString = 4A3735C65677D3191621E4EB;
 			remoteInfo = Gripi;
 		};
+		48F7CC6674711046DE2DF2A7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 09654984F6514817960DD824 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4A3735C65677D3191621E4EB;
+			remoteInfo = Gripi;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1189DDF4FA4BFE593DCD6E84 /* GatewayToolbar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayToolbar.swift; sourceTree = "<group>"; };
 		307EC0976314E92216DB72DD /* GatewayWebViewSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayWebViewSession.swift; sourceTree = "<group>"; };
+		3AF0B833D6BA4B35A6F3A71E /* NativeBridge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
+		3B4A7CB2B533A1D004E81881 /* NativeIntegrationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeIntegrationTests.swift; sourceTree = "<group>"; };
 		3EE110B0C5DBEF409B0A4688 /* ContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4C9503F59B11D804385D652C /* GripiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GripiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4E44093AE755FF826A47217B /* GripiApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GripiApp.swift; sourceTree = "<group>"; };
@@ -48,12 +66,17 @@
 		690761E80BD5FA248F9314BA /* GatewayEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayEditorView.swift; sourceTree = "<group>"; };
 		6DCA71DF49F68738AA0F4860 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		76D524E01176F793D7E8DEC6 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		7D045456BA578EC45EB5974A /* AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		8265AB4305C79F6AA6A9B327 /* Gripi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gripi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		87C92DFAC476A18F708B911D /* Gateway.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Gateway.swift; sourceTree = "<group>"; };
+		90A2008B6B17C496C7D3DE3E /* DownloadDestination.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DownloadDestination.swift; sourceTree = "<group>"; };
 		91BEB225210E234B4F0FBB9B /* OriginPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OriginPolicyTests.swift; sourceTree = "<group>"; };
 		954E06743E9D55D1C793D0EB /* GatewayWebView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayWebView.swift; sourceTree = "<group>"; };
 		96EFF0EBE0F6798093332A8A /* GatewayRepository.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayRepository.swift; sourceTree = "<group>"; };
+		9F65FA43E9DFF7955A0D0680 /* ShareSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
+		CA3FA6AC53FAE7B240A9A6DC /* GripiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GripiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF35C65DB941768746A82B6A /* GatewayScreen.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayScreen.swift; sourceTree = "<group>"; };
+		E4A83DBE44351A8956257A63 /* GatewaySwitchingUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewaySwitchingUITests.swift; sourceTree = "<group>"; };
 		F6BC608A9BC4242727C622EF /* GatewayStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayStore.swift; sourceTree = "<group>"; };
 		F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayConfigurationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -75,6 +98,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EBFE6E14E69AB517AFE405FE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				495FEA66A938CB51580C36C0 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -83,6 +114,7 @@
 			children = (
 				8265AB4305C79F6AA6A9B327 /* Gripi.app */,
 				4C9503F59B11D804385D652C /* GripiTests.xctest */,
+				CA3FA6AC53FAE7B240A9A6DC /* GripiUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -100,6 +132,8 @@
 			children = (
 				690761E80BD5FA248F9314BA /* GatewayEditorView.swift */,
 				CF35C65DB941768746A82B6A /* GatewayScreen.swift */,
+				1189DDF4FA4BFE593DCD6E84 /* GatewayToolbar.swift */,
+				9F65FA43E9DFF7955A0D0680 /* ShareSheet.swift */,
 			);
 			name = Views;
 			path = Views;
@@ -111,6 +145,8 @@
 				616D3FC48CED67F81C0767FB /* OriginPolicy.swift */,
 				307EC0976314E92216DB72DD /* GatewayWebViewSession.swift */,
 				954E06743E9D55D1C793D0EB /* GatewayWebView.swift */,
+				3AF0B833D6BA4B35A6F3A71E /* NativeBridge.swift */,
+				90A2008B6B17C496C7D3DE3E /* DownloadDestination.swift */,
 			);
 			name = Web;
 			path = Web;
@@ -131,6 +167,7 @@
 				5176F8449798C51AA78A4310 /* Frameworks */,
 				F25F6B66D5A9264846748219 /* Gripi */,
 				D19BE1911FCAADDCC9BCB781 /* GripiTests */,
+				FFA9669A4E13013CB63E006B /* GripiUITests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -160,6 +197,7 @@
 				F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */,
 				4E6AF4C71771A735A4E0BDF3 /* GatewayRepositoryTests.swift */,
 				91BEB225210E234B4F0FBB9B /* OriginPolicyTests.swift */,
+				3B4A7CB2B533A1D004E81881 /* NativeIntegrationTests.swift */,
 			);
 			name = GripiTests;
 			path = GripiTests;
@@ -176,9 +214,19 @@
 				66F07EA4601900128165C690 /* Info.plist */,
 				6DCA71DF49F68738AA0F4860 /* Assets.xcassets */,
 				3EF3CF541B127783C2212CA7 /* Web */,
+				7D045456BA578EC45EB5974A /* AppDelegate.swift */,
 			);
 			name = Gripi;
 			path = Gripi;
+			sourceTree = "<group>";
+		};
+		FFA9669A4E13013CB63E006B /* GripiUITests */ = {
+			isa = PBXGroup;
+			children = (
+				E4A83DBE44351A8956257A63 /* GatewaySwitchingUITests.swift */,
+			);
+			name = GripiUITests;
+			path = GripiUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -219,6 +267,24 @@
 			productReference = 8265AB4305C79F6AA6A9B327 /* Gripi.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C79B402DB59751F0584F861E /* GripiUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BC00D7365A9141EF241035F8 /* Build configuration list for PBXNativeTarget "GripiUITests" */;
+			buildPhases = (
+				BAD4B479B774460054378FFE /* Sources */,
+				EBFE6E14E69AB517AFE405FE /* Frameworks */,
+				F7004785911958B3E000C7DC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				008A528211752C79B30D8413 /* PBXTargetDependency */,
+			);
+			name = GripiUITests;
+			productName = GripiUITests;
+			productReference = CA3FA6AC53FAE7B240A9A6DC /* GripiUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -245,6 +311,7 @@
 			targets = (
 				4A3735C65677D3191621E4EB /* Gripi */,
 				22DE6D7FB74FA4F1F33174DE /* GripiTests */,
+				C79B402DB59751F0584F861E /* GripiUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -265,6 +332,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F7004785911958B3E000C7DC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -275,6 +349,15 @@
 				8B2115561B207D2347B93A46 /* GatewayConfigurationTests.swift in Sources */,
 				A775887C76F40AA4C3838381 /* GatewayRepositoryTests.swift in Sources */,
 				38477FF259496DFDB964D23C /* OriginPolicyTests.swift in Sources */,
+				C52715967E88207D39BE7000 /* NativeIntegrationTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BAD4B479B774460054378FFE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8655F60AFBEFAF80084BF5D3 /* GatewaySwitchingUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -293,12 +376,23 @@
 				7A93841F128F6929409F00C8 /* GatewayWebViewSession.swift in Sources */,
 				870B7C01861C96A2D82884F6 /* GatewayWebView.swift in Sources */,
 				0F0AFB1B9973B849A5F8EAFD /* GatewayScreen.swift in Sources */,
+				50BCDE15D38DCE2F6BC1E9D0 /* NativeBridge.swift in Sources */,
+				CD54367FAE2EB0CA625087CF /* DownloadDestination.swift in Sources */,
+				B304B9E4A27FB579F42FBF19 /* GatewayToolbar.swift in Sources */,
+				C9AF2022843825325A4CF8ED /* ShareSheet.swift in Sources */,
+				DF5001E723BACB6C899CA554 /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		008A528211752C79B30D8413 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Gripi;
+			target = 4A3735C65677D3191621E4EB /* Gripi */;
+			targetProxy = 48F7CC6674711046DE2DF2A7 /* PBXContainerItemProxy */;
+		};
 		D4F003FFB30D9F3C962CF6AA /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = Gripi;
@@ -387,6 +481,22 @@
 			};
 			name = Debug;
 		};
+		26E5402F56C17DC81B97ADBA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.gripi.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Gripi;
+			};
+			name = Debug;
+		};
 		3AC34A6ACDB4183D3E3D6697 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -426,6 +536,23 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Gripi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Gripi";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		6A4F108760EF8F13C027410A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.gripi.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Gripi;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -517,6 +644,15 @@
 			buildConfigurations = (
 				8E15CB0F17F029D5DD1A815E /* Debug */,
 				0F0C87A41D0F510EB8BD179F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BC00D7365A9141EF241035F8 /* Build configuration list for PBXNativeTarget "GripiUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A4F108760EF8F13C027410A /* Release */,
+				26E5402F56C17DC81B97ADBA /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

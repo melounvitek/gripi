@@ -1,3 +1,4 @@
+import { nativeBridgeMethod, nativeNotificationsRequirePermission } from "./native_bridge.js";
 import { WebPushController } from "./web_push.js";
 
 const enableButton = document.querySelector("[data-enable]");
@@ -10,12 +11,12 @@ function setStatus(message, error = false) {
   statusBox.classList.toggle("error", error);
 }
 
-function desktopNotificationAvailable() {
-  return Boolean(window.gripiElectron?.showNotification);
+function nativeNotificationAvailable() {
+  return Boolean(nativeBridgeMethod(window, "showNotification"));
 }
 
 function notificationAvailable() {
-  return desktopNotificationAvailable() || webPushController.available();
+  return nativeNotificationAvailable() || webPushController.available();
 }
 
 async function refreshState() {
@@ -26,9 +27,9 @@ async function refreshState() {
     return;
   }
 
-  if (desktopNotificationAvailable()) {
-    sendButton.disabled = false;
-    setStatus("Desktop notifications are available. Tap Send test notification.");
+  if (nativeNotificationAvailable()) {
+    sendButton.disabled = nativeNotificationsRequirePermission(window);
+    setStatus(nativeNotificationsRequirePermission(window) ? "Tap Enable notifications to grant app permission." : "App notifications are available. Tap Send test notification.");
   } else if (Notification.permission === "granted") {
     const enabled = await webPushController.reconcile();
     sendButton.disabled = !enabled;
@@ -45,11 +46,18 @@ async function refreshState() {
 
 enableButton.addEventListener("click", async () => {
   try {
-    if (!notificationAvailable() || desktopNotificationAvailable()) {
+    if (!notificationAvailable()) {
       await refreshState();
       return;
     }
     setStatus("Requesting notification permission…");
+    if (nativeNotificationAvailable()) {
+      const result = await nativeBridgeMethod(window, "requestNotificationPermission")?.();
+      if (!result?.ok) throw new Error("App notification permission was not granted.");
+      sendButton.disabled = false;
+      setStatus("App notifications are enabled. Tap Send test notification.");
+      return;
+    }
     const enabled = await webPushController.enable();
     if (!enabled && Notification.permission !== "denied") throw new Error("Web Push could not be enabled.");
     await refreshState();
@@ -60,20 +68,20 @@ enableButton.addEventListener("click", async () => {
 
 sendButton.addEventListener("click", async () => {
   try {
-    if (desktopNotificationAvailable()) {
-      const result = await window.gripiElectron.showNotification({
+    if (nativeNotificationAvailable()) {
+      const result = await nativeBridgeMethod(window, "showNotification")({
         type: "gripi-notification-test",
         title: "Gripi test",
-        body: "If you can see this, desktop notifications work here.",
+        body: "If you can see this, app notifications work here.",
         tag: "gripi-notification-test",
         url: "/notification-test"
       });
-      if (!result?.ok) throw new Error("Desktop notification bridge did not accept the request.");
+      if (!result?.ok) throw new Error("App notification bridge did not accept the request.");
     } else {
       const response = await fetch("/web-push/test", { method: "POST" });
       if (!response.ok) throw new Error(`Web Push test failed (${response.status}).`);
     }
-    setStatus("Test notification sent. You can close Gripi; Web Push does not require this page to remain open.");
+    setStatus(nativeNotificationAvailable() ? "Test notification sent. Closed-app delivery will be enabled with the upcoming APNs gateway integration." : "Test notification sent. You can close Gripi; Web Push does not require this page to remain open.");
   } catch (error) {
     setStatus(`Send failed: ${error.message || error}`, true);
   }

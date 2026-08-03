@@ -373,6 +373,7 @@ function openSameOriginPopupWindow(url, allowedOrigin, partition) {
   const webPreferences = {
     contextIsolation: true,
     nodeIntegration: false,
+    preload: GATEWAY_PRELOAD_PATH,
     sandbox: true
   };
   if (partition) webPreferences.partition = partition;

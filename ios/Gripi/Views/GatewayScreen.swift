@@ -18,6 +18,11 @@ struct GatewayScreen: View {
         .sheet(item: $session.popupRequest) { request in
             PopupGatewayView(request: request)
         }
+        .sheet(item: $session.shareRequest) { request in
+            ShareSheet(fileURL: request.fileURL) {
+                session.shareRequest = nil
+            }
+        }
     }
 
     private func unavailableView(_ message: String) -> some View {

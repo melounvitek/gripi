@@ -73,8 +73,10 @@ test("desktop gateway webviews install the notification bridge", () => {
   assert.match(main, /gatewayIdFromPartition/);
   assert.match(main, /gateway:activate-requested/);
   assert.match(main, /new Notification/);
+  assert.match(preload, /gripiNative/);
   assert.match(preload, /gripiElectron/);
   assert.match(preload, /gateway-notification:show/);
+  assert.match(main, /preload: GATEWAY_PRELOAD_PATH/);
 });
 
 test("desktop gateway downloads open a native save dialog for trusted session exports", () => {

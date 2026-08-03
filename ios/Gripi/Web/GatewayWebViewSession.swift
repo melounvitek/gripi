@@ -17,16 +17,30 @@ final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
 
     @Published private(set) var isLoading = true
     @Published private(set) var failureMessage: String?
+    @Published private(set) var unreadCount = 0
     @Published var popupRequest: PopupRequest?
+    @Published var shareRequest: ShareRequest?
 
     private let coordinator: GatewayWebCoordinator
+    private let nativeBridge: NativeBridge
+    private var unreadTimer: AnyCancellable?
 
     init(gateway: Gateway, initialURL: URL? = nil) {
         self.gateway = gateway
 
+        let contentController = WKUserContentController()
+        nativeBridge = NativeBridge(gateway: gateway)
+        contentController.add(nativeBridge, contentWorld: .page, name: NativeBridge.handlerName)
+        contentController.addUserScript(WKUserScript(
+            source: NativeBridge.source,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: gateway.id)
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.userContentController = contentController
         webView = WKWebView(frame: .zero, configuration: configuration)
         coordinator = GatewayWebCoordinator(gateway: gateway)
 
@@ -76,6 +90,19 @@ final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
     fileprivate func finishedLoading() {
         failureMessage = nil
         isLoading = false
+        refreshUnreadCount()
+        if unreadTimer == nil {
+            unreadTimer = Timer.publish(every: 5, on: .main, in: .common)
+                .autoconnect()
+                .sink { [weak self] _ in self?.refreshUnreadCount() }
+        }
+    }
+
+    private func refreshUnreadCount() {
+        webView.evaluateJavaScript("Number(document.querySelector('.session-sidebar[data-unread-session-count]')?.dataset.unreadSessionCount || 0)") { [weak self] result, _ in
+            guard let count = result as? Double else { return }
+            self?.unreadCount = max(0, Int(count))
+        }
     }
 
     fileprivate func failedLoading(_ error: Error) {
@@ -86,11 +113,12 @@ final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
 }
 
 @MainActor
-final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
     weak var session: GatewayWebViewSession?
 
     private let gateway: Gateway
     private let originPolicy: OriginPolicy
+    private var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
     init(gateway: Gateway) {
         self.gateway = gateway
@@ -125,13 +153,55 @@ final class GatewayWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate 
 
         switch originPolicy.decision(for: url) {
         case .allow:
-            decisionHandler(.allow)
+            decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
         case .openExternally:
             decisionHandler(.cancel)
             UIApplication.shared.open(url)
         case .reject:
             decisionHandler(.cancel)
         }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        guard let url = navigationResponse.response.url, originPolicy.contains(url) else {
+            decisionHandler(.cancel)
+            return
+        }
+
+        decisionHandler(navigationResponse.canShowMIMEType ? .allow : .download)
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String,
+        completionHandler: @escaping (URL?) -> Void
+    ) {
+        let destination = DownloadDestination.temporaryURL(for: suggestedFilename)
+        downloadDestinations[ObjectIdentifier(download)] = destination
+        completionHandler(destination)
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        guard let destination = downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        session?.shareRequest = ShareRequest(fileURL: destination)
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        downloadDestinations.removeValue(forKey: ObjectIdentifier(download))
+        session?.failedLoading(error)
     }
 
     func webView(

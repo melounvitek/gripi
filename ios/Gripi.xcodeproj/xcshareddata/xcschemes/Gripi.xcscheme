@@ -47,6 +47,16 @@
                ReferencedContainer = "container:Gripi.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "C79B402DB59751F0584F861E"
+               BuildableName = "GripiUITests.xctest"
+               BlueprintName = "GripiUITests"
+               ReferencedContainer = "container:Gripi.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

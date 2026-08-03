@@ -9,9 +9,9 @@ struct UserDefaultsGatewayRepository: GatewayConfigurationRepository {
     private let defaults: UserDefaults
     private let key: String
 
-    init(defaults: UserDefaults = .standard, key: String = "gatewayConfiguration") {
+    init(defaults: UserDefaults = .standard, key: String? = nil) {
         self.defaults = defaults
-        self.key = key
+        self.key = key ?? ProcessInfo.processInfo.environment["GRIPI_GATEWAY_CONFIGURATION_KEY"] ?? "gatewayConfiguration"
     }
 
     func load() -> GatewayConfiguration {

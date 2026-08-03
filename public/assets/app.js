@@ -25,6 +25,7 @@ import {
   stableTextHash
 } from "./formatting.js";
 import { modelSettingsKey, selectedThinkingLevel, supportedThinkingLevels } from "./model.js";
+import { nativeBridgeMethod, nativeNotificationsRequirePermission } from "./native_bridge.js";
 import {
   currentSessionFindNavigationShortcut,
   isCtrlOrMetaShortcut,
@@ -593,12 +594,12 @@ function updateStatusFromMessage(message) {
   }
 }
 
-function desktopNotificationAvailable() {
-  return Boolean(window.gripiElectron?.showNotification);
+function nativeNotificationAvailable() {
+  return Boolean(nativeBridgeMethod(window, "showNotification"));
 }
 
 function notificationAvailable() {
-  return desktopNotificationAvailable() || ("Notification" in window && "serviceWorker" in navigator);
+  return nativeNotificationAvailable() || ("Notification" in window && "serviceWorker" in navigator);
 }
 
 function notificationsDisabled() {
@@ -607,7 +608,9 @@ function notificationsDisabled() {
 
 function notificationsEnabled() {
   if (notificationsDisabled()) return false;
-  if (desktopNotificationAvailable()) return true;
+  if (nativeNotificationAvailable()) {
+    return !nativeNotificationsRequirePermission(window) || localStorage.getItem("gripi:native-notifications-enabled") === "true";
+  }
   if (webPushController.available()) return webPushEnabled;
   return ("Notification" in window) && Notification.permission === "granted";
 }
@@ -615,7 +618,7 @@ function notificationsEnabled() {
 function notificationToggleState() {
   if (notificationsDisabled()) return { name: "off", label: "Off", title: "Notifications off — click to enable" };
   if (notificationsEnabled()) return { name: "enabled", label: "On", title: "Notifications on — click to disable" };
-  if (!desktopNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied") return { name: "blocked", label: "Blocked", title: "Notifications blocked — click for setup help" };
+  if (!nativeNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied") return { name: "blocked", label: "Blocked", title: "Notifications blocked — click for setup help" };
   return { name: "enable", label: "Enable", title: "Enable notifications" };
 }
 
@@ -643,7 +646,11 @@ async function toggleNotifications() {
   }
 
   localStorage.removeItem("gripi:notifications-disabled");
-  if (desktopNotificationAvailable()) {
+  if (nativeNotificationAvailable()) {
+    const requestPermission = nativeBridgeMethod(window, "requestNotificationPermission");
+    if (!nativeNotificationsRequirePermission(window) || (await requestPermission?.())?.ok) {
+      localStorage.setItem("gripi:native-notifications-enabled", "true");
+    }
     updateNotificationToggle();
     return;
   }
@@ -662,7 +669,7 @@ async function toggleNotifications() {
 }
 
 async function ensureNotificationWorker() {
-  if (desktopNotificationAvailable() || !notificationAvailable() || Notification.permission !== "granted") return null;
+  if (nativeNotificationAvailable() || !notificationAvailable() || Notification.permission !== "granted") return null;
   notificationRegistration ||= await navigator.serviceWorker.register("/service-worker.js");
   await navigator.serviceWorker.ready;
   return notificationRegistration;
@@ -671,8 +678,9 @@ async function ensureNotificationWorker() {
 async function showGripiNotification(title, body, url, tag) {
   if (notificationsDisabled()) return;
 
-  if (desktopNotificationAvailable()) {
-    await window.gripiElectron.showNotification({ type: "gripi-notification", title, body, url, tag });
+  const showNotification = nativeBridgeMethod(window, "showNotification");
+  if (showNotification) {
+    await showNotification({ type: "gripi-notification", title, body, url, tag });
     return;
   }
 
@@ -2401,8 +2409,9 @@ function copyTargetText(button) {
 }
 
 async function copyText(text) {
-  if (window.gripiElectron?.copyText) {
-    const result = await window.gripiElectron.copyText(text);
+  const nativeCopyText = nativeBridgeMethod(window, "copyText");
+  if (nativeCopyText) {
+    const result = await nativeCopyText(text);
     if (result?.ok) return true;
   }
 

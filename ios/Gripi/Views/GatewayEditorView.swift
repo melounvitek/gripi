@@ -5,11 +5,13 @@ struct GatewayEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let gateway: Gateway?
+    private let dismissAfterSave: Bool
     @State private var name: String
     @State private var url: String
 
-    init(gateway: Gateway? = nil) {
+    init(gateway: Gateway? = nil, dismissAfterSave: Bool = false) {
         self.gateway = gateway
+        self.dismissAfterSave = dismissAfterSave
         _name = State(initialValue: gateway?.name ?? "")
         _url = State(initialValue: gateway?.url.absoluteString ?? "https://")
     }
@@ -40,7 +42,7 @@ struct GatewayEditorView: View {
             }
             .navigationTitle(gateway == nil ? "Connect to Gripi" : "Edit Server")
             .toolbar {
-                if gateway != nil {
+                if dismissAfterSave {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { dismiss() }
                     }
@@ -62,6 +64,6 @@ struct GatewayEditorView: View {
             saved = gatewayStore.add(name: name, url: url)
         }
 
-        if saved && gateway != nil { dismiss() }
+        if saved && dismissAfterSave { dismiss() }
     }
 }

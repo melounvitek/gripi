@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import WebKit
 
@@ -14,12 +15,16 @@ struct GatewayWebView: UIViewRepresentable {
 @MainActor
 final class GatewaySessionStore: ObservableObject {
     private var sessions: [UUID: GatewayWebViewSession] = [:]
+    private var subscriptions: [UUID: AnyCancellable] = [:]
 
     func session(for gateway: Gateway) -> GatewayWebViewSession {
         if let session = sessions[gateway.id], session.gateway == gateway { return session }
 
         let session = GatewayWebViewSession(gateway: gateway)
         sessions[gateway.id] = session
+        subscriptions[gateway.id] = session.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
         return session
     }
 
@@ -27,6 +32,7 @@ final class GatewaySessionStore: ObservableObject {
         let gatewayIDs = Set(gateways.map(\.id))
         let removedSessions = sessions.filter { !gatewayIDs.contains($0.key) }.map(\.value)
         sessions = sessions.filter { gatewayIDs.contains($0.key) }
+        subscriptions = subscriptions.filter { gatewayIDs.contains($0.key) }
 
         for session in removedSessions {
             Task { await session.clearWebsiteData() }
