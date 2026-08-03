@@ -1888,6 +1888,14 @@ async function submitPrompt(event) {
     sidebarController.refresh({ force: true }).catch(() => {});
   };
 
+  const showControlCommandFailure = (message) => {
+    restoreSubmittedPromptInput();
+    if (reloadCommand && liveBash) setComposerState("bash", "Shell command running…");
+    else if (reloadCommand && queuedPrompt) setComposerState("running", message, { since: previousWaitingForOutputSince });
+    else setComposerState("error", message);
+    showStatus(message, true);
+  };
+
   const showPromptFailure = (errorMessage, { retryableContention = false } = {}) => {
     restoreSubmittedPromptInput();
     clearPendingCompaction();
@@ -1929,11 +1937,7 @@ async function submitPrompt(event) {
     if (stopHandlingChangedSubmittedView()) return;
     if (submittedPromptSuperseded()) return;
     if (nameCommand || reloadCommand) {
-      const message = nameCommand ? "Session name could not be changed" : "Pi resources could not be reloaded";
-      restoreSubmittedPromptInput();
-      if (reloadCommand && queuedPrompt) setComposerState("running", message, { since: previousWaitingForOutputSince });
-      else setComposerState("error", message);
-      showStatus(message, true);
+      showControlCommandFailure(nameCommand ? "Session name could not be changed" : "Pi resources could not be reloaded");
       return;
     }
     showPromptFailure("Prompt failed to send");
@@ -1953,11 +1957,7 @@ async function submitPrompt(event) {
       return;
     }
     if (nameCommand || reloadCommand) {
-      const errorMessage = payload?.error || (nameCommand ? "Session name could not be changed" : "Pi resources could not be reloaded");
-      restoreSubmittedPromptInput();
-      if (reloadCommand && queuedPrompt) setComposerState("running", errorMessage, { since: previousWaitingForOutputSince });
-      else setComposerState("error", errorMessage);
-      showStatus(errorMessage, true);
+      showControlCommandFailure(payload?.error || (nameCommand ? "Session name could not be changed" : "Pi resources could not be reloaded"));
       return;
     }
     const retryableContention = payload?.code === "session_operation_pending";

@@ -703,8 +703,18 @@ func TestClientReloadsThroughThePrivateExtensionBridge(t *testing.T) {
 		errors <- err
 	}()
 
+	decoder := json.NewDecoder(stdinReader)
+	var stateCommand map[string]any
+	if err := decoder.Decode(&stateCommand); err != nil {
+		t.Fatal(err)
+	}
+	if stateCommand["type"] != "get_state" {
+		t.Fatalf("state command = %#v", stateCommand)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"id": stateCommand["id"], "type": "response", "command": "get_state", "success": true, "data": map[string]any{"isStreaming": false, "isCompacting": false}})
+
 	var command map[string]any
-	if err := json.NewDecoder(stdinReader).Decode(&command); err != nil {
+	if err := decoder.Decode(&command); err != nil {
 		t.Fatal(err)
 	}
 	message, _ := command["message"].(string)
@@ -736,18 +746,24 @@ func TestClientRejectsReloadDuringCompaction(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
 	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start", "reason": "manual"})
 	waitSequence(t, client, 1)
-	go func() {
-		var command map[string]any
-		if json.NewDecoder(stdinReader).Decode(&command) == nil {
-			response, _ := json.Marshal(map[string]any{"id": command["id"], "type": "response", "command": "prompt", "success": true})
-			_, _ = stdoutWriter.Write(append(response, '\n'))
-		}
-	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	response, err := client.Reload(ctx)
+	response, err := client.Reload(context.Background())
 	if err != nil || response["success"] != false || response["error"] != "Wait for compaction to finish before reloading" {
+		t.Fatalf("response = %#v, %v", response, err)
+	}
+}
+
+func TestClientRejectsReloadWhileCompactionFollowUpsAreFlushing(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	client.mu.Lock()
+	client.flushingCompactionFollowUps = true
+	client.mu.Unlock()
+
+	response, err := client.Reload(context.Background())
+	if err != nil || response["success"] != false || response["error"] != "Session is busy" {
 		t.Fatalf("response = %#v, %v", response, err)
 	}
 }

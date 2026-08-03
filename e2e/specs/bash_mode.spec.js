@@ -87,6 +87,29 @@ test("cancel a long-running bash command with one click", async ({ page }) => {
   await expectRunFinished(page);
 });
 
+test("reject reload without hiding controls for active native bash", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.bashCancel);
+  await sendPrompt(page, `!${nativeBash.cancel.command}`);
+
+  const card = bashCard(page, nativeBash.cancel.command);
+  await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("running");
+  const abort = page.getByRole("button", { name: "Abort running Pi" });
+  await expect(abort).toBeVisible();
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/reload");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(composer).toHaveValue("/reload");
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "bash");
+  await expect(abort).toBeVisible();
+  await expect(message(page, "user", "/reload")).toHaveCount(0);
+
+  await abort.click();
+  await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("cancelled");
+  await expectRunFinished(page);
+});
+
 test("stop overlapping bash before retaining and then aborting the agent run", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.bashOverlap);

@@ -516,20 +516,52 @@ func (client *Client) SetSessionName(ctx context.Context, name string) (map[stri
 	return client.request(ctx, "set_session_name", client.nextID("set_session_name"), map[string]any{"name": name}, client.requestTimeout, nil)
 }
 func (client *Client) Reload(ctx context.Context) (map[string]any, error) {
+	if failure := client.reloadFailure(); failure != nil {
+		return failure, nil
+	}
+	state, err := client.GetState(ctx)
+	if err != nil || state["success"] != true {
+		return state, err
+	}
+	if data, ok := state["data"].(map[string]any); ok {
+		if data["isCompacting"] == true {
+			return reloadFailureResponse("Wait for compaction to finish before reloading"), nil
+		}
+		if data["isStreaming"] == true {
+			return reloadFailureResponse("Session is busy"), nil
+		}
+	}
 	if failure := client.beginReload(); failure != nil {
 		return failure, nil
 	}
 	return client.extensionRequest(ctx, "gripi_reload", map[string]any{}, LongRequestTimeout, "Pi resources reload timed out")
 }
 
+func (client *Client) reloadFailure() map[string]any {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.reloadFailureLocked()
+}
+
+func (client *Client) reloadFailureLocked() map[string]any {
+	if client.compacting {
+		return reloadFailureResponse("Wait for compaction to finish before reloading")
+	}
+	if client.busy || client.activeBashToken != nil || client.flushingCompactionFollowUps || len(client.deferredCommandIDs) > 0 {
+		return reloadFailureResponse("Session is busy")
+	}
+	return nil
+}
+
+func reloadFailureResponse(message string) map[string]any {
+	return map[string]any{"type": "response", "command": "prompt", "success": false, "error": message}
+}
+
 func (client *Client) beginReload() map[string]any {
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if client.compacting {
-		return map[string]any{"type": "response", "command": "prompt", "success": false, "error": "Wait for compaction to finish before reloading"}
-	}
-	if client.busy || client.activeBashToken != nil {
-		return map[string]any{"type": "response", "command": "prompt", "success": false, "error": "Session is busy"}
+	if failure := client.reloadFailureLocked(); failure != nil {
+		return failure
 	}
 
 	client.pendingDialogs = make(map[string]*extensionDialog)
