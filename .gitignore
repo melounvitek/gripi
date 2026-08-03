@@ -5,3 +5,9 @@ dist/
 playwright-report/
 test-results/
 /tmp/
+
+# Xcode
+.DS_Store
+DerivedData/
+*.xcuserstate
+xcuserdata/

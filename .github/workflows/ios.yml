@@ -1,0 +1,43 @@
+name: iOS
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select simulator
+        run: |
+          simulator_id="$(xcrun simctl list devices available --json | ruby -rjson -e '
+            devices = JSON.parse(STDIN.read).fetch("devices").values.flatten
+            phone = devices.reverse.find { |device| device.fetch("name", "").start_with?("iPhone") }
+            abort "No available iPhone simulator" unless phone
+            puts phone.fetch("udid")
+          ')"
+          echo "SIMULATOR_ID=$simulator_id" >> "$GITHUB_ENV"
+      - name: Test
+        run: |
+          xcodebuild \
+            -project ios/Gripi.xcodeproj \
+            -scheme Gripi \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -derivedDataPath "$RUNNER_TEMP/GripiDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/Gripi.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            clean test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ios-test-results
+          path: ${{ runner.temp }}/Gripi.xcresult
+          if-no-files-found: ignore

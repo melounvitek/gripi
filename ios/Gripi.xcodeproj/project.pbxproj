@@ -1,0 +1,516 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2AF1F3CCF59D084D391078CD /* GatewayEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 690761E80BD5FA248F9314BA /* GatewayEditorView.swift */; };
+		3C2985FB32A54E6D9AF2DDED /* Gateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87C92DFAC476A18F708B911D /* Gateway.swift */; };
+		3EEE7C8E003BB7B06C959846 /* GatewayStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6BC608A9BC4242727C622EF /* GatewayStore.swift */; };
+		455F3159B3CCD88B136DBF8B /* GatewayConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64097602FA6E45DB66869991 /* GatewayConfiguration.swift */; };
+		5CA07ACEA614162D638CE951 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
+		7A8FB5D960AD9053A42EBA94 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE110B0C5DBEF409B0A4688 /* ContentView.swift */; };
+		7D03CE88BF2B2FED90486333 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
+		8B2115561B207D2347B93A46 /* GatewayConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */; };
+		A775887C76F40AA4C3838381 /* GatewayRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E6AF4C71771A735A4E0BDF3 /* GatewayRepositoryTests.swift */; };
+		C5604342C493011B26639477 /* GatewayRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96EFF0EBE0F6798093332A8A /* GatewayRepository.swift */; };
+		DC6A1B4628DFADA69FB9D00D /* GripiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E44093AE755FF826A47217B /* GripiApp.swift */; };
+		FB776F5061FCDE8B9F4D08A5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6DCA71DF49F68738AA0F4860 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		0BDA01AF561FB2F1E9605AFF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 09654984F6514817960DD824 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4A3735C65677D3191621E4EB;
+			remoteInfo = Gripi;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		3EE110B0C5DBEF409B0A4688 /* ContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		4C9503F59B11D804385D652C /* GripiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GripiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4E44093AE755FF826A47217B /* GripiApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GripiApp.swift; sourceTree = "<group>"; };
+		4E6AF4C71771A735A4E0BDF3 /* GatewayRepositoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayRepositoryTests.swift; sourceTree = "<group>"; };
+		64097602FA6E45DB66869991 /* GatewayConfiguration.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayConfiguration.swift; sourceTree = "<group>"; };
+		66F07EA4601900128165C690 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		690761E80BD5FA248F9314BA /* GatewayEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayEditorView.swift; sourceTree = "<group>"; };
+		6DCA71DF49F68738AA0F4860 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		76D524E01176F793D7E8DEC6 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		8265AB4305C79F6AA6A9B327 /* Gripi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gripi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		87C92DFAC476A18F708B911D /* Gateway.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Gateway.swift; sourceTree = "<group>"; };
+		96EFF0EBE0F6798093332A8A /* GatewayRepository.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayRepository.swift; sourceTree = "<group>"; };
+		F6BC608A9BC4242727C622EF /* GatewayStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayStore.swift; sourceTree = "<group>"; };
+		F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayConfigurationTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1FC046035D26B466845EBB34 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7D03CE88BF2B2FED90486333 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3C8F49AECE22B64B1784BBC5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5CA07ACEA614162D638CE951 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1249D1A6AF7F721388CFCCE2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8265AB4305C79F6AA6A9B327 /* Gripi.app */,
+				4C9503F59B11D804385D652C /* GripiTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		16434B6736D584E447B24642 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				76D524E01176F793D7E8DEC6 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		24AB662B9E911AC2252A1BE8 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				690761E80BD5FA248F9314BA /* GatewayEditorView.swift */,
+			);
+			name = Views;
+			path = Views;
+			sourceTree = "<group>";
+		};
+		5176F8449798C51AA78A4310 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				16434B6736D584E447B24642 /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		89BA3E008E8EFDAF2188849F = {
+			isa = PBXGroup;
+			children = (
+				1249D1A6AF7F721388CFCCE2 /* Products */,
+				5176F8449798C51AA78A4310 /* Frameworks */,
+				F25F6B66D5A9264846748219 /* Gripi */,
+				D19BE1911FCAADDCC9BCB781 /* GripiTests */,
+			);
+			sourceTree = "<group>";
+		};
+		8AE8CE025AC728B4B6D0CD0A /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				96EFF0EBE0F6798093332A8A /* GatewayRepository.swift */,
+				F6BC608A9BC4242727C622EF /* GatewayStore.swift */,
+			);
+			name = Persistence;
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		B0BA5BDA2403B672AF99AABD /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				87C92DFAC476A18F708B911D /* Gateway.swift */,
+				64097602FA6E45DB66869991 /* GatewayConfiguration.swift */,
+			);
+			name = Models;
+			path = Models;
+			sourceTree = "<group>";
+		};
+		D19BE1911FCAADDCC9BCB781 /* GripiTests */ = {
+			isa = PBXGroup;
+			children = (
+				F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */,
+				4E6AF4C71771A735A4E0BDF3 /* GatewayRepositoryTests.swift */,
+			);
+			name = GripiTests;
+			path = GripiTests;
+			sourceTree = "<group>";
+		};
+		F25F6B66D5A9264846748219 /* Gripi */ = {
+			isa = PBXGroup;
+			children = (
+				B0BA5BDA2403B672AF99AABD /* Models */,
+				8AE8CE025AC728B4B6D0CD0A /* Persistence */,
+				24AB662B9E911AC2252A1BE8 /* Views */,
+				4E44093AE755FF826A47217B /* GripiApp.swift */,
+				3EE110B0C5DBEF409B0A4688 /* ContentView.swift */,
+				66F07EA4601900128165C690 /* Info.plist */,
+				6DCA71DF49F68738AA0F4860 /* Assets.xcassets */,
+			);
+			name = Gripi;
+			path = Gripi;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		22DE6D7FB74FA4F1F33174DE /* GripiTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DB8233C5C1AE1A969C8FB5A0 /* Build configuration list for PBXNativeTarget "GripiTests" */;
+			buildPhases = (
+				A26B3410C92B1EB1B83C5869 /* Sources */,
+				3C8F49AECE22B64B1784BBC5 /* Frameworks */,
+				5919DF22B7890965040CAE3D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D4F003FFB30D9F3C962CF6AA /* PBXTargetDependency */,
+			);
+			name = GripiTests;
+			productName = GripiTests;
+			productReference = 4C9503F59B11D804385D652C /* GripiTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		4A3735C65677D3191621E4EB /* Gripi */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F3DF674BE2CA38BBB255D656 /* Build configuration list for PBXNativeTarget "Gripi" */;
+			buildPhases = (
+				D3860F2744D8A6D4FCF219AB /* Sources */,
+				1FC046035D26B466845EBB34 /* Frameworks */,
+				C918E45FE13FBAFDE78551F4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Gripi;
+			productName = Gripi;
+			productReference = 8265AB4305C79F6AA6A9B327 /* Gripi.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		09654984F6514817960DD824 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = BBE6E6E50DC6BCBF5B9CD8AB /* Build configuration list for PBXProject "Gripi" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 89BA3E008E8EFDAF2188849F;
+			minimizedProjectReferenceProxies = 0;
+			preferredProjectObjectVersion = 100;
+			productRefGroup = 1249D1A6AF7F721388CFCCE2 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				4A3735C65677D3191621E4EB /* Gripi */,
+				22DE6D7FB74FA4F1F33174DE /* GripiTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5919DF22B7890965040CAE3D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C918E45FE13FBAFDE78551F4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FB776F5061FCDE8B9F4D08A5 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A26B3410C92B1EB1B83C5869 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8B2115561B207D2347B93A46 /* GatewayConfigurationTests.swift in Sources */,
+				A775887C76F40AA4C3838381 /* GatewayRepositoryTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D3860F2744D8A6D4FCF219AB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DC6A1B4628DFADA69FB9D00D /* GripiApp.swift in Sources */,
+				7A8FB5D960AD9053A42EBA94 /* ContentView.swift in Sources */,
+				3C2985FB32A54E6D9AF2DDED /* Gateway.swift in Sources */,
+				455F3159B3CCD88B136DBF8B /* GatewayConfiguration.swift in Sources */,
+				C5604342C493011B26639477 /* GatewayRepository.swift in Sources */,
+				3EEE7C8E003BB7B06C959846 /* GatewayStore.swift in Sources */,
+				2AF1F3CCF59D084D391078CD /* GatewayEditorView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D4F003FFB30D9F3C962CF6AA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Gripi;
+			target = 4A3735C65677D3191621E4EB /* Gripi */;
+			targetProxy = 0BDA01AF561FB2F1E9605AFF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0F0C87A41D0F510EB8BD179F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		184E2154001E4DE69F1B6DB3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Gripi/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.gripi.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		3AC34A6ACDB4183D3E3D6697 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Gripi/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.gripi.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		3DC85B435CA5349CAE3610A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.gripi.ios.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Gripi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Gripi";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		8E15CB0F17F029D5DD1A815E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		9A8C53FE5E99F5495328E285 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.gripi.ios.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Gripi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Gripi";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BBE6E6E50DC6BCBF5B9CD8AB /* Build configuration list for PBXProject "Gripi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8E15CB0F17F029D5DD1A815E /* Debug */,
+				0F0C87A41D0F510EB8BD179F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DB8233C5C1AE1A969C8FB5A0 /* Build configuration list for PBXNativeTarget "GripiTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3DC85B435CA5349CAE3610A9 /* Release */,
+				9A8C53FE5E99F5495328E285 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F3DF674BE2CA38BBB255D656 /* Build configuration list for PBXNativeTarget "Gripi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3AC34A6ACDB4183D3E3D6697 /* Release */,
+				184E2154001E4DE69F1B6DB3 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 09654984F6514817960DD824 /* Project object */;
+}
