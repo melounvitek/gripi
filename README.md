@@ -77,7 +77,9 @@ The desktop app connects to a running gateway and can store and switch between m
 <img width="1468" height="930" alt="Screenshot 2026-07-15 at 19 23 37" src="https://github.com/user-attachments/assets/194b8d2a-5e1d-43c5-aae7-a8092e73b6f4" />
 
 
-There is no mobile app, but on iPhone, adding the gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow works nicely. On iOS/iPadOS 16.4 or newer, the installed web app can enable Web Push notifications for completed replies; they continue working while Gripi is closed and require no App Store installation or Apple developer account. The gateway must be reached over HTTPS and have outbound internet access to the browser's push service.
+The repository includes a native iPhone client under [`ios/`](docs/iphone.md). It is a thin SwiftUI and WebKit shell, like the Electron app: it stores and switches between gateways while Pi and the gateway continue running on another machine. The initial source release is installed from Xcode rather than the App Store.
+
+Adding a gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow also works nicely. On iOS/iPadOS 16.4 or newer, that installed web app can enable Web Push notifications for completed replies; they continue working while Gripi is closed and require no App Store installation or Apple developer account. The gateway must be reached over HTTPS and have outbound internet access to the browser's push service. The native client's closed-app APNs delivery is a planned follow-up; its local notifications cover replies observed while the app is active.
 
 <img width="804" height="362" alt="image" src="https://github.com/user-attachments/assets/37ab55d7-7b34-4cce-932e-566a6d415041" />
 

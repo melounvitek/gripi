@@ -35,8 +35,6 @@ final class GatewaySwitchingUITests: XCTestCase {
 
         let urlField = app.textFields["https://gripi.example.com/"]
         urlField.tap()
-        urlField.press(forDuration: 1)
-        app.menuItems["Select All"].tap()
         urlField.typeText(url)
     }
 }

@@ -13,7 +13,7 @@ struct GatewayEditorView: View {
         self.gateway = gateway
         self.dismissAfterSave = dismissAfterSave
         _name = State(initialValue: gateway?.name ?? "")
-        _url = State(initialValue: gateway?.url.absoluteString ?? "https://")
+        _url = State(initialValue: gateway?.url.absoluteString ?? "")
     }
 
     var body: some View {
