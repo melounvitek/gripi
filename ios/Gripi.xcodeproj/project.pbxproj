@@ -7,13 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0F0AFB1B9973B849A5F8EAFD /* GatewayScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF35C65DB941768746A82B6A /* GatewayScreen.swift */; };
 		2AF1F3CCF59D084D391078CD /* GatewayEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 690761E80BD5FA248F9314BA /* GatewayEditorView.swift */; };
+		38477FF259496DFDB964D23C /* OriginPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91BEB225210E234B4F0FBB9B /* OriginPolicyTests.swift */; };
+		39173289C2D6CB0A0091F33C /* OriginPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 616D3FC48CED67F81C0767FB /* OriginPolicy.swift */; };
 		3C2985FB32A54E6D9AF2DDED /* Gateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87C92DFAC476A18F708B911D /* Gateway.swift */; };
 		3EEE7C8E003BB7B06C959846 /* GatewayStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6BC608A9BC4242727C622EF /* GatewayStore.swift */; };
 		455F3159B3CCD88B136DBF8B /* GatewayConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64097602FA6E45DB66869991 /* GatewayConfiguration.swift */; };
 		5CA07ACEA614162D638CE951 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
 		7A8FB5D960AD9053A42EBA94 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE110B0C5DBEF409B0A4688 /* ContentView.swift */; };
+		7A93841F128F6929409F00C8 /* GatewayWebViewSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 307EC0976314E92216DB72DD /* GatewayWebViewSession.swift */; };
 		7D03CE88BF2B2FED90486333 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D524E01176F793D7E8DEC6 /* Foundation.framework */; };
+		870B7C01861C96A2D82884F6 /* GatewayWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 954E06743E9D55D1C793D0EB /* GatewayWebView.swift */; };
 		8B2115561B207D2347B93A46 /* GatewayConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */; };
 		A775887C76F40AA4C3838381 /* GatewayRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E6AF4C71771A735A4E0BDF3 /* GatewayRepositoryTests.swift */; };
 		C5604342C493011B26639477 /* GatewayRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96EFF0EBE0F6798093332A8A /* GatewayRepository.swift */; };
@@ -32,10 +37,12 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		307EC0976314E92216DB72DD /* GatewayWebViewSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayWebViewSession.swift; sourceTree = "<group>"; };
 		3EE110B0C5DBEF409B0A4688 /* ContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4C9503F59B11D804385D652C /* GripiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GripiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4E44093AE755FF826A47217B /* GripiApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GripiApp.swift; sourceTree = "<group>"; };
 		4E6AF4C71771A735A4E0BDF3 /* GatewayRepositoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayRepositoryTests.swift; sourceTree = "<group>"; };
+		616D3FC48CED67F81C0767FB /* OriginPolicy.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OriginPolicy.swift; sourceTree = "<group>"; };
 		64097602FA6E45DB66869991 /* GatewayConfiguration.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayConfiguration.swift; sourceTree = "<group>"; };
 		66F07EA4601900128165C690 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		690761E80BD5FA248F9314BA /* GatewayEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayEditorView.swift; sourceTree = "<group>"; };
@@ -43,7 +50,10 @@
 		76D524E01176F793D7E8DEC6 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		8265AB4305C79F6AA6A9B327 /* Gripi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gripi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		87C92DFAC476A18F708B911D /* Gateway.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Gateway.swift; sourceTree = "<group>"; };
+		91BEB225210E234B4F0FBB9B /* OriginPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OriginPolicyTests.swift; sourceTree = "<group>"; };
+		954E06743E9D55D1C793D0EB /* GatewayWebView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayWebView.swift; sourceTree = "<group>"; };
 		96EFF0EBE0F6798093332A8A /* GatewayRepository.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayRepository.swift; sourceTree = "<group>"; };
+		CF35C65DB941768746A82B6A /* GatewayScreen.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayScreen.swift; sourceTree = "<group>"; };
 		F6BC608A9BC4242727C622EF /* GatewayStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayStore.swift; sourceTree = "<group>"; };
 		F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GatewayConfigurationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -89,9 +99,21 @@
 			isa = PBXGroup;
 			children = (
 				690761E80BD5FA248F9314BA /* GatewayEditorView.swift */,
+				CF35C65DB941768746A82B6A /* GatewayScreen.swift */,
 			);
 			name = Views;
 			path = Views;
+			sourceTree = "<group>";
+		};
+		3EF3CF541B127783C2212CA7 /* Web */ = {
+			isa = PBXGroup;
+			children = (
+				616D3FC48CED67F81C0767FB /* OriginPolicy.swift */,
+				307EC0976314E92216DB72DD /* GatewayWebViewSession.swift */,
+				954E06743E9D55D1C793D0EB /* GatewayWebView.swift */,
+			);
+			name = Web;
+			path = Web;
 			sourceTree = "<group>";
 		};
 		5176F8449798C51AA78A4310 /* Frameworks */ = {
@@ -137,6 +159,7 @@
 			children = (
 				F99509B00982D769E8562046 /* GatewayConfigurationTests.swift */,
 				4E6AF4C71771A735A4E0BDF3 /* GatewayRepositoryTests.swift */,
+				91BEB225210E234B4F0FBB9B /* OriginPolicyTests.swift */,
 			);
 			name = GripiTests;
 			path = GripiTests;
@@ -152,6 +175,7 @@
 				3EE110B0C5DBEF409B0A4688 /* ContentView.swift */,
 				66F07EA4601900128165C690 /* Info.plist */,
 				6DCA71DF49F68738AA0F4860 /* Assets.xcassets */,
+				3EF3CF541B127783C2212CA7 /* Web */,
 			);
 			name = Gripi;
 			path = Gripi;
@@ -250,6 +274,7 @@
 			files = (
 				8B2115561B207D2347B93A46 /* GatewayConfigurationTests.swift in Sources */,
 				A775887C76F40AA4C3838381 /* GatewayRepositoryTests.swift in Sources */,
+				38477FF259496DFDB964D23C /* OriginPolicyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -264,6 +289,10 @@
 				C5604342C493011B26639477 /* GatewayRepository.swift in Sources */,
 				3EEE7C8E003BB7B06C959846 /* GatewayStore.swift in Sources */,
 				2AF1F3CCF59D084D391078CD /* GatewayEditorView.swift in Sources */,
+				39173289C2D6CB0A0091F33C /* OriginPolicy.swift in Sources */,
+				7A93841F128F6929409F00C8 /* GatewayWebViewSession.swift in Sources */,
+				870B7C01861C96A2D82884F6 /* GatewayWebView.swift in Sources */,
+				0F0AFB1B9973B849A5F8EAFD /* GatewayScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
