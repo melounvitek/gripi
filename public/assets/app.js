@@ -790,7 +790,7 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   if (!["running", "sending"].includes(state)) stopWaitingForOutput();
   if (composerState) {
     composerState.dataset.state = state;
-    composerState.textContent = ["running", "bash", "sending", "exporting", "stopping", "error"].includes(state) ? label : "";
+    composerState.textContent = ["running", "bash", "sending", "exporting", "stopping", "error", "success"].includes(state) ? label : "";
     if (state === "running") updateWaitingForOutputStatus();
   }
   const taskBusy = ["running", "bash", "sending", "stopping"].includes(state);
@@ -1995,7 +1995,7 @@ async function submitPrompt(event) {
     }
     clearStoredComposerDraft(submittedSession);
     if (payload?.command === "reload") {
-      setComposerState("done", "Reloaded");
+      setComposerState("success", "Reloaded");
       refreshCommandsAfterReload();
       showStatus("Pi resources reloaded", true);
       return;

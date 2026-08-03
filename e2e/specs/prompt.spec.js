@@ -63,7 +63,9 @@ test("reload Pi resources and refresh the slash command catalog", async ({ page 
 
   await composer.fill("/reload");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
-  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "success");
+  await expect(page.locator(".composer-state")).toHaveText("Reloaded");
+  await expect(page.locator(".composer-state")).toBeVisible();
   await expect(message(page, "user", "/reload")).toHaveCount(0);
   await expect(page.locator('[data-status-key="extension:stale-resource"]')).toHaveCount(0);
   releaseStaleCatalog();
