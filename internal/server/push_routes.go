@@ -8,14 +8,18 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 
 	"github.com/melounvitek/gripi/internal/push"
+	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 const (
 	pushRequestBytes = 8 << 10
 	singleUserOwner  = "single-user"
 )
+
+var notificationPresenceClientID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 type pushNotifier interface {
 	Deliver(context.Context, string, []byte) error
@@ -29,6 +33,8 @@ func (app *application) registerPushRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/web-push/subscription", http.NotFound)
 	mux.HandleFunc("POST /web-push/test", app.testPushNotification)
 	mux.HandleFunc("/web-push/test", http.NotFound)
+	mux.HandleFunc("PUT /web-push/presence", app.updateNotificationPresence)
+	mux.HandleFunc("/web-push/presence", http.NotFound)
 }
 
 func (app *application) webPushConfig(response http.ResponseWriter, _ *http.Request) {
@@ -88,6 +94,54 @@ func (app *application) removePushSubscription(response http.ResponseWriter, req
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
+}
+
+func (app *application) updateNotificationPresence(response http.ResponseWriter, request *http.Request) {
+	var input struct {
+		ClientID string `json:"client_id"`
+		Session  string `json:"session"`
+		Focused  bool   `json:"focused"`
+		Sequence uint64 `json:"sequence"`
+	}
+	if !decodePushJSON(response, request, &input) {
+		return
+	}
+	if !notificationPresenceClientID.MatchString(input.ClientID) || input.Sequence == 0 {
+		writeText(response, http.StatusBadRequest, "Invalid notification presence")
+		return
+	}
+	owner, ok := app.notificationPresenceOwner(request)
+	if !ok {
+		writeText(response, http.StatusForbidden, "Forbidden")
+		return
+	}
+	if !input.Focused {
+		app.notificationPresence.Update(owner, input.ClientID, "", false, input.Sequence)
+		response.WriteHeader(http.StatusNoContent)
+		return
+	}
+	path, valid := sessions.ConfiguredSessionPath(app.config.SessionsRoot, input.Session)
+	if !valid {
+		writeText(response, http.StatusBadRequest, "Invalid notification presence")
+		return
+	}
+	if app.config.MultiUserMode && !app.ownsSession(request, path) {
+		writeText(response, http.StatusForbidden, "Forbidden")
+		return
+	}
+	app.notificationPresence.Update(owner, input.ClientID, path, true, input.Sequence)
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (app *application) notificationPresenceOwner(request *http.Request) (string, bool) {
+	owner, ok := app.pushOwner(request)
+	if !ok {
+		return "", false
+	}
+	if app.config.MultiUserMode {
+		return owner, true
+	}
+	return singleUserOwner, true
 }
 
 func (app *application) testPushNotification(response http.ResponseWriter, request *http.Request) {

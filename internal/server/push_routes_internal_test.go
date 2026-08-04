@@ -125,6 +125,85 @@ func TestWebPushRoutesRejectCrossOriginMalformedAndWrongMethodRequests(t *testin
 	}
 }
 
+func TestWebPushPresenceTracksTheFocusedSessionAcrossApprovedBrowsers(t *testing.T) {
+	handler := newPushTestHandler(t, false, false)
+	for _, token := range []string{"desktop", "phone"} {
+		if _, err := handler.app.browserStore.ApproveCurrentBrowser(token, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessionPath := filepath.Join(handler.app.config.SessionsRoot, "focused.jsonl")
+
+	focused := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, map[string]any{
+		"client_id": "desktop-window", "session": sessionPath, "focused": true, "sequence": 1,
+	}), "gripi_browser=desktop")
+	if focused.Code != http.StatusNoContent {
+		t.Fatalf("focused response = %d %s", focused.Code, focused.Body.String())
+	}
+	if !handler.app.notificationPresence.Focused(singleUserOwner, sessionPath) {
+		t.Fatal("desktop focus was not visible to the single user")
+	}
+
+	cleared := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, map[string]any{
+		"client_id": "desktop-window", "session": "", "focused": false, "sequence": 2,
+	}), "gripi_browser=desktop")
+	if cleared.Code != http.StatusNoContent || handler.app.notificationPresence.Focused(singleUserOwner, sessionPath) {
+		t.Fatalf("cleared response = %d, focused = %t", cleared.Code, handler.app.notificationPresence.Focused(singleUserOwner, sessionPath))
+	}
+}
+
+func TestWebPushPresenceIsIsolatedByWorkspace(t *testing.T) {
+	handler := newPushTestHandler(t, true, false)
+	for _, workspace := range []string{"workspace-a", "workspace-b"} {
+		if err := handler.app.workspaceStore.ApproveWorkspace(workspace); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessionPath := filepath.Join(handler.app.config.SessionsRoot, "focused.jsonl")
+	if _, err := handler.app.ownershipStore.Claim(sessionPath, "workspace-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	response := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, map[string]any{
+		"client_id": "workspace-window", "session": sessionPath, "focused": true, "sequence": 1,
+	}), "gripi_workspace=workspace-a")
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("presence response = %d %s", response.Code, response.Body.String())
+	}
+	if !handler.app.notificationPresence.Focused("workspace:workspace-a", sessionPath) {
+		t.Fatal("workspace focus was not tracked")
+	}
+	if handler.app.notificationPresence.Focused("workspace:workspace-b", sessionPath) {
+		t.Fatal("workspace focus leaked to another owner")
+	}
+
+	foreign := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, map[string]any{
+		"client_id": "foreign-window", "session": sessionPath, "focused": true, "sequence": 1,
+	}), "gripi_workspace=workspace-b")
+	if foreign.Code != http.StatusForbidden {
+		t.Fatalf("foreign workspace response = %d", foreign.Code)
+	}
+}
+
+func TestWebPushPresenceRejectsInvalidClientAndSessionValues(t *testing.T) {
+	handler := newPushTestHandler(t, false, true)
+	for _, input := range []map[string]any{
+		{"client_id": "invalid client", "session": filepath.Join(handler.app.config.SessionsRoot, "session.jsonl"), "focused": true, "sequence": 1},
+		{"client_id": "client", "session": filepath.Join(t.TempDir(), "outside.jsonl"), "focused": true, "sequence": 1},
+		{"client_id": "client", "session": "", "focused": true, "sequence": 1},
+		{"client_id": "client", "session": filepath.Join(handler.app.config.SessionsRoot, "session.jsonl"), "focused": true, "sequence": 0},
+	} {
+		response := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, input), "")
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid presence %#v response = %d", input, response.Code)
+		}
+	}
+	wrongMethod := pushRequest(handler, http.MethodPost, "/web-push/presence", "", "")
+	if wrongMethod.Code != http.StatusNotFound {
+		t.Fatalf("wrong method response = %d", wrongMethod.Code)
+	}
+}
+
 func TestWebPushTestDeliversOnlyToTheCurrentOwner(t *testing.T) {
 	handler := newPushTestHandler(t, true, false)
 	if err := handler.app.workspaceStore.ApproveWorkspace("workspace-a"); err != nil {
@@ -158,6 +237,8 @@ func newPushTestHandler(t *testing.T, multiUser, authDisabled bool) *Handler {
 	root := t.TempDir()
 	cfg := config.Config{
 		Address:                "127.0.0.1:4567",
+		Home:                   root,
+		SessionsRoot:           root,
 		BrowserAuthDisabled:    authDisabled,
 		MultiUserMode:          multiUser,
 		AdminPassword:          "secret",
