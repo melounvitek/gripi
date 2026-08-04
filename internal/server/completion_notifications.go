@@ -126,6 +126,19 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	if len(owners) == 0 {
 		return nil
 	}
+	deliveryOwners := make([]string, 0, len(owners))
+	for _, owner := range owners {
+		presenceOwner := singleUserOwner
+		if notifier.app.config.MultiUserMode {
+			presenceOwner = owner
+		}
+		if !notifier.app.notificationPresence.Focused(presenceOwner, path) {
+			deliveryOwners = append(deliveryOwners, owner)
+		}
+	}
+	if len(deliveryOwners) == 0 {
+		return nil
+	}
 
 	title := "current session"
 	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
@@ -146,7 +159,7 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	var failures []error
 	var failuresMu sync.Mutex
 	var deliveries sync.WaitGroup
-	for _, owner := range owners {
+	for _, owner := range deliveryOwners {
 		deliveries.Add(1)
 		go func(owner string) {
 			defer deliveries.Done()

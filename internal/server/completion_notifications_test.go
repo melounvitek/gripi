@@ -191,6 +191,79 @@ func TestCompletionNotifierFansOutToBrowserOwnersWithoutSerialBlocking(t *testin
 	}
 }
 
+func TestCompletionNotifierSuppressesAllBrowserPushesWhenTheSessionIsFocused(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := writeNotificationSession(t, root, "Focused session")
+	fake := &recordingPushNotifier{}
+	app := notificationTestApplication(t, root, false, false, fake)
+	for _, token := range []string{"desktop", "phone"} {
+		if _, err := app.browserStore.ApproveCurrentBrowser(token, "test"); err != nil {
+			t.Fatal(err)
+		}
+		owner, _ := app.pushOwner(requestWithCookie("gripi_browser=" + token))
+		if err := app.pushSubscriptions.Upsert(owner, pushRouteSubscription(token)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := &remapClient{}
+	if err := app.rpcClients.Register(sessionPath, client); err != nil {
+		t.Fatal(err)
+	}
+	notifier := newCompletionNotifier(app)
+	app.notificationPresence.Update(singleUserOwner, "desktop-window", sessionPath, true)
+
+	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: "done", id: "focused"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.owners) != 0 {
+		t.Fatalf("focused delivery owners = %#v", fake.owners)
+	}
+
+	app.notificationPresence.Update(singleUserOwner, "desktop-window", filepath.Join(root, "other.jsonl"), true)
+	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: "done", id: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.owners) != 2 {
+		t.Fatalf("background delivery owners = %#v", fake.owners)
+	}
+}
+
+func TestCompletionNotifierScopesFocusedSessionsToTheirWorkspace(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := writeNotificationSession(t, root, "Workspace session")
+	fake := &recordingPushNotifier{}
+	app := notificationTestApplication(t, root, true, false, fake)
+	for _, workspace := range []string{"workspace-a", "workspace-b"} {
+		if err := app.workspaceStore.ApproveWorkspace(workspace); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := app.ownershipStore.Claim(sessionPath, "workspace-a"); err != nil {
+		t.Fatal(err)
+	}
+	client := &remapClient{}
+	if err := app.rpcClients.Register(sessionPath, client); err != nil {
+		t.Fatal(err)
+	}
+	notifier := newCompletionNotifier(app)
+	app.notificationPresence.Update("workspace:workspace-b", "other-window", sessionPath, true)
+
+	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: "done", id: "other-workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(fake.owners, []string{"workspace:workspace-a"}) {
+		t.Fatalf("other workspace delivery owners = %#v", fake.owners)
+	}
+
+	app.notificationPresence.Update("workspace:workspace-a", "focused-window", sessionPath, true)
+	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: "done", id: "focused-workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.owners) != 1 {
+		t.Fatalf("focused workspace received another delivery: %#v", fake.owners)
+	}
+}
+
 func TestCompletionNotifierTargetsEveryApprovedBrowserAndDropsRevokedOwners(t *testing.T) {
 	root := t.TempDir()
 	fake := &recordingPushNotifier{}
@@ -292,15 +365,16 @@ func notificationTestApplication(t *testing.T, root string, multiUser, authDisab
 		PushSubscriptionsPath:  filepath.Join(root, "subscriptions.json"),
 	}
 	app := &application{
-		config:            cfg,
-		browserStore:      access.NewBrowserStore(cfg.BrowserAccessPath),
-		workspaceStore:    access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
-		ownershipStore:    access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
-		pushSubscriptions: push.NewSubscriptionStore(cfg.PushSubscriptionsPath),
-		pushNotifier:      notifier,
-		sessionCache:      sessions.NewCache(),
-		pendingSessions:   rpc.NewPendingSessionRegistry(nil),
-		rpcClients:        rpc.NewRegistry(nil, nil),
+		config:               cfg,
+		browserStore:         access.NewBrowserStore(cfg.BrowserAccessPath),
+		workspaceStore:       access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
+		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
+		pushSubscriptions:    push.NewSubscriptionStore(cfg.PushSubscriptionsPath),
+		pushNotifier:         notifier,
+		notificationPresence: newNotificationPresence(time.Now),
+		sessionCache:         sessions.NewCache(),
+		pendingSessions:      rpc.NewPendingSessionRegistry(nil),
+		rpcClients:           rpc.NewRegistry(nil, nil),
 	}
 	return app
 }
