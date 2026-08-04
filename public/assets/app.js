@@ -608,10 +608,18 @@ function notificationsDisabled() {
   return localStorage.getItem("gripi:notifications-disabled") === "true";
 }
 
+function nativeNotificationPermissionStatus() {
+  return localStorage.getItem("gripi:native-notification-permission") || "notDetermined";
+}
+
+function storeNativeNotificationPermission(result) {
+  if (result?.status) localStorage.setItem("gripi:native-notification-permission", result.status);
+}
+
 function notificationsEnabled() {
   if (notificationsDisabled()) return false;
   if (nativeNotificationAvailable()) {
-    return !nativeNotificationsRequirePermission(window) || localStorage.getItem("gripi:native-notifications-enabled") === "true";
+    return !nativeNotificationsRequirePermission(window) || nativeNotificationPermissionStatus() === "granted";
   }
   if (webPushController.available()) return webPushEnabled;
   return ("Notification" in window) && Notification.permission === "granted";
@@ -620,6 +628,7 @@ function notificationsEnabled() {
 function notificationToggleState() {
   if (notificationsDisabled()) return { name: "off", label: "Off", title: "Notifications off — click to enable" };
   if (notificationsEnabled()) return { name: "enabled", label: "On", title: "Notifications on — click to disable" };
+  if (nativeNotificationAvailable() && nativeNotificationPermissionStatus() === "denied") return { name: "blocked", label: "Blocked", title: "Notifications blocked — tap to open iOS Settings" };
   if (!nativeNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied") return { name: "blocked", label: "Blocked", title: "Notifications blocked — click for setup help" };
   return { name: "enable", label: "Enable", title: "Enable notifications" };
 }
@@ -643,7 +652,7 @@ async function reconcileNativeNotificationPermission() {
   if (!notificationPermission) return;
 
   const result = await notificationPermission();
-  localStorage.setItem("gripi:native-notifications-enabled", result?.ok ? "true" : "false");
+  storeNativeNotificationPermission(result);
   updateNotificationToggle();
 }
 
@@ -660,8 +669,8 @@ async function toggleNotifications() {
   if (nativeNotificationAvailable()) {
     const requiresPermission = nativeNotificationsRequirePermission(window);
     const requestPermission = nativeBridgeMethod(window, "requestNotificationPermission");
-    const granted = !requiresPermission || (await requestPermission?.())?.ok;
-    localStorage.setItem("gripi:native-notifications-enabled", granted ? "true" : "false");
+    const result = requiresPermission ? await requestPermission?.() : { ok: true, status: "granted" };
+    storeNativeNotificationPermission(result);
     updateNotificationToggle();
     return;
   }
@@ -692,8 +701,8 @@ async function showGripiNotification(title, body, url, tag) {
   const showNotification = nativeBridgeMethod(window, "showNotification");
   if (showNotification) {
     const result = await showNotification({ type: "gripi-notification", title, body, url, tag });
-    if (!result?.ok && nativeNotificationsRequirePermission(window)) {
-      localStorage.setItem("gripi:native-notifications-enabled", "false");
+    if (nativeNotificationsRequirePermission(window)) {
+      storeNativeNotificationPermission(result);
       updateNotificationToggle();
     }
     return;
@@ -3303,6 +3312,7 @@ window.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("pageshow", () => resumeEventPolling().catch(() => {}));
 window.addEventListener("focus", () => {
+  reconcileNativeNotificationPermission().catch(() => {});
   if (markReadAfterVisible) markCurrentSessionReadAfterVisible();
   resumeEventPolling().catch(() => {});
 });

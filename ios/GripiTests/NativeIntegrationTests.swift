@@ -33,7 +33,7 @@ final class NativeIntegrationTests: XCTestCase {
 
     func testNativeBridgeSupportsGatewaysUsingTheElectronContract() {
         XCTAssertTrue(NativeBridge.source.contains("window.gripiElectron ||="))
-        XCTAssertTrue(NativeBridge.source.contains("nativeBridge.requestNotificationPermission()"))
+        XCTAssertTrue(NativeBridge.source.contains("payload?.type === \"gripi-notification-test\""))
     }
 
     func testRenamingAGatewayPreservesItsWebViewSession() throws {

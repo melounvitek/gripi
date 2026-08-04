@@ -16,8 +16,10 @@ struct GatewayScreen: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
             }
         }
-        .onAppear { session.setActive(isActive) }
-        .onChange(of: isActive) { _, active in session.setActive(active) }
+        .onAppear { updateNativeVisibility() }
+        .onChange(of: isActive) { _, _ in updateNativeVisibility() }
+        .onChange(of: session.popupRequest?.id) { _, _ in updateNativeVisibility() }
+        .onChange(of: session.shareRequest?.id) { _, _ in updateNativeVisibility() }
         .sheet(item: $session.popupRequest) { request in
             PopupGatewayView(request: request)
         }
@@ -26,6 +28,10 @@ struct GatewayScreen: View {
                 session.shareRequest = nil
             }
         }
+    }
+
+    private func updateNativeVisibility() {
+        session.setActive(isActive && session.popupRequest == nil && session.shareRequest == nil)
     }
 
     private func unavailableView(_ message: String) -> some View {

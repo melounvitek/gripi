@@ -40,27 +40,51 @@ struct NativeNotificationPayload: Equatable {
     }
 }
 
+enum NativeNotificationPermission: String {
+    case notDetermined
+    case denied
+    case granted
+}
+
 @MainActor
 final class NativeNotificationService {
     static let shared = NativeNotificationService()
 
     private let center = UNUserNotificationCenter.current()
 
-    func permissionGranted() async -> Bool {
-        let settings = await center.notificationSettings()
-        return settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+    func permission() async -> NativeNotificationPermission {
+        switch await center.notificationSettings().authorizationStatus {
+        case .notDetermined:
+            .notDetermined
+        case .denied:
+            .denied
+        case .authorized, .provisional, .ephemeral:
+            .granted
+        @unknown default:
+            .denied
+        }
     }
 
-    func requestPermission() async -> Bool {
+    func requestPermission() async -> NativeNotificationPermission {
+        let currentPermission = await permission()
+        if currentPermission == .denied {
+            if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                await UIApplication.shared.open(settingsURL)
+            }
+            return .denied
+        }
+        if currentPermission == .granted { return .granted }
+
         do {
-            return try await center.requestAuthorization(options: [.alert, .badge, .sound])
+            _ = try await center.requestAuthorization(options: [.alert, .badge, .sound])
+            return await permission()
         } catch {
-            return false
+            return .denied
         }
     }
 
     func show(_ payload: NativeNotificationPayload, gatewayID: UUID) async -> Bool {
-        guard await permissionGranted() else { return false }
+        guard await permission() == .granted else { return false }
 
         let content = UNMutableNotificationContent()
         content.title = payload.title
@@ -122,13 +146,13 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             replyHandler(["ok": true], nil)
         case "notificationPermission":
             Task {
-                let granted = await NativeNotificationService.shared.permissionGranted()
-                replyHandler(["ok": granted], nil)
+                let permission = await NativeNotificationService.shared.permission()
+                replyHandler(Self.permissionResponse(permission), nil)
             }
         case "requestNotificationPermission":
             Task {
-                let granted = await NativeNotificationService.shared.requestPermission()
-                replyHandler(["ok": granted], nil)
+                let permission = await NativeNotificationService.shared.requestPermission()
+                replyHandler(Self.permissionResponse(permission), nil)
             }
         case "showNotification":
             guard let payload = body["payload"] as? [String: Any],
@@ -138,11 +162,16 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
             Task {
                 let shown = await NativeNotificationService.shared.show(notification, gatewayID: gateway.id)
-                replyHandler(["ok": shown], nil)
+                let permission = await NativeNotificationService.shared.permission()
+                replyHandler(["ok": shown, "status": permission.rawValue], nil)
             }
         default:
             replyHandler(["ok": false], nil)
         }
+    }
+
+    private static func permissionResponse(_ permission: NativeNotificationPermission) -> [String: Any] {
+        ["ok": permission == .granted, "status": permission.rawValue]
     }
 
     static let source = """
@@ -163,8 +192,10 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
         copyText: nativeBridge.copyText,
         showNotification: async (payload) => {
           let permission = await nativeBridge.notificationPermission();
-          if (!permission?.ok) permission = await nativeBridge.requestNotificationPermission();
-          if (!permission?.ok) return { ok: false };
+          if (!permission?.ok && payload?.type === "gripi-notification-test") {
+            permission = await nativeBridge.requestNotificationPermission();
+          }
+          if (!permission?.ok) return { ok: false, status: permission?.status };
           return nativeBridge.showNotification(payload);
         }
       });

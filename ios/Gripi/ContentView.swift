@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var gatewayStore: GatewayStore
     @EnvironmentObject private var gatewaySessions: GatewaySessionStore
     @EnvironmentObject private var notificationRouter: NotificationRouter
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var editor: GatewayEditor?
     @State private var pendingRemoval: Gateway?
@@ -58,7 +59,7 @@ struct ContentView: View {
         ZStack {
             ForEach(gatewayStore.configuration.gateways) { gateway in
                 let session = gatewaySessions.session(for: gateway)
-                GatewayScreen(session: session, isActive: gateway.id == gatewayStore.activeGateway?.id)
+                GatewayScreen(session: session, isActive: gateway.id == gatewayStore.activeGateway?.id && scenePhase == .active)
                     .id(session.id)
                     .opacity(gateway.id == gatewayStore.activeGateway?.id ? 1 : 0)
                     .allowsHitTesting(gateway.id == gatewayStore.activeGateway?.id)

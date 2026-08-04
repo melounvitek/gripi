@@ -31,7 +31,11 @@ async function refreshState() {
     const permission = await nativeBridgeMethod(window, "notificationPermission")?.();
     const enabled = !nativeNotificationsRequirePermission(window) || permission?.ok;
     sendButton.disabled = !enabled;
-    setStatus(enabled ? "App notifications are available. Tap Send test notification." : "Tap Enable notifications to grant app permission.");
+    if (permission?.status === "denied") {
+      setStatus("App notification permission is denied. Tap Enable notifications to open iOS Settings.", true);
+    } else {
+      setStatus(enabled ? "App notifications are available. Tap Send test notification." : "Tap Enable notifications to grant app permission.");
+    }
   } else if (Notification.permission === "granted") {
     const enabled = await webPushController.reconcile();
     sendButton.disabled = !enabled;
@@ -55,8 +59,7 @@ enableButton.addEventListener("click", async () => {
     if (nativeNotificationAvailable()) {
       if (nativeNotificationsRequirePermission(window)) {
         setStatus("Requesting notification permission…");
-        const result = await nativeBridgeMethod(window, "requestNotificationPermission")?.();
-        if (!result?.ok) throw new Error("App notification permission was not granted.");
+        await nativeBridgeMethod(window, "requestNotificationPermission")?.();
       }
       await refreshState();
       return;
@@ -91,5 +94,6 @@ sendButton.addEventListener("click", async () => {
   }
 });
 
+window.addEventListener("focus", () => refreshState().catch(() => {}));
 webPushController.prepare().catch(() => {});
 refreshState().catch((error) => setStatus(`Setup failed: ${error.message || error}`, true));

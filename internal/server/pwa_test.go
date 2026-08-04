@@ -84,7 +84,7 @@ func TestHandlerServesTheNotificationTestTemplateWithFirstTapControls(t *testing
 	}
 	for _, text := range []string{
 		"Notification test",
-		"even after Gripi is closed",
+		"browser Web Push or native app notifications",
 		`<button type="button" data-enable>`,
 		`src="/assets/notification_test.js"`,
 	} {
@@ -94,7 +94,7 @@ func TestHandlerServesTheNotificationTestTemplateWithFirstTapControls(t *testing
 	}
 
 	script := performRequest(handler, http.MethodGet, "http://example.com/assets/notification_test.js", "")
-	for _, text := range []string{"WebPushController", `enableButton.addEventListener("click"`, `fetch("/web-push/test"`} {
+	for _, text := range []string{"nativeBridgeMethod", "WebPushController", `enableButton.addEventListener("click"`, `fetch("/web-push/test"`} {
 		if !strings.Contains(script.Body.String(), text) {
 			t.Fatalf("notification test script does not contain %q", text)
 		}
