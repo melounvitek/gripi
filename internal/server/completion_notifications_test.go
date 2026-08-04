@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -341,11 +342,15 @@ func (notifier pushNotifierFunc) Deliver(ctx context.Context, owner string, payl
 }
 
 type recordingPushNotifier struct {
+	mu       sync.Mutex
 	owners   []string
 	payloads [][]byte
 }
 
 func (notifier *recordingPushNotifier) Deliver(_ context.Context, owner string, payload []byte) error {
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+
 	notifier.owners = append(notifier.owners, owner)
 	notifier.payloads = append(notifier.payloads, append([]byte(nil), payload...))
 	return nil
