@@ -71,14 +71,12 @@ func (presence *notificationPresence) Focused(owner, path string) bool {
 }
 
 func (presence *notificationPresence) removeExpired(now time.Time) {
-	for owner, clients := range presence.clients {
+	for _, clients := range presence.clients {
 		for clientID, lease := range clients {
-			if !lease.expiresAt.After(now) {
-				delete(clients, clientID)
+			if lease.path != "" && !lease.expiresAt.After(now) {
+				lease.path = ""
+				clients[clientID] = lease
 			}
-		}
-		if len(clients) == 0 {
-			delete(presence.clients, owner)
 		}
 	}
 }

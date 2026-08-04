@@ -56,12 +56,14 @@ func TestNotificationPresenceExpiresAndBoundsClientLeases(t *testing.T) {
 	}
 }
 
-func TestNotificationPresenceIgnoresOutOfOrderClientUpdates(t *testing.T) {
-	presence := newNotificationPresence(time.Now)
+func TestNotificationPresenceIgnoresOutOfOrderClientUpdatesAfterTheLeaseExpires(t *testing.T) {
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	presence := newNotificationPresence(func() time.Time { return now })
 	presence.Update("owner", "client", "", false, 2)
+	now = now.Add(notificationPresenceTTL)
 	presence.Update("owner", "client", "/sessions/stale.jsonl", true, 1)
 
 	if presence.Focused("owner", "/sessions/stale.jsonl") {
-		t.Fatal("an older focused update replaced the newer blur")
+		t.Fatal("an older focused update replaced the expired blur watermark")
 	}
 }
