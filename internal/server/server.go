@@ -40,6 +40,7 @@ type application struct {
 	pushIdentity            *push.VAPIDIdentity
 	pushSubscriptions       *push.SubscriptionStore
 	pushNotifier            pushNotifier
+	notificationPresence    *notificationPresence
 	accessLimiter           *access.RateLimiter
 	adminLimiter            *access.RateLimiter
 	newBrowserToken         func() (string, error)
@@ -166,28 +167,29 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	pushDelivery := push.NewWebPushDelivery(pushIdentity, "https://github.com/melounvitek/gripi", &http.Client{Timeout: 15 * time.Second})
 
 	app := &application{
-		config:             cfg,
-		files:              files,
-		templates:          templates,
-		browserStore:       access.NewBrowserStore(cfg.BrowserAccessPath),
-		workspaceStore:     access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
-		ownershipStore:     access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
-		workspaceSecret:    workspaceSecret,
-		pushIdentity:       pushIdentity,
-		pushSubscriptions:  pushSubscriptions,
-		pushNotifier:       push.NewNotifier(pushSubscriptions, pushDelivery),
-		accessLimiter:      access.NewRateLimiter(30, time.Minute),
-		adminLimiter:       access.NewRateLimiter(10, 5*time.Minute),
-		newBrowserToken:    newBrowserToken,
-		instanceID:         instanceID,
-		sessionCache:       sessions.NewCache(),
-		gatewayState:       sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionsRoot),
-		markdown:           markdown,
-		heavyRequests:      make(chan struct{}, 2),
-		fdRequests:         make(chan struct{}, 4),
-		unknownBodySpools:  make(chan struct{}, unknownBodySpoolLimit),
-		knownSessionHashes: make(map[string]bool),
-		pendingSessions:    rpc.NewPendingSessionRegistry(nil),
+		config:               cfg,
+		files:                files,
+		templates:            templates,
+		browserStore:         access.NewBrowserStore(cfg.BrowserAccessPath),
+		workspaceStore:       access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
+		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
+		workspaceSecret:      workspaceSecret,
+		pushIdentity:         pushIdentity,
+		pushSubscriptions:    pushSubscriptions,
+		pushNotifier:         push.NewNotifier(pushSubscriptions, pushDelivery),
+		notificationPresence: newNotificationPresence(time.Now),
+		accessLimiter:        access.NewRateLimiter(30, time.Minute),
+		adminLimiter:         access.NewRateLimiter(10, 5*time.Minute),
+		newBrowserToken:      newBrowserToken,
+		instanceID:           instanceID,
+		sessionCache:         sessions.NewCache(),
+		gatewayState:         sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionsRoot),
+		markdown:             markdown,
+		heavyRequests:        make(chan struct{}, 2),
+		fdRequests:           make(chan struct{}, 4),
+		unknownBodySpools:    make(chan struct{}, unknownBodySpoolLimit),
+		knownSessionHashes:   make(map[string]bool),
+		pendingSessions:      rpc.NewPendingSessionRegistry(nil),
 	}
 	diagnostics := &rpc.Diagnostics{Enabled: cfg.RPCDiagnosticsEnabled, Writer: os.Stderr}
 	app.rpcDiagnostics = diagnostics

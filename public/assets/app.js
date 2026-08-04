@@ -49,10 +49,12 @@ import { activateToolOutputRegion, enhanceMarkdownCodeBlocks, enhanceMessageLink
 import { eventPollCurrent, eventPollingDelay } from "./polling.js";
 import { extensionUiRequestExpired, extensionUiResponseDisposition } from "./extension_ui.js";
 import { TreeSessionController } from "./tree_session_controller.js";
+import { NotificationPresenceController } from "./notification_presence.js";
 import { WebPushController } from "./web_push.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window);
 const resourceUsageController = new ResourceUsageController(document, window);
+const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath);
 const webPushController = new WebPushController(window, navigator);
 const notifyAccessRequest = (title, body, tag) =>
   showGripiNotification(title, body, window.location.href, tag).catch(() => {});
@@ -3207,6 +3209,7 @@ function restorePreservedConversationScroll(scrollSnapshot) {
 
 function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery = null } = {}) {
   const generation = sessionViewGeneration;
+  notificationPresenceController.sessionChanged();
   projectSelectController.initialize(document.querySelector('[data-modal="new-session-modal"]'));
   newSessionFormController.initialize();
   ensureNotificationWorker().catch(() => {});
@@ -3296,6 +3299,7 @@ function bootstrapPage() {
   bindSessionDom();
   bindSessionControls();
   rememberMainSessionSelection(currentSessionPath());
+  notificationPresenceController.start();
   initializeSessionView();
   gatewayUpdateController.resume();
   resourceUsageController.start();
