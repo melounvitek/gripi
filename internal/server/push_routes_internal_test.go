@@ -135,7 +135,7 @@ func TestWebPushPresenceTracksTheFocusedSessionAcrossApprovedBrowsers(t *testing
 	sessionPath := filepath.Join(handler.app.config.SessionsRoot, "focused.jsonl")
 
 	focused := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, map[string]any{
-		"client_id": "desktop-window", "session": sessionPath, "focused": true,
+		"client_id": "desktop-window", "session": sessionPath, "focused": true, "sequence": 1,
 	}), "gripi_browser=desktop")
 	if focused.Code != http.StatusNoContent {
 		t.Fatalf("focused response = %d %s", focused.Code, focused.Body.String())
@@ -145,7 +145,7 @@ func TestWebPushPresenceTracksTheFocusedSessionAcrossApprovedBrowsers(t *testing
 	}
 
 	cleared := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, map[string]any{
-		"client_id": "desktop-window", "session": "", "focused": false,
+		"client_id": "desktop-window", "session": "", "focused": false, "sequence": 2,
 	}), "gripi_browser=desktop")
 	if cleared.Code != http.StatusNoContent || handler.app.notificationPresence.Focused(singleUserOwner, sessionPath) {
 		t.Fatalf("cleared response = %d, focused = %t", cleared.Code, handler.app.notificationPresence.Focused(singleUserOwner, sessionPath))
@@ -165,7 +165,7 @@ func TestWebPushPresenceIsIsolatedByWorkspace(t *testing.T) {
 	}
 
 	response := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, map[string]any{
-		"client_id": "workspace-window", "session": sessionPath, "focused": true,
+		"client_id": "workspace-window", "session": sessionPath, "focused": true, "sequence": 1,
 	}), "gripi_workspace=workspace-a")
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("presence response = %d %s", response.Code, response.Body.String())
@@ -178,7 +178,7 @@ func TestWebPushPresenceIsIsolatedByWorkspace(t *testing.T) {
 	}
 
 	foreign := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, map[string]any{
-		"client_id": "foreign-window", "session": sessionPath, "focused": true,
+		"client_id": "foreign-window", "session": sessionPath, "focused": true, "sequence": 1,
 	}), "gripi_workspace=workspace-b")
 	if foreign.Code != http.StatusForbidden {
 		t.Fatalf("foreign workspace response = %d", foreign.Code)
@@ -188,9 +188,10 @@ func TestWebPushPresenceIsIsolatedByWorkspace(t *testing.T) {
 func TestWebPushPresenceRejectsInvalidClientAndSessionValues(t *testing.T) {
 	handler := newPushTestHandler(t, false, true)
 	for _, input := range []map[string]any{
-		{"client_id": "invalid client", "session": filepath.Join(handler.app.config.SessionsRoot, "session.jsonl"), "focused": true},
-		{"client_id": "client", "session": filepath.Join(t.TempDir(), "outside.jsonl"), "focused": true},
-		{"client_id": "client", "session": "", "focused": true},
+		{"client_id": "invalid client", "session": filepath.Join(handler.app.config.SessionsRoot, "session.jsonl"), "focused": true, "sequence": 1},
+		{"client_id": "client", "session": filepath.Join(t.TempDir(), "outside.jsonl"), "focused": true, "sequence": 1},
+		{"client_id": "client", "session": "", "focused": true, "sequence": 1},
+		{"client_id": "client", "session": filepath.Join(handler.app.config.SessionsRoot, "session.jsonl"), "focused": true, "sequence": 0},
 	} {
 		response := pushRequest(handler, http.MethodPut, "/web-push/presence", pushJSON(t, input), "")
 		if response.Code != http.StatusBadRequest {

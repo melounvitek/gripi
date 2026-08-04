@@ -211,7 +211,7 @@ func TestCompletionNotifierSuppressesAllBrowserPushesWhenTheSessionIsFocused(t *
 		t.Fatal(err)
 	}
 	notifier := newCompletionNotifier(app)
-	app.notificationPresence.Update(singleUserOwner, "desktop-window", sessionPath, true)
+	app.notificationPresence.Update(singleUserOwner, "desktop-window", sessionPath, true, 1)
 
 	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: "done", id: "focused"}); err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestCompletionNotifierSuppressesAllBrowserPushesWhenTheSessionIsFocused(t *
 		t.Fatalf("focused delivery owners = %#v", fake.owners)
 	}
 
-	app.notificationPresence.Update(singleUserOwner, "desktop-window", filepath.Join(root, "other.jsonl"), true)
+	app.notificationPresence.Update(singleUserOwner, "desktop-window", filepath.Join(root, "other.jsonl"), true, 2)
 	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: "done", id: "other"}); err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestCompletionNotifierScopesFocusedSessionsToTheirWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	notifier := newCompletionNotifier(app)
-	app.notificationPresence.Update("workspace:workspace-b", "other-window", sessionPath, true)
+	app.notificationPresence.Update("workspace:workspace-b", "other-window", sessionPath, true, 1)
 
 	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: "done", id: "other-workspace"}); err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ func TestCompletionNotifierScopesFocusedSessionsToTheirWorkspace(t *testing.T) {
 		t.Fatalf("other workspace delivery owners = %#v", fake.owners)
 	}
 
-	app.notificationPresence.Update("workspace:workspace-a", "focused-window", sessionPath, true)
+	app.notificationPresence.Update("workspace:workspace-a", "focused-window", sessionPath, true, 1)
 	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: "done", id: "focused-workspace"}); err != nil {
 		t.Fatal(err)
 	}
@@ -324,6 +324,13 @@ func TestCompletionNotifierResolvesAndClaimsAPendingSessionForItsWorkspace(t *te
 	}
 	if !slices.Equal(fake.owners, []string{"workspace:workspace-a"}) {
 		t.Fatalf("delivery owners = %#v", fake.owners)
+	}
+	app.notificationPresence.Update("workspace:workspace-a", "pending-window", pendingPath, true, 1)
+	if err := notifier.deliver(context.Background(), completedReply{client: client, path: pendingPath, text: "done again", id: "reply-10"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.owners) != 1 {
+		t.Fatalf("focused pending session received another delivery: %#v", fake.owners)
 	}
 	var payload map[string]string
 	if err := json.Unmarshal(fake.payloads[0], &payload); err != nil {

@@ -132,7 +132,11 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 		if notifier.app.config.MultiUserMode {
 			presenceOwner = owner
 		}
-		if !notifier.app.notificationPresence.Focused(presenceOwner, path) {
+		focused := notifier.app.notificationPresence.Focused(presenceOwner, path)
+		if !focused && reply.path != path {
+			focused = notifier.app.notificationPresence.Focused(presenceOwner, reply.path)
+		}
+		if !focused {
 			deliveryOwners = append(deliveryOwners, owner)
 		}
 	}

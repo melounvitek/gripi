@@ -12,6 +12,7 @@ const (
 
 type notificationFocusLease struct {
 	path      string
+	sequence  uint64
 	expiresAt time.Time
 }
 
@@ -25,18 +26,14 @@ func newNotificationPresence(now func() time.Time) *notificationPresence {
 	return &notificationPresence{now: now, clients: make(map[string]map[string]notificationFocusLease)}
 }
 
-func (presence *notificationPresence) Update(owner, clientID, path string, focused bool) {
+func (presence *notificationPresence) Update(owner, clientID, path string, focused bool, sequence uint64) {
 	presence.mu.Lock()
 	defer presence.mu.Unlock()
 
 	now := presence.now()
 	presence.removeExpired(now)
 	clients := presence.clients[owner]
-	if !focused {
-		delete(clients, clientID)
-		if len(clients) == 0 {
-			delete(presence.clients, owner)
-		}
+	if lease, exists := clients[clientID]; exists && lease.sequence >= sequence {
 		return
 	}
 	if clients == nil {
@@ -54,7 +51,10 @@ func (presence *notificationPresence) Update(owner, clientID, path string, focus
 		}
 		delete(clients, oldestClient)
 	}
-	clients[clientID] = notificationFocusLease{path: path, expiresAt: now.Add(notificationPresenceTTL)}
+	if !focused {
+		path = ""
+	}
+	clients[clientID] = notificationFocusLease{path: path, sequence: sequence, expiresAt: now.Add(notificationPresenceTTL)}
 }
 
 func (presence *notificationPresence) Focused(owner, path string) bool {

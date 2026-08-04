@@ -1,4 +1,5 @@
 const NOTIFICATION_PRESENCE_CLIENT_KEY = "gripi:notification-presence-client";
+const NOTIFICATION_PRESENCE_SEQUENCE_KEY = "gripi:notification-presence-sequence";
 const NOTIFICATION_PRESENCE_HEARTBEAT_MS = 10_000;
 
 export class NotificationPresenceController {
@@ -8,6 +9,7 @@ export class NotificationPresenceController {
     this.sessionPath = sessionPath;
     this.fetch = fetchFunction;
     this.clientID = clientID;
+    this.sequence = notificationPresenceSequence(windowObject);
     this.started = false;
     this.lastSession = null;
     this.lastFocused = null;
@@ -47,10 +49,12 @@ export class NotificationPresenceController {
   report(session, focused, keepalive = false) {
     this.lastSession = session;
     this.lastFocused = focused;
+    this.sequence += 1;
+    storeNotificationPresenceSequence(this.window, this.sequence);
     this.fetch("/web-push/presence", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: this.clientID, session, focused }),
+      body: JSON.stringify({ client_id: this.clientID, session, focused, sequence: this.sequence }),
       keepalive
     }).catch(() => {});
   }
@@ -59,12 +63,28 @@ export class NotificationPresenceController {
 function notificationPresenceClientID(windowObject) {
   try {
     const existing = windowObject.sessionStorage.getItem(NOTIFICATION_PRESENCE_CLIENT_KEY);
-    if (existing) return existing;
+    if (/^[A-Za-z0-9_-]{1,64}$/.test(existing || "")) return existing;
     const generated = randomClientID(windowObject);
     windowObject.sessionStorage.setItem(NOTIFICATION_PRESENCE_CLIENT_KEY, generated);
     return generated;
   } catch (_error) {
     return randomClientID(windowObject);
+  }
+}
+
+function notificationPresenceSequence(windowObject) {
+  try {
+    const sequence = Number(windowObject.sessionStorage.getItem(NOTIFICATION_PRESENCE_SEQUENCE_KEY));
+    return Number.isSafeInteger(sequence) && sequence >= 0 ? sequence : 0;
+  } catch (_error) {
+    return 0;
+  }
+}
+
+function storeNotificationPresenceSequence(windowObject, sequence) {
+  try {
+    windowObject.sessionStorage.setItem(NOTIFICATION_PRESENCE_SEQUENCE_KEY, String(sequence));
+  } catch (_error) {
   }
 }
 

@@ -10,7 +10,7 @@ func TestNotificationPresenceTracksFocusedSessionsByOwnerAndClient(t *testing.T)
 	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
 	presence := newNotificationPresence(func() time.Time { return now })
 
-	presence.Update("owner-a", "client-a", "/sessions/one.jsonl", true)
+	presence.Update("owner-a", "client-a", "/sessions/one.jsonl", true, 1)
 	if !presence.Focused("owner-a", "/sessions/one.jsonl") {
 		t.Fatal("focused session was not tracked")
 	}
@@ -18,17 +18,17 @@ func TestNotificationPresenceTracksFocusedSessionsByOwnerAndClient(t *testing.T)
 		t.Fatal("focus leaked to another owner")
 	}
 
-	presence.Update("owner-a", "client-a", "/sessions/two.jsonl", true)
+	presence.Update("owner-a", "client-a", "/sessions/two.jsonl", true, 2)
 	if presence.Focused("owner-a", "/sessions/one.jsonl") || !presence.Focused("owner-a", "/sessions/two.jsonl") {
 		t.Fatal("client session change was not applied")
 	}
 
-	presence.Update("owner-a", "client-b", "/sessions/two.jsonl", true)
-	presence.Update("owner-a", "client-a", "", false)
+	presence.Update("owner-a", "client-b", "/sessions/two.jsonl", true, 1)
+	presence.Update("owner-a", "client-a", "", false, 3)
 	if !presence.Focused("owner-a", "/sessions/two.jsonl") {
 		t.Fatal("clearing one client removed another client's focus")
 	}
-	presence.Update("owner-a", "client-b", "", false)
+	presence.Update("owner-a", "client-b", "", false, 2)
 	if presence.Focused("owner-a", "/sessions/two.jsonl") {
 		t.Fatal("cleared session remained focused")
 	}
@@ -37,7 +37,7 @@ func TestNotificationPresenceTracksFocusedSessionsByOwnerAndClient(t *testing.T)
 func TestNotificationPresenceExpiresAndBoundsClientLeases(t *testing.T) {
 	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
 	presence := newNotificationPresence(func() time.Time { return now })
-	presence.Update("owner", "expiring", "/sessions/old.jsonl", true)
+	presence.Update("owner", "expiring", "/sessions/old.jsonl", true, 1)
 
 	now = now.Add(notificationPresenceTTL)
 	if presence.Focused("owner", "/sessions/old.jsonl") {
@@ -45,7 +45,7 @@ func TestNotificationPresenceExpiresAndBoundsClientLeases(t *testing.T) {
 	}
 
 	for index := 0; index <= notificationPresenceMaxClients; index++ {
-		presence.Update("owner", fmt.Sprintf("client-%d", index), fmt.Sprintf("/sessions/%d.jsonl", index), true)
+		presence.Update("owner", fmt.Sprintf("client-%d", index), fmt.Sprintf("/sessions/%d.jsonl", index), true, 1)
 		now = now.Add(time.Millisecond)
 	}
 	if presence.Focused("owner", "/sessions/0.jsonl") {
@@ -53,5 +53,15 @@ func TestNotificationPresenceExpiresAndBoundsClientLeases(t *testing.T) {
 	}
 	if !presence.Focused("owner", fmt.Sprintf("/sessions/%d.jsonl", notificationPresenceMaxClients)) {
 		t.Fatal("newest client was not retained")
+	}
+}
+
+func TestNotificationPresenceIgnoresOutOfOrderClientUpdates(t *testing.T) {
+	presence := newNotificationPresence(time.Now)
+	presence.Update("owner", "client", "", false, 2)
+	presence.Update("owner", "client", "/sessions/stale.jsonl", true, 1)
+
+	if presence.Focused("owner", "/sessions/stale.jsonl") {
+		t.Fatal("an older focused update replaced the newer blur")
 	}
 }

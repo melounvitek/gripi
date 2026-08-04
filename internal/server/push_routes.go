@@ -101,11 +101,12 @@ func (app *application) updateNotificationPresence(response http.ResponseWriter,
 		ClientID string `json:"client_id"`
 		Session  string `json:"session"`
 		Focused  bool   `json:"focused"`
+		Sequence uint64 `json:"sequence"`
 	}
 	if !decodePushJSON(response, request, &input) {
 		return
 	}
-	if !notificationPresenceClientID.MatchString(input.ClientID) {
+	if !notificationPresenceClientID.MatchString(input.ClientID) || input.Sequence == 0 {
 		writeText(response, http.StatusBadRequest, "Invalid notification presence")
 		return
 	}
@@ -115,7 +116,7 @@ func (app *application) updateNotificationPresence(response http.ResponseWriter,
 		return
 	}
 	if !input.Focused {
-		app.notificationPresence.Update(owner, input.ClientID, "", false)
+		app.notificationPresence.Update(owner, input.ClientID, "", false, input.Sequence)
 		response.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -128,7 +129,7 @@ func (app *application) updateNotificationPresence(response http.ResponseWriter,
 		writeText(response, http.StatusForbidden, "Forbidden")
 		return
 	}
-	app.notificationPresence.Update(owner, input.ClientID, path, true)
+	app.notificationPresence.Update(owner, input.ClientID, path, true, input.Sequence)
 	response.WriteHeader(http.StatusNoContent)
 }
 

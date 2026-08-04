@@ -26,7 +26,7 @@ test("notification presence follows focus, session changes, heartbeats, and page
   controller.start();
   await flush();
   assert.deepEqual(requests.at(-1).body, {
-    client_id: "desktop-window", session: "/sessions/one.jsonl", focused: true
+    client_id: "desktop-window", session: "/sessions/one.jsonl", focused: true, sequence: 1
   });
   assert.equal(interval.milliseconds, 10_000);
 
@@ -45,7 +45,7 @@ test("notification presence follows focus, session changes, heartbeats, and page
   document.dispatch("visibilitychange");
   await flush();
   assert.deepEqual(requests.at(-1).body, {
-    client_id: "desktop-window", session: "", focused: false
+    client_id: "desktop-window", session: "", focused: false, sequence: 4
   });
 
   document.hidden = false;
@@ -58,6 +58,7 @@ test("notification presence follows focus, session changes, heartbeats, and page
   window.dispatch("pagehide");
   await flush();
   assert.equal(requests.at(-1).body.focused, false);
+  assert.equal(requests.at(-1).body.sequence, 6);
   assert.equal(requests.at(-1).keepalive, true);
 });
 
@@ -77,7 +78,7 @@ test("notification presence does not claim focus without a selected session", as
   controller.start();
   await flush();
 
-  assert.deepEqual(requests, [{ client_id: "empty-window", session: "", focused: false }]);
+  assert.deepEqual(requests, [{ client_id: "empty-window", session: "", focused: false, sequence: 1 }]);
 });
 
 function eventTarget(properties) {
