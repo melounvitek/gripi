@@ -59,13 +59,17 @@ struct ContentView: View {
         ZStack {
             ForEach(gatewayStore.configuration.gateways) { gateway in
                 let session = gatewaySessions.session(for: gateway)
-                GatewayScreen(session: session, isActive: gateway.id == gatewayStore.activeGateway?.id && scenePhase == .active)
+                GatewayScreen(session: session, isActive: gateway.id == gatewayStore.activeGateway?.id && conversationVisible)
                     .id(session.id)
                     .opacity(gateway.id == gatewayStore.activeGateway?.id ? 1 : 0)
                     .allowsHitTesting(gateway.id == gatewayStore.activeGateway?.id)
                     .accessibilityHidden(gateway.id != gatewayStore.activeGateway?.id)
             }
         }
+    }
+
+    private var conversationVisible: Bool {
+        scenePhase == .active && editor == nil && pendingRemoval == nil
     }
 
     private var removalAlert: Binding<Bool> {

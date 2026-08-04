@@ -2,7 +2,7 @@ import SwiftUI
 
 struct GatewayScreen: View {
     @ObservedObject var session: GatewayWebViewSession
-    var isActive = true
+    let isActive: Bool
 
     var body: some View {
         ZStack {
@@ -50,6 +50,7 @@ struct GatewayScreen: View {
 
 private struct PopupGatewayView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session: GatewayWebViewSession
 
     init(request: PopupRequest) {
@@ -58,7 +59,7 @@ private struct PopupGatewayView: View {
 
     var body: some View {
         NavigationStack {
-            GatewayScreen(session: session)
+            GatewayScreen(session: session, isActive: scenePhase == .active)
                 .navigationTitle(session.gateway.name)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
