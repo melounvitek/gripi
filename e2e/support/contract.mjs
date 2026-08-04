@@ -29,6 +29,7 @@ export const sessions = {
   bashIncluded: "E2E Bash Included Desktop",
   bashExcluded: "E2E Bash Excluded Desktop",
   bashCancel: "E2E Bash Cancel Desktop",
+  bashReload: "E2E Bash Reload Desktop",
   bashOverlap: "E2E Bash Overlap Desktop",
   bashMobile: "E2E Bash Cancel Mobile",
   wrappedToolOutput: "E2E Wrapped Tool Output Mobile"
@@ -71,6 +72,7 @@ export const nativeBash = {
   excluded: { command: "printf 'excluded native bash output'", output: "excluded native bash output\n" },
   nonzero: { command: "exit 7", output: "deterministic nonzero output\n", exitCode: 7 },
   cancel: { command: "sleep 30 # e2e-cancel" },
+  reload: { command: "sleep 30 # e2e-reload" },
   overlap: { command: "sleep 30 # e2e-overlap" },
   mobileCancel: { command: "sleep 30 # e2e-mobile-cancel" }
 };

@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool } from "./contract.mjs";
 
-const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
+const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
 const sessionsRoot = process.env.GRIPI_E2E_SESSIONS_ROOT;
 let sessionPath = resumedPath || null;
