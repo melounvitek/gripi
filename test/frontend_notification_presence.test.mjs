@@ -62,6 +62,38 @@ test("notification presence follows focus, session changes, heartbeats, and page
   assert.equal(requests.at(-1).keepalive, true);
 });
 
+test("notification presence follows native gateway activation immediately", async () => {
+  const requests = [];
+  const document = eventTarget({ hidden: false });
+  document.hasFocus = () => true;
+  const window = eventTarget({
+    gripiNativeViewActive: false,
+    setInterval() { return 1; }
+  });
+  const controller = new NotificationPresenceController(
+    document,
+    window,
+    () => "/sessions/native.jsonl",
+    async (_url, options) => { requests.push(JSON.parse(options.body)); },
+    "native-window"
+  );
+
+  controller.start();
+  await flush();
+  assert.equal(requests.at(-1).focused, false);
+
+  window.gripiNativeViewActive = true;
+  window.dispatch("gripi:native-active-changed");
+  await flush();
+  assert.equal(requests.at(-1).session, "/sessions/native.jsonl");
+  assert.equal(requests.at(-1).focused, true);
+
+  window.gripiNativeViewActive = false;
+  window.dispatch("gripi:native-active-changed");
+  await flush();
+  assert.equal(requests.at(-1).focused, false);
+});
+
 test("notification presence does not claim focus without a selected session", async () => {
   const requests = [];
   const document = eventTarget({ hidden: false });

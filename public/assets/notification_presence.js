@@ -20,7 +20,7 @@ export class NotificationPresenceController {
     this.started = true;
 
     this.document.addEventListener("visibilitychange", () => this.reportCurrent(true));
-    ["focus", "blur", "pageshow", "online"].forEach((eventName) => {
+    ["focus", "blur", "pageshow", "online", "gripi:native-active-changed"].forEach((eventName) => {
       this.window.addEventListener(eventName, () => this.reportCurrent(true));
     });
     this.window.addEventListener("pagehide", () => this.report("", false, true));
@@ -42,7 +42,7 @@ export class NotificationPresenceController {
 
   current() {
     const session = String(this.sessionPath() || "");
-    const focused = session !== "" && !this.document.hidden && (this.document.hasFocus?.() ?? true);
+    const focused = session !== "" && this.window.gripiNativeViewActive !== false && !this.document.hidden && (this.document.hasFocus?.() ?? true);
     return { session: focused ? session : "", focused };
   }
 

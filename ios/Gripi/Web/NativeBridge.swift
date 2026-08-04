@@ -151,12 +151,22 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
       if (!handler) return;
       const call = (action, payload = {}) => Promise.resolve(handler.postMessage({ action, payload }));
       window.gripiNativeViewActive = false;
-      window.gripiNative = Object.freeze({
+      const nativeBridge = Object.freeze({
         notificationsRequirePermission: true,
         copyText: (text) => call("copyText", { text }),
         notificationPermission: () => call("notificationPermission"),
         requestNotificationPermission: () => call("requestNotificationPermission"),
         showNotification: (payload) => call("showNotification", payload)
+      });
+      window.gripiNative = nativeBridge;
+      window.gripiElectron ||= Object.freeze({
+        copyText: nativeBridge.copyText,
+        showNotification: async (payload) => {
+          let permission = await nativeBridge.notificationPermission();
+          if (!permission?.ok) permission = await nativeBridge.requestNotificationPermission();
+          if (!permission?.ok) return { ok: false };
+          return nativeBridge.showNotification(payload);
+        }
       });
     })();
     """

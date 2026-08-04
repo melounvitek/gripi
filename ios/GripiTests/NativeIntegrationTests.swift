@@ -31,6 +31,11 @@ final class NativeIntegrationTests: XCTestCase {
         ], gatewayURL: gatewayURL))
     }
 
+    func testNativeBridgeSupportsGatewaysUsingTheElectronContract() {
+        XCTAssertTrue(NativeBridge.source.contains("window.gripiElectron ||="))
+        XCTAssertTrue(NativeBridge.source.contains("nativeBridge.requestNotificationPermission()"))
+    }
+
     func testRenamingAGatewayPreservesItsWebViewSession() throws {
         let gateway = try Gateway.from(name: "Original", url: "https://gateway.example")
         let renamed = try Gateway.from(id: gateway.id, name: "Renamed", url: gateway.url.absoluteString)

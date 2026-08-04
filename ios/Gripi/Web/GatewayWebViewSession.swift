@@ -111,7 +111,8 @@ final class GatewayWebViewSession: NSObject, ObservableObject, Identifiable {
     }
 
     private func updateNativeVisibility() {
-        webView.evaluateJavaScript("window.gripiNativeViewActive = \(isActive ? "true" : "false")")
+        let active = isActive ? "true" : "false"
+        webView.evaluateJavaScript("window.gripiNativeViewActive = \(active); window.dispatchEvent(new CustomEvent('gripi:native-active-changed'))")
     }
 
     private func refreshUnreadCount() {
