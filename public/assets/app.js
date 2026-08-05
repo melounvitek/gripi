@@ -1575,7 +1575,7 @@ async function reconnectSession() {
 }
 
 async function refreshStaleSessionAfterResume(hiddenDuration = 0) {
-  if (!liveOutput || document.hidden) return false;
+  if (!liveOutput || document.hidden || sessionSwitching()) return false;
   if (staleSessionRefreshInFlight) return true;
 
   const pollingGap = Date.now() - lastEventPollSuccessAt;
@@ -2575,6 +2575,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   const switchGeneration = sessionSwitchGeneration.next();
   const refreshRequestVersion = sidebarController.refreshRequestVersion;
   const timeout = setTimeout(() => abortController.abort(), SESSION_SWITCH_TIMEOUT_MS);
+  let navigatingAway = false;
   showSessionSwitching();
   try {
     const response = await fetch(sessionFragmentUrl(url), { headers: { "Accept": "application/json" }, signal: abortController.signal });
@@ -2606,6 +2607,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   } catch (_error) {
     if (!sessionSwitchGeneration.current(switchGeneration)) return false;
     if (fallbackNavigation) {
+      navigatingAway = true;
       window.location.href = url;
     } else {
       showReconnectBanner();
@@ -2615,7 +2617,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   } finally {
     clearTimeout(timeout);
     if (sessionSwitchAbortController === abortController) sessionSwitchAbortController = null;
-    if (sessionSwitchGeneration.current(switchGeneration)) hideSessionSwitching();
+    if (!navigatingAway && sessionSwitchGeneration.current(switchGeneration)) hideSessionSwitching();
   }
 }
 

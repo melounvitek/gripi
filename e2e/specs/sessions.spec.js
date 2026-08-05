@@ -155,6 +155,38 @@ test("session switching blocks shortcuts from acting underneath the overlay", as
   await expect(page.locator('[data-modal="new-session-modal"]')).toBeVisible();
 });
 
+test("wake recovery does not supersede a pending user session switch", async ({ page }) => {
+  await page.goto("/");
+  const targetLink = page.getByRole("link", { name: new RegExp(sessions.promptRetryCompact) });
+  await expect(targetLink).toBeVisible();
+
+  let markFragmentRequested;
+  const fragmentRequested = new Promise((resolve) => { markFragmentRequested = resolve; });
+  let releaseFragments;
+  const fragmentsRelease = new Promise((resolve) => { releaseFragments = resolve; });
+  let fragmentRequests = 0;
+  await page.route(/\/session_fragment(?:\?|$)/, async (route) => {
+    fragmentRequests += 1;
+    markFragmentRequested();
+    await fragmentsRelease;
+    await route.continue().catch(() => {});
+  });
+
+  await targetLink.click();
+  await fragmentRequested;
+  await page.evaluate(() => {
+    const resumedAt = Date.now() + 61_000;
+    Date.now = () => resumedAt;
+    window.dispatchEvent(new Event("pageshow"));
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  expect(fragmentRequests).toBe(1);
+  releaseFragments();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.promptRetryCompact })).toBeVisible();
+  await expect(page.locator("body")).not.toHaveClass(/session-switching/);
+});
+
 test("a newer session switch wins when fragment responses arrive out of order", async ({ page }) => {
   await page.goto("/");
   const olderLink = page.getByRole("link", { name: new RegExp(sessions.marker) });
