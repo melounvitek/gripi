@@ -1,4 +1,4 @@
-import { ESCAPE_STOP_CONFIRMATION_WINDOW_MS, STALE_SESSION_REFRESH_AFTER_MS } from "./constants.js";
+import { ESCAPE_STOP_CONFIRMATION_WINDOW_MS, SESSION_SWITCH_TIMEOUT_MS, STALE_SESSION_REFRESH_AFTER_MS } from "./constants.js";
 import { AsyncGeneration } from "./async_generation.js";
 import { parseNativeBash } from "./bash.js";
 import { downloadResponse } from "./downloads.js";
@@ -153,6 +153,7 @@ let lastBoundSessionPath = null;
 let emptyEventPollCount = 0;
 let sessionViewGeneration = 0;
 const sessionSwitchGeneration = new AsyncGeneration();
+let sessionSwitchAbortController = null;
 let promptSubmissionGeneration = 0;
 let sessionStatusRequestVersion = 0;
 let notificationRegistration = null;
@@ -1548,9 +1549,11 @@ function restoreComposerDraft(draft) {
   if (draft.images.length > 0) addImageFiles(draft.images, { restore: true });
 }
 
-async function refreshCurrentSessionPreservingComposer() {
+async function refreshCurrentSessionPreservingComposer({ fallbackNavigation = true } = {}) {
   const draft = composerDraft();
-  const refreshed = await switchSession(window.location.href, { push: false, focus: false, preserveScroll: true });
+
+  const refreshed = await switchSession(window.location.href, { push: false, focus: false, preserveScroll: true, fallbackNavigation });
+
   if (refreshed) restoreComposerDraft(draft);
   return refreshed;
 }
@@ -1569,7 +1572,7 @@ async function refreshStaleSessionAfterResume(hiddenDuration = 0) {
 
   staleSessionRefreshInFlight = true;
   try {
-    return await refreshCurrentSessionPreservingComposer();
+    return await refreshCurrentSessionPreservingComposer({ fallbackNavigation: false });
   } finally {
     staleSessionRefreshInFlight = false;
   }
@@ -2550,23 +2553,21 @@ function detachSession() {
   return switchSession(detachedSessionFallbackUrl(currentSessionPath()), { push: true, focus: true });
 }
 
-async function switchSession(url, { push = true, focus = true, preserveScroll = false, findQuery = null } = {}) {
+async function switchSession(url, { push = true, focus = true, preserveScroll = false, findQuery = null, fallbackNavigation = true } = {}) {
   const scrollSnapshot = preserveScroll ? conversationScrollSnapshot() : null;
   persistStoredComposerDraft();
   sidebarController.invalidate({ clearSessionsLimit: true });
+  sessionSwitchAbortController?.abort();
+  const abortController = new AbortController();
+  sessionSwitchAbortController = abortController;
   const switchGeneration = sessionSwitchGeneration.next();
   const refreshRequestVersion = sidebarController.refreshRequestVersion;
-  let navigatingAway = false;
+  const timeout = setTimeout(() => abortController.abort(), SESSION_SWITCH_TIMEOUT_MS);
   showSessionSwitching();
-  resetSessionViewState();
   try {
-    const response = await fetch(sessionFragmentUrl(url), { headers: { "Accept": "application/json" } });
+    const response = await fetch(sessionFragmentUrl(url), { headers: { "Accept": "application/json" }, signal: abortController.signal });
     if (!sessionSwitchGeneration.current(switchGeneration)) return false;
-    if (!response.ok) {
-      navigatingAway = true;
-      window.location.href = url;
-      return false;
-    }
+    if (!response.ok) throw new Error("Session fragment failed");
 
     const payload = await response.json();
     if (!sessionSwitchGeneration.current(switchGeneration)) return false;
@@ -2592,11 +2593,17 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
     return true;
   } catch (_error) {
     if (!sessionSwitchGeneration.current(switchGeneration)) return false;
-    navigatingAway = true;
-    window.location.href = url;
+    if (fallbackNavigation) {
+      window.location.href = url;
+    } else {
+      showReconnectBanner();
+      sidebarController.scheduleRefresh(0);
+    }
     return false;
   } finally {
-    if (!navigatingAway && sessionSwitchGeneration.current(switchGeneration)) hideSessionSwitching();
+    clearTimeout(timeout);
+    if (sessionSwitchAbortController === abortController) sessionSwitchAbortController = null;
+    if (sessionSwitchGeneration.current(switchGeneration)) hideSessionSwitching();
   }
 }
 

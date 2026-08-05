@@ -89,6 +89,36 @@ test("find, select, and pin a session with persisted history", async ({ page }) 
   await expect(page.getByRole("heading", { level: 2, name: "Pinned" })).toBeVisible();
 });
 
+test("a stalled stale-session refresh recovers without reloading the current view", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => { window.__staleRefreshSentinel = true; });
+
+  let markFragmentRequested;
+  const fragmentRequested = new Promise((resolve) => { markFragmentRequested = resolve; });
+  let releaseFragment;
+  const fragmentRelease = new Promise((resolve) => { releaseFragment = resolve; });
+  await page.route(/\/session_fragment(?:\?|$)/, async (route) => {
+    markFragmentRequested();
+    await fragmentRelease;
+    await route.abort().catch(() => {});
+  });
+  await page.route(/\/events(?:\?|$)/, (route) => route.abort("connectionfailed"));
+
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.install({ time: now });
+  await page.clock.setSystemTime(now + 61_000);
+  await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+  await fragmentRequested;
+
+  await expect(page.locator("body")).toHaveClass(/session-switching/);
+  await page.clock.runFor(12_001);
+
+  await expect(page.locator("body")).not.toHaveClass(/session-switching/);
+  await expect.poll(() => page.evaluate(() => window.__staleRefreshSentinel)).toBe(true);
+  await expect(page.getByText("Session may be stale.")).toBeVisible();
+  releaseFragment();
+});
+
 test("a newer session switch wins when fragment responses arrive out of order", async ({ page }) => {
   await page.goto("/");
   const olderLink = page.getByRole("link", { name: new RegExp(sessions.marker) });
