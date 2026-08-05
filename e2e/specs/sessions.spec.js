@@ -121,6 +121,7 @@ test("a stalled stale-session refresh recovers without reloading the current vie
 
 test("session switching blocks shortcuts from acting underneath the overlay", async ({ page }) => {
   await page.goto("/");
+  await searchSessions(page, sessions.promptRetryCompact);
   const targetLink = page.getByRole("link", { name: new RegExp(sessions.promptRetryCompact) });
   await expect(targetLink).toBeVisible();
 
@@ -157,6 +158,7 @@ test("session switching blocks shortcuts from acting underneath the overlay", as
 
 test("wake recovery does not supersede a pending user session switch", async ({ page }) => {
   await page.goto("/");
+  await searchSessions(page, sessions.promptRetryCompact);
   const targetLink = page.getByRole("link", { name: new RegExp(sessions.promptRetryCompact) });
   await expect(targetLink).toBeVisible();
 
@@ -199,6 +201,7 @@ test("wake recovery does not supersede a pending user session switch", async ({ 
 
 test("in-flight event recovery does not supersede a pending user session switch", async ({ page }) => {
   await page.goto("/");
+  await searchSessions(page, sessions.promptRetryCompact);
   const targetLink = page.getByRole("link", { name: new RegExp(sessions.promptRetryCompact) });
   await expect(targetLink).toBeVisible();
 
@@ -233,12 +236,17 @@ test("in-flight event recovery does not supersede a pending user session switch"
 
 test("a newer session switch wins when fragment responses arrive out of order", async ({ page }) => {
   await page.goto("/");
+  await searchSessions(page, sessions.marker);
   const olderLink = page.getByRole("link", { name: new RegExp(sessions.marker) });
-  const newerLink = page.getByRole("link", { name: new RegExp(sessions.promptRetryCompact) });
   await expect(olderLink).toBeVisible();
+  const olderHref = await olderLink.getAttribute("href");
+
+  await changeSessionSearch(page, sessions.promptRetryCompact);
+  const newerLink = page.getByRole("link", { name: new RegExp(sessions.promptRetryCompact) });
   await expect(newerLink).toBeVisible();
-  const olderSession = new URL(await olderLink.getAttribute("href"), page.url()).searchParams.get("session");
-  const newerSession = new URL(await newerLink.getAttribute("href"), page.url()).searchParams.get("session");
+  const newerHref = await newerLink.getAttribute("href");
+  const olderSession = new URL(olderHref, page.url()).searchParams.get("session");
+  const newerSession = new URL(newerHref, page.url()).searchParams.get("session");
 
   let markOlderFragmentRequested;
   const olderFragmentRequested = new Promise((resolve) => { markOlderFragmentRequested = resolve; });
@@ -262,12 +270,15 @@ test("a newer session switch wins when fragment responses arrive out of order", 
     if (session === newerSession) markNewerFragmentCompleted();
   });
 
-  await olderLink.click();
+  await page.evaluate((href) => {
+    history.pushState({}, "", href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, olderHref);
   await olderFragmentRequested;
   await page.evaluate((href) => {
     history.pushState({}, "", href);
     window.dispatchEvent(new PopStateEvent("popstate"));
-  }, await newerLink.getAttribute("href"));
+  }, newerHref);
 
   await expect(page.getByRole("heading", { level: 1, name: sessions.promptRetryCompact })).toBeVisible();
   await expect.poll(() => fragmentCompletionOrder).toEqual([newerSession, olderSession]);
@@ -279,6 +290,10 @@ test("a newer session switch wins when fragment responses arrive out of order", 
 
 async function searchSessions(page, query) {
   await page.getByRole("button", { name: "Search sessions" }).click();
+  await changeSessionSearch(page, query);
+}
+
+async function changeSessionSearch(page, query) {
   const search = page.getByRole("searchbox", { name: "Search sessions" });
   await search.fill(query);
   await Promise.all([
