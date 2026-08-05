@@ -1619,7 +1619,11 @@ function sessionSyncRefreshRequired(sync) {
 }
 
 async function pollEvents() {
-  if (!liveOutput || sessionSwitching()) return;
+  if (!liveOutput) return;
+  if (sessionSwitching()) {
+    scheduleNextEventPoll(250);
+    return;
+  }
   if (modalIsOpen()) return;
   if (eventPollInFlight) return;
 
@@ -1665,7 +1669,7 @@ async function pollEvents() {
     if (eventPollAbortController === controller) eventPollAbortController = null;
     if (eventPollCurrent(generation, sessionViewGeneration)) {
       eventPollInFlight = false;
-      scheduleNextEventPoll(nextEventPollDelay(!pollSucceeded));
+      if (!controller.piSuppressedAbort) scheduleNextEventPoll(nextEventPollDelay(!pollSucceeded));
     }
   }
 }
@@ -2579,6 +2583,9 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   const refreshRequestVersion = sidebarController.refreshRequestVersion;
   const timeout = setTimeout(() => abortController.abort(), SESSION_SWITCH_TIMEOUT_MS);
   showSessionSwitching();
+  clearTimeout(eventPollTimer);
+  eventPollTimer = null;
+  abortEventPoll();
   try {
     const response = await fetch(sessionFragmentUrl(url), { headers: { "Accept": "application/json" }, signal: abortController.signal });
     if (!sessionSwitchGeneration.current(switchGeneration)) return false;

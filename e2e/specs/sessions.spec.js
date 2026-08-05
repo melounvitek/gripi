@@ -197,6 +197,40 @@ test("wake recovery does not supersede a pending user session switch", async ({ 
   await expect(page.locator("body")).not.toHaveClass(/session-switching/);
 });
 
+test("in-flight event recovery does not supersede a pending user session switch", async ({ page }) => {
+  await page.goto("/");
+  const targetLink = page.getByRole("link", { name: new RegExp(sessions.promptRetryCompact) });
+  await expect(targetLink).toBeVisible();
+
+  let releaseEvent;
+  const eventRelease = new Promise((resolve) => { releaseEvent = resolve; });
+  let markEventRequested;
+  const eventRequested = new Promise((resolve) => { markEventRequested = resolve; });
+  await page.route(/\/events(?:\?|$)/, async (route) => {
+    markEventRequested();
+    await eventRelease;
+    await route.fulfill({ json: { events: [], last_seq: 0, missed: true } }).catch(() => {});
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+  await eventRequested;
+
+  let releaseFragments;
+  const fragmentsRelease = new Promise((resolve) => { releaseFragments = resolve; });
+  await page.route(/\/session_fragment(?:\?|$)/, async (route) => {
+    await fragmentsRelease;
+    await route.continue().catch(() => {});
+  });
+
+  await targetLink.click();
+  await expect(page.locator("body")).toHaveClass(/session-switching/);
+  releaseEvent();
+  await page.evaluate(() => Promise.resolve());
+  releaseFragments();
+
+  await expect(page.getByRole("heading", { level: 1, name: sessions.promptRetryCompact })).toBeVisible();
+  await expect(page.locator("body")).not.toHaveClass(/session-switching/);
+});
+
 test("a newer session switch wins when fragment responses arrive out of order", async ({ page }) => {
   await page.goto("/");
   const olderLink = page.getByRole("link", { name: new RegExp(sessions.marker) });
