@@ -255,6 +255,17 @@ function editableElement(element) {
   return element?.closest?.("input, textarea, select, [contenteditable]");
 }
 
+function sessionSwitching() {
+  return document.body.classList.contains("session-switching");
+}
+
+function blockSessionSwitchingKeyboard(event) {
+  if (!sessionSwitching()) return;
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
 function currentSessionFindShortcut(event) {
   if (!currentSessionFindController.available || String(event.key || "").toLowerCase() !== "f") return false;
   if (event.altKey || event.shiftKey) return false;
@@ -262,7 +273,7 @@ function currentSessionFindShortcut(event) {
 }
 
 function requestSessionSearch() {
-  if (modalIsOpen()) return false;
+  if (sessionSwitching() || modalIsOpen()) return false;
   return sidebarController.openSearch();
 }
 
@@ -273,7 +284,7 @@ function handleSessionSearchShortcut(event) {
 }
 
 function requestCurrentSessionFindNavigation(direction) {
-  if (modalIsOpen() || !currentSessionFindController.open) return false;
+  if (sessionSwitching() || modalIsOpen() || !currentSessionFindController.open) return false;
   currentSessionFindController.move(direction === -1 ? -1 : 1);
   return true;
 }
@@ -286,7 +297,7 @@ function handleCurrentSessionFindNavigationShortcut(event) {
 }
 
 function requestCurrentSessionFind() {
-  if (modalIsOpen() || !currentSessionFindController.available) return false;
+  if (sessionSwitching() || modalIsOpen() || !currentSessionFindController.available) return false;
   currentSessionFindController.show().catch(() => {});
   return true;
 }
@@ -2273,6 +2284,7 @@ function recordKeyboardConversationScrollIntent(event) {
 }
 
 function bindPageLifetimeControls() {
+  document.addEventListener("keydown", blockSessionSwitchingKeyboard, true);
   document.addEventListener("keydown", recordKeyboardConversationScrollIntent);
 }
 
@@ -2677,6 +2689,8 @@ function sessionShortcutsVisible() {
 }
 
 function openNewSessionModal() {
+  if (sessionSwitching()) return;
+
   const modal = document.querySelector('[data-modal="new-session-modal"]');
   newSessionFormController.open(modal?.querySelector(".new-session-cwd-form"));
   openModal(modal);

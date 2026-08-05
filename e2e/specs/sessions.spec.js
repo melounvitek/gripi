@@ -119,6 +119,42 @@ test("a stalled stale-session refresh recovers without reloading the current vie
   releaseFragment();
 });
 
+test("session switching blocks shortcuts from acting underneath the overlay", async ({ page }) => {
+  await page.goto("/");
+  const targetLink = page.getByRole("link", { name: new RegExp(sessions.promptRetryCompact) });
+  await expect(targetLink).toBeVisible();
+
+  let markFragmentRequested;
+  const fragmentRequested = new Promise((resolve) => { markFragmentRequested = resolve; });
+  let releaseFragment;
+  const fragmentRelease = new Promise((resolve) => { releaseFragment = resolve; });
+  await page.route(/\/session_fragment(?:\?|$)/, async (route) => {
+    markFragmentRequested();
+    await fragmentRelease;
+    await route.continue();
+  });
+
+  await targetLink.click();
+  await fragmentRequested;
+  await expect(page.locator("body")).toHaveClass(/session-switching/);
+
+  const escapeBlocked = await page.evaluate(() => {
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    return !document.dispatchEvent(event);
+  });
+  expect.soft(escapeBlocked).toBe(true);
+
+  await page.evaluate(() => window.dispatchEvent(new Event("gripi:new-session-requested")));
+  await expect.soft(page.locator('[data-modal="new-session-modal"]')).toBeHidden();
+
+  releaseFragment();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.promptRetryCompact })).toBeVisible();
+  await expect(page.locator("body")).not.toHaveClass(/session-switching/);
+
+  await page.evaluate(() => window.dispatchEvent(new Event("gripi:new-session-requested")));
+  await expect(page.locator('[data-modal="new-session-modal"]')).toBeVisible();
+});
+
 test("a newer session switch wins when fragment responses arrive out of order", async ({ page }) => {
   await page.goto("/");
   const olderLink = page.getByRole("link", { name: new RegExp(sessions.marker) });
