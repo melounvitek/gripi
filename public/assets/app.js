@@ -154,6 +154,7 @@ let emptyEventPollCount = 0;
 let sessionViewGeneration = 0;
 const sessionSwitchGeneration = new AsyncGeneration();
 let sessionSwitchAbortController = null;
+let sessionNavigationPending = false;
 let promptSubmissionGeneration = 0;
 let sessionStatusRequestVersion = 0;
 let notificationRegistration = null;
@@ -1618,7 +1619,7 @@ function sessionSyncRefreshRequired(sync) {
 }
 
 async function pollEvents() {
-  if (!liveOutput) return;
+  if (!liveOutput || sessionSwitching()) return;
   if (modalIsOpen()) return;
   if (eventPollInFlight) return;
 
@@ -2513,6 +2514,8 @@ function showSessionSwitching() {
 }
 
 function hideSessionSwitching() {
+  if (sessionNavigationPending) return;
+
   document.body.classList.remove("session-switching");
 }
 
@@ -2575,7 +2578,6 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   const switchGeneration = sessionSwitchGeneration.next();
   const refreshRequestVersion = sidebarController.refreshRequestVersion;
   const timeout = setTimeout(() => abortController.abort(), SESSION_SWITCH_TIMEOUT_MS);
-  let navigatingAway = false;
   showSessionSwitching();
   try {
     const response = await fetch(sessionFragmentUrl(url), { headers: { "Accept": "application/json" }, signal: abortController.signal });
@@ -2607,7 +2609,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   } catch (_error) {
     if (!sessionSwitchGeneration.current(switchGeneration)) return false;
     if (fallbackNavigation) {
-      navigatingAway = true;
+      sessionNavigationPending = true;
       window.location.href = url;
     } else {
       showReconnectBanner();
@@ -2617,7 +2619,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   } finally {
     clearTimeout(timeout);
     if (sessionSwitchAbortController === abortController) sessionSwitchAbortController = null;
-    if (!navigatingAway && sessionSwitchGeneration.current(switchGeneration)) hideSessionSwitching();
+    if (sessionSwitchGeneration.current(switchGeneration)) hideSessionSwitching();
   }
 }
 

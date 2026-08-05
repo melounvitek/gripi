@@ -171,16 +171,26 @@ test("wake recovery does not supersede a pending user session switch", async ({ 
     await fragmentsRelease;
     await route.continue().catch(() => {});
   });
+  let resuming = false;
+  let resumeEventRequests = 0;
+  await page.route(/\/events(?:\?|$)/, async (route) => {
+    if (!resuming) return route.continue();
+
+    resumeEventRequests += 1;
+    await route.fulfill({ json: { events: [], last_seq: 0, missed: true } });
+  });
 
   await targetLink.click();
   await fragmentRequested;
-  await page.evaluate(() => {
-    const resumedAt = Date.now() + 61_000;
-    Date.now = () => resumedAt;
-    window.dispatchEvent(new Event("pageshow"));
-  });
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.install({ time: now });
+  await page.clock.setSystemTime(now + 61_000);
+  resuming = true;
+  await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+  await page.clock.runFor(100);
+  await new Promise((resolve) => setImmediate(resolve));
 
+  expect(resumeEventRequests).toBe(0);
   expect(fragmentRequests).toBe(1);
   releaseFragments();
   await expect(page.getByRole("heading", { level: 1, name: sessions.promptRetryCompact })).toBeVisible();
