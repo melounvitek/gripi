@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-import { mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool } from "./contract.mjs";
+import { mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool, writeTool } from "./contract.mjs";
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
@@ -320,6 +320,8 @@ function acceptPrompt(command) {
     schedule(120, () => completeWithTool(reply, { command: tool.terminalCommand, updates: tool.terminalUpdates, updateDelay: 350, completionDelay: 800 }));
   } else if (command.message === prompts.wrappedToolOutput) {
     schedule(120, () => completeWithTool(reply, { command: tool.wrappedCommand, updates: [tool.wrappedOutput] }));
+  } else if (command.message === prompts.writeOutput) {
+    schedule(120, () => completeWithWrite(reply));
   } else {
     schedule(120, () => completeWithTool(reply));
   }
@@ -669,6 +671,34 @@ function completeWithTool(reply, options = {}) {
     else schedule(options.updateDelay || 0, () => publishUpdate(index + 1));
   };
   publishUpdate(0);
+}
+
+function completeWithWrite(reply) {
+  const toolCallId = `call_${randomUUID().slice(0, 8)}`;
+  const toolCall = { type: "toolCall", id: toolCallId, name: "write", arguments: { path: writeTool.path, content: writeTool.content } };
+  const toolMessage = assistantMessage([toolCall], "toolUse");
+  emit({ type: "message_start", message: { ...toolMessage, content: [] } });
+  emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall, partial: toolMessage } });
+  emit({ type: "message_end", message: toolMessage });
+  appendMessage(toolMessage);
+  emit({ type: "tool_execution_start", toolCallId, toolName: "write", args: toolCall.arguments });
+
+  const result = { content: [{ type: "text", text: writeTool.result }], details: {} };
+  emit({ type: "tool_execution_end", toolCallId, toolName: "write", result, isError: false });
+  const toolResult = {
+    role: "toolResult",
+    toolCallId,
+    toolName: "write",
+    content: result.content,
+    details: {},
+    isError: false,
+    timestamp: Date.now()
+  };
+  appendMessage(toolResult);
+  emitMessage(toolResult);
+  emit({ type: "turn_end", message: toolMessage, toolResults: [toolResult] });
+  emit({ type: "turn_start" });
+  schedule(120, () => completeAssistant(reply));
 }
 
 function completeAssistant(reply) {

@@ -1694,7 +1694,7 @@ func contentText(content any) string {
 					continue
 				}
 				if name == "write" {
-					values = append(values, previewText("+", stringValue(asMap(value["arguments"])["content"])))
+					values = append(values, prefixedText("+", stringValue(asMap(value["arguments"])["content"]), 0))
 					continue
 				}
 				if name == "edit" {
@@ -1776,13 +1776,13 @@ func compactSummary(parts []any, home string) string {
 	return strings.Join(unique(labels), " + ")
 }
 
-func previewText(prefix, text string) string {
+func prefixedText(prefix, text string, maximumLines int) string {
 	if text == "" {
 		return ""
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(lines) > 6 {
-		lines = append(lines[:6], "…")
+	if maximumLines > 0 && len(lines) > maximumLines {
+		lines = append(lines[:maximumLines], "…")
 	}
 	for index := range lines {
 		lines[index] = prefix + " " + lines[index]
@@ -1794,7 +1794,7 @@ func editPreview(value any) string {
 	var groups []string
 	for index, candidate := range arrayValue(value) {
 		edit := asMap(candidate)
-		groups = append(groups, fmt.Sprintf("Edit %d\n%s\n%s", index+1, previewText("-", stringValue(edit["oldText"])), previewText("+", stringValue(edit["newText"]))))
+		groups = append(groups, fmt.Sprintf("Edit %d\n%s\n%s", index+1, prefixedText("-", stringValue(edit["oldText"]), 6), prefixedText("+", stringValue(edit["newText"]), 6)))
 	}
 	return strings.Join(groups, "\n\n")
 }

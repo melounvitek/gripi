@@ -78,7 +78,7 @@ export class LiveMessageParser {
     }
 
     function transcriptToolCallText(name, args = {}) {
-      if (name === "write") return previewText("+", args.content);
+      if (name === "write") return prefixedText("+", args.content);
       if (name !== "edit") return "";
 
       const edits = Array.isArray(args.edits) ? args.edits : [];
@@ -86,21 +86,22 @@ export class LiveMessageParser {
         if (!edit || typeof edit !== "object") return "";
         return [
           `Edit ${index + 1}`,
-          previewText("-", edit.oldText),
-          previewText("+", edit.newText)
+          prefixedText("-", edit.oldText, 6),
+          prefixedText("+", edit.newText, 6)
         ].filter(Boolean).join("\n");
       }).filter(Boolean).join("\n\n");
 
       return editPreview;
     }
 
-    function previewText(prefix, text) {
+    function prefixedText(prefix, text, maximumLines) {
       const lines = String(text || "").split("\n");
       if (lines[lines.length - 1] === "") lines.pop();
       if (lines.length === 0) return "";
-      const preview = lines.slice(0, 6).map((line) => `${prefix} ${line}`);
-      if (lines.length > 6) preview.push(`${prefix} …`);
-      return preview.join("\n");
+      const displayed = maximumLines === undefined ? lines : lines.slice(0, maximumLines);
+      const result = displayed.map((line) => `${prefix} ${line}`);
+      if (maximumLines !== undefined && lines.length > maximumLines) result.push(`${prefix} …`);
+      return result.join("\n");
     }
 
     function toolSummaryParts(name, args = {}) {

@@ -122,6 +122,51 @@ func TestSelectedOversizedToolCallsAndResultsRenderWithCorrectPairing(t *testing
 	}
 }
 
+func TestWriteCallsRetainCompleteContentForStandardOutputCollapsing(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	lines := make([]string, 24)
+	prefixed := make([]string, len(lines))
+	for index := range lines {
+		lines[index] = fmt.Sprintf("write-line-%d", index+1)
+		prefixed[index] = "+ " + lines[index]
+	}
+	content := strings.Join(lines, "\n")
+	quotedContent, _ := json.Marshal(content)
+	callLine := `{"type":"message","id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"write-1","name":"write","arguments":{"path":"output.txt","content":` + string(quotedContent) + `}}]}}`
+	writeSessionLines(t, path, []string{
+		sessionLine(project),
+		callLine,
+		`{"type":"message","id":"result","parentId":"assistant","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"write-1","toolName":"write","content":[{"type":"text","text":"Successfully wrote output.txt"}],"isError":false}}`,
+	})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	window, err := store.Window(path, "", false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join(prefixed, "\n") + "\n\nSuccessfully wrote output.txt"
+	if len(window.Messages) != 1 || window.Messages[0].Text != want {
+		t.Fatalf("write message = %#v, want text %q", window.Messages, want)
+	}
+}
+
+func TestOversizedWriteCallsAccountForCompleteContentInWindowEstimates(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	content := strings.Repeat("x", MaxIndexedEntryBytes+1024)
+	writeSessionLines(t, path, []string{
+		sessionLine(project),
+		`{"type":"message","id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"write-1","name":"write","arguments":{"path":"output.txt","content":"` + content + `"}}]}}`,
+	})
+
+	indexed, err := (Store{Root: root, Home: root, Cache: NewCache()}).Cache.Index(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if indexed.entries[1].Segments[0].Minimum < int64(len(content)*2) {
+		t.Fatalf("write segment estimate = %d, want at least %d", indexed.entries[1].Segments[0].Minimum, len(content)*2)
+	}
+}
+
 func TestOversizedAssistantStatusAndCompactionMetadataRemainUsable(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	answer := strings.Repeat("a", MaxIndexedEntryBytes+1024)

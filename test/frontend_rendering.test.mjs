@@ -134,6 +134,22 @@ test("live parser preserves representative SSR shapes and renderer deduplicates 
   assert.equal(renderer.liveMessageAlreadyRendered("assistant", "Different", timestamp), false);
 });
 
+test("live parser retains complete write content for standard output collapsing", () => {
+  const parser = new LiveMessageParser();
+  const content = Array.from({ length: 24 }, (_, index) => `write-line-${index + 1}`).join("\n");
+
+  const [segment] = parser.contentSegments([{
+    type: "toolCall",
+    id: "write-1",
+    name: "write",
+    arguments: { path: "output.txt", content },
+  }], { role: "assistant" });
+
+  assert.equal(segment.text.split("\n").length, 24);
+  assert.match(segment.text, /^\+ write-line-1\n/);
+  assert.match(segment.text, /\+ write-line-24$/);
+});
+
 test("restored subagents prefer gateway timestamps and retain persisted-call fallback", () => {
   const renderer = new LiveMessageRenderer({}, {}, {}, { bind() {} });
   renderer.liveOutput = { dataset: {

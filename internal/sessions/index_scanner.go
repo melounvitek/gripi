@@ -1316,7 +1316,7 @@ func assistantScanSegments(parts []scannedPart, argumentBytes map[int]int, argum
 				}
 			} else if toolName == "bash" {
 				minimum = int64(safeHomeReplacementLower(argumentCommands[part.index]) * 2)
-			} else if toolName != "read" && toolName != "write" && toolName != "edit" {
+			} else if toolName != "read" && toolName != "edit" {
 				minimum = int64(argumentBytes[part.index] * 2)
 			}
 			segments = append(segments, segment{Role: "assistant", ToolCallID: part.id, ToolName: toolName, Minimum: minimum})

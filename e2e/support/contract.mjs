@@ -32,7 +32,8 @@ export const sessions = {
   bashReload: "E2E Bash Reload Desktop",
   bashOverlap: "E2E Bash Overlap Desktop",
   bashMobile: "E2E Bash Cancel Mobile",
-  wrappedToolOutput: "E2E Wrapped Tool Output Mobile"
+  wrappedToolOutput: "E2E Wrapped Tool Output Mobile",
+  writeOutput: "E2E Write Output Desktop"
 };
 
 export const prompts = {
@@ -54,6 +55,7 @@ export const prompts = {
   extension: "Ask me for release approval",
   extensionRace: "Exercise queued extension requests",
   wrappedToolOutput: "Show wrapped tool output",
+  writeOutput: "Show complete write output",
   newSession: "Create the first deterministic response",
   realPiPrefix: "Reply with exactly this token and nothing else:"
 };
@@ -102,6 +104,18 @@ export const paginatedSubagent = {
   unrelatedCallId: "e2e-paginated-unrelated",
   persistedResult: "Persisted paginated subagent result",
   liveProgress: "Paginated subagent replay still running"
+};
+
+const writeContent = [
+  "oldest-write-content",
+  ...Array.from({ length: 22 }, (_, index) => `write-content-${String(index + 2).padStart(2, "0")}`),
+  "latest-write-content"
+].join("\n");
+
+export const writeTool = {
+  path: "generated/write-output.txt",
+  content: writeContent,
+  result: `Successfully wrote ${writeContent.length} bytes to generated/write-output.txt`
 };
 
 export const tool = {
