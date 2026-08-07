@@ -19,7 +19,9 @@ type assistantStreamPart struct {
 func newAssistantStreamState(message map[string]any, maxBytes int) *assistantStreamState {
 	metadata := cloneMap(message)
 	metadata["content"] = []any{}
-	return &assistantStreamState{message: metadata, parts: make(map[int]*assistantStreamPart), maxBytes: maxBytes}
+	stream := &assistantStreamState{message: metadata, parts: make(map[int]*assistantStreamPart), bytes: jsonSize(metadata), maxBytes: maxBytes}
+	stream.disabled = stream.bytes > maxBytes
+	return stream
 }
 
 func (stream *assistantStreamState) apply(event map[string]any) {
@@ -52,6 +54,8 @@ func (stream *assistantStreamState) apply(event map[string]any) {
 		if content, ok := event["content"].(string); ok {
 			stream.finishPart(index, "thinking", content)
 		}
+	case "toolcall_start", "toolcall_delta":
+		// Pi does not expose tool identity until toolcall_end, so only complete calls are projected.
 	case "toolcall_end":
 		toolCall, _ := event["toolCall"].(map[string]any)
 		if toolCall != nil {

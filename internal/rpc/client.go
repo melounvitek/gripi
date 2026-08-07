@@ -22,6 +22,7 @@ import (
 const (
 	DefaultEventBufferLimit                  = 5_000
 	DefaultEventBufferBytes                  = 8 << 20
+	MaxAssistantPartialMessageBytes          = 8 << 20
 	RPCReadChunkBytes                        = 64 << 10
 	MaxSampledToolUpdateBytes                = 1 << 20
 	MaxFallbackRPCLineBytes                  = 65 << 20
@@ -1544,7 +1545,8 @@ func (client *Client) updateAssistantStreamLocked(response map[string]any) {
 	case "message_start":
 		message, _ := response["message"].(map[string]any)
 		if message["role"] == "assistant" {
-			client.assistantStream = newAssistantStreamState(message, client.fallbackRPCLineBytes)
+			limit := min(MaxAssistantPartialMessageBytes, client.eventBufferBytes, client.fallbackRPCLineBytes)
+			client.assistantStream = newAssistantStreamState(message, limit)
 		}
 	case "message_update":
 		if response["message"] != nil || client.assistantStream == nil {

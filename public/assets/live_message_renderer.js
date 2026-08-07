@@ -779,6 +779,21 @@ export class LiveMessageRenderer {
     this.liveAssistantSegments.forEach((entry) => entry.article.classList.remove("message--streaming"));
   }
 
+  reconcileEndedAssistantSegments(event, segments) {
+    const finalSegments = new Map(segments.map((segment, index) => [this.segmentIdentity(event, segment, index), segment]));
+    let removed = false;
+    [...this.liveAssistantSegments].forEach(([key, entry]) => {
+      const segment = finalSegments.get(key);
+      const thinkingChanged = segment && entry.article.classList.contains("message--thinking") !== segment.thinking;
+      if (segment && !thinkingChanged) return;
+
+      entry.article.remove();
+      this.forgetLiveEntry(entry);
+      removed = true;
+    });
+    return removed;
+  }
+
   forgetLiveEntry(entry) {
     this.liveAssistantSegments.forEach((storedEntry, key) => {
       if (storedEntry === entry) this.liveAssistantSegments.delete(key);
@@ -1060,9 +1075,12 @@ export class LiveMessageRenderer {
       this.resetLiveAssistantTracking();
     }
     if (outcome.assistantEnded) this.clearLiveAssistantStreaming();
+    const shouldScroll = this.conversationController.followLiveOutput();
+    if (outcome.assistantEnded && this.reconcileEndedAssistantSegments(event, segments)) {
+      this.conversationController.afterLiveOutputChange(shouldScroll, true, true);
+    }
     if (segments.length === 0 || (customMessage && message.display !== true)) return outcome;
 
-    const shouldScroll = this.conversationController.followLiveOutput();
     const timestamp = eventTimestamp(event);
 
     if (roleName !== "assistant") {

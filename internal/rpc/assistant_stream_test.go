@@ -21,7 +21,9 @@ func TestAssistantStreamIgnoresMalformedDeltasAndIndexes(t *testing.T) {
 }
 
 func TestAssistantStreamStopsProjectingAfterItsSizeLimit(t *testing.T) {
-	stream := newAssistantStreamState(map[string]any{"role": "assistant"}, 4)
+	message := map[string]any{"role": "assistant"}
+	metadataBytes := jsonSize(map[string]any{"role": "assistant", "content": []any{}})
+	stream := newAssistantStreamState(message, metadataBytes+4)
 	stream.apply(map[string]any{"type": "thinking_start", "contentIndex": 0})
 	stream.apply(map[string]any{"type": "thinking_delta", "contentIndex": 0, "delta": "1234"})
 	stream.apply(map[string]any{"type": "thinking_delta", "contentIndex": 0, "delta": "5"})

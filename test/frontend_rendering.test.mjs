@@ -53,6 +53,24 @@ function markdownBody() {
   };
 }
 
+test("authoritative assistant endings remove provisional segments they omit", () => {
+  const conversation = {
+    element: new FakeElement("section"),
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+  };
+  const renderer = new LiveMessageRenderer({}, conversation, new LiveMessageParser(), { bind() {} });
+  renderer.conversationScroll = conversation.element;
+  const article = new FakeElement("article");
+  conversation.element.append(article);
+  renderer.liveAssistantSegments.set("0-text", { article, compact: false });
+
+  renderer.renderMessageEvent({ type: "message_end", message: { role: "assistant", content: [] } });
+
+  assert.equal(article.parentElement, null);
+  assert.equal(renderer.liveAssistantSegments.size, 0);
+});
+
 test("live thinking follows the bound Pi display setting through streaming updates", () => {
   const document = new FakeDocument();
   const conversation = {
