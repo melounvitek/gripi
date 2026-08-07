@@ -12,10 +12,12 @@ import (
 )
 
 type GatewayState struct {
-	readPath     string
-	pinnedPath   string
-	sessionsRoot string
-	mu           sync.Mutex
+	readPath       string
+	pinnedPath     string
+	sessionsRoot   string
+	pinnedChanges  map[string]uint64
+	pinnedRevision uint64
+	mu             sync.Mutex
 }
 
 func NewGatewayState(readPath, pinnedPath, sessionsRoot string) *GatewayState {
@@ -95,6 +97,11 @@ func (state *GatewayState) SetPinned(path string, pinned bool) error {
 	if err := writeJSON(state.pinnedPath, result); err != nil {
 		return fmt.Errorf("write pinned sessions state: %w", err)
 	}
+	state.pinnedRevision++
+	if state.pinnedChanges == nil {
+		state.pinnedChanges = make(map[string]uint64)
+	}
+	state.pinnedChanges[path] = state.pinnedRevision
 	return nil
 }
 
@@ -106,12 +113,17 @@ func (state *GatewayState) MigratePinned(from, to string) (func() error, error) 
 		return nil, fmt.Errorf("read pinned sessions state: %w", err)
 	}
 	from, to = state.configuredPath(from), state.configuredPath(to)
+	if from == to {
+		return nil, nil
+	}
+
+	sourceRevision, destinationRevision := state.pinnedChanges[from], state.pinnedChanges[to]
 	result := make([]string, 0, len(paths))
 	seen := make(map[string]bool)
-	migrated, destinationPinned := false, false
+	migrated, destinationWasPinned := false, false
 	for _, path := range paths {
 		path = state.configuredPath(path)
-		destinationPinned = destinationPinned || path == to
+		destinationWasPinned = destinationWasPinned || path == to
 		if path == from {
 			path = to
 			migrated = true
@@ -125,6 +137,7 @@ func (state *GatewayState) MigratePinned(from, to string) (func() error, error) 
 	if !migrated {
 		return nil, nil
 	}
+
 	if err := writeJSON(state.pinnedPath, result); err != nil {
 		return nil, fmt.Errorf("write pinned sessions state: %w", err)
 	}
@@ -135,12 +148,18 @@ func (state *GatewayState) MigratePinned(from, to string) (func() error, error) 
 		if err := readJSONIfExists(state.pinnedPath, &current); err != nil {
 			return fmt.Errorf("read pinned sessions state for rollback: %w", err)
 		}
-		result := make([]string, 0, len(current)+1)
+		result := make([]string, 0, len(current)+2)
 		seen := make(map[string]bool)
+		currentSourcePinned, currentDestinationPinned := false, false
 		for _, path := range current {
 			path = state.configuredPath(path)
-			if path == to && !destinationPinned {
-				path = from
+			switch path {
+			case from:
+				currentSourcePinned = true
+				continue
+			case to:
+				currentDestinationPinned = true
+				continue
 			}
 			if seen[path] {
 				continue
@@ -148,8 +167,24 @@ func (state *GatewayState) MigratePinned(from, to string) (func() error, error) 
 			seen[path] = true
 			result = append(result, path)
 		}
-		if !seen[from] {
+		sourceChanged := state.pinnedChanges[from] != sourceRevision
+		destinationChanged := state.pinnedChanges[to] != destinationRevision
+		sourcePinned := true
+		destinationPinned := destinationWasPinned
+		if sourceChanged {
+			sourcePinned = currentSourcePinned
+		} else if destinationChanged {
+			sourcePinned = currentDestinationPinned
+		}
+		if destinationChanged {
+			destinationPinned = currentDestinationPinned
+		}
+
+		if sourcePinned {
 			result = append(result, from)
+		}
+		if destinationPinned {
+			result = append(result, to)
 		}
 		if err := writeJSON(state.pinnedPath, result); err != nil {
 			return fmt.Errorf("roll back pinned sessions state: %w", err)

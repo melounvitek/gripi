@@ -113,30 +113,42 @@ func TestGatewayStatePinnedMigrationRollbackPreservesNewerChanges(t *testing.T) 
 	}
 }
 
-func TestGatewayStatePinnedMigrationRollbackPreservesNewerDestinationPin(t *testing.T) {
-	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")
-	if err := state.SetPinned("/pending", true); err != nil {
-		t.Fatal(err)
-	}
-	rollback, err := state.MigratePinned("/pending", "/persisted")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := state.SetPinned("/persisted", true); err != nil {
-		t.Fatal(err)
-	}
+func TestGatewayStatePinnedMigrationRollbackPreservesNewerDestinationChange(t *testing.T) {
+	for _, test := range []struct {
+		name                    string
+		pinned                  bool
+		expectSourcePinned      bool
+		expectDestinationPinned bool
+	}{
+		{name: "pin", pinned: true, expectSourcePinned: true, expectDestinationPinned: true},
+		{name: "unpin", pinned: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")
+			if err := state.SetPinned("/pending", true); err != nil {
+				t.Fatal(err)
+			}
+			rollback, err := state.MigratePinned("/pending", "/persisted")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := state.SetPinned("/persisted", test.pinned); err != nil {
+				t.Fatal(err)
+			}
 
-	if err := rollback(); err != nil {
-		t.Fatal(err)
-	}
+			if err := rollback(); err != nil {
+				t.Fatal(err)
+			}
 
-	_, pinned, err := state.ReadAndObserve([]*Session{{Path: "/pending"}, {Path: "/persisted"}}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !pinned["/pending"] || !pinned["/persisted"] {
-		t.Fatalf("pinned = %v", pinned)
+			_, pinned, err := state.ReadAndObserve([]*Session{{Path: "/pending"}, {Path: "/persisted"}}, nil, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pinned["/pending"] != test.expectSourcePinned || pinned["/persisted"] != test.expectDestinationPinned {
+				t.Fatalf("pinned = %v", pinned)
+			}
+		})
 	}
 }
 
