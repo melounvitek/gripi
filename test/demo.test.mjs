@@ -71,7 +71,6 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
     'function openSelectOnFirstTouch(trigger, closed, open) {',
     'trigger.addEventListener("touchmove", trackTouch);',
     'openSelectOnFirstTouch(element.projectTrigger, () => element.projectList.hidden, openProjectList);',
-    'openSelectOnFirstTouch(element.viewTrigger, () => element.viewList.hidden, openConversationView);',
     'openSelectOnFirstTouch(newSessionTrigger, () => newSessionList.hidden, openNewSessionList);',
     'const introSeenKey = "gripi:static-demo:intro-seen";',
     'if (!introSeen()) openModal("demo-intro-modal", null);',
@@ -80,8 +79,7 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
   for (const expected of [
     'role="dialog" aria-modal="true" aria-labelledby="demo-intro-title"',
     'data-modal-open="demo-intro-modal"',
-    'data-conversation-view-trigger',
-    'data-conversation-view-listbox',
+    'data-conversation-view-toggle',
     'placeholder="Ask Pi…"',
     'openai-codex/gpt-5.5 (medium)',
   ]) assert.ok(html.includes(expected), `missing ${expected}`);

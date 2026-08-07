@@ -226,9 +226,6 @@
   let programmaticScrollTimer = null;
   let autoScrollEnabled = true;
   let focusedView = false;
-  let viewActiveIndex = 0;
-  let viewTypeahead = "";
-  let viewTypeaheadTimer = null;
   let activityRunning = false;
   const focusedActivityMessageIds = new WeakMap();
   let focusedActivityMessageSequence = 0;
@@ -249,7 +246,7 @@
     project: document.getElementById("project-filter"), projectTrigger: document.getElementById("project-select-trigger"), projectList: document.getElementById("project-select-listbox"),
     searchForm: document.getElementById("sidebar-session-search"), search: document.querySelector('#sidebar-session-search input[type="search"]'), clearFilters: document.querySelector("[data-sidebar-filters-clear]"),
     headerName: document.querySelector(".session-header-name"), headerProject: document.querySelector(".session-header-project"), form: document.getElementById("prompt-form"), prompt: document.querySelector(".prompt-form textarea"),
-    panel: document.querySelector(".conversation-panel"), viewSelect: document.querySelector("[data-conversation-view-select]"), viewTrigger: document.querySelector("[data-conversation-view-trigger]"), viewList: document.querySelector("[data-conversation-view-listbox]"),
+    panel: document.querySelector(".conversation-panel"), viewToggle: document.querySelector("[data-conversation-view-toggle]"),
     state: document.querySelector(".composer-state"), stop: document.getElementById("stop-button"), commands: document.getElementById("command-list"), attachmentTray: document.querySelector(".attachment-tray"),
     treeTarget: document.querySelector("[data-demo-tree-target]"), treeTargetTitle: document.querySelector("[data-demo-tree-target-title]"), treeCurrentTitle: document.querySelector("[data-demo-tree-current-title]")
   };
@@ -737,7 +734,6 @@
       Promise.resolve(navigator.clipboard?.writeText ? navigator.clipboard.writeText(text).then(() => true).catch(fallback) : fallback()).then((copied) => { copy.textContent = copied ? "Copied" : "Copy failed"; setTimeout(() => { copy.textContent = "Copy"; }, 1200); }); return;
     }
     if (!event.target.closest("[data-project-select]") && !element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); }
-    if (!event.target.closest("[data-conversation-view-trigger], [data-conversation-view-listbox]") && !element.viewList.hidden) closeConversationView();
     if (event.target.closest("[data-demo-disabled]")) event.preventDefault();
   });
 
@@ -800,74 +796,7 @@
   });
   element.projectList.addEventListener("click", (event) => { const option = event.target.closest("[data-project-value]"); if (option) selectProject(option.dataset.projectValue); });
   document.querySelector("[data-notification-toggle]").addEventListener("click", (event) => { const enabled = !event.currentTarget.classList.contains("is-enabled"); event.currentTarget.classList.toggle("is-enabled", enabled); event.currentTarget.classList.toggle("is-disabled", !enabled); event.currentTarget.querySelector("[data-notification-toggle-state]").textContent = enabled ? "Demo on" : "Demo off"; });
-  function conversationViewOptions() { return [...element.viewList.querySelectorAll("[role=option]")]; }
-  function setActiveConversationView(index) {
-    const options = conversationViewOptions();
-    viewActiveIndex = (index + options.length) % options.length;
-    options.forEach((option, optionIndex) => option.classList.toggle("is-active", optionIndex === viewActiveIndex));
-    element.viewTrigger.setAttribute("aria-activedescendant", options[viewActiveIndex].id);
-    options[viewActiveIndex].scrollIntoView({ block: "nearest" });
-  }
-  function closeConversationView({ focus = false } = {}) {
-    element.viewList.hidden = true;
-    element.viewTrigger.setAttribute("aria-expanded", "false");
-    element.viewTrigger.removeAttribute("aria-activedescendant");
-    conversationViewOptions().forEach((option) => option.classList.remove("is-active"));
-    if (focus) element.viewTrigger.focus();
-  }
-  function openConversationView() {
-    element.viewList.hidden = false;
-    element.viewTrigger.setAttribute("aria-expanded", "true");
-    const rect = element.viewTrigger.getBoundingClientRect();
-    Object.assign(element.viewList.style, { left: `${rect.left}px`, top: `${rect.bottom + 6}px`, width: `${Math.max(rect.width, 240)}px` });
-    setActiveConversationView(Math.max(0, conversationViewOptions().findIndex((option) => option.dataset.conversationViewValue === element.viewSelect.value)));
-  }
-  function selectConversationView(value) {
-    const option = element.viewList.querySelector(`[data-conversation-view-value="${value}"]`);
-    if (!option) return;
-    element.viewSelect.value = value;
-    element.viewTrigger.querySelector(".project-select-trigger-label").textContent = option.textContent;
-    conversationViewOptions().forEach((item) => item.setAttribute("aria-selected", String(item === option)));
-    closeConversationView({ focus: true });
-    element.viewSelect.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-  openSelectOnFirstTouch(element.viewTrigger, () => element.viewList.hidden, openConversationView);
-  element.viewTrigger.addEventListener("click", () => {
-    if (element.viewList.hidden) openConversationView();
-    else closeConversationView();
-  });
-  element.viewTrigger.addEventListener("keydown", (event) => {
-    const open = !element.viewList.hidden;
-    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      event.preventDefault();
-      if (!open) openConversationView();
-      if (event.key === "ArrowDown") setActiveConversationView(viewActiveIndex + 1);
-      if (event.key === "ArrowUp") setActiveConversationView(viewActiveIndex - 1);
-      if (event.key === "Home") setActiveConversationView(0);
-      if (event.key === "End") setActiveConversationView(conversationViewOptions().length - 1);
-      return;
-    }
-    if (["Enter", " ", "Spacebar"].includes(event.key)) {
-      event.preventDefault();
-      if (open) selectConversationView(conversationViewOptions()[viewActiveIndex].dataset.conversationViewValue);
-      else openConversationView();
-      return;
-    }
-    if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); closeConversationView({ focus: true }); return; }
-    if (event.key === "Tab" && open) { closeConversationView(); return; }
-    if (event.key.length !== 1 || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (!open) openConversationView();
-    clearTimeout(viewTypeaheadTimer);
-    viewTypeahead += event.key.toLocaleLowerCase();
-    const match = conversationViewOptions().findIndex((option) => option.textContent.trim().toLocaleLowerCase().startsWith(viewTypeahead));
-    if (match >= 0) setActiveConversationView(match);
-    viewTypeaheadTimer = setTimeout(() => { viewTypeahead = ""; }, 600);
-  });
-  element.viewList.addEventListener("click", (event) => {
-    const option = event.target.closest("[data-conversation-view-value]");
-    if (option) selectConversationView(option.dataset.conversationViewValue);
-  });
-  element.viewSelect.addEventListener("change", () => {
+  element.viewToggle.addEventListener("click", () => {
     const scrollRect = element.scroll.getBoundingClientRect();
     const anchor = [...element.scroll.querySelectorAll(".message")]
       .filter((message) => focusedConversationMessage(message))
@@ -875,8 +804,13 @@
     const scrollTop = element.scroll.scrollTop;
     const nearBottom = element.scroll.scrollHeight - scrollTop - element.scroll.clientHeight < 120;
     const anchorOffset = anchor ? anchor.getBoundingClientRect().top - scrollRect.top : null;
-    focusedView = element.viewSelect.value === "conversation";
+    focusedView = !focusedView;
     element.panel.classList.toggle("is-conversation-focused", focusedView);
+    element.viewToggle.dataset.view = focusedView ? "conversation" : "full";
+    element.viewToggle.setAttribute("aria-pressed", String(focusedView));
+    const action = focusedView ? "Show all details" : "Show messages only";
+    element.viewToggle.setAttribute("aria-label", action);
+    element.viewToggle.title = action;
     if (nearBottom) element.scroll.scrollTop = element.scroll.scrollHeight;
     else if (anchor) element.scroll.scrollTop += anchor.getBoundingClientRect().top - scrollRect.top - anchorOffset;
     else element.scroll.scrollTop = Math.min(scrollTop, Math.max(0, element.scroll.scrollHeight - element.scroll.clientHeight));
@@ -896,7 +830,7 @@
   document.querySelector("[data-current-session-find-close]").addEventListener("click", () => resetFind(true));
   document.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); const find = document.querySelector("[data-current-session-find]"); find.hidden = false; find.querySelector("input").focus(); }
-    if (event.key === "Escape") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (modal) closeModal(modal); else if (!element.viewList.hidden) closeConversationView({ focus: true }); else if (!element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); element.projectTrigger.focus(); } }
+    if (event.key === "Escape") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (modal) closeModal(modal); else if (!element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); element.projectTrigger.focus(); } }
     if (event.key === "Tab") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (!modal) return; const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")]; if (!focusable.length) return; const first = focusable[0], last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
 
