@@ -808,9 +808,8 @@
     element.panel.classList.toggle("is-conversation-focused", focusedView);
     element.viewToggle.dataset.view = focusedView ? "conversation" : "full";
     element.viewToggle.setAttribute("aria-pressed", String(focusedView));
-    const action = focusedView ? "Show all details" : "Show messages only";
-    element.viewToggle.setAttribute("aria-label", action);
-    element.viewToggle.title = action;
+    element.viewToggle.setAttribute("aria-label", "Messages-only transcript view");
+    element.viewToggle.title = focusedView ? "Show all details" : "Show messages only";
     if (nearBottom) element.scroll.scrollTop = element.scroll.scrollHeight;
     else if (anchor) element.scroll.scrollTop += anchor.getBoundingClientRect().top - scrollRect.top - anchorOffset;
     else element.scroll.scrollTop = Math.min(scrollTop, Math.max(0, element.scroll.scrollHeight - element.scroll.clientHeight));

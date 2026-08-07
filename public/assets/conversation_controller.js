@@ -147,9 +147,8 @@ export class ConversationController {
     if (this.viewToggle) {
       this.viewToggle.dataset.view = this.focusedView ? "conversation" : "full";
       this.viewToggle.setAttribute("aria-pressed", String(this.focusedView));
-      const action = this.focusedView ? "Show all details" : "Show messages only";
-      this.viewToggle.setAttribute("aria-label", action);
-      this.viewToggle.title = action;
+      this.viewToggle.setAttribute("aria-label", "Messages-only transcript view");
+      this.viewToggle.title = this.focusedView ? "Show all details" : "Show messages only";
     }
 
     if (!scrollSnapshot) return;

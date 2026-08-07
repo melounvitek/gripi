@@ -97,14 +97,14 @@ test("conversation view toggle button reflects the focused state", () => {
   conversation.applyFocusedView();
   assert.equal(toggle.dataset.view, "full");
   assert.equal(toggle.getAttribute("aria-pressed"), "false");
-  assert.equal(toggle.getAttribute("aria-label"), "Show messages only");
+  assert.equal(toggle.getAttribute("aria-label"), "Messages-only transcript view");
   assert.equal(toggle.title, "Show messages only");
 
   conversation.focusedView = true;
   conversation.applyFocusedView();
   assert.equal(toggle.dataset.view, "conversation");
   assert.equal(toggle.getAttribute("aria-pressed"), "true");
-  assert.equal(toggle.getAttribute("aria-label"), "Show all details");
+  assert.equal(toggle.getAttribute("aria-label"), "Messages-only transcript view");
   assert.equal(toggle.title, "Show all details");
 });
 

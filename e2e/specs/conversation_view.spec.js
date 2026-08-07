@@ -10,25 +10,34 @@ test("toggles transcript details with a single icon button", async ({ page }) =>
   const toolCall = message(page, "assistant", `$ ${tool.longCommand}`).last();
   await expect(toolCall).toBeVisible();
 
-  const showMessagesOnly = page.getByRole("button", { name: "Show messages only" });
-  await expect(showMessagesOnly).toHaveAttribute("aria-pressed", "false");
-  await expect(showMessagesOnly).toHaveAttribute("title", "Show messages only");
-  await expect(showMessagesOnly.locator('[data-view-icon="full"]')).toBeVisible();
-  await expect(showMessagesOnly.locator('[data-view-icon="messages"]')).toBeHidden();
-  await showMessagesOnly.click();
+  const toggle = page.getByRole("button", { name: "Messages-only transcript view" });
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toHaveAttribute("title", "Show messages only");
+  await expect(toggle.locator('[data-view-icon="full"]')).toBeVisible();
+  await expect(toggle.locator('[data-view-icon="messages"]')).toBeHidden();
+  await toggle.click();
 
-  const showAllDetails = page.getByRole("button", { name: "Show all details" });
   await expect(page.locator(".conversation-panel")).toHaveClass(/is-conversation-focused/);
-  await expect(showAllDetails).toHaveAttribute("aria-pressed", "true");
-  await expect(showAllDetails).toHaveAttribute("title", "Show all details");
-  await expect(showAllDetails.locator('[data-view-icon="messages"]')).toBeVisible();
-  await expect(showAllDetails.locator('[data-view-icon="full"]')).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(toggle).toHaveAttribute("title", "Show all details");
+  await expect(toggle.locator('[data-view-icon="messages"]')).toBeVisible();
+  await expect(toggle.locator('[data-view-icon="full"]')).toBeHidden();
   await expect(toolCall).toBeHidden();
 
-  await showAllDetails.click();
+  await toggle.click();
   await expect(page.locator(".conversation-panel")).not.toHaveClass(/is-conversation-focused/);
-  await expect(page.getByRole("button", { name: "Show messages only" })).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await expect(toolCall).toBeVisible();
-
   await expectRunFinished(page);
+
+  await page.keyboard.press("Control+f");
+  const find = page.getByRole("searchbox", { name: "Find in conversation" });
+  await find.fill("deterministic-tool-result");
+  const count = page.locator("[data-current-session-find-count]");
+  await expect(count).toHaveText("1 / 1");
+
+  await toggle.click();
+  await expect(count).toHaveText("0 / 0");
+  await toggle.click();
+  await expect(count).toHaveText("1 / 1");
 });
