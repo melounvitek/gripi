@@ -1120,10 +1120,10 @@ func (app *application) branchFromAction(response http.ResponseWriter, request *
 				return nil, err
 			}
 		}
-		var attachmentRollback func() error
+		var stateRollback func() error
 		if wasPending {
 			var err error
-			attachmentRollback, err = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Migrate(from, to)
+			stateRollback, err = app.migratePendingSessionState(from, to)
 			if err != nil {
 				if claimed && app.releaseSession != nil {
 					err = errors.Join(err, app.releaseSession(request, to))
@@ -1132,15 +1132,15 @@ func (app *application) branchFromAction(response http.ResponseWriter, request *
 			}
 		}
 		return func() error {
-			var attachmentErr error
-			if attachmentRollback != nil {
-				attachmentErr = attachmentRollback()
+			var stateErr error
+			if stateRollback != nil {
+				stateErr = stateRollback()
 			}
 			var ownershipErr error
 			if claimed && app.releaseSession != nil {
 				ownershipErr = app.releaseSession(request, to)
 			}
-			return errors.Join(attachmentErr, ownershipErr)
+			return errors.Join(stateErr, ownershipErr)
 		}, nil
 	})
 	if err != nil {

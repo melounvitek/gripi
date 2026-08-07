@@ -98,6 +98,45 @@ func (state *GatewayState) SetPinned(path string, pinned bool) error {
 	return nil
 }
 
+func (state *GatewayState) MigratePinned(from, to string) (func() error, error) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	var paths []string
+	if err := readJSONIfExists(state.pinnedPath, &paths); err != nil {
+		return nil, fmt.Errorf("read pinned sessions state: %w", err)
+	}
+	from, to = state.configuredPath(from), state.configuredPath(to)
+	result := make([]string, 0, len(paths))
+	seen := make(map[string]bool)
+	migrated := false
+	for _, path := range paths {
+		path = state.configuredPath(path)
+		if path == from {
+			path = to
+			migrated = true
+		}
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		result = append(result, path)
+	}
+	if !migrated {
+		return nil, nil
+	}
+	if err := writeJSON(state.pinnedPath, result); err != nil {
+		return nil, fmt.Errorf("write pinned sessions state: %w", err)
+	}
+	return func() error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if err := writeJSON(state.pinnedPath, paths); err != nil {
+			return fmt.Errorf("roll back pinned sessions state: %w", err)
+		}
+		return nil
+	}, nil
+}
+
 func (state *GatewayState) MarkRead(path string, count int) error {
 	state.mu.Lock()
 	defer state.mu.Unlock()

@@ -25,7 +25,7 @@ import (
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
-func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayAttachments(t *testing.T) {
+func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) {
 	root := t.TempDir()
 	sessionsRoot := filepath.Join(root, "sessions")
 	attachmentsRoot := filepath.Join(root, "attachments")
@@ -79,6 +79,16 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayAttachments(t *testi
 	_, pinned, err := gatewayState.ReadAndObserve([]*sessions.Session{{Path: realPath, CWD: project}}, nil, false)
 	if err != nil || !pinned[realPath] {
 		t.Fatalf("migrated pin = %v, %v", pinned, err)
+	}
+	form := url.Values{"session": {pendingPath}, "pinned": {"false"}}
+	request := httptest.NewRequest(http.MethodPost, "/sessions/pin", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	app.pinSession(response, request)
+
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"session":"`+realPath+`"`) {
+		t.Fatalf("stale pin request = %d %s", response.Code, response.Body.String())
 	}
 }
 

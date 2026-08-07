@@ -405,7 +405,7 @@ func (app *application) movePendingRPCClient(request *http.Request, from, to str
 				return nil, err
 			}
 		}
-		attachmentRollback, err := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Migrate(from, to)
+		stateRollback, err := app.migratePendingSessionState(from, to)
 		if err != nil {
 			if claimed && app.releaseSession != nil {
 				err = errors.Join(err, app.releaseSession(request, to))
@@ -413,19 +413,47 @@ func (app *application) movePendingRPCClient(request *http.Request, from, to str
 			return nil, err
 		}
 		return func() error {
-			var attachmentErr error
-			if attachmentRollback != nil {
-				attachmentErr = attachmentRollback()
+			var stateErr error
+			if stateRollback != nil {
+				stateErr = stateRollback()
 			}
 			var ownershipErr error
 			if claimed && app.releaseSession != nil {
 				ownershipErr = app.releaseSession(request, to)
 			}
-			return errors.Join(attachmentErr, ownershipErr)
+			return errors.Join(stateErr, ownershipErr)
 		}, nil
 	}, func() {
 		app.pendingSessions.Remap(from, to)
 	})
+}
+
+func (app *application) migratePendingSessionState(from, to string) (func() error, error) {
+	attachmentRollback, err := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Migrate(from, to)
+	if err != nil {
+		return nil, err
+	}
+	var pinRollback func() error
+	if app.gatewayState != nil {
+		pinRollback, err = app.gatewayState.MigratePinned(from, to)
+	}
+	if err != nil {
+		if attachmentRollback != nil {
+			err = errors.Join(err, attachmentRollback())
+		}
+		return nil, err
+	}
+	return func() error {
+		var attachmentErr error
+		if attachmentRollback != nil {
+			attachmentErr = attachmentRollback()
+		}
+		var pinErr error
+		if pinRollback != nil {
+			pinErr = pinRollback()
+		}
+		return errors.Join(attachmentErr, pinErr)
+	}, nil
 }
 
 func (app *application) cleanupIdleRPCClients(ctx context.Context) error {

@@ -312,6 +312,13 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 	if !ok {
 		return
 	}
+	path, unlock, err := app.lockResolvedImagePromptPath(request, path)
+	if err != nil {
+		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
+		return
+	}
+	defer unlock()
+
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
 	if session, persisted := store.Session(path); persisted {
 		path = session.Path
