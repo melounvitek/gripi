@@ -313,8 +313,9 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 		return
 	}
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, ok := store.Session(path)
-	if !ok {
+	if session, persisted := store.Session(path); persisted {
+		path = session.Path
+	} else if _, pending := app.pendingSessions.CWD(path); !pending {
 		http.NotFound(response, request)
 		return
 	}
@@ -328,12 +329,12 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 		writeText(response, http.StatusBadRequest, "Invalid pinned state")
 		return
 	}
-	if err := app.gatewayState.SetPinned(session.Path, pinned); err != nil {
+	if err := app.gatewayState.SetPinned(path, pinned); err != nil {
 		logInternalError("update pinned sessions", err)
 		http.Error(response, "Unable to update pinned sessions", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(response, map[string]any{"session": session.Path, "pinned": pinned})
+	writeJSON(response, map[string]any{"session": path, "pinned": pinned})
 }
 
 func (app *application) markSessionRead(response http.ResponseWriter, request *http.Request) {
