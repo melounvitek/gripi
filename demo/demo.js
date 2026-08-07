@@ -210,6 +210,7 @@
 
   const storageKey = "gripi:static-demo:v14";
   const introSeenKey = "gripi:static-demo:intro-seen";
+  const desktopSidebarHiddenKey = "gripi:desktop-sidebar-hidden";
   let sessions = initialSessions;
   let currentId = defaultSessionId;
   const demoStartedAt = timeLabel();
@@ -248,7 +249,8 @@
     headerName: document.querySelector(".session-header-name"), headerProject: document.querySelector(".session-header-project"), form: document.getElementById("prompt-form"), prompt: document.querySelector(".prompt-form textarea"),
     panel: document.querySelector(".conversation-panel"), viewToggle: document.querySelector("[data-conversation-view-toggle]"),
     state: document.querySelector(".composer-state"), stop: document.getElementById("stop-button"), commands: document.getElementById("command-list"), attachmentTray: document.querySelector(".attachment-tray"),
-    treeTarget: document.querySelector("[data-demo-tree-target]"), treeTargetTitle: document.querySelector("[data-demo-tree-target-title]"), treeCurrentTitle: document.querySelector("[data-demo-tree-current-title]")
+    treeTarget: document.querySelector("[data-demo-tree-target]"), treeTargetTitle: document.querySelector("[data-demo-tree-target-title]"), treeCurrentTitle: document.querySelector("[data-demo-tree-current-title]"),
+    sidebarVisibilityToggle: document.querySelector("[data-sidebar-visibility-toggle]")
   };
 
   function currentSession() { return sessions.find((session) => session.id === currentId) || sessions[0]; }
@@ -260,6 +262,19 @@
   }
   function persist() {
     try { localStorage.setItem(storageKey, JSON.stringify({ sessions, currentId })); } catch (_error) {}
+  }
+  function setDesktopSidebarHidden(hidden, persistPreference = false) {
+    document.body.classList.toggle("desktop-sidebar-hidden", hidden);
+    const label = hidden ? "Show sessions" : "Hide sessions";
+    element.sidebarVisibilityToggle.setAttribute("aria-label", label);
+    element.sidebarVisibilityToggle.setAttribute("title", label);
+    element.sidebarVisibilityToggle.setAttribute("aria-expanded", hidden ? "false" : "true");
+    if (!persistPreference) return;
+
+    try {
+      if (hidden) localStorage.setItem(desktopSidebarHiddenKey, "true");
+      else localStorage.removeItem(desktopSidebarHiddenKey);
+    } catch (_error) {}
   }
   function draftKey(id = currentId) { return `${storageKey}:draft:${id}`; }
   function persistDraft(id = currentId) {
@@ -723,6 +738,13 @@
   function moveFind(direction) { if (!findMatches.length) return; findIndex = (findIndex + direction + findMatches.length) % findMatches.length; updateFind(); }
 
   document.addEventListener("click", (event) => {
+    const sidebarVisibilityToggle = event.target.closest("[data-sidebar-visibility-toggle]");
+    if (sidebarVisibilityToggle) {
+      event.preventDefault();
+      setDesktopSidebarHidden(!document.body.classList.contains("desktop-sidebar-hidden"), true);
+      return;
+    }
+
     const sessionLink = event.target.closest("[data-session-id]"); if (sessionLink) { event.preventDefault(); switchSession(sessionLink.dataset.sessionId); return; }
     const pin = event.target.closest("[data-pin-id]"); if (pin) { const session = sessions.find((item) => item.id === pin.dataset.pinId); session.pinned = !session.pinned; persist(); renderSidebar(); return; }
     const open = event.target.closest("[data-modal-open]"); if (open) { openModal(open.dataset.modalOpen); return; }
@@ -828,7 +850,8 @@
   document.querySelector("[data-current-session-find-next]").addEventListener("click", () => moveFind(1));
   document.querySelector("[data-current-session-find-close]").addEventListener("click", () => resetFind(true));
   document.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); const find = document.querySelector("[data-current-session-find]"); find.hidden = false; find.querySelector("input").focus(); }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); element.searchForm.classList.add("is-open"); const searchToggle = document.querySelector("[data-sidebar-search-toggle]"); searchToggle.classList.add("is-active"); searchToggle.setAttribute("aria-expanded", "true"); if (matchMedia("(min-width: 761px)").matches) setDesktopSidebarHidden(false); else document.getElementById("mobile-session-toggle").checked = true; element.search.focus(); }
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); const find = document.querySelector("[data-current-session-find]"); find.hidden = false; find.querySelector("input").focus(); }
     if (event.key === "Escape") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (modal) closeModal(modal); else if (!element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); element.projectTrigger.focus(); } }
     if (event.key === "Tab") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (!modal) return; const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")]; if (!focusable.length) return; const first = focusable[0], last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
@@ -896,6 +919,9 @@
   document.querySelector(".model-settings-form").addEventListener("submit", (event) => { event.preventDefault(); const model = new FormData(event.target).get("model"); const thinking = new FormData(event.target).get("thinking"); document.querySelector('[data-status-key="model"] .session-status-value').textContent = `${model} (${thinking})`; closeModal(event.target.closest("[data-modal]")); });
   document.querySelector("[data-model-search]").addEventListener("input", (event) => { const query = event.target.value.toLowerCase(); document.querySelectorAll(".model-option").forEach((option) => { option.hidden = !option.textContent.toLowerCase().includes(query); }); });
 
+  let desktopSidebarHidden = false;
+  try { desktopSidebarHidden = localStorage.getItem(desktopSidebarHiddenKey) === "true"; } catch (_error) {}
+  setDesktopSidebarHidden(desktopSidebarHidden);
   renderHeader(); renderConversation(); renderSidebar(); loadDraft();
   if (!introSeen()) openModal("demo-intro-modal", null);
 })(globalThis);

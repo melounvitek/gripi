@@ -1,6 +1,9 @@
 import { notificationReplyPreview } from "./formatting.js";
 import { newSessionModalUrl, sessionUrl } from "./urls.js";
 
+const DESKTOP_SIDEBAR_HIDDEN_KEY = "gripi:desktop-sidebar-hidden";
+const DESKTOP_SIDEBAR_MEDIA = "(min-width: 761px)";
+
 export class SidebarController {
   constructor(document, window, projectSelectController, gatewayUpdateController, notifyFinalReply) {
     this.document = document;
@@ -22,6 +25,7 @@ export class SidebarController {
 
   initialize() {
     this.bindPageListeners();
+    this.applyDesktopVisibilityPreference();
     this.bind();
   }
 
@@ -32,9 +36,36 @@ export class SidebarController {
 
     this.projectSelectController.initialize(this.element);
     this.bindInteractionTracking();
-    this.syncMobileUnreadBadges();
+    this.syncUnreadBadges();
     this.gatewayUpdateController.apply();
     return this.element;
+  }
+
+  applyDesktopVisibilityPreference() {
+    let hidden = false;
+    try { hidden = this.window.localStorage?.getItem(DESKTOP_SIDEBAR_HIDDEN_KEY) === "true"; } catch (_error) {}
+    this.setDesktopVisibility(hidden);
+  }
+
+  setDesktopVisibility(hidden, persist = false) {
+    this.document.body.classList.toggle("desktop-sidebar-hidden", hidden);
+    this.syncVisibilityToggle();
+    if (!persist) return;
+
+    try {
+      if (hidden) this.window.localStorage.setItem(DESKTOP_SIDEBAR_HIDDEN_KEY, "true");
+      else this.window.localStorage.removeItem(DESKTOP_SIDEBAR_HIDDEN_KEY);
+    } catch (_error) {}
+  }
+
+  syncVisibilityToggle() {
+    const hidden = this.document.body.classList.contains("desktop-sidebar-hidden");
+    const label = hidden ? "Show sessions" : "Hide sessions";
+    this.document.querySelectorAll("[data-sidebar-visibility-toggle]").forEach((toggle) => {
+      toggle.setAttribute("aria-label", label);
+      toggle.setAttribute("title", label);
+      toggle.setAttribute("aria-expanded", hidden ? "false" : "true");
+    });
   }
 
   invalidate({ clearSessionsLimit = false } = {}) {
@@ -66,6 +97,13 @@ export class SidebarController {
       this.changeSearchFilter(form).catch(() => form.submit());
     });
     this.document.addEventListener("click", (event) => {
+      const visibilityToggle = event.target.closest?.("[data-sidebar-visibility-toggle]");
+      if (visibilityToggle) {
+        event.preventDefault();
+        this.setDesktopVisibility(!this.document.body.classList.contains("desktop-sidebar-hidden"), true);
+        return;
+      }
+
       const clearFiltersLink = event.target.closest?.("[data-sidebar-filters-clear]");
       if (clearFiltersLink && this.normalLeftClick(event)) {
         event.preventDefault();
@@ -386,11 +424,11 @@ export class SidebarController {
     indicators.appendChild(indicator);
   }
 
-  syncMobileUnreadBadges() {
+  syncUnreadBadges() {
     const count = Number(this.element?.dataset.unreadSessionCount || 0);
     const label = `${count} unread ${count === 1 ? "session" : "sessions"}`;
     const text = count > 99 ? "99+" : String(count);
-    this.document.querySelectorAll(".mobile-sessions-button").forEach((button) => {
+    this.document.querySelectorAll(".mobile-sessions-button, .desktop-sessions-button").forEach((button) => {
       let badge = button.querySelector(".mobile-sessions-unread-badge");
       if (count <= 0) {
         badge?.remove();
@@ -424,6 +462,7 @@ export class SidebarController {
     if (!this.setSearchOpen(form, button, true)) return false;
     const mobileToggle = this.document.getElementById("mobile-session-toggle");
     if (mobileToggle) mobileToggle.checked = true;
+    if (this.window.matchMedia?.(DESKTOP_SIDEBAR_MEDIA).matches) this.setDesktopVisibility(false);
     input.focus({ preventScroll: true });
     input.select();
     return true;

@@ -2,6 +2,58 @@ import { expect, test } from "@playwright/test";
 import { sessions } from "../support/contract.mjs";
 import { message } from "../support/ui.mjs";
 
+test("hide the desktop sidebar and remember the preference", async ({ page }) => {
+  await page.goto("/");
+
+  const sidebar = page.getByRole("complementary", { name: "Sessions" });
+  const toggle = page.locator(".session-header [data-sidebar-visibility-toggle]");
+  await expect(sidebar).toBeVisible();
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-label", "Hide sessions");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+  await toggle.click();
+
+  await expect(sidebar).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-label", "Show sessions");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("gripi:desktop-sidebar-hidden"))).toBe("true");
+
+  await page.setViewportSize({ width: 760, height: 900 });
+  const mobileToggle = page.locator('.session-header label[aria-label="Open sessions"]');
+  await expect(toggle).toBeHidden();
+  await expect(mobileToggle).toBeVisible();
+  await expect(page.locator("#mobile-session-toggle")).not.toBeChecked();
+  await mobileToggle.click();
+  await expect(page.locator("#mobile-session-toggle")).toBeChecked();
+  await expect(sidebar).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("gripi:desktop-sidebar-hidden"))).toBe("true");
+
+  await page.setViewportSize({ width: 761, height: 900 });
+  await expect(sidebar).toBeHidden();
+  await expect(toggle).toBeVisible();
+
+  await page.reload();
+
+  await expect(sidebar).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-label", "Show sessions");
+
+  await page.keyboard.press("Control+Shift+f");
+
+  await expect(sidebar).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search sessions" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("gripi:desktop-sidebar-hidden"))).toBe("true");
+
+  await page.reload();
+  await expect(sidebar).toBeHidden();
+  await toggle.click();
+
+  await expect(sidebar).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-label", "Hide sessions");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("gripi:desktop-sidebar-hidden"))).toBe(null);
+});
+
 test("switch focus between the composer and conversation in a narrow desktop window", async ({ page }) => {
   await page.goto("/");
 

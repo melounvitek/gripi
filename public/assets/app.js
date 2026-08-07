@@ -193,6 +193,7 @@ const treeSessionController = new TreeSessionController(document, window, {
 
 function bindSessionDom() {
   conversationPanel = document.querySelector(".conversation-panel");
+  sidebarController.syncVisibilityToggle();
   liveOutput = document.getElementById("live-output");
   promptForm = document.querySelector(".prompt-form");
   abortForm = document.getElementById("abort-form");
