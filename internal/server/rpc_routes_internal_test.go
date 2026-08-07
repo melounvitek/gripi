@@ -49,11 +49,15 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayAttachments(t *testi
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project)
+	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), sessionsRoot)
+	if err := gatewayState.SetPinned(pendingPath, true); err != nil {
+		t.Fatal(err)
+	}
 	metadata := filepath.Join(attachmentsRoot, sessions.SessionHash(pendingPath)+".jsonl")
 	if err := os.WriteFile(metadata, []byte("gateway metadata\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	app := &application{config: config.Config{SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot}, sessionCache: sessions.NewCache(), gatewayState: gatewayState, rpcClients: registry, pendingSessions: pending}
 
 	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), pendingPath)
 	if err != nil || result != realPath {
@@ -71,6 +75,10 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayAttachments(t *testi
 	migrated, err := os.ReadFile(filepath.Join(attachmentsRoot, sessions.SessionHash(realPath)+".jsonl"))
 	if err != nil || string(migrated) != "gateway metadata\n" {
 		t.Fatalf("migrated metadata = %q, %v", migrated, err)
+	}
+	_, pinned, err := gatewayState.ReadAndObserve([]*sessions.Session{{Path: realPath, CWD: project}}, nil, false)
+	if err != nil || !pinned[realPath] {
+		t.Fatalf("migrated pin = %v, %v", pinned, err)
 	}
 }
 

@@ -202,6 +202,9 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if strings.Contains(sidebarAfterPendingClone.Body.String(), pendingPath) {
 		t.Fatalf("old pending session remained in sidebar: %s", sidebarAfterPendingClone.Body.String())
 	}
+	if !strings.Contains(sidebarAfterPendingClone.Body.String(), "<h2>Pinned</h2>") {
+		t.Fatalf("pending pin did not follow clone: %s", sidebarAfterPendingClone.Body.String())
+	}
 
 	log, err := os.ReadFile(fakeLog)
 	if err != nil {
