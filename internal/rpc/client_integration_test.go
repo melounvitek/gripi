@@ -479,6 +479,86 @@ func TestClientDeliversAssembledDeltaOnlyMessageUpdates(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestClientFinishesDeltaOnlyPartsAndDeliversCompleteToolCalls(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_start", "message": map[string]any{"role": "assistant", "content": []any{}}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "text_start", "contentIndex": 0}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "text_delta", "contentIndex": 0, "delta": "provisional"}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "text_end", "contentIndex": 0, "content": "authoritative"}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "toolcall_start", "contentIndex": 1}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "toolcall_delta", "contentIndex": 1, "delta": `{"path":"/tmp/file`}})
+	toolCall := map[string]any{"type": "toolCall", "id": "read-1", "name": "read", "arguments": map[string]any{"path": "/tmp/file"}}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "toolcall_end", "contentIndex": 1, "toolCall": toolCall}})
+	waitSequence(t, client, 7)
+
+	partial := gatewayPartialMessage(t, client.EventsAfter(0).Events)
+	wantContent := []any{map[string]any{"type": "text", "text": "authoritative"}, toolCall}
+	if !reflect.DeepEqual(partial["content"], wantContent) {
+		t.Fatalf("finished partial content = %#v, want %#v", partial["content"], wantContent)
+	}
+	_ = stdoutWriter.Close()
+}
+
+func TestClientPreservesCumulativeMessageUpdatesAndClearsFinishedStreams(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_start", "message": map[string]any{"role": "assistant", "content": []any{}}})
+	legacyMessage := map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "legacy partial"}}}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "message": legacyMessage, "assistantMessageEvent": map[string]any{"type": "text_delta", "contentIndex": 0, "delta": "legacy partial"}})
+	waitSequence(t, client, 2)
+
+	batch := client.EventsAfter(0)
+	update := eventOfType(t, batch.Events, "message_update")
+	if !reflect.DeepEqual(update["message"], legacyMessage) || update["gatewayPartialMessage"] != nil {
+		t.Fatalf("legacy update = %#v", update)
+	}
+
+	finalMessage := map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "final"}}}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_end", "message": finalMessage})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "text_delta", "contentIndex": 0, "delta": "late"}})
+	waitSequence(t, client, 4)
+
+	batch = client.EventsAfter(batch.LastSeq)
+	if !reflect.DeepEqual(eventOfType(t, batch.Events, "message_end")["message"], finalMessage) {
+		t.Fatalf("final events = %#v", batch.Events)
+	}
+	if update = eventOfType(t, batch.Events, "message_update"); update["gatewayPartialMessage"] != nil {
+		t.Fatalf("late update retained finished stream = %#v", update)
+	}
+	_ = stdoutWriter.Close()
+}
+
+func TestClientKeepsAssistantStreamAcrossNonAssistantMessages(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_start", "message": map[string]any{"role": "assistant", "content": []any{}}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "thinking_start", "contentIndex": 0}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "thinking_delta", "contentIndex": 0, "delta": "Before"}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_start", "message": map[string]any{"role": "custom", "content": []any{}}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_end", "message": map[string]any{"role": "custom", "content": []any{}}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "thinking_delta", "contentIndex": 0, "delta": " after"}})
+	waitSequence(t, client, 6)
+
+	partial := gatewayPartialMessage(t, client.EventsAfter(0).Events)
+	if !reflect.DeepEqual(partial["content"], []any{map[string]any{"type": "thinking", "thinking": "Before after"}}) {
+		t.Fatalf("interleaved partial = %#v", partial)
+	}
+	_ = stdoutWriter.Close()
+}
+
 func TestClientBoundsReplayAndCoalescesLiveUpdates(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
@@ -996,6 +1076,17 @@ func waitSequence(t *testing.T, client *Client, want int64) {
 	}
 	t.Fatalf("event sequence = %d, want %d", client.EventSequence(), want)
 }
+func eventOfType(t *testing.T, events []map[string]any, eventType string) map[string]any {
+	t.Helper()
+	for _, event := range events {
+		if event["type"] == eventType {
+			return event
+		}
+	}
+	t.Fatalf("%s event missing from %#v", eventType, events)
+	return nil
+}
+
 func gatewayPartialMessage(t *testing.T, events []map[string]any) map[string]any {
 	t.Helper()
 	for _, event := range events {

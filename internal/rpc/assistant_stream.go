@@ -35,15 +35,23 @@ func (stream *assistantStreamState) apply(event map[string]any) {
 	case "text_start":
 		stream.startPart(index, "text")
 	case "text_delta":
-		stream.appendPart(index, "text", stringValue(event["delta"]))
+		if delta, ok := event["delta"].(string); ok {
+			stream.appendPart(index, "text", delta)
+		}
 	case "text_end":
-		stream.finishPart(index, "text", stringValue(event["content"]))
+		if content, ok := event["content"].(string); ok {
+			stream.finishPart(index, "text", content)
+		}
 	case "thinking_start":
 		stream.startPart(index, "thinking")
 	case "thinking_delta":
-		stream.appendPart(index, "thinking", stringValue(event["delta"]))
+		if delta, ok := event["delta"].(string); ok {
+			stream.appendPart(index, "thinking", delta)
+		}
 	case "thinking_end":
-		stream.finishPart(index, "thinking", stringValue(event["content"]))
+		if content, ok := event["content"].(string); ok {
+			stream.finishPart(index, "thinking", content)
+		}
 	case "toolcall_end":
 		toolCall, _ := event["toolCall"].(map[string]any)
 		if toolCall != nil {

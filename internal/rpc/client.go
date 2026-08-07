@@ -1539,12 +1539,12 @@ func (client *Client) extensionUIEventForDeliveryLocked(event map[string]any) ma
 
 func (client *Client) updateAssistantStreamLocked(response map[string]any) {
 	switch response["type"] {
+	case "agent_start":
+		client.assistantStream = nil
 	case "message_start":
 		message, _ := response["message"].(map[string]any)
 		if message["role"] == "assistant" {
 			client.assistantStream = newAssistantStreamState(message, client.fallbackRPCLineBytes)
-		} else {
-			client.assistantStream = nil
 		}
 	case "message_update":
 		if response["message"] != nil || client.assistantStream == nil {
