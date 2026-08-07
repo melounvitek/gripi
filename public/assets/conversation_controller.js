@@ -64,10 +64,6 @@ export class ConversationController {
     this.followOversizedMessageBottom = false;
     if (!this.element) return;
 
-    this.listen(this.element, "click", (event) => {
-      const toggle = event.target.closest?.("[data-focus-activity-toggle]");
-      if (toggle) this.toggleFocusedActivity(toggle);
-    });
     this.refreshFocusedActivity();
 
     this.listen(this.element, "keydown", (event) => {
@@ -269,38 +265,21 @@ export class ConversationController {
     }).join("|")}`;
     if (signature === this.focusedActivitySignature) return;
     this.focusedActivitySignature = signature;
-    const summaries = [...this.element.querySelectorAll("[data-focus-activity-summary]")];
-    const activeToggle = this.document.activeElement?.closest?.("[data-focus-activity-toggle]");
-    const activeGroupId = activeToggle?.closest("[data-focus-activity-summary]")?.dataset.focusActivitySummary;
-    const focusAnchor = activeGroupId && messages.find((message) => message.dataset.focusActivityGroup === activeGroupId);
-    const expandedMessages = new Set();
-    summaries.forEach((summary) => {
-      if (summary.querySelector("[data-focus-activity-toggle]")?.getAttribute("aria-expanded") === "true") {
-        messages.filter((message) => message.dataset.focusActivityGroup === summary.dataset.focusActivitySummary).forEach((message) => expandedMessages.add(message));
-      }
-      summary.remove();
-    });
+    this.element.querySelectorAll("[data-focus-activity-summary]").forEach((summary) => summary.remove());
     messages.forEach((message) => { delete message.dataset.focusActivityGroup; });
-    let replacementFocus = null;
     const groups = this.focusedActivityGroups(messages);
     groups.forEach((group, index) => {
       const groupId = `${this.bindingEpoch}-${index}`;
-      const expanded = group.some((message) => expandedMessages.has(message));
       group.forEach((message) => { message.dataset.focusActivityGroup = groupId; });
       const summaryData = this.focusedActivitySummary(group);
       const items = this.focusedActivityItems(group);
       const running = this.agentRunning && index === groups.length - 1 && group.at(-1) === messages.at(-1);
       const summary = this.document.createElement("section");
-      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${expanded ? " is-expanded" : ""}${running ? " is-running" : ""}`;
+      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${running ? " is-running" : ""}`;
       summary.dataset.focusActivitySummary = groupId;
 
-      const header = this.document.createElement(items.length > 0 ? "button" : "div");
+      const header = this.document.createElement("div");
       header.className = "focus-activity-header";
-      if (items.length > 0) {
-        header.type = "button";
-        header.dataset.focusActivityToggle = "true";
-        header.setAttribute("aria-expanded", String(expanded));
-      }
       if (running) {
         const spinner = this.document.createElement("span");
         spinner.className = "focus-activity-spinner";
@@ -324,7 +303,6 @@ export class ConversationController {
       if (items.length > 0) {
         const details = this.document.createElement("div");
         details.className = "focus-activity-details";
-        details.hidden = !expanded;
         const hiddenItemCount = Math.max(0, items.length - FOCUSED_ACTIVITY_ITEM_LIMIT);
         if (hiddenItemCount > 0) {
           const notice = this.document.createElement("p");
@@ -351,10 +329,7 @@ export class ConversationController {
         summary.append(details);
       }
       group[0].before(summary);
-      if (focusAnchor && group.includes(focusAnchor)) replacementFocus = header;
     });
-    if (activeToggle && !replacementFocus) replacementFocus = this.viewSelectControl;
-    replacementFocus?.focus({ preventScroll: true });
   }
 
   scheduleFocusedActivityRefresh() {
@@ -365,16 +340,6 @@ export class ConversationController {
       this.focusedActivityRefreshFrame = null;
       if (epoch === this.bindingEpoch && element === this.element) this.refreshFocusedActivity();
     });
-  }
-
-  toggleFocusedActivity(toggle) {
-    const summary = toggle.closest("[data-focus-activity-summary]");
-    const expanded = toggle.getAttribute("aria-expanded") !== "true";
-    toggle.setAttribute("aria-expanded", String(expanded));
-    summary.classList.toggle("is-expanded", expanded);
-    const details = summary.querySelector(".focus-activity-details");
-    if (details) details.hidden = !expanded;
-    this.updateJumpControls();
   }
 
   listen(target, type, listener, options) {
