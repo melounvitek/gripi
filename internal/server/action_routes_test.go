@@ -190,6 +190,10 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if pendingPage.Code != http.StatusOK || !strings.Contains(pendingPage.Body.String(), "New session (pending first assistant response)") {
 		t.Fatalf("pending session page = %d %s", pendingPage.Code, pendingPage.Body.String())
 	}
+	pendingPin := serveAction(handler, formActionRequest("/sessions/pin", map[string]string{"session": pendingPath, "pinned": "true"}, true))
+	if pendingPin.Code != http.StatusOK || !strings.Contains(pendingPin.Body.String(), `"pinned":true`) {
+		t.Fatalf("pending pin = %d %s", pendingPin.Code, pendingPin.Body.String())
+	}
 	pendingClone := serveAction(handler, formActionRequest("/sessions/clone", map[string]string{"session": pendingPath}, true))
 	if pendingClone.Code != http.StatusOK {
 		t.Fatalf("pending clone = %d %s", pendingClone.Code, pendingClone.Body.String())

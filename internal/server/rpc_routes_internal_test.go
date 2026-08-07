@@ -294,6 +294,37 @@ func TestPreparePageCanonicalizesSelectedPendingSessionBeforeBuildingView(t *tes
 	}
 }
 
+func TestPreparePageOrdersPendingSessionByRecentActivity(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for index := range recentSessionLimit {
+		path := filepath.Join(root, fmt.Sprintf("persisted-%02d.jsonl", index))
+		writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": fmt.Sprintf("persisted-%02d", index), "timestamp": "2026-01-01T00:00:00Z", "cwd": project}})
+	}
+	pendingPath := filepath.Join(root, "pending.jsonl")
+	pending := rpc.NewPendingSessionRegistry(func() time.Time {
+		return time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
+	})
+	pending.Remember(pendingPath, project)
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root}, sessionCache: sessions.NewCache(), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), root), rpcClients: registry, pendingSessions: pending}
+	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
+
+	view, err := app.preparePage(request, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Sessions) != recentSessionLimit+1 {
+		t.Fatalf("sessions = %d, want %d", len(view.Sessions), recentSessionLimit+1)
+	}
+	if view.SeparateCurrent != nil || len(view.SidebarSessions) == 0 || view.SidebarSessions[0].Path != pendingPath {
+		t.Fatalf("separate current = %#v, first sidebar session = %#v", view.SeparateCurrent, view.SidebarSessions[0])
+	}
+}
+
 func TestImagePromptLockFollowsRemapChainAndBlocksTheFinalPath(t *testing.T) {
 	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register("/intermediate", &remapClient{}); err != nil {
