@@ -55,7 +55,7 @@ test("replace a retained subagent when its persisted history page loads", async 
   await expect(matching).toContainText(paginatedSubagent.liveProgress);
   await expect(unrelated).toHaveCount(1);
 
-  await page.locator("[data-conversation-history-status]").click();
+  await page.getByRole("button", { name: "Earlier messages available" }).scrollIntoViewIfNeeded();
   await expect(matching).toHaveCount(1);
   await expect(matching).toContainText(paginatedSubagent.persistedResult);
   await expect(unrelated).toHaveCount(1);
