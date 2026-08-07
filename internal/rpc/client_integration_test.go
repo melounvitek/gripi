@@ -443,6 +443,42 @@ func TestClientAcceptsFallbackResponseNearConfiguredLimit(t *testing.T) {
 	}
 }
 
+func TestClientDeliversAssembledDeltaOnlyMessageUpdates(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+	timestamp := "2026-08-07T08:26:06.648Z"
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_start", "message": map[string]any{"role": "assistant", "content": []any{}, "timestamp": timestamp}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "thinking_start", "contentIndex": 0}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "thinking_delta", "contentIndex": 0, "delta": "First"}})
+	waitSequence(t, client, 3)
+
+	batch := client.EventsAfter(0)
+	partial := gatewayPartialMessage(t, batch.Events)
+	if partial["timestamp"] != timestamp || !reflect.DeepEqual(partial["content"], []any{map[string]any{"type": "thinking", "thinking": "First"}}) {
+		t.Fatalf("first partial message = %#v", partial)
+	}
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "thinking_delta", "contentIndex": 0, "delta": " thought"}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "text_start", "contentIndex": 1}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "text_delta", "contentIndex": 1, "delta": "Answer"}})
+	waitSequence(t, client, 6)
+
+	batch = client.EventsAfter(batch.LastSeq)
+	partial = gatewayPartialMessage(t, batch.Events)
+	wantContent := []any{
+		map[string]any{"type": "thinking", "thinking": "First thought"},
+		map[string]any{"type": "text", "text": "Answer"},
+	}
+	if !reflect.DeepEqual(partial["content"], wantContent) {
+		t.Fatalf("complete partial content = %#v, want %#v", partial["content"], wantContent)
+	}
+	_ = stdoutWriter.Close()
+}
+
 func TestClientBoundsReplayAndCoalescesLiveUpdates(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
@@ -960,6 +996,21 @@ func waitSequence(t *testing.T, client *Client, want int64) {
 	}
 	t.Fatalf("event sequence = %d, want %d", client.EventSequence(), want)
 }
+func gatewayPartialMessage(t *testing.T, events []map[string]any) map[string]any {
+	t.Helper()
+	for _, event := range events {
+		if event["type"] != "message_update" {
+			continue
+		}
+		message, _ := event["gatewayPartialMessage"].(map[string]any)
+		if message != nil {
+			return message
+		}
+	}
+	t.Fatalf("gateway partial message missing from %#v", events)
+	return nil
+}
+
 func assertSubagentGatewayTimestamp(t *testing.T, events []map[string]any, want int64) {
 	t.Helper()
 	if len(events) != 1 {

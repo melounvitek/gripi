@@ -309,6 +309,10 @@ function acceptPrompt(command) {
     return;
   }
   if ([prompts.steerStart, prompts.followUpStart, prompts.abortStart].includes(command.message)) return;
+  if (command.message === prompts.deltaStreaming) {
+    schedule(120, completeDeltaAssistant);
+    return;
+  }
 
   let reply = replies.standard;
   if (path.basename(process.cwd()).startsWith("new-session-")) reply = replies.newSession;
@@ -719,6 +723,32 @@ function completeAssistant(reply) {
   emit({ type: "message_start", message: started });
   emit({ type: "message_update", message: partial, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: partial.content[0].text, partial } });
   emit({ type: "message_update", message: completed, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: reply.slice(partial.content[0].text.length), partial: completed } });
+  finishAssistant(completed);
+}
+
+function completeDeltaAssistant() {
+  const timestamp = Date.now();
+  const started = assistantMessage([], "stop", timestamp);
+  const completed = assistantMessage([
+    { type: "thinking", thinking: replies.deltaThinking },
+    { type: "text", text: replies.deltaText }
+  ], "stop", timestamp);
+  emit({ type: "message_start", message: started });
+  emit({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } });
+  emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: replies.deltaThinking } });
+  schedule(700, () => {
+    emit({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 } });
+    emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: replies.deltaTextStart } });
+    schedule(2000, () => {
+      emit({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: replies.deltaThinking } });
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: replies.deltaText.slice(replies.deltaTextStart.length) } });
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 1, content: replies.deltaText } });
+      finishAssistant(completed);
+    });
+  });
+}
+
+function finishAssistant(completed) {
   emit({ type: "message_end", message: completed });
   appendMessage(completed);
   emit({ type: "turn_end", message: completed, toolResults: [] });

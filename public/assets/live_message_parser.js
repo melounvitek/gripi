@@ -197,7 +197,7 @@ export class LiveMessageParser {
     }
 
     function eventMessage(event) {
-      return event.message || event.delta || event.item || event;
+      return event.message || event.gatewayPartialMessage || event.delta || event.item || event;
     }
 
     function messageText(message) {

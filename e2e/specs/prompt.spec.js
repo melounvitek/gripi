@@ -331,6 +331,19 @@ test("renders readable Markdown tables live and after reload", async ({ page }) 
   await expectReadableMarkdownTable(persistedResponse.getByRole("table"));
 });
 
+test("stream delta-only thinking and text before the assistant message ends", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.deltaStreaming);
+  await sendPrompt(page, prompts.deltaStreaming);
+
+  await expect(page.locator(".message--thinking")).toContainText(replies.deltaThinking);
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(message(page, "assistant", replies.deltaTextStart)).toBeVisible();
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(message(page, "assistant", replies.deltaText)).toBeVisible();
+  await expectRunFinished(page);
+});
+
 test("stream a tool-backed answer and render the persisted result after reload", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.prompt);

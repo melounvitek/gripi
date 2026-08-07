@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { messageFingerprint } from "../public/assets/formatting.js";
+import { eventTimestamp, messageFingerprint } from "../public/assets/formatting.js";
 import { LiveMessageParser } from "../public/assets/live_message_parser.js";
 import { LiveMessageRenderer } from "../public/assets/live_message_renderer.js";
 import { ServerMarkdownRenderer } from "../public/assets/server_markdown_renderer.js";
@@ -25,6 +25,23 @@ test("live user messages render and update plain URLs as links", () => {
   renderer.updateLiveSegment(entry, "user", { compact: false, text: "Use https://example.test/task/43." }, false);
   const updatedLink = entry.body.children.find((child) => child.tagName === "A");
   assert.equal(updatedLink?.getAttribute("href"), "https://example.test/task/43");
+});
+
+test("delta-only updates use the gateway partial message and its timestamp", () => {
+  const parser = new LiveMessageParser();
+  const gatewayPartialMessage = {
+    role: "assistant",
+    content: [{ type: "thinking", thinking: "Live reasoning" }],
+    timestamp: "2026-08-07T08:26:06.648Z",
+  };
+  const event = {
+    type: "message_update",
+    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: " reasoning" },
+    gatewayPartialMessage,
+  };
+
+  assert.equal(parser.eventMessage(event), gatewayPartialMessage);
+  assert.equal(eventTimestamp(event), gatewayPartialMessage.timestamp);
 });
 
 function markdownBody() {

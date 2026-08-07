@@ -182,6 +182,7 @@ type Client struct {
 	eventReplayFloor int64
 	eventSequence    int64
 	coalesced        map[string]*replayEntry
+	assistantStream  *assistantStreamState
 
 	activeToolEvents     map[string]map[string]any
 	activeToolOrder      []string
@@ -972,6 +973,7 @@ func (client *Client) readerStopped() {
 	client.extensionWidgets = make(map[string]map[string]any)
 	client.extensionWidgetOrder = nil
 	client.extensionTitle = nil
+	client.assistantStream = nil
 	client.busy = false
 	client.busySince = nil
 	client.mu.Unlock()
@@ -1034,6 +1036,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 			response["gatewayTimestamp"] = gatewayTimestamp
 			serializedBytes = jsonSize(response)
 		}
+		client.updateAssistantStreamLocked(response)
 		client.updateBusyStateLocked(response)
 		client.updateQueuedMessagesLocked(response)
 		if typeName == "queue_update" {
@@ -1087,7 +1090,7 @@ func (client *Client) EventsAfter(after int64) EventBatch {
 		if entry.sequence <= after {
 			continue
 		}
-		if event := client.extensionUIEventForDeliveryLocked(entry.event); event != nil {
+		if event := client.eventForDeliveryLocked(entry.event); event != nil {
 			result.Events = append(result.Events, event)
 		}
 	}
@@ -1506,6 +1509,19 @@ func (client *Client) snapshotDialogLocked(dialog *extensionDialog) map[string]a
 	result["timeout"] = int64(math.Ceil(float64(remaining) / float64(time.Millisecond)))
 	return result
 }
+func (client *Client) eventForDeliveryLocked(event map[string]any) map[string]any {
+	event = client.extensionUIEventForDeliveryLocked(event)
+	if event == nil || event["type"] != "message_update" || event["message"] != nil {
+		return event
+	}
+	partial := client.assistantStream.partialMessage()
+	if partial == nil {
+		return event
+	}
+	result := cloneMap(event)
+	result["gatewayPartialMessage"] = partial
+	return result
+}
 func (client *Client) extensionUIEventForDeliveryLocked(event map[string]any) map[string]any {
 	if event["type"] != "extension_ui_request" {
 		return event
@@ -1519,6 +1535,31 @@ func (client *Client) extensionUIEventForDeliveryLocked(event map[string]any) ma
 		return nil
 	}
 	return client.snapshotDialogLocked(dialog)
+}
+
+func (client *Client) updateAssistantStreamLocked(response map[string]any) {
+	switch response["type"] {
+	case "message_start":
+		message, _ := response["message"].(map[string]any)
+		if message["role"] == "assistant" {
+			client.assistantStream = newAssistantStreamState(message, client.fallbackRPCLineBytes)
+		} else {
+			client.assistantStream = nil
+		}
+	case "message_update":
+		if response["message"] != nil || client.assistantStream == nil {
+			return
+		}
+		event, _ := response["assistantMessageEvent"].(map[string]any)
+		client.assistantStream.apply(event)
+	case "message_end":
+		message, _ := response["message"].(map[string]any)
+		if message["role"] == "assistant" {
+			client.assistantStream = nil
+		}
+	case "agent_end":
+		client.assistantStream = nil
+	}
 }
 
 func internalBridgeStatusKey(response map[string]any) string {
