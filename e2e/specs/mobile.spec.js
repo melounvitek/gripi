@@ -43,6 +43,35 @@ test("keep parallel subagent order and timestamps stable on mobile", async ({ pa
   await expect(cards).toHaveCount(2);
 });
 
+test("show a compact transcript toggle that switches on the first tap", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  const history = page.getByRole("link", { name: new RegExp(sessions.history) });
+  if (!await history.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
+  await history.tap();
+
+  const toggle = page.getByRole("button", { name: "Messages-only transcript view" });
+  await expect(toggle.getByText("All", { exact: true })).toBeVisible();
+  const projectIcon = await page.locator(".session-header-project-icon").boundingBox();
+  const viewIcon = await toggle.locator("[data-view-icon-frame]").boundingBox();
+  const tapTarget = await toggle.boundingBox();
+  expect(projectIcon).not.toBeNull();
+  expect(viewIcon).not.toBeNull();
+  expect(tapTarget).not.toBeNull();
+  expect(viewIcon.width).toBe(projectIcon.width);
+  expect(viewIcon.height).toBe(projectIcon.height);
+  expect(tapTarget.width).toBeGreaterThanOrEqual(44);
+  expect(tapTarget.height).toBeGreaterThanOrEqual(44);
+
+  await toggle.tap();
+
+  await expect(toggle).toHaveAttribute("aria-label", "Messages-only transcript view");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(toggle).toHaveAttribute("title", "Show all details");
+  await expect(toggle.getByText("Chat", { exact: true })).toBeVisible();
+});
+
 test("keep native Tab order for coarse pointers", async ({ page }) => {
   await page.goto("/");
 

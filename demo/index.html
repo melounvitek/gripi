@@ -76,12 +76,16 @@
     .session-header-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-project .session-header-project-icon { width: 1.55rem; min-width: 1.55rem; height: 1.25rem; border-radius: 0.2rem; font-size: 0.56rem; }
     .session-header-project-separator { flex: 0 0 auto; color: var(--muted-soft); }
-    .session-header-view-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 2.1rem; min-width: 2.1rem; height: 2.1rem; padding: 0; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); }
-    .session-header-view-toggle:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
-    .session-header-view-toggle:focus-visible { border-color: var(--accent-line-55); outline: none; box-shadow: 0 0 0 2px var(--accent-tint-14); }
-    .session-header-view-toggle-icon { display: none; width: 1.125rem; height: 1.125rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .session-header-view-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2.1rem; padding: 0.35rem 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 500; letter-spacing: normal; text-transform: none; }
+    .session-header-view-toggle:hover { color: var(--text); background: transparent; transform: none; }
+    .session-header-view-toggle:focus-visible { outline: none; box-shadow: none; }
+    .session-header-view-toggle-icon-frame { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 1.55rem; min-width: 1.55rem; height: 1.25rem; border: 1px solid var(--border-strong); border-radius: 0.2rem; background: var(--panel-soft); }
+    .session-header-view-toggle:hover .session-header-view-toggle-icon-frame { border-color: var(--accent-line-55); background: var(--accent-tint-04); }
+    .session-header-view-toggle:focus-visible .session-header-view-toggle-icon-frame { border-color: var(--accent-line-55); box-shadow: 0 0 0 2px var(--accent-tint-14); }
+    .session-header-view-toggle-icon { display: none; width: 0.9rem; height: 0.9rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     .session-header-view-toggle-icon circle { fill: currentColor; stroke: none; }
-    .session-header-view-toggle[data-view="full"] [data-view-icon="full"], .session-header-view-toggle[data-view="conversation"] [data-view-icon="messages"] { display: block; }
+    .session-header-view-toggle-label { display: none; white-space: nowrap; }
+    .session-header-view-toggle[data-view="full"] [data-view-icon="full"], .session-header-view-toggle[data-view="full"] [data-view-label="full"], .session-header-view-toggle[data-view="conversation"] [data-view-icon="messages"], .session-header-view-toggle[data-view="conversation"] [data-view-label="messages"] { display: block; }
     .session-header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 0.45rem; }
     .session-header-actions form { margin: 0; }
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.7rem; }
@@ -577,7 +581,7 @@
     @media (pointer: coarse) {
       .session-row a.session { padding-right: 3.6rem; }
       .session-pin-toggle { top: 0.35rem; right: 0.35rem; width: 2.75rem; height: 2.75rem; padding: 0.8rem; opacity: 0.7; }
-      .session-header-view-toggle { width: 2.75rem; min-width: 2.75rem; height: 2.75rem; }
+      .session-header-view-toggle { min-height: 2.75rem; }
       .send-control { min-width: 2.75rem; }
       .send-button { display: inline-flex; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; align-items: center; justify-content: center; font-size: 0; }
     }
@@ -619,7 +623,7 @@
       .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.66rem; }
       .session-header h1 { font-size: 1rem; }
       .session-header-project { font-size: 0.7rem; }
-      .session-header-view-toggle { width: 2.75rem; min-width: 2.75rem; height: 2.75rem; }
+      .session-header-view-toggle { min-height: 2.75rem; }
       .project-select-trigger { min-height: 2.75rem; }
       .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.4rem; }
       .project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }
@@ -758,7 +762,7 @@
         <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
         <div class="session-header-title" id="session-header-title">
           <h1 class="session-header-name">Welcome to Gripi</h1>
-          <div class="session-header-project" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon" aria-hidden="true">GR</span><span class="session-header-project-label">gripi</span><span class="session-header-project-separator" aria-hidden="true">·</span><button type="button" class="session-header-view-toggle" data-conversation-view-toggle data-view="full" aria-pressed="false" title="Show messages only" aria-label="Messages-only transcript view"><svg class="session-header-view-toggle-icon" data-view-icon="full" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r=".75"/><circle cx="3.5" cy="12" r=".75"/><circle cx="3.5" cy="18" r=".75"/></svg><svg class="session-header-view-toggle-icon" data-view-icon="messages" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15a3 3 0 0 1-3 3H8l-4 3v-3.8A3 3 0 0 1 2 14V7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3z"/><path d="M7 9h8M7 13h5"/></svg></button></div>
+          <div class="session-header-project" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon" aria-hidden="true">GR</span><span class="session-header-project-label">gripi</span><span class="session-header-project-separator" aria-hidden="true">·</span><button type="button" class="session-header-view-toggle" data-conversation-view-toggle data-view="full" aria-pressed="false" title="Show messages only" aria-label="Messages-only transcript view"><span class="session-header-view-toggle-icon-frame" data-view-icon-frame aria-hidden="true"><svg class="session-header-view-toggle-icon" data-view-icon="full" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r=".75"/><circle cx="3.5" cy="12" r=".75"/><circle cx="3.5" cy="18" r=".75"/></svg><svg class="session-header-view-toggle-icon" data-view-icon="messages" viewBox="0 0 24 24"><path d="M20 15a3 3 0 0 1-3 3H8l-4 3v-3.8A3 3 0 0 1 2 14V7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3z"/><path d="M7 9h8M7 13h5"/></svg></span><span class="session-header-view-toggle-label" data-view-label="full">All</span><span class="session-header-view-toggle-label" data-view-label="messages">Chat</span></button></div>
         </div>
         <div class="session-header-actions">
           <a class="session-header-action session-header-window-action" href="#" title="Open session in new window" aria-label="Open session in new window" data-demo-disabled>↗</a>

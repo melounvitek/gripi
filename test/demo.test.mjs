@@ -81,6 +81,8 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
     'role="dialog" aria-modal="true" aria-labelledby="demo-intro-title"',
     'data-modal-open="demo-intro-modal"',
     'data-conversation-view-toggle',
+    'data-view-label="full">All</span>',
+    'data-view-label="messages">Chat</span>',
     'data-sidebar-visibility-toggle',
     'placeholder="Ask Pi…"',
     'openai-codex/gpt-5.5 (medium)',

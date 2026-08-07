@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { prompts, sessions, tool } from "../support/contract.mjs";
 import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
-test("toggles transcript details with a single icon button", async ({ page }) => {
+test("toggles transcript details with a single button", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.toolSummary);
   await sendPrompt(page, prompts.longCommand);
@@ -15,6 +15,8 @@ test("toggles transcript details with a single icon button", async ({ page }) =>
   await expect(toggle).toHaveAttribute("title", "Show messages only");
   await expect(toggle.locator('[data-view-icon="full"]')).toBeVisible();
   await expect(toggle.locator('[data-view-icon="messages"]')).toBeHidden();
+  await expect(toggle.getByText("All", { exact: true })).toBeVisible();
+  await expect(toggle.getByText("Chat", { exact: true })).toBeHidden();
   await toggle.click();
 
   await expect(page.locator(".conversation-panel")).toHaveClass(/is-conversation-focused/);
@@ -22,6 +24,8 @@ test("toggles transcript details with a single icon button", async ({ page }) =>
   await expect(toggle).toHaveAttribute("title", "Show all details");
   await expect(toggle.locator('[data-view-icon="messages"]')).toBeVisible();
   await expect(toggle.locator('[data-view-icon="full"]')).toBeHidden();
+  await expect(toggle.getByText("Chat", { exact: true })).toBeVisible();
+  await expect(toggle.getByText("All", { exact: true })).toBeHidden();
   await expect(toolCall).toBeHidden();
 
   await toggle.click();
