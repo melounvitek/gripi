@@ -98,8 +98,7 @@ test("shows Pi CLI guidance for login and logout commands", async ({ page }) => 
   await page.goto("/");
   await selectSession(page, sessions.prompt);
 
-  await page.getByRole("combobox", { name: "Transcript view" }).click();
-  await page.getByRole("option", { name: "Messages only" }).click();
+  await page.getByRole("button", { name: "Show messages only" }).click();
   await page.getByLabel("Message to Pi").fill("/");
   await expect(page.locator('[data-command-name="login"]')).toBeVisible();
   await expect(page.locator('[data-command-name="logout"]')).toBeVisible();

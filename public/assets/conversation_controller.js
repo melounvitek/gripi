@@ -52,10 +52,10 @@ export class ConversationController {
     this.jumpToFirstButton = this.document.querySelector(".jump-to-first");
     this.jumpToLatestButton = this.document.querySelector(".jump-to-latest");
     this.conversationPanel = this.document.querySelector(".conversation-panel");
-    this.viewSelect = this.document.querySelector("[data-conversation-view-select]");
+    this.viewToggle = this.document.querySelector("[data-conversation-view-toggle]");
     this.applyFocusedView();
-    this.listen(this.viewSelect, "change", () => {
-      this.focusedView = this.viewSelect.value === "conversation";
+    this.listen(this.viewToggle, "click", () => {
+      this.focusedView = !this.focusedView;
       this.applyFocusedView(true);
     });
     this.lastScrollTop = this.element?.scrollTop || 0;
@@ -125,7 +125,7 @@ export class ConversationController {
     this.element = null;
     this.liveOutput = null;
     this.conversationPanel = null;
-    this.viewSelect = null;
+    this.viewToggle = null;
     this.agentRunning = false;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
@@ -144,12 +144,12 @@ export class ConversationController {
     } : null;
 
     this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
-    if (this.viewSelect) {
-      const value = this.focusedView ? "conversation" : "full";
-      if (this.viewSelect.value !== value) {
-        this.viewSelect.value = value;
-        this.viewSelect.dispatchEvent?.(new this.window.Event("change", { bubbles: true }));
-      }
+    if (this.viewToggle) {
+      this.viewToggle.dataset.view = this.focusedView ? "conversation" : "full";
+      this.viewToggle.setAttribute("aria-pressed", String(this.focusedView));
+      const action = this.focusedView ? "Show all details" : "Show messages only";
+      this.viewToggle.setAttribute("aria-label", action);
+      this.viewToggle.title = action;
     }
 
     if (!scrollSnapshot) return;

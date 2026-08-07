@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { ConversationController } from "../public/assets/conversation_controller.js";
 import { renderTextWithLinks } from "../public/assets/dom.js";
 import { ProjectSelectController } from "../public/assets/project_select_controller.js";
 import { SidebarController } from "../public/assets/sidebar_controller.js";
@@ -61,8 +62,8 @@ test("project selector opens on the first valid touch without sticky-hover behav
   const wrapper = new FakeElement("div", ["[data-project-select]"]);
   wrapper.setAttribute("data-project-select-plain", "");
   const select = new FakeElement("select");
-  select.setAttribute("aria-label", "Transcript view");
-  select.options = [nativeOption("full", "All details"), nativeOption("conversation", "Messages only")];
+  select.setAttribute("aria-label", "Filter sessions by project");
+  select.options = [nativeOption("/alpha", "alpha"), nativeOption("/beta", "beta")];
   select.selectedIndex = 0;
   Object.defineProperty(select, "selectedOptions", { get() { return [this.options[this.selectedIndex]]; } });
   wrapper.append(select);
@@ -86,6 +87,25 @@ test("project selector opens on the first valid touch without sticky-hover behav
     option.textContent = text;
     return option;
   }
+});
+
+test("conversation view toggle button reflects the focused state", () => {
+  const conversation = new ConversationController({}, {});
+  const toggle = new FakeElement("button");
+  conversation.viewToggle = toggle;
+
+  conversation.applyFocusedView();
+  assert.equal(toggle.dataset.view, "full");
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+  assert.equal(toggle.getAttribute("aria-label"), "Show messages only");
+  assert.equal(toggle.title, "Show messages only");
+
+  conversation.focusedView = true;
+  conversation.applyFocusedView();
+  assert.equal(toggle.dataset.view, "conversation");
+  assert.equal(toggle.getAttribute("aria-pressed"), "true");
+  assert.equal(toggle.getAttribute("aria-label"), "Show all details");
+  assert.equal(toggle.title, "Show all details");
 });
 
 test("tree model covers search, folding, navigation, labels, and exact filters", () => {

@@ -24,8 +24,7 @@ test("show the full wrapped tool command live and after reload", async ({ page }
 });
 
 async function showMessagesOnly(page) {
-  await page.getByRole("combobox", { name: "Transcript view" }).click();
-  await page.getByRole("option", { name: "Messages only" }).click();
+  await page.getByRole("button", { name: "Show messages only" }).click();
 }
 
 async function expectAlwaysOpenActivity(page) {
