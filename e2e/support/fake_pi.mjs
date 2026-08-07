@@ -315,7 +315,7 @@ function acceptPrompt(command) {
   else if (command.message === prompts.markdownTable) reply = replies.markdownTable;
 
   if (command.message === prompts.longCommand) {
-    schedule(120, () => completeWithTool(reply, { command: tool.longCommand }));
+    schedule(120, () => completeWithTool(reply, { command: tool.longCommand, initialCommand: "pi --no-session", initialCommandDelay: 750, completionDelay: 1200 }));
   } else if (command.message === prompts.terminal) {
     schedule(120, () => completeWithTool(reply, { command: tool.terminalCommand, updates: tool.terminalUpdates, updateDelay: 350, completionDelay: 800 }));
   } else if (command.message === prompts.wrappedToolOutput) {
@@ -642,10 +642,6 @@ function completeWithTool(reply, options = {}) {
   const toolCallId = `call_${randomUUID().slice(0, 8)}`;
   const toolMessage = assistantMessage([{ type: "toolCall", id: toolCallId, name: "bash", arguments: { command } }], "toolUse");
   emit({ type: "message_start", message: { ...toolMessage, content: [] } });
-  emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: toolMessage.content[0], partial: toolMessage } });
-  emit({ type: "message_end", message: toolMessage });
-  appendMessage(toolMessage);
-  emit({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command } });
 
   const finish = () => {
     const result = { content: [{ type: "text", text: updates.at(-1) }], details: {} };
@@ -670,7 +666,21 @@ function completeWithTool(reply, options = {}) {
     if (index === updates.length - 1) finish();
     else schedule(options.updateDelay || 0, () => publishUpdate(index + 1));
   };
-  publishUpdate(0);
+  const publishToolCall = () => {
+    emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: toolMessage.content[0], partial: toolMessage } });
+    emit({ type: "message_end", message: toolMessage });
+    appendMessage(toolMessage);
+    emit({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command } });
+    publishUpdate(0);
+  };
+
+  if (options.initialCommand) {
+    const initialMessage = assistantMessage([{ type: "toolCall", id: toolCallId, name: "bash", arguments: { command: options.initialCommand } }], "toolUse");
+    emit({ type: "message_update", message: initialMessage, assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, toolCall: initialMessage.content[0], partial: initialMessage } });
+    schedule(options.initialCommandDelay || 50, publishToolCall);
+  } else {
+    publishToolCall();
+  }
 }
 
 function completeWithWrite(reply) {

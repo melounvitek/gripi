@@ -53,7 +53,6 @@ export class ConversationController {
     this.jumpToLatestButton = this.document.querySelector(".jump-to-latest");
     this.conversationPanel = this.document.querySelector(".conversation-panel");
     this.viewSelect = this.document.querySelector("[data-conversation-view-select]");
-    this.viewSelectControl = this.viewSelect?.closest?.("[data-project-select]")?._projectSelectState?.trigger || this.viewSelect;
     this.applyFocusedView();
     this.listen(this.viewSelect, "change", () => {
       this.focusedView = this.viewSelect.value === "conversation";
@@ -127,7 +126,6 @@ export class ConversationController {
     this.liveOutput = null;
     this.conversationPanel = null;
     this.viewSelect = null;
-    this.viewSelectControl = null;
     this.agentRunning = false;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
@@ -255,12 +253,16 @@ export class ConversationController {
     const messages = [...this.element.querySelectorAll(".message")];
     const signature = `${this.agentRunning}|${this.historyStatus()?.hidden !== false}|${messages.map((message) => {
       if (!this.focusedActivityMessageIds.has(message)) this.focusedActivityMessageIds.set(message, ++this.focusedActivityMessageSequence);
+      const toolCall = message.classList.contains("message--tool-call");
+      const error = message.classList.contains("message--error") || message.classList.contains("message--tool-error");
+      const itemText = toolCall || error ? (message.querySelector(".compact-summary") || message.querySelector(".message-body"))?.textContent || "" : "";
       return [
         this.focusedActivityMessageIds.get(message),
         this.focusedViewMessage(message),
         message.classList.contains("message--thinking"),
         ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name)),
-        message.classList.contains("message--error") || message.classList.contains("message--tool-error")
+        error,
+        itemText
       ].join(":");
     }).join("|")}`;
     if (signature === this.focusedActivitySignature) return;

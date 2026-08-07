@@ -6,7 +6,6 @@ test("show the full wrapped tool command live and after reload", async ({ page }
   await page.goto("/");
   await selectSession(page, sessions.toolSummary);
   await sendPrompt(page, prompts.longCommand);
-  await expectRunFinished(page);
 
   const card = message(page, "assistant", "pi --no-session").last();
   await expectFullCommand(card);
@@ -15,6 +14,7 @@ test("show the full wrapped tool command live and after reload", async ({ page }
   await expectFullCommand(card, { wrapped: true });
   await showMessagesOnly(page);
   await expectAlwaysOpenActivity(page);
+  await expectRunFinished(page);
 
   await page.reload();
   const restoredCard = message(page, "assistant", "pi --no-session").last();

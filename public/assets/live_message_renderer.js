@@ -831,7 +831,7 @@ export class LiveMessageRenderer {
 
     if (!this.markLiveEntryRendered(entry, roleName, segment.text, timestamp)) return null;
     this.replaceMessageImages(entry.article, segment.images);
-    this.conversationController.afterLiveOutputChange(shouldScroll);
+    this.conversationController.afterLiveOutputChange(shouldScroll, true, segment.compact);
     return entry;
   }
 
