@@ -146,6 +146,9 @@ export class LiveMessageRenderer {
   }
 
   replaceMessageImages(article, images = []) {
+    article.querySelectorAll(".message-image").forEach((image) => {
+      if (image.dataset.objectUrl) URL.revokeObjectURL(image.dataset.objectUrl);
+    });
     article.querySelector(".message-images")?.remove();
     this.renderMessageImages(article, images);
   }
@@ -170,11 +173,7 @@ export class LiveMessageRenderer {
       element.alt = alt;
       element.loading = "lazy";
       element.decoding = "async";
-      if (image.src.startsWith("blob:")) {
-        const revoke = () => URL.revokeObjectURL(image.src);
-        element.addEventListener("load", revoke, { once: true });
-        element.addEventListener("error", revoke, { once: true });
-      }
+      if (image.src.startsWith("blob:")) element.dataset.objectUrl = image.src;
       button.append(element);
       container.append(button);
     });
