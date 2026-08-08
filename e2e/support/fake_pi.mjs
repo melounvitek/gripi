@@ -318,7 +318,9 @@ function acceptPrompt(command) {
   if (path.basename(process.cwd()).startsWith("new-session-")) reply = replies.newSession;
   else if (command.message === prompts.markdownTable) reply = replies.markdownTable;
 
-  if (command.message === prompts.longCommand) {
+  if (command.message === prompts.imageRead) {
+    schedule(120, () => completeWithImageRead(reply));
+  } else if (command.message === prompts.longCommand) {
     schedule(120, () => completeWithTool(reply, { command: tool.longCommand, initialCommand: "pi --no-session", initialCommandDelay: 750, completionDelay: 1200 }));
   } else if (command.message === prompts.terminal) {
     schedule(120, () => completeWithTool(reply, { command: tool.terminalCommand, updates: tool.terminalUpdates, updateDelay: 350, completionDelay: 800 }));
@@ -703,6 +705,40 @@ function completeWithWrite(reply) {
     role: "toolResult",
     toolCallId,
     toolName: "write",
+    content: result.content,
+    details: {},
+    isError: false,
+    timestamp: Date.now()
+  };
+  appendMessage(toolResult);
+  emitMessage(toolResult);
+  emit({ type: "turn_end", message: toolMessage, toolResults: [toolResult] });
+  emit({ type: "turn_start" });
+  schedule(120, () => completeAssistant(reply));
+}
+
+function completeWithImageRead(reply) {
+  const toolCallId = `call_${randomUUID().slice(0, 8)}`;
+  const toolCall = { type: "toolCall", id: toolCallId, name: "read", arguments: { path: "/tmp/e2e-large-image.png" } };
+  const toolMessage = assistantMessage([toolCall], "toolUse");
+  emit({ type: "message_start", message: { ...toolMessage, content: [] } });
+  emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall, partial: toolMessage } });
+  emit({ type: "message_end", message: toolMessage });
+  appendMessage(toolMessage);
+  emit({ type: "tool_execution_start", toolCallId, toolName: "read", args: toolCall.arguments });
+
+  const result = {
+    content: [
+      { type: "text", text: "Read image file [image/png]" },
+      { type: "image", data: "a".repeat(3 << 20), mimeType: "image/png" }
+    ],
+    details: {}
+  };
+  emit({ type: "tool_execution_end", toolCallId, toolName: "read", result, isError: false });
+  const toolResult = {
+    role: "toolResult",
+    toolCallId,
+    toolName: "read",
     content: result.content,
     details: {},
     isError: false,

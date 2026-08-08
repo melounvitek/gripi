@@ -172,7 +172,8 @@ export async function seedFixtures(root) {
     ["bash-project", "bash-reload", sessions.bashReload],
     ["controls-project", "write-output", sessions.writeOutput],
     ["prompt-project", "delta-streaming", sessions.deltaStreaming],
-    ["mobile-project", "image-viewer", sessions.imageViewer]
+    ["mobile-project", "image-viewer", sessions.imageViewer],
+    ["prompt-project", "image-read", sessions.imageRead]
   ];
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
     await writeSession(root, projects[projectName], slug, title, index + 1, history);

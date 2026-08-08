@@ -344,6 +344,30 @@ test("stream delta-only thinking and text before the assistant message ends", as
   await expectRunFinished(page);
 });
 
+test("render a large image read without blocking the conversation", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.imageRead);
+
+  let sessionFragmentRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/session_fragment") sessionFragmentRequests += 1;
+  });
+  await page.evaluate(() => {
+    window.sessionSwitchingObserved = false;
+    new MutationObserver(() => {
+      if (document.body.classList.contains("session-switching")) window.sessionSwitchingObserved = true;
+    }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  });
+
+  await sendPrompt(page, prompts.imageRead);
+  await expect(page.getByRole("button", { name: "View attached image full size" })).toBeAttached();
+  await expectRunFinished(page);
+  await expect(message(page, "assistant", replies.standard)).toBeVisible();
+
+  expect(sessionFragmentRequests).toBe(0);
+  expect(await page.evaluate(() => window.sessionSwitchingObserved)).toBe(false);
+});
+
 test("stream a tool-backed answer and render the persisted result after reload", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.prompt);

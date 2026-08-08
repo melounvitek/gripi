@@ -28,6 +28,7 @@ export const sessions = {
   extensionRace: "E2E Extension Race Desktop",
   mobile: "E2E Prompt Mobile",
   imageViewer: "E2E Image Viewer Mobile",
+  imageRead: "E2E Image Read Desktop",
   bashIncluded: "E2E Bash Included Desktop",
   bashExcluded: "E2E Bash Excluded Desktop",
   bashCancel: "E2E Bash Cancel Desktop",
@@ -59,6 +60,7 @@ export const prompts = {
   extensionRace: "Exercise queued extension requests",
   wrappedToolOutput: "Show wrapped tool output",
   writeOutput: "Show complete write output",
+  imageRead: "Read a large image without refreshing the conversation",
   newSession: "Create the first deterministic response",
   realPiPrefix: "Reply with exactly this token and nothing else:"
 };
