@@ -1712,6 +1712,10 @@ func (client *Client) updateActiveToolsLocked(response map[string]any, serialize
 	}
 }
 func (client *Client) boundedReplayEvent(response map[string]any, serializedBytes int) (map[string]any, int) {
+	if event, changed := replayEventWithoutDuplicateImages(response); changed {
+		response = event
+		serializedBytes = jsonSize(response)
+	}
 	if response["type"] != "tool_execution_update" || response["toolName"] != snapshotToolName || serializedBytes <= MaxActiveToolSnapshotBytes {
 		return response, serializedBytes
 	}
@@ -1720,6 +1724,42 @@ func (client *Client) boundedReplayEvent(response map[string]any, serializedByte
 		return nil, 0
 	}
 	return event, jsonSize(event)
+}
+
+func replayEventWithoutDuplicateImages(response map[string]any) (map[string]any, bool) {
+	containerKey := ""
+	switch response["type"] {
+	case "tool_execution_end":
+		containerKey = "result"
+	case "message_start":
+		message, _ := response["message"].(map[string]any)
+		if message["role"] == "toolResult" {
+			containerKey = "message"
+		}
+	}
+	if containerKey == "" {
+		return response, false
+	}
+	container, _ := response[containerKey].(map[string]any)
+	content, _ := container["content"].([]any)
+	filtered := make([]any, 0, len(content))
+	changed := false
+	for _, part := range content {
+		record, _ := part.(map[string]any)
+		if record["type"] == "image" {
+			changed = true
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	if !changed {
+		return response, false
+	}
+	event := cloneMap(response)
+	container = cloneMap(container)
+	container["content"] = filtered
+	event[containerKey] = container
+	return event, true
 }
 
 func boundedActiveToolEvent(response map[string]any, serializedBytes int) map[string]any {

@@ -601,7 +601,7 @@ func TestClientKeepsCurrentReplayCursorThroughImageToolResultLifecycle(t *testin
 	if batch.Missed {
 		t.Fatalf("image lifecycle missed current cursor: replay floor = %d", client.EventReplayCursor())
 	}
-	if !reflect.DeepEqual(eventTypes(batch.Events), []string{"tool_execution_end", "message_start", "message_end"}) {
+	if !reflect.DeepEqual(eventTypes(batch.Events), []any{"tool_execution_end", "message_start", "message_end"}) {
 		t.Fatalf("image lifecycle events = %v", eventTypes(batch.Events))
 	}
 	redundant, _ := json.Marshal(batch.Events[:2])
