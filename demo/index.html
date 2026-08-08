@@ -596,7 +596,8 @@
     @media (min-width: 761px) {
       body.desktop-sidebar-hidden .app-shell { grid-template-columns: minmax(0, 1fr); }
       body.desktop-sidebar-hidden .session-sidebar { display: none; }
-      .desktop-sessions-button { display: inline-flex; }
+      .session-sidebar-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+      .desktop-sessions-close-button, body.desktop-sidebar-hidden .desktop-sessions-open-button { display: inline-flex; }
     }
     @media (max-width: 760px) {
       html, body { width: 100%; max-width: 100vw; overflow-x: hidden; }
@@ -706,6 +707,7 @@
           <h1><svg viewBox="0 0 1400 400" role="img" aria-label="Gripi"><g style="fill: var(--accent)"><path d="M0 0H300V100H100V300H200V200H300V400H0Z"/><path fill-rule="evenodd" d="M400 0H700V200H600V300H500V400H400ZM500 100V200H600V100Z"/><path d="M600 300H700V400H600Z"/><path d="M800 0H900V400H800Z"/></g><g style="fill: var(--text)" transform="translate(1000 0)"><path fill-rule="evenodd" d="M0 0H300V200H200V300H100V400H0ZM100 100V200H200V100Z"/><path d="M300 200H400V400H300Z"/></g></svg></h1>
           <div class="sidebar-server-origin">static demo · local browser</div>
         </div>
+        <button type="button" class="desktop-sessions-button desktop-sessions-close-button" aria-label="Hide sessions" title="Hide sessions" aria-controls="session-sidebar" aria-expanded="true" data-sidebar-visibility-toggle><span class="hamburger-icon" aria-hidden="true"></span></button>
         <label for="mobile-session-toggle" class="mobile-sessions-button mobile-sessions-close-button" aria-label="Close sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
       </div>
       <div class="session-sidebar-content">
@@ -758,7 +760,7 @@
 
     <main class="conversation-panel">
       <header class="session-header">
-        <button type="button" class="desktop-sessions-button" aria-label="Hide sessions" title="Hide sessions" aria-controls="session-sidebar" aria-expanded="true" data-sidebar-visibility-toggle><span class="hamburger-icon" aria-hidden="true"></span></button>
+        <button type="button" class="desktop-sessions-button desktop-sessions-open-button" aria-label="Show sessions" title="Show sessions" aria-controls="session-sidebar" aria-expanded="false" data-sidebar-visibility-toggle><span class="hamburger-icon" aria-hidden="true"></span></button>
         <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
         <div class="session-header-title" id="session-header-title">
           <h1 class="session-header-name">Welcome to Gripi</h1>

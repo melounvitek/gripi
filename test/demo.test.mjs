@@ -74,6 +74,8 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
     'openSelectOnFirstTouch(newSessionTrigger, () => newSessionList.hidden, openNewSessionList);',
     'const introSeenKey = "gripi:static-demo:intro-seen";',
     'const desktopSidebarHiddenKey = "gripi:desktop-sidebar-hidden";',
+    'sidebarVisibilityToggles: document.querySelectorAll("[data-sidebar-visibility-toggle]")',
+    'element.sidebarVisibilityToggles.forEach((toggle) => {',
     'if (!introSeen()) openModal("demo-intro-modal", null);',
   ]) assert.ok(javascript.includes(expected), `missing ${expected}`);
 
@@ -83,6 +85,8 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
     'data-conversation-view-toggle',
     'data-view-label="full">All</span>',
     'data-view-label="messages">Chat</span>',
+    'class="desktop-sessions-button desktop-sessions-close-button"',
+    'class="desktop-sessions-button desktop-sessions-open-button"',
     'data-sidebar-visibility-toggle',
     'placeholder="Ask Pi…"',
     'openai-codex/gpt-5.5 (medium)',

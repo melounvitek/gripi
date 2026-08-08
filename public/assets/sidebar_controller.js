@@ -100,7 +100,9 @@ export class SidebarController {
       const visibilityToggle = event.target.closest?.("[data-sidebar-visibility-toggle]");
       if (visibilityToggle) {
         event.preventDefault();
-        this.setDesktopVisibility(!this.document.body.classList.contains("desktop-sidebar-hidden"), true);
+        const hidden = !this.document.body.classList.contains("desktop-sidebar-hidden");
+        this.setDesktopVisibility(hidden, true);
+        this.document.querySelector(hidden ? ".desktop-sessions-open-button" : ".desktop-sessions-close-button")?.focus();
         return;
       }
 
@@ -222,6 +224,8 @@ export class SidebarController {
     const previousSearchQuery = previousSearchForm?.querySelector('input[name="session_search"]')?.value;
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
     const focusedPinPath = this.document.activeElement?.closest?.("[data-session-pin-toggle]")?.dataset.sessionPath;
+    const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");
+    const visibilityToggleFocused = !!focusedVisibilityToggle && oldElement.contains(focusedVisibilityToggle);
     this.projectSelectController.destroy(oldElement);
     oldElement.outerHTML = html;
     this.bind(this.document.querySelector(".session-sidebar"));
@@ -237,6 +241,8 @@ export class SidebarController {
     if (focusedPinPath) {
       const focusedPin = [...this.element.querySelectorAll("[data-session-pin-toggle]")].find((button) => button.dataset.sessionPath === focusedPinPath);
       (focusedPin || this.element.querySelector("[data-sidebar-search-toggle]"))?.focus({ preventScroll: true });
+    } else if (visibilityToggleFocused) {
+      this.element.querySelector("[data-sidebar-visibility-toggle]")?.focus({ preventScroll: true });
     }
     if (notify) this.notifyBackgroundFinalReplies(previousAssistantCounts);
     const refreshedScrollContainer = this.scrollContainer();

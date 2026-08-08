@@ -250,7 +250,7 @@
     panel: document.querySelector(".conversation-panel"), viewToggle: document.querySelector("[data-conversation-view-toggle]"),
     state: document.querySelector(".composer-state"), stop: document.getElementById("stop-button"), commands: document.getElementById("command-list"), attachmentTray: document.querySelector(".attachment-tray"),
     treeTarget: document.querySelector("[data-demo-tree-target]"), treeTargetTitle: document.querySelector("[data-demo-tree-target-title]"), treeCurrentTitle: document.querySelector("[data-demo-tree-current-title]"),
-    sidebarVisibilityToggle: document.querySelector("[data-sidebar-visibility-toggle]")
+    sidebarVisibilityToggles: document.querySelectorAll("[data-sidebar-visibility-toggle]")
   };
 
   function currentSession() { return sessions.find((session) => session.id === currentId) || sessions[0]; }
@@ -266,9 +266,11 @@
   function setDesktopSidebarHidden(hidden, persistPreference = false) {
     document.body.classList.toggle("desktop-sidebar-hidden", hidden);
     const label = hidden ? "Show sessions" : "Hide sessions";
-    element.sidebarVisibilityToggle.setAttribute("aria-label", label);
-    element.sidebarVisibilityToggle.setAttribute("title", label);
-    element.sidebarVisibilityToggle.setAttribute("aria-expanded", hidden ? "false" : "true");
+    element.sidebarVisibilityToggles.forEach((toggle) => {
+      toggle.setAttribute("aria-label", label);
+      toggle.setAttribute("title", label);
+      toggle.setAttribute("aria-expanded", hidden ? "false" : "true");
+    });
     if (!persistPreference) return;
 
     try {
@@ -741,7 +743,9 @@
     const sidebarVisibilityToggle = event.target.closest("[data-sidebar-visibility-toggle]");
     if (sidebarVisibilityToggle) {
       event.preventDefault();
-      setDesktopSidebarHidden(!document.body.classList.contains("desktop-sidebar-hidden"), true);
+      const hidden = !document.body.classList.contains("desktop-sidebar-hidden");
+      setDesktopSidebarHidden(hidden, true);
+      document.querySelector(hidden ? ".desktop-sessions-open-button" : ".desktop-sessions-close-button")?.focus();
       return;
     }
 
