@@ -595,18 +595,20 @@ func TestClientKeepsCurrentReplayCursorThroughImageToolResultLifecycle(t *testin
 	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "read-image", "toolName": "read", "result": map[string]any{"content": imageContent}, "isError": false})
 	writeRecord(t, stdoutWriter, map[string]any{"type": "message_start", "message": map[string]any{"role": "toolResult", "toolCallId": "read-image", "content": imageContent}})
 	writeRecord(t, stdoutWriter, map[string]any{"type": "message_end", "message": map[string]any{"role": "toolResult", "toolCallId": "read-image", "content": imageContent}})
-	waitSequence(t, client, 4)
+	writeRecord(t, stdoutWriter, map[string]any{"type": "turn_end", "toolResults": []any{map[string]any{"role": "toolResult", "toolCallId": "read-image", "content": imageContent}}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "agent_end", "messages": []any{map[string]any{"role": "toolResult", "toolCallId": "read-image", "content": imageContent}}})
+	waitSequence(t, client, 6)
 
 	batch := client.EventsAfter(cursor)
 	if batch.Missed {
 		t.Fatalf("image lifecycle missed current cursor: replay floor = %d", client.EventReplayCursor())
 	}
-	if !reflect.DeepEqual(eventTypes(batch.Events), []any{"tool_execution_end", "message_start", "message_end"}) {
+	if !reflect.DeepEqual(eventTypes(batch.Events), []any{"tool_execution_end", "message_start", "message_end", "turn_end", "agent_end"}) {
 		t.Fatalf("image lifecycle events = %v", eventTypes(batch.Events))
 	}
-	redundant, _ := json.Marshal(batch.Events[:2])
+	redundant, _ := json.Marshal([]any{batch.Events[0], batch.Events[1], batch.Events[3], batch.Events[4]})
 	if strings.Contains(string(redundant), imageData) {
-		t.Fatal("redundant image data retained before final tool result message")
+		t.Fatal("redundant image data retained outside final tool result message")
 	}
 	final, _ := json.Marshal(batch.Events[2])
 	if !strings.Contains(string(final), imageData) {

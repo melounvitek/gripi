@@ -748,10 +748,10 @@ function completeWithImageRead(reply) {
   emitMessage(toolResult);
   emit({ type: "turn_end", message: toolMessage, toolResults: [toolResult] });
   emit({ type: "turn_start" });
-  schedule(120, () => completeAssistant(reply));
+  schedule(120, () => completeAssistant(reply, [toolMessage, toolResult]));
 }
 
-function completeAssistant(reply) {
+function completeAssistant(reply, priorMessages = []) {
   const timestamp = Date.now();
   const started = assistantMessage([], "stop", timestamp);
   const partial = assistantMessage([{ type: "text", text: reply.slice(0, Math.ceil(reply.length / 2)) }], "stop", timestamp);
@@ -759,7 +759,7 @@ function completeAssistant(reply) {
   emit({ type: "message_start", message: started });
   emit({ type: "message_update", message: partial, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: partial.content[0].text, partial } });
   emit({ type: "message_update", message: completed, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: reply.slice(partial.content[0].text.length), partial: completed } });
-  finishAssistant(completed);
+  finishAssistant(completed, priorMessages);
 }
 
 function completeDeltaAssistant() {
@@ -784,11 +784,11 @@ function completeDeltaAssistant() {
   });
 }
 
-function finishAssistant(completed) {
+function finishAssistant(completed, priorMessages = []) {
   emit({ type: "message_end", message: completed });
   appendMessage(completed);
   emit({ type: "turn_end", message: completed, toolResults: [] });
-  emit({ type: "agent_end", messages: [completed], willRetry: false });
+  emit({ type: "agent_end", messages: [...priorMessages, completed], willRetry: false });
   busy = false;
   activeScenario = null;
   persistDeferredBashMessages();

@@ -1728,6 +1728,7 @@ func (client *Client) boundedReplayEvent(response map[string]any, serializedByte
 
 func replayEventWithoutDuplicateImages(response map[string]any) (map[string]any, bool) {
 	containerKey := ""
+	messagesKey := ""
 	switch response["type"] {
 	case "tool_execution_end":
 		containerKey = "result"
@@ -1736,12 +1737,53 @@ func replayEventWithoutDuplicateImages(response map[string]any) (map[string]any,
 		if message["role"] == "toolResult" {
 			containerKey = "message"
 		}
+	case "turn_end":
+		messagesKey = "toolResults"
+	case "agent_end":
+		messagesKey = "messages"
 	}
-	if containerKey == "" {
+	if containerKey != "" {
+		container, _ := response[containerKey].(map[string]any)
+		content, changed := replayContentWithoutImages(container["content"])
+		if !changed {
+			return response, false
+		}
+		event := cloneMap(response)
+		container = cloneMap(container)
+		container["content"] = content
+		event[containerKey] = container
+		return event, true
+	}
+	if messagesKey == "" {
 		return response, false
 	}
-	container, _ := response[containerKey].(map[string]any)
-	content, _ := container["content"].([]any)
+	messages, _ := response[messagesKey].([]any)
+	compacted := append([]any(nil), messages...)
+	changed := false
+	for index, value := range messages {
+		message, _ := value.(map[string]any)
+		if message["role"] != "toolResult" {
+			continue
+		}
+		content, contentChanged := replayContentWithoutImages(message["content"])
+		if !contentChanged {
+			continue
+		}
+		message = cloneMap(message)
+		message["content"] = content
+		compacted[index] = message
+		changed = true
+	}
+	if !changed {
+		return response, false
+	}
+	event := cloneMap(response)
+	event[messagesKey] = compacted
+	return event, true
+}
+
+func replayContentWithoutImages(value any) ([]any, bool) {
+	content, _ := value.([]any)
 	filtered := make([]any, 0, len(content))
 	changed := false
 	for _, part := range content {
@@ -1752,14 +1794,7 @@ func replayEventWithoutDuplicateImages(response map[string]any) (map[string]any,
 		}
 		filtered = append(filtered, part)
 	}
-	if !changed {
-		return response, false
-	}
-	event := cloneMap(response)
-	container = cloneMap(container)
-	container["content"] = filtered
-	event[containerKey] = container
-	return event, true
+	return filtered, changed
 }
 
 func boundedActiveToolEvent(response map[string]any, serializedBytes int) map[string]any {
