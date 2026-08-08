@@ -49,6 +49,7 @@ import { activateToolOutputRegion, enhanceMarkdownCodeBlocks, enhanceMessageLink
 import { eventPollCurrent, eventPollingDelay } from "./polling.js";
 import { extensionUiRequestExpired, extensionUiResponseDisposition } from "./extension_ui.js";
 import { TreeSessionController } from "./tree_session_controller.js";
+import { ImageViewerController } from "./image_viewer_controller.js";
 import { NotificationPresenceController } from "./notification_presence.js";
 import { WebPushController } from "./web_push.js";
 
@@ -169,6 +170,8 @@ const composerAutocompleteController = new ComposerAutocompleteController(docume
 const liveMessageParser = new LiveMessageParser(document.body.dataset.homeDir || "");
 const serverMarkdownRenderer = new ServerMarkdownRenderer(document, conversationController);
 const liveMessageRenderer = new LiveMessageRenderer(document, conversationController, liveMessageParser, serverMarkdownRenderer);
+const imageViewerController = new ImageViewerController(document, window);
+imageViewerController.bind();
 conversationController.historyEnhancer = (root) => liveMessageRenderer.hydrateTerminalOutputs(root, { notify: false });
 conversationController.historyReconciler = (root) => liveMessageRenderer.reconcilePersistedToolResults(root);
 const treeSessionController = new TreeSessionController(document, window, {
@@ -1485,7 +1488,7 @@ function scheduleNextEventPoll(delay = nextEventPollDelay()) {
   if (!liveOutput) return;
   clearTimeout(eventPollTimer);
   eventPollTimer = null;
-  if (modalIsOpen()) return;
+  if (piModalIsOpen()) return;
   eventPollTimer = setTimeout(() => pollEvents().catch(() => {}), delay);
 }
 
@@ -1625,7 +1628,7 @@ async function pollEvents() {
     scheduleNextEventPoll(250);
     return;
   }
-  if (modalIsOpen()) return;
+  if (piModalIsOpen()) return;
   if (eventPollInFlight) return;
 
   const generation = sessionViewGeneration;
@@ -2454,6 +2457,8 @@ async function copyText(text) {
 
 function resetSessionViewState() {
   currentSessionFindController.close({ restoreFocus: false });
+  imageViewerController.close();
+  liveMessageRenderer.releaseMessageImageObjectURLs(conversationPanel);
   composerAutocompleteController.destroy();
   clearTimeout(extensionUiTimeoutTimer);
   extensionUiTimeoutTimer = null;
@@ -2487,7 +2492,7 @@ function resetSessionViewState() {
   const modelModal = document.querySelector('[data-modal="model-settings-modal"]');
   if (modelModal) modelModal.hidden = true;
   modelSettingsOperationGeneration += 1;
-  document.body.classList.toggle("modal-open", modalIsOpen());
+  document.body.classList.toggle("modal-open", piModalIsOpen());
 }
 
 function replaceNewSessionModalHtml(html) {
@@ -2708,8 +2713,12 @@ function openNewSessionModal() {
   openModal(modal);
 }
 
-function modalIsOpen() {
+function piModalIsOpen() {
   return !!document.querySelector("[data-modal]:not([hidden])");
+}
+
+function modalIsOpen() {
+  return imageViewerController.isOpen || piModalIsOpen();
 }
 
 function openModal(modal) {
@@ -2730,8 +2739,8 @@ function closeModal(modal) {
   if (modal.dataset.modal === "new-session-modal") newSessionFormController.close(modal.querySelector(".new-session-cwd-form"));
   modal.hidden = true;
   if (modal.dataset.modal === "model-settings-modal") modelSettingsOperationGeneration += 1;
-  document.body.classList.toggle("modal-open", modalIsOpen());
-  if (!modalIsOpen() && !document.hidden) {
+  document.body.classList.toggle("modal-open", piModalIsOpen());
+  if (!piModalIsOpen() && !document.hidden) {
     scheduleNextEventPoll(0);
     sidebarController.scheduleRefresh(0);
     browserAccessController.resume();

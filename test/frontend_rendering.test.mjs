@@ -27,6 +27,55 @@ test("live user messages render and update plain URLs as links", () => {
   assert.equal(updatedLink?.getAttribute("href"), "https://example.test/task/43");
 });
 
+test("live message images render as accessible viewer buttons", () => {
+  const document = new FakeDocument();
+  const conversation = {
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+  };
+  const renderer = new LiveMessageRenderer(document, conversation, {}, { bind() {} });
+  renderer.liveOutput = new FakeElement("div");
+
+  const entry = renderer.appendMessage("user", "Screenshot", true, false, null, {
+    images: [{ src: "data:image/png;base64,cG5n", alt: "Screenshot" }],
+  });
+
+  const container = entry.article.querySelector(".message-images");
+  const button = container.children[0];
+  const image = button.children[0];
+  assert.equal(button.tagName, "BUTTON");
+  assert.equal(button.type, "button");
+  assert.equal(button.dataset.imageViewerOpen, "");
+  assert.equal(button.getAttribute("aria-label"), "View screenshot full size");
+  assert.equal(image.tagName, "IMG");
+  assert.equal(image.src, "data:image/png;base64,cG5n");
+  assert.equal(image.alt, "Screenshot");
+});
+
+test("live image object URLs are released when their messages leave the conversation", () => {
+  const document = new FakeDocument();
+  const renderer = new LiveMessageRenderer(document, {
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+  }, {}, { bind() {} });
+  renderer.liveOutput = new FakeElement("div");
+  const entry = renderer.appendMessage("user", "Screenshot", true, false, null, {
+    images: [{ src: "blob:image-preview", alt: "Screenshot" }],
+  });
+  const revoked = [];
+  const originalRevoke = URL.revokeObjectURL;
+  URL.revokeObjectURL = (url) => revoked.push(url);
+
+  try {
+    renderer.releaseMessageImageObjectURLs(entry.article);
+  } finally {
+    URL.revokeObjectURL = originalRevoke;
+  }
+
+  assert.deepEqual(revoked, ["blob:image-preview"]);
+  assert.equal(entry.article.querySelector(".message-image").dataset.objectUrl, undefined);
+});
+
 test("delta-only updates use the gateway partial message and its timestamp", () => {
   const parser = new LiveMessageParser();
   const gatewayPartialMessage = {

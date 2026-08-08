@@ -108,7 +108,10 @@ export class LiveMessageRenderer {
       if (articles.size === 0) return;
 
       this.rememberPersistedToolResult(id);
-      articles.forEach((article) => article.remove());
+      articles.forEach((article) => {
+        this.releaseMessageImageObjectURLs(article);
+        article.remove();
+      });
       if (entry) this.forgetLiveEntry(entry);
       removed = true;
     });
@@ -133,6 +136,7 @@ export class LiveMessageRenderer {
 
   removeOptimisticUserMessage(text) {
     const message = this.optimisticUserMessage(text);
+    this.releaseMessageImageObjectURLs(message);
     message?.remove();
     if (message) this.conversationController.scheduleFocusedActivityRefresh?.();
   }
@@ -145,7 +149,17 @@ export class LiveMessageRenderer {
     delete message.dataset.optimisticImageCount;
   }
 
+  releaseMessageImageObjectURLs(root) {
+    root?.querySelectorAll(".message-image").forEach((image) => {
+      if (!image.dataset.objectUrl) return;
+
+      URL.revokeObjectURL(image.dataset.objectUrl);
+      delete image.dataset.objectUrl;
+    });
+  }
+
   replaceMessageImages(article, images = []) {
+    this.releaseMessageImageObjectURLs(article);
     article.querySelector(".message-images")?.remove();
     this.renderMessageImages(article, images);
   }
@@ -157,18 +171,22 @@ export class LiveMessageRenderer {
     const container = this.document.createElement("div");
     container.className = "message-images";
     visibleImages.forEach((image) => {
+      const button = this.document.createElement("button");
+      button.type = "button";
+      button.className = "message-image-button";
+      button.dataset.imageViewerOpen = "";
+      const alt = image.alt || "Attached image";
+      button.setAttribute("aria-label", `View ${alt.toLocaleLowerCase()} full size`);
+
       const element = this.document.createElement("img");
       element.className = "message-image";
       element.src = image.src;
-      element.alt = image.alt || "Attached image";
+      element.alt = alt;
       element.loading = "lazy";
       element.decoding = "async";
-      if (image.src.startsWith("blob:")) {
-        const revoke = () => URL.revokeObjectURL(image.src);
-        element.addEventListener("load", revoke, { once: true });
-        element.addEventListener("error", revoke, { once: true });
-      }
-      container.append(element);
+      if (image.src.startsWith("blob:")) element.dataset.objectUrl = image.src;
+      button.append(element);
+      container.append(button);
     });
     article.append(container);
   }
@@ -787,6 +805,7 @@ export class LiveMessageRenderer {
       const thinkingChanged = segment && entry.article.classList.contains("message--thinking") !== segment.thinking;
       if (segment && !thinkingChanged) return;
 
+      this.releaseMessageImageObjectURLs(entry.article);
       entry.article.remove();
       this.forgetLiveEntry(entry);
       removed = true;
@@ -815,6 +834,7 @@ export class LiveMessageRenderer {
   markLiveEntryRendered(entry, roleName, text, timestamp = null) {
     const timestampKey = messageTimestampKey(timestamp) || entry.article.dataset.messageTimestamp;
     if (this.liveMessageAlreadyRendered(roleName, text, timestampKey)) {
+      this.releaseMessageImageObjectURLs(entry.article);
       entry.article.remove();
       this.forgetLiveEntry(entry);
       this.conversationController.scheduleFocusedActivityRefresh?.();

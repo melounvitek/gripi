@@ -27,6 +27,7 @@ export const sessions = {
   extension: "E2E Extension Desktop",
   extensionRace: "E2E Extension Race Desktop",
   mobile: "E2E Prompt Mobile",
+  imageViewer: "E2E Image Viewer Mobile",
   bashIncluded: "E2E Bash Included Desktop",
   bashExcluded: "E2E Bash Excluded Desktop",
   bashCancel: "E2E Bash Cancel Desktop",

@@ -2,6 +2,66 @@ import { expect, test } from "@playwright/test";
 import { mobileSubagents, nativeBash, prompts, replies, sessions, tool } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
+test("open and zoom live and persisted images on the first mobile tap", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  const session = page.getByRole("link", { name: new RegExp(sessions.imageViewer) });
+  if (!await session.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
+  await session.tap();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.imageViewer })).toBeVisible();
+
+  let releasePrompt;
+  await page.route("**/prompt", async (route) => {
+    await new Promise((resolve) => { releasePrompt = resolve; });
+    await route.continue();
+  });
+  await page.locator("#image-input").setInputFiles({
+    name: "mobile-image.png",
+    mimeType: "image/png",
+    buffer: await page.screenshot()
+  });
+  const prompt = "Inspect this mobile image";
+  await sendPrompt(page, prompt);
+  await expect.poll(() => typeof releasePrompt).toBe("function");
+
+  const liveImage = message(page, "user", prompt).getByRole("button", { name: "View mobile-image.png full size" });
+  await expect(liveImage).toBeVisible();
+  await liveImage.tap();
+
+  const viewer = page.getByRole("dialog", { name: "Full-size image viewer" });
+  await expect(viewer).toBeVisible();
+  await expect(viewer).not.toHaveAttribute("data-load-error", "true");
+  const controls = viewer.locator("button");
+  const sizes = await controls.evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect()).map(({ width, height }) => ({ width, height })));
+  expect(sizes.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
+
+  const zoomValue = viewer.locator("[data-image-viewer-zoom-value]");
+  const fittedZoom = Number.parseInt(await zoomValue.textContent(), 10);
+  await viewer.locator("[data-image-viewer-image]").dblclick();
+  await expect(zoomValue).toHaveText("100%");
+  await expect(viewer).toBeVisible();
+  await viewer.getByRole("button", { name: "Fit image to screen" }).tap();
+  await expect(zoomValue).toHaveText(`${fittedZoom}%`);
+  await viewer.getByRole("button", { name: "Zoom in" }).tap();
+  await expect.poll(async () => Number.parseInt(await zoomValue.textContent(), 10)).toBeGreaterThan(fittedZoom);
+  await viewer.getByRole("button", { name: "Show actual size" }).tap();
+  await expect(viewer.locator("[data-image-viewer-zoom-value]")).toHaveText("100%");
+
+  releasePrompt();
+  await expectRunFinished(page);
+  await expect(viewer).toBeVisible();
+  await viewer.getByRole("button", { name: "Close image viewer" }).tap();
+  await expect(viewer).toBeHidden();
+  await page.reload();
+
+  const persistedImage = message(page, "user", prompt).getByRole("button", { name: "View attached image full size" });
+  await expect(persistedImage).toBeVisible();
+  await persistedImage.tap();
+  await expect(viewer).toBeVisible();
+  await viewer.locator("[data-image-viewer-stage]").tap({ position: { x: 10, y: 10 } });
+  await expect(viewer).toBeHidden();
+});
+
 test("keep parallel subagent order and timestamps stable on mobile", async ({ page }) => {
   await page.goto("/");
   await page.locator('label[aria-label="Open sessions"]').tap();
