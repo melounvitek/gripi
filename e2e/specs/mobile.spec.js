@@ -5,10 +5,10 @@ import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 test("open and zoom live and persisted images on the first mobile tap", async ({ page }) => {
   await page.goto("/");
   await page.locator('label[aria-label="Open sessions"]').tap();
-  const session = page.getByRole("link", { name: new RegExp(sessions.mobile) });
+  const session = page.getByRole("link", { name: new RegExp(sessions.imageViewer) });
   if (!await session.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
   await session.tap();
-  await expect(page.getByRole("heading", { level: 1, name: sessions.mobile })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.imageViewer })).toBeVisible();
 
   let releasePrompt;
   await page.route("**/prompt", async (route) => {

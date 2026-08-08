@@ -156,6 +156,7 @@ export async function seedFixtures(root) {
     ["bash-project", "bash-cancel", sessions.bashCancel],
     ["bash-project", "bash-overlap", sessions.bashOverlap],
     ["mobile-project", "mobile", sessions.mobile],
+    ["mobile-project", "image-viewer", sessions.imageViewer],
     ["mobile-bash-project", "bash-mobile", sessions.bashMobile],
     ["prompt-project", "prompt-retry", sessions.promptRetry],
     ["prompt-project", "prompt-retry-stop", sessions.promptRetryStop],
