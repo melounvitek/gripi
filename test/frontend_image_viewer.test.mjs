@@ -48,11 +48,12 @@ function sourceImage() {
   return { button, image };
 }
 
-function pointer(pointerId, clientX, clientY) {
+function pointer(pointerId, clientX, clientY, target = null) {
   return {
     pointerId,
     clientX,
     clientY,
+    target,
     preventDefault() {},
   };
 }
@@ -66,7 +67,6 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
 
   assert.equal(controller.isOpen, true);
   assert.equal(overlay.hidden, false);
-  assert.equal(document.body.classList.contains("image-viewer-open"), true);
   assert.equal(controller.scale, 0.42);
   assert.equal(zoomValue.textContent, "42%");
   assert.equal(close.focused, true);
@@ -78,7 +78,6 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
   controller.close();
   assert.equal(controller.isOpen, false);
   assert.equal(overlay.hidden, true);
-  assert.equal(document.body.classList.contains("image-viewer-open"), false);
   assert.equal(button.focused, true);
 });
 
@@ -88,23 +87,34 @@ test("image viewer pans one pointer and pinches around the moving midpoint", () 
   controller.open(image, button);
   controller.showActualSize();
 
-  controller.handlePointerDown(pointer(1, 400, 300));
-  controller.handlePointerMove(pointer(1, 500, 350));
-  controller.handlePointerUp(pointer(1, 500, 350));
+  controller.handlePointerDown(pointer(1, 400, 300, controller.image));
+  controller.handlePointerUp(pointer(1, 400, 300, controller.image));
+  controller.handleViewerClick({ target: controller.stage, preventDefault() {} });
+  assert.equal(controller.isOpen, true);
+
+  controller.handlePointerDown(pointer(1, 400, 300, controller.image));
+  controller.handlePointerMove(pointer(1, 500, 350, controller.image));
+  controller.handlePointerUp(pointer(1, 500, 350, controller.image));
   assert.equal(controller.offsetX, 100);
   assert.equal(controller.offsetY, 50);
 
   controller.resetPosition();
-  controller.handlePointerDown(pointer(1, 300, 300));
-  controller.handlePointerDown(pointer(2, 500, 300));
-  controller.handlePointerMove(pointer(2, 600, 300));
+  controller.handlePointerDown(pointer(1, 300, 300, controller.image));
+  controller.handlePointerDown(pointer(2, 500, 300, controller.image));
+  controller.handlePointerMove(pointer(2, 600, 300, controller.image));
   assert.equal(controller.scale, 1.5);
   assert.equal(controller.offsetX, 50);
   assert.equal(controller.offsetY, 0);
 
-  controller.handlePointerUp(pointer(2, 600, 300));
-  controller.handlePointerUp(pointer(1, 300, 300));
-  controller.handleViewerClick({ target: controller.image, preventDefault() {} });
+  controller.handlePointerUp(pointer(2, 600, 300, controller.image));
+  controller.handlePointerUp(pointer(1, 300, 300, controller.image));
+  controller.handleViewerClick({ target: controller.stage, preventDefault() {} });
+  assert.equal(controller.isOpen, true);
+
+  controller.handleDoubleClick({ preventDefault() {} });
+  assert.equal(controller.scale, controller.fitScale);
+  controller.handlePointerDown(pointer(3, 10, 10, controller.stage));
+  controller.handlePointerUp(pointer(3, 10, 10, controller.stage));
   controller.handleViewerClick({ target: controller.stage, preventDefault() {} });
   assert.equal(controller.isOpen, false);
 });

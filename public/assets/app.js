@@ -2457,6 +2457,8 @@ async function copyText(text) {
 
 function resetSessionViewState() {
   currentSessionFindController.close({ restoreFocus: false });
+  imageViewerController.close();
+  liveMessageRenderer.releaseMessageImageObjectURLs(conversationPanel);
   composerAutocompleteController.destroy();
   clearTimeout(extensionUiTimeoutTimer);
   extensionUiTimeoutTimer = null;

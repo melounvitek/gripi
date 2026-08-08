@@ -37,15 +37,21 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
 
   const zoomValue = viewer.locator("[data-image-viewer-zoom-value]");
   const fittedZoom = Number.parseInt(await zoomValue.textContent(), 10);
+  await viewer.locator("[data-image-viewer-image]").dblclick();
+  await expect(zoomValue).toHaveText("100%");
+  await expect(viewer).toBeVisible();
+  await viewer.getByRole("button", { name: "Fit image to screen" }).tap();
+  await expect(zoomValue).toHaveText(`${fittedZoom}%`);
   await viewer.getByRole("button", { name: "Zoom in" }).tap();
   await expect.poll(async () => Number.parseInt(await zoomValue.textContent(), 10)).toBeGreaterThan(fittedZoom);
   await viewer.getByRole("button", { name: "Show actual size" }).tap();
   await expect(viewer.locator("[data-image-viewer-zoom-value]")).toHaveText("100%");
-  await viewer.getByRole("button", { name: "Close image viewer" }).tap();
-  await expect(viewer).toBeHidden();
 
   releasePrompt();
   await expectRunFinished(page);
+  await expect(viewer).toBeVisible();
+  await viewer.getByRole("button", { name: "Close image viewer" }).tap();
+  await expect(viewer).toBeHidden();
   await page.reload();
 
   const persistedImage = message(page, "user", prompt).getByRole("button", { name: "View attached image full size" });

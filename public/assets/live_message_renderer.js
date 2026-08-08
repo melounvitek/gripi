@@ -108,7 +108,10 @@ export class LiveMessageRenderer {
       if (articles.size === 0) return;
 
       this.rememberPersistedToolResult(id);
-      articles.forEach((article) => article.remove());
+      articles.forEach((article) => {
+        this.releaseMessageImageObjectURLs(article);
+        article.remove();
+      });
       if (entry) this.forgetLiveEntry(entry);
       removed = true;
     });
@@ -133,6 +136,7 @@ export class LiveMessageRenderer {
 
   removeOptimisticUserMessage(text) {
     const message = this.optimisticUserMessage(text);
+    this.releaseMessageImageObjectURLs(message);
     message?.remove();
     if (message) this.conversationController.scheduleFocusedActivityRefresh?.();
   }
@@ -145,10 +149,17 @@ export class LiveMessageRenderer {
     delete message.dataset.optimisticImageCount;
   }
 
-  replaceMessageImages(article, images = []) {
-    article.querySelectorAll(".message-image").forEach((image) => {
-      if (image.dataset.objectUrl) URL.revokeObjectURL(image.dataset.objectUrl);
+  releaseMessageImageObjectURLs(root) {
+    root?.querySelectorAll(".message-image").forEach((image) => {
+      if (!image.dataset.objectUrl) return;
+
+      URL.revokeObjectURL(image.dataset.objectUrl);
+      delete image.dataset.objectUrl;
     });
+  }
+
+  replaceMessageImages(article, images = []) {
+    this.releaseMessageImageObjectURLs(article);
     article.querySelector(".message-images")?.remove();
     this.renderMessageImages(article, images);
   }
@@ -794,6 +805,7 @@ export class LiveMessageRenderer {
       const thinkingChanged = segment && entry.article.classList.contains("message--thinking") !== segment.thinking;
       if (segment && !thinkingChanged) return;
 
+      this.releaseMessageImageObjectURLs(entry.article);
       entry.article.remove();
       this.forgetLiveEntry(entry);
       removed = true;
@@ -822,6 +834,7 @@ export class LiveMessageRenderer {
   markLiveEntryRendered(entry, roleName, text, timestamp = null) {
     const timestampKey = messageTimestampKey(timestamp) || entry.article.dataset.messageTimestamp;
     if (this.liveMessageAlreadyRendered(roleName, text, timestampKey)) {
+      this.releaseMessageImageObjectURLs(entry.article);
       entry.article.remove();
       this.forgetLiveEntry(entry);
       this.conversationController.scheduleFocusedActivityRefresh?.();

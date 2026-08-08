@@ -30,6 +30,7 @@ export class ImageViewerController {
     this.panStart = null;
     this.pinchStart = null;
     this.suppressClick = false;
+    this.pointerStartedOnBackdrop = null;
     this.bound = false;
   }
 
@@ -84,7 +85,6 @@ export class ImageViewerController {
     this.viewer.hidden = false;
     this.viewer.dataset.loading = "true";
     delete this.viewer.dataset.loadError;
-    this.document.body.classList.add("image-viewer-open");
     this.image.alt = source.alt || "Full-size image";
     this.image.src = source.currentSrc || source.src;
     this.closeButton?.focus({ preventScroll: true });
@@ -99,8 +99,8 @@ export class ImageViewerController {
     const opener = this.opener;
     this.isOpen = false;
     this.viewer.hidden = true;
-    this.document.body.classList.remove("image-viewer-open");
     this.pointers.clear();
+    this.pointerStartedOnBackdrop = null;
     this.panStart = null;
     this.pinchStart = null;
     this.image.removeAttribute("src");
@@ -201,6 +201,7 @@ export class ImageViewerController {
     if (!this.isOpen) return;
 
     event.preventDefault();
+    if (this.pointers.size === 0) this.pointerStartedOnBackdrop = event.target === this.stage;
     this.stage.setPointerCapture?.(event.pointerId);
     this.pointers.set(event.pointerId, this.stagePoint(event.clientX, event.clientY));
     this.suppressClick = false;
@@ -273,7 +274,10 @@ export class ImageViewerController {
 
   handleViewerClick(event) {
     if (!this.isOpen) return;
-    if (event.target !== this.stage) {
+
+    const startedOnBackdrop = this.pointerStartedOnBackdrop;
+    this.pointerStartedOnBackdrop = null;
+    if (startedOnBackdrop === false || event.target !== this.stage) {
       this.suppressClick = false;
       return;
     }

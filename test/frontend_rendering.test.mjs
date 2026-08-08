@@ -52,6 +52,30 @@ test("live message images render as accessible viewer buttons", () => {
   assert.equal(image.alt, "Screenshot");
 });
 
+test("live image object URLs are released when their messages leave the conversation", () => {
+  const document = new FakeDocument();
+  const renderer = new LiveMessageRenderer(document, {
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+  }, {}, { bind() {} });
+  renderer.liveOutput = new FakeElement("div");
+  const entry = renderer.appendMessage("user", "Screenshot", true, false, null, {
+    images: [{ src: "blob:image-preview", alt: "Screenshot" }],
+  });
+  const revoked = [];
+  const originalRevoke = URL.revokeObjectURL;
+  URL.revokeObjectURL = (url) => revoked.push(url);
+
+  try {
+    renderer.releaseMessageImageObjectURLs(entry.article);
+  } finally {
+    URL.revokeObjectURL = originalRevoke;
+  }
+
+  assert.deepEqual(revoked, ["blob:image-preview"]);
+  assert.equal(entry.article.querySelector(".message-image").dataset.objectUrl, undefined);
+});
+
 test("delta-only updates use the gateway partial message and its timestamp", () => {
   const parser = new LiveMessageParser();
   const gatewayPartialMessage = {
