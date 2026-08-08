@@ -28,6 +28,28 @@ test("demo exposes the guide catalogue and safe portable helpers", () => {
   assert.equal(demo.formatDemoTimestamp(new Date(2026, 6, 17, 16, 36)), "2026-07-17 16:36");
 });
 
+test("every demo session includes activity that distinguishes the transcript views", () => {
+  for (const session of demo.sessionCatalog) {
+    assert.equal(session.hasActivity, true, `${session.name} has no thinking or tool activity`);
+  }
+
+  const normalized = demo.normalizeSession({
+    id: "local-session",
+    messages: [
+      { role: "user", text: "Help me with this project." },
+      { role: "assistant", text: "What would you like to change?" },
+    ],
+  });
+  assert.deepEqual(normalized.messages.map(({ role }) => role), ["user", "thinking", "assistant"]);
+
+  const restored = demo.normalizeSession({
+    id: "restored-session",
+    messages: Array.from({ length: 4 }, (_, index) => ({ role: "user", text: `Message ${index + 1}` })),
+  });
+  assert.equal(restored.messages.at(-1).role, "thinking");
+  assert.match(javascript, /sessions\.push\(normalizeSession\(\{ \.\.\.source, id, name: `\$\{source\.name\} \(fork\)`[\s\S]*?messages: source\.messages\.slice\(0, 4\)/);
+});
+
 test("demo scripted responses finish, cancel, and include visible stages", async () => {
   const events = [];
   assert.equal(await demo.playScript(

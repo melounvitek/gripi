@@ -8,6 +8,7 @@
       id: "welcome", name: "Welcome to Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "just now", pinned: true,
       messages: [
         { role: "user", text: "What is Gripi?" },
+        { role: "thinking", text: "I’ll summarize what Gripi adds while keeping Pi’s role clear." },
         { role: "assistant", text: "Gripi is a desktop and web portal for Pi, powered by a self-hosted gateway. Run the gateway on your development machine or home server, then use your existing Pi projects and sessions from the desktop app or a browser.\n\nPi stays Pi: Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. This static demo lets you explore session navigation, settings, streamed responses, and tool activity. Prompts stay in this browser, and all Pi or gateway behavior is simulated." }
       ]
     },
@@ -15,6 +16,7 @@
       id: "install", name: "Install Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "1 minute ago", pinned: false,
       messages: [
         { role: "user", text: "How do I install Gripi and the desktop app?" },
+        { role: "thinking", text: "I’ll separate gateway and desktop installation so each can be set up independently." },
         { role: "assistant", text: "Install and prepare the gateway with one command. It installs Mise if needed, checks out Gripi at `~/.local/share/gripi`, builds the Go gateway, and ensures an admin password exists. Pi CLI must already be installed and configured. Then start Gripi with `~/.local/share/gripi/bin/start` and open http://localhost:4567.", code: "bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/melounvitek/gripi/master/bin/install | bash -s -- gateway'", link: { href: "https://github.com/melounvitek/gripi", label: "View installation details →" } },
         { role: "assistant", text: "Install the desktop app independently with one command. It installs Mise and Gripi’s pinned Node.js version if needed, builds the app from a temporary checkout, and removes that checkout afterward. Connect the app to your running gateway.", code: "bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/melounvitek/gripi/master/bin/install | bash -s -- desktop'", link: { href: "https://github.com/melounvitek/gripi", label: "View desktop installation details →" } }
       ]
@@ -23,6 +25,7 @@
       id: "new-to-pi", name: "New to Pi? Start here", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "2 minutes ago", pinned: false,
       messages: [
         { role: "user", text: "I found Gripi before Pi. Is this a good place to start?" },
+        { role: "thinking", text: "I’ll distinguish Pi itself from the Gripi interface and point to the best starting place." },
         { role: "assistant", text: "Start with Pi itself. Pi is the coding-agent harness that reads files, runs tools, edits code, and owns the projects and sessions shown here. Gripi runs that same Pi environment on a gateway machine and gives you desktop and browser access to it.\n\nTry Pi CLI first and become comfortable with its tools, sessions, models, extensions, and filesystem access. Gripi becomes useful when you want to reach an existing Pi setup from other devices.", link: { href: "https://pi.dev/", label: "Learn about Pi →" } }
       ]
     },
@@ -30,6 +33,7 @@
       id: "pi-stays-pi", name: "Does Gripi change Pi?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "5 minutes ago", pinned: false,
       messages: [
         { role: "user", text: "Does Gripi change how Pi behaves?" },
+        { role: "thinking", text: "I’ll check the boundary between Gripi and the Pi runtime." },
         { role: "assistant", text: "No. Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It starts and connects to the Pi coding-agent harness through a gateway, while Pi remains responsible for the actual agent runtime, tools, models, and session data." }
       ]
     },
@@ -37,6 +41,7 @@
       id: "unsupported", name: "Extension support in Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "9 minutes ago", pinned: false,
       messages: [
         { role: "user", text: "Which Pi extension features work in Gripi?" },
+        { role: "thinking", text: "I’ll separate browser-compatible extension features from terminal-only UI behavior." },
         { role: "assistant", text: "Gripi supports standard tools, compatible custom tools, subagents, RPC extension commands, session data, images, compaction, tree navigation, and common extension prompts such as select, confirm, input, editor, notify, status, title, and editor prefill.\n\nGripi preserves the underlying Pi workflow, but it does not reproduce arbitrary terminal interfaces in the browser. Use Pi CLI for extensions that depend on custom TUI components, overlays, terminal-rendered widgets, terminal-only editors, terminal keybindings, custom TUI rendering, or `ctx.mode === \"tui\"`." }
       ]
     },
@@ -52,6 +57,7 @@
       id: "tailscale", name: "Access Gripi remotely with Tailscale", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "22 minutes ago", pinned: false,
       messages: [
         { role: "user", text: "What is the recommended way to connect from another device?" },
+        { role: "thinking", text: "I’ll recommend a private-network setup that avoids exposing the gateway publicly." },
         { role: "assistant", text: "Use a private VPN such as Tailscale. Either bind Gripi to the gateway’s Tailscale address, or keep it on 127.0.0.1 and use Tailscale Serve for private HTTPS. Keep browser approval enabled.\n\nDo not expose port 4567 directly to the public internet.", code: "GRIPI_HOST=127.0.0.1 mise run start\ntailscale serve --bg --yes 4567\ntailscale serve status", link: { href: "https://github.com/melounvitek/gripi/blob/master/docs/examples.md", label: "See the remote-access options →" } }
       ]
     },
@@ -59,6 +65,7 @@
       id: "mobile", name: "Use Gripi from a phone or tablet", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "31 minutes ago", pinned: false,
       messages: [
         { role: "user", text: "Can I use Gripi from my phone?" },
+        { role: "thinking", text: "I’ll cover the private connection and the mobile web-app experience." },
         { role: "assistant", text: "Yes. Join the phone to the same Tailscale network, open the gateway’s private URL, and approve that browser. On iPhone, Safari’s Add to Home Screen flow can open Gripi as a web app.\n\nThere is no native mobile app, but the web interface includes a responsive session sidebar and composer.", link: { href: "https://github.com/melounvitek/gripi/blob/master/docs/examples.md", label: "Review the private-network setup →" } }
       ]
     },
@@ -76,6 +83,7 @@
       id: "demo-fidelity", name: "Does this look 1:1 realistic as the real product?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "1 hour ago", pinned: false,
       messages: [
         { role: "user", text: "Does this static demo look exactly like the real product?" },
+        { role: "thinking", text: "I’ll be explicit about what this simulation simplifies." },
         { role: "assistant", text: "Not exactly. The demo uses the same overall interface, but some interactions and details are simplified, and a few parts are not as polished here as they are in the real app. A connected Gripi gateway has the full live session behavior, real tool output, and production rendering polish." }
       ]
     },
@@ -141,9 +149,30 @@
     return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : fallback;
   }
 
+  function sessionHasActivity(messages) {
+    return messages.some(({ role }) => ["thinking", "tool", "error"].includes(role));
+  }
+
+  function ensureSessionActivity(messages) {
+    if (sessionHasActivity(messages)) return messages;
+    const activity = { role: "thinking", text: "I’ll review the available session context before responding.", title: "", time: "", code: "", link: null };
+    const insertAt = messages.findIndex(({ role }) => role === "assistant");
+    if (insertAt < 0) return [...messages, activity];
+    return [...messages.slice(0, insertAt), activity, ...messages.slice(insertAt)];
+  }
+
   function normalizeSession(session) {
     if (!session || typeof session !== "object" || !String(session.id || "")) return null;
     const allowedRoles = new Set(["user", "assistant", "thinking", "tool", "compaction", "error"]);
+    const messages = Array.isArray(session.messages) ? session.messages.filter((message) => allowedRoles.has(message?.role)).map((message) => ({
+      role: message.role,
+      text: String(message.text || ""),
+      title: String(message.title || ""),
+      time: String(message.time || ""),
+      code: String(message.code || ""),
+      link: safeGuideLink(message.link)
+    })) : [];
+
     return {
       id: String(session.id),
       name: String(session.name || "Demo session"),
@@ -153,14 +182,7 @@
       background: safeIdentityColor(session.background, "#4a281f"),
       age: String(session.age || "just now"),
       pinned: !!session.pinned,
-      messages: Array.isArray(session.messages) ? session.messages.filter((message) => allowedRoles.has(message?.role)).map((message) => ({
-        role: message.role,
-        text: String(message.text || ""),
-        title: String(message.title || ""),
-        time: String(message.time || ""),
-        code: String(message.code || ""),
-        link: safeGuideLink(message.link)
-      })) : []
+      messages: ensureSessionActivity(messages)
     };
   }
 
@@ -204,8 +226,8 @@
   }
 
   const defaultSessionId = "welcome";
-  const sessionCatalog = initialSessions.map(({ id, name, project, age, pinned }) => ({ id, name, project, age, pinned }));
-  global.GripiDemo = { playScript, responseScript, safeIdentityColor, safeGuideLink, inlineCodeParts, toolSummaryParts, formatDemoTimestamp: timeLabel, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
+  const sessionCatalog = initialSessions.map(({ id, name, project, age, pinned, messages }) => ({ id, name, project, age, pinned, hasActivity: sessionHasActivity(messages) }));
+  global.GripiDemo = { playScript, responseScript, normalizeSession, safeIdentityColor, safeGuideLink, inlineCodeParts, toolSummaryParts, formatDemoTimestamp: timeLabel, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
   if (typeof document === "undefined") return;
 
   const storageKey = "gripi:static-demo:v14";
@@ -915,10 +937,10 @@
     const project = cwd.split("/").filter(Boolean).pop() || "project";
     const identity = identities[project] || { monogram: project.slice(0, 2).toUpperCase(), color: "#f0c674", background: "#3c3728" };
     const id = `local-${Date.now()}`;
-    sessions.unshift({ id, name: "New local demo session", project, ...identity, age: "just now", pinned: false, messages: [{ role: "assistant", text: "This representative session was created locally. Enter a prompt to try streaming.", time: timeLabel() }] });
+    sessions.unshift(normalizeSession({ id, name: "New local demo session", project, ...identity, age: "just now", pinned: false, messages: [{ role: "assistant", text: "This representative session was created locally. Enter a prompt to try streaming.", time: timeLabel() }] }));
     closeModal(event.target.closest("[data-modal]")); switchSession(id);
   });
-  document.querySelectorAll("[data-demo-fork]").forEach((button) => button.addEventListener("click", () => { const source = currentSession(); const id = `fork-${Date.now()}`; sessions.push({ ...source, id, name: `${source.name} (fork)`, age: "just now", pinned: false, messages: source.messages.slice(0, 4).map((message) => ({ ...message })) }); closeModal(button.closest("[data-modal]")); switchSession(id); }));
+  document.querySelectorAll("[data-demo-fork]").forEach((button) => button.addEventListener("click", () => { const source = currentSession(); const id = `fork-${Date.now()}`; sessions.push(normalizeSession({ ...source, id, name: `${source.name} (fork)`, age: "just now", pinned: false, messages: source.messages.slice(0, 4).map((message) => ({ ...message })) })); closeModal(button.closest("[data-modal]")); switchSession(id); }));
   document.querySelectorAll("[data-demo-tree]").forEach((button) => button.addEventListener("click", () => { closeModal(button.closest("[data-modal]")); if (button.dataset.demoTreeTarget) switchSession(button.dataset.demoTreeTarget); }));
   document.querySelector(".model-settings-form").addEventListener("submit", (event) => { event.preventDefault(); const model = new FormData(event.target).get("model"); const thinking = new FormData(event.target).get("thinking"); document.querySelector('[data-status-key="model"] .session-status-value').textContent = `${model} (${thinking})`; closeModal(event.target.closest("[data-modal]")); });
   document.querySelector("[data-model-search]").addEventListener("input", (event) => { const query = event.target.value.toLowerCase(); document.querySelectorAll(".model-option").forEach((option) => { option.hidden = !option.textContent.toLowerCase().includes(query); }); });
