@@ -581,6 +581,40 @@ func TestClientBoundsReplayAndCoalescesLiveUpdates(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestClientKeepsCurrentReplayCursorThroughImageToolResultLifecycle(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{EventBufferBytes: 1 << 20})
+	t.Cleanup(func() { _ = client.Close() })
+	writeRecord(t, stdoutWriter, map[string]any{"type": "turn_start"})
+	waitSequence(t, client, 1)
+	cursor := client.EventSequence()
+	imageData := strings.Repeat("a", 600<<10)
+	imageContent := []any{map[string]any{"type": "text", "text": "Read image file"}, map[string]any{"type": "image", "data": imageData, "mimeType": "image/png"}}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "tool_execution_end", "toolCallId": "read-image", "toolName": "read", "result": map[string]any{"content": imageContent}, "isError": false})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_start", "message": map[string]any{"role": "toolResult", "toolCallId": "read-image", "content": imageContent}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_end", "message": map[string]any{"role": "toolResult", "toolCallId": "read-image", "content": imageContent}})
+	waitSequence(t, client, 4)
+
+	batch := client.EventsAfter(cursor)
+	if batch.Missed {
+		t.Fatalf("image lifecycle missed current cursor: replay floor = %d", client.EventReplayCursor())
+	}
+	if !reflect.DeepEqual(eventTypes(batch.Events), []string{"tool_execution_end", "message_start", "message_end"}) {
+		t.Fatalf("image lifecycle events = %v", eventTypes(batch.Events))
+	}
+	redundant, _ := json.Marshal(batch.Events[:2])
+	if strings.Contains(string(redundant), imageData) {
+		t.Fatal("redundant image data retained before final tool result message")
+	}
+	final, _ := json.Marshal(batch.Events[2])
+	if !strings.Contains(string(final), imageData) {
+		t.Fatal("final tool result message lost image data")
+	}
+	_ = stdoutWriter.Close()
+}
+
 func TestClientSamplesOversizedNativeToolUpdatesAndBoundsActiveSnapshots(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
