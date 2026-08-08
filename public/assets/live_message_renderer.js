@@ -157,10 +157,17 @@ export class LiveMessageRenderer {
     const container = this.document.createElement("div");
     container.className = "message-images";
     visibleImages.forEach((image) => {
+      const button = this.document.createElement("button");
+      button.type = "button";
+      button.className = "message-image-button";
+      button.dataset.imageViewerOpen = "";
+      const alt = image.alt || "Attached image";
+      button.setAttribute("aria-label", `View ${alt.toLocaleLowerCase()} full size`);
+
       const element = this.document.createElement("img");
       element.className = "message-image";
       element.src = image.src;
-      element.alt = image.alt || "Attached image";
+      element.alt = alt;
       element.loading = "lazy";
       element.decoding = "async";
       if (image.src.startsWith("blob:")) {
@@ -168,7 +175,8 @@ export class LiveMessageRenderer {
         element.addEventListener("load", revoke, { once: true });
         element.addEventListener("error", revoke, { once: true });
       }
-      container.append(element);
+      button.append(element);
+      container.append(button);
     });
     article.append(container);
   }
