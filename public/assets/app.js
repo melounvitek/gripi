@@ -169,8 +169,8 @@ const composerAutocompleteController = new ComposerAutocompleteController(docume
 });
 const liveMessageParser = new LiveMessageParser(document.body.dataset.homeDir || "");
 const serverMarkdownRenderer = new ServerMarkdownRenderer(document, conversationController);
-const liveMessageRenderer = new LiveMessageRenderer(document, conversationController, liveMessageParser, serverMarkdownRenderer);
 const imageViewerController = new ImageViewerController(document, window);
+const liveMessageRenderer = new LiveMessageRenderer(document, conversationController, liveMessageParser, serverMarkdownRenderer, imageViewerController);
 imageViewerController.bind();
 conversationController.historyEnhancer = (root) => liveMessageRenderer.hydrateTerminalOutputs(root, { notify: false });
 conversationController.historyReconciler = (root) => liveMessageRenderer.reconcilePersistedToolResults(root);

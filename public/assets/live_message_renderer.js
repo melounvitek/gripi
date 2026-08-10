@@ -7,11 +7,12 @@ const TERMINAL_OUTPUT_EXCLUDED_TOOLS = new Set(["read", "edit", "write"]);
 const PERSISTED_TOOL_REPLAY_LIMIT = 16;
 
 export class LiveMessageRenderer {
-  constructor(document, conversationController, parser, markdownRenderer) {
+  constructor(document, conversationController, parser, markdownRenderer, imageViewerController = null) {
     this.document = document;
     this.conversationController = conversationController;
     this.parser = parser;
     this.markdownRenderer = markdownRenderer;
+    this.imageViewerController = imageViewerController;
     this.liveOutput = null;
     this.conversationScroll = null;
     this.hideThinkingBlock = false;
@@ -153,7 +154,7 @@ export class LiveMessageRenderer {
     root?.querySelectorAll(".message-image").forEach((image) => {
       if (!image.dataset.objectUrl) return;
 
-      URL.revokeObjectURL(image.dataset.objectUrl);
+      if (!this.imageViewerController?.retainObjectURL(image.dataset.objectUrl)) URL.revokeObjectURL(image.dataset.objectUrl);
       delete image.dataset.objectUrl;
     });
   }

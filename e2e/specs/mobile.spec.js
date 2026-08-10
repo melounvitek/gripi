@@ -56,6 +56,10 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   releasePrompt();
   await expectRunFinished(page);
   await expect(viewer).toBeVisible();
+  downloadPromise = page.waitForEvent("download");
+  await viewer.getByRole("link", { name: "Download image" }).tap();
+  download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("mobile-image.png");
   await viewer.getByRole("button", { name: "Close image viewer" }).tap();
   await expect(viewer).toBeHidden();
   await page.reload();

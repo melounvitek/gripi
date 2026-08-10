@@ -49,6 +49,7 @@ export class ImageViewerController {
     this.pinchStart = null;
     this.suppressClick = false;
     this.pointerStartedOnBackdrop = null;
+    this.retainedObjectURLs = new Set();
     this.bound = false;
   }
 
@@ -100,12 +101,14 @@ export class ImageViewerController {
     if (!this.viewer || !this.image || !source) return false;
 
     this.opener = opener || this.document.activeElement;
+    this.openerArticle = this.opener?.closest?.("article") || null;
     this.isOpen = true;
     this.viewer.hidden = false;
     this.viewer.dataset.loading = "true";
     delete this.viewer.dataset.loadError;
     const sourceURL = source.currentSrc || source.src;
 
+    this.sourceURL = sourceURL;
     this.image.alt = source.alt || "Full-size image";
     this.image.src = sourceURL;
     this.downloadLink?.setAttribute("href", sourceURL);
@@ -119,7 +122,7 @@ export class ImageViewerController {
   close() {
     if (!this.isOpen) return;
 
-    const opener = this.opener;
+    const opener = this.opener?.isConnected === false ? this.openerArticle?.querySelector("[data-image-viewer-open]") : this.opener;
     this.isOpen = false;
     this.viewer.hidden = true;
     this.pointers.clear();
@@ -129,8 +132,19 @@ export class ImageViewerController {
     this.image.removeAttribute("src");
     this.downloadLink?.removeAttribute("href");
     this.downloadLink?.removeAttribute("download");
+    this.retainedObjectURLs.forEach((url) => this.window.URL?.revokeObjectURL(url));
+    this.retainedObjectURLs.clear();
+    this.sourceURL = null;
     this.opener = null;
+    this.openerArticle = null;
     opener?.focus({ preventScroll: true });
+  }
+
+  retainObjectURL(url) {
+    if (!this.isOpen || this.sourceURL !== url) return false;
+
+    this.retainedObjectURLs.add(url);
+    return true;
   }
 
   initializeImage() {

@@ -52,12 +52,13 @@ test("live message images render as accessible viewer buttons", () => {
   assert.equal(image.alt, "Screenshot");
 });
 
-test("live image object URLs are released when their messages leave the conversation", () => {
+test("live image object URLs stay owned while their viewer remains open", () => {
   const document = new FakeDocument();
+  const retained = [];
   const renderer = new LiveMessageRenderer(document, {
     followLiveOutput: () => false,
     afterLiveOutputChange() {},
-  }, {}, { bind() {} });
+  }, {}, { bind() {} }, { retainObjectURL: (url) => retained.push(url) === 1 });
   renderer.liveOutput = new FakeElement("div");
   const entry = renderer.appendMessage("user", "Screenshot", true, false, null, {
     images: [{ src: "blob:image-preview", alt: "Screenshot" }],
@@ -72,7 +73,8 @@ test("live image object URLs are released when their messages leave the conversa
     URL.revokeObjectURL = originalRevoke;
   }
 
-  assert.deepEqual(revoked, ["blob:image-preview"]);
+  assert.deepEqual(retained, ["blob:image-preview"]);
+  assert.deepEqual(revoked, []);
   assert.equal(entry.article.querySelector(".message-image").dataset.objectUrl, undefined);
 });
 

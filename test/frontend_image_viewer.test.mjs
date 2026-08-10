@@ -38,6 +38,8 @@ function viewerFixture() {
 }
 
 function sourceImage() {
+  const article = new FakeElement("article");
+  const container = new FakeElement("div");
   const button = new FakeElement("button", ["[data-image-viewer-open]"]);
   const image = new FakeElement("img");
   image.src = "/attachments/image.png";
@@ -46,7 +48,9 @@ function sourceImage() {
   image.naturalWidth = 1600;
   image.naturalHeight = 1200;
   button.append(image);
-  return { button, image };
+  container.append(button);
+  article.append(container);
+  return { article, container, button, image };
 }
 
 function pointer(pointerId, clientX, clientY, target = null) {
@@ -61,8 +65,8 @@ function pointer(pointerId, clientX, clientY, target = null) {
 
 test("image viewer opens fitted, exposes actual size, and restores focus when closed", () => {
   const { controller, document, overlay, close, zoomValue, download } = viewerFixture();
-  const { button, image } = sourceImage();
-  document.body.append(button);
+  const { article, container, button, image } = sourceImage();
+  document.body.append(article);
 
   controller.open(image, button);
 
@@ -85,12 +89,17 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
   assert.equal(controller.scale, 1);
   assert.equal(zoomValue.textContent, "100%");
 
+  const replacement = new FakeElement("button", ["[data-image-viewer-open]"]);
+  container.remove();
+  article.append(replacement);
+  button.isConnected = false;
   controller.close();
   assert.equal(controller.isOpen, false);
   assert.equal(overlay.hidden, true);
   assert.equal(download.getAttribute("href"), null);
   assert.equal(download.getAttribute("download"), null);
-  assert.equal(button.focused, true);
+  assert.equal(button.focused, undefined);
+  assert.equal(replacement.focused, true);
 });
 
 test("image viewer pans one pointer and pinches around the moving midpoint", () => {
