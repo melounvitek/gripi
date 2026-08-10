@@ -31,7 +31,7 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   const viewer = page.getByRole("dialog", { name: "Full-size image viewer" });
   await expect(viewer).toBeVisible();
   await expect(viewer).not.toHaveAttribute("data-load-error", "true");
-  const controls = viewer.locator("button");
+  const controls = viewer.locator("button, [data-image-viewer-download]");
   const sizes = await controls.evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect()).map(({ width, height }) => ({ width, height })));
   expect(sizes.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
 
@@ -47,6 +47,12 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   await viewer.getByRole("button", { name: "Show actual size" }).tap();
   await expect(viewer.locator("[data-image-viewer-zoom-value]")).toHaveText("100%");
 
+  let downloadPromise = page.waitForEvent("download");
+  await viewer.getByRole("link", { name: "Download image" }).tap();
+  let download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("mobile-image.png");
+  await expect(viewer).toBeVisible();
+
   releasePrompt();
   await expectRunFinished(page);
   await expect(viewer).toBeVisible();
@@ -57,6 +63,11 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   const persistedImage = message(page, "user", prompt).getByRole("button", { name: "View attached image full size" });
   await expect(persistedImage).toBeVisible();
   await persistedImage.tap();
+  await expect(viewer).toBeVisible();
+  downloadPromise = page.waitForEvent("download");
+  await viewer.getByRole("link", { name: "Download image" }).tap();
+  download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("image.png");
   await expect(viewer).toBeVisible();
   await viewer.locator("[data-image-viewer-stage]").tap({ position: { x: 10, y: 10 } });
   await expect(viewer).toBeHidden();

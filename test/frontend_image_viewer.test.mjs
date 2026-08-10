@@ -27,13 +27,14 @@ function viewerFixture() {
   const zoomIn = new FakeElement("button", ["[data-image-viewer-zoom-in]"]);
   const actualSize = new FakeElement("button", ["[data-image-viewer-actual-size]"]);
   const fit = new FakeElement("button", ["[data-image-viewer-fit]"]);
+  const download = new FakeElement("a", ["[data-image-viewer-download]"]);
   stage.append(image);
-  overlay.append(stage, close, zoomOut, zoomValue, zoomIn, actualSize, fit);
+  overlay.append(stage, close, zoomOut, zoomValue, zoomIn, actualSize, fit, download);
   document.body.append(overlay);
 
   const controller = new ImageViewerController(document, window);
   controller.bind();
-  return { controller, document, overlay, stage, image, close, zoomValue };
+  return { controller, document, overlay, stage, image, close, zoomValue, download };
 }
 
 function sourceImage() {
@@ -59,7 +60,7 @@ function pointer(pointerId, clientX, clientY, target = null) {
 }
 
 test("image viewer opens fitted, exposes actual size, and restores focus when closed", () => {
-  const { controller, document, overlay, close, zoomValue } = viewerFixture();
+  const { controller, document, overlay, close, zoomValue, download } = viewerFixture();
   const { button, image } = sourceImage();
   document.body.append(button);
 
@@ -69,6 +70,15 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
   assert.equal(overlay.hidden, false);
   assert.equal(controller.scale, 0.42);
   assert.equal(zoomValue.textContent, "42%");
+  assert.equal(download.getAttribute("href"), "/attachments/image.png");
+  assert.equal(download.getAttribute("download"), "image.png");
+  assert.equal(close.focused, true);
+
+  close.focused = false;
+  document.activeElement = download;
+  let trapped = false;
+  controller.trapFocus({ shiftKey: false, preventDefault() { trapped = true; } });
+  assert.equal(trapped, true);
   assert.equal(close.focused, true);
 
   controller.showActualSize();
@@ -78,6 +88,8 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
   controller.close();
   assert.equal(controller.isOpen, false);
   assert.equal(overlay.hidden, true);
+  assert.equal(download.getAttribute("href"), null);
+  assert.equal(download.getAttribute("download"), null);
   assert.equal(button.focused, true);
 });
 

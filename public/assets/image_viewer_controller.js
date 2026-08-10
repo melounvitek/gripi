@@ -15,6 +15,24 @@ function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+function imageExtension(source) {
+  const dataType = String(source || "").match(/^data:image\/(png|jpeg|gif|webp)[;,]/i)?.[1];
+  const pathType = String(source || "").match(/\.(png|jpe?g|gif|webp)(?:[?#]|$)/i)?.[1];
+  const extension = (dataType || pathType || "").toLocaleLowerCase();
+  return extension === "jpeg" ? "jpg" : extension;
+}
+
+function imageDownloadFilename(source) {
+  const label = String(source.alt || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").trim().replace(/[. ]+$/, "");
+  const labelledExtension = label.match(/\.(png|jpe?g|gif|webp)$/i)?.[1];
+  if (labelledExtension) return label;
+
+  const extension = imageExtension(source.currentSrc || source.src);
+  const genericLabel = !label || ["attached image", "full-size image"].includes(label.toLocaleLowerCase());
+  const basename = genericLabel ? "image" : label;
+  return extension ? `${basename}.${extension}` : basename;
+}
+
 export class ImageViewerController {
   constructor(document, window) {
     this.document = document;
@@ -46,6 +64,7 @@ export class ImageViewerController {
     this.zoomInButton = this.viewer?.querySelector("[data-image-viewer-zoom-in]");
     this.actualSizeButton = this.viewer?.querySelector("[data-image-viewer-actual-size]");
     this.fitButton = this.viewer?.querySelector("[data-image-viewer-fit]");
+    this.downloadLink = this.viewer?.querySelector("[data-image-viewer-download]");
     if (!this.viewer || !this.stage || !this.image) return;
 
     this.document.addEventListener("click", (event) => this.handleDocumentClick(event));
@@ -85,8 +104,12 @@ export class ImageViewerController {
     this.viewer.hidden = false;
     this.viewer.dataset.loading = "true";
     delete this.viewer.dataset.loadError;
+    const sourceURL = source.currentSrc || source.src;
+
     this.image.alt = source.alt || "Full-size image";
-    this.image.src = source.currentSrc || source.src;
+    this.image.src = sourceURL;
+    this.downloadLink?.setAttribute("href", sourceURL);
+    this.downloadLink?.setAttribute("download", imageDownloadFilename(source));
     this.closeButton?.focus({ preventScroll: true });
 
     if (this.image.complete && this.image.naturalWidth > 0) this.initializeImage();
@@ -104,6 +127,8 @@ export class ImageViewerController {
     this.panStart = null;
     this.pinchStart = null;
     this.image.removeAttribute("src");
+    this.downloadLink?.removeAttribute("href");
+    this.downloadLink?.removeAttribute("download");
     this.opener = null;
     opener?.focus({ preventScroll: true });
   }
@@ -330,7 +355,7 @@ export class ImageViewerController {
   }
 
   trapFocus(event) {
-    const controls = [this.closeButton, this.zoomOutButton, this.zoomInButton, this.actualSizeButton, this.fitButton]
+    const controls = [this.closeButton, this.zoomOutButton, this.zoomInButton, this.actualSizeButton, this.fitButton, this.downloadLink]
       .filter((control) => control && !control.disabled);
     if (controls.length === 0) return;
 

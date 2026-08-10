@@ -85,7 +85,7 @@ func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T
 		`class="session-sidebar"`, `id="conversation-scroll"`, `class="message message--user"`,
 		`class="message message--assistant"`, `data-message-fingerprint="assistant:`,
 		`data-events-url="/events?session=`, `data-status-url="/status?session=`, `data-image-viewer`, `data-image-viewer-stage`,
-		`data-image-viewer-open`,
+		`data-image-viewer-open`, `data-image-viewer-download`,
 		`aria-label="View attached image full size"`, `src="data:image/png;base64,cG5n"`,
 	} {
 		if !strings.Contains(page.Body.String(), contract) {
