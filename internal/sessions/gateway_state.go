@@ -193,6 +193,18 @@ func (state *GatewayState) MigratePinned(from, to string) (func() error, error) 
 	}, nil
 }
 
+func (state *GatewayState) ReadCount(path string) (int, error) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	values := map[string]int{}
+	if err := readJSONIfExists(state.readPath, &values); err != nil {
+		return 0, fmt.Errorf("read session read state: %w", err)
+	}
+	values, _ = state.normalizedCounts(values)
+	return values[state.configuredPath(path)], nil
+}
+
 func (state *GatewayState) MarkRead(path string, count int) error {
 	state.mu.Lock()
 	defer state.mu.Unlock()

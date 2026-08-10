@@ -155,6 +155,51 @@ func TestCompletionNotifierWaitsForEachReplyGraceDeadline(t *testing.T) {
 	}
 }
 
+func TestCompletionNotifierSuppressesAReplyReadDuringTheGracePeriod(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := writeNotificationSession(t, root, "Read session")
+	fake := &recordingPushNotifier{}
+	app := notificationTestApplication(t, root, false, true, fake)
+	client := &remapClient{}
+	if err := app.rpcClients.Register(sessionPath, client); err != nil {
+		t.Fatal(err)
+	}
+
+	waiting := make(chan struct{}, 2)
+	release := make(chan struct{}, 1)
+	notifier := newCompletionNotifier(app)
+	notifier.waitUntil = func(ctx context.Context, _ time.Time) bool {
+		waiting <- struct{}{}
+		select {
+		case <-release:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = notifier.Close(ctx)
+	})
+
+	notifier.schedule(completedReply{client: client, path: sessionPath, text: "read", id: "read"})
+	<-waiting
+	if err := app.gatewayState.MarkRead(sessionPath, 1); err != nil {
+		t.Fatal(err)
+	}
+	notifier.schedule(completedReply{client: client, path: sessionPath, text: "sentinel", id: "sentinel"})
+	release <- struct{}{}
+	select {
+	case <-waiting:
+	case <-time.After(time.Second):
+		t.Fatal("notifier did not finish checking the read reply")
+	}
+	if len(fake.owners) != 0 {
+		t.Fatalf("read reply delivery owners = %#v", fake.owners)
+	}
+}
+
 func TestCompletionNotifierCloseCancelsRepliesWaitingForTheGracePeriod(t *testing.T) {
 	root := t.TempDir()
 	sessionPath := writeNotificationSession(t, root, "Canceled session")
@@ -478,6 +523,7 @@ func notificationTestApplication(t *testing.T, root string, multiUser, authDisab
 		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
 		pushSubscriptions:    push.NewSubscriptionStore(cfg.PushSubscriptionsPath),
 		pushNotifier:         notifier,
+		gatewayState:         sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root),
 		notificationPresence: newNotificationPresence(time.Now),
 		sessionCache:         sessions.NewCache(),
 		pendingSessions:      rpc.NewPendingSessionRegistry(nil),

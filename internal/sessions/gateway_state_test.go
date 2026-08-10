@@ -22,7 +22,24 @@ func TestGatewayStatePreservesMalformedReadState(t *testing.T) {
 	if err := state.MarkRead(session.Path, 1); err == nil {
 		t.Fatal("MarkRead() succeeded")
 	}
+	if _, err := state.ReadCount(session.Path); err == nil {
+		t.Fatal("ReadCount() succeeded")
+	}
 	assertFileContents(t, path, malformed)
+}
+
+func TestGatewayStateReportsThePersistedReadCount(t *testing.T) {
+	root := t.TempDir()
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root)
+	path := filepath.Join(root, "session.jsonl")
+	if err := state.MarkRead(path, 3); err != nil {
+		t.Fatal(err)
+	}
+
+	count, err := state.ReadCount(path)
+	if err != nil || count != 3 {
+		t.Fatalf("ReadCount() = %d, %v", count, err)
+	}
 }
 
 func TestGatewayStatePreservesMalformedPinnedState(t *testing.T) {

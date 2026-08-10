@@ -23,11 +23,13 @@ const (
 )
 
 type completedReply struct {
-	client     rpc.RPCClient
-	path       string
-	text       string
-	id         string
-	observedAt time.Time
+	client         rpc.RPCClient
+	path           string
+	text           string
+	id             string
+	observedAt     time.Time
+	readCount      int
+	readCountKnown bool
 }
 
 type completionNotifier struct {
@@ -69,6 +71,13 @@ func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string
 
 func (notifier *completionNotifier) schedule(reply completedReply) {
 	reply.observedAt = notifier.now()
+	if notifier.app.gatewayState != nil {
+		readCount, err := notifier.app.gatewayState.ReadCount(reply.path)
+		if err == nil {
+			reply.readCount = readCount
+			reply.readCountKnown = true
+		}
+	}
 
 	notifier.mu.Lock()
 	if notifier.closed {
@@ -146,6 +155,13 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	if err != nil {
 		return err
 	}
+	if reply.readCountKnown && notifier.app.gatewayState != nil {
+		readCount, err := notifier.app.gatewayState.ReadCount(path)
+		if err == nil && readCount > reply.readCount {
+			return nil
+		}
+	}
+
 	owners, err := notifier.owners(path)
 	if err != nil {
 		return err
