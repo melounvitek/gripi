@@ -24,10 +24,10 @@ function imageExtension(source) {
 
 function imageDownloadFilename(source) {
   const label = String(source.alt || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").trim().replace(/[. ]+$/, "");
-  const labelledExtension = label.match(/\.(png|jpe?g|gif|webp)$/i)?.[1];
-  if (labelledExtension) return label;
-
   const extension = imageExtension(source.currentSrc || source.src);
+  const labelledExtension = label.match(/\.(png|jpe?g|gif|webp)$/i)?.[1];
+  if (labelledExtension) return extension ? `${label.slice(0, -labelledExtension.length)}${extension}` : label;
+
   const genericLabel = !label || ["attached image", "full-size image"].includes(label.toLocaleLowerCase());
   const basename = genericLabel ? "image" : label;
   return extension ? `${basename}.${extension}` : basename;
@@ -49,7 +49,7 @@ export class ImageViewerController {
     this.pinchStart = null;
     this.suppressClick = false;
     this.pointerStartedOnBackdrop = null;
-    this.retainedObjectURLs = new Set();
+    this.retainedObjectURL = null;
     this.bound = false;
   }
 
@@ -102,6 +102,8 @@ export class ImageViewerController {
 
     this.opener = opener || this.document.activeElement;
     this.openerArticle = this.opener?.closest?.("article") || null;
+    this.openerIndex = Math.max(0, [...(this.openerArticle?.querySelectorAll("[data-image-viewer-open]") || [])].indexOf(this.opener));
+    this.openerMessageFingerprint = this.openerArticle?.dataset.messageFingerprint || null;
     this.isOpen = true;
     this.viewer.hidden = false;
     this.viewer.dataset.loading = "true";
@@ -122,7 +124,17 @@ export class ImageViewerController {
   close() {
     if (!this.isOpen) return;
 
-    const opener = this.opener?.isConnected === false ? this.openerArticle?.querySelector("[data-image-viewer-open]") : this.opener;
+    let opener = this.opener;
+    if (opener?.isConnected === false) {
+      let article = this.openerArticle;
+      if (article?.isConnected === false && this.openerMessageFingerprint) {
+        article = [...this.document.querySelectorAll("article")]
+          .find((candidate) => candidate.dataset.messageFingerprint === this.openerMessageFingerprint);
+      }
+      opener = article?.querySelectorAll("[data-image-viewer-open]")[this.openerIndex] || this.document.querySelector("#conversation-scroll");
+      if (opener?.isConnected === false) opener = null;
+    }
+
     this.isOpen = false;
     this.viewer.hidden = true;
     this.pointers.clear();
@@ -132,18 +144,20 @@ export class ImageViewerController {
     this.image.removeAttribute("src");
     this.downloadLink?.removeAttribute("href");
     this.downloadLink?.removeAttribute("download");
-    this.retainedObjectURLs.forEach((url) => this.window.URL?.revokeObjectURL(url));
-    this.retainedObjectURLs.clear();
+    if (this.retainedObjectURL) this.window.URL?.revokeObjectURL(this.retainedObjectURL);
+    this.retainedObjectURL = null;
     this.sourceURL = null;
     this.opener = null;
     this.openerArticle = null;
+    this.openerIndex = 0;
+    this.openerMessageFingerprint = null;
     opener?.focus({ preventScroll: true });
   }
 
   retainObjectURL(url) {
     if (!this.isOpen || this.sourceURL !== url) return false;
 
-    this.retainedObjectURLs.add(url);
+    this.retainedObjectURL = url;
     return true;
   }
 

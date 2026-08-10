@@ -34,21 +34,23 @@ function viewerFixture() {
 
   const controller = new ImageViewerController(document, window);
   controller.bind();
-  return { controller, document, overlay, stage, image, close, zoomValue, download };
+  return { controller, document, window, overlay, stage, image, close, zoomValue, download };
 }
 
-function sourceImage() {
+function sourceImage(src = "/attachments/image.png", alt = "Attached image") {
   const article = new FakeElement("article");
   const container = new FakeElement("div");
   const button = new FakeElement("button", ["[data-image-viewer-open]"]);
   const image = new FakeElement("img");
-  image.src = "/attachments/image.png";
+  image.src = src;
   image.currentSrc = image.src;
-  image.alt = "Attached image";
+  image.alt = alt;
   image.naturalWidth = 1600;
   image.naturalHeight = 1200;
+  const firstButton = new FakeElement("button", ["[data-image-viewer-open]"]);
   button.append(image);
-  container.append(button);
+  container.append(firstButton, button);
+  article.dataset.messageFingerprint = "user:image";
   article.append(container);
   return { article, container, button, image };
 }
@@ -65,7 +67,7 @@ function pointer(pointerId, clientX, clientY, target = null) {
 
 test("image viewer opens fitted, exposes actual size, and restores focus when closed", () => {
   const { controller, document, overlay, close, zoomValue, download } = viewerFixture();
-  const { article, container, button, image } = sourceImage();
+  const { article, button, image } = sourceImage();
   document.body.append(article);
 
   controller.open(image, button);
@@ -89,10 +91,15 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
   assert.equal(controller.scale, 1);
   assert.equal(zoomValue.textContent, "100%");
 
+  const replacementArticle = new FakeElement("article");
+  const firstReplacement = new FakeElement("button", ["[data-image-viewer-open]"]);
   const replacement = new FakeElement("button", ["[data-image-viewer-open]"]);
-  container.remove();
-  article.append(replacement);
+  replacementArticle.dataset.messageFingerprint = article.dataset.messageFingerprint;
+  replacementArticle.append(firstReplacement, replacement);
+  article.remove();
+  article.isConnected = false;
   button.isConnected = false;
+  document.body.append(replacementArticle);
   controller.close();
   assert.equal(controller.isOpen, false);
   assert.equal(overlay.hidden, true);
@@ -100,6 +107,29 @@ test("image viewer opens fitted, exposes actual size, and restores focus when cl
   assert.equal(download.getAttribute("download"), null);
   assert.equal(button.focused, undefined);
   assert.equal(replacement.focused, true);
+});
+
+test("image viewer uses the displayed image format for its download filename", () => {
+  const { controller, download } = viewerFixture();
+  const { button, image } = sourceImage("data:image/png;base64,cG5n", "preview.jpg");
+
+  controller.open(image, button);
+
+  assert.equal(download.getAttribute("download"), "preview.png");
+});
+
+test("image viewer retains its live object URL until close", () => {
+  const { controller, window } = viewerFixture();
+  const { button, image } = sourceImage("blob:image-preview", "preview.png");
+  const revoked = [];
+  window.URL = { revokeObjectURL: (url) => revoked.push(url) };
+
+  controller.open(image, button);
+
+  assert.equal(controller.retainObjectURL("blob:other"), false);
+  assert.equal(controller.retainObjectURL("blob:image-preview"), true);
+  controller.close();
+  assert.deepEqual(revoked, ["blob:image-preview"]);
 });
 
 test("image viewer pans one pointer and pinches around the moving midpoint", () => {

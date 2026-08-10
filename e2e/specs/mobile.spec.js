@@ -62,12 +62,19 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   expect(download.suggestedFilename()).toBe("mobile-image.png");
   await viewer.getByRole("button", { name: "Close image viewer" }).tap();
   await expect(viewer).toBeHidden();
+  await page.setViewportSize({ width: 300, height: 700 });
   await page.reload();
 
   const persistedImage = message(page, "user", prompt).getByRole("button", { name: "View attached image full size" });
   await expect(persistedImage).toBeVisible();
   await persistedImage.tap();
   await expect(viewer).toBeVisible();
+  const downloadBounds = await viewer.getByRole("link", { name: "Download image" }).boundingBox();
+  expect(downloadBounds).not.toBeNull();
+  expect(downloadBounds.x).toBeGreaterThanOrEqual(0);
+  expect(downloadBounds.x + downloadBounds.width).toBeLessThanOrEqual(300);
+  expect(downloadBounds.width).toBeGreaterThanOrEqual(44);
+  expect(downloadBounds.height).toBeGreaterThanOrEqual(44);
   downloadPromise = page.waitForEvent("download");
   await viewer.getByRole("link", { name: "Download image" }).tap();
   download = await downloadPromise;
