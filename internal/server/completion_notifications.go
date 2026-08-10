@@ -73,7 +73,9 @@ func (notifier *completionNotifier) schedule(reply completedReply) {
 	reply.observedAt = notifier.now()
 	if notifier.app.gatewayState != nil {
 		readCount, err := notifier.app.gatewayState.ReadCount(reply.path)
-		if err == nil {
+		if err != nil {
+			log.Printf("capture completed-reply read state: %v", err)
+		} else {
 			reply.readCount = readCount
 			reply.readCountKnown = true
 		}
@@ -156,9 +158,19 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 		return err
 	}
 	if reply.readCountKnown && notifier.app.gatewayState != nil {
-		readCount, err := notifier.app.gatewayState.ReadCount(path)
-		if err == nil && readCount > reply.readCount {
-			return nil
+		readBaselines := map[string]int{reply.path: reply.readCount}
+		if path != reply.path {
+			readBaselines[path] = 0
+		}
+		for readPath, baseline := range readBaselines {
+			readCount, err := notifier.app.gatewayState.ReadCount(readPath)
+			if err != nil {
+				log.Printf("check completed-reply read state: %v", err)
+				continue
+			}
+			if readCount > baseline {
+				return nil
+			}
 		}
 	}
 

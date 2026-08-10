@@ -155,7 +155,7 @@ func TestCompletionNotifierWaitsForEachReplyGraceDeadline(t *testing.T) {
 	}
 }
 
-func TestCompletionNotifierSuppressesAReplyReadDuringTheGracePeriod(t *testing.T) {
+func TestCompletionNotifierSuppressesAReplyReadBeforeDelivery(t *testing.T) {
 	root := t.TempDir()
 	sessionPath := writeNotificationSession(t, root, "Read session")
 	fake := &recordingPushNotifier{}
@@ -472,6 +472,19 @@ func TestCompletionNotifierResolvesAndClaimsAPendingSessionForItsWorkspace(t *te
 	if len(fake.owners) != 1 {
 		t.Fatalf("focused pending session received another delivery: %#v", fake.owners)
 	}
+
+	app.notificationPresence.Update("workspace:workspace-a", "pending-window", pendingPath, false, 2)
+	if err := app.gatewayState.MarkRead(pendingPath, 1); err != nil {
+		t.Fatal(err)
+	}
+	readReply := completedReply{client: client, path: pendingPath, text: "read pending", id: "reply-11", readCountKnown: true}
+	if err := notifier.deliver(context.Background(), readReply); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.owners) != 1 {
+		t.Fatalf("read pending session received another delivery: %#v", fake.owners)
+	}
+
 	var payload map[string]string
 	if err := json.Unmarshal(fake.payloads[0], &payload); err != nil {
 		t.Fatal(err)
