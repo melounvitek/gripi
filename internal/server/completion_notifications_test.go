@@ -61,6 +61,7 @@ func TestRPCMessageEndFlowsThroughTheCompletionQueueToPushDelivery(t *testing.T)
 	})
 	app := notificationTestApplication(t, root, false, true, fake)
 	completion := newCompletionNotifier(app)
+	completion.gracePeriod = 0
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -85,6 +86,100 @@ func TestRPCMessageEndFlowsThroughTheCompletionQueueToPushDelivery(t *testing.T)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("completed RPC reply did not reach push delivery")
+	}
+}
+
+func TestCompletionNotifierWaitsForEachReplyGraceDeadline(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := writeNotificationSession(t, root, "Delayed session")
+	delivered := make(chan struct{}, 2)
+	fake := pushNotifierFunc(func(_ context.Context, _ string, _ []byte) error {
+		delivered <- struct{}{}
+		return nil
+	})
+	app := notificationTestApplication(t, root, false, true, fake)
+	client := &remapClient{}
+	if err := app.rpcClients.Register(sessionPath, client); err != nil {
+		t.Fatal(err)
+	}
+
+	observedAt := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
+	deadlines := make(chan time.Time, 2)
+	release := make(chan struct{}, 2)
+	notifier := newCompletionNotifier(app)
+	notifier.now = func() time.Time { return observedAt }
+	notifier.waitUntil = func(ctx context.Context, deadline time.Time) bool {
+		deadlines <- deadline
+		select {
+		case <-release:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = notifier.Close(ctx)
+	})
+
+	notifier.schedule(completedReply{client: client, path: sessionPath, text: "first", id: "first"})
+	firstDeadline := <-deadlines
+	if want := observedAt.Add(time.Minute); !firstDeadline.Equal(want) {
+		t.Fatalf("first deadline = %v, want %v", firstDeadline, want)
+	}
+	select {
+	case <-delivered:
+		t.Fatal("reply delivered before its grace deadline")
+	default:
+	}
+
+	observedAt = observedAt.Add(10 * time.Second)
+	notifier.schedule(completedReply{client: client, path: sessionPath, text: "second", id: "second"})
+	release <- struct{}{}
+	select {
+	case <-delivered:
+	case <-time.After(time.Second):
+		t.Fatal("first reply was not delivered after its grace deadline")
+	}
+	secondDeadline := <-deadlines
+	if want := observedAt.Add(time.Minute); !secondDeadline.Equal(want) {
+		t.Fatalf("second deadline = %v, want %v", secondDeadline, want)
+	}
+
+	release <- struct{}{}
+	select {
+	case <-delivered:
+	case <-time.After(time.Second):
+		t.Fatal("second reply was not delivered after its grace deadline")
+	}
+}
+
+func TestCompletionNotifierCloseCancelsRepliesWaitingForTheGracePeriod(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := writeNotificationSession(t, root, "Canceled session")
+	delivered := make(chan struct{}, 1)
+	fake := pushNotifierFunc(func(_ context.Context, _ string, _ []byte) error {
+		delivered <- struct{}{}
+		return nil
+	})
+	app := notificationTestApplication(t, root, false, true, fake)
+	client := &remapClient{}
+	if err := app.rpcClients.Register(sessionPath, client); err != nil {
+		t.Fatal(err)
+	}
+	notifier := newCompletionNotifier(app)
+	notifier.schedule(completedReply{client: client, path: sessionPath, text: "done", id: "done"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := notifier.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-delivered:
+		t.Fatal("reply delivered while closing during its grace period")
+	default:
 	}
 }
 

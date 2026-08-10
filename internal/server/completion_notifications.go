@@ -17,26 +17,31 @@ import (
 )
 
 const (
-	completionNotificationQueueSize = 64
-	maxNotificationURLBytes         = 512
+	completionNotificationQueueSize   = 64
+	completionNotificationGracePeriod = time.Minute
+	maxNotificationURLBytes           = 512
 )
 
 type completedReply struct {
-	client rpc.RPCClient
-	path   string
-	text   string
-	id     string
+	client     rpc.RPCClient
+	path       string
+	text       string
+	id         string
+	observedAt time.Time
 }
 
 type completionNotifier struct {
-	app     *application
-	ctx     context.Context
-	cancel  context.CancelFunc
-	queue   chan completedReply
-	done    chan struct{}
-	mu      sync.Mutex
-	started bool
-	closed  bool
+	app         *application
+	ctx         context.Context
+	cancel      context.CancelFunc
+	queue       chan completedReply
+	done        chan struct{}
+	now         func() time.Time
+	waitUntil   func(context.Context, time.Time) bool
+	gracePeriod time.Duration
+	mu          sync.Mutex
+	started     bool
+	closed      bool
 }
 
 func newCompletionNotifier(app *application) *completionNotifier {
@@ -44,6 +49,7 @@ func newCompletionNotifier(app *application) *completionNotifier {
 	return &completionNotifier{
 		app: app, ctx: ctx, cancel: cancel,
 		queue: make(chan completedReply, completionNotificationQueueSize), done: make(chan struct{}),
+		now: time.Now, waitUntil: waitUntilNotificationDeadline, gracePeriod: completionNotificationGracePeriod,
 	}
 }
 
@@ -58,6 +64,11 @@ func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string
 		return
 	}
 	reply := completedReply{client: client, path: path, text: text, id: completedReplyID(event)}
+	notifier.schedule(reply)
+}
+
+func (notifier *completionNotifier) schedule(reply completedReply) {
+	reply.observedAt = notifier.now()
 
 	notifier.mu.Lock()
 	if notifier.closed {
@@ -105,12 +116,28 @@ func (notifier *completionNotifier) run() {
 		case <-notifier.ctx.Done():
 			return
 		case reply := <-notifier.queue:
+			if !notifier.waitUntil(notifier.ctx, reply.observedAt.Add(notifier.gracePeriod)) {
+				return
+			}
+
 			ctx, cancel := context.WithTimeout(notifier.ctx, 50*time.Second)
 			if err := notifier.deliver(ctx, reply); err != nil && !errors.Is(err, context.Canceled) {
 				log.Printf("deliver completed-reply notification: %v", err)
 			}
 			cancel()
 		}
+	}
+}
+
+func waitUntilNotificationDeadline(ctx context.Context, deadline time.Time) bool {
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
