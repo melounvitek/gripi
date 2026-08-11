@@ -2,6 +2,18 @@ import { expect, test } from "@playwright/test";
 import { prompts, sessions, tool } from "../support/contract.mjs";
 import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
+test("shows one tool result after reloading an active command", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.toolReload);
+  await sendPrompt(page, prompts.longCommand);
+  await expect(message(page, "assistant", tool.longCommand)).toBeVisible();
+
+  await page.reload();
+
+  await expect(message(page, "toolResult", tool.result)).toHaveCount(1);
+  await expectRunFinished(page);
+});
+
 test("toggles transcript details with a single button", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.toolSummary);

@@ -321,7 +321,7 @@ function acceptPrompt(command) {
   if (command.message === prompts.imageRead) {
     schedule(120, () => completeWithImageRead(reply));
   } else if (command.message === prompts.longCommand) {
-    schedule(120, () => completeWithTool(reply, { command: tool.longCommand, initialCommand: "pi --no-session", initialCommandDelay: 750, completionDelay: 1200 }));
+    schedule(120, () => completeWithTool(reply, { command: tool.longCommand, initialCommand: "pi --no-session", initialCommandDelay: 750, resultDelay: 1500, completionDelay: 1200 }));
   } else if (command.message === prompts.terminal) {
     schedule(120, () => completeWithTool(reply, { command: tool.terminalCommand, updates: tool.terminalUpdates, updateDelay: 350, completionDelay: 800 }));
   } else if (command.message === prompts.wrappedToolOutput) {
@@ -669,7 +669,8 @@ function completeWithTool(reply, options = {}) {
   };
   const publishUpdate = (index) => {
     emit({ type: "tool_execution_update", toolCallId, toolName: "bash", args: { command }, partialResult: { content: [{ type: "text", text: updates[index] }], details: {} } });
-    if (index === updates.length - 1) finish();
+    if (index === updates.length - 1 && options.resultDelay) schedule(options.resultDelay, finish);
+    else if (index === updates.length - 1) finish();
     else schedule(options.updateDelay || 0, () => publishUpdate(index + 1));
   };
   const publishToolCall = () => {

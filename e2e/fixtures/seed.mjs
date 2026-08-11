@@ -166,6 +166,7 @@ export async function seedFixtures(root) {
     ["extension-project", "extension-race", sessions.extensionRace],
     ["prompt-project", "markdown-table", sessions.markdownTable],
     ["prompt-project", "tool-summary", sessions.toolSummary],
+    ["prompt-project", "tool-reload", sessions.toolReload],
     ["controls-project", "parallel-subagents", sessions.parallelSubagents],
     ["mobile-project", "wrapped-tool-output", sessions.wrappedToolOutput],
     ["controls-project", "compaction-follow-up", sessions.compactionFollowUp],

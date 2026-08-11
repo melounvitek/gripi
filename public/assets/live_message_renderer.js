@@ -1138,7 +1138,8 @@ export class LiveMessageRenderer {
           this.upsertLiveCustomSegment(message, segment, index, shouldScroll, timestamp);
         } else if (segment.compact) {
           const text = segment.generalSubagent ? this.parser.subagentDisplayText(message.details, segment.text, false) : segment.text;
-          this.appendCompactMessage(roleName, segment.summary, text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolCallId: segment.toolCallId, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, error: segment.error, images: segment.images });
+          const entry = this.appendCompactMessage(roleName, segment.summary, text, true, shouldScroll, timestamp, { summaryParts: segment.summaryParts, toolTranscript: segment.toolTranscript, toolName: segment.toolName, toolCallId: segment.toolCallId, toolPreview: segment.toolPreview, toolPrompt: segment.toolPrompt, error: segment.error, images: segment.images });
+          if (entry && segment.isToolResult && segment.toolCallId) this.liveToolExecutions.set(segment.toolCallId, entry);
         } else {
           this.appendMessage(roleName, segment.text, true, shouldScroll, timestamp, { images: segment.images });
         }

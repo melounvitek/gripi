@@ -347,6 +347,35 @@ test("persisted tool results ignore replayed message events with the same tool i
   assert.equal(appended, 0);
 });
 
+test("result-first tool lifecycle updates one fallback result card", () => {
+  const document = new FakeDocument();
+  const conversation = {
+    element: new FakeElement("section"),
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+  };
+  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser(), { bind() {} });
+  renderer.liveOutput = new FakeElement("section");
+  renderer.conversationScroll = conversation.element;
+  const message = {
+    role: "toolResult",
+    toolCallId: "restored-bash",
+    toolName: "bash",
+    content: [{ type: "text", text: "Command completed" }],
+    isError: false,
+    timestamp: Date.parse("2026-01-01T00:00:00Z"),
+  };
+
+  renderer.renderMessageEvent({ type: "message_start", message });
+  renderer.renderMessageEvent({ type: "message_end", message });
+
+  assert.equal(renderer.liveOutput.children.length, 1);
+  const [article] = renderer.liveOutput.children;
+  assert.equal(article.dataset.role, "toolResult");
+  assert.equal(article.dataset.toolCallId, "restored-bash");
+  assert.equal(article.querySelector(".message-body").dataset.rawText, "Command completed");
+});
+
 test("result-first general subagent output keeps its transcript display", () => {
   const conversation = {
     element: { querySelectorAll: () => [] },

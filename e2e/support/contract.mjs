@@ -8,6 +8,7 @@ export const sessions = {
   deltaStreaming: "E2E Delta Streaming Desktop",
   markdownTable: "E2E Markdown Table Desktop",
   toolSummary: "E2E Tool Summary Desktop",
+  toolReload: "E2E Tool Reload Desktop",
   markRead: "E2E Mark Read Desktop",
   idleClient: "E2E Idle Client Desktop",
   promptRetry: "E2E Prompt Retry Desktop",
