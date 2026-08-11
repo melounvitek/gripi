@@ -75,7 +75,7 @@ export class LiveMessageRenderer {
 
   persistedToolResults(root) {
     return [...(root?.querySelectorAll(".message:not(.message--live)[data-tool-call-id]") || [])]
-      .filter((message) => message.dataset.role === "toolResult" && message.dataset.toolCallId);
+      .filter((message) => (message.dataset.role === "toolResult" || message.dataset.toolResultPersisted === "true") && message.dataset.toolCallId);
   }
 
   rememberPersistedToolResult(id) {

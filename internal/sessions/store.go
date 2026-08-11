@@ -74,6 +74,7 @@ type Message struct {
 	Error                   bool
 	ToolCallID              string
 	ToolName                string
+	ToolResultPersisted      bool
 	Thinking                bool
 	ToolSummaryHTML         string
 	ToolTranscript          bool
@@ -1653,6 +1654,7 @@ func pairMessages(messages []*Message) []*Message {
 					call.Text = strings.TrimSpace(call.Text + "\n\n" + message.Text)
 				}
 				call.Error = call.Error || message.Error
+				call.ToolResultPersisted = true
 				if !message.Error {
 					call.ToolPreview = false
 				}

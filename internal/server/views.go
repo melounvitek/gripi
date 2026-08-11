@@ -283,7 +283,7 @@ func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, hom
 	}
 	persistedToolResults := map[string]bool{}
 	for _, message := range messages {
-		if message.Role == "toolResult" && message.ToolCallID != "" {
+		if (message.Role == "toolResult" || message.ToolResultPersisted) && message.ToolCallID != "" {
 			persistedToolResults[message.ToolCallID] = true
 		}
 	}

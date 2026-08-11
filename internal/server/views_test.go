@@ -41,6 +41,30 @@ func TestMessageTemplateCollapsesLongSingleLineToolOutput(t *testing.T) {
 	}
 }
 
+func TestMessageTemplateIdentifiesPersistedPairedToolResults(t *testing.T) {
+	message := &sessions.Message{
+		Role:                "assistant",
+		Text:                "done",
+		Compact:             true,
+		ToolCallID:          "bash-1",
+		ToolName:            "bash",
+		ToolResultPersisted: true,
+	}
+	templates, err := template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rendered strings.Builder
+	if err := templates.ExecuteTemplate(&rendered, "message", messageData{View: &pageView{}, Message: message}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(rendered.String(), `data-tool-call-id="bash-1" data-tool-result-persisted="true"`) {
+		t.Fatalf("persisted tool identity missing: %s", rendered.String())
+	}
+}
+
 func TestMessageTemplatePreservesLongDiffTail(t *testing.T) {
 	lines := make([]string, 18)
 	for index := range lines {

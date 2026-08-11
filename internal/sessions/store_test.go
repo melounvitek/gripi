@@ -117,7 +117,7 @@ func TestSelectedOversizedToolCallsAndResultsRenderWithCorrectPairing(t *testing
 	if window.TotalMessageCount != 4 || window.StartIndex != 0 || len(window.Messages) != 4 {
 		t.Fatalf("window = start %d of %d, messages %#v", window.StartIndex, window.TotalMessageCount, window.Messages)
 	}
-	if !window.Messages[0].Thinking || window.Messages[1].ToolName != "read" || window.Messages[1].Text != "" || window.Messages[2].Text != "Between tools" || window.Messages[3].ToolName != "write" || !strings.HasPrefix(window.Messages[3].Text, "+ ok\n\nsaved ") {
+	if !window.Messages[0].Thinking || window.Messages[1].ToolName != "read" || window.Messages[1].Text != "" || !window.Messages[1].ToolResultPersisted || window.Messages[2].Text != "Between tools" || window.Messages[3].ToolName != "write" || !window.Messages[3].ToolResultPersisted || !strings.HasPrefix(window.Messages[3].Text, "+ ok\n\nsaved ") {
 		t.Fatalf("paired messages = %#v", window.Messages)
 	}
 }

@@ -347,6 +347,28 @@ test("persisted tool results ignore replayed message events with the same tool i
   assert.equal(appended, 0);
 });
 
+test("persisted paired tool results ignore replayed message events with the same tool identity", () => {
+  const persisted = { dataset: { role: "assistant", toolCallId: "bash-1", toolResultPersisted: "true" } };
+  const conversation = {
+    element: {
+      querySelectorAll(selector) {
+        if (selector === ".message:not(.message--live)[data-tool-call-id]") return [persisted];
+        if (selector === ".message:not(.message--live)[data-message-fingerprint]") return [];
+        return [];
+      },
+    },
+    followLiveOutput: () => false,
+  };
+  const renderer = new LiveMessageRenderer({}, conversation, new LiveMessageParser(), { bind() {} });
+  renderer.conversationScroll = conversation.element;
+  let appended = 0;
+  renderer.appendCompactMessage = () => { appended += 1; };
+
+  renderer.renderMessageEvent({ type: "message_start", message: { role: "toolResult", toolCallId: "bash-1", toolName: "bash", content: [{ type: "text", text: "Done" }] } });
+
+  assert.equal(appended, 0);
+});
+
 test("result-first tool lifecycle updates one fallback result card", () => {
   const document = new FakeDocument();
   const conversation = {
@@ -361,13 +383,13 @@ test("result-first tool lifecycle updates one fallback result card", () => {
     role: "toolResult",
     toolCallId: "restored-bash",
     toolName: "bash",
-    content: [{ type: "text", text: "Command completed" }],
+    content: [{ type: "text", text: "Command started" }],
     isError: false,
     timestamp: Date.parse("2026-01-01T00:00:00Z"),
   };
 
   renderer.renderMessageEvent({ type: "message_start", message });
-  renderer.renderMessageEvent({ type: "message_end", message });
+  renderer.renderMessageEvent({ type: "message_end", message: { ...message, content: [{ type: "text", text: "Command completed" }] } });
 
   assert.equal(renderer.liveOutput.children.length, 1);
   const [article] = renderer.liveOutput.children;
