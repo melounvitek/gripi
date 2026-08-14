@@ -5,6 +5,23 @@ import { expectRunFinished, message, selectSession, sendPrompt } from "../suppor
 const loginGuidance = "/login isn’t available in Gripi. Run /login in the Pi CLI, then restart the Gripi gateway to load the new credentials.";
 const logoutGuidance = "/logout isn’t available in Gripi. Run /logout in the Pi CLI, then restart the Gripi gateway to reload credentials.";
 
+async function expectNeutralImageHover(button) {
+  const image = button.locator("img");
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((element) => element.naturalWidth)).toBeGreaterThan(0);
+
+  const initial = await button.evaluate((element) => ({
+    background: getComputedStyle(element).backgroundColor,
+    buttonWidth: element.getBoundingClientRect().width,
+    imageWidth: element.querySelector("img").getBoundingClientRect().width
+  }));
+  expect(Math.abs(initial.buttonWidth - initial.imageWidth)).toBeLessThanOrEqual(1);
+
+  await button.hover();
+  await button.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+  await expect(button).toHaveCSS("background-color", initial.background);
+}
+
 async function expectReadableMarkdownTable(table) {
   await expect(table).toBeVisible();
   await expect(table.getByRole("columnheader", { name: "Revised status" })).toBeVisible();
@@ -342,6 +359,34 @@ test("stream delta-only thinking and text before the assistant message ends", as
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   await expect(message(page, "assistant", replies.deltaText)).toBeVisible();
   await expectRunFinished(page);
+});
+
+test("keep live and persisted images fitted without an orange hover background", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.imageHover);
+
+  let releasePrompt;
+  await page.route("**/prompt", async (route) => {
+    await new Promise((resolve) => { releasePrompt = resolve; });
+    await route.continue();
+  });
+  await page.locator("#image-input").setInputFiles({
+    name: "hover-image.png",
+    mimeType: "image/png",
+    buffer: await page.screenshot()
+  });
+
+  await sendPrompt(page, prompts.imageHover);
+  await expect.poll(() => typeof releasePrompt).toBe("function");
+  const liveImage = message(page, "user", prompts.imageHover).getByRole("button", { name: "View hover-image.png full size" });
+  await expectNeutralImageHover(liveImage);
+
+  releasePrompt();
+  await expectRunFinished(page);
+
+  await page.reload();
+  const persistedImage = message(page, "user", prompts.imageHover).getByRole("button", { name: "View attached image full size" });
+  await expectNeutralImageHover(persistedImage);
 });
 
 test("render a large image read without blocking the conversation", async ({ page }) => {

@@ -174,6 +174,7 @@ export async function seedFixtures(root) {
     ["controls-project", "write-output", sessions.writeOutput],
     ["prompt-project", "delta-streaming", sessions.deltaStreaming],
     ["mobile-project", "image-viewer", sessions.imageViewer],
+    ["prompt-project", "image-hover", sessions.imageHover],
     ["prompt-project", "image-read", sessions.imageRead]
   ];
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
