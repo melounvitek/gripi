@@ -35,6 +35,7 @@ export class ConversationController {
     this.focusedView = false;
     this.agentRunning = false;
     this.focusedActivityRefreshFrame = null;
+    this.focusedActivityTouchActive = false;
     this.focusedActivityMessageIds = new WeakMap();
     this.focusedActivityMessageSequence = 0;
     this.focusedActivitySignature = null;
@@ -63,6 +64,21 @@ export class ConversationController {
     this.followOversizedMessageBottom = false;
     if (!this.element) return;
 
+    this.listen(this.element, "click", (event) => {
+      const toggle = event.target.closest?.("[data-focus-activity-toggle]");
+      if (toggle) this.toggleFocusedActivity(toggle);
+    });
+    this.listen(this.element, "pointerdown", (event) => {
+      if (event.pointerType === "touch" && event.target.closest?.("[data-focus-activity-toggle]")) this.focusedActivityTouchActive = true;
+    });
+    ["pointerup", "pointercancel"].forEach((type) => {
+      this.listen(this.element, type, () => {
+        if (!this.focusedActivityTouchActive) return;
+        this.focusedActivityTouchActive = false;
+        this.focusedActivitySignature = null;
+        this.scheduleFocusedActivityRefresh();
+      });
+    });
     this.refreshFocusedActivity();
 
     this.listen(this.element, "keydown", (event) => {
@@ -111,6 +127,7 @@ export class ConversationController {
     this.messageJumpSuppressionTimer = null;
     if (this.focusedActivityRefreshFrame) cancelAnimationFrame(this.focusedActivityRefreshFrame);
     this.focusedActivityRefreshFrame = null;
+    this.focusedActivityTouchActive = false;
     this.focusedActivitySignature = null;
     this.clearMessageJumpSuppressionScrollEndListener();
     this.messageJumpSuppressionGeneration += 1;
@@ -249,6 +266,10 @@ export class ConversationController {
 
   refreshFocusedActivity() {
     if (!this.element?.querySelectorAll) return;
+    if (this.focusedActivityTouchActive) {
+      this.focusedActivitySignature = null;
+      return;
+    }
     const messages = [...this.element.querySelectorAll(".message")];
     const signature = `${this.agentRunning}|${this.historyStatus()?.hidden !== false}|${messages.map((message) => {
       if (!this.focusedActivityMessageIds.has(message)) this.focusedActivityMessageIds.set(message, ++this.focusedActivityMessageSequence);
@@ -266,21 +287,38 @@ export class ConversationController {
     }).join("|")}`;
     if (signature === this.focusedActivitySignature) return;
     this.focusedActivitySignature = signature;
-    this.element.querySelectorAll("[data-focus-activity-summary]").forEach((summary) => summary.remove());
+    const summaries = [...this.element.querySelectorAll("[data-focus-activity-summary]")];
+    const activeToggle = this.document.activeElement?.closest?.("[data-focus-activity-toggle]");
+    const activeGroupId = activeToggle?.closest("[data-focus-activity-summary]")?.dataset.focusActivitySummary;
+    const focusAnchor = activeGroupId && messages.find((message) => message.dataset.focusActivityGroup === activeGroupId);
+    const expandedMessages = new Set();
+    summaries.forEach((summary) => {
+      if (summary.querySelector("[data-focus-activity-toggle]")?.getAttribute("aria-expanded") === "true") {
+        messages.filter((message) => message.dataset.focusActivityGroup === summary.dataset.focusActivitySummary).forEach((message) => expandedMessages.add(message));
+      }
+      summary.remove();
+    });
     messages.forEach((message) => { delete message.dataset.focusActivityGroup; });
+    let replacementFocus = null;
     const groups = this.focusedActivityGroups(messages);
     groups.forEach((group, index) => {
       const groupId = `${this.bindingEpoch}-${index}`;
+      const expanded = group.some((message) => expandedMessages.has(message));
       group.forEach((message) => { message.dataset.focusActivityGroup = groupId; });
       const summaryData = this.focusedActivitySummary(group);
       const items = this.focusedActivityItems(group);
       const running = this.agentRunning && index === groups.length - 1 && group.at(-1) === messages.at(-1);
       const summary = this.document.createElement("section");
-      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${running ? " is-running" : ""}`;
+      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${expanded ? " is-expanded" : ""}${running ? " is-running" : ""}`;
       summary.dataset.focusActivitySummary = groupId;
 
-      const header = this.document.createElement("div");
+      const header = this.document.createElement(items.length > 0 ? "button" : "div");
       header.className = "focus-activity-header";
+      if (items.length > 0) {
+        header.type = "button";
+        header.dataset.focusActivityToggle = "true";
+        header.setAttribute("aria-expanded", String(expanded));
+      }
       if (running) {
         const spinner = this.document.createElement("span");
         spinner.className = "focus-activity-spinner";
@@ -304,6 +342,7 @@ export class ConversationController {
       if (items.length > 0) {
         const details = this.document.createElement("div");
         details.className = "focus-activity-details";
+        details.hidden = !expanded;
         const hiddenItemCount = Math.max(0, items.length - FOCUSED_ACTIVITY_ITEM_LIMIT);
         if (hiddenItemCount > 0) {
           const notice = this.document.createElement("p");
@@ -330,7 +369,10 @@ export class ConversationController {
         summary.append(details);
       }
       group[0].before(summary);
+      if (focusAnchor && group.includes(focusAnchor)) replacementFocus = header;
     });
+    if (activeToggle && !replacementFocus) replacementFocus = this.viewToggle;
+    replacementFocus?.focus({ preventScroll: true });
   }
 
   scheduleFocusedActivityRefresh() {
@@ -341,6 +383,16 @@ export class ConversationController {
       this.focusedActivityRefreshFrame = null;
       if (epoch === this.bindingEpoch && element === this.element) this.refreshFocusedActivity();
     });
+  }
+
+  toggleFocusedActivity(toggle) {
+    const summary = toggle.closest("[data-focus-activity-summary]");
+    const expanded = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", String(expanded));
+    summary.classList.toggle("is-expanded", expanded);
+    const details = summary.querySelector(".focus-activity-details");
+    if (details) details.hidden = !expanded;
+    this.updateJumpControls();
   }
 
   listen(target, type, listener, options) {

@@ -253,6 +253,7 @@
   const focusedActivityMessageIds = new WeakMap();
   let focusedActivityMessageSequence = 0;
   let focusedActivitySignature = null;
+  let focusedActivityTouchActive = false;
 
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey));
@@ -345,6 +346,10 @@
     return items;
   }
   function refreshFocusedActivity() {
+    if (focusedActivityTouchActive) {
+      focusedActivitySignature = null;
+      return;
+    }
     const messages = [...element.scroll.querySelectorAll(".message")];
     const signature = `${activityRunning}|${messages.map((message) => {
       if (!focusedActivityMessageIds.has(message)) focusedActivityMessageIds.set(message, ++focusedActivityMessageSequence);
@@ -352,8 +357,17 @@
     }).join("|")}`;
     if (signature === focusedActivitySignature) return;
     focusedActivitySignature = signature;
-    element.scroll.querySelectorAll("[data-focus-activity-summary]").forEach((summary) => summary.remove());
+    const summaries = [...element.scroll.querySelectorAll("[data-focus-activity-summary]")];
+    const activeToggle = document.activeElement?.closest?.("[data-focus-activity-toggle]");
+    const activeGroupId = activeToggle?.closest("[data-focus-activity-summary]")?.dataset.focusActivitySummary;
+    const focusAnchor = activeGroupId && messages.find((message) => message.dataset.focusActivityGroup === activeGroupId);
+    const expandedMessages = new Set();
+    summaries.forEach((summary) => {
+      if (summary.querySelector("[data-focus-activity-toggle]")?.getAttribute("aria-expanded") === "true") messages.filter((message) => message.dataset.focusActivityGroup === summary.dataset.focusActivitySummary).forEach((message) => expandedMessages.add(message));
+      summary.remove();
+    });
     messages.forEach((message) => { delete message.dataset.focusActivityGroup; });
+    let replacementFocus = null;
     let groups = []; let group = [];
     messages.forEach((message) => {
       if (focusedConversationMessage(message)) { if (group.length) groups.push(group); group = []; }
@@ -363,20 +377,22 @@
     const latestMessage = messages.at(-1);
     groups.forEach((messages, index) => {
       const groupId = `demo-${index}`;
+      const expanded = messages.some((message) => expandedMessages.has(message));
       messages.forEach((message) => { message.dataset.focusActivityGroup = groupId; });
       const summaryData = focusedActivitySummary(messages);
       const items = focusedActivityItems(messages);
       const running = activityRunning && index === groups.length - 1 && messages.at(-1) === latestMessage;
       const summary = document.createElement("section");
-      summary.className = `focus-activity-summary${summaryData.errorCount ? " has-errors" : ""}${running ? " is-running" : ""}`;
+      summary.className = `focus-activity-summary${summaryData.errorCount ? " has-errors" : ""}${expanded ? " is-expanded" : ""}${running ? " is-running" : ""}`;
       summary.dataset.focusActivitySummary = groupId;
-      const header = document.createElement("div"); header.className = "focus-activity-header";
+      const header = document.createElement(items.length ? "button" : "div"); header.className = "focus-activity-header";
+      if (items.length) { header.type = "button"; header.dataset.focusActivityToggle = "true"; header.setAttribute("aria-expanded", String(expanded)); }
       if (running) { const spinner = document.createElement("span"); spinner.className = "focus-activity-spinner"; spinner.setAttribute("aria-hidden", "true"); header.append(spinner); }
       if (summaryData.text) { const text = document.createElement("span"); text.className = "focus-activity-summary-text"; text.textContent = summaryData.text; header.append(text); }
       if (summaryData.errorCount) { const error = document.createElement("span"); error.className = "focus-activity-error-count"; error.textContent = `${summaryData.errorCount} ${summaryData.errorCount === 1 ? "error" : "errors"}`; header.append(error); }
       summary.append(header);
       if (items.length) {
-        const details = document.createElement("div"); details.className = "focus-activity-details";
+        const details = document.createElement("div"); details.className = "focus-activity-details"; details.hidden = !expanded;
         const hiddenItemCount = Math.max(0, items.length - FOCUSED_ACTIVITY_ITEM_LIMIT);
         if (hiddenItemCount > 0) {
           const notice = document.createElement("p"); notice.className = "focus-activity-hidden-count"; notice.textContent = `… (${hiddenItemCount} previous ${hiddenItemCount === 1 ? "item" : "items"} hidden)`;
@@ -392,7 +408,10 @@
         details.append(list); summary.append(details);
       }
       messages[0].before(summary);
+      if (focusAnchor && messages.includes(focusAnchor)) replacementFocus = header;
     });
+    if (activeToggle && !replacementFocus) replacementFocus = element.viewToggle;
+    replacementFocus?.focus({ preventScroll: true });
   }
   function timeLabel(date = new Date()) { const pad = (value) => String(value).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`; }
   function applyIdentity(target, session) {
@@ -776,6 +795,13 @@
     const open = event.target.closest("[data-modal-open]"); if (open) { openModal(open.dataset.modalOpen); return; }
     const close = event.target.closest("[data-modal-close]"); if (close) { closeModal(close.closest("[data-modal]")); return; }
     const command = event.target.closest("[data-command-name]"); if (command) { handleSlash(command.dataset.commandName); element.prompt.value = ""; persistDraft(); element.commands.classList.remove("is-visible"); return; }
+    const activityToggle = event.target.closest("[data-focus-activity-toggle]"); if (activityToggle) {
+      const summary = activityToggle.closest("[data-focus-activity-summary]");
+      const expanded = activityToggle.getAttribute("aria-expanded") !== "true";
+      activityToggle.setAttribute("aria-expanded", String(expanded)); summary.classList.toggle("is-expanded", expanded);
+      const details = summary.querySelector(".focus-activity-details"); if (details) details.hidden = !expanded;
+      return;
+    }
     const copy = event.target.closest("[data-copy-target]"); if (copy) {
       const text = copy.closest(".message").querySelector(".message-body")?.textContent || "";
       const fallback = () => { const textarea = document.createElement("textarea"); textarea.value = text; textarea.className = "visually-hidden"; document.body.append(textarea); textarea.select(); const copied = document.execCommand("copy"); textarea.remove(); return copied; };
@@ -784,6 +810,16 @@
     if (!event.target.closest("[data-project-select]") && !element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); }
     if (event.target.closest("[data-demo-disabled]")) event.preventDefault();
   });
+
+  element.scroll.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "touch" && event.target.closest("[data-focus-activity-toggle]")) focusedActivityTouchActive = true;
+  });
+  ["pointerup", "pointercancel"].forEach((type) => element.scroll.addEventListener(type, () => {
+    if (!focusedActivityTouchActive) return;
+    focusedActivityTouchActive = false;
+    focusedActivitySignature = null;
+    requestAnimationFrame(refreshFocusedActivity);
+  }));
 
   element.scroll.addEventListener("scroll", () => {
     const current = element.scroll.scrollTop;

@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 import { prompts, sessions, tool } from "../support/contract.mjs";
 import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
+test.use({ hasTouch: true });
+
 test("show the full wrapped tool command live and after reload", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.toolSummary);
@@ -13,24 +15,41 @@ test("show the full wrapped tool command live and after reload", async ({ page }
   await page.setViewportSize({ width: 390, height: 844 });
   await expectFullCommand(card, { wrapped: true });
   await showMessagesOnly(page);
-  await expectAlwaysOpenActivity(page);
+  const activity = await activityFor(page, card);
+  await expectCollapsedActivity(activity);
+  await activity.locator("[data-focus-activity-toggle]").tap();
+  await expectExpandedActivity(activity);
   await expectRunFinished(page);
+  await expectExpandedActivity(activity);
 
   await page.reload();
   const restoredCard = message(page, "assistant", "pi --no-session").last();
   await expectFullCommand(restoredCard, { wrapped: true });
   await showMessagesOnly(page);
-  await expectAlwaysOpenActivity(page);
+  const restoredActivity = await activityFor(page, restoredCard);
+  await expectCollapsedActivity(restoredActivity);
+  await restoredActivity.locator("[data-focus-activity-toggle]").tap();
+  await expectExpandedActivity(restoredActivity);
 });
 
 async function showMessagesOnly(page) {
   await page.getByRole("button", { name: "Messages-only transcript view" }).click();
 }
 
-async function expectAlwaysOpenActivity(page) {
-  const activity = page.locator("[data-focus-activity-summary]").last();
+async function activityFor(page, card) {
+  await expect(card).toHaveAttribute("data-focus-activity-group", /.+/);
+  const groupId = await card.getAttribute("data-focus-activity-group");
+  return page.locator(`[data-focus-activity-summary="${groupId}"]`);
+}
+
+async function expectCollapsedActivity(activity) {
+  await expect(activity.locator("[data-focus-activity-toggle]")).toHaveAttribute("aria-expanded", "false");
+  await expect(activity.locator(".focus-activity-details")).toBeHidden();
+}
+
+async function expectExpandedActivity(activity) {
+  await expect(activity.locator("[data-focus-activity-toggle]")).toHaveAttribute("aria-expanded", "true");
   await expect(activity.locator(".focus-activity-details")).toBeVisible();
-  await expect(activity.locator("button.focus-activity-header, [data-focus-activity-toggle]")).toHaveCount(0);
   await expect(activity.locator(".focus-activity-item-text")).toContainText(tool.longCommand);
 
   const metrics = await activity.locator(".focus-activity-details").evaluate((details) => ({

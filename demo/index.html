@@ -95,6 +95,10 @@
     .focus-activity-summary { display: none; }
     .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin: 0 0 0.85rem; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.78rem; }
     .focus-activity-header { width: 100%; display: flex; align-items: center; gap: 0.5rem; min-width: 0; min-height: 0; padding: 0.5rem 0.7rem; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
+    button.focus-activity-header { cursor: pointer; }
+    button.focus-activity-header:hover { background: var(--accent-tint-04); color: var(--text); }
+    button.focus-activity-header::after { content: "›"; flex: 0 0 auto; margin-left: auto; font-size: 1rem; line-height: 1; transition: transform 120ms ease; }
+    .focus-activity-summary.is-expanded button.focus-activity-header::after { transform: rotate(90deg); }
     .focus-activity-spinner { flex: 0 0 auto; width: 0.72rem; height: 0.72rem; border: 1.5px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     .focus-activity-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .focus-activity-error-count { flex: 0 0 auto; padding: 0.12rem 0.35rem; border: 1px solid #cc666659; border-radius: 0.2rem; background: var(--danger-soft); color: var(--danger); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; }
