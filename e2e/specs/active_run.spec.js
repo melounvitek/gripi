@@ -31,14 +31,41 @@ test("use slash commands while Pi is running", async ({ page }) => {
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   await expect(abort).toBeVisible();
 
+  const failActiveName = async (route) => {
+    if (!route.request().postData()?.includes("Failed active name")) return route.continue();
+    await route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: "Name rejected" }) });
+  };
+  await page.route("**/prompt", failActiveName);
+  await composer.fill("/name Failed active name");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(composer).toHaveValue("/name Failed active name");
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(abort).toBeVisible();
+  await page.unroute("**/prompt", failActiveName);
+
+  await composer.fill("/model");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  const modelDialog = page.getByRole("dialog", { name: "Model & thinking" });
+  await expect(modelDialog).toBeVisible();
+  await modelDialog.getByRole("radio", { name: /Contract Model/ }).check();
+  await modelDialog.getByRole("button", { name: "Apply" }).click();
+  await expect(modelDialog).toBeHidden();
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(abort).toBeVisible();
+
   await composer.fill("/immediate-command");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   await expect(abort).toBeVisible();
 
+  await page.route("**/sessions/export", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
   const downloadPromise = page.waitForEvent("download");
   await composer.fill("/export active-run");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(abort).toBeVisible();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe("active-run.html");
   await download.delete();
@@ -111,6 +138,26 @@ test("runs extension commands and queues steering during compaction", async ({ p
   await expect(message(page, "assistant", replies.standard)).toBeVisible();
   await expect(queuedSteer).toHaveCount(0);
   await expectRunFinished(page);
+});
+
+test("abort an active run before navigating the session tree", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.controlsAbort);
+  await sendPrompt(page, prompts.steerStart);
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/tree");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  const dialog = page.getByRole("dialog", { name: "Session tree" });
+  await expect(dialog).toBeVisible();
+  const firstEntry = dialog.locator("[data-tree-viewport] > [role=treeitem] > .tree-session-row [data-tree-entry-id]");
+  await firstEntry.click();
+  await dialog.locator("[data-tree-navigate]").click();
+  await dialog.locator("[data-tree-summary-submit]").click();
+
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
 });
 
 test("abort an active run before compacting", async ({ page }) => {

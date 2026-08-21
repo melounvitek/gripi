@@ -233,6 +233,9 @@ func TestCompactionQueueFlushesNativePromptBehaviors(t *testing.T) {
 		if command["type"] != "prompt" || command["message"] != expected.message || command["streamingBehavior"] != expected.behavior {
 			t.Fatalf("command = %#v", command)
 		}
+		if !client.DeferringCompactionPrompts() {
+			t.Fatal("client stopped deferring prompts before the queued batch was accepted")
+		}
 		writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": "prompt", "success": true})
 	}
 }
@@ -384,6 +387,9 @@ func TestClientCompactionFlushDoesNotBlockStdoutAndTimesOut(t *testing.T) {
 		flushing := client.flushingCompactionFollowUps
 		client.mu.Unlock()
 		if !flushing {
+			if queued := client.LiveSnapshot().QueuedMessages["followUp"]; len(queued) != 1 {
+				t.Fatalf("timed-out prompt was not restored: %#v", queued)
+			}
 			return
 		}
 		time.Sleep(time.Millisecond)

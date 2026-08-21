@@ -1128,8 +1128,9 @@ type followUpRaceClient struct {
 	prompted       bool
 }
 
-func (*followUpRaceClient) Close() error     { return nil }
-func (*followUpRaceClient) Compacting() bool { return false }
+func (*followUpRaceClient) Close() error                     { return nil }
+func (*followUpRaceClient) Compacting() bool                 { return false }
+func (*followUpRaceClient) DeferringCompactionPrompts() bool { return false }
 func (*followUpRaceClient) GetState(context.Context) (map[string]any, error) {
 	return map[string]any{"success": true}, nil
 }

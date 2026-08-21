@@ -552,7 +552,7 @@ async function loadModelSettings(modal, operation) {
     }
     renderModelSettingsModels();
     renderThinkingOptions(selectedSettingsModel());
-    if (apply) apply.disabled = !selectedSettingsModel() || ["running", "sending", "exporting"].includes(composerState?.dataset.state);
+    if (apply) apply.disabled = !selectedSettingsModel() || ["sending", "exporting", "stopping"].includes(composerState?.dataset.state);
   } catch (error) {
     if (operation === modelSettingsOperationGeneration && !modal.hidden && sessionPath === currentSessionPath()) {
       setModelSettingsStatus(error.message || "Could not load models.", true);
@@ -561,7 +561,7 @@ async function loadModelSettings(modal, operation) {
 }
 
 function openModelSettingsModal() {
-  if (["running", "sending", "exporting"].includes(composerState?.dataset.state)) return false;
+  if (["sending", "exporting", "stopping"].includes(composerState?.dataset.state)) return false;
   const modal = document.querySelector('[data-modal="model-settings-modal"]');
   const search = modal?.querySelector("[data-model-search]");
   if (search) search.value = "";
@@ -828,7 +828,8 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
     composerState.textContent = ["running", "bash", "sending", "exporting", "stopping", "error", "success"].includes(state) ? label : "";
     if (state === "running") updateWaitingForOutputStatus();
   }
-  const taskBusy = ["running", "bash", "sending", "stopping"].includes(state);
+  const activeTask = liveAgentRunning || liveOutput?.dataset.composerCompacting === "true";
+  const taskBusy = ["running", "bash", "sending", "stopping"].includes(state) || (state === "exporting" && activeTask);
   const agentBusy = ["running", "sending", "exporting", "stopping"].includes(state);
   const submitting = ["sending", "exporting"].includes(state);
   const stopping = state === "stopping";
@@ -851,9 +852,9 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   if (promptTextarea) promptTextarea.disabled = submitting || stopping || sessionSyncBlocked();
   if (focus && state !== previousState) syncComposerFocus(state);
   const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]');
-  if (modelButton) modelButton.disabled = agentBusy || sessionSyncBlocked();
+  if (modelButton) modelButton.disabled = submitting || stopping || sessionSyncBlocked();
   const modelApply = document.querySelector('[data-modal="model-settings-modal"] [data-model-settings-apply]');
-  if (modelApply && !document.querySelector('[data-modal="model-settings-modal"]')?.hidden) modelApply.disabled = agentBusy || !selectedSettingsModel();
+  if (modelApply && !document.querySelector('[data-modal="model-settings-modal"]')?.hidden) modelApply.disabled = submitting || stopping || !selectedSettingsModel();
   if (composerState && state === "running" && previousState !== "running") {
     resetEventPollBackoff();
     scheduleNextEventPoll(0);
@@ -1940,7 +1941,7 @@ async function submitPrompt(event) {
   const showControlCommandFailure = (message) => {
     restoreSubmittedPromptInput();
     if (reloadCommand && liveBash) setComposerState("bash", "Shell command running…");
-    else if (reloadCommand && queuedPrompt) setComposerState("running", message, { since: previousWaitingForOutputSince });
+    else if (queuedPrompt) showCurrentActiveTask("error", message);
     else setComposerState("error", message);
     showStatus(message, true);
   };
@@ -2025,7 +2026,8 @@ async function submitPrompt(event) {
     if (payload?.command === "name") {
       if (payload.error) {
         restoreSubmittedPromptInput();
-        setComposerState("error", payload.error);
+        if (queuedPrompt) showCurrentActiveTask("error", payload.error);
+        else setComposerState("error", payload.error);
         showStatus(payload.error, true);
         return;
       }

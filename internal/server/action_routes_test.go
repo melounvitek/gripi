@@ -142,13 +142,19 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if activeModel.Code != http.StatusOK || !strings.Contains(activeModel.Body.String(), `"thinking":"off"`) {
 		t.Fatalf("active model = %d %s", activeModel.Code, activeModel.Body.String())
 	}
-	activeTree := serveAction(handler, formActionRequest("/sessions/tree", map[string]string{"session": sessionPath, "entry_id": "user-1", "summary_mode": "none"}, true))
-	if activeTree.Code != http.StatusConflict {
-		t.Fatalf("active tree = %d %s", activeTree.Code, activeTree.Body.String())
-	}
 	steeredSlash := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "/unknown-steer", "streaming_behavior": "steer"}, true))
 	if steeredSlash.Code != http.StatusOK || !strings.Contains(steeredSlash.Body.String(), `"steer":true`) {
 		t.Fatalf("steered slash = %d %s", steeredSlash.Code, steeredSlash.Body.String())
+	}
+	waitForFakePiSettled(t, handler, sessionPath)
+
+	activeTreeStart := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "Start the steer scenario"}, true))
+	if activeTreeStart.Code != http.StatusOK {
+		t.Fatalf("active tree start = %d %s", activeTreeStart.Code, activeTreeStart.Body.String())
+	}
+	activeTree := serveAction(handler, formActionRequest("/sessions/tree", map[string]string{"session": sessionPath, "entry_id": "user-1", "summary_mode": "none"}, true))
+	if activeTree.Code != http.StatusOK {
+		t.Fatalf("active tree = %d %s", activeTree.Code, activeTree.Body.String())
 	}
 	waitForFakePiSettled(t, handler, sessionPath)
 

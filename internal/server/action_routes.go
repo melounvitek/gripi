@@ -231,7 +231,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 				if behavior == "follow_up" {
 					nativeBehavior = "followUp"
 				}
-				if client.Compacting() && app.extensionSlashCommand(request, client, rpcMessage) {
+				deferringCompactionPrompts := client.Compacting()
+				if state, valid := client.(interface{ DeferringCompactionPrompts() bool }); valid {
+					deferringCompactionPrompts = state.DeferringCompactionPrompts()
+				}
+				if deferringCompactionPrompts && app.extensionSlashCommand(request, client, rpcMessage) {
 					rpcResponse, actionErr = actions.PromptWithBehavior(request.Context(), rpcMessage, rpcImages, nativeBehavior)
 					handled = actionErr == nil
 				} else {
@@ -292,8 +296,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 			state, stateErr = client.GetState(request.Context())
 			return stateErr
 		}) == nil {
-			if running, valid := responseData(state)["isStreaming"].(bool); valid {
-				payload["running"] = running
+			data := responseData(state)
+			streaming, streamingKnown := data["isStreaming"].(bool)
+			compacting, compactingKnown := data["isCompacting"].(bool)
+			if streamingKnown || compactingKnown {
+				payload["running"] = streaming || compacting
 			}
 		}
 	}
@@ -792,8 +799,14 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 		if err != nil {
 			return err
 		}
-		if client.Busy() {
-			return errSessionBusy
+		if client.AgentRunning() {
+			aborted, abortErr := actions.Abort(request.Context())
+			if abortErr != nil {
+				return abortErr
+			}
+			if !successfulRPCResponse(aborted) {
+				return &rpcSettingError{response: aborted}
+			}
 		}
 		if summary != "custom" {
 			instructions = ""

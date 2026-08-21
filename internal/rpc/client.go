@@ -170,11 +170,10 @@ type Client struct {
 	stderrDone chan struct{}
 	readerErr  error
 
-	mu                 sync.Mutex
-	requestSequence    int64
-	pending            map[string]chan responseResult
-	bridgePending      map[string]chan string
-	deferredCommandIDs map[string]bool
+	mu              sync.Mutex
+	requestSequence int64
+	pending         map[string]chan responseResult
+	bridgePending   map[string]chan string
 
 	events           []replayEntry
 	eventBufferSize  int
@@ -329,7 +328,7 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser,
 		requestTimeout: options.RequestTimeout, abortTimeout: options.AbortTimeout, fallbackRPCLineBytes: options.FallbackRPCLineBytes, treeBridgeTimeout: options.TreeBridgeTimeout,
 		clock: options.Clock, now: options.Now, diagnostics: options.Diagnostics, eventObserver: options.EventObserver,
 		writeLane: make(chan struct{}, 1), readerDone: make(chan struct{}), stderrDone: make(chan struct{}),
-		pending: make(map[string]chan responseResult), bridgePending: make(map[string]chan string), deferredCommandIDs: make(map[string]bool),
+		pending: make(map[string]chan responseResult), bridgePending: make(map[string]chan string),
 		eventBufferLimit: options.EventBufferLimit, eventBufferBytes: options.EventBufferBytes, coalesced: make(map[string]*replayEntry),
 		activeToolEvents: make(map[string]map[string]any), queuedMessages: map[string][]string{"steering": {}, "followUp": {}},
 		pendingDialogs: make(map[string]*extensionDialog), extensionStatuses: make(map[string]map[string]any), extensionWidgets: make(map[string]map[string]any),
@@ -473,7 +472,7 @@ func (client *Client) QueueCompactionPrompt(_ context.Context, message string, i
 		return nil, false, nil
 	}
 	if client.compactionFollowUpCount >= MaxCompactionFollowUps || client.compactionFollowUpBytes+size > MaxCompactionFollowUpBytes {
-		return map[string]any{"type": "response", "command": "follow_up", "success": false, "error": "Too many follow-up messages are waiting for compaction to finish"}, true, nil
+		return map[string]any{"type": "response", "command": "prompt", "success": false, "error": "Too many messages are waiting for compaction to finish"}, true, nil
 	}
 	client.compactionFollowUps = append(client.compactionFollowUps, payload)
 	client.compactionFollowUpCount++
@@ -560,7 +559,7 @@ func (client *Client) reloadFailureLocked() map[string]any {
 	if client.compacting {
 		return reloadFailureResponse("Wait for compaction to finish before reloading")
 	}
-	if client.busy || client.activeBashToken != nil || client.flushingCompactionFollowUps || len(client.deferredCommandIDs) > 0 || client.reloading {
+	if client.busy || client.activeBashToken != nil || client.flushingCompactionFollowUps || client.reloading {
 		return reloadFailureResponse("Session is busy")
 	}
 	return nil
@@ -968,7 +967,6 @@ func (client *Client) readerStopped() {
 	client.compactionFollowUpBytes = 0
 	client.flushingCompactionFollowUps = false
 	client.reloading = false
-	client.deferredCommandIDs = make(map[string]bool)
 	client.activeToolEvents = make(map[string]map[string]any)
 	client.activeToolOrder = nil
 	client.completedBashEvents = make(map[string]map[string]any)
@@ -1012,9 +1010,6 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		target := client.pending[id]
 		delete(client.pending, id)
 		target <- responseResult{value: response}
-	} else if id := stringValue(response["id"]); id != "" && client.deferredCommandIDs[id] {
-		delete(client.deferredCommandIDs, id)
-		storeAsEvent = response["success"] == false
 	} else if typeName == "response" && stringValue(response["id"]) != "" {
 		// A response whose request timed out is intentionally discarded.
 	} else {
@@ -1125,6 +1120,11 @@ func (client *Client) Compacting() bool {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	return client.compacting
+}
+func (client *Client) DeferringCompactionPrompts() bool {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.compacting || client.flushingCompactionFollowUps
 }
 func (client *Client) SettledAt() *time.Time {
 	client.mu.Lock()
@@ -2138,29 +2138,16 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 }
 func (client *Client) flushCompactionPrompts(items []map[string]any) {
 	deadline := client.now().Add(client.requestTimeout)
-	timer := time.NewTimer(max(client.requestTimeout, time.Nanosecond))
-	defer timer.Stop()
-	select {
-	case <-client.writeLane:
-		defer func() { client.writeLane <- struct{}{} }()
-	case <-client.readerDone:
-		client.finishFailedCompactionFlush("")
-		return
-	case <-timer.C:
-		client.finishFailedCompactionFlush("")
-		return
-	}
 	for {
-		for _, payload := range items {
-			command := "prompt"
-			id := client.nextID(command)
-			client.mu.Lock()
-			client.deferredCommandIDs[id] = true
-			client.mu.Unlock()
-			value := cloneMap(payload)
-			value["id"], value["type"] = id, command
-			if err := client.writeCommandUnlocked(value, command, deadline); err != nil {
-				client.finishFailedCompactionFlush(id)
+		for index, payload := range items {
+			remaining := deadline.Sub(client.now())
+			if remaining <= 0 {
+				client.finishFailedCompactionFlush(items[index:])
+				return
+			}
+			response, err := client.request(context.Background(), "prompt", client.nextID("prompt"), payload, remaining, nil)
+			if err != nil || response["success"] != true {
+				client.finishFailedCompactionFlush(items[index:])
 				return
 			}
 			size := promptPayloadSize(payload)
@@ -2182,22 +2169,14 @@ func (client *Client) flushCompactionPrompts(items []map[string]any) {
 		items, client.compactionFollowUps = client.compactionFollowUps, nil
 		client.appendQueuedMessagesEventLocked()
 		client.mu.Unlock()
-		if !client.now().Before(deadline) {
-			client.finishFailedCompactionFlush("")
-			return
-		}
 	}
 }
 
-func (client *Client) finishFailedCompactionFlush(_ string) {
+func (client *Client) finishFailedCompactionFlush(items []map[string]any) {
 	client.mu.Lock()
-	client.deferredCommandIDs = make(map[string]bool)
-	queueChanged := len(client.compactionFollowUps) > 0
-	client.compactionFollowUps = nil
-	client.compactionFollowUpCount = 0
-	client.compactionFollowUpBytes = 0
+	client.compactionFollowUps = append(items, client.compactionFollowUps...)
 	client.flushingCompactionFollowUps = false
-	if queueChanged {
+	if len(client.compactionFollowUps) > 0 {
 		client.appendQueuedMessagesEventLocked()
 	}
 	client.mu.Unlock()
