@@ -163,7 +163,6 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 			attachmentPaths = append(attachmentPaths, image.Path)
 			mimeTypes = append(mimeTypes, image.MIMEType)
 		}
-		rpcMessage = messageWithAttachmentPaths(message, attachmentPaths)
 		return nil
 	}
 	recordImages := func() error {
@@ -1533,18 +1532,6 @@ func uploadedPromptImages(response http.ResponseWriter, request *http.Request) (
 		return nil, false
 	}
 	return files, true
-}
-
-func messageWithAttachmentPaths(message string, paths []string) string {
-	if len(paths) == 0 {
-		return message
-	}
-	parts := []string{}
-	if trimmed := strings.TrimSpace(message); trimmed != "" {
-		parts = append(parts, trimmed)
-	}
-	parts = append(parts, strings.Join(paths, "\n"))
-	return strings.Join(parts, "\n\n")
 }
 
 func validatedCWD(raw, home string) (string, string, bool) {

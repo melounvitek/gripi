@@ -181,6 +181,12 @@ const treeSessionController = new TreeSessionController(document, window, {
   closeModal: (modal) => closeModal(modal),
   showSessionSwitching: () => showSessionSwitching(),
   hideSessionSwitching: () => hideSessionSwitching(),
+  restoreEditorText: (text) => {
+    if (promptTextarea && !promptTextarea.value) {
+      promptTextarea.value = text;
+      resizePromptTextarea();
+    }
+  },
   navigate: async (payload) => {
     if (promptTextarea && !promptTextarea.value && payload?.editorText !== undefined) {
       promptTextarea.value = payload.editorText;

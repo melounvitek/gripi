@@ -279,7 +279,7 @@ func TestNextPromptRetriesARejectedCompactionFlushFirst(t *testing.T) {
 	}
 }
 
-func TestSessionReplacementDiscardsRemainingCompactionPrompts(t *testing.T) {
+func TestSessionReplacementWaitsForCompactionPrompts(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
 	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
@@ -287,7 +287,7 @@ func TestSessionReplacementDiscardsRemainingCompactionPrompts(t *testing.T) {
 
 	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start"})
 	waitSequence(t, client, 1)
-	for _, message := range []string{"first", "must not cross sessions"} {
+	for _, message := range []string{"first", "second"} {
 		if _, queued, err := client.QueueCompactionPrompt(context.Background(), message, nil, "steer"); err != nil || !queued {
 			t.Fatalf("queue %q = %v, %v", message, queued, err)
 		}
@@ -307,20 +307,15 @@ func TestSessionReplacementDiscardsRemainingCompactionPrompts(t *testing.T) {
 		_, err := client.NewSession(context.Background(), "")
 		replaced <- err
 	}()
-	deadline := time.Now().Add(time.Second)
-	for {
-		client.mu.Lock()
-		cancelled := !client.flushingCompactionFollowUps
-		client.mu.Unlock()
-		if cancelled {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("session replacement did not cancel the compaction flush")
-		}
-		time.Sleep(time.Millisecond)
+	writeRecord(t, stdoutWriter, map[string]any{"id": first["id"], "type": "response", "command": "prompt", "success": true})
+	var second map[string]any
+	if err := decoder.Decode(&second); err != nil {
+		t.Fatal(err)
 	}
-	writeRecord(t, stdoutWriter, map[string]any{"id": first["id"], "type": "response", "command": "prompt", "success": false, "error": "cancelled for replacement"})
+	if second["type"] != "prompt" || second["message"] != "second" {
+		t.Fatalf("second prompt = %#v", second)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"id": second["id"], "type": "response", "command": "prompt", "success": true})
 	var command map[string]any
 	if err := decoder.Decode(&command); err != nil {
 		t.Fatal(err)
@@ -333,7 +328,7 @@ func TestSessionReplacementDiscardsRemainingCompactionPrompts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if queued := client.LiveSnapshot().QueuedMessages; len(queued["steering"])+len(queued["followUp"]) != 0 {
-		t.Fatalf("cancelled prompts crossed into the replacement session: %#v", queued)
+		t.Fatalf("accepted prompts remained after replacement: %#v", queued)
 	}
 }
 

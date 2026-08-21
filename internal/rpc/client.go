@@ -212,8 +212,6 @@ type Client struct {
 	compactionFollowUpCount     int
 	compactionFollowUpBytes     int
 	flushingCompactionFollowUps bool
-	compactionFlushDone         chan struct{}
-	compactionFlushGeneration   uint64
 	reloading                   bool
 
 	sampledToolUpdates map[string]time.Time
@@ -497,14 +495,16 @@ func (client *Client) AbortBash(ctx context.Context) (map[string]any, error) {
 	return client.request(ctx, "abort_bash", client.nextID("abort_bash"), nil, client.abortTimeout, nil)
 }
 func (client *Client) NewSession(ctx context.Context, parent string) (map[string]any, error) {
-	if err := client.discardCompactionPrompts(ctx); err != nil {
+	if err := client.waitForCompactionFlush(ctx, client.now().Add(LongRequestTimeout)); err != nil {
 		return nil, err
 	}
 	payload := map[string]any{}
 	if parent != "" {
 		payload["parentSession"] = parent
 	}
-	return client.request(ctx, "new_session", client.nextID("new_session"), payload, LongRequestTimeout, nil)
+	response, err := client.request(ctx, "new_session", client.nextID("new_session"), payload, LongRequestTimeout, nil)
+	client.resetReplacedSessionState(response, err)
+	return response, err
 }
 func (client *Client) SwitchSession(ctx context.Context, path string) (map[string]any, error) {
 	return client.request(ctx, "switch_session", client.nextID("switch_session"), map[string]any{"sessionPath": path}, LongRequestTimeout, nil)
@@ -520,17 +520,46 @@ func (client *Client) GetForkMessages(ctx context.Context) (map[string]any, erro
 	return client.request(ctx, "get_fork_messages", client.nextID("get_fork_messages"), nil, client.requestTimeout, nil)
 }
 func (client *Client) Fork(ctx context.Context, entryID string) (map[string]any, error) {
-	if err := client.discardCompactionPrompts(ctx); err != nil {
+	if err := client.waitForCompactionFlush(ctx, client.now().Add(LongRequestTimeout)); err != nil {
 		return nil, err
 	}
-	return client.request(ctx, "fork", client.nextID("fork"), map[string]any{"entryId": entryID}, LongRequestTimeout, nil)
+	response, err := client.request(ctx, "fork", client.nextID("fork"), map[string]any{"entryId": entryID}, LongRequestTimeout, nil)
+	client.resetReplacedSessionState(response, err)
+	return response, err
 }
 func (client *Client) CloneSession(ctx context.Context) (map[string]any, error) {
-	if err := client.discardCompactionPrompts(ctx); err != nil {
+	if err := client.waitForCompactionFlush(ctx, client.now().Add(LongRequestTimeout)); err != nil {
 		return nil, err
 	}
-	return client.request(ctx, "clone", client.nextID("clone"), nil, LongRequestTimeout, nil)
+	response, err := client.request(ctx, "clone", client.nextID("clone"), nil, LongRequestTimeout, nil)
+	client.resetReplacedSessionState(response, err)
+	return response, err
 }
+func (client *Client) resetReplacedSessionState(response map[string]any, err error) {
+	if err != nil || response["success"] != true || responseCancelled(response) {
+		return
+	}
+	client.mu.Lock()
+	client.agentRunning = false
+	client.busy = false
+	client.busySince = nil
+	client.compacting = false
+	client.compactingSince = nil
+	client.compactionFollowUps = nil
+	client.compactionFollowUpCount = 0
+	client.compactionFollowUpBytes = 0
+	client.flushingCompactionFollowUps = false
+	client.queuedMessages = map[string][]string{"steering": {}, "followUp": {}}
+	client.pendingDialogs = make(map[string]*extensionDialog)
+	client.pendingDialogOrder = nil
+	client.extensionStatuses = make(map[string]map[string]any)
+	client.extensionStatusOrder = nil
+	client.extensionWidgets = make(map[string]map[string]any)
+	client.extensionWidgetOrder = nil
+	client.extensionTitle = nil
+	client.mu.Unlock()
+}
+
 func (client *Client) ExportHTML(ctx context.Context, outputPath string) (map[string]any, error) {
 	return client.request(ctx, "export_html", client.nextID("export_html"), map[string]any{"outputPath": outputPath}, LongRequestTimeout, nil)
 }
@@ -1006,8 +1035,6 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 	}
 
 	var queuedPrompts []map[string]any
-	var flushDone chan struct{}
-	var flushGeneration uint64
 	var observed map[string]any
 	compactionQueueChanged := false
 	client.mu.Lock()
@@ -1063,10 +1090,6 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 			queuedPrompts = client.compactionFollowUps
 			client.compactionFollowUps = nil
 			client.flushingCompactionFollowUps = true
-			client.compactionFlushGeneration++
-			client.compactionFlushDone = make(chan struct{})
-			flushDone = client.compactionFlushDone
-			flushGeneration = client.compactionFlushGeneration
 			compactionQueueChanged = true
 		}
 		client.updateActiveToolsLocked(response, serializedBytes)
@@ -1090,7 +1113,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		client.eventObserver(client, observed)
 	}
 	if len(queuedPrompts) > 0 {
-		go client.flushCompactionPrompts(queuedPrompts, flushDone, flushGeneration)
+		go client.flushCompactionPrompts(queuedPrompts)
 	}
 }
 
@@ -2133,17 +2156,12 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		if !client.compacting && !client.flushingCompactionFollowUps && len(client.compactionFollowUps) > 0 {
 			retry, client.compactionFollowUps = client.compactionFollowUps, nil
 			client.flushingCompactionFollowUps = true
-			client.compactionFlushGeneration++
-			client.compactionFlushDone = make(chan struct{})
 			client.appendQueuedMessagesEventLocked()
 		}
 		waiting := client.flushingCompactionFollowUps || (client.compacting && len(client.compactionFollowUps) > 0)
 		client.mu.Unlock()
 		if len(retry) > 0 {
-			client.mu.Lock()
-			flushDone, generation := client.compactionFlushDone, client.compactionFlushGeneration
-			client.mu.Unlock()
-			go client.flushCompactionPrompts(retry, flushDone, generation)
+			go client.flushCompactionPrompts(retry)
 		}
 		if !waiting {
 			return nil
@@ -2167,46 +2185,30 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		}
 	}
 }
-func (client *Client) flushCompactionPrompts(items []map[string]any, done chan struct{}, generation uint64) {
-	defer client.finishCompactionFlush(done, generation)
+func (client *Client) flushCompactionPrompts(items []map[string]any) {
 	deadline := client.now().Add(client.requestTimeout)
 	for {
 		for index, payload := range items {
 			remaining := deadline.Sub(client.now())
 			if remaining <= 0 {
-				client.finishFailedCompactionFlush(items[index:], generation)
+				client.finishFailedCompactionFlush(items[index:])
 				return
 			}
 			response, err := client.request(context.Background(), "prompt", client.nextID("prompt"), payload, remaining, nil)
-			client.mu.Lock()
-			active := client.flushingCompactionFollowUps && client.compactionFlushGeneration == generation
-			client.mu.Unlock()
-			if !active {
-				return
-			}
 			if err != nil {
-				client.dropUncertainCompactionPrompt(payload, items[index+1:], generation)
+				client.dropUncertainCompactionPrompt(payload, items[index+1:])
 				return
 			}
 			if response["success"] != true {
-				client.finishFailedCompactionFlush(items[index:], generation)
+				client.finishFailedCompactionFlush(items[index:])
 				return
 			}
-			size := promptPayloadSize(payload)
 			client.mu.Lock()
-			if !client.flushingCompactionFollowUps || client.compactionFlushGeneration != generation {
-				client.mu.Unlock()
-				return
-			}
 			client.compactionFollowUpCount--
-			client.compactionFollowUpBytes -= size
+			client.compactionFollowUpBytes -= promptPayloadSize(payload)
 			client.mu.Unlock()
 		}
 		client.mu.Lock()
-		if !client.flushingCompactionFollowUps || client.compactionFlushGeneration != generation {
-			client.mu.Unlock()
-			return
-		}
 		if len(client.compactionFollowUps) == 0 {
 			client.flushingCompactionFollowUps = false
 			client.mu.Unlock()
@@ -2218,67 +2220,26 @@ func (client *Client) flushCompactionPrompts(items []map[string]any, done chan s
 	}
 }
 
-func (client *Client) finishFailedCompactionFlush(items []map[string]any, generation uint64) {
+func (client *Client) finishFailedCompactionFlush(items []map[string]any) {
 	client.mu.Lock()
-	if client.compactionFlushGeneration == generation {
-		client.compactionFollowUps = append(items, client.compactionFollowUps...)
-		client.flushingCompactionFollowUps = false
-		if len(client.compactionFollowUps) > 0 {
-			client.appendQueuedMessagesEventLocked()
-		}
-	}
-	client.mu.Unlock()
-}
-
-func (client *Client) dropUncertainCompactionPrompt(payload map[string]any, remaining []map[string]any, generation uint64) {
-	client.mu.Lock()
-	if client.compactionFlushGeneration == generation {
-		client.compactionFollowUpCount--
-		client.compactionFollowUpBytes -= promptPayloadSize(payload)
-		client.compactionFollowUps = append(remaining, client.compactionFollowUps...)
-		client.flushingCompactionFollowUps = false
-		if len(client.compactionFollowUps) > 0 {
-			client.appendQueuedMessagesEventLocked()
-		}
-	}
-	client.mu.Unlock()
-}
-
-func (client *Client) finishCompactionFlush(done chan struct{}, generation uint64) {
-	close(done)
-	client.mu.Lock()
-	if client.compactionFlushGeneration == generation && client.compactionFlushDone == done {
-		client.compactionFlushDone = nil
-	}
-	client.mu.Unlock()
-}
-
-func (client *Client) discardCompactionPrompts(ctx context.Context) error {
-	client.mu.Lock()
+	client.compactionFollowUps = append(items, client.compactionFollowUps...)
 	client.flushingCompactionFollowUps = false
-	client.compactionFlushGeneration++
-	client.compactionFollowUps = nil
-	client.compactionFollowUpCount = 0
-	client.compactionFollowUpBytes = 0
-	done := client.compactionFlushDone
-	client.appendQueuedMessagesEventLocked()
+	if len(client.compactionFollowUps) > 0 {
+		client.appendQueuedMessagesEventLocked()
+	}
 	client.mu.Unlock()
-	if done == nil {
-		return nil
+}
+
+func (client *Client) dropUncertainCompactionPrompt(payload map[string]any, remaining []map[string]any) {
+	client.mu.Lock()
+	client.compactionFollowUpCount--
+	client.compactionFollowUpBytes -= promptPayloadSize(payload)
+	client.compactionFollowUps = append(remaining, client.compactionFollowUps...)
+	client.flushingCompactionFollowUps = false
+	if len(client.compactionFollowUps) > 0 {
+		client.appendQueuedMessagesEventLocked()
 	}
-	select {
-	case <-done:
-		client.mu.Lock()
-		if client.compactionFlushDone == done {
-			client.compactionFlushDone = nil
-		}
-		client.mu.Unlock()
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-client.readerDone:
-		return ErrProcessExited
-	}
+	client.mu.Unlock()
 }
 
 func (client *Client) ExtensionUIResponse(ctx context.Context, id string, value *string, confirmed *bool, cancelled bool) (map[string]any, error) {

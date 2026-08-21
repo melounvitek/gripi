@@ -462,6 +462,7 @@ export class TreeSessionController {
     try {
       const response = await fetch("/sessions/tree", { method: "POST", body: formData, headers: { "Accept": "application/json" } });
       const payload = await response.json().catch(() => null);
+      if (payload?.editorText !== undefined) this.callbacks.restoreEditorText?.(payload.editorText);
       if (!response.ok || !payload || payload.cancelled) throw new Error(payload?.error || "Could not navigate the session tree.");
       if (modal) this.callbacks.closeModal?.(modal);
       await this.callbacks.navigate?.(payload, entry);
