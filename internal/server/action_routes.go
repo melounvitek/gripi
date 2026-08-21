@@ -132,7 +132,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	attachmentStore := sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}
 	var rpcResponse map[string]any
 	var rpcMessage = message
-	var handledSlashCommand, compactingAfterHandledCommand, runningAfterHandledCommand bool
+	var extensionCommandWithImages, handledSlashCommand, compactingAfterHandledCommand, runningAfterHandledCommand bool
 	var rpcImages []rpc.PromptImage
 	var attachmentPaths, mimeTypes []string
 	cleanupImages := func() error { return nil }
@@ -146,7 +146,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	}
 	defer func() { _ = cleanupFailedImages() }()
 	prepareImages := func() error {
-		if len(imageFiles) == 0 || len(rpcImages) > 0 || behavior == "" && command.Type != "" {
+		if extensionCommandWithImages || len(imageFiles) == 0 || len(rpcImages) > 0 || behavior == "" && command.Type != "" {
 			return nil
 		}
 		images, cleanup, err := prompts.PersistUploadedImages(imageFiles, filepath.Join(app.config.AttachmentsRoot, sessions.SessionHash(path)))
@@ -179,6 +179,9 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
+		}
+		if len(imageFiles) > 0 && app.extensionSlashCommand(request, client, rpcMessage) {
+			extensionCommandWithImages = true
 		}
 		if err := prepareImages(); err != nil {
 			return err
@@ -224,9 +227,6 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 				if actionErr != nil {
 					return actionErr
 				}
-				if err := prepareImages(); err != nil {
-					return err
-				}
 				nativeBehavior := "steer"
 				if behavior == "follow_up" {
 					nativeBehavior = "followUp"
@@ -235,7 +235,12 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 				if state, valid := client.(interface{ DeferringCompactionPrompts() bool }); valid {
 					deferringCompactionPrompts = state.DeferringCompactionPrompts()
 				}
-				if deferringCompactionPrompts && app.extensionSlashCommand(request, client, rpcMessage) {
+				extensionSlashCommand := (deferringCompactionPrompts || len(imageFiles) > 0) && app.extensionSlashCommand(request, client, rpcMessage)
+				extensionCommandWithImages = extensionSlashCommand && len(imageFiles) > 0
+				if err := prepareImages(); err != nil {
+					return err
+				}
+				if deferringCompactionPrompts && extensionSlashCommand {
 					rpcResponse, actionErr = actions.PromptWithBehavior(request.Context(), rpcMessage, rpcImages, nativeBehavior)
 					handled = actionErr == nil
 					handledSlashCommand = handled
@@ -803,6 +808,10 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 		writeText(response, http.StatusBadRequest, "Custom summary instructions are too long")
 		return
 	}
+	if app.rpcClients.Compacting(path) {
+		app.writeSettingError(response, errSessionBusy)
+		return
+	}
 	restoredQueuedText := ""
 	if app.rpcClients.AgentRunning(path) {
 		queued := app.rpcClients.LiveSnapshot(path).QueuedMessages
@@ -846,10 +855,18 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 		result, err = actions.NavigateTree(request.Context(), entryID, summary, instructions)
 		return err
 	})
+	if err != nil && restoredQueuedText != "" {
+		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Could not navigate the session tree.", "editorText": restoredQueuedText})
+		return
+	}
 	if app.writeSettingError(response, err) {
 		return
 	}
 	if !successfulRPCResponse(result) {
+		if restoredQueuedText != "" {
+			writeJSONStatus(response, http.StatusUnprocessableEntity, map[string]any{"error": rpcErrorMessage(result, "Could not navigate the session tree."), "editorText": restoredQueuedText})
+			return
+		}
 		app.writeRPCSettingFailure(response, result)
 		return
 	}

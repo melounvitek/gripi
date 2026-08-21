@@ -60,7 +60,10 @@ var (
 	ErrBashAlreadyRunning = errors.New("a bash command is already running for this Pi RPC client")
 )
 
-type RequestTimeoutError struct{ Command string }
+type RequestTimeoutError struct {
+	Command  string
+	Accepted bool
+}
 
 func (err *RequestTimeoutError) Error() string { return "Pi RPC command timed out: " + err.Command }
 
@@ -683,7 +686,7 @@ func (client *Client) request(ctx context.Context, command, id string, payload m
 	case <-timer:
 		client.removePending(id)
 		client.diagnostics.Log("command_timed_out", map[string]any{"command": command, "rpc_id": id, "stage": "response"})
-		return nil, &RequestTimeoutError{Command: command}
+		return nil, &RequestTimeoutError{Command: command, Accepted: true}
 	case <-client.readerDone:
 		select {
 		case result := <-pending:
@@ -1035,6 +1038,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 	}
 
 	var queuedPrompts []map[string]any
+	var compactionWillRetry bool
 	var observed map[string]any
 	compactionQueueChanged := false
 	client.mu.Lock()
@@ -1090,6 +1094,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 			queuedPrompts = client.compactionFollowUps
 			client.compactionFollowUps = nil
 			client.flushingCompactionFollowUps = true
+			compactionWillRetry = typeName == "compaction_end" && response["willRetry"] == true
 			compactionQueueChanged = true
 		}
 		client.updateActiveToolsLocked(response, serializedBytes)
@@ -1113,7 +1118,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		client.eventObserver(client, observed)
 	}
 	if len(queuedPrompts) > 0 {
-		go client.flushCompactionPrompts(queuedPrompts)
+		go client.flushCompactionPrompts(queuedPrompts, compactionWillRetry)
 	}
 }
 
@@ -2161,7 +2166,7 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		waiting := client.flushingCompactionFollowUps || (client.compacting && len(client.compactionFollowUps) > 0)
 		client.mu.Unlock()
 		if len(retry) > 0 {
-			go client.flushCompactionPrompts(retry)
+			go client.flushCompactionPrompts(retry, false)
 		}
 		if !waiting {
 			return nil
@@ -2185,7 +2190,7 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		}
 	}
 }
-func (client *Client) flushCompactionPrompts(items []map[string]any) {
+func (client *Client) flushCompactionPrompts(items []map[string]any, compactionWillRetry bool) {
 	deadline := client.now().Add(client.requestTimeout)
 	for {
 		for index, payload := range items {
@@ -2194,9 +2199,24 @@ func (client *Client) flushCompactionPrompts(items []map[string]any) {
 				client.finishFailedCompactionFlush(items[index:])
 				return
 			}
-			response, err := client.request(context.Background(), "prompt", client.nextID("prompt"), payload, remaining, nil)
+			command := "prompt"
+			value := payload
+			if compactionWillRetry {
+				command = "steer"
+				if payload["streamingBehavior"] == "followUp" {
+					command = "follow_up"
+				}
+				value = cloneMap(payload)
+				delete(value, "streamingBehavior")
+			}
+			response, err := client.request(context.Background(), command, client.nextID(command), value, remaining, nil)
 			if err != nil {
-				client.dropUncertainCompactionPrompt(payload, items[index+1:])
+				var timeout *RequestTimeoutError
+				if errors.As(err, &timeout) && timeout.Accepted {
+					client.dropUncertainCompactionPrompt(payload, items[index+1:])
+				} else {
+					client.finishFailedCompactionFlush(items[index:])
+				}
 				return
 			}
 			if response["success"] != true {

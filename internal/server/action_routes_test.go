@@ -76,6 +76,12 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	}
 
 	waitForFakePiSettled(t, handler, sessionPath)
+	extensionImageRequest := multipartRequest(t, "/prompt", map[string]string{"session": sessionPath, "message": "/immediate-command"}, "images[]", "ignored.png", "image/png", []byte("ignored-extension-image"))
+	extensionImageRequest.Header.Set("Accept", "application/json")
+	extensionImage := serveAction(handler, extensionImageRequest)
+	if extensionImage.Code != http.StatusOK {
+		t.Fatalf("extension image = %d %s", extensionImage.Code, extensionImage.Body.String())
+	}
 	exported := serveAction(handler, formActionRequest("/sessions/export", map[string]string{"session": sessionPath, "filename": `..\Quarterly report`}, false))
 	if exported.Code != http.StatusOK || exported.Header().Get("Content-Type") != "text/html; charset=utf-8" || exported.Header().Get("Content-Disposition") != `attachment; filename="Quarterly report.html"` || !strings.Contains(exported.Body.String(), "Fixture session export") {
 		t.Fatalf("export = %d %#v %s", exported.Code, exported.Header(), exported.Body.String())
@@ -268,18 +274,30 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 			t.Errorf("fake Pi log does not contain %s", expected)
 		}
 	}
+	extensionCommandChecked := false
 	for _, line := range strings.Split(strings.TrimSpace(string(log)), "\n") {
 		var entry struct {
 			Command struct {
 				Type       string `json:"type"`
+				Message    string `json:"message"`
 				OutputPath string `json:"outputPath"`
+				Images     []any  `json:"images"`
 			} `json:"command"`
 		}
-		if json.Unmarshal([]byte(line), &entry) == nil && entry.Command.Type == "export_html" {
+		if json.Unmarshal([]byte(line), &entry) == nil && entry.Command.Message == "/immediate-command" {
+			extensionCommandChecked = true
+			if len(entry.Command.Images) != 0 {
+				t.Fatalf("extension command received ignored images: %#v", entry.Command.Images)
+			}
+		}
+		if entry.Command.Type == "export_html" {
 			if _, err := os.Stat(entry.Command.OutputPath); !os.IsNotExist(err) {
 				t.Fatalf("temporary export was not removed: %s (%v)", entry.Command.OutputPath, err)
 			}
 		}
+	}
+	if !extensionCommandChecked {
+		t.Fatal("fake Pi did not receive the extension command")
 	}
 	for _, localCommand := range []string{"/login anthropic"} {
 		if strings.Contains(string(log), localCommand) {

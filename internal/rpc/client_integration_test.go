@@ -240,6 +240,33 @@ func TestCompactionQueueFlushesNativePromptBehaviors(t *testing.T) {
 	}
 }
 
+func TestCompactionRetryQueuesNativeSteeringAndFollowUps(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start"})
+	waitSequence(t, client, 1)
+	for _, queued := range []struct{ message, behavior string }{{"adjust", "steer"}, {"after", "followUp"}} {
+		if _, accepted, err := client.QueueCompactionPrompt(context.Background(), queued.message, nil, queued.behavior); err != nil || !accepted {
+			t.Fatalf("queue %q = %v, %v", queued.message, accepted, err)
+		}
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_end", "willRetry": true})
+	decoder := json.NewDecoder(stdinReader)
+	for _, expected := range []struct{ message, command string }{{"adjust", "steer"}, {"after", "follow_up"}} {
+		var command map[string]any
+		if err := decoder.Decode(&command); err != nil {
+			t.Fatal(err)
+		}
+		if command["type"] != expected.command || command["message"] != expected.message || command["streamingBehavior"] != nil {
+			t.Fatalf("command = %#v", command)
+		}
+		writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": expected.command, "success": true})
+	}
+}
+
 func TestNextPromptRetriesARejectedCompactionFlushFirst(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
@@ -479,8 +506,8 @@ func TestClientCompactionFlushDoesNotBlockStdoutAndTimesOut(t *testing.T) {
 		flushing := client.flushingCompactionFollowUps
 		client.mu.Unlock()
 		if !flushing {
-			if queued := client.LiveSnapshot().QueuedMessages["followUp"]; len(queued) != 0 {
-				t.Fatalf("prompt with uncertain acceptance was queued for duplicate delivery: %#v", queued)
+			if queued := client.LiveSnapshot().QueuedMessages["followUp"]; len(queued) != 1 {
+				t.Fatalf("prompt rejected before acceptance was not restored: %#v", queued)
 			}
 			return
 		}
