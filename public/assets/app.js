@@ -830,7 +830,6 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   }
   const activeTask = liveAgentRunning || liveOutput?.dataset.composerCompacting === "true";
   const taskBusy = ["running", "bash", "sending", "stopping"].includes(state) || (state === "exporting" && activeTask);
-  const agentBusy = ["running", "sending", "exporting", "stopping"].includes(state);
   const submitting = ["sending", "exporting"].includes(state);
   const stopping = state === "stopping";
   if (!["running", "sending"].includes(state)) streamingBehaviorSelection = "steer";
@@ -2089,14 +2088,17 @@ async function submitPrompt(event) {
       return;
     }
     if (cloneCommand || newCommand) hideSessionSwitching();
-    if (payload?.running === false) {
+    if (payload?.queued_after_compaction || payload?.compacting) {
+      liveAgentRunning = payload?.running === true;
+      setComposerState("running", "Compacting…", { since: previousWaitingForOutputSince });
+      if (payload?.queued_after_compaction) showStatus("Queued for after compaction", true);
+    } else if (payload?.running === false) {
       setComposerState("done", "Done");
       showStatus("Done");
     } else {
       liveAgentRunning = true;
-      setComposerState("running", liveOutput?.dataset.composerCompacting === "true" ? "Compacting…" : "Pi is running…");
-      if (payload?.queued_after_compaction) showStatus("Queued for after compaction", true);
-      else if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
+      setComposerState("running", "Pi is running…");
+      if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
       else if (payload?.steer) showStatus("Steered Pi", true);
     }
   } else {

@@ -132,6 +132,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	attachmentStore := sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}
 	var rpcResponse map[string]any
 	var rpcMessage = message
+	var handledCompacting, runningAfterHandledCommand bool
 	var rpcImages []rpc.PromptImage
 	var attachmentPaths, mimeTypes []string
 	cleanupImages := func() error { return nil }
@@ -238,6 +239,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 				if deferringCompactionPrompts && app.extensionSlashCommand(request, client, rpcMessage) {
 					rpcResponse, actionErr = actions.PromptWithBehavior(request.Context(), rpcMessage, rpcImages, nativeBehavior)
 					handled = actionErr == nil
+					handledCompacting = handled && client.Compacting()
+					runningAfterHandledCommand = client.AgentRunning()
 				} else {
 					rpcResponse, queued, actionErr = actions.QueueCompactionPrompt(request.Context(), rpcMessage, rpcImages, nativeBehavior)
 				}
@@ -275,6 +278,10 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	if behavior != "" && rpcResponse["compacting"] == true {
 		payload["queued_after_compaction"] = true
 	}
+	if handledCompacting {
+		payload["compacting"] = true
+		payload["running"] = runningAfterHandledCommand
+	}
 	if command.Type != "" {
 		payload["command"] = command.Type
 		if command.Name != "" {
@@ -299,8 +306,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 			data := responseData(state)
 			streaming, streamingKnown := data["isStreaming"].(bool)
 			compacting, compactingKnown := data["isCompacting"].(bool)
-			if streamingKnown || compactingKnown {
-				payload["running"] = streaming || compacting
+			if streamingKnown {
+				payload["running"] = streaming
+			}
+			if compactingKnown {
+				payload["compacting"] = compacting
 			}
 		}
 	}

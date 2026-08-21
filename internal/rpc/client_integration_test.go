@@ -240,6 +240,100 @@ func TestCompactionQueueFlushesNativePromptBehaviors(t *testing.T) {
 	}
 }
 
+func TestNextPromptRetriesARejectedCompactionFlushFirst(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start"})
+	waitSequence(t, client, 1)
+	if _, queued, err := client.QueueCompactionPrompt(context.Background(), "retry me", nil, "steer"); err != nil || !queued {
+		t.Fatalf("queue = %v, %v", queued, err)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_end"})
+	decoder := json.NewDecoder(stdinReader)
+	var rejected map[string]any
+	if err := decoder.Decode(&rejected); err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"id": rejected["id"], "type": "response", "command": "prompt", "success": false, "error": "retry"})
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := client.Prompt(context.Background(), "new prompt", nil)
+		result <- err
+	}()
+	for _, expected := range []string{"retry me", "new prompt"} {
+		var command map[string]any
+		if err := decoder.Decode(&command); err != nil {
+			t.Fatal(err)
+		}
+		if command["message"] != expected {
+			t.Fatalf("command = %#v, want %q", command, expected)
+		}
+		writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": "prompt", "success": true})
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSessionReplacementDiscardsRemainingCompactionPrompts(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start"})
+	waitSequence(t, client, 1)
+	for _, message := range []string{"first", "must not cross sessions"} {
+		if _, queued, err := client.QueueCompactionPrompt(context.Background(), message, nil, "steer"); err != nil || !queued {
+			t.Fatalf("queue %q = %v, %v", message, queued, err)
+		}
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_end"})
+	decoder := json.NewDecoder(stdinReader)
+	var first map[string]any
+	if err := decoder.Decode(&first); err != nil {
+		t.Fatal(err)
+	}
+	if first["message"] != "first" {
+		t.Fatalf("first prompt = %#v", first)
+	}
+
+	replaced := make(chan error, 1)
+	go func() {
+		_, err := client.NewSession(context.Background(), "")
+		replaced <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		client.mu.Lock()
+		cancelled := !client.flushingCompactionFollowUps
+		client.mu.Unlock()
+		if cancelled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("session replacement did not cancel the compaction flush")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"id": first["id"], "type": "response", "command": "prompt", "success": true})
+	var command map[string]any
+	if err := decoder.Decode(&command); err != nil {
+		t.Fatal(err)
+	}
+	if command["type"] != "new_session" {
+		t.Fatalf("replacement command = %#v", command)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": "new_session", "success": true, "data": map[string]any{"cancelled": false}})
+	if err := <-replaced; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestQueueCompactionFollowUpAtomicallyReportsWhetherItQueued(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()

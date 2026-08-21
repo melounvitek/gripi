@@ -119,8 +119,12 @@ test("runs extension commands and queues steering during compaction", async ({ p
   await expect(page.locator(".composer-state")).toContainText("Compacting…");
 
   const composer = page.getByLabel("Message to Pi");
+  const immediateResponsePromise = page.waitForResponse((response) => response.request().postData()?.includes("/immediate-command"));
   await composer.fill("/immediate-command");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  const immediateResponse = await immediateResponsePromise;
+  expect(immediateResponse.status()).toBe(200);
+  expect(await immediateResponse.json()).toMatchObject({ compacting: true, running: false });
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   await expect(page.locator(".composer-state")).toContainText("Compacting…");
 
