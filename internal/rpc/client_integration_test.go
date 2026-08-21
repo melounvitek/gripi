@@ -244,6 +244,33 @@ func TestQueueCompactionFollowUpAtomicallyReportsWhetherItQueued(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestClientPromptsWithNativeStreamingBehavior(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+
+	result := make(chan map[string]any, 1)
+	errors := make(chan error, 1)
+	go func() {
+		response, err := client.PromptWithBehavior(context.Background(), "/review", nil, "steer")
+		result <- response
+		errors <- err
+	}()
+
+	var command map[string]any
+	if err := json.NewDecoder(stdinReader).Decode(&command); err != nil {
+		t.Fatal(err)
+	}
+	if command["type"] != "prompt" || command["message"] != "/review" || command["streamingBehavior"] != "steer" {
+		t.Fatalf("command = %#v", command)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": "prompt", "success": true})
+	if response, err := <-result, <-errors; err != nil || response["success"] != true {
+		t.Fatalf("response = %#v, %v", response, err)
+	}
+}
+
 func TestImageCommandStreamsPersistedBytesWithoutLargeWrites(t *testing.T) {
 	root := t.TempDir()
 	imagePath := filepath.Join(root, "image.png")
@@ -254,7 +281,7 @@ func TestImageCommandStreamsPersistedBytesWithoutLargeWrites(t *testing.T) {
 	writer := &boundedWriteCloser{}
 	client := NewClient(writer, io.NopCloser(strings.NewReader("")), nil, ClientOptions{})
 	<-client.readerDone
-	value := map[string]any{"id": "prompt-1", "type": "prompt", "message": "hello", "images": []PromptImage{{Path: imagePath, MIMEType: "image/png", Size: int64(len(contents))}}}
+	value := map[string]any{"id": "prompt-1", "type": "prompt", "message": "hello", "streamingBehavior": "steer", "images": []PromptImage{{Path: imagePath, MIMEType: "image/png", Size: int64(len(contents))}}}
 	if err := client.writeCommandUnlocked(value, "prompt", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
@@ -269,6 +296,9 @@ func TestImageCommandStreamsPersistedBytesWithoutLargeWrites(t *testing.T) {
 	image := images[0].(map[string]any)
 	if image["type"] != "image" || image["mimeType"] != "image/png" || image["data"] != base64.StdEncoding.EncodeToString(contents) {
 		t.Fatal("streamed payload changed native Pi image shape")
+	}
+	if payload["streamingBehavior"] != "steer" {
+		t.Fatalf("streaming behavior = %#v", payload["streamingBehavior"])
 	}
 
 	if err := os.WriteFile(imagePath, append(contents, 'x'), 0600); err != nil {

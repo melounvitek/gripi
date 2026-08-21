@@ -37,6 +37,7 @@ type ActionClient interface {
 	SetThinkingLevel(context.Context, string) (map[string]any, error)
 	CycleThinkingLevel(context.Context) (map[string]any, error)
 	Prompt(context.Context, string, []PromptImage) (map[string]any, error)
+	PromptWithBehavior(context.Context, string, []PromptImage, string) (map[string]any, error)
 	Steer(context.Context, string, []PromptImage) (map[string]any, error)
 	FollowUp(context.Context, string, []PromptImage) (map[string]any, error)
 	QueueCompactionFollowUp(context.Context, string, []PromptImage) (map[string]any, bool, error)

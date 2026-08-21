@@ -433,15 +433,17 @@ func (client *Client) Prompt(ctx context.Context, message string, images []Promp
 	if err := client.waitForCompactionFlush(ctx, deadline); err != nil {
 		return nil, err
 	}
-	payload := map[string]any{"message": message}
-	if len(images) > 0 {
-		payload["images"] = images
-	}
+	payload := promptPayload(message, images)
 	remaining := deadline.Sub(client.now())
 	if remaining <= 0 {
 		return nil, &RequestTimeoutError{Command: "prompt"}
 	}
 	return client.request(ctx, "prompt", client.nextID("prompt"), payload, remaining, nil)
+}
+func (client *Client) PromptWithBehavior(ctx context.Context, message string, images []PromptImage, behavior string) (map[string]any, error) {
+	payload := promptPayload(message, images)
+	payload["streamingBehavior"] = behavior
+	return client.request(ctx, "prompt", client.nextID("prompt"), payload, client.requestTimeout, nil)
 }
 func (client *Client) Steer(ctx context.Context, message string, images []PromptImage) (map[string]any, error) {
 	payload := map[string]any{"message": message}
@@ -769,7 +771,7 @@ func writeImageCommand(writer io.Writer, value map[string]any, images []PromptIm
 		return err
 	}
 	first := true
-	for _, key := range []string{"message", "id", "type"} {
+	for _, key := range []string{"message", "streamingBehavior", "id", "type"} {
 		item, exists := value[key]
 		if !exists {
 			continue
