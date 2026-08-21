@@ -175,6 +175,13 @@ func (registry *Registry) Compacting(path string) bool {
 	}
 	return false
 }
+func (registry *Registry) DeferringCompactionPrompts(path string) bool {
+	client := registry.Client(path)
+	if state, ok := client.(interface{ DeferringCompactionPrompts() bool }); ok {
+		return state.DeferringCompactionPrompts()
+	}
+	return client != nil && client.Compacting()
+}
 func (registry *Registry) LiveSnapshot(path string) LiveSnapshot {
 	if client := registry.Client(path); client != nil {
 		return client.LiveSnapshot()

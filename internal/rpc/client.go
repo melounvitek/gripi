@@ -553,13 +553,6 @@ func (client *Client) resetReplacedSessionState(response map[string]any, err err
 	client.compactionFollowUpBytes = 0
 	client.flushingCompactionFollowUps = false
 	client.queuedMessages = map[string][]string{"steering": {}, "followUp": {}}
-	client.pendingDialogs = make(map[string]*extensionDialog)
-	client.pendingDialogOrder = nil
-	client.extensionStatuses = make(map[string]map[string]any)
-	client.extensionStatusOrder = nil
-	client.extensionWidgets = make(map[string]map[string]any)
-	client.extensionWidgetOrder = nil
-	client.extensionTitle = nil
 	client.mu.Unlock()
 }
 

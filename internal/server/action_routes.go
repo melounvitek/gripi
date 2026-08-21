@@ -808,7 +808,7 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 		writeText(response, http.StatusBadRequest, "Custom summary instructions are too long")
 		return
 	}
-	if app.rpcClients.Compacting(path) {
+	if app.rpcClients.DeferringCompactionPrompts(path) {
 		app.writeSettingError(response, errSessionBusy)
 		return
 	}
