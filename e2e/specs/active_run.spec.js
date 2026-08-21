@@ -82,7 +82,7 @@ test("queue a follow-up for an active run", async ({ page }) => {
   await expectRunFinished(page);
 });
 
-test("shows a follow-up queued during compaction", async ({ page, context }) => {
+test("runs extension commands and queues steering during compaction", async ({ page, context }) => {
   await page.goto("/");
   await selectSession(page, sessions.compactionFollowUp);
 
@@ -90,20 +90,39 @@ test("shows a follow-up queued during compaction", async ({ page, context }) => 
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   await expect(page.locator(".composer-state")).toContainText("Compacting…");
-  await sendPrompt(page, prompts.standard);
 
-  const queuedFollowUp = page.locator(".pending-message--follow-up");
-  await expect(queuedFollowUp).toHaveText(`Follow-up: ${prompts.standard}`);
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/immediate-command");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(page.locator(".composer-state")).toContainText("Compacting…");
+
+  await sendPrompt(page, prompts.standard);
+  const queuedSteer = page.locator(".pending-message--steering");
+  await expect(queuedSteer).toHaveText(`Steering: ${prompts.standard}`);
   await expect(page.locator('[data-pending-compaction="true"]')).toBeVisible();
 
   const restoredPage = await context.newPage();
   await restoredPage.goto("/");
   await selectSession(restoredPage, sessions.compactionFollowUp);
-  await expect(restoredPage.locator(".pending-message--follow-up")).toHaveText(`Follow-up: ${prompts.standard}`);
+  await expect(restoredPage.locator(".pending-message--steering")).toHaveText(`Steering: ${prompts.standard}`);
   await restoredPage.close();
 
   await expect(message(page, "assistant", replies.standard)).toBeVisible();
-  await expect(queuedFollowUp).toHaveCount(0);
+  await expect(queuedSteer).toHaveCount(0);
+  await expectRunFinished(page);
+});
+
+test("abort an active run before compacting", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.controlsAbort);
+  await sendPrompt(page, prompts.steerStart);
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/compact");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(page.locator('[data-pending-compaction="true"]')).toBeVisible();
   await expectRunFinished(page);
 });
 

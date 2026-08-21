@@ -169,6 +169,12 @@ function handleCommand(command) {
       replaceWithNewSession(command);
       break;
     case "compact":
+      if (busy) {
+        busy = false;
+        activeScenario = null;
+        emit({ type: "agent_end", messages: [], willRetry: false });
+        emit({ type: "agent_settled" });
+      }
       compacting = true;
       emit({ type: "compaction_start" });
       schedule(4000, () => {

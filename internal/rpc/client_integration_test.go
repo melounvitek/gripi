@@ -208,6 +208,35 @@ func TestQueueCompactionFollowUpPublishesMergedQueueState(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestCompactionQueueFlushesNativePromptBehaviors(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_start"})
+	waitSequence(t, client, 1)
+	if _, queued, err := client.QueueCompactionPrompt(context.Background(), "adjust", nil, "steer"); err != nil || !queued {
+		t.Fatalf("steering queue = %v, %v", queued, err)
+	}
+	if _, queued, err := client.QueueCompactionPrompt(context.Background(), "/after", nil, "followUp"); err != nil || !queued {
+		t.Fatalf("follow-up queue = %v, %v", queued, err)
+	}
+	writeRecord(t, stdoutWriter, map[string]any{"type": "compaction_end"})
+
+	decoder := json.NewDecoder(stdinReader)
+	for _, expected := range []struct{ message, behavior string }{{"adjust", "steer"}, {"/after", "followUp"}} {
+		var command map[string]any
+		if err := decoder.Decode(&command); err != nil {
+			t.Fatal(err)
+		}
+		if command["type"] != "prompt" || command["message"] != expected.message || command["streamingBehavior"] != expected.behavior {
+			t.Fatalf("command = %#v", command)
+		}
+		writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": "prompt", "success": true})
+	}
+}
+
 func TestQueueCompactionFollowUpAtomicallyReportsWhetherItQueued(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()

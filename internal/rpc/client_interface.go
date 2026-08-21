@@ -41,6 +41,7 @@ type ActionClient interface {
 	Steer(context.Context, string, []PromptImage) (map[string]any, error)
 	FollowUp(context.Context, string, []PromptImage) (map[string]any, error)
 	QueueCompactionFollowUp(context.Context, string, []PromptImage) (map[string]any, bool, error)
+	QueueCompactionPrompt(context.Context, string, []PromptImage, string) (map[string]any, bool, error)
 	Abort(context.Context) (map[string]any, error)
 	AbortBash(context.Context) (map[string]any, error)
 	ActiveBashCommand() string

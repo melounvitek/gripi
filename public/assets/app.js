@@ -337,7 +337,7 @@ function toggleConversationPromptFocus(event, nextElement) {
 }
 
 function selectedStreamingBehavior() {
-  return liveOutput?.dataset.composerCompacting === "true" ? "follow_up" : streamingBehaviorSelection;
+  return streamingBehaviorSelection;
 }
 
 function submittedStreamingBehavior() {
@@ -365,16 +365,15 @@ function selectStreamingBehavior(behavior, { focus = true } = {}) {
 
 function updateStreamingSendControl(state = composerState?.dataset.state) {
   const running = state === "running";
-  const forcedFollowUp = liveOutput?.dataset.composerCompacting === "true";
   const behavior = selectedStreamingBehavior();
   if (sendControl) sendControl.classList.toggle("is-streaming", running);
-  if (sendMenuToggle) sendMenuToggle.hidden = !running || forcedFollowUp;
+  if (sendMenuToggle) sendMenuToggle.hidden = !running;
   sendMenu?.querySelectorAll("[data-streaming-behavior]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.streamingBehavior === behavior)));
   if (sendButton && running) {
     sendButton.textContent = behavior === "follow_up" ? "Queue" : "Steer";
     sendButton.setAttribute("aria-label", behavior === "follow_up" ? "Queue follow-up" : "Send steer");
   }
-  if (!running || forcedFollowUp) closeSendMenu();
+  if (!running) closeSendMenu();
 }
 
 function updatePromptPlaceholder() {
@@ -1861,7 +1860,7 @@ async function submitPrompt(event) {
   const queuedPrompt = !!streamingBehavior;
   const followUp = streamingBehavior === "follow_up";
   const steer = streamingBehavior === "steer";
-  const compactingFollowUp = followUp && liveOutput?.dataset.composerCompacting === "true";
+  const compactingQueuedPrompt = queuedPrompt && liveOutput?.dataset.composerCompacting === "true";
   const previousWaitingForOutputSince = waitingForOutputSince;
 
   const generation = sessionViewGeneration;
@@ -1922,8 +1921,8 @@ async function submitPrompt(event) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
-  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : reloadCommand ? "Reloading…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening instructions…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering…" : "Sending…");
-  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : reloadCommand ? "Reloading Pi resources…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening authentication instructions…" : compactingFollowUp ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering Pi…" : "Sending…", true);
+  setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : reloadCommand ? "Reloading…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening instructions…" : compactingQueuedPrompt ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering…" : "Sending…");
+  showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : reloadCommand ? "Reloading Pi resources…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening authentication instructions…" : compactingQueuedPrompt ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering Pi…" : "Sending…", true);
   if (cloneCommand || newCommand) showSessionSwitching();
 
   const restoreSubmittedPromptInput = () => {
@@ -1952,7 +1951,7 @@ async function submitPrompt(event) {
     if (queuedPrompt) {
       const currentState = composerState?.dataset.state;
       if (["running", "sending"].includes(currentState)) selectStreamingBehavior(streamingBehavior, { focus: false });
-      if (currentState === "sending") setComposerState("running", compactingFollowUp ? "Compacting…" : "Pi is running…", { since: previousWaitingForOutputSince });
+      if (currentState === "sending") setComposerState("running", compactingQueuedPrompt ? "Compacting…" : "Pi is running…", { since: previousWaitingForOutputSince });
       showStatus(errorMessage, true);
       return;
     }

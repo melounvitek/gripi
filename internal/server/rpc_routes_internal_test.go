@@ -1128,11 +1128,16 @@ type followUpRaceClient struct {
 	prompted       bool
 }
 
-func (*followUpRaceClient) Close() error { return nil }
+func (*followUpRaceClient) Close() error     { return nil }
+func (*followUpRaceClient) Compacting() bool { return false }
 func (*followUpRaceClient) GetState(context.Context) (map[string]any, error) {
 	return map[string]any{"success": true}, nil
 }
 func (client *followUpRaceClient) QueueCompactionFollowUp(context.Context, string, []rpc.PromptImage) (map[string]any, bool, error) {
+	client.queue()
+	return nil, false, nil
+}
+func (client *followUpRaceClient) QueueCompactionPrompt(context.Context, string, []rpc.PromptImage, string) (map[string]any, bool, error) {
 	client.queue()
 	return nil, false, nil
 }

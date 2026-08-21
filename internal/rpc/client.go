@@ -459,8 +459,13 @@ func (client *Client) FollowUp(ctx context.Context, message string, images []Pro
 	return client.request(ctx, "follow_up", client.nextID("follow_up"), promptPayload(message, images), client.requestTimeout, nil)
 }
 
-func (client *Client) QueueCompactionFollowUp(_ context.Context, message string, images []PromptImage) (map[string]any, bool, error) {
+func (client *Client) QueueCompactionFollowUp(ctx context.Context, message string, images []PromptImage) (map[string]any, bool, error) {
+	return client.QueueCompactionPrompt(ctx, message, images, "followUp")
+}
+
+func (client *Client) QueueCompactionPrompt(_ context.Context, message string, images []PromptImage, behavior string) (map[string]any, bool, error) {
 	payload := promptPayload(message, images)
+	payload["streamingBehavior"] = behavior
 	size := promptPayloadSize(payload)
 	client.mu.Lock()
 	defer client.mu.Unlock()
@@ -474,7 +479,7 @@ func (client *Client) QueueCompactionFollowUp(_ context.Context, message string,
 	client.compactionFollowUpCount++
 	client.compactionFollowUpBytes += size
 	client.appendQueuedMessagesEventLocked()
-	return map[string]any{"type": "response", "command": "follow_up", "success": true, "queued": true, "compacting": true}, true, nil
+	return map[string]any{"type": "response", "command": "prompt", "success": true, "queued": true, "compacting": true}, true, nil
 }
 
 func promptPayload(message string, images []PromptImage) map[string]any {
@@ -991,9 +996,8 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		delete(client.sampledToolUpdates, stringValue(response["toolCallId"]))
 	}
 
-	var followUps []map[string]any
+	var queuedPrompts []map[string]any
 	var observed map[string]any
-	firstType := "prompt"
 	compactionQueueChanged := false
 	client.mu.Lock()
 	storeAsEvent := false
@@ -1048,13 +1052,10 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		}
 		client.updateExtensionUILocked(response)
 		if (typeName == "compaction" || typeName == "compaction_end") && !client.flushingCompactionFollowUps && len(client.compactionFollowUps) > 0 {
-			followUps = client.compactionFollowUps
+			queuedPrompts = client.compactionFollowUps
 			client.compactionFollowUps = nil
 			client.flushingCompactionFollowUps = true
 			compactionQueueChanged = true
-			if typeName == "compaction_end" && response["willRetry"] == true {
-				firstType = "follow_up"
-			}
 		}
 		client.updateActiveToolsLocked(response, serializedBytes)
 		client.discardSupersededLocked(response)
@@ -1076,8 +1077,8 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 	if observed != nil {
 		client.eventObserver(client, observed)
 	}
-	if len(followUps) > 0 {
-		go client.flushCompactionFollowUps(followUps, firstType)
+	if len(queuedPrompts) > 0 {
+		go client.flushCompactionPrompts(queuedPrompts)
 	}
 }
 
@@ -1285,9 +1286,13 @@ func (client *Client) visibleQueuedMessagesLocked() map[string][]string {
 		if !ok {
 			continue
 		}
-		result["followUp"] = append(result["followUp"], boundedText(message, MaxSnapshotStringBytes))
+		queue := "steering"
+		if payload["streamingBehavior"] == "followUp" {
+			queue = "followUp"
+		}
+		result[queue] = append(result[queue], boundedText(message, MaxSnapshotStringBytes))
 		if len(result["steering"])+len(result["followUp"]) > MaxQueuedMessageCount || jsonSize(result) > MaxQueuedMessageBytes-128 {
-			result["followUp"] = result["followUp"][:len(result["followUp"])-1]
+			result[queue] = result[queue][:len(result[queue])-1]
 			break
 		}
 	}
@@ -2131,7 +2136,7 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		}
 	}
 }
-func (client *Client) flushCompactionFollowUps(items []map[string]any, firstType string) {
+func (client *Client) flushCompactionPrompts(items []map[string]any) {
 	deadline := client.now().Add(client.requestTimeout)
 	timer := time.NewTimer(max(client.requestTimeout, time.Nanosecond))
 	defer timer.Stop()
@@ -2146,11 +2151,8 @@ func (client *Client) flushCompactionFollowUps(items []map[string]any, firstType
 		return
 	}
 	for {
-		for index, payload := range items {
-			command := "follow_up"
-			if index == 0 && firstType != "" {
-				command = firstType
-			}
+		for _, payload := range items {
+			command := "prompt"
 			id := client.nextID(command)
 			client.mu.Lock()
 			client.deferredCommandIDs[id] = true
@@ -2178,7 +2180,6 @@ func (client *Client) flushCompactionFollowUps(items []map[string]any, firstType
 			return
 		}
 		items, client.compactionFollowUps = client.compactionFollowUps, nil
-		firstType = "follow_up"
 		client.appendQueuedMessagesEventLocked()
 		client.mu.Unlock()
 		if !client.now().Before(deadline) {

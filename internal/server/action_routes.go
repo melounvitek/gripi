@@ -97,10 +97,6 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		writeText(response, http.StatusBadRequest, "Invalid streaming behavior")
 		return
 	}
-	if behavior == "steer" && app.rpcClients.Compacting(path) {
-		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Steering is unavailable during compaction"})
-		return
-	}
 	command := prompts.SlashCommand{}
 	if behavior != "follow_up" {
 		command = prompts.ParseSlashCommand(message)
@@ -201,9 +197,6 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		default:
 			switch behavior {
 			case "steer":
-				if client.Compacting() {
-					return errSteeringDuringCompaction
-				}
 				rpcResponse, err = actions.PromptWithBehavior(request.Context(), rpcMessage, rpcImages, "steer")
 			case "follow_up":
 				rpcResponse, err = actions.PromptWithBehavior(request.Context(), rpcMessage, rpcImages, "followUp")
@@ -217,11 +210,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		return err
 	}
 	var err error
-	if behavior == "follow_up" {
+	if behavior != "" && command.Type == "" {
 		if blocked := app.synchronizer.KnownBlocked(path); blocked != nil {
 			err = &sessions.SyncBlockedError{Mode: blocked.Mode, Message: app.synchronizer.Message(*blocked)}
 		} else {
-			queued := false
+			queued, handled := false, false
 			path, ok = app.resolveActionPendingPath(response, request, path)
 			if !ok {
 				return
@@ -234,22 +227,27 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 				if err := prepareImages(); err != nil {
 					return err
 				}
-				rpcResponse, queued, actionErr = actions.QueueCompactionFollowUp(request.Context(), rpcMessage, rpcImages)
-				if actionErr == nil && queued {
+				nativeBehavior := "steer"
+				if behavior == "follow_up" {
+					nativeBehavior = "followUp"
+				}
+				if client.Compacting() && app.extensionSlashCommand(request, client, rpcMessage) {
+					rpcResponse, actionErr = actions.PromptWithBehavior(request.Context(), rpcMessage, rpcImages, nativeBehavior)
+					handled = actionErr == nil
+				} else {
+					rpcResponse, queued, actionErr = actions.QueueCompactionPrompt(request.Context(), rpcMessage, rpcImages, nativeBehavior)
+				}
+				if actionErr == nil && (queued || handled) {
 					actionErr = recordImages()
 				}
 				return actionErr
 			})
-			if err == nil && !queued {
+			if err == nil && !queued && !handled {
 				err = app.withSynchronizedClient(request, path, call)
 			}
 		}
 	} else {
 		err = app.withSynchronizedClient(request, path, call)
-	}
-	if errors.Is(err, errSteeringDuringCompaction) {
-		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Steering is unavailable during compaction"})
-		return
 	}
 	if err != nil {
 		app.writeActionRPCError(response, errors.Join(err, cleanupFailedImages()))
@@ -269,9 +267,9 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	}
 	if behavior == "follow_up" {
 		payload["follow_up"] = true
-		if rpcResponse["compacting"] == true {
-			payload["queued_after_compaction"] = true
-		}
+	}
+	if behavior != "" && rpcResponse["compacting"] == true {
+		payload["queued_after_compaction"] = true
 	}
 	if command.Type != "" {
 		payload["command"] = command.Type
@@ -302,7 +300,22 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	app.writePromptResult(response, request, path, payload)
 }
 
-var errSteeringDuringCompaction = errors.New("steering during compaction")
+func (app *application) extensionSlashCommand(request *http.Request, client rpc.RPCClient, message string) bool {
+	if !strings.HasPrefix(message, "/") {
+		return false
+	}
+	name := strings.TrimPrefix(strings.SplitN(message, " ", 2)[0], "/")
+	response, err := client.GetCommands(request.Context())
+	if err != nil {
+		return false
+	}
+	for _, command := range rpc.CommandsFrom(response) {
+		if command["name"] == name && command["source"] == "extension" {
+			return true
+		}
+	}
+	return false
+}
 
 var errUnsupportedActionClient = errors.New("Pi RPC client does not support actions")
 
