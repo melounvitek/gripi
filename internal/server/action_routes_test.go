@@ -156,7 +156,6 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if activeTree.Code != http.StatusOK {
 		t.Fatalf("active tree = %d %s", activeTree.Code, activeTree.Body.String())
 	}
-	waitForFakePiSettled(t, handler, sessionPath)
 
 	followUpStart := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "Start the follow-up scenario"}, true))
 	if followUpStart.Code != http.StatusOK {

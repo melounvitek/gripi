@@ -437,6 +437,28 @@ func TestRegistryObserverAllowsMoveButPreventsRetirement(t *testing.T) {
 	}
 }
 
+func TestRegistryClosesSettledClientWithOnlyObservers(t *testing.T) {
+	client := newRegistryClient()
+	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
+	if err := registry.Register("/session", client); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- registry.WithObservingClient(context.Background(), "/session", false, func(RPCClient) error { close(started); <-release; return nil })
+	}()
+	<-started
+	if closed, err := registry.CloseClientWithoutOperations("/session"); err != nil || !closed {
+		t.Fatalf("did not close observed settled client: %v %v", closed, err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 type registryClient struct {
 	mu           sync.Mutex
 	isBusy       bool

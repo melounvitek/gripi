@@ -549,6 +549,9 @@ func (registry *Registry) EventsAfter(path string, after int64) EventBatch {
 func (registry *Registry) CloseClientIfIdle(path string) (bool, error) {
 	return registry.closeWhen(path, func(entry *clientEntry) bool { return entry.activeRequests == 0 && !entry.client.Busy() }, nil)
 }
+func (registry *Registry) CloseClientWithoutOperations(path string) (bool, error) {
+	return registry.closeWhen(path, func(entry *clientEntry) bool { return entry.activeRequests <= entry.observers && !entry.client.Busy() }, nil)
+}
 func (registry *Registry) CloseClientIfExpired(path string, idle time.Duration, now time.Time, onClose func(string)) (bool, error) {
 	return registry.closeWhen(path, func(entry *clientEntry) bool {
 		return entry.activeRequests == 0 && !entry.client.Busy() && !activityAt(entry).Add(idle).After(now)

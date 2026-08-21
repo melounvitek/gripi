@@ -147,8 +147,12 @@ test("runs extension commands and queues steering during compaction", async ({ p
 test("abort an active run before navigating the session tree", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.controlsAbort);
-  await sendPrompt(page, prompts.steerStart);
+  await sendPrompt(page, prompts.followUpStart);
   await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
+  await page.getByRole("button", { name: "More send options" }).click();
+  await page.getByRole("button", { name: "Queue follow-up" }).click();
+  await sendPrompt(page, "Restore this queued message");
+  await expect(page.locator(".pending-message--follow-up")).toBeVisible();
 
   const composer = page.getByLabel("Message to Pi");
   await composer.fill("/tree");
@@ -162,6 +166,7 @@ test("abort an active run before navigating the session tree", async ({ page }) 
 
   await expect(dialog).toBeHidden();
   await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
+  await expect(composer).toHaveValue("Restore this queued message");
 });
 
 test("abort an active run before compacting", async ({ page }) => {

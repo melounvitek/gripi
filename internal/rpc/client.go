@@ -213,6 +213,7 @@ type Client struct {
 	compactionFollowUpBytes     int
 	flushingCompactionFollowUps bool
 	compactionFlushDone         chan struct{}
+	compactionFlushGeneration   uint64
 	reloading                   bool
 
 	sampledToolUpdates map[string]time.Time
@@ -1006,6 +1007,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 
 	var queuedPrompts []map[string]any
 	var flushDone chan struct{}
+	var flushGeneration uint64
 	var observed map[string]any
 	compactionQueueChanged := false
 	client.mu.Lock()
@@ -1061,8 +1063,10 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 			queuedPrompts = client.compactionFollowUps
 			client.compactionFollowUps = nil
 			client.flushingCompactionFollowUps = true
+			client.compactionFlushGeneration++
 			client.compactionFlushDone = make(chan struct{})
 			flushDone = client.compactionFlushDone
+			flushGeneration = client.compactionFlushGeneration
 			compactionQueueChanged = true
 		}
 		client.updateActiveToolsLocked(response, serializedBytes)
@@ -1086,7 +1090,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		client.eventObserver(client, observed)
 	}
 	if len(queuedPrompts) > 0 {
-		go client.flushCompactionPrompts(queuedPrompts, flushDone)
+		go client.flushCompactionPrompts(queuedPrompts, flushDone, flushGeneration)
 	}
 }
 
@@ -2129,6 +2133,7 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		if !client.compacting && !client.flushingCompactionFollowUps && len(client.compactionFollowUps) > 0 {
 			retry, client.compactionFollowUps = client.compactionFollowUps, nil
 			client.flushingCompactionFollowUps = true
+			client.compactionFlushGeneration++
 			client.compactionFlushDone = make(chan struct{})
 			client.appendQueuedMessagesEventLocked()
 		}
@@ -2136,9 +2141,9 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		client.mu.Unlock()
 		if len(retry) > 0 {
 			client.mu.Lock()
-			flushDone := client.compactionFlushDone
+			flushDone, generation := client.compactionFlushDone, client.compactionFlushGeneration
 			client.mu.Unlock()
-			go client.flushCompactionPrompts(retry, flushDone)
+			go client.flushCompactionPrompts(retry, flushDone, generation)
 		}
 		if !waiting {
 			return nil
@@ -2162,24 +2167,34 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		}
 	}
 }
-func (client *Client) flushCompactionPrompts(items []map[string]any, done chan struct{}) {
-	defer client.finishCompactionFlush(done)
+func (client *Client) flushCompactionPrompts(items []map[string]any, done chan struct{}, generation uint64) {
+	defer client.finishCompactionFlush(done, generation)
 	deadline := client.now().Add(client.requestTimeout)
 	for {
 		for index, payload := range items {
 			remaining := deadline.Sub(client.now())
 			if remaining <= 0 {
-				client.finishFailedCompactionFlush(items[index:])
+				client.finishFailedCompactionFlush(items[index:], generation)
 				return
 			}
 			response, err := client.request(context.Background(), "prompt", client.nextID("prompt"), payload, remaining, nil)
-			if err != nil || response["success"] != true {
-				client.finishFailedCompactionFlush(items[index:])
+			client.mu.Lock()
+			active := client.flushingCompactionFollowUps && client.compactionFlushGeneration == generation
+			client.mu.Unlock()
+			if !active {
+				return
+			}
+			if err != nil {
+				client.dropUncertainCompactionPrompt(payload, items[index+1:], generation)
+				return
+			}
+			if response["success"] != true {
+				client.finishFailedCompactionFlush(items[index:], generation)
 				return
 			}
 			size := promptPayloadSize(payload)
 			client.mu.Lock()
-			if !client.flushingCompactionFollowUps {
+			if !client.flushingCompactionFollowUps || client.compactionFlushGeneration != generation {
 				client.mu.Unlock()
 				return
 			}
@@ -2188,6 +2203,10 @@ func (client *Client) flushCompactionPrompts(items []map[string]any, done chan s
 			client.mu.Unlock()
 		}
 		client.mu.Lock()
+		if !client.flushingCompactionFollowUps || client.compactionFlushGeneration != generation {
+			client.mu.Unlock()
+			return
+		}
 		if len(client.compactionFollowUps) == 0 {
 			client.flushingCompactionFollowUps = false
 			client.mu.Unlock()
@@ -2199,20 +2218,36 @@ func (client *Client) flushCompactionPrompts(items []map[string]any, done chan s
 	}
 }
 
-func (client *Client) finishFailedCompactionFlush(items []map[string]any) {
+func (client *Client) finishFailedCompactionFlush(items []map[string]any, generation uint64) {
 	client.mu.Lock()
-	client.compactionFollowUps = append(items, client.compactionFollowUps...)
-	client.flushingCompactionFollowUps = false
-	if len(client.compactionFollowUps) > 0 {
-		client.appendQueuedMessagesEventLocked()
+	if client.compactionFlushGeneration == generation {
+		client.compactionFollowUps = append(items, client.compactionFollowUps...)
+		client.flushingCompactionFollowUps = false
+		if len(client.compactionFollowUps) > 0 {
+			client.appendQueuedMessagesEventLocked()
+		}
 	}
 	client.mu.Unlock()
 }
 
-func (client *Client) finishCompactionFlush(done chan struct{}) {
+func (client *Client) dropUncertainCompactionPrompt(payload map[string]any, remaining []map[string]any, generation uint64) {
+	client.mu.Lock()
+	if client.compactionFlushGeneration == generation {
+		client.compactionFollowUpCount--
+		client.compactionFollowUpBytes -= promptPayloadSize(payload)
+		client.compactionFollowUps = append(remaining, client.compactionFollowUps...)
+		client.flushingCompactionFollowUps = false
+		if len(client.compactionFollowUps) > 0 {
+			client.appendQueuedMessagesEventLocked()
+		}
+	}
+	client.mu.Unlock()
+}
+
+func (client *Client) finishCompactionFlush(done chan struct{}, generation uint64) {
 	close(done)
 	client.mu.Lock()
-	if client.compactionFlushDone == done {
+	if client.compactionFlushGeneration == generation && client.compactionFlushDone == done {
 		client.compactionFlushDone = nil
 	}
 	client.mu.Unlock()
@@ -2221,6 +2256,7 @@ func (client *Client) finishCompactionFlush(done chan struct{}) {
 func (client *Client) discardCompactionPrompts(ctx context.Context) error {
 	client.mu.Lock()
 	client.flushingCompactionFollowUps = false
+	client.compactionFlushGeneration++
 	client.compactionFollowUps = nil
 	client.compactionFollowUpCount = 0
 	client.compactionFollowUpBytes = 0
@@ -2232,6 +2268,11 @@ func (client *Client) discardCompactionPrompts(ctx context.Context) error {
 	}
 	select {
 	case <-done:
+		client.mu.Lock()
+		if client.compactionFlushDone == done {
+			client.compactionFlushDone = nil
+		}
+		client.mu.Unlock()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

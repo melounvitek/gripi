@@ -132,7 +132,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	attachmentStore := sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}
 	var rpcResponse map[string]any
 	var rpcMessage = message
-	var handledCompacting, runningAfterHandledCommand bool
+	var handledSlashCommand, compactingAfterHandledCommand, runningAfterHandledCommand bool
 	var rpcImages []rpc.PromptImage
 	var attachmentPaths, mimeTypes []string
 	cleanupImages := func() error { return nil }
@@ -239,7 +239,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 				if deferringCompactionPrompts && app.extensionSlashCommand(request, client, rpcMessage) {
 					rpcResponse, actionErr = actions.PromptWithBehavior(request.Context(), rpcMessage, rpcImages, nativeBehavior)
 					handled = actionErr == nil
-					handledCompacting = handled && client.Compacting()
+					handledSlashCommand = handled
+					compactingAfterHandledCommand = client.Compacting()
 					runningAfterHandledCommand = client.AgentRunning()
 				} else {
 					rpcResponse, queued, actionErr = actions.QueueCompactionPrompt(request.Context(), rpcMessage, rpcImages, nativeBehavior)
@@ -278,8 +279,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	if behavior != "" && rpcResponse["compacting"] == true {
 		payload["queued_after_compaction"] = true
 	}
-	if handledCompacting {
-		payload["compacting"] = true
+	if handledSlashCommand {
+		payload["compacting"] = compactingAfterHandledCommand
 		payload["running"] = runningAfterHandledCommand
 	}
 	if command.Type != "" {
@@ -803,20 +804,42 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 		writeText(response, http.StatusBadRequest, "Custom summary instructions are too long")
 		return
 	}
+	restoredQueuedText := ""
+	if app.rpcClients.AgentRunning(path) {
+		queued := app.rpcClients.LiveSnapshot(path).QueuedMessages
+		restoredQueuedText = strings.Join(append(append([]string{}, queued["steering"]...), queued["followUp"]...), "\n\n")
+		err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+			actions, actionErr := checkedActionClient(client)
+			if actionErr != nil {
+				return actionErr
+			}
+			aborted, actionErr := actions.Abort(request.Context())
+			if actionErr != nil {
+				return actionErr
+			}
+			if !successfulRPCResponse(aborted) {
+				return &rpcSettingError{response: aborted}
+			}
+			return nil
+		})
+		if app.writeSettingError(response, err) {
+			return
+		}
+		closed, err := app.rpcClients.CloseClientWithoutOperations(path)
+		if err != nil {
+			app.writeActionRPCError(response, err)
+			return
+		}
+		if !closed {
+			app.writeSettingError(response, errSessionBusy)
+			return
+		}
+	}
 	var result map[string]any
 	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
-		}
-		if client.AgentRunning() {
-			aborted, abortErr := actions.Abort(request.Context())
-			if abortErr != nil {
-				return abortErr
-			}
-			if !successfulRPCResponse(aborted) {
-				return &rpcSettingError{response: aborted}
-			}
 		}
 		if summary != "custom" {
 			instructions = ""
@@ -833,7 +856,9 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 	}
 	data := responseData(result)
 	payload := map[string]any{"session": path, "redirect": app.sessionRedirectPath(request, path), "cancelled": data["cancelled"] == true}
-	if editor, valid := data["editorText"].(string); valid {
+	if restoredQueuedText != "" {
+		payload["editorText"] = restoredQueuedText
+	} else if editor, valid := data["editorText"].(string); valid {
 		if len(editor) > extensionValueBytes {
 			writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Extension editor response is too long"})
 			return

@@ -56,8 +56,8 @@ test("fake Pi follows the native prompt lifecycle for a new session", { timeout:
   await assert.rejects(readFile(sessionPath), { code: "ENOENT" });
 
   child.stdin.write(`${JSON.stringify({ id: "abort-active", type: "abort" })}\n`);
-  assert.equal((await nextRecord(records)).id, "abort-active");
   assert.deepEqual((await readRecords(records, 2)).map((event) => event.type), ["agent_end", "agent_settled"]);
+  assert.equal((await nextRecord(records)).id, "abort-active");
 
   child.stdin.write(`${JSON.stringify({ id: "prompt-new", type: "prompt", message: prompts.newSession })}\n`);
   assert.equal((await nextRecord(records)).id, "prompt-new");
@@ -161,8 +161,8 @@ test("fake Pi serializes bash, cancels it while the agent runs, and defers its e
   assert.equal(deferred.data.entries.some((entry) => entry.message?.role === "bashExecution"), false);
 
   child.stdin.write(`${JSON.stringify({ id: "abort-agent", type: "abort" })}\n`);
-  assert.equal((await nextRecord(records)).id, "abort-agent");
   assert.deepEqual((await readRecords(records, 2)).map((record) => record.type), ["agent_end", "agent_settled"]);
+  assert.equal((await nextRecord(records)).id, "abort-agent");
   child.stdin.write(`${JSON.stringify({ id: "entries-settled", type: "get_entries" })}\n`);
   const settled = await nextRecord(records);
   const bashEntry = settled.data.entries.at(-1);

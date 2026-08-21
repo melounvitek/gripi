@@ -497,7 +497,8 @@ function acceptFollowUp(command) {
   }
   respond(command, true);
   emit({ type: "queue_update", steering: [], followUp: [command.message] });
-  schedule(350, () => {
+  const delay = command.message === "Restore this queued message" ? 10_000 : 350;
+  schedule(delay, () => {
     emit({ type: "queue_update", steering: [], followUp: [] });
     const user = userMessage(command.message);
     appendMessage(user);
@@ -507,15 +508,19 @@ function acceptFollowUp(command) {
 }
 
 function acceptAbort(command) {
-  respond(command, true);
-  if (!busy) return;
+  if (!busy) {
+    respond(command, true);
+    return;
+  }
   clearTimers();
   if ([prompts.parallelSubagents, prompts.parallelSubagentsMobile].includes(activeScenario)) {
     abortParallelSubagents();
+    respond(command, true);
     return;
   }
   if (activeScenario === prompts.paginatedSubagent) {
     abortPaginatedSubagent();
+    respond(command, true);
     return;
   }
   busy = false;
@@ -524,6 +529,7 @@ function acceptAbort(command) {
   emit({ type: "agent_end", messages: [], willRetry: false });
   persistDeferredBashMessages();
   emit({ type: "agent_settled" });
+  respond(command, true);
 }
 
 function acceptBash(command) {

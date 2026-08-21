@@ -320,7 +320,7 @@ func TestSessionReplacementDiscardsRemainingCompactionPrompts(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	writeRecord(t, stdoutWriter, map[string]any{"id": first["id"], "type": "response", "command": "prompt", "success": true})
+	writeRecord(t, stdoutWriter, map[string]any{"id": first["id"], "type": "response", "command": "prompt", "success": false, "error": "cancelled for replacement"})
 	var command map[string]any
 	if err := decoder.Decode(&command); err != nil {
 		t.Fatal(err)
@@ -331,6 +331,9 @@ func TestSessionReplacementDiscardsRemainingCompactionPrompts(t *testing.T) {
 	writeRecord(t, stdoutWriter, map[string]any{"id": command["id"], "type": "response", "command": "new_session", "success": true, "data": map[string]any{"cancelled": false}})
 	if err := <-replaced; err != nil {
 		t.Fatal(err)
+	}
+	if queued := client.LiveSnapshot().QueuedMessages; len(queued["steering"])+len(queued["followUp"]) != 0 {
+		t.Fatalf("cancelled prompts crossed into the replacement session: %#v", queued)
 	}
 }
 
@@ -481,8 +484,8 @@ func TestClientCompactionFlushDoesNotBlockStdoutAndTimesOut(t *testing.T) {
 		flushing := client.flushingCompactionFollowUps
 		client.mu.Unlock()
 		if !flushing {
-			if queued := client.LiveSnapshot().QueuedMessages["followUp"]; len(queued) != 1 {
-				t.Fatalf("timed-out prompt was not restored: %#v", queued)
+			if queued := client.LiveSnapshot().QueuedMessages["followUp"]; len(queued) != 0 {
+				t.Fatalf("prompt with uncertain acceptance was queued for duplicate delivery: %#v", queued)
 			}
 			return
 		}
