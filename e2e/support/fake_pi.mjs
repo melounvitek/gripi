@@ -159,6 +159,9 @@ function handleCommand(command) {
       appendEntry("session_info", { name: sessionName });
       respond(command, true);
       break;
+    case "new_session":
+      replaceWithNewSession(command);
+      break;
     case "compact":
       compacting = true;
       emit({ type: "compaction_start" });
@@ -265,6 +268,14 @@ function setModel(command) {
 
 function acceptPrompt(command) {
   if (acceptReloadBridge(command) || acceptTreeBridge(command)) return;
+  if (busy && command.streamingBehavior === "steer") {
+    acceptSteer(command);
+    return;
+  }
+  if (busy && command.streamingBehavior === "followUp") {
+    acceptFollowUp(command);
+    return;
+  }
   if (busy) {
     respond(command, false, { error: "Agent is already streaming" });
     return;
@@ -794,6 +805,22 @@ function finishAssistant(completed, priorMessages = []) {
   activeScenario = null;
   persistDeferredBashMessages();
   emit({ type: "agent_settled" });
+}
+
+function replaceWithNewSession(command) {
+  clearTimers();
+  if (busy) {
+    busy = false;
+    activeScenario = null;
+    emit({ type: "agent_end", messages: [], willRetry: false });
+    emit({ type: "agent_settled" });
+  }
+  entries = [];
+  leafId = null;
+  sessionName = null;
+  sessionPersisted = false;
+  prepareNewSession();
+  respond(command, true, { data: { cancelled: false } });
 }
 
 function prepareNewSession() {

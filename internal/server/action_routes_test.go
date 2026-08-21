@@ -97,7 +97,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 
 	for _, command := range []struct{ name, input, behavior, message string }{
 		{"login", "/login anthropic", "steer", "`/login` isn’t available in Gripi. Run `/login` in the Pi CLI, then restart the Gripi gateway to load the new credentials."},
-		{"logout", "/logout", "follow_up", "`/logout` isn’t available in Gripi. Run `/logout` in the Pi CLI, then restart the Gripi gateway to reload credentials."},
+		{"logout", "/logout", "steer", "`/logout` isn’t available in Gripi. Run `/logout` in the Pi CLI, then restart the Gripi gateway to reload credentials."},
 	} {
 		result := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": command.input, "streaming_behavior": command.behavior}, true))
 		if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"command":"`+command.name+`"`) || !strings.Contains(result.Body.String(), command.message) {
@@ -129,6 +129,38 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if cycle.Code != http.StatusOK || !strings.Contains(cycle.Body.String(), `"thinking":"off"`) {
 		t.Fatalf("cycle thinking = %d %s", cycle.Code, cycle.Body.String())
 	}
+
+	steerStart := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "Start the steer scenario"}, true))
+	if steerStart.Code != http.StatusOK {
+		t.Fatalf("steer start = %d %s", steerStart.Code, steerStart.Body.String())
+	}
+	activeName := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "/name Active session", "streaming_behavior": "steer"}, true))
+	if activeName.Code != http.StatusOK || !strings.Contains(activeName.Body.String(), `"command":"name"`) {
+		t.Fatalf("active name = %d %s", activeName.Code, activeName.Body.String())
+	}
+	activeModel := serveAction(handler, formActionRequest("/sessions/model_settings", map[string]string{"session": sessionPath, "provider": "e2e", "model": "contract-model", "thinking": "off"}, true))
+	if activeModel.Code != http.StatusOK || !strings.Contains(activeModel.Body.String(), `"thinking":"off"`) {
+		t.Fatalf("active model = %d %s", activeModel.Code, activeModel.Body.String())
+	}
+	activeTree := serveAction(handler, formActionRequest("/sessions/tree", map[string]string{"session": sessionPath, "entry_id": "user-1", "summary_mode": "none"}, true))
+	if activeTree.Code != http.StatusConflict {
+		t.Fatalf("active tree = %d %s", activeTree.Code, activeTree.Body.String())
+	}
+	steeredSlash := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "/unknown-steer", "streaming_behavior": "steer"}, true))
+	if steeredSlash.Code != http.StatusOK || !strings.Contains(steeredSlash.Body.String(), `"steer":true`) {
+		t.Fatalf("steered slash = %d %s", steeredSlash.Code, steeredSlash.Body.String())
+	}
+	waitForFakePiSettled(t, handler, sessionPath)
+
+	followUpStart := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "Start the follow-up scenario"}, true))
+	if followUpStart.Code != http.StatusOK {
+		t.Fatalf("follow-up start = %d %s", followUpStart.Code, followUpStart.Body.String())
+	}
+	followUpCommand := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "/logout", "streaming_behavior": "follow_up"}, true))
+	if followUpCommand.Code != http.StatusOK || !strings.Contains(followUpCommand.Body.String(), `"follow_up":true`) || strings.Contains(followUpCommand.Body.String(), `"command":"logout"`) {
+		t.Fatalf("follow-up slash command = %d %s", followUpCommand.Code, followUpCommand.Body.String())
+	}
+	waitForFakePiSettled(t, handler, sessionPath)
 
 	tree := serveAction(handler, getActionRequest("/sessions/tree_entries?session="+url.QueryEscape(sessionPath)+"&filter=all"))
 	if tree.Code != http.StatusOK || !strings.Contains(tree.Body.String(), `"settings"`) || !strings.Contains(tree.Body.String(), `"entries"`) {
@@ -175,6 +207,22 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if fork.Code != http.StatusOK || !strings.Contains(fork.Body.String(), `"text"`) {
 		t.Fatalf("fork = %d %s", fork.Code, fork.Body.String())
 	}
+	var forkPayload map[string]any
+	decodeActionJSON(t, fork, &forkPayload)
+	forkPath := forkPayload["session"].(string)
+	activeBeforeNew := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": forkPath, "message": "Start the steer scenario"}, true))
+	if activeBeforeNew.Code != http.StatusOK {
+		t.Fatalf("active before new = %d %s", activeBeforeNew.Code, activeBeforeNew.Body.String())
+	}
+	replaced := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": forkPath, "message": "/new", "streaming_behavior": "steer"}, true))
+	if replaced.Code != http.StatusOK {
+		t.Fatalf("active new = %d %s", replaced.Code, replaced.Body.String())
+	}
+	var replacedPayload map[string]any
+	decodeActionJSON(t, replaced, &replacedPayload)
+	if replacedPayload["session"] == forkPath {
+		t.Fatalf("active new did not replace session: %#v", replacedPayload)
+	}
 
 	newSession := serveAction(handler, formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": project, "project": filepath.Join(root, "stale-project")}, true))
 	if newSession.Code != http.StatusOK || !strings.Contains(newSession.Body.String(), `"session"`) {
@@ -210,7 +258,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{`"type":"prompt"`, `"mimeType":"image/png"`, `"type":"export_html"`, `"type":"bash"`, `"excludeFromContext":true`, `"type":"set_model"`, `"modelId":"contract-model"`, `/gripi_reload`, `/gripi_tree_snapshot`, `"type":"compact"`, `"type":"clone"`, `"type":"fork"`} {
+	for _, expected := range []string{`"type":"prompt"`, `"streamingBehavior":"steer"`, `"message":"/unknown-steer"`, `"streamingBehavior":"followUp"`, `"message":"/logout"`, `"mimeType":"image/png"`, `"type":"export_html"`, `"type":"bash"`, `"excludeFromContext":true`, `"type":"set_model"`, `"modelId":"contract-model"`, `/gripi_reload`, `/gripi_tree_snapshot`, `"type":"compact"`, `"type":"clone"`, `"type":"fork"`, `"type":"new_session"`} {
 		if !strings.Contains(string(log), expected) {
 			t.Errorf("fake Pi log does not contain %s", expected)
 		}
@@ -228,7 +276,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 			}
 		}
 	}
-	for _, localCommand := range []string{"/login anthropic", "/logout"} {
+	for _, localCommand := range []string{"/login anthropic"} {
 		if strings.Contains(string(log), localCommand) {
 			t.Errorf("fake Pi received local command %q", localCommand)
 		}
@@ -375,7 +423,7 @@ func waitForFakePiSettled(t *testing.T, handler http.Handler, sessionPath string
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
 		response := serveAction(handler, getActionRequest("/events?session="+url.QueryEscape(sessionPath)+"&after=0"))
-		if response.Code == http.StatusOK && strings.Contains(response.Body.String(), `"type":"agent_settled"`) {
+		if response.Code == http.StatusOK && strings.Contains(response.Body.String(), `"type":"agent_settled"`) && strings.Contains(response.Body.String(), `"gateway_busy":false`) {
 			return
 		}
 		time.Sleep(25 * time.Millisecond)

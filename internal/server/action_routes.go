@@ -92,47 +92,33 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		app.runBash(response, request, path, command.Command, command.ExcludeFromContext)
 		return
 	}
-	parsedCommand := prompts.ParseSlashCommand(message)
-	if parsedCommand.Type == "login" || parsedCommand.Type == "logout" {
-		guidance := map[string]string{
-			"login":  "`/login` isn’t available in Gripi. Run `/login` in the Pi CLI, then restart the Gripi gateway to load the new credentials.",
-			"logout": "`/logout` isn’t available in Gripi. Run `/logout` in the Pi CLI, then restart the Gripi gateway to reload credentials.",
-		}
-		app.writePromptResult(response, request, path, map[string]any{"command": parsedCommand.Type, "message": guidance[parsedCommand.Type]})
-		return
-	}
-
 	behavior := request.FormValue("streaming_behavior")
 	if behavior != "" && behavior != "steer" && behavior != "follow_up" {
 		writeText(response, http.StatusBadRequest, "Invalid streaming behavior")
 		return
-	}
-	if parsedCommand.Type == "reload" {
-		behavior = ""
 	}
 	if behavior == "steer" && app.rpcClients.Compacting(path) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Steering is unavailable during compaction"})
 		return
 	}
 	command := prompts.SlashCommand{}
-	if behavior == "" {
-		command = parsedCommand
+	if behavior != "follow_up" {
+		command = prompts.ParseSlashCommand(message)
+	}
+	if command.Type == "login" || command.Type == "logout" {
+		guidance := map[string]string{
+			"login":  "`/login` isn’t available in Gripi. Run `/login` in the Pi CLI, then restart the Gripi gateway to load the new credentials.",
+			"logout": "`/logout` isn’t available in Gripi. Run `/logout` in the Pi CLI, then restart the Gripi gateway to reload credentials.",
+		}
+		app.writePromptResult(response, request, path, map[string]any{"command": command.Type, "message": guidance[command.Type]})
+		return
 	}
 	if command.Type == "fork" || command.Type == "tree" || command.Type == "model" {
 		app.writePromptResult(response, request, path, map[string]any{"command": command.Type})
 		return
 	}
-	if command.Type == "new" {
-		newPath, err := app.startNewSession(request, app.currentSessionCWD(path))
-		if err != nil {
-			app.writeActionRPCError(response, err)
-			return
-		}
-		app.redirectToNewSession(response, request, newPath, "new")
-		return
-	}
-	if command.Type == "clone" {
-		app.branchFromAction(response, request, path, true, "")
+	if command.Type == "new" || command.Type == "clone" {
+		app.replaceSessionFromAction(response, request, path, command.Type, "")
 		return
 	}
 	if len(imageFiles) > 0 && command.Type == "" {
@@ -201,26 +187,26 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		if err := prepareImages(); err != nil {
 			return err
 		}
-		switch behavior {
-		case "steer":
-			if client.Compacting() {
-				return errSteeringDuringCompaction
+		switch command.Type {
+		case "name":
+			if command.Name != "" {
+				rpcResponse, err = actions.SetSessionName(request.Context(), command.Name)
+			} else {
+				rpcResponse, err = client.GetState(request.Context())
 			}
-			rpcResponse, err = actions.Steer(request.Context(), rpcMessage, rpcImages)
-		case "follow_up":
-			rpcResponse, err = actions.FollowUp(request.Context(), rpcMessage, rpcImages)
+		case "compact":
+			rpcResponse, err = actions.Compact(request.Context(), command.Instructions)
+		case "reload":
+			rpcResponse, err = actions.Reload(request.Context())
 		default:
-			switch command.Type {
-			case "name":
-				if command.Name != "" {
-					rpcResponse, err = actions.SetSessionName(request.Context(), command.Name)
-				} else {
-					rpcResponse, err = client.GetState(request.Context())
+			switch behavior {
+			case "steer":
+				if client.Compacting() {
+					return errSteeringDuringCompaction
 				}
-			case "compact":
-				rpcResponse, err = actions.Compact(request.Context(), command.Instructions)
-			case "reload":
-				rpcResponse, err = actions.Reload(request.Context())
+				rpcResponse, err = actions.PromptWithBehavior(request.Context(), rpcMessage, rpcImages, "steer")
+			case "follow_up":
+				rpcResponse, err = actions.PromptWithBehavior(request.Context(), rpcMessage, rpcImages, "followUp")
 			default:
 				rpcResponse, err = actions.Prompt(request.Context(), rpcMessage, rpcImages)
 			}
@@ -301,7 +287,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 			}
 		}
 	}
-	if command.Type == "" && behavior == "" && strings.HasPrefix(strings.TrimSpace(message), "/") && !strings.ContainsAny(message, "\r\n") {
+	if command.Type == "" && strings.HasPrefix(strings.TrimSpace(message), "/") && !strings.ContainsAny(message, "\r\n") {
 		var state map[string]any
 		if app.rpcClients.WithExistingClient(request.Context(), path, true, func(client rpc.RPCClient) error {
 			var stateErr error
@@ -518,9 +504,6 @@ func (app *application) setModelSettings(response http.ResponseWriter, request *
 		if err != nil {
 			return err
 		}
-		if client.Busy() {
-			return errSessionBusy
-		}
 		setting, err := actions.SetModel(request.Context(), provider, modelID)
 		if err != nil {
 			return err
@@ -564,9 +547,6 @@ func (app *application) cycleThinking(response http.ResponseWriter, request *htt
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
-		}
-		if client.Busy() {
-			return errSessionBusy
 		}
 		result, err = actions.CycleThinkingLevel(request.Context())
 		return err
@@ -891,7 +871,7 @@ func (app *application) forkSession(response http.ResponseWriter, request *http.
 		writeText(response, http.StatusBadRequest, "Fork entry id is too long")
 		return
 	}
-	app.branchFromAction(response, request, path, false, entryID)
+	app.replaceSessionFromAction(response, request, path, "fork", entryID)
 }
 
 func (app *application) cloneSession(response http.ResponseWriter, request *http.Request) {
@@ -902,7 +882,7 @@ func (app *application) cloneSession(response http.ResponseWriter, request *http
 	if !ok {
 		return
 	}
-	app.branchFromAction(response, request, path, true, "")
+	app.replaceSessionFromAction(response, request, path, "clone", "")
 }
 
 func (app *application) exportSession(response http.ResponseWriter, request *http.Request) {
@@ -1079,7 +1059,7 @@ func (app *application) takeOverSession(response http.ResponseWriter, request *h
 	writeJSON(response, map[string]any{"ok": true, "session": path, "session_sync": map[string]any{"mode": state.Mode, "revision": state.Revision}})
 }
 
-func (app *application) branchFromAction(response http.ResponseWriter, request *http.Request, previous string, clone bool, entryID string) {
+func (app *application) replaceSessionFromAction(response http.ResponseWriter, request *http.Request, previous, operation, entryID string) {
 	resolved, unlock, err := app.lockResolvedImagePromptPath(request, previous)
 	if err != nil {
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
@@ -1098,10 +1078,14 @@ func (app *application) branchFromAction(response http.ResponseWriter, request *
 		if err != nil {
 			return nil, err
 		}
-		if clone {
+		switch operation {
+		case "new":
+			return actions.NewSession(request.Context(), "")
+		case "clone":
 			return actions.CloneSession(request.Context())
+		default:
+			return actions.Fork(request.Context(), entryID)
 		}
-		return actions.Fork(request.Context(), entryID)
 	}, func(path string) (string, error) {
 		configured, ok := sessions.ConfiguredSessionPath(app.config.SessionsRoot, path)
 		if !ok {
@@ -1164,7 +1148,7 @@ func (app *application) branchFromAction(response http.ResponseWriter, request *
 	}
 	if wantsJSON(request) {
 		payload := map[string]any{"session": newPath, "redirect": app.sessionRedirectPath(request, newPath)}
-		if !clone {
+		if operation == "fork" {
 			if text, valid := responseData(actionResponse)["text"].(string); valid {
 				payload["text"] = text
 			}

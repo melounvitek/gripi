@@ -44,6 +44,7 @@ type ActionClient interface {
 	Abort(context.Context) (map[string]any, error)
 	AbortBash(context.Context) (map[string]any, error)
 	ActiveBashCommand() string
+	NewSession(context.Context, string) (map[string]any, error)
 	Compact(context.Context, string) (map[string]any, error)
 	Fork(context.Context, string) (map[string]any, error)
 	CloneSession(context.Context) (map[string]any, error)
