@@ -13,6 +13,62 @@ test("steer an active run", async ({ page }) => {
   await expectRunFinished(page);
 });
 
+test("use slash commands while Pi is running", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.controlsSteer);
+  await sendPrompt(page, prompts.steerStart);
+
+  const abort = page.getByRole("button", { name: "Abort running Pi" });
+  await expect(abort).toBeVisible();
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/");
+  await expect(page.locator('.command[data-command-name="name"]')).toBeVisible();
+  await expect(page.locator('.command[data-command-name="steer-template"]')).toBeVisible();
+
+  await composer.fill("/name Active commands");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(page.getByRole("heading", { level: 1, name: "Active commands" })).toBeVisible();
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(abort).toBeVisible();
+
+  await composer.fill("/immediate-command");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(abort).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await composer.fill("/export active-run");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("active-run.html");
+  await download.delete();
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  await expect(abort).toBeVisible();
+
+  await composer.fill("/steer-template");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(message(page, "assistant", replies.steer)).toBeVisible();
+  await expectRunFinished(page);
+
+  await sendPrompt(page, "/name E2E Steer Desktop");
+  await expect(page.getByRole("heading", { level: 1, name: sessions.controlsSteer })).toBeVisible();
+});
+
+test("queue a built-in-looking slash command as a follow-up", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.controlsFollowUp);
+  await sendPrompt(page, prompts.followUpStart);
+  await page.getByRole("button", { name: "More send options" }).click();
+  await page.getByRole("button", { name: "Queue follow-up" }).click();
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("/logout");
+  await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
+  await expect(message(page, "assistant", replies.followUp)).toBeVisible();
+  await expect(message(page, "gateway", "restart the Gripi gateway")).toHaveCount(0);
+  await expectRunFinished(page);
+});
+
 test("queue a follow-up for an active run", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.controlsFollowUp);

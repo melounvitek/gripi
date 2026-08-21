@@ -1,6 +1,5 @@
 {{define "commands_list"}}<details class="command-list" id="command-list" data-loaded="true">
   <summary>Slash commands ({{.Count}})</summary>
-  <div class="command-list-message" data-queued-slash-message hidden>Slash commands are not supported in queued follow-up messages.</div>
   {{range .Groups}}<h3>{{.Source}} commands</h3>
     {{range .Commands}}<div class="command" data-command-name="{{.Name}}" data-command-text="{{.Text}}">
       <code>/{{.Name}}</code>{{if .Description}}

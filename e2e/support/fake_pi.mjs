@@ -133,10 +133,16 @@ function handleCommand(command) {
     case "get_available_models":
       respond(command, true, { data: { models: fakeModels() } });
       break;
-    case "get_commands":
+    case "get_commands": {
       if (!resourcesReloaded) emit({ type: "extension_ui_request", method: "setStatus", statusKey: "stale-resource", statusText: "loaded" });
-      respond(command, true, { data: { commands: resourcesReloaded ? [{ name: "fresh-resource", description: "Loaded after reload", source: "prompt" }] : [] } });
+      const commands = [
+        { name: "immediate-command", description: "Execute immediately", source: "extension" },
+        { name: "steer-template", description: "Steer from a prompt template", source: "prompt" }
+      ];
+      if (resourcesReloaded) commands.push({ name: "fresh-resource", description: "Loaded after reload", source: "prompt" });
+      respond(command, true, { data: { commands } });
       break;
+    }
     case "export_html":
       writeFileSync(command.outputPath, "<!doctype html><title>Fixture session export</title>", "utf8");
       respond(command, true, { data: { path: command.outputPath } });
@@ -268,6 +274,10 @@ function setModel(command) {
 
 function acceptPrompt(command) {
   if (acceptReloadBridge(command) || acceptTreeBridge(command)) return;
+  if (command.message === "/immediate-command") {
+    respond(command, true);
+    return;
+  }
   if (busy && command.streamingBehavior === "steer") {
     acceptSteer(command);
     return;

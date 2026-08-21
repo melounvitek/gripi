@@ -1754,6 +1754,7 @@ async function submitBashPrompt(rawMessage, bashCommand) {
 }
 
 async function submitExportPrompt(rawMessage, exportCommand) {
+  const activeRun = composerState?.dataset.state === "running";
   const generation = sessionViewGeneration;
   const switchGeneration = sessionSwitchGeneration.capture();
   const submittedSession = promptSessionInput?.value;
@@ -1789,13 +1790,19 @@ async function submitExportPrompt(rawMessage, exportCommand) {
     const filename = await downloadResponse(result.response, exportCommand.filename || "pi-session.html", { cancelled: retryCancelled });
     if (!filename || retryCancelled()) return;
 
-    if (composerState?.dataset.state === "exporting") setComposerState("done", "Exported");
+    if (composerState?.dataset.state === "exporting") {
+      if (activeRun) showCurrentActiveTask();
+      else setComposerState("done", "Exported");
+    }
     showStatus(`Downloaded ${filename}`, true);
   } catch (error) {
     if (submittedViewChanged()) return;
 
     restoreSubmittedComposerInput(rawMessage, submittedImageFiles);
-    if (composerState?.dataset.state === "exporting") setComposerState("error", error.message || "Session could not be exported");
+    if (composerState?.dataset.state === "exporting") {
+      if (activeRun) showCurrentActiveTask();
+      else setComposerState("error", error.message || "Session could not be exported");
+    }
     showStatus(error.message || "Session could not be exported", true);
   }
 }
@@ -1847,7 +1854,8 @@ async function submitPrompt(event) {
   if (bashCommand) return submitBashPrompt(rawMessage, bashCommand);
 
   const streamingBehavior = submittedStreamingBehavior();
-  const exportCommand = streamingBehavior ? null : sessionExportSlashCommand(rawMessage);
+  const handleBuiltinCommand = streamingBehavior !== "follow_up";
+  const exportCommand = handleBuiltinCommand ? sessionExportSlashCommand(rawMessage) : null;
   if (exportCommand) return submitExportPrompt(rawMessage, exportCommand);
 
   const queuedPrompt = !!streamingBehavior;
@@ -1881,15 +1889,15 @@ async function submitPrompt(event) {
   submittedImageFiles.forEach((file) => formData.append("images[]", file, file.name || "image"));
   if (streamingBehavior) formData.set("streaming_behavior", streamingBehavior);
 
-  const nameCommand = queuedPrompt ? null : sessionNameSlashCommand(message);
-  const compactCommand = queuedPrompt ? null : sessionCompactSlashCommand(message);
-  const forkCommand = queuedPrompt ? null : sessionForkSlashCommand(message);
-  const treeCommand = queuedPrompt ? null : sessionTreeSlashCommand(message);
-  const cloneCommand = queuedPrompt ? null : sessionCloneSlashCommand(message);
-  const newCommand = queuedPrompt ? null : sessionNewSlashCommand(message);
-  const modelCommand = queuedPrompt ? null : sessionModelSlashCommand(message);
-  const reloadCommand = sessionReloadSlashCommand(message);
-  const authGuidanceCommand = sessionAuthGuidanceSlashCommand(message);
+  const nameCommand = handleBuiltinCommand && sessionNameSlashCommand(message);
+  const compactCommand = handleBuiltinCommand && sessionCompactSlashCommand(message);
+  const forkCommand = handleBuiltinCommand && sessionForkSlashCommand(message);
+  const treeCommand = handleBuiltinCommand && sessionTreeSlashCommand(message);
+  const cloneCommand = handleBuiltinCommand && sessionCloneSlashCommand(message);
+  const newCommand = handleBuiltinCommand && sessionNewSlashCommand(message);
+  const modelCommand = handleBuiltinCommand && sessionModelSlashCommand(message);
+  const reloadCommand = handleBuiltinCommand && sessionReloadSlashCommand(message);
+  const authGuidanceCommand = handleBuiltinCommand ? sessionAuthGuidanceSlashCommand(message) : null;
   if (!nameCommand && !compactCommand && !forkCommand && !treeCommand && !cloneCommand && !newCommand && !modelCommand && !reloadCommand && !authGuidanceCommand) {
     if (!queuedPrompt) {
       liveMessageRenderer.resetLiveAssistantTracking();
@@ -2029,7 +2037,8 @@ async function submitPrompt(event) {
         return;
       }
       updateSessionHeaderName(payload.name);
-      setComposerState("done", payload.current ? "Named" : "Name set");
+      if (queuedPrompt) showCurrentActiveTask();
+      else setComposerState("done", payload.current ? "Named" : "Name set");
       showStatus(payload.current ? `Session name: “${payload.name}”` : eventStatusText({ type: "session_info", name: payload.name }), true);
       appendSessionNameFeedback(payload);
       sidebarController.refresh().catch(() => {});
@@ -2049,19 +2058,22 @@ async function submitPrompt(event) {
       return;
     }
     if (payload?.command === "fork") {
-      setComposerState("idle", "", { focus: false });
+      if (queuedPrompt) showCurrentActiveTask();
+      else setComposerState("idle", "", { focus: false });
       showStatus("Choose a fork point", true);
       openForkSessionModal();
       return;
     }
     if (payload?.command === "tree") {
-      setComposerState("idle", "", { focus: false });
+      if (queuedPrompt) showCurrentActiveTask();
+      else setComposerState("idle", "", { focus: false });
       showStatus("Choose a tree entry", true);
       openTreeSessionModal();
       return;
     }
     if (payload?.command === "model") {
-      setComposerState("idle", "", { focus: false });
+      if (queuedPrompt) showCurrentActiveTask();
+      else setComposerState("idle", "", { focus: false });
       openModelSettingsModal();
       return;
     }
@@ -2146,12 +2158,7 @@ function confirmOrStopRunningTask(event) {
   return true;
 }
 
-function composingQueuedMessage() {
-  return composerState?.dataset.state === "running";
-}
-
 function visibleCommands() {
-  if (composingQueuedMessage()) return [];
   return [...(commandList?.querySelectorAll(".command") || [])].filter((command) => !command.hidden);
 }
 
@@ -2165,7 +2172,6 @@ function updateHighlightedCommand() {
 
 function resetCommandSelection() {
   highlightedCommandIndex = 0;
-  hideQueuedSlashCommandMessage();
   commandList?.querySelectorAll(".command-list h3").forEach((heading) => { heading.hidden = false; });
   commandList?.querySelectorAll(".command").forEach((command) => {
     command.hidden = false;
@@ -2173,25 +2179,8 @@ function resetCommandSelection() {
   });
 }
 
-function showQueuedSlashCommandMessage() {
-  if (!commandList) return;
-  const message = commandList.querySelector("[data-queued-slash-message]");
-  if (message) {
-    message.textContent = "Slash commands are not supported in steering or follow-up messages.";
-    message.removeAttribute("hidden");
-  }
-  commandList.querySelectorAll(".command-list h3, .command").forEach((element) => { element.hidden = true; });
-  highlightedCommandIndex = 0;
-}
-
-function hideQueuedSlashCommandMessage() {
-  commandList?.querySelector("[data-queued-slash-message]")?.setAttribute("hidden", "");
-}
-
 function filterCommandsFromPrompt() {
   if (!commandList || !promptTextarea) return;
-  if (composingQueuedMessage()) return showQueuedSlashCommandMessage();
-  hideQueuedSlashCommandMessage();
   commandList.querySelectorAll(".command-list h3").forEach((heading) => { heading.hidden = false; });
   const query = promptTextarea.value.startsWith("/") ? promptTextarea.value.slice(1).trim().toLowerCase() : "";
   commandList.querySelectorAll(".command").forEach((command) => {
@@ -2202,7 +2191,7 @@ function filterCommandsFromPrompt() {
 }
 
 function selectCommand(command) {
-  if (composingQueuedMessage() || !command || !promptTextarea) return false;
+  if (!command || !promptTextarea) return false;
   promptTextarea.value = `/${command.dataset.commandName} `;
   commandList?.classList.remove("is-visible");
   commandList?.removeAttribute("open");
@@ -2227,7 +2216,7 @@ function moveHighlightedCommand(direction) {
 async function ensureCommandsLoaded() {
   const list = commandList;
   const generation = sessionSwitchGeneration.capture();
-  if (!list || composingQueuedMessage() || list.dataset.loaded === "true") return;
+  if (!list || list.dataset.loaded === "true") return;
   const url = list.dataset.commandsUrl;
   if (!url || list.dataset.loading === "true") return;
 
@@ -2274,12 +2263,8 @@ function updateCommandListForPrompt() {
   if (promptTextarea.value.startsWith("/")) {
     commandList.classList.add("is-visible");
     commandList.setAttribute("open", "");
-    if (composingQueuedMessage()) {
-      showQueuedSlashCommandMessage();
-    } else {
-      ensureCommandsLoaded();
-      filterCommandsFromPrompt();
-    }
+    ensureCommandsLoaded();
+    filterCommandsFromPrompt();
   } else {
     commandList.classList.remove("is-visible");
     commandList.removeAttribute("open");
