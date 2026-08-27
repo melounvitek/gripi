@@ -437,6 +437,36 @@ func TestRegistryObserverAllowsMoveButPreventsRetirement(t *testing.T) {
 	}
 }
 
+func TestRetireQueuedClientDoesNotInterruptAnActiveOperation(t *testing.T) {
+	client := newRegistryClient()
+	client.queued = map[string][]string{"steering": {"adjust"}}
+	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
+	if err := registry.Register("/session", client); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- registry.WithClient(context.Background(), "/session", func(RPCClient) error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+
+	retired, _, err := registry.RetireQueuedClient("/session", client)
+
+	if err != nil || retired || client.closed() {
+		t.Fatalf("retired=%v closed=%v err=%v", retired, client.closed(), err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRegistryClosesSettledClientWithOnlyObservers(t *testing.T) {
 	client := newRegistryClient()
 	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
@@ -467,6 +497,7 @@ type registryClient struct {
 	closeErr     error
 	closeStarted chan struct{}
 	releaseClose chan struct{}
+	queued       map[string][]string
 }
 
 func newRegistryClient() *registryClient { return &registryClient{} }
@@ -517,6 +548,9 @@ func (client *registryClient) EventsAfter(int64) EventBatch {
 }
 func (client *registryClient) LiveSnapshot() LiveSnapshot {
 	return LiveSnapshot{ActiveToolEvents: []map[string]any{}}
+}
+func (client *registryClient) QueuedMessagesForStop() (map[string][]string, bool) {
+	return client.queued, len(client.queued["steering"]) > 0 || len(client.queued["followUp"]) > 0
 }
 func (client *registryClient) GetState(context.Context) (map[string]any, error) { return nil, nil }
 func (client *registryClient) GetSessionStats(context.Context) (map[string]any, error) {

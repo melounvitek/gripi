@@ -403,6 +403,33 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 	requested = canonical
 	path := requested
 	result := rpc.StopResult{}
+	queuedText := ""
+	stoppedQueuedRun := false
+	if _, statErr := os.Stat(requested); statErr == nil {
+		if client := app.rpcClients.Client(requested); client != nil {
+			var queued map[string][]string
+
+			retire := func() (bool, error) {
+				retired, messages, retireErr := app.rpcClients.RetireQueuedClient(requested, client)
+				queued = messages
+				return retired, retireErr
+			}
+
+			if app.synchronizer != nil {
+				stoppedQueuedRun, err = app.synchronizer.RetireManagedClientIfAvailable(requested, retire)
+			} else {
+				stoppedQueuedRun, err = retire()
+			}
+			if err != nil {
+				app.writeActionRPCError(response, err)
+				return
+			}
+			if stoppedQueuedRun {
+				queuedText = strings.Join(append(append([]string{}, queued["steering"]...), queued["followUp"]...), "\n\n")
+				result.Forced = true
+			}
+		}
+	}
 	abortClient := func(client rpc.RPCClient) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
@@ -416,18 +443,20 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 		return err
 	}
 	err = nil
-	if app.rpcClients.Active(requested) {
-		err = app.withSynchronizedInterruptClient(request, requested, abortClient)
-	} else {
-		var matched string
-		matched, err = app.abortMatchingPending(request, requested, abortClient)
-		if matched != "" {
-			path = matched
-		} else if err == nil {
+	if !stoppedQueuedRun {
+		if app.rpcClients.Active(requested) {
 			err = app.withSynchronizedInterruptClient(request, requested, abortClient)
+		} else {
+			var matched string
+			matched, err = app.abortMatchingPending(request, requested, abortClient)
+			if matched != "" {
+				path = matched
+			} else if err == nil {
+				err = app.withSynchronizedInterruptClient(request, requested, abortClient)
+			}
 		}
+		result, err = rpc.StopResultFor(err)
 	}
-	result, err = rpc.StopResultFor(err)
 	if err != nil && app.writeActionRPCError(response, err) {
 		return
 	}
@@ -438,6 +467,9 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 		}
 		if result.Stopping {
 			payload["stopping"] = true
+		}
+		if queuedText != "" {
+			payload["editorText"] = queuedText
 		}
 		status := http.StatusOK
 		if result.Stopping {

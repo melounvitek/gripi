@@ -13,6 +13,28 @@ test("steer an active run", async ({ page }) => {
   await expectRunFinished(page);
 });
 
+test("stop immediately and restore a queued steering message", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.controlsSteer);
+  await page.keyboard.press("Escape");
+  await sendPrompt(page, prompts.steerStart);
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
+
+  await sendPrompt(page, prompts.queuedAbortSteer);
+  await expect(page.locator(".pending-message--steering")).toHaveText(`Steering: ${prompts.queuedAbortSteer}`);
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("Keep this draft");
+
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+
+  await expect(composer).toHaveValue(`${prompts.queuedAbortSteer}\n\nKeep this draft`, { timeout: 3_000 });
+  await expect(page.locator(".composer-state")).not.toHaveAttribute("data-state", /running|stopping/);
+  await expect(composer).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
+  await expect(page.locator("[data-session-sync-banner]")).toHaveCount(0);
+});
+
 test("use slash commands while Pi is running", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.controlsSteer);

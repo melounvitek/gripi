@@ -49,6 +49,7 @@ export const prompts = {
   retryCancelled: "Do not send this prompt after stopping",
   steerStart: "Start the steer scenario",
   steerMessage: "Use the steered direction",
+  queuedAbortSteer: "Restore this steering message after stopping",
   followUpStart: "Start the follow-up scenario",
   followUpMessage: "Continue with the queued follow-up",
   abortStart: "Start the abort scenario",

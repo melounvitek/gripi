@@ -19,6 +19,7 @@ let thinkingLevel = "medium";
 let busy = false;
 let compacting = false;
 let activeScenario = null;
+let queuedAbortSteer = null;
 let pendingExtensionRequest = null;
 let activeBash = null;
 let resourcesReloaded = false;
@@ -481,6 +482,10 @@ function acceptSteer(command) {
   }
   respond(command, true);
   emit({ type: "queue_update", steering: [command.message], followUp: [] });
+  if (command.message === prompts.queuedAbortSteer) {
+    queuedAbortSteer = command.message;
+    return;
+  }
   schedule(350, () => {
     emit({ type: "queue_update", steering: [], followUp: [] });
     const user = userMessage(command.message);
@@ -513,6 +518,14 @@ function acceptAbort(command) {
     return;
   }
   clearTimers();
+  if (queuedAbortSteer) {
+    emit({ type: "queue_update", steering: [], followUp: [] });
+    const user = userMessage(queuedAbortSteer);
+    appendMessage(user);
+    emitMessage(user);
+    queuedAbortSteer = null;
+    return;
+  }
   if ([prompts.parallelSubagents, prompts.parallelSubagentsMobile].includes(activeScenario)) {
     abortParallelSubagents();
     respond(command, true);

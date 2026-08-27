@@ -2127,10 +2127,27 @@ async function submitAbort(event) {
   const submittedForm = abortForm;
   const submittedSession = currentSessionPath();
   submittedForm.dataset.submitting = "true";
+  abortEventPoll();
   showSessionSwitching();
   try {
     const response = await fetch(submittedForm.action, { method: "POST", body: new FormData(submittedForm), headers: { "Accept": "application/json" } });
     if (!response.ok) throw new Error("Stop failed");
+    const payload = await response.json();
+    if (submittedSession === currentSessionPath() && payload.forced && payload.editorText !== undefined) {
+      liveAgentRunning = false;
+      conversationController.setAgentRunning(false);
+      liveBusySince = null;
+      if (liveOutput) liveOutput.dataset.composerCompacting = "false";
+      liveMessageRenderer.clearLiveAssistantStreaming();
+      liveMessageRenderer.resetLiveAssistantTracking();
+      liveMessageRenderer.renderQueuedMessages({ steering: [], followUp: [] });
+      liveMessageRenderer.removePendingCompactionMessage();
+      setComposerState("done", "Done");
+      if (payload.editorText && promptTextarea) {
+        promptTextarea.value = [payload.editorText, promptTextarea.value].filter((text) => text.trim()).join("\n\n");
+        promptTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
   } catch (_error) {
     stoppingSessionPaths.delete(submittedSession);
     if (submittedSession === currentSessionPath() && composerState?.dataset.state === "stopping") {

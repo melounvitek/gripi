@@ -97,6 +97,20 @@ func (synchronizer *Synchronizer) Forget(path string) {
 	delete(synchronizer.states, path)
 	synchronizer.statesMu.Unlock()
 }
+func (synchronizer *Synchronizer) RetireManagedClientIfAvailable(path string, retire func() (bool, error)) (bool, error) {
+	unlock, locked := synchronizer.locks.TryLock(path)
+	if !locked {
+		return false, nil
+	}
+	defer unlock()
+	state := synchronizer.state(path)
+	blocked := state.Mode == SyncExternalFollow || state.Mode == SyncConflict
+	retired, err := retire()
+	if retired && !blocked {
+		synchronizer.Forget(path)
+	}
+	return retired, err
+}
 func (synchronizer *Synchronizer) Message(result SyncResult) string {
 	return blockedMessage(result.Mode, result.Error)
 }

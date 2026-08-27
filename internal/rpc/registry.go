@@ -553,6 +553,23 @@ func (registry *Registry) EventsAfter(path string, after int64) EventBatch {
 	return result
 }
 
+func (registry *Registry) RetireQueuedClient(path string, client RPCClient) (bool, map[string][]string, error) {
+	var queued map[string][]string
+	retired, err := registry.closeWhen(path, func(entry *clientEntry) bool {
+		if entry.client != client || entry.activeRequests > entry.observers {
+			return false
+		}
+		candidate, ok := entry.client.(interface {
+			QueuedMessagesForStop() (map[string][]string, bool)
+		})
+		if !ok {
+			return false
+		}
+		queued, ok = candidate.QueuedMessagesForStop()
+		return ok
+	}, nil)
+	return retired, queued, err
+}
 func (registry *Registry) CloseClientIfIdle(path string) (bool, error) {
 	return registry.closeWhen(path, func(entry *clientEntry) bool { return entry.activeRequests == 0 && !entry.client.Busy() }, nil)
 }

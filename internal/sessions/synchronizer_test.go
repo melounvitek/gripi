@@ -48,6 +48,48 @@ func TestSynchronizerReconcilesRPCAppendAndDetectsForeignEntries(t *testing.T) {
 	}
 }
 
+func TestRetireManagedClientPreservesExternalFollowState(t *testing.T) {
+	root, path := synchronizerSession(t)
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
+	client := newSyncClient()
+	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, errors.New("unexpected start") }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncManaged {
+		t.Fatalf("initial result = %#v", result)
+	}
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "external", "parentId": "old", "message": map[string]any{"role": "user", "content": []any{}}})
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow {
+		t.Fatalf("external result = %#v", result)
+	}
+
+	retired, err := synchronizer.RetireManagedClientIfAvailable(path, func() (bool, error) { return true, nil })
+
+	blocked := synchronizer.KnownBlocked(path)
+	if err != nil || !retired || blocked == nil || blocked.Mode != SyncExternalFollow {
+		t.Fatalf("retired=%v blocked=%#v err=%v", retired, blocked, err)
+	}
+}
+
+func TestRetireManagedClientDoesNotWaitForAnotherSessionOperation(t *testing.T) {
+	synchronizer := NewSynchronizer(t.TempDir(), "", NewCache(), rpc.NewRegistry(nil, nil))
+	unlock := synchronizer.locks.Lock("/session")
+	defer unlock()
+	called := false
+
+	retired, err := synchronizer.RetireManagedClientIfAvailable("/session", func() (bool, error) {
+		called = true
+		return true, nil
+	})
+
+	if err != nil || retired || called {
+		t.Fatalf("retired=%v called=%v err=%v", retired, called, err)
+	}
+}
+
 func TestFileSnapshotStreamsLargeFinalEntryMetadata(t *testing.T) {
 	root, path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "large", "parentId": nil, "message": map[string]any{"role": "toolResult", "toolCallId": "tool", "toolName": "read", "content": []any{map[string]any{"type": "text", "text": strings.Repeat("x", 1<<20)}}}})

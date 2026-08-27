@@ -718,6 +718,102 @@ func TestAcceptedPromptImageSurvivesAttachmentMetadataFailure(t *testing.T) {
 	}
 }
 
+func TestAbortRetiresAQueuedRunAndRestoresItsMessages(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "session.jsonl")
+	writeSessionRecords(t, path, []map[string]any{
+		{"type": "session", "version": 3, "id": "queued-abort", "cwd": project},
+		{"type": "message", "id": "before", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}},
+	})
+	client := &queuedAbortClient{
+		followUpRaceClient: &followUpRaceClient{Client: (*rpc.Client)(nil)},
+		onClose: func() {
+			file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := map[string]any{"type": "message", "id": "stopped", "parentId": "before", "message": map[string]any{"role": "assistant", "content": []any{}, "stopReason": "aborted"}}
+			if err := json.NewEncoder(file).Encode(entry); err != nil {
+				t.Fatal(err)
+			}
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+		},
+		live: rpc.LiveSnapshot{
+			AgentRunning: true,
+			QueuedMessages: map[string][]string{
+				"steering": {"Change direction"},
+				"followUp": {"Then continue"},
+			},
+		},
+	}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	cache := sessions.NewCache()
+	app := &application{config: config.Config{SessionsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil)}
+	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	if state, err := app.synchronizer.Inspect(context.Background(), path, true); err != nil || state.Mode != sessions.SyncManaged {
+		t.Fatalf("initial synchronization = %#v, %v", state, err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+
+	app.abortSession(response, request)
+
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || payload["forced"] != true || payload["editorText"] != "Change direction\n\nThen continue" {
+		t.Fatalf("response = %d %#v", response.Code, payload)
+	}
+	if !client.closed || client.aborted || registry.Active(path) {
+		t.Fatalf("closed=%v aborted=%v active=%v", client.closed, client.aborted, registry.Active(path))
+	}
+	state, err := app.synchronizer.Inspect(context.Background(), path, false)
+	if err != nil || state.Mode != sessions.SyncAvailable {
+		t.Fatalf("synchronization after stop = %#v, %v", state, err)
+	}
+}
+
+func TestAbortDoesNotRetireAQueuedPendingSession(t *testing.T) {
+	path := "/synthetic-pending-queue"
+	client := &queuedAbortClient{
+		followUpRaceClient: &followUpRaceClient{Client: (*rpc.Client)(nil)},
+		live: rpc.LiveSnapshot{
+			AgentRunning:   true,
+			QueuedMessages: map[string][]string{"steering": {"Keep queued"}},
+		},
+		onClose: func() {},
+	}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember(path, "/project")
+	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+
+	app.abortSession(response, request)
+
+	if response.Code != http.StatusOK || !client.aborted || client.closed || !registry.Active(path) {
+		t.Fatalf("response=%d aborted=%v closed=%v active=%v", response.Code, client.aborted, client.closed, registry.Active(path))
+	}
+}
+
 func TestAbortAllowsTrackedSyntheticPendingSession(t *testing.T) {
 	path := "/synthetic-pending"
 	client := &followUpRaceClient{Client: (*rpc.Client)(nil)}
@@ -1131,6 +1227,7 @@ type followUpRaceClient struct {
 func (*followUpRaceClient) Close() error                     { return nil }
 func (*followUpRaceClient) Compacting() bool                 { return false }
 func (*followUpRaceClient) DeferringCompactionPrompts() bool { return false }
+func (*followUpRaceClient) LiveSnapshot() rpc.LiveSnapshot   { return rpc.LiveSnapshot{} }
 func (*followUpRaceClient) GetState(context.Context) (map[string]any, error) {
 	return map[string]any{"success": true}, nil
 }
@@ -1157,6 +1254,32 @@ func (*followUpRaceClient) ActiveBashCommand() string { return "" }
 func (client *followUpRaceClient) Abort(context.Context) (map[string]any, error) {
 	client.aborted = true
 	return map[string]any{"success": true}, nil
+}
+
+type queuedAbortClient struct {
+	*followUpRaceClient
+	live    rpc.LiveSnapshot
+	onClose func()
+	closed  bool
+}
+
+func (client *queuedAbortClient) Close() error {
+	client.closed = true
+	client.onClose()
+	return nil
+}
+func (*queuedAbortClient) Busy() bool                            { return true }
+func (*queuedAbortClient) AgentRunning() bool                    { return true }
+func (*queuedAbortClient) ActiveBashCommand() string             { return "" }
+func (client *queuedAbortClient) LiveSnapshot() rpc.LiveSnapshot { return client.live }
+func (client *queuedAbortClient) QueuedMessagesForStop() (map[string][]string, bool) {
+	return client.live.QueuedMessages, true
+}
+func (*queuedAbortClient) SessionPosition(context.Context, string) (rpc.SessionEntries, error) {
+	return rpc.SessionEntries{Known: true, LeafID: "before"}, nil
+}
+func (client *queuedAbortClient) SessionEntriesAfter(context.Context, string) (rpc.SessionEntries, error) {
+	return rpc.SessionEntries{Known: true, LeafID: "before"}, nil
 }
 
 type remapClient struct {

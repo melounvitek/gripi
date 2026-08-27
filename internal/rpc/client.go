@@ -1179,6 +1179,15 @@ func (client *Client) ActiveBashCommand() string {
 	defer client.mu.Unlock()
 	return client.activeBashCommand
 }
+func (client *Client) QueuedMessagesForStop() (map[string][]string, bool) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	queued := client.visibleQueuedMessagesLocked()
+	if client.activeBashToken != nil || (len(queued["steering"]) == 0 && len(queued["followUp"]) == 0) {
+		return nil, false
+	}
+	return queued, true
+}
 
 func (client *Client) LiveSnapshot() LiveSnapshot {
 	client.mu.Lock()
