@@ -59,6 +59,30 @@ func (store AttachmentStore) RecordPrompt(sessionPath, message string, imageCoun
 	return err
 }
 
+func (store AttachmentStore) Delete(sessionPath string) error {
+	paths := []string{sessionPath}
+	if store.SessionsRoot != "" {
+		if aliases := SessionPathAliases(store.SessionsRoot, sessionPath); len(aliases) > 0 {
+			paths = aliases
+		}
+	}
+	seen := make(map[string]bool)
+	var result error
+	for _, path := range paths {
+		hash := SessionHash(path)
+		for _, attachmentPath := range []string{filepath.Join(store.Root, hash+".jsonl"), filepath.Join(store.Root, hash)} {
+			if seen[attachmentPath] {
+				continue
+			}
+			seen[attachmentPath] = true
+			if err := os.RemoveAll(attachmentPath); err != nil {
+				result = errors.Join(result, err)
+			}
+		}
+	}
+	return result
+}
+
 func (store AttachmentStore) Migrate(fromSessionPath, toSessionPath string) (func() error, error) {
 	if fromSessionPath == toSessionPath {
 		return nil, nil

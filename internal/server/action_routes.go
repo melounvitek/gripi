@@ -34,6 +34,7 @@ const (
 	modelIDBytes            = 4_096
 	extensionValueBytes     = 1 << 20
 	exportFilenameBytes     = 255
+	sessionNameBytes        = 4 << 10
 )
 
 var thinkingLevels = map[string]bool{
@@ -50,6 +51,8 @@ func (app *application) registerActionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sessions/browse_cwd", app.browseSessionCWD)
 	mux.HandleFunc("POST /sessions/new", app.newSession)
 	mux.HandleFunc("POST /sessions/new_at_cwd", app.newSessionAtCWD)
+	mux.HandleFunc("POST /sessions/rename", app.renameSession)
+	mux.HandleFunc("POST /sessions/delete", app.deleteSession)
 	mux.HandleFunc("GET /sessions/model_settings", app.modelSettings)
 	mux.HandleFunc("POST /sessions/model_settings", app.setModelSettings)
 	mux.HandleFunc("POST /sessions/cycle_thinking", app.cycleThinking)
@@ -681,6 +684,126 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		return
 	}
 	app.redirectToNewSession(response, request, newPath, "")
+}
+
+func (app *application) renameSession(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	session, ok := app.persistedActionSession(response, request, request.FormValue("session"))
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(request.FormValue("name"))
+	if name == "" || len(name) > sessionNameBytes {
+		message := "Session name cannot be empty"
+		if name != "" {
+			message = "Session name is too long"
+		}
+		writeText(response, http.StatusBadRequest, message)
+		return
+	}
+
+	if err := app.setSessionName(request, session.Path, name); app.writeSettingError(response, err) {
+		return
+	}
+	writeJSON(response, map[string]any{"session": session.Path, "name": name})
+}
+
+func (app *application) setSessionName(request *http.Request, path, name string) error {
+	wasActive := app.rpcClients.Active(path)
+	var result map[string]any
+	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+		actions, err := checkedActionClient(client)
+		if err != nil {
+			return err
+		}
+		result, err = actions.SetSessionName(request.Context(), name)
+		return err
+	})
+	if err == nil && !successfulRPCResponse(result) {
+		err = &rpcSettingError{response: result}
+	}
+	if !wasActive && err == nil {
+		if closed, closeErr := app.rpcClients.CloseClientIfIdle(path); closeErr != nil {
+			logInternalError("close renamed session client", closeErr)
+		} else if closed {
+			app.synchronizer.Forget(path)
+		}
+	}
+	return err
+}
+
+func (app *application) deleteSession(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	session, ok := app.persistedActionSession(response, request, request.FormValue("session"))
+	if !ok {
+		return
+	}
+	if reason := app.deleteSessionBlockReason(request.FormValue("current_session"), session.Path); reason != "" {
+		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": reason})
+		return
+	}
+
+	method, err := app.deletePersistedSession(request, session.Path)
+	if err != nil {
+		writeInternalError(response, "delete session", err)
+		return
+	}
+	writeJSON(response, map[string]any{"session": session.Path, "deleted": true, "method": method})
+}
+
+func (app *application) persistedActionSession(response http.ResponseWriter, request *http.Request, raw string) (*sessions.Session, bool) {
+	path, ok := app.actionSessionPath(response, request, raw, true)
+	if !ok {
+		return nil, false
+	}
+	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+	session, persisted := store.Session(path)
+	if !persisted {
+		http.NotFound(response, request)
+		return nil, false
+	}
+	return session, true
+}
+
+func (app *application) deleteSessionBlockReason(currentPath, targetPath string) string {
+	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+	if current, found := store.Session(currentPath); found {
+		currentPath = current.Path
+	}
+	if currentPath == targetPath {
+		return "Cannot delete the current session"
+	}
+	if app.rpcClients.Active(targetPath) {
+		return "Cannot delete an active session"
+	}
+	return ""
+}
+
+func (app *application) deletePersistedSession(request *http.Request, path string) (string, error) {
+	method, err := sessions.DeleteSessionFile(path)
+	if err != nil {
+		return "", err
+	}
+	app.sessionCache.Forget(path)
+	app.synchronizer.Forget(path)
+	app.pendingSessions.Forget(path)
+	if err := app.gatewayState.Forget(path); err != nil {
+		logInternalError("clean deleted session state", err)
+	}
+	attachments := sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}
+	if err := attachments.Delete(path); err != nil {
+		logInternalError("clean deleted session attachments", err)
+	}
+	if app.releaseSession != nil {
+		if err := app.releaseSession(request, path); err != nil {
+			logInternalError("release deleted session ownership", err)
+		}
+	}
+	return method, nil
 }
 
 func (app *application) validateSessionCWD(response http.ResponseWriter, request *http.Request) {

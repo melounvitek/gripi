@@ -169,6 +169,34 @@ func TestGatewayStatePinnedMigrationRollbackPreservesNewerDestinationChange(t *t
 	}
 }
 
+func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
+	root := t.TempDir()
+	readPath := filepath.Join(root, "read.json")
+	pinnedPath := filepath.Join(root, "pinned.json")
+	sessionPath := filepath.Join(root, "sessions", "session.jsonl")
+	state := NewGatewayState(readPath, pinnedPath, filepath.Join(root, "sessions"))
+
+	if err := state.MarkRead(sessionPath, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetPinned(sessionPath, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Forget(sessionPath); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := state.ReadCount(sessionPath); err != nil || count != 0 {
+		t.Fatalf("read count = %d, %v", count, err)
+	}
+	_, pinned, err := state.ReadAndObserve(nil, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned[sessionPath] {
+		t.Fatal("session remains pinned")
+	}
+}
+
 func TestGatewayStateTreatsMissingFilesAsEmpty(t *testing.T) {
 	root := t.TempDir()
 	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")

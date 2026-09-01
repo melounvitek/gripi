@@ -193,6 +193,47 @@ func (state *GatewayState) MigratePinned(from, to string) (func() error, error) 
 	}, nil
 }
 
+func (state *GatewayState) Forget(path string) error {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	counts := map[string]int{}
+	if err := readJSONIfExists(state.readPath, &counts); err != nil {
+		return fmt.Errorf("read session read state: %w", err)
+	}
+	counts, _ = state.normalizedCounts(counts)
+	path = state.configuredPath(path)
+	delete(counts, path)
+
+	var paths []string
+	if err := readJSONIfExists(state.pinnedPath, &paths); err != nil {
+		return fmt.Errorf("read pinned sessions state: %w", err)
+	}
+	pinned := make([]string, 0, len(paths))
+	seen := make(map[string]bool)
+	for _, candidate := range paths {
+		candidate = state.configuredPath(candidate)
+		if candidate == path || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		pinned = append(pinned, candidate)
+	}
+
+	if err := writeJSON(state.readPath, counts); err != nil {
+		return fmt.Errorf("write session read state: %w", err)
+	}
+	if err := writeJSON(state.pinnedPath, pinned); err != nil {
+		return fmt.Errorf("write pinned sessions state: %w", err)
+	}
+	state.pinnedRevision++
+	if state.pinnedChanges == nil {
+		state.pinnedChanges = make(map[string]uint64)
+	}
+	state.pinnedChanges[path] = state.pinnedRevision
+	return nil
+}
+
 func (state *GatewayState) ReadCount(path string) (int, error) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
