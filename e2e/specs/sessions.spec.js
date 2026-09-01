@@ -145,9 +145,9 @@ test("find, select, and pin a session with persisted history", async ({ page }) 
 
   session = page.getByRole("link", { name: new RegExp(sessions.history) });
   const row = page.locator(".session-row").filter({ has: session });
-  await row.getByRole("button", { name: new RegExp(`Session actions for ${sessions.history}`) }).click();
-  await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
+  await row.getByRole("button", { name: `Pin session ${sessions.history}` }).click();
   await expect(row).toHaveAttribute("data-pinned", "true");
+  await expect(row.getByRole("button", { name: `Unpin session ${sessions.history}` })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("heading", { level: 2, name: "Pinned" })).toBeVisible();
   await row.getByRole("button", { name: new RegExp(`Session actions for ${sessions.history}`) }).click();
   await expect(page.getByRole("menuitem", { name: "Unpin", exact: true })).toBeVisible();
