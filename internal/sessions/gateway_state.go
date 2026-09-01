@@ -211,16 +211,17 @@ func (state *GatewayState) Forget(path string) error {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
-	counts := map[string]int{}
-	if err := readJSONIfExists(state.readPath, &counts); err != nil {
-		return fmt.Errorf("read session read state: %w", err)
-	}
-	counts, _ = state.normalizedCounts(counts)
 	path = state.configuredPath(path)
 	if state.forgotten == nil {
 		state.forgotten = make(map[string]bool)
 	}
 	state.forgotten[path] = true
+
+	counts := map[string]int{}
+	if err := readJSONIfExists(state.readPath, &counts); err != nil {
+		return fmt.Errorf("read session read state: %w", err)
+	}
+	counts, _ = state.normalizedCounts(counts)
 	delete(counts, path)
 
 	var paths []string

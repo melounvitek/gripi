@@ -204,6 +204,22 @@ func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
 	}
 }
 
+func TestGatewayStateTracksForgottenSessionWhenCleanupStateIsMalformed(t *testing.T) {
+	root := t.TempDir()
+	readPath := filepath.Join(root, "read.json")
+	state := NewGatewayState(readPath, filepath.Join(root, "pinned.json"), "")
+	if err := os.WriteFile(readPath, []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := state.Forget("/deleted.jsonl"); err == nil {
+		t.Fatal("malformed state cleanup succeeded")
+	}
+	if !state.SessionForgotten("/deleted.jsonl") {
+		t.Fatal("failed cleanup did not retain the deletion tombstone")
+	}
+}
+
 func TestGatewayStateTreatsMissingFilesAsEmpty(t *testing.T) {
 	root := t.TempDir()
 	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")

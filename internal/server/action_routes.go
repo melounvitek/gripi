@@ -744,6 +744,8 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 	if !ok {
 		return
 	}
+	app.pendingRemapMu.Lock()
+	defer app.pendingRemapMu.Unlock()
 	unlock := app.sessionMutationLocks.Lock(session.Path)
 	defer unlock()
 
@@ -1334,6 +1336,8 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 		return
 	}
 	defer unlock()
+	app.pendingRemapMu.Lock()
+	defer app.pendingRemapMu.Unlock()
 	previous = resolved
 	cwd := app.currentSessionCWD(previous)
 	_, wasPending := app.pendingSessions.CWD(previous)
@@ -1361,6 +1365,9 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 		}
 		return configured, nil
 	}, func(from, to string) (func() error, error) {
+		if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
+			return nil, os.ErrNotExist
+		}
 		if app.ownsSession != nil && !app.ownsSession(request, from) {
 			return nil, errors.New("pending session is not owned by the requester")
 		}
