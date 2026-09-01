@@ -188,6 +188,9 @@ func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
 	if count, err := state.ReadCount(sessionPath); err != nil || count != 0 {
 		t.Fatalf("read count = %d, %v", count, err)
 	}
+	if !state.SessionForgotten(sessionPath) {
+		t.Fatal("forgotten session was not tracked")
+	}
 	stale := &Session{Path: sessionPath, AssistantResponseCount: 5}
 	unread, pinned, err := state.ReadAndObserve([]*Session{stale}, stale, true)
 	if err != nil {

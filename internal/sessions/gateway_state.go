@@ -286,6 +286,12 @@ func (state *GatewayState) MarkRead(path string, count int) error {
 	return nil
 }
 
+func (state *GatewayState) SessionForgotten(path string) bool {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.sessionForgotten(path)
+}
+
 func (state *GatewayState) sessionForgotten(path string) bool {
 	path = state.configuredPath(path)
 	if !state.forgotten[path] {

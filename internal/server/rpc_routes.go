@@ -396,6 +396,12 @@ func (app *application) movePendingRPCClient(request *http.Request, from, to str
 		app.pendingSessions.Forget(from)
 		return nil
 	}
+	unlockMutation := app.sessionMutationLocks.Lock(to)
+	defer unlockMutation()
+	if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
+		return os.ErrNotExist
+	}
+
 	return app.rpcClients.MoveWithCommit(from, to, func() (func() error, error) {
 		claimed := false
 		if app.claimSession != nil {
