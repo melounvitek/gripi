@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { ConversationController } from "../public/assets/conversation_controller.js";
 import { renderTextWithLinks } from "../public/assets/dom.js";
 import { ProjectSelectController } from "../public/assets/project_select_controller.js";
+import { SessionActionsController } from "../public/assets/session_actions_controller.js";
 import { SidebarController } from "../public/assets/sidebar_controller.js";
 import { TREE_FILTERS, TREE_SUMMARY_CHOICES, TreeSessionController, TreeSessionModel } from "../public/assets/tree_session_controller.js";
 import { FakeDocument, FakeElement, FakeEventTarget } from "./helpers/fake_dom.mjs";
@@ -49,6 +50,172 @@ test("background reply notifications preserve literal Markdown punctuation", () 
   }
 
   assert.deepEqual(notifications, [["Background task", "Finished feat/my_branch_name", "/?session=background", "gripi-final-reply:background"]]);
+});
+
+test("session actions open from the first button tap and from right click", () => {
+  const document = new FakeDocument();
+  const window = { innerWidth: 400, innerHeight: 800 };
+  const row = new FakeElement("div", [".session-row"]);
+  row.dataset.sessionPath = "/sessions/one.jsonl";
+  row.dataset.sessionName = "One";
+  row.dataset.current = "false";
+  row.dataset.busy = "false";
+  row.dataset.pinned = "false";
+  const toggle = new FakeElement("button", ["[data-session-actions-toggle]"]);
+  row.append(toggle);
+  const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
+  menu.hidden = true;
+  const rename = new FakeElement("button");
+  const pin = new FakeElement("button", ["[data-session-action-pin]"]);
+  const remove = new FakeElement("button", ["[data-session-action-delete]"]);
+  menu.append(rename, pin, remove);
+  document.body.append(row, menu);
+  const controller = new SessionActionsController(document, window, {});
+  controller.initialize();
+
+  let prevented = false;
+  document.listeners.get("click")[0]({ target: toggle, preventDefault() { prevented = true; }, stopPropagation() {} });
+  assert.equal(prevented, true);
+  assert.equal(menu.hidden, false);
+  assert.equal(controller.target.path, "/sessions/one.jsonl");
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(pin.textContent, "Pin");
+  assert.equal(remove.getAttribute("aria-disabled"), "false");
+
+  document.activeElement = pin;
+  document.listeners.get("keydown")[0]({ key: "ArrowDown", target: pin, preventDefault() {} });
+  assert.equal(remove.focused, true);
+
+  pin.disabled = true;
+  remove.focused = false;
+  document.activeElement = rename;
+  document.listeners.get("keydown")[0]({ key: "ArrowDown", target: rename, preventDefault() {} });
+  assert.equal(remove.focused, true);
+
+  controller.closeMenu();
+  prevented = false;
+  document.listeners.get("contextmenu")[0]({ target: row, clientX: 24, clientY: 30, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(menu.hidden, false);
+  assert.equal(menu.style.left, "24px");
+  assert.equal(menu.style.top, "30px");
+
+  prevented = false;
+  let propagationStopped = false;
+  document.listeners.get("keydown")[0]({ key: "Escape", target: menu, preventDefault() { prevented = true; }, stopImmediatePropagation() { propagationStopped = true; } });
+  assert.equal(prevented, true);
+  assert.equal(propagationStopped, true);
+  assert.equal(menu.hidden, true);
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(toggle.focused, true);
+});
+
+test("direct session pin activates on the first click", async () => {
+  const document = new FakeDocument();
+  const row = new FakeElement("div", [".session-row"]);
+  row.dataset.sessionPath = "/sessions/one.jsonl";
+  row.dataset.sessionName = "One";
+  row.dataset.current = "false";
+  row.dataset.busy = "false";
+  row.dataset.pinned = "false";
+  const pin = new FakeElement("button", ["[data-session-pin-toggle]"]);
+  row.append(pin);
+  const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
+  menu.hidden = false;
+  document.body.append(row, menu);
+  const controller = new SessionActionsController(document, {}, {});
+  const targets = [];
+  controller.togglePin = async (target) => targets.push(target);
+  controller.initialize();
+
+  let prevented = false;
+  let propagationStopped = false;
+  document.listeners.get("click")[0]({
+    target: pin,
+    preventDefault() { prevented = true; },
+    stopPropagation() { propagationStopped = true; },
+  });
+  await Promise.resolve();
+
+  assert.equal(prevented, true);
+  assert.equal(propagationStopped, true);
+  assert.equal(menu.hidden, true);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].path, "/sessions/one.jsonl");
+  assert.equal(targets[0].pinned, false);
+});
+
+test("direct session pin restores stable focus when its row leaves the sidebar", async () => {
+  const originalFetch = globalThis.fetch;
+  const document = new FakeDocument();
+  const desktopVisibility = new FakeElement("button", ["[data-sidebar-visibility-toggle]"]);
+  const search = new FakeElement("button", ["[data-sidebar-search-toggle]"]);
+  document.body.append(desktopVisibility, search);
+  const controller = new SessionActionsController(document, {}, { refresh: async () => {} });
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ pinned: false }) });
+
+  try {
+    await controller.togglePin({ path: "/sessions/old.jsonl", pinned: true }, { restoreFocus: true });
+    assert.equal(search.focused, true);
+    assert.equal(desktopVisibility.focused, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("session actions show pin failures in the menu", async () => {
+  const originalFetch = globalThis.fetch;
+  const document = new FakeDocument();
+  const row = new FakeElement("div", [".session-row"]);
+  row.dataset.sessionPath = "/sessions/one.jsonl";
+  row.dataset.sessionName = "One";
+  row.dataset.current = "false";
+  row.dataset.busy = "false";
+  row.dataset.pinned = "false";
+  const replacementRow = new FakeElement("div", [".session-row"]);
+  Object.assign(replacementRow.dataset, row.dataset);
+  const toggle = new FakeElement("button", ["[data-session-actions-toggle]"]);
+  replacementRow.append(toggle);
+  const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
+  menu.hidden = true;
+  const pin = new FakeElement("button", ["[data-session-action-pin]"]);
+  const error = new FakeElement("p", ["[data-session-actions-error]"]);
+  error.hidden = true;
+  menu.append(pin, error);
+  document.body.append(replacementRow, menu);
+  const controller = new SessionActionsController(document, { innerWidth: 400, innerHeight: 800 }, {});
+  globalThis.fetch = async () => ({ ok: false });
+
+  try {
+    await assert.rejects(controller.togglePin(controller.targetFor(row)), /Could not update pinned session/);
+    assert.equal(menu.hidden, false);
+    assert.equal(controller.target.row, replacementRow);
+    assert.equal(error.hidden, false);
+    assert.equal(error.textContent, "Could not update pinned session");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("session actions explain why the current session cannot be deleted", () => {
+  const document = new FakeDocument();
+  const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
+  menu.hidden = true;
+  const remove = new FakeElement("button", ["[data-session-action-delete]"]);
+  menu.append(remove);
+  document.body.append(menu);
+  const row = new FakeElement("div", [".session-row"]);
+  row.dataset.sessionPath = "/sessions/current.jsonl";
+  row.dataset.sessionName = "Current";
+  row.dataset.current = "true";
+  row.dataset.busy = "false";
+  row.dataset.pinned = "false";
+  const controller = new SessionActionsController(document, { innerWidth: 800, innerHeight: 600 }, {});
+
+  controller.openMenu(row, { x: 10, y: 10 });
+
+  assert.equal(remove.getAttribute("aria-disabled"), "true");
+  assert.equal(remove.title, "Cannot delete the current session");
 });
 
 test("project selector opens on the first valid touch without sticky-hover behavior", () => {

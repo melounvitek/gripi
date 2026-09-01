@@ -428,6 +428,95 @@ func TestGoGatewayValidatesAndBrowsesNewSessionDirectories(t *testing.T) {
 	}
 }
 
+func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	sessionsRoot := filepath.Join(home, ".pi", "agent", "sessions")
+	attachmentsRoot := filepath.Join(home, ".pi", "gripi", "attachments")
+	project := filepath.Join(root, "project")
+	for _, directory := range []string{sessionsRoot, attachmentsRoot, project} {
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	currentPath := filepath.Join(sessionsRoot, "current.jsonl")
+	targetPath := filepath.Join(sessionsRoot, "target.jsonl")
+	writeActionSession(t, currentPath, project)
+	writeActionSession(t, targetPath, project)
+	_, file, _, _ := runtime.Caller(0)
+	fakePi := filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_pi.mjs")
+	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
+	cfg := config.Config{
+		Address: "127.0.0.1:4567", Environment: "test", Home: home,
+		SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot,
+		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"),
+		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
+		PiCommand: []string{"node", fakePi}, RPCIdleTimeout: time.Hour,
+	}
+	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if closer, ok := handler.(interface{ Close(context.Context) error }); ok {
+			_ = closer.Close(context.Background())
+		}
+	}()
+
+	rename := serveAction(handler, formActionRequest("/sessions/rename", map[string]string{"session": targetPath, "name": "Renamed in sidebar"}, true))
+	if rename.Code != http.StatusOK || !strings.Contains(rename.Body.String(), `"name":"Renamed in sidebar"`) {
+		t.Fatalf("rename = %d %s", rename.Code, rename.Body.String())
+	}
+	contents, err := os.ReadFile(targetPath)
+	if err != nil || !strings.Contains(string(contents), `"type":"session_info"`) || !strings.Contains(string(contents), `"name":"Renamed in sidebar"`) {
+		t.Fatalf("renamed session = %s, %v", contents, err)
+	}
+	started := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": targetPath, "message": "Keep this session busy while delete is attempted"}, true))
+	if started.Code != http.StatusOK {
+		t.Fatalf("start target = %d %s", started.Code, started.Body.String())
+	}
+	busyDelete := serveAction(handler, formActionRequest("/sessions/delete", map[string]string{"session": targetPath, "current_session": currentPath}, true))
+	if busyDelete.Code != http.StatusConflict || !strings.Contains(busyDelete.Body.String(), "Cannot delete a running session") {
+		t.Fatalf("busy delete = %d %s", busyDelete.Code, busyDelete.Body.String())
+	}
+	waitForFakePiSettled(t, handler, targetPath)
+
+	currentDelete := serveAction(handler, formActionRequest("/sessions/delete", map[string]string{"session": currentPath, "current_session": currentPath}, true))
+	if currentDelete.Code != http.StatusConflict || !strings.Contains(currentDelete.Body.String(), "Cannot delete the current session") {
+		t.Fatalf("current delete = %d %s", currentDelete.Code, currentDelete.Body.String())
+	}
+	if _, err := os.Stat(currentPath); err != nil {
+		t.Fatalf("current session was deleted: %v", err)
+	}
+
+	pin := serveAction(handler, formActionRequest("/sessions/pin", map[string]string{"session": targetPath, "pinned": "true"}, true))
+	if pin.Code != http.StatusOK {
+		t.Fatalf("pin = %d %s", pin.Code, pin.Body.String())
+	}
+	attachmentDirectory := filepath.Join(attachmentsRoot, sessions.SessionHash(targetPath))
+	if err := os.MkdirAll(attachmentDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	attachmentMetadata := filepath.Join(attachmentsRoot, sessions.SessionHash(targetPath)+".jsonl")
+	if err := os.WriteFile(attachmentMetadata, []byte("metadata"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted := serveAction(handler, formActionRequest("/sessions/delete", map[string]string{"session": targetPath, "current_session": currentPath}, true))
+	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted":true`) {
+		t.Fatalf("delete = %d %s", deleted.Code, deleted.Body.String())
+	}
+	for _, path := range []string{targetPath, attachmentDirectory, attachmentMetadata} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("deleted path remains at %s: %v", path, err)
+		}
+	}
+	pinned, err := os.ReadFile(cfg.PinnedSessionsPath)
+	if err != nil || strings.Contains(string(pinned), targetPath) {
+		t.Fatalf("pinned state = %s, %v", pinned, err)
+	}
+}
+
 func waitForDeferredSidebar(t *testing.T, handler http.Handler) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

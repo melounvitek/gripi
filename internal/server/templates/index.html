@@ -17,7 +17,10 @@
     {{if not .SessionOnly}}<input type="checkbox" class="mobile-session-toggle" id="mobile-session-toggle">{{template "sidebar" .}}<label for="mobile-session-toggle" class="mobile-sidebar-backdrop" aria-label="Hide sessions"></label>{{end}}
     {{template "conversation" .}}
   </div>
+  {{if not .SessionOnly}}<div class="session-actions-menu" role="menu" data-session-actions-menu hidden><button type="button" role="menuitem" data-session-action="rename">Rename…</button><button type="button" role="menuitem" data-session-action="pin" data-session-action-pin>Pin</button><p class="session-actions-error" role="alert" data-session-actions-error hidden></p><div class="session-actions-separator" role="separator"></div><button type="button" class="session-action-delete" role="menuitem" data-session-action="delete" data-session-action-delete>Delete session…</button></div>{{end}}
   {{template "new_session_modal" .}}
+  {{template "session_rename_modal" .}}
+  {{template "session_delete_modal" .}}
   {{template "fork_session_modal" .}}
   {{template "model_settings_modal" .}}
   {{template "extension_ui_modal" .}}

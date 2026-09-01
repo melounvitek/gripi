@@ -115,6 +115,15 @@ func (synchronizer *Synchronizer) Message(result SyncResult) string {
 	return blockedMessage(result.Mode, result.Error)
 }
 
+func (synchronizer *Synchronizer) WithExclusiveOperation(path string, call func() error) error {
+	unlock, locked := synchronizer.locks.TryLock(path)
+	if !locked {
+		return ErrSyncBusy
+	}
+	defer unlock()
+	return call()
+}
+
 func (synchronizer *Synchronizer) WithMutableClient(ctx context.Context, path string, call func(rpc.RPCClient) error) error {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {

@@ -169,6 +169,57 @@ func TestGatewayStatePinnedMigrationRollbackPreservesNewerDestinationChange(t *t
 	}
 }
 
+func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
+	root := t.TempDir()
+	readPath := filepath.Join(root, "read.json")
+	pinnedPath := filepath.Join(root, "pinned.json")
+	sessionPath := filepath.Join(root, "sessions", "session.jsonl")
+	state := NewGatewayState(readPath, pinnedPath, filepath.Join(root, "sessions"))
+
+	if err := state.MarkRead(sessionPath, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetPinned(sessionPath, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Forget(sessionPath); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := state.ReadCount(sessionPath); err != nil || count != 0 {
+		t.Fatalf("read count = %d, %v", count, err)
+	}
+	if !state.SessionForgotten(sessionPath) {
+		t.Fatal("forgotten session was not tracked")
+	}
+	stale := &Session{Path: sessionPath, AssistantResponseCount: 5}
+	unread, pinned, err := state.ReadAndObserve([]*Session{stale}, stale, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unread[sessionPath] || pinned[sessionPath] {
+		t.Fatalf("forgotten session state was recreated: unread=%v pinned=%v", unread, pinned)
+	}
+	if count, err := state.ReadCount(sessionPath); err != nil || count != 0 {
+		t.Fatalf("read count after stale observation = %d, %v", count, err)
+	}
+}
+
+func TestGatewayStateTracksForgottenSessionWhenCleanupStateIsMalformed(t *testing.T) {
+	root := t.TempDir()
+	readPath := filepath.Join(root, "read.json")
+	state := NewGatewayState(readPath, filepath.Join(root, "pinned.json"), "")
+	if err := os.WriteFile(readPath, []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := state.Forget("/deleted.jsonl"); err == nil {
+		t.Fatal("malformed state cleanup succeeded")
+	}
+	if !state.SessionForgotten("/deleted.jsonl") {
+		t.Fatal("failed cleanup did not retain the deletion tombstone")
+	}
+}
+
 func TestGatewayStateTreatsMissingFilesAsEmpty(t *testing.T) {
 	root := t.TempDir()
 	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")

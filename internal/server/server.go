@@ -60,6 +60,7 @@ type application struct {
 	pendingSessions         *rpc.PendingSessionRegistry
 	pendingRemapMu          sync.Mutex
 	imagePromptLocks        keyedlock.Mutexes
+	sessionMutationLocks    keyedlock.Mutexes
 	synchronizer            *sessions.Synchronizer
 	rpcMaintenance          *rpc.Maintenance
 	completionNotifications *completionNotifier

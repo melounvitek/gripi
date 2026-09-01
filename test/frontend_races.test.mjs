@@ -3,8 +3,9 @@ import { test } from "node:test";
 
 import { ConversationController } from "../public/assets/conversation_controller.js";
 import { CurrentSessionFindController } from "../public/assets/current_session_find_controller.js";
+import { SessionActionsController } from "../public/assets/session_actions_controller.js";
 import { SidebarController } from "../public/assets/sidebar_controller.js";
-import { deferred } from "./helpers/fake_dom.mjs";
+import { deferred, FakeDocument, FakeElement } from "./helpers/fake_dom.mjs";
 
 test("conversation find restores long tool output according to its wrapping policy", () => {
   const restore = (wraps) => {
@@ -56,7 +57,7 @@ test("conversation find restores long tool output according to its wrapping poli
   assert.equal(nonWrapping.control.hidden, true);
 });
 
-test("sidebar ignores stale refreshes and admits only one pin mutation", async () => {
+test("sidebar ignores stale refreshes", async () => {
   const originalFetch = globalThis.fetch;
   const document = { hidden: false, querySelector: () => null, querySelectorAll: () => [], activeElement: null };
   const element = { querySelector: () => null };
@@ -84,34 +85,48 @@ test("sidebar ignores stale refreshes and admits only one pin mutation", async (
     first.resolve({ ok: true, text: async () => "stale sidebar" });
     await older;
     assert.deepEqual(replacements, ["new sidebar"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
-    let pinFetches = 0;
-    const pinResponse = deferred();
-    globalThis.fetch = () => { pinFetches += 1; return pinResponse.promise; };
-    controller.refresh = async ({ force } = {}) => assert.equal(force, true);
-    const classes = new Set();
-    const attributes = new Map();
-    const button = {
-      dataset: { pinned: "false", sessionPath: "/session" },
-      disabled: false,
-      isConnected: true,
-      classList: {
-        add: (name) => classes.add(name),
-        remove: (name) => classes.delete(name),
-        toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
-      },
-      setAttribute: (name, value) => attributes.set(name, value),
-      removeAttribute: (name) => attributes.delete(name),
-    };
-    const mutation = controller.togglePin(button);
-    const overlapping = await controller.togglePin(button);
+test("session actions admit only one pin mutation", async () => {
+  const originalFetch = globalThis.fetch;
+  const pinResponse = deferred();
+  let pinFetches = 0;
+  let refreshes = 0;
+  const document = new FakeDocument();
+  const directPin = new FakeElement("button", ["[data-session-pin-toggle]"]);
+  const secondDirectPin = new FakeElement("button", ["[data-session-pin-toggle]"]);
+  const menuPin = new FakeElement("button", ["[data-session-action-pin]"]);
+  document.body.append(directPin, secondDirectPin, menuPin);
+  const pinControls = [directPin, secondDirectPin, menuPin];
+  globalThis.fetch = () => { pinFetches += 1; return pinResponse.promise; };
+  const controller = new SessionActionsController(document, {}, { refresh: async () => { refreshes += 1; } });
+  const target = { path: "/session", pinned: false };
+
+  try {
+    const mutation = controller.togglePin(target);
+    assert.deepEqual(pinControls.map(({ disabled }) => disabled), [true, true, true]);
+    assert.equal(document.body.classList.contains("session-pin-operation-active"), true);
+
+    const replacementPin = new FakeElement("button", ["[data-session-pin-toggle]"]);
+    const replacementSidebar = new FakeElement("aside", [".session-sidebar"]);
+    replacementSidebar.append(replacementPin);
+    document.body.append(replacementSidebar);
+    const sidebar = new SidebarController(document, {}, { initialize() {} }, { apply() {} }, () => {});
+    sidebar.bind(replacementSidebar);
+    pinControls.push(replacementPin);
+    assert.equal(replacementPin.disabled, true);
+
+    const overlapping = await controller.togglePin({ path: "/other-session", pinned: true });
     assert.equal(overlapping, null);
     pinResponse.resolve({ ok: true, json: async () => ({ pinned: true }) });
-    await mutation;
+    assert.deepEqual(await mutation, { pinned: true });
+    assert.deepEqual(pinControls.map(({ disabled }) => disabled), [false, false, false, false]);
+    assert.equal(document.body.classList.contains("session-pin-operation-active"), false);
     assert.equal(pinFetches, 1);
-    assert.equal(button.dataset.pinned, "true");
-    assert.equal(button.disabled, false);
-    assert.equal(classes.has("is-loading"), false);
+    assert.equal(refreshes, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

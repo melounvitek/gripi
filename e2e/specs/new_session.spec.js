@@ -16,8 +16,8 @@ test("start a session in a configured directory and persist its first response",
 
   let session = page.getByRole("link", { name: /New session \(pending first assistant response\)/ });
   let row = page.locator(".session-row").filter({ has: session });
-  await row.getByRole("button", { name: "Pin session" }).click();
-  await expect(row.getByRole("button", { name: "Unpin session" })).toBeVisible();
+  await row.getByRole("button", { name: /Pin session New session/ }).click();
+  await expect(row).toHaveAttribute("data-pinned", "true");
   await expect(page.getByRole("heading", { level: 2, name: "Pinned" })).toBeVisible();
 
   await sendPrompt(page, prompts.newSession);
@@ -28,7 +28,7 @@ test("start a session in a configured directory and persist its first response",
   await expect(page.getByRole("heading", { level: 1, name: prompts.newSession })).toBeVisible();
   session = page.getByRole("link", { name: new RegExp(prompts.newSession) });
   row = page.locator(".session-row").filter({ has: session });
-  await expect(row.getByRole("button", { name: "Unpin session" })).toBeVisible();
+  await expect(row).toHaveAttribute("data-pinned", "true");
   await expect(message(page, "user", prompts.newSession)).toBeVisible();
   await expect(message(page, "assistant", replies.newSession)).toBeVisible();
 });

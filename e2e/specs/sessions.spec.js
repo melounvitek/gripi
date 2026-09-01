@@ -145,9 +145,54 @@ test("find, select, and pin a session with persisted history", async ({ page }) 
 
   session = page.getByRole("link", { name: new RegExp(sessions.history) });
   const row = page.locator(".session-row").filter({ has: session });
-  await row.getByRole("button", { name: "Pin session" }).click();
-  await expect(row.getByRole("button", { name: "Unpin session" })).toBeVisible();
+  await row.getByRole("button", { name: `Pin session ${sessions.history}` }).focus();
+  await page.keyboard.press("Enter");
+  await expect(row).toHaveAttribute("data-pinned", "true");
+  await expect(row.getByRole("button", { name: `Unpin session ${sessions.history}` })).toHaveAttribute("aria-pressed", "true");
+  await expect(row.getByRole("button", { name: `Unpin session ${sessions.history}` })).toBeFocused();
   await expect(page.getByRole("heading", { level: 2, name: "Pinned" })).toBeVisible();
+  await row.getByRole("button", { name: new RegExp(`Session actions for ${sessions.history}`) }).click();
+  await expect(page.getByRole("menuitem", { name: "Unpin", exact: true })).toBeVisible();
+});
+
+test("rename and delete a background session from its contextual actions", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "New session" }).click();
+  const newSessionDialog = page.getByRole("dialog", { name: "New session" });
+  await newSessionDialog.getByRole("combobox", { name: "Project" }).click();
+  await page.getByRole("option", { name: /new-session-desktop/ }).click();
+  await newSessionDialog.getByRole("button", { name: "Start session" }).click();
+
+  const currentRow = page.locator('.session-row[data-current="true"]');
+  const sessionPath = await currentRow.getAttribute("data-session-path");
+  await currentRow.getByRole("button", { name: /Session actions/ }).click();
+  const deleteAction = page.getByRole("menuitem", { name: "Delete session…" });
+  await expect(deleteAction).toHaveAttribute("aria-disabled", "true");
+  await expect(deleteAction).toHaveAttribute("title", "Cannot delete the current session");
+  await page.keyboard.press("Escape");
+
+  await searchSessions(page, "History Desktop");
+  await page.getByRole("link", { name: new RegExp(sessions.history) }).click();
+  await page.getByRole("link", { name: "Clear filters" }).click();
+  const rowSelector = await page.evaluate((path) => `.session-row[data-session-path="${CSS.escape(path)}"]`, sessionPath);
+  const row = page.locator(rowSelector);
+  await expect(row).toBeVisible();
+
+  await row.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Rename…" }).click();
+  const renameDialog = page.getByRole("dialog", { name: "Rename session" });
+  await renameDialog.getByRole("textbox", { name: "Name" }).fill("E2E Sidebar Session Actions");
+  await renameDialog.getByRole("button", { name: "Rename" }).click();
+  await expect(renameDialog).toBeHidden();
+  await expect(row).toHaveAttribute("data-session-name", "E2E Sidebar Session Actions");
+
+  await row.getByRole("button", { name: "Session actions for E2E Sidebar Session Actions" }).click();
+  await page.getByRole("menuitem", { name: "Delete session…" }).click();
+  const deleteDialog = page.getByRole("dialog", { name: "Delete session" });
+  await expect(deleteDialog).toContainText("E2E Sidebar Session Actions");
+  await deleteDialog.getByRole("button", { name: "Delete session" }).click();
+  await expect(deleteDialog).toBeHidden();
+  await expect(row).toHaveCount(0);
 });
 
 test("a stalled stale-session refresh recovers without reloading the current view", async ({ page }) => {

@@ -84,6 +84,61 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   await expect(viewer).toBeHidden();
 });
 
+test("open selected session actions on the first mobile tap", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+
+  const currentRow = page.locator('.session-row[data-current="true"]');
+  const pin = currentRow.getByRole("button", { name: /Pin session/ });
+  const pinBounds = await pin.boundingBox();
+  expect(pinBounds).not.toBeNull();
+  expect(pinBounds.width).toBeGreaterThanOrEqual(44);
+  expect(pinBounds.height).toBeGreaterThanOrEqual(44);
+
+  await pin.tap();
+  await expect(currentRow).toHaveAttribute("data-pinned", "true");
+  await expect(currentRow.getByRole("button", { name: /Unpin session/ })).toHaveAttribute("aria-pressed", "true");
+
+  const actions = currentRow.getByRole("button", { name: /Session actions/ });
+  const indicators = currentRow.locator(".session-indicators");
+  await indicators.evaluate((element) => {
+    const indicator = document.createElement("span");
+    indicator.className = "session-fork-indicator";
+    indicator.textContent = "⑂";
+    element.append(indicator);
+  });
+  const indicatorBounds = await indicators.locator(".session-fork-indicator").boundingBox();
+  const oneLineActionBounds = await actions.boundingBox();
+  expect(indicatorBounds.y + indicatorBounds.height).toBeLessThanOrEqual(oneLineActionBounds.y);
+  await indicators.locator(".session-fork-indicator").evaluate((element) => element.remove());
+
+  const title = currentRow.locator(".session-title");
+  await title.evaluate((element) => { element.textContent = "Fix sidebar session deletion and native rename behavior"; });
+  const titleMetrics = await title.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+  }));
+  expect(titleMetrics.height).toBeGreaterThan(titleMetrics.lineHeight * 1.5);
+  expect(titleMetrics.height).toBeLessThanOrEqual(titleMetrics.lineHeight * 2 + 1);
+
+  const bounds = await actions.boundingBox();
+  const titleBounds = await title.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(titleBounds.y + titleBounds.height).toBeLessThanOrEqual(bounds.y);
+  expect(bounds.width).toBeGreaterThanOrEqual(44);
+  expect(bounds.height).toBeGreaterThanOrEqual(44);
+
+  await actions.tap();
+
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  const menuBounds = await menu.boundingBox();
+  expect(menuBounds.x).toBeGreaterThanOrEqual(0);
+  expect(menuBounds.x + menuBounds.width).toBeLessThanOrEqual(page.viewportSize().width);
+  await expect(page.getByRole("menuitem", { name: "Rename…" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Delete session…" })).toHaveAttribute("aria-disabled", "true");
+});
+
 test("keep parallel subagent order and timestamps stable on mobile", async ({ page }) => {
   await page.goto("/");
   await page.locator('label[aria-label="Open sessions"]').tap();

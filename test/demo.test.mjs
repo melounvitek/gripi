@@ -114,4 +114,5 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
     'openai-codex/gpt-5.5 (medium)',
   ]) assert.ok(html.includes(expected), `missing ${expected}`);
   assert.match(html, /@media \(pointer: coarse\) \{[\s\S]*?\.send-button \{ display: inline-flex;/);
+  assert.match(javascript, /pin\.setAttribute\("aria-label", session\.pinned \? `Unpin session \$\{session\.name\}` : `Pin session \$\{session\.name\}`\)/);
 });

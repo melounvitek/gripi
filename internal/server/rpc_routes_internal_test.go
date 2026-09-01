@@ -412,6 +412,46 @@ func TestPendingRemapVerifiesSourceOwnershipAndClaimsDestination(t *testing.T) {
 	}
 }
 
+func TestPendingRemapRejectsADeletedDestination(t *testing.T) {
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := registry.Register("/pending", &remapClient{}); err != nil {
+		t.Fatal(err)
+	}
+	pending := rpc.NewPendingSessionRegistry(nil)
+	pending.Remember("/pending", "/project")
+	root := t.TempDir()
+	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")
+	if err := gatewayState.Forget("/real"); err != nil {
+		t.Fatal(err)
+	}
+	app := &application{config: config.Config{AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending, gatewayState: gatewayState}
+	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
+
+	if err := app.movePendingRPCClient(request, "/pending", "/real"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remap error = %v", err)
+	}
+	if !registry.Active("/pending") || registry.Active("/real") {
+		t.Fatal("rejected remap changed clients")
+	}
+
+	sameRegistry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := sameRegistry.Register("/same", &remapClient{}); err != nil {
+		t.Fatal(err)
+	}
+	samePending := rpc.NewPendingSessionRegistry(nil)
+	samePending.Remember("/same", "/project")
+	app.rpcClients, app.pendingSessions = sameRegistry, samePending
+	if err := gatewayState.Forget("/same"); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.movePendingRPCClient(request, "/same", "/same"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("same-path remap error = %v", err)
+	}
+	if !sameRegistry.Active("/same") {
+		t.Fatal("rejected same-path remap changed client")
+	}
+}
+
 func TestCompletedPendingRemapRequiresEveryDestinationOwnership(t *testing.T) {
 	pending := rpc.NewPendingSessionRegistry(nil)
 	pending.Remap("/pending", "/intermediate")

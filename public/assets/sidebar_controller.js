@@ -17,7 +17,6 @@ export class SidebarController {
     this.refreshRequestVersion = 0;
     this.lastInteractionAt = 0;
     this.temporarySessionsLimit = null;
-    this.pinOperationActive = false;
     this.filterOperationActive = false;
     this.notifiedFinalReplyKeys = new Set();
     this.listenersBound = false;
@@ -35,6 +34,9 @@ export class SidebarController {
     if (!this.element) return null;
 
     this.projectSelectController.initialize(this.element);
+    if (this.document.body.classList.contains("session-pin-operation-active")) {
+      this.element.querySelectorAll("[data-session-pin-toggle]").forEach((control) => { control.disabled = true; });
+    }
     this.bindInteractionTracking();
     this.syncUnreadBadges();
     this.gatewayUpdateController.apply();
@@ -114,13 +116,6 @@ export class SidebarController {
         return;
       }
 
-      const pinButton = event.target.closest?.("[data-session-pin-toggle]");
-      if (pinButton) {
-        event.preventDefault();
-        this.togglePin(pinButton).catch(() => {});
-        return;
-      }
-
       const searchButton = event.target.closest?.("[data-sidebar-search-toggle]");
       if (searchButton) this.toggleSearch(searchButton);
 
@@ -177,14 +172,14 @@ export class SidebarController {
   }
 
   requestRefresh(delay = 0) {
-    if (!this.pinOperationActive && !this.filterOperationActive) this.invalidate();
+    if (!this.filterOperationActive) this.invalidate();
     this.refreshRequestVersion += 1;
     this.scheduleRefresh(delay);
   }
 
   async refresh({ force = false } = {}) {
     if (!this.element || (!force && this.modalIsOpen())) return;
-    if (!force && (this.pinOperationActive || this.filterOperationActive || this.controlsActive() || this.recentlyInteracted())) {
+    if (!force && (this.filterOperationActive || this.controlsActive() || this.recentlyInteracted())) {
       this.scheduleRefresh(1000);
       return;
     }
@@ -223,7 +218,9 @@ export class SidebarController {
     const previousSearchForm = preserveSearch ? oldElement.querySelector(".sidebar-session-search") : null;
     const previousSearchQuery = previousSearchForm?.querySelector('input[name="session_search"]')?.value;
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
-    const focusedPinPath = this.document.activeElement?.closest?.("[data-session-pin-toggle]")?.dataset.sessionPath;
+    const focusedSessionControl = this.document.activeElement?.closest?.("[data-session-pin-toggle], [data-session-actions-toggle]");
+    const focusedSessionPath = focusedSessionControl?.closest(".session-row")?.dataset.sessionPath;
+    const focusedSessionControlSelector = focusedSessionControl?.matches("[data-session-pin-toggle]") ? "[data-session-pin-toggle]" : "[data-session-actions-toggle]";
     const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");
     const visibilityToggleFocused = !!focusedVisibilityToggle && oldElement.contains(focusedVisibilityToggle);
     this.projectSelectController.destroy(oldElement);
@@ -238,9 +235,9 @@ export class SidebarController {
     if (previousSearchOpen !== undefined) this.setSearchOpen(replacementSearchForm, replacementSearchButton, previousSearchOpen);
     if (notificationToggle) this.element.querySelector("[data-notification-toggle]")?.replaceWith(notificationToggle);
     if (resourceUsage) this.element.querySelector("[data-resource-usage]")?.replaceWith(resourceUsage);
-    if (focusedPinPath) {
-      const focusedPin = [...this.element.querySelectorAll("[data-session-pin-toggle]")].find((button) => button.dataset.sessionPath === focusedPinPath);
-      (focusedPin || this.element.querySelector("[data-sidebar-search-toggle]"))?.focus({ preventScroll: true });
+    if (focusedSessionPath) {
+      const focusedRow = [...this.element.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === focusedSessionPath);
+      (focusedRow?.querySelector(focusedSessionControlSelector) || this.element.querySelector("[data-sidebar-search-toggle]"))?.focus({ preventScroll: true });
     } else if (visibilityToggleFocused) {
       this.element.querySelector("[data-sidebar-visibility-toggle]")?.focus({ preventScroll: true });
     }
@@ -362,58 +359,6 @@ export class SidebarController {
     }
   }
 
-  async togglePin(button) {
-    if (!button || button.disabled || this.pinOperationActive) return null;
-
-    this.pinOperationActive = true;
-    this.invalidate();
-    const epoch = this.asyncEpoch;
-    const boundElement = this.element;
-    const currentlyPinned = button.dataset.pinned === "true";
-    let idleLabel = currentlyPinned ? "Unpin session" : "Pin session";
-    const loadingLabel = currentlyPinned ? "Unpinning session" : "Pinning session";
-    button.disabled = true;
-    button.classList.add("is-loading");
-    button.setAttribute("aria-busy", "true");
-    button.setAttribute("aria-label", loadingLabel);
-    button.setAttribute("title", loadingLabel);
-    try {
-      const body = new URLSearchParams({
-        session: button.dataset.sessionPath,
-        pinned: currentlyPinned ? "false" : "true"
-      });
-      const response = await fetch("/sessions/pin", {
-        method: "POST",
-        body,
-        headers: { "Accept": "application/json" }
-      });
-      if (!response.ok) throw new Error("Could not update pinned session");
-
-      const payload = await response.json();
-      if (this.current(epoch, boundElement) && button.isConnected !== false) {
-        const pinned = payload.pinned === true;
-        idleLabel = pinned ? "Unpin session" : "Pin session";
-        button.dataset.pinned = pinned ? "true" : "false";
-        button.classList.toggle("is-pinned", pinned);
-        button.setAttribute("aria-pressed", pinned ? "true" : "false");
-      }
-      await this.refresh({ force: true });
-      return payload;
-    } catch (error) {
-      if (this.current(epoch, boundElement)) this.scheduleRefresh();
-      throw error;
-    } finally {
-      this.pinOperationActive = false;
-      if (button.isConnected !== false) {
-        button.disabled = false;
-        button.classList.remove("is-loading");
-        button.removeAttribute("aria-busy");
-        button.setAttribute("aria-label", idleLabel);
-        button.setAttribute("title", idleLabel);
-      }
-    }
-  }
-
   markSessionCompacting(sessionPath) {
     if (!sessionPath || !this.element) return;
     const link = this.element.querySelector(`a.session[data-session-path="${CSS.escape(sessionPath)}"]`);
@@ -510,7 +455,7 @@ export class SidebarController {
   }
 
   controlsActive() {
-    return this.projectSelectController.isActive(this.element) || !!this.document.activeElement?.closest?.(".sidebar-session-search") || this.document.body.classList.contains("session-shortcuts-visible");
+    return this.projectSelectController.isActive(this.element) || !!this.document.activeElement?.closest?.(".sidebar-session-search") || this.document.body.classList.contains("session-shortcuts-visible") || this.document.body.classList.contains("session-pin-operation-active");
   }
 
   currentSessionPath() {

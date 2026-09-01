@@ -38,6 +38,7 @@ import { ResourceUsageController } from "./resource_usage_controller.js";
 import { BrowserAccessRequestController, WorkspaceAccessRequestController } from "./access_request_controllers.js";
 import { ProjectSelectController } from "./project_select_controller.js";
 import { NewSessionFormController } from "./new_session_form_controller.js";
+import { SessionActionsController } from "./session_actions_controller.js";
 import { SidebarController } from "./sidebar_controller.js";
 import { ConversationController } from "./conversation_controller.js";
 import { ComposerAutocompleteController } from "./composer_autocomplete_controller.js";
@@ -73,6 +74,13 @@ const sidebarController = new SidebarController(
     showGripiNotification(name, body, url, tag).catch(() => {});
   }
 );
+const sessionActionsController = new SessionActionsController(document, window, {
+  currentSessionPath: () => currentSessionPath(),
+  openModal: (modal) => openModal(modal),
+  closeModal: (modal) => closeModal(modal),
+  refresh: () => sidebarController.refresh({ force: true }),
+  showStatus: (message) => showStatus(message, true)
+});
 
 let conversationPanel = null;
 let liveOutput = null;
@@ -2746,7 +2754,7 @@ function openModal(modal) {
 }
 
 function closeModal(modal) {
-  if (!modal) return;
+  if (!modal || modal.dataset.sessionActionPending === "true") return;
   if (modal.dataset.modal === "new-session-modal") newSessionFormController.close(modal.querySelector(".new-session-cwd-form"));
   modal.hidden = true;
   if (modal.dataset.modal === "model-settings-modal") modelSettingsOperationGeneration += 1;
@@ -2764,6 +2772,8 @@ function focusPromptAfterModalClose(modal) {
   if (modal?.dataset.modal === "model-settings-modal") {
     const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]:not(:disabled)');
     (modelButton || conversationScroll)?.focus({ preventScroll: true });
+  } else if (["session-rename-modal", "session-delete-modal"].includes(modal?.dataset.modal)) {
+    sessionActionsController.restoreFocus();
   } else if (modal?.dataset.modal === "new-session-modal") {
     syncComposerFocus();
   }
@@ -3049,9 +3059,9 @@ window.addEventListener("gripi:current-session-find-navigation-requested", (even
 window.addEventListener("gripi:session-search-requested", requestSessionSearch);
 window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
-function handleModelSettingsModalTab(event) {
+function handleModalTab(event) {
   if (event.key !== "Tab") return;
-  const modal = document.querySelector('[data-modal="model-settings-modal"]:not([hidden])');
+  const modal = document.querySelector('[data-modal]:not([hidden])');
   if (!modal) return;
   const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
     .filter((element) => !element.closest("[hidden]"));
@@ -3081,7 +3091,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  handleModelSettingsModalTab(event);
+  handleModalTab(event);
   if (modalIsOpen()) return;
 
   if (handleSessionSearchShortcut(event)) return;
@@ -3348,6 +3358,7 @@ function bootstrapPage() {
     updateNotificationToggle();
   }).catch(() => {});
   sidebarController.initialize();
+  sessionActionsController.initialize();
   bindPageLifetimeControls();
   bindSessionDom();
   bindSessionControls();
