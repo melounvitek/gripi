@@ -223,7 +223,7 @@ export class SessionActionsController {
       const pin = this.rowForPath(target.path)?.querySelector("[data-session-pin-toggle]") || loadingPin;
       pin?.classList.remove("is-loading");
       pin?.removeAttribute("aria-busy");
-      if (pin === loadingPin) {
+      if (pin && pin === loadingPin) {
         pin.setAttribute("aria-label", idleLabel);
         pin.title = idleTitle;
       }
