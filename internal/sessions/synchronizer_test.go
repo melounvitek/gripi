@@ -15,6 +15,30 @@ import (
 	"github.com/melounvitek/gripi/internal/rpc"
 )
 
+func TestSynchronizerExclusiveOperationRejectsConcurrentMutation(t *testing.T) {
+	synchronizer := NewSynchronizer(t.TempDir(), t.TempDir(), NewCache(), nil)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- synchronizer.WithExclusiveOperation("session", func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+
+	err := synchronizer.WithExclusiveOperation("session", func() error { return nil })
+	if !errors.Is(err, ErrSyncBusy) {
+		t.Fatalf("concurrent operation error = %v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSynchronizerReconcilesRPCAppendAndDetectsForeignEntries(t *testing.T) {
 	root, path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})

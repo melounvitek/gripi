@@ -165,7 +165,7 @@ test("rename and delete a background session from its contextual actions", async
   const sessionPath = await currentRow.getAttribute("data-session-path");
   await currentRow.getByRole("button", { name: /Session actions/ }).click();
   const deleteAction = page.getByRole("menuitem", { name: "Delete session…" });
-  await expect(deleteAction).toBeDisabled();
+  await expect(deleteAction).toHaveAttribute("aria-disabled", "true");
   await expect(deleteAction).toHaveAttribute("title", "Cannot delete the current session");
   await page.keyboard.press("Escape");
 

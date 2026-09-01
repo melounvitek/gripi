@@ -5,6 +5,7 @@ export class SessionActionsController {
     this.callbacks = callbacks;
     this.target = null;
     this.pinOperationActive = false;
+    this.operationAbort = null;
     this.initialized = false;
   }
 
@@ -13,7 +14,7 @@ export class SessionActionsController {
     this.initialized = true;
     this.document.addEventListener("click", (event) => this.handleClick(event));
     this.document.addEventListener("contextmenu", (event) => this.handleContextMenu(event));
-    this.document.addEventListener("keydown", (event) => this.handleKeydown(event));
+    this.document.addEventListener("keydown", (event) => this.handleKeydown(event), true);
     this.document.addEventListener("submit", (event) => this.handleSubmit(event));
   }
 
@@ -22,9 +23,8 @@ export class SessionActionsController {
     if (toggle) {
       event.preventDefault();
       event.stopPropagation?.();
-      const row = toggle.closest(".session-row");
       const rect = toggle.getBoundingClientRect();
-      this.openMenu(row, { x: rect.left, y: rect.bottom });
+      this.openMenu(toggle.closest(".session-row"), { x: rect.left, y: rect.bottom });
       return;
     }
 
@@ -45,11 +45,22 @@ export class SessionActionsController {
   }
 
   handleKeydown(event) {
-    if (event.key === "Escape" && !this.menu()?.hidden) {
+    const menu = this.menu();
+    if (event.key === "Escape" && !menu?.hidden) {
       event.preventDefault();
+      event.stopImmediatePropagation?.();
       this.closeMenu({ restoreFocus: true });
       return;
     }
+    if (!menu?.hidden && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      this.moveMenuFocus(event.key);
+      return;
+    }
+    this.openKeyboardMenu(event);
+  }
+
+  openKeyboardMenu(event) {
     if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
     const row = event.target.closest?.(".session-row");
     if (!row) return;
@@ -58,10 +69,33 @@ export class SessionActionsController {
     this.openMenu(row, { x: rect.left, y: rect.bottom });
   }
 
+  moveMenuFocus(key) {
+    const items = Array.from(this.menu()?.querySelectorAll("button") || []);
+    if (items.length === 0) return;
+    const current = items.indexOf(this.document.activeElement);
+    let index = key === "End" ? items.length - 1 : 0;
+    if (key === "ArrowDown") index = (current + 1) % items.length;
+    if (key === "ArrowUp") index = (current - 1 + items.length) % items.length;
+    items[index].focus();
+  }
+
   openMenu(row, position) {
     const menu = this.menu();
     if (!row || !menu) return false;
-    this.target = {
+    this.closeMenu();
+    this.target = this.targetFor(row);
+    const pin = menu.querySelector("[data-session-action-pin]");
+    if (pin) pin.textContent = this.target.pinned ? "Unpin" : "Pin";
+    this.configureDeleteAction(menu.querySelector("[data-session-action-delete]"));
+    row.querySelector("[data-session-actions-toggle]")?.setAttribute("aria-expanded", "true");
+    menu.hidden = false;
+    this.positionMenu(menu, position);
+    menu.querySelector("button")?.focus();
+    return true;
+  }
+
+  targetFor(row) {
+    return {
       row,
       path: row.dataset.sessionPath,
       name: row.dataset.sessionName,
@@ -69,18 +103,13 @@ export class SessionActionsController {
       busy: row.dataset.busy === "true",
       pinned: row.dataset.pinned === "true"
     };
-    const pin = menu.querySelector("[data-session-action-pin]");
-    if (pin) pin.textContent = this.target.pinned ? "Unpin" : "Pin";
-    const remove = menu.querySelector("[data-session-action-delete]");
-    if (remove) {
-      const reason = this.target.current ? "Cannot delete the current session" : this.target.busy ? "Cannot delete a running session" : "";
-      remove.disabled = reason !== "";
-      remove.title = reason;
-    }
-    menu.hidden = false;
-    this.positionMenu(menu, position);
-    Array.from(menu.querySelectorAll("button")).find((button) => !button.disabled)?.focus();
-    return true;
+  }
+
+  configureDeleteAction(button) {
+    if (!button) return;
+    const reason = this.target.current ? "Cannot delete the current session" : this.target.busy ? "Cannot delete a running session" : "";
+    button.setAttribute("aria-disabled", reason ? "true" : "false");
+    button.title = reason;
   }
 
   positionMenu(menu, { x = 0, y = 0 } = {}) {
@@ -94,6 +123,7 @@ export class SessionActionsController {
   closeMenu({ restoreFocus = false } = {}) {
     const menu = this.menu();
     if (menu) menu.hidden = true;
+    this.target?.row.querySelector("[data-session-actions-toggle]")?.setAttribute("aria-expanded", "false");
     if (restoreFocus) this.restoreFocus();
   }
 
@@ -105,20 +135,20 @@ export class SessionActionsController {
 
   performAction(action) {
     const target = this.target;
+    if (!target || action === "delete" && (target.current || target.busy)) return;
     this.closeMenu();
-    if (!target) return;
     if (action === "rename") this.openRename(target);
     if (action === "pin") this.togglePin(target).catch(() => {});
-    if (action === "delete" && !target.current && !target.busy) this.openDelete(target);
+    if (action === "delete") this.openDelete(target);
   }
 
   openRename(target) {
     const modal = this.document.querySelector('[data-modal="session-rename-modal"]');
     const form = modal?.querySelector("[data-session-rename-form]");
     if (!modal || !form) return;
+    this.prepareForm(form);
     form.querySelector('[name="session"]').value = target.path;
     form.querySelector('[name="name"]').value = target.name;
-    this.clearError(form);
     this.callbacks.openModal?.(modal);
     form.querySelector('[name="name"]').select?.();
   }
@@ -127,11 +157,10 @@ export class SessionActionsController {
     const modal = this.document.querySelector('[data-modal="session-delete-modal"]');
     const form = modal?.querySelector("[data-session-delete-form]");
     if (!modal || !form) return;
+    this.prepareForm(form);
     form.querySelector('[name="session"]').value = target.path;
     form.querySelector('[name="current_session"]').value = this.callbacks.currentSessionPath?.() || "";
-    const name = modal.querySelector("[data-session-delete-name]");
-    if (name) name.textContent = target.name;
-    this.clearError(form);
+    modal.querySelector("[data-session-delete-name]").textContent = target.name;
     this.callbacks.openModal?.(modal);
   }
 
@@ -163,12 +192,23 @@ export class SessionActionsController {
   }
 
   async submit(form, action) {
+    if (action === "delete") form.querySelector('[name="current_session"]').value = this.callbacks.currentSessionPath?.() || "";
     const body = new FormData(form);
     const controls = Array.from(form.querySelectorAll("button, input"));
     controls.forEach((control) => { control.disabled = true; });
     this.clearError(form);
+    const abort = new AbortController();
+    this.operationAbort?.abort();
+    this.operationAbort = abort;
+    await this.sendMutation(form, action, body, abort);
+    if (this.operationAbort !== abort) return;
+    this.operationAbort = null;
+    controls.forEach((control) => { control.disabled = false; });
+  }
+
+  async sendMutation(form, action, body, abort) {
     try {
-      const response = await fetch(form.action, { method: "POST", body, headers: { "Accept": "application/json" } });
+      const response = await fetch(form.action, { method: "POST", body, headers: { "Accept": "application/json" }, signal: abort.signal });
       const responseText = await response.text();
       let payload = null;
       try { payload = JSON.parse(responseText); } catch (_error) {}
@@ -177,10 +217,21 @@ export class SessionActionsController {
       await this.callbacks.refresh?.();
       this.callbacks.showStatus?.(action === "delete" ? "Session deleted" : "Session renamed");
     } catch (error) {
-      this.showError(form, error.message);
-    } finally {
-      controls.forEach((control) => { control.disabled = false; });
+      if (error.name !== "AbortError") this.showError(form, error.message);
     }
+  }
+
+  prepareForm(form) {
+    this.operationAbort?.abort();
+    this.operationAbort = null;
+    form.querySelectorAll("button, input").forEach((control) => { control.disabled = false; });
+    this.clearError(form);
+  }
+
+  modalClosed(modal) {
+    if (!["session-rename-modal", "session-delete-modal"].includes(modal?.dataset.modal)) return;
+    this.operationAbort?.abort();
+    this.operationAbort = null;
   }
 
   clearError(form) {

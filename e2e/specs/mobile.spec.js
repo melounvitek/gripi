@@ -99,7 +99,7 @@ test("open selected session actions on the first mobile tap", async ({ page }) =
 
   await expect(page.getByRole("menu")).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Rename…" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Delete session…" })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Delete session…" })).toHaveAttribute("aria-disabled", "true");
 });
 
 test("keep parallel subagent order and timestamps stable on mobile", async ({ page }) => {

@@ -37,6 +37,8 @@ const (
 	sessionNameBytes        = 4 << 10
 )
 
+var errDeleteRunning = errors.New("session is running")
+
 var thinkingLevels = map[string]bool{
 	"off": true, "minimal": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true,
 }
@@ -746,15 +748,11 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": reason})
 		return
 	}
-	if reason, err := app.closeDeleteSessionClient(session.Path); err != nil {
-		writeInternalError(response, "close deleted session client", err)
-		return
-	} else if reason != "" {
-		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": reason})
+	method, err := app.deletePersistedSession(request, session.Path)
+	if errors.Is(err, errDeleteRunning) || errors.Is(err, sessions.ErrSyncBusy) {
+		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Cannot delete a running session"})
 		return
 	}
-
-	method, err := app.deletePersistedSession(request, session.Path)
 	if err != nil {
 		writeInternalError(response, "delete session", err)
 		return
@@ -790,26 +788,40 @@ func (app *application) deleteSessionBlockReason(currentPath, targetPath string)
 	return ""
 }
 
-func (app *application) closeDeleteSessionClient(path string) (string, error) {
+func (app *application) closeDeleteSessionClient(path string) error {
 	if !app.rpcClients.Active(path) {
-		return "", nil
+		return nil
 	}
 	closed, err := app.rpcClients.CloseClientIfIdle(path)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if !closed {
-		return "Cannot delete a running session", nil
+		return errDeleteRunning
 	}
-	app.synchronizer.Forget(path)
-	return "", nil
+	return nil
 }
 
 func (app *application) deletePersistedSession(request *http.Request, path string) (string, error) {
-	method, err := sessions.DeleteSessionFile(path)
-	if err != nil {
-		return "", err
-	}
+	method := ""
+	err := app.synchronizer.WithExclusiveOperation(path, func() error {
+		if app.rpcClients.Busy(path) || app.rpcClients.Compacting(path) {
+			return errDeleteRunning
+		}
+		if err := app.closeDeleteSessionClient(path); err != nil {
+			return err
+		}
+		var err error
+		method, err = sessions.DeleteSessionFile(path)
+		if err == nil {
+			app.cleanupDeletedSession(request, path)
+		}
+		return err
+	})
+	return method, err
+}
+
+func (app *application) cleanupDeletedSession(request *http.Request, path string) {
 	app.sessionCache.Forget(path)
 	app.synchronizer.Forget(path)
 	app.pendingSessions.Forget(path)
@@ -825,7 +837,6 @@ func (app *application) deletePersistedSession(request *http.Request, path strin
 			logInternalError("release deleted session ownership", err)
 		}
 	}
-	return method, nil
 }
 
 func (app *application) validateSessionCWD(response http.ResponseWriter, request *http.Request) {

@@ -77,8 +77,13 @@ test("session actions open from the first button tap and from right click", () =
   assert.equal(prevented, true);
   assert.equal(menu.hidden, false);
   assert.equal(controller.target.path, "/sessions/one.jsonl");
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
   assert.equal(pin.textContent, "Pin");
-  assert.equal(remove.disabled, false);
+  assert.equal(remove.getAttribute("aria-disabled"), "false");
+
+  document.activeElement = pin;
+  document.listeners.get("keydown")[0]({ key: "ArrowDown", target: pin, preventDefault() {} });
+  assert.equal(remove.focused, true);
 
   controller.closeMenu();
   prevented = false;
@@ -89,9 +94,12 @@ test("session actions open from the first button tap and from right click", () =
   assert.equal(menu.style.top, "30px");
 
   prevented = false;
-  document.listeners.get("keydown")[0]({ key: "Escape", target: menu, preventDefault() { prevented = true; } });
+  let propagationStopped = false;
+  document.listeners.get("keydown")[0]({ key: "Escape", target: menu, preventDefault() { prevented = true; }, stopImmediatePropagation() { propagationStopped = true; } });
   assert.equal(prevented, true);
+  assert.equal(propagationStopped, true);
   assert.equal(menu.hidden, true);
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
   assert.equal(toggle.focused, true);
 });
 
@@ -112,7 +120,7 @@ test("session actions explain why the current session cannot be deleted", () => 
 
   controller.openMenu(row, { x: 10, y: 10 });
 
-  assert.equal(remove.disabled, true);
+  assert.equal(remove.getAttribute("aria-disabled"), "true");
   assert.equal(remove.title, "Cannot delete the current session");
 });
 

@@ -2755,6 +2755,7 @@ function openModal(modal) {
 
 function closeModal(modal) {
   if (!modal) return;
+  sessionActionsController.modalClosed(modal);
   if (modal.dataset.modal === "new-session-modal") newSessionFormController.close(modal.querySelector(".new-session-cwd-form"));
   modal.hidden = true;
   if (modal.dataset.modal === "model-settings-modal") modelSettingsOperationGeneration += 1;
@@ -3059,9 +3060,9 @@ window.addEventListener("gripi:current-session-find-navigation-requested", (even
 window.addEventListener("gripi:session-search-requested", requestSessionSearch);
 window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
-function handleModelSettingsModalTab(event) {
+function handleModalTab(event) {
   if (event.key !== "Tab") return;
-  const modal = document.querySelector('[data-modal="model-settings-modal"]:not([hidden])');
+  const modal = document.querySelector('[data-modal]:not([hidden])');
   if (!modal) return;
   const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
     .filter((element) => !element.closest("[hidden]"));
@@ -3091,7 +3092,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  handleModelSettingsModalTab(event);
+  handleModalTab(event);
   if (modalIsOpen()) return;
 
   if (handleSessionSearchShortcut(event)) return;

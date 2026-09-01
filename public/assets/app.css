@@ -178,8 +178,8 @@
     .session-actions-menu[hidden] { display: none; }
     .session-actions-menu button { width: 100%; min-height: 0; display: block; padding: 0.52rem 0.65rem; border: 0; background: transparent; color: var(--copy); font-family: var(--sans); font-size: 0.8rem; font-weight: 500; letter-spacing: 0; text-align: left; text-transform: none; }
     .session-actions-menu button:hover, .session-actions-menu button:focus-visible { background: var(--accent-tint-08); color: var(--text); }
-    .session-actions-menu button:disabled { color: var(--muted-soft); cursor: not-allowed; }
-    .session-actions-menu button:disabled:hover { background: transparent; }
+    .session-actions-menu button[aria-disabled="true"] { color: var(--muted-soft); cursor: not-allowed; }
+    .session-actions-menu button[aria-disabled="true"]:hover { background: transparent; }
     .session-actions-menu .session-action-delete { color: var(--danger); }
     .session-actions-separator { height: 1px; margin: 0.3rem 0.25rem; background: var(--border); }
     .session-action-modal form { display: grid; gap: 0.9rem; }
