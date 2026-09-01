@@ -96,7 +96,7 @@ func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T
 
 	sidebar := serve(t, handler, http.MethodGet, "/sidebar?session="+url.QueryEscape(fixture.markerPath), "")
 	titleTooltip := `class="session-title" title="` + fixture.markerTitle + `">`
-	if sidebar.Code != http.StatusOK || !strings.Contains(sidebar.Body.String(), `aria-current="page"`) || !strings.Contains(sidebar.Body.String(), titleTooltip) || !strings.Contains(sidebar.Body.String(), `data-session-actions-toggle`) || !strings.Contains(sidebar.Body.String(), `data-current="true"`) {
+	if sidebar.Code != http.StatusOK || !strings.Contains(sidebar.Body.String(), `aria-current="page"`) || !strings.Contains(sidebar.Body.String(), titleTooltip) || !strings.Contains(sidebar.Body.String(), `data-session-pin-toggle`) || !strings.Contains(sidebar.Body.String(), `aria-label="Pin session `+fixture.markerTitle+`"`) || !strings.Contains(sidebar.Body.String(), `aria-pressed="false"`) || !strings.Contains(sidebar.Body.String(), `data-session-actions-toggle`) || !strings.Contains(sidebar.Body.String(), `data-current="true"`) {
 		t.Fatalf("sidebar contract missing: status=%d", sidebar.Code)
 	}
 	modal := serve(t, handler, http.MethodGet, "/new_session_modal?session="+url.QueryEscape(fixture.markerPath), "")
@@ -136,8 +136,8 @@ func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T
 		t.Fatalf("pin = %d %q", pinned.Code, pinned.Body.String())
 	}
 	pinnedSidebar := serve(t, handler, http.MethodGet, "/sidebar?session="+url.QueryEscape(fixture.markerPath), "")
-	if !strings.Contains(pinnedSidebar.Body.String(), "pinned-sessions-section") {
-		t.Fatal("pinned session was not rendered")
+	if !strings.Contains(pinnedSidebar.Body.String(), "pinned-sessions-section") || !strings.Contains(pinnedSidebar.Body.String(), `class="session-pin-toggle is-pinned"`) || !strings.Contains(pinnedSidebar.Body.String(), `aria-label="Unpin session `+fixture.markerTitle+`"`) || !strings.Contains(pinnedSidebar.Body.String(), `aria-pressed="true"`) {
+		t.Fatal("pinned session was not rendered with its direct unpin control")
 	}
 
 	oldestPath := filepath.Join(fixture.sessionsRoot, "e2e", "idle-client.jsonl")

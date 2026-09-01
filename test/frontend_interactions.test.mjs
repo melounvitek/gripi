@@ -103,6 +103,38 @@ test("session actions open from the first button tap and from right click", () =
   assert.equal(toggle.focused, true);
 });
 
+test("direct session pin activates on the first click", async () => {
+  const document = new FakeDocument();
+  const row = new FakeElement("div", [".session-row"]);
+  row.dataset.sessionPath = "/sessions/one.jsonl";
+  row.dataset.sessionName = "One";
+  row.dataset.current = "false";
+  row.dataset.busy = "false";
+  row.dataset.pinned = "false";
+  const pin = new FakeElement("button", ["[data-session-pin-toggle]"]);
+  row.append(pin);
+  document.body.append(row);
+  const controller = new SessionActionsController(document, {}, {});
+  const targets = [];
+  controller.togglePin = async (target) => targets.push(target);
+  controller.initialize();
+
+  let prevented = false;
+  let propagationStopped = false;
+  document.listeners.get("click")[0]({
+    target: pin,
+    preventDefault() { prevented = true; },
+    stopPropagation() { propagationStopped = true; },
+  });
+  await Promise.resolve();
+
+  assert.equal(prevented, true);
+  assert.equal(propagationStopped, true);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].path, "/sessions/one.jsonl");
+  assert.equal(targets[0].pinned, false);
+});
+
 test("session actions show pin failures in the menu", async () => {
   const originalFetch = globalThis.fetch;
   const document = new FakeDocument();

@@ -18,6 +18,14 @@ export class SessionActionsController {
   }
 
   handleClick(event) {
+    const pinToggle = event.target.closest?.("[data-session-pin-toggle]");
+    if (pinToggle) {
+      event.preventDefault();
+      event.stopPropagation?.();
+      this.togglePin(this.targetFor(pinToggle.closest(".session-row"))).catch(() => {});
+      return;
+    }
+
     const toggle = event.target.closest?.("[data-session-actions-toggle]");
     if (toggle) {
       event.preventDefault();
