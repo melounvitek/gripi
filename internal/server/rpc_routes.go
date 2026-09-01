@@ -387,6 +387,12 @@ func (app *application) movePendingRPCClient(request *http.Request, from, to str
 	if app.ownsSession != nil && !app.ownsSession(request, from) {
 		return errors.New("pending session is not owned by the requester")
 	}
+	unlockMutation := app.sessionMutationLocks.Lock(to)
+	defer unlockMutation()
+	if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
+		return os.ErrNotExist
+	}
+
 	if from == to {
 		if app.claimSession != nil {
 			if _, err := app.claimSession(request, to); err != nil {
@@ -396,12 +402,6 @@ func (app *application) movePendingRPCClient(request *http.Request, from, to str
 		app.pendingSessions.Forget(from)
 		return nil
 	}
-	unlockMutation := app.sessionMutationLocks.Lock(to)
-	defer unlockMutation()
-	if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
-		return os.ErrNotExist
-	}
-
 	return app.rpcClients.MoveWithCommit(from, to, func() (func() error, error) {
 		claimed := false
 		if app.claimSession != nil {

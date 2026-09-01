@@ -433,6 +433,23 @@ func TestPendingRemapRejectsADeletedDestination(t *testing.T) {
 	if !registry.Active("/pending") || registry.Active("/real") {
 		t.Fatal("rejected remap changed clients")
 	}
+
+	sameRegistry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	if err := sameRegistry.Register("/same", &remapClient{}); err != nil {
+		t.Fatal(err)
+	}
+	samePending := rpc.NewPendingSessionRegistry(nil)
+	samePending.Remember("/same", "/project")
+	app.rpcClients, app.pendingSessions = sameRegistry, samePending
+	if err := gatewayState.Forget("/same"); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.movePendingRPCClient(request, "/same", "/same"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("same-path remap error = %v", err)
+	}
+	if !sameRegistry.Active("/same") {
+		t.Fatal("rejected same-path remap changed client")
+	}
 }
 
 func TestCompletedPendingRemapRequiresEveryDestinationOwnership(t *testing.T) {
