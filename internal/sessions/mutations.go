@@ -8,16 +8,18 @@ import (
 )
 
 func DeleteSessionFile(path string) (string, error) {
-	args := []string{path}
+	trashArgs := []string{path}
 	if len(path) > 0 && path[0] == '-' {
-		args = []string{"--", path}
+		trashArgs = []string{"--", path}
 	}
-	trashErr := exec.Command("trash", args...).Run()
-	if trashErr == nil {
-		return "trash", nil
-	}
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return "trash", nil
+	commands := [][]string{append([]string{"trash"}, trashArgs...), {"gio", "trash", "--", path}}
+	for _, command := range commands {
+		if err := exec.Command(command[0], command[1:]...).Run(); err == nil {
+			return "trash", nil
+		}
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			return "trash", nil
+		}
 	}
 	if err := os.Remove(path); err != nil {
 		return "", fmt.Errorf("delete session: %w", err)

@@ -84,6 +84,24 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   await expect(viewer).toBeHidden();
 });
 
+test("open selected session actions on the first mobile tap", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+
+  const currentRow = page.locator('.session-row[data-current="true"]');
+  const actions = currentRow.getByRole("button", { name: /Session actions/ });
+  const bounds = await actions.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds.width).toBeGreaterThanOrEqual(44);
+  expect(bounds.height).toBeGreaterThanOrEqual(44);
+
+  await actions.tap();
+
+  await expect(page.getByRole("menu")).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Rename…" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Delete session…" })).toBeDisabled();
+});
+
 test("keep parallel subagent order and timestamps stable on mobile", async ({ page }) => {
   await page.goto("/");
   await page.locator('label[aria-label="Open sessions"]').tap();

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { ConversationController } from "../public/assets/conversation_controller.js";
 import { renderTextWithLinks } from "../public/assets/dom.js";
 import { ProjectSelectController } from "../public/assets/project_select_controller.js";
+import { SessionActionsController } from "../public/assets/session_actions_controller.js";
 import { SidebarController } from "../public/assets/sidebar_controller.js";
 import { TREE_FILTERS, TREE_SUMMARY_CHOICES, TreeSessionController, TreeSessionModel } from "../public/assets/tree_session_controller.js";
 import { FakeDocument, FakeElement, FakeEventTarget } from "./helpers/fake_dom.mjs";
@@ -49,6 +50,70 @@ test("background reply notifications preserve literal Markdown punctuation", () 
   }
 
   assert.deepEqual(notifications, [["Background task", "Finished feat/my_branch_name", "/?session=background", "gripi-final-reply:background"]]);
+});
+
+test("session actions open from the first button tap and from right click", () => {
+  const document = new FakeDocument();
+  const window = { innerWidth: 400, innerHeight: 800 };
+  const row = new FakeElement("div", [".session-row"]);
+  row.dataset.sessionPath = "/sessions/one.jsonl";
+  row.dataset.sessionName = "One";
+  row.dataset.current = "false";
+  row.dataset.busy = "false";
+  row.dataset.pinned = "false";
+  const toggle = new FakeElement("button", ["[data-session-actions-toggle]"]);
+  row.append(toggle);
+  const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
+  menu.hidden = true;
+  const pin = new FakeElement("button", ["[data-session-action-pin]"]);
+  const remove = new FakeElement("button", ["[data-session-action-delete]"]);
+  menu.append(pin, remove);
+  document.body.append(row, menu);
+  const controller = new SessionActionsController(document, window, {});
+  controller.initialize();
+
+  let prevented = false;
+  document.listeners.get("click")[0]({ target: toggle, preventDefault() { prevented = true; }, stopPropagation() {} });
+  assert.equal(prevented, true);
+  assert.equal(menu.hidden, false);
+  assert.equal(controller.target.path, "/sessions/one.jsonl");
+  assert.equal(pin.textContent, "Pin");
+  assert.equal(remove.disabled, false);
+
+  controller.closeMenu();
+  prevented = false;
+  document.listeners.get("contextmenu")[0]({ target: row, clientX: 24, clientY: 30, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(menu.hidden, false);
+  assert.equal(menu.style.left, "24px");
+  assert.equal(menu.style.top, "30px");
+
+  prevented = false;
+  document.listeners.get("keydown")[0]({ key: "Escape", target: menu, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(menu.hidden, true);
+  assert.equal(toggle.focused, true);
+});
+
+test("session actions explain why the current session cannot be deleted", () => {
+  const document = new FakeDocument();
+  const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
+  menu.hidden = true;
+  const remove = new FakeElement("button", ["[data-session-action-delete]"]);
+  menu.append(remove);
+  document.body.append(menu);
+  const row = new FakeElement("div", [".session-row"]);
+  row.dataset.sessionPath = "/sessions/current.jsonl";
+  row.dataset.sessionName = "Current";
+  row.dataset.current = "true";
+  row.dataset.busy = "false";
+  row.dataset.pinned = "false";
+  const controller = new SessionActionsController(document, { innerWidth: 800, innerHeight: 600 }, {});
+
+  controller.openMenu(row, { x: 10, y: 10 });
+
+  assert.equal(remove.disabled, true);
+  assert.equal(remove.title, "Cannot delete the current session");
 });
 
 test("project selector opens on the first valid touch without sticky-hover behavior", () => {

@@ -746,6 +746,13 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": reason})
 		return
 	}
+	if reason, err := app.closeDeleteSessionClient(session.Path); err != nil {
+		writeInternalError(response, "close deleted session client", err)
+		return
+	} else if reason != "" {
+		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": reason})
+		return
+	}
 
 	method, err := app.deletePersistedSession(request, session.Path)
 	if err != nil {
@@ -777,10 +784,25 @@ func (app *application) deleteSessionBlockReason(currentPath, targetPath string)
 	if currentPath == targetPath {
 		return "Cannot delete the current session"
 	}
-	if app.rpcClients.Active(targetPath) {
-		return "Cannot delete an active session"
+	if app.rpcClients.Busy(targetPath) || app.rpcClients.Compacting(targetPath) {
+		return "Cannot delete a running session"
 	}
 	return ""
+}
+
+func (app *application) closeDeleteSessionClient(path string) (string, error) {
+	if !app.rpcClients.Active(path) {
+		return "", nil
+	}
+	closed, err := app.rpcClients.CloseClientIfIdle(path)
+	if err != nil {
+		return "", err
+	}
+	if !closed {
+		return "Cannot delete a running session", nil
+	}
+	app.synchronizer.Forget(path)
+	return "", nil
 }
 
 func (app *application) deletePersistedSession(request *http.Request, path string) (string, error) {

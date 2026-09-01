@@ -451,7 +451,7 @@ func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
 		SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot,
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"),
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
-		PiCommand: []string{"node", fakePi}, RPCIdleTimeout: 0,
+		PiCommand: []string{"node", fakePi}, RPCIdleTimeout: time.Hour,
 	}
 	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
 	if err != nil {
@@ -471,6 +471,15 @@ func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
 	if err != nil || !strings.Contains(string(contents), `"type":"session_info"`) || !strings.Contains(string(contents), `"name":"Renamed in sidebar"`) {
 		t.Fatalf("renamed session = %s, %v", contents, err)
 	}
+	started := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": targetPath, "message": "Keep this session busy while delete is attempted"}, true))
+	if started.Code != http.StatusOK {
+		t.Fatalf("start target = %d %s", started.Code, started.Body.String())
+	}
+	busyDelete := serveAction(handler, formActionRequest("/sessions/delete", map[string]string{"session": targetPath, "current_session": currentPath}, true))
+	if busyDelete.Code != http.StatusConflict || !strings.Contains(busyDelete.Body.String(), "Cannot delete a running session") {
+		t.Fatalf("busy delete = %d %s", busyDelete.Code, busyDelete.Body.String())
+	}
+	waitForFakePiSettled(t, handler, targetPath)
 
 	currentDelete := serveAction(handler, formActionRequest("/sessions/delete", map[string]string{"session": currentPath, "current_session": currentPath}, true))
 	if currentDelete.Code != http.StatusConflict || !strings.Contains(currentDelete.Body.String(), "Cannot delete the current session") {

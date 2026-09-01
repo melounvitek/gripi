@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { ConversationController } from "../public/assets/conversation_controller.js";
 import { CurrentSessionFindController } from "../public/assets/current_session_find_controller.js";
+import { SessionActionsController } from "../public/assets/session_actions_controller.js";
 import { SidebarController } from "../public/assets/sidebar_controller.js";
 import { deferred } from "./helpers/fake_dom.mjs";
 
@@ -56,7 +57,7 @@ test("conversation find restores long tool output according to its wrapping poli
   assert.equal(nonWrapping.control.hidden, true);
 });
 
-test("sidebar ignores stale refreshes and admits only one pin mutation", async () => {
+test("sidebar ignores stale refreshes", async () => {
   const originalFetch = globalThis.fetch;
   const document = { hidden: false, querySelector: () => null, querySelectorAll: () => [], activeElement: null };
   const element = { querySelector: () => null };
@@ -84,34 +85,28 @@ test("sidebar ignores stale refreshes and admits only one pin mutation", async (
     first.resolve({ ok: true, text: async () => "stale sidebar" });
     await older;
     assert.deepEqual(replacements, ["new sidebar"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
-    let pinFetches = 0;
-    const pinResponse = deferred();
-    globalThis.fetch = () => { pinFetches += 1; return pinResponse.promise; };
-    controller.refresh = async ({ force } = {}) => assert.equal(force, true);
-    const classes = new Set();
-    const attributes = new Map();
-    const button = {
-      dataset: { pinned: "false", sessionPath: "/session" },
-      disabled: false,
-      isConnected: true,
-      classList: {
-        add: (name) => classes.add(name),
-        remove: (name) => classes.delete(name),
-        toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
-      },
-      setAttribute: (name, value) => attributes.set(name, value),
-      removeAttribute: (name) => attributes.delete(name),
-    };
-    const mutation = controller.togglePin(button);
-    const overlapping = await controller.togglePin(button);
+test("session actions admit only one pin mutation", async () => {
+  const originalFetch = globalThis.fetch;
+  const pinResponse = deferred();
+  let pinFetches = 0;
+  let refreshes = 0;
+  globalThis.fetch = () => { pinFetches += 1; return pinResponse.promise; };
+  const controller = new SessionActionsController({}, {}, { refresh: async () => { refreshes += 1; } });
+  const target = { path: "/session", pinned: false };
+
+  try {
+    const mutation = controller.togglePin(target);
+    const overlapping = await controller.togglePin(target);
     assert.equal(overlapping, null);
     pinResponse.resolve({ ok: true, json: async () => ({ pinned: true }) });
-    await mutation;
+    assert.deepEqual(await mutation, { pinned: true });
     assert.equal(pinFetches, 1);
-    assert.equal(button.dataset.pinned, "true");
-    assert.equal(button.disabled, false);
-    assert.equal(classes.has("is-loading"), false);
+    assert.equal(refreshes, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
