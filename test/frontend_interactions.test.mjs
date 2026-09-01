@@ -148,14 +148,16 @@ test("direct session pin activates on the first click", async () => {
 test("direct session pin restores stable focus when its row leaves the sidebar", async () => {
   const originalFetch = globalThis.fetch;
   const document = new FakeDocument();
+  const desktopVisibility = new FakeElement("button", ["[data-sidebar-visibility-toggle]"]);
   const search = new FakeElement("button", ["[data-sidebar-search-toggle]"]);
-  document.body.append(search);
+  document.body.append(desktopVisibility, search);
   const controller = new SessionActionsController(document, {}, { refresh: async () => {} });
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ pinned: false }) });
 
   try {
     await controller.togglePin({ path: "/sessions/old.jsonl", pinned: true }, { restoreFocus: true });
     assert.equal(search.focused, true);
+    assert.equal(desktopVisibility.focused, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }

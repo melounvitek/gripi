@@ -213,7 +213,7 @@ export class SessionActionsController {
       this.pinOperationActive = false;
       this.setPinControlsDisabled(false);
       const pin = this.rowForPath(target.path)?.querySelector("[data-session-pin-toggle]");
-      const fallback = this.document.querySelector?.("[data-sidebar-search-toggle], [data-sidebar-visibility-toggle], [data-notification-toggle]");
+      const fallback = this.document.querySelector?.("[data-sidebar-search-toggle]") || this.document.querySelector?.("[data-notification-toggle]") || this.document.querySelector?.("[data-sidebar-visibility-toggle]");
       if (succeeded && restoreFocus) (pin || fallback)?.focus({ preventScroll: true });
     }
   }
