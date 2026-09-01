@@ -108,11 +108,23 @@ test("session actions admit only one pin mutation", async () => {
   try {
     const mutation = controller.togglePin(target);
     assert.deepEqual(pinControls.map(({ disabled }) => disabled), [true, true, true]);
+    assert.equal(document.body.classList.contains("session-pin-operation-active"), true);
+
+    const replacementPin = new FakeElement("button", ["[data-session-pin-toggle]"]);
+    const replacementSidebar = new FakeElement("aside", [".session-sidebar"]);
+    replacementSidebar.append(replacementPin);
+    document.body.append(replacementSidebar);
+    const sidebar = new SidebarController(document, {}, { initialize() {} }, { apply() {} }, () => {});
+    sidebar.bind(replacementSidebar);
+    pinControls.push(replacementPin);
+    assert.equal(replacementPin.disabled, true);
+
     const overlapping = await controller.togglePin({ path: "/other-session", pinned: true });
     assert.equal(overlapping, null);
     pinResponse.resolve({ ok: true, json: async () => ({ pinned: true }) });
     assert.deepEqual(await mutation, { pinned: true });
-    assert.deepEqual(pinControls.map(({ disabled }) => disabled), [false, false, false]);
+    assert.deepEqual(pinControls.map(({ disabled }) => disabled), [false, false, false, false]);
+    assert.equal(document.body.classList.contains("session-pin-operation-active"), false);
     assert.equal(pinFetches, 1);
     assert.equal(refreshes, 1);
   } finally {

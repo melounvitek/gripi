@@ -24,7 +24,9 @@ export class SessionActionsController {
       if (!row) return;
       event.preventDefault();
       event.stopPropagation?.();
-      this.togglePin(this.targetFor(row), { restoreFocus: true }).catch(() => {});
+      this.closeMenu();
+      this.target = this.targetFor(row);
+      this.togglePin(this.target, { restoreFocus: true }).catch(() => {});
       return;
     }
 
@@ -210,11 +212,14 @@ export class SessionActionsController {
     } finally {
       this.pinOperationActive = false;
       this.setPinControlsDisabled(false);
-      if (succeeded && restoreFocus) this.rowForPath(target.path)?.querySelector("[data-session-pin-toggle]")?.focus({ preventScroll: true });
+      const pin = this.rowForPath(target.path)?.querySelector("[data-session-pin-toggle]");
+      const fallback = this.document.querySelector?.("[data-sidebar-search-toggle], [data-sidebar-visibility-toggle], [data-notification-toggle]");
+      if (succeeded && restoreFocus) (pin || fallback)?.focus({ preventScroll: true });
     }
   }
 
   setPinControlsDisabled(disabled) {
+    this.document.body?.classList.toggle("session-pin-operation-active", disabled);
     this.document.querySelectorAll?.("[data-session-pin-toggle], [data-session-action-pin]").forEach((control) => { control.disabled = disabled; });
   }
 

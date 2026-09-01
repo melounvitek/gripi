@@ -120,7 +120,9 @@ test("direct session pin activates on the first click", async () => {
   row.dataset.pinned = "false";
   const pin = new FakeElement("button", ["[data-session-pin-toggle]"]);
   row.append(pin);
-  document.body.append(row);
+  const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
+  menu.hidden = false;
+  document.body.append(row, menu);
   const controller = new SessionActionsController(document, {}, {});
   const targets = [];
   controller.togglePin = async (target) => targets.push(target);
@@ -137,9 +139,26 @@ test("direct session pin activates on the first click", async () => {
 
   assert.equal(prevented, true);
   assert.equal(propagationStopped, true);
+  assert.equal(menu.hidden, true);
   assert.equal(targets.length, 1);
   assert.equal(targets[0].path, "/sessions/one.jsonl");
   assert.equal(targets[0].pinned, false);
+});
+
+test("direct session pin restores stable focus when its row leaves the sidebar", async () => {
+  const originalFetch = globalThis.fetch;
+  const document = new FakeDocument();
+  const search = new FakeElement("button", ["[data-sidebar-search-toggle]"]);
+  document.body.append(search);
+  const controller = new SessionActionsController(document, {}, { refresh: async () => {} });
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ pinned: false }) });
+
+  try {
+    await controller.togglePin({ path: "/sessions/old.jsonl", pinned: true }, { restoreFocus: true });
+    assert.equal(search.focused, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("session actions show pin failures in the menu", async () => {

@@ -34,6 +34,9 @@ export class SidebarController {
     if (!this.element) return null;
 
     this.projectSelectController.initialize(this.element);
+    if (this.document.body.classList.contains("session-pin-operation-active")) {
+      this.element.querySelectorAll("[data-session-pin-toggle]").forEach((control) => { control.disabled = true; });
+    }
     this.bindInteractionTracking();
     this.syncUnreadBadges();
     this.gatewayUpdateController.apply();
@@ -452,7 +455,7 @@ export class SidebarController {
   }
 
   controlsActive() {
-    return this.projectSelectController.isActive(this.element) || !!this.document.activeElement?.closest?.(".sidebar-session-search") || this.document.body.classList.contains("session-shortcuts-visible");
+    return this.projectSelectController.isActive(this.element) || !!this.document.activeElement?.closest?.(".sidebar-session-search") || this.document.body.classList.contains("session-shortcuts-visible") || this.document.body.classList.contains("session-pin-operation-active");
   }
 
   currentSessionPath() {
