@@ -202,6 +202,10 @@
     .session-pin-toggle:hover, .session-actions-toggle:hover { border-color: var(--border-strong); background: var(--panel); color: var(--text); }
     .session-pin-toggle:focus-visible, .session-actions-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
     .session-pin-toggle:disabled { opacity: 0.48; }
+    .session-pin-toggle.is-loading:disabled { cursor: wait; opacity: 1; }
+    .session-pin-toggle.is-loading:disabled:hover { border-color: transparent; background: transparent; }
+    .session-pin-toggle.is-loading svg { visibility: hidden; }
+    .session-pin-toggle.is-loading::after { content: ""; position: absolute; width: 0.85rem; height: 0.85rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     .session-actions-menu { position: fixed; z-index: 100; min-width: 11rem; padding: 0.3rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: var(--panel); box-shadow: var(--shadow-soft); }
     .session-actions-menu[hidden] { display: none; }
     .session-actions-menu button { width: 100%; min-height: 0; display: block; padding: 0.52rem 0.65rem; border: 0; background: transparent; color: var(--copy); font-family: var(--sans); font-size: 0.8rem; font-weight: 500; letter-spacing: 0; text-align: left; text-transform: none; }
@@ -616,7 +620,7 @@
     @keyframes progress-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
     @keyframes streaming-bubble-pulse { 0%, 100% { box-shadow: 0 0 0 1px #ff5a1f3d inset; } 50% { box-shadow: 0 0 0 2px #ff5a1f66 inset; } }
     @keyframes streaming-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .focus-activity-spinner, .message--assistant.message--streaming, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .focus-activity-spinner, .message--assistant.message--streaming, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (pointer: coarse) {
       .session-row a.session { padding-right: 0.75rem; }
       .session-row .session-project, .session-row .session-meta { max-width: calc(100% - 6.5rem); }

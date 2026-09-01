@@ -197,6 +197,14 @@ export class SessionActionsController {
     if (this.pinOperationActive) return null;
     this.pinOperationActive = true;
     this.setPinControlsDisabled(true);
+    const loadingPin = this.rowForPath(target.path)?.querySelector("[data-session-pin-toggle]") || target.row?.querySelector("[data-session-pin-toggle]");
+    const idleLabel = loadingPin?.getAttribute("aria-label");
+    const idleTitle = loadingPin?.title;
+    const loadingLabel = `${target.pinned ? "Unpinning" : "Pinning"} session ${target.name}`;
+    loadingPin?.classList.add("is-loading");
+    loadingPin?.setAttribute("aria-busy", "true");
+    loadingPin?.setAttribute("aria-label", loadingLabel);
+    if (loadingPin) loadingPin.title = loadingLabel;
     let succeeded = false;
     try {
       const body = new URLSearchParams({ session: target.path, pinned: target.pinned ? "false" : "true" });
@@ -212,7 +220,13 @@ export class SessionActionsController {
     } finally {
       this.pinOperationActive = false;
       this.setPinControlsDisabled(false);
-      const pin = this.rowForPath(target.path)?.querySelector("[data-session-pin-toggle]");
+      const pin = this.rowForPath(target.path)?.querySelector("[data-session-pin-toggle]") || loadingPin;
+      pin?.classList.remove("is-loading");
+      pin?.removeAttribute("aria-busy");
+      if (pin === loadingPin) {
+        pin.setAttribute("aria-label", idleLabel);
+        pin.title = idleTitle;
+      }
       const fallback = this.document.querySelector?.("[data-sidebar-search-toggle]") || this.document.querySelector?.("[data-notification-toggle]") || this.document.querySelector?.("[data-sidebar-visibility-toggle]");
       if (succeeded && restoreFocus) (pin || fallback)?.focus({ preventScroll: true });
     }
