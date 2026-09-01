@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { sessions } from "../support/contract.mjs";
-import { message } from "../support/ui.mjs";
+import { prompts, sessions } from "../support/contract.mjs";
+import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
 test("hide the desktop sidebar and remember the preference", async ({ page }) => {
   await page.goto("/");
@@ -162,6 +162,9 @@ test("rename and delete a background session from its contextual actions", async
   await newSessionDialog.getByRole("combobox", { name: "Project" }).click();
   await page.getByRole("option", { name: /new-session-desktop/ }).click();
   await newSessionDialog.getByRole("button", { name: "Start session" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
+  await sendPrompt(page, prompts.newSession);
+  await expectRunFinished(page);
 
   const currentRow = page.locator('.session-row[data-current="true"]');
   const sessionPath = await currentRow.getAttribute("data-session-path");
