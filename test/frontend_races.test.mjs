@@ -5,7 +5,7 @@ import { ConversationController } from "../public/assets/conversation_controller
 import { CurrentSessionFindController } from "../public/assets/current_session_find_controller.js";
 import { SessionActionsController } from "../public/assets/session_actions_controller.js";
 import { SidebarController } from "../public/assets/sidebar_controller.js";
-import { deferred } from "./helpers/fake_dom.mjs";
+import { deferred, FakeDocument, FakeElement } from "./helpers/fake_dom.mjs";
 
 test("conversation find restores long tool output according to its wrapping policy", () => {
   const restore = (wraps) => {
@@ -95,16 +95,24 @@ test("session actions admit only one pin mutation", async () => {
   const pinResponse = deferred();
   let pinFetches = 0;
   let refreshes = 0;
+  const document = new FakeDocument();
+  const directPin = new FakeElement("button", ["[data-session-pin-toggle]"]);
+  const secondDirectPin = new FakeElement("button", ["[data-session-pin-toggle]"]);
+  const menuPin = new FakeElement("button", ["[data-session-action-pin]"]);
+  document.body.append(directPin, secondDirectPin, menuPin);
+  const pinControls = [directPin, secondDirectPin, menuPin];
   globalThis.fetch = () => { pinFetches += 1; return pinResponse.promise; };
-  const controller = new SessionActionsController({}, {}, { refresh: async () => { refreshes += 1; } });
+  const controller = new SessionActionsController(document, {}, { refresh: async () => { refreshes += 1; } });
   const target = { path: "/session", pinned: false };
 
   try {
     const mutation = controller.togglePin(target);
-    const overlapping = await controller.togglePin(target);
+    assert.deepEqual(pinControls.map(({ disabled }) => disabled), [true, true, true]);
+    const overlapping = await controller.togglePin({ path: "/other-session", pinned: true });
     assert.equal(overlapping, null);
     pinResponse.resolve({ ok: true, json: async () => ({ pinned: true }) });
     assert.deepEqual(await mutation, { pinned: true });
+    assert.deepEqual(pinControls.map(({ disabled }) => disabled), [false, false, false]);
     assert.equal(pinFetches, 1);
     assert.equal(refreshes, 1);
   } finally {

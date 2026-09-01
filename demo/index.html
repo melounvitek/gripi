@@ -201,6 +201,7 @@
     .session-row:hover .session-pin-toggle, .session-row:hover .session-actions-toggle, .session-pin-toggle:focus-visible, .session-actions-toggle:focus-visible { opacity: 1; }
     .session-pin-toggle:hover, .session-actions-toggle:hover { border-color: var(--border-strong); background: var(--panel); color: var(--text); }
     .session-pin-toggle:focus-visible, .session-actions-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+    .session-pin-toggle:disabled { opacity: 0.48; }
     .session-actions-menu { position: fixed; z-index: 100; min-width: 11rem; padding: 0.3rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: var(--panel); box-shadow: var(--shadow-soft); }
     .session-actions-menu[hidden] { display: none; }
     .session-actions-menu button { width: 100%; min-height: 0; display: block; padding: 0.52rem 0.65rem; border: 0; background: transparent; color: var(--copy); font-family: var(--sans); font-size: 0.8rem; font-weight: 500; letter-spacing: 0; text-align: left; text-transform: none; }
@@ -220,7 +221,7 @@
     a.session.unread:hover { background: var(--accent-tint-14); }
     a.session.unread .session-title { color: var(--text); font-weight: 700; }
     .session-content { min-width: 0; }
-    .session-indicators { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; min-width: 0.7rem; }
+    .session-indicators { align-self: start; display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; min-width: 0.7rem; }
     .session-fork-indicator { display: inline-flex; align-items: center; justify-content: center; min-width: 1.15rem; height: 1.15rem; border: 1px solid #f0c67447; border-radius: 0.2rem; background: #f0c67414; color: var(--gold); font-size: 0.86rem; font-weight: 700; line-height: 1; }
     .session-shortcut { display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; background: var(--accent-tint-08); color: var(--accent); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
     body.session-shortcuts-visible .recent-session .session-shortcut { display: inline-flex; }

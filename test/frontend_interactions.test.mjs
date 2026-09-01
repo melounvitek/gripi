@@ -65,9 +65,10 @@ test("session actions open from the first button tap and from right click", () =
   row.append(toggle);
   const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
   menu.hidden = true;
+  const rename = new FakeElement("button");
   const pin = new FakeElement("button", ["[data-session-action-pin]"]);
   const remove = new FakeElement("button", ["[data-session-action-delete]"]);
-  menu.append(pin, remove);
+  menu.append(rename, pin, remove);
   document.body.append(row, menu);
   const controller = new SessionActionsController(document, window, {});
   controller.initialize();
@@ -83,6 +84,12 @@ test("session actions open from the first button tap and from right click", () =
 
   document.activeElement = pin;
   document.listeners.get("keydown")[0]({ key: "ArrowDown", target: pin, preventDefault() {} });
+  assert.equal(remove.focused, true);
+
+  pin.disabled = true;
+  remove.focused = false;
+  document.activeElement = rename;
+  document.listeners.get("keydown")[0]({ key: "ArrowDown", target: rename, preventDefault() {} });
   assert.equal(remove.focused, true);
 
   controller.closeMenu();
@@ -144,21 +151,24 @@ test("session actions show pin failures in the menu", async () => {
   row.dataset.current = "false";
   row.dataset.busy = "false";
   row.dataset.pinned = "false";
+  const replacementRow = new FakeElement("div", [".session-row"]);
+  Object.assign(replacementRow.dataset, row.dataset);
   const toggle = new FakeElement("button", ["[data-session-actions-toggle]"]);
-  row.append(toggle);
+  replacementRow.append(toggle);
   const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
   menu.hidden = true;
   const pin = new FakeElement("button", ["[data-session-action-pin]"]);
   const error = new FakeElement("p", ["[data-session-actions-error]"]);
   error.hidden = true;
   menu.append(pin, error);
-  document.body.append(row, menu);
+  document.body.append(replacementRow, menu);
   const controller = new SessionActionsController(document, { innerWidth: 400, innerHeight: 800 }, {});
   globalThis.fetch = async () => ({ ok: false });
 
   try {
     await assert.rejects(controller.togglePin(controller.targetFor(row)), /Could not update pinned session/);
     assert.equal(menu.hidden, false);
+    assert.equal(controller.target.row, replacementRow);
     assert.equal(error.hidden, false);
     assert.equal(error.textContent, "Could not update pinned session");
   } finally {

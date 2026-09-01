@@ -20,9 +20,11 @@ export class SessionActionsController {
   handleClick(event) {
     const pinToggle = event.target.closest?.("[data-session-pin-toggle]");
     if (pinToggle) {
+      const row = pinToggle.closest(".session-row");
+      if (!row) return;
       event.preventDefault();
       event.stopPropagation?.();
-      this.togglePin(this.targetFor(pinToggle.closest(".session-row"))).catch(() => {});
+      this.togglePin(this.targetFor(row), { restoreFocus: true }).catch(() => {});
       return;
     }
 
@@ -78,7 +80,7 @@ export class SessionActionsController {
   }
 
   moveMenuFocus(key) {
-    const items = Array.from(this.menu()?.querySelectorAll("button") || []);
+    const items = Array.from(this.menu()?.querySelectorAll("button") || []).filter((button) => !button.disabled);
     if (items.length === 0) return;
     const current = items.indexOf(this.document.activeElement);
     let index = key === "End" ? items.length - 1 : 0;
@@ -93,7 +95,10 @@ export class SessionActionsController {
     this.closeMenu();
     this.target = this.targetFor(row);
     const pin = menu.querySelector("[data-session-action-pin]");
-    if (pin) pin.textContent = this.target.pinned ? "Unpin" : "Pin";
+    if (pin) {
+      pin.textContent = this.target.pinned ? "Unpin" : "Pin";
+      pin.disabled = this.pinOperationActive;
+    }
     this.configureDeleteAction(menu.querySelector("[data-session-action-delete]"));
     this.clearMenuError(menu);
     row.querySelector("[data-session-actions-toggle]")?.setAttribute("aria-expanded", "true");
@@ -144,9 +149,12 @@ export class SessionActionsController {
   }
 
   restoreFocus() {
-    const path = this.target?.path;
-    const row = Array.from(this.document.querySelectorAll(".session-row")).find((candidate) => candidate.dataset.sessionPath === path);
-    (row || this.target?.row)?.querySelector("[data-session-actions-toggle]")?.focus({ preventScroll: true });
+    const row = this.rowForPath(this.target?.path) || this.target?.row;
+    row?.querySelector("[data-session-actions-toggle]")?.focus({ preventScroll: true });
+  }
+
+  rowForPath(path) {
+    return Array.from(this.document.querySelectorAll(".session-row")).find((row) => row.dataset.sessionPath === path);
   }
 
   performAction(action) {
@@ -183,29 +191,39 @@ export class SessionActionsController {
     this.callbacks.openModal?.(modal);
   }
 
-  async togglePin(target) {
+  async togglePin(target, { restoreFocus = false } = {}) {
     if (this.pinOperationActive) return null;
     this.pinOperationActive = true;
+    this.setPinControlsDisabled(true);
+    let succeeded = false;
     try {
       const body = new URLSearchParams({ session: target.path, pinned: target.pinned ? "false" : "true" });
       const response = await fetch("/sessions/pin", { method: "POST", body, headers: { "Accept": "application/json" } });
       if (!response.ok) throw new Error("Could not update pinned session");
       const payload = await response.json();
       await this.callbacks.refresh?.();
+      succeeded = true;
       return payload;
     } catch (error) {
       this.showPinError(target, error.message);
       throw error;
     } finally {
       this.pinOperationActive = false;
+      this.setPinControlsDisabled(false);
+      if (succeeded && restoreFocus) this.rowForPath(target.path)?.querySelector("[data-session-pin-toggle]")?.focus({ preventScroll: true });
     }
   }
 
+  setPinControlsDisabled(disabled) {
+    this.document.querySelectorAll?.("[data-session-pin-toggle], [data-session-action-pin]").forEach((control) => { control.disabled = disabled; });
+  }
+
   showPinError(target, message) {
-    const toggle = target.row?.querySelector("[data-session-actions-toggle]");
+    const row = this.rowForPath(target.path) || target.row;
+    const toggle = row?.querySelector("[data-session-actions-toggle]");
     if (!toggle) return;
     const rect = toggle.getBoundingClientRect();
-    this.openMenu(target.row, { x: rect.left, y: rect.bottom });
+    this.openMenu(row, { x: rect.left, y: rect.bottom });
     const error = this.menu()?.querySelector("[data-session-actions-error]");
     if (!error) return;
     error.textContent = message;

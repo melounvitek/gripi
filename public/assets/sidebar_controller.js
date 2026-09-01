@@ -215,7 +215,9 @@ export class SidebarController {
     const previousSearchForm = preserveSearch ? oldElement.querySelector(".sidebar-session-search") : null;
     const previousSearchQuery = previousSearchForm?.querySelector('input[name="session_search"]')?.value;
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
-    const focusedActionPath = this.document.activeElement?.closest?.("[data-session-actions-toggle]")?.closest(".session-row")?.dataset.sessionPath;
+    const focusedSessionControl = this.document.activeElement?.closest?.("[data-session-pin-toggle], [data-session-actions-toggle]");
+    const focusedSessionPath = focusedSessionControl?.closest(".session-row")?.dataset.sessionPath;
+    const focusedSessionControlSelector = focusedSessionControl?.matches("[data-session-pin-toggle]") ? "[data-session-pin-toggle]" : "[data-session-actions-toggle]";
     const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");
     const visibilityToggleFocused = !!focusedVisibilityToggle && oldElement.contains(focusedVisibilityToggle);
     this.projectSelectController.destroy(oldElement);
@@ -230,9 +232,9 @@ export class SidebarController {
     if (previousSearchOpen !== undefined) this.setSearchOpen(replacementSearchForm, replacementSearchButton, previousSearchOpen);
     if (notificationToggle) this.element.querySelector("[data-notification-toggle]")?.replaceWith(notificationToggle);
     if (resourceUsage) this.element.querySelector("[data-resource-usage]")?.replaceWith(resourceUsage);
-    if (focusedActionPath) {
-      const focusedRow = [...this.element.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === focusedActionPath);
-      (focusedRow?.querySelector("[data-session-actions-toggle]") || this.element.querySelector("[data-sidebar-search-toggle]"))?.focus({ preventScroll: true });
+    if (focusedSessionPath) {
+      const focusedRow = [...this.element.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === focusedSessionPath);
+      (focusedRow?.querySelector(focusedSessionControlSelector) || this.element.querySelector("[data-sidebar-search-toggle]"))?.focus({ preventScroll: true });
     } else if (visibilityToggleFocused) {
       this.element.querySelector("[data-sidebar-visibility-toggle]")?.focus({ preventScroll: true });
     }

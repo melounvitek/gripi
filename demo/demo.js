@@ -543,7 +543,7 @@
     const indicators = document.createElement("div"); indicators.className = "session-indicators";
     link.append(content, indicators);
     const pin = document.createElement("button");
-    pin.type = "button"; pin.className = `session-pin-toggle demo-pin-toggle${session.pinned ? " is-pinned" : ""}`; pin.dataset.pinId = session.id; pin.setAttribute("aria-pressed", String(!!session.pinned)); pin.setAttribute("aria-label", session.pinned ? "Unpin session" : "Pin session"); pin.title = session.pinned ? "Unpin session" : "Pin session";
+    pin.type = "button"; pin.className = `session-pin-toggle demo-pin-toggle${session.pinned ? " is-pinned" : ""}`; pin.dataset.pinId = session.id; pin.setAttribute("aria-pressed", String(!!session.pinned)); pin.setAttribute("aria-label", session.pinned ? `Unpin session ${session.name}` : `Pin session ${session.name}`); pin.title = session.pinned ? "Unpin session" : "Pin session";
     pin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 5 3 3v2h-4l-1 8-1-8H7v-2l3-3-1-5Z"/></svg>';
     wrapper.append(link, pin);
     return wrapper;
@@ -791,7 +791,7 @@
     }
 
     const sessionLink = event.target.closest("[data-session-id]"); if (sessionLink) { event.preventDefault(); switchSession(sessionLink.dataset.sessionId); return; }
-    const pin = event.target.closest("[data-pin-id]"); if (pin) { const session = sessions.find((item) => item.id === pin.dataset.pinId); session.pinned = !session.pinned; persist(); renderSidebar(); return; }
+    const pin = event.target.closest("[data-pin-id]"); if (pin) { const session = sessions.find((item) => item.id === pin.dataset.pinId); session.pinned = !session.pinned; persist(); renderSidebar(); [...document.querySelectorAll("[data-pin-id]")].find((button) => button.dataset.pinId === session.id)?.focus({ preventScroll: true }); return; }
     const open = event.target.closest("[data-modal-open]"); if (open) { openModal(open.dataset.modalOpen); return; }
     const close = event.target.closest("[data-modal-close]"); if (close) { closeModal(close.closest("[data-modal]")); return; }
     const command = event.target.closest("[data-command-name]"); if (command) { handleSlash(command.dataset.commandName); element.prompt.value = ""; persistDraft(); element.commands.classList.remove("is-visible"); return; }

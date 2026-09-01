@@ -99,6 +99,19 @@ test("open selected session actions on the first mobile tap", async ({ page }) =
   await expect(currentRow).toHaveAttribute("data-pinned", "true");
   await expect(currentRow.getByRole("button", { name: /Unpin session/ })).toHaveAttribute("aria-pressed", "true");
 
+  const actions = currentRow.getByRole("button", { name: /Session actions/ });
+  const indicators = currentRow.locator(".session-indicators");
+  await indicators.evaluate((element) => {
+    const indicator = document.createElement("span");
+    indicator.className = "session-fork-indicator";
+    indicator.textContent = "⑂";
+    element.append(indicator);
+  });
+  const indicatorBounds = await indicators.locator(".session-fork-indicator").boundingBox();
+  const oneLineActionBounds = await actions.boundingBox();
+  expect(indicatorBounds.y + indicatorBounds.height).toBeLessThanOrEqual(oneLineActionBounds.y);
+  await indicators.locator(".session-fork-indicator").evaluate((element) => element.remove());
+
   const title = currentRow.locator(".session-title");
   await title.evaluate((element) => { element.textContent = "Fix sidebar session deletion and native rename behavior"; });
   const titleMetrics = await title.evaluate((element) => ({
@@ -108,7 +121,6 @@ test("open selected session actions on the first mobile tap", async ({ page }) =
   expect(titleMetrics.height).toBeGreaterThan(titleMetrics.lineHeight * 1.5);
   expect(titleMetrics.height).toBeLessThanOrEqual(titleMetrics.lineHeight * 2 + 1);
 
-  const actions = currentRow.getByRole("button", { name: /Session actions/ });
   const bounds = await actions.boundingBox();
   const titleBounds = await title.boundingBox();
   expect(bounds).not.toBeNull();
