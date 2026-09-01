@@ -744,6 +744,9 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 	if !ok {
 		return
 	}
+	unlock := app.sessionMutationLocks.Lock(session.Path)
+	defer unlock()
+
 	if reason := app.deleteSessionBlockReason(request.FormValue("current_session"), session.Path); reason != "" {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": reason})
 		return

@@ -318,6 +318,8 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 		return
 	}
 	defer unlock()
+	unlockMutation := app.sessionMutationLocks.Lock(path)
+	defer unlockMutation()
 
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
 	if session, persisted := store.Session(path); persisted {
@@ -352,6 +354,9 @@ func (app *application) markSessionRead(response http.ResponseWriter, request *h
 	if !ok {
 		return
 	}
+	unlock := app.sessionMutationLocks.Lock(path)
+	defer unlock()
+
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
 	session, ok := store.Session(path)
 	if !ok {

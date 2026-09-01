@@ -5,7 +5,6 @@ export class SessionActionsController {
     this.callbacks = callbacks;
     this.target = null;
     this.pinOperationActive = false;
-    this.operationAbort = null;
     this.initialized = false;
   }
 
@@ -57,6 +56,7 @@ export class SessionActionsController {
       this.moveMenuFocus(event.key);
       return;
     }
+    if (event.key === "Tab" && !menu?.hidden) this.closeMenu({ restoreFocus: true });
     this.openKeyboardMenu(event);
   }
 
@@ -138,7 +138,10 @@ export class SessionActionsController {
     if (!target || action === "delete" && (target.current || target.busy)) return;
     this.closeMenu();
     if (action === "rename") this.openRename(target);
-    if (action === "pin") this.togglePin(target).catch(() => {});
+    if (action === "pin") {
+      this.restoreFocus();
+      this.togglePin(target).catch(() => {});
+    }
     if (action === "delete") this.openDelete(target);
   }
 
@@ -192,46 +195,41 @@ export class SessionActionsController {
   }
 
   async submit(form, action) {
+    const modal = form.closest("[data-modal]");
+    if (modal.dataset.sessionActionPending === "true") return;
     if (action === "delete") form.querySelector('[name="current_session"]').value = this.callbacks.currentSessionPath?.() || "";
     const body = new FormData(form);
-    const controls = Array.from(form.querySelectorAll("button, input"));
+    const controls = Array.from(modal.querySelectorAll("button, input"));
     controls.forEach((control) => { control.disabled = true; });
+    modal.dataset.sessionActionPending = "true";
     this.clearError(form);
-    const abort = new AbortController();
-    this.operationAbort?.abort();
-    this.operationAbort = abort;
-    await this.sendMutation(form, action, body, abort);
-    if (this.operationAbort !== abort) return;
-    this.operationAbort = null;
-    controls.forEach((control) => { control.disabled = false; });
+    try {
+      await this.sendMutation(form, action, body);
+    } finally {
+      delete modal.dataset.sessionActionPending;
+      controls.forEach((control) => { control.disabled = false; });
+    }
   }
 
-  async sendMutation(form, action, body, abort) {
+  async sendMutation(form, action, body) {
     try {
-      const response = await fetch(form.action, { method: "POST", body, headers: { "Accept": "application/json" }, signal: abort.signal });
+      const response = await fetch(form.action, { method: "POST", body, headers: { "Accept": "application/json" } });
       const responseText = await response.text();
       let payload = null;
       try { payload = JSON.parse(responseText); } catch (_error) {}
       if (!response.ok) throw new Error(payload?.error || responseText.trim() || `Could not ${action} session`);
+      delete form.closest("[data-modal]").dataset.sessionActionPending;
       this.callbacks.closeModal?.(form.closest("[data-modal]"));
       await this.callbacks.refresh?.();
       this.callbacks.showStatus?.(action === "delete" ? "Session deleted" : "Session renamed");
     } catch (error) {
-      if (error.name !== "AbortError") this.showError(form, error.message);
+      this.showError(form, error.message);
     }
   }
 
   prepareForm(form) {
-    this.operationAbort?.abort();
-    this.operationAbort = null;
-    form.querySelectorAll("button, input").forEach((control) => { control.disabled = false; });
+    form.closest("[data-modal]").querySelectorAll("button, input").forEach((control) => { control.disabled = false; });
     this.clearError(form);
-  }
-
-  modalClosed(modal) {
-    if (!["session-rename-modal", "session-delete-modal"].includes(modal?.dataset.modal)) return;
-    this.operationAbort?.abort();
-    this.operationAbort = null;
   }
 
   clearError(form) {

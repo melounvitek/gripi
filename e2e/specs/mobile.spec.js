@@ -97,7 +97,11 @@ test("open selected session actions on the first mobile tap", async ({ page }) =
 
   await actions.tap();
 
-  await expect(page.getByRole("menu")).toBeVisible();
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  const menuBounds = await menu.boundingBox();
+  expect(menuBounds.x).toBeGreaterThanOrEqual(0);
+  expect(menuBounds.x + menuBounds.width).toBeLessThanOrEqual(page.viewportSize().width);
   await expect(page.getByRole("menuitem", { name: "Rename…" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Delete session…" })).toHaveAttribute("aria-disabled", "true");
 });

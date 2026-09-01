@@ -2754,8 +2754,7 @@ function openModal(modal) {
 }
 
 function closeModal(modal) {
-  if (!modal) return;
-  sessionActionsController.modalClosed(modal);
+  if (!modal || modal.dataset.sessionActionPending === "true") return;
   if (modal.dataset.modal === "new-session-modal") newSessionFormController.close(modal.querySelector(".new-session-cwd-form"));
   modal.hidden = true;
   if (modal.dataset.modal === "model-settings-modal") modelSettingsOperationGeneration += 1;
