@@ -103,6 +103,37 @@ test("session actions open from the first button tap and from right click", () =
   assert.equal(toggle.focused, true);
 });
 
+test("session actions show pin failures in the menu", async () => {
+  const originalFetch = globalThis.fetch;
+  const document = new FakeDocument();
+  const row = new FakeElement("div", [".session-row"]);
+  row.dataset.sessionPath = "/sessions/one.jsonl";
+  row.dataset.sessionName = "One";
+  row.dataset.current = "false";
+  row.dataset.busy = "false";
+  row.dataset.pinned = "false";
+  const toggle = new FakeElement("button", ["[data-session-actions-toggle]"]);
+  row.append(toggle);
+  const menu = new FakeElement("div", ["[data-session-actions-menu]"]);
+  menu.hidden = true;
+  const pin = new FakeElement("button", ["[data-session-action-pin]"]);
+  const error = new FakeElement("p", ["[data-session-actions-error]"]);
+  error.hidden = true;
+  menu.append(pin, error);
+  document.body.append(row, menu);
+  const controller = new SessionActionsController(document, { innerWidth: 400, innerHeight: 800 }, {});
+  globalThis.fetch = async () => ({ ok: false });
+
+  try {
+    await assert.rejects(controller.togglePin(controller.targetFor(row)), /Could not update pinned session/);
+    assert.equal(menu.hidden, false);
+    assert.equal(error.hidden, false);
+    assert.equal(error.textContent, "Could not update pinned session");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("session actions explain why the current session cannot be deleted", () => {
   const document = new FakeDocument();
   const menu = new FakeElement("div", ["[data-session-actions-menu]"]);

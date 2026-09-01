@@ -87,6 +87,7 @@ export class SessionActionsController {
     const pin = menu.querySelector("[data-session-action-pin]");
     if (pin) pin.textContent = this.target.pinned ? "Unpin" : "Pin";
     this.configureDeleteAction(menu.querySelector("[data-session-action-delete]"));
+    this.clearMenuError(menu);
     row.querySelector("[data-session-actions-toggle]")?.setAttribute("aria-expanded", "true");
     menu.hidden = false;
     this.positionMenu(menu, position);
@@ -110,6 +111,13 @@ export class SessionActionsController {
     const reason = this.target.current ? "Cannot delete the current session" : this.target.busy ? "Cannot delete a running session" : "";
     button.setAttribute("aria-disabled", reason ? "true" : "false");
     button.title = reason;
+  }
+
+  clearMenuError(menu) {
+    const error = menu.querySelector("[data-session-actions-error]");
+    if (!error) return;
+    error.hidden = true;
+    error.textContent = "";
   }
 
   positionMenu(menu, { x = 0, y = 0 } = {}) {
@@ -178,11 +186,22 @@ export class SessionActionsController {
       await this.callbacks.refresh?.();
       return payload;
     } catch (error) {
-      this.callbacks.showError?.(error.message);
+      this.showPinError(target, error.message);
       throw error;
     } finally {
       this.pinOperationActive = false;
     }
+  }
+
+  showPinError(target, message) {
+    const toggle = target.row?.querySelector("[data-session-actions-toggle]");
+    if (!toggle) return;
+    const rect = toggle.getBoundingClientRect();
+    this.openMenu(target.row, { x: rect.left, y: rect.bottom });
+    const error = this.menu()?.querySelector("[data-session-actions-error]");
+    if (!error) return;
+    error.textContent = message;
+    error.hidden = false;
   }
 
   handleSubmit(event) {

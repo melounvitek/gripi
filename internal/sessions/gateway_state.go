@@ -17,6 +17,7 @@ type GatewayState struct {
 	sessionsRoot   string
 	pinnedChanges  map[string]uint64
 	pinnedRevision uint64
+	forgotten      map[string]bool
 	mu             sync.Mutex
 }
 
@@ -39,14 +40,23 @@ func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, mar
 	if err := readJSONIfExists(state.pinnedPath, &paths); err != nil {
 		return nil, nil, fmt.Errorf("read pinned sessions state: %w", err)
 	}
+	for path := range counts {
+		if state.sessionForgotten(path) {
+			delete(counts, path)
+			changed = true
+		}
+	}
 	for _, session := range all {
+		if state.sessionForgotten(session.Path) {
+			continue
+		}
 		value, known := counts[session.Path]
 		if !known || value > session.AssistantResponseCount {
 			counts[session.Path] = session.AssistantResponseCount
 			changed = true
 		}
 	}
-	if selected != nil && markSelected && counts[selected.Path] != selected.AssistantResponseCount {
+	if selected != nil && markSelected && !state.sessionForgotten(selected.Path) && counts[selected.Path] != selected.AssistantResponseCount {
 		counts[selected.Path] = selected.AssistantResponseCount
 		changed = true
 	}
@@ -57,11 +67,14 @@ func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, mar
 	}
 	unread := make(map[string]bool)
 	for _, session := range all {
-		unread[session.Path] = counts[session.Path] < session.AssistantResponseCount
+		unread[session.Path] = !state.sessionForgotten(session.Path) && counts[session.Path] < session.AssistantResponseCount
 	}
 	pinned := make(map[string]bool)
 	for _, path := range paths {
-		pinned[state.configuredPath(path)] = true
+		path = state.configuredPath(path)
+		if !state.sessionForgotten(path) {
+			pinned[path] = true
+		}
 	}
 	return unread, pinned, nil
 }
@@ -74,6 +87,7 @@ func (state *GatewayState) SetPinned(path string, pinned bool) error {
 		return fmt.Errorf("read pinned sessions state: %w", err)
 	}
 	path = state.configuredPath(path)
+	delete(state.forgotten, path)
 	result := make([]string, 0, len(paths)+1)
 	found := false
 	seen := make(map[string]bool)
@@ -203,6 +217,10 @@ func (state *GatewayState) Forget(path string) error {
 	}
 	counts, _ = state.normalizedCounts(counts)
 	path = state.configuredPath(path)
+	if state.forgotten == nil {
+		state.forgotten = make(map[string]bool)
+	}
+	state.forgotten[path] = true
 	delete(counts, path)
 
 	var paths []string
@@ -258,6 +276,7 @@ func (state *GatewayState) MarkRead(path string, count int) error {
 	}
 	values, _ = state.normalizedCounts(values)
 	path = state.configuredPath(path)
+	delete(state.forgotten, path)
 	if values[path] < count {
 		values[path] = count
 	}
@@ -265,6 +284,18 @@ func (state *GatewayState) MarkRead(path string, count int) error {
 		return fmt.Errorf("write session read state: %w", err)
 	}
 	return nil
+}
+
+func (state *GatewayState) sessionForgotten(path string) bool {
+	path = state.configuredPath(path)
+	if !state.forgotten[path] {
+		return false
+	}
+	if _, err := os.Stat(path); err == nil {
+		delete(state.forgotten, path)
+		return false
+	}
+	return true
 }
 
 func (state *GatewayState) configuredPath(path string) string {

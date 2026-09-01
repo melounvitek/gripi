@@ -318,16 +318,20 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 		return
 	}
 	defer unlock()
-	unlockMutation := app.sessionMutationLocks.Lock(path)
-	defer unlockMutation()
 
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	if session, persisted := store.Session(path); persisted {
-		path = session.Path
-	} else if _, pending := app.pendingSessions.CWD(path); !pending {
+	path, ok = app.gatewayStateSessionPath(path)
+	if !ok {
 		http.NotFound(response, request)
 		return
 	}
+	unlockMutation := app.sessionMutationLocks.Lock(path)
+	defer unlockMutation()
+	path, ok = app.gatewayStateSessionPath(path)
+	if !ok {
+		http.NotFound(response, request)
+		return
+	}
+
 	var pinned bool
 	switch request.FormValue("pinned") {
 	case "true":
@@ -346,6 +350,15 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 	writeJSON(response, map[string]any{"session": path, "pinned": pinned})
 }
 
+func (app *application) gatewayStateSessionPath(path string) (string, bool) {
+	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+	if session, persisted := store.Session(path); persisted {
+		return session.Path, true
+	}
+	_, pending := app.pendingSessions.CWD(path)
+	return path, pending
+}
+
 func (app *application) markSessionRead(response http.ResponseWriter, request *http.Request) {
 	if !parseForm(response, request) {
 		return
@@ -354,15 +367,20 @@ func (app *application) markSessionRead(response http.ResponseWriter, request *h
 	if !ok {
 		return
 	}
-	unlock := app.sessionMutationLocks.Lock(path)
-	defer unlock()
-
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
 	session, ok := store.Session(path)
 	if !ok {
 		http.NotFound(response, request)
 		return
 	}
+	unlock := app.sessionMutationLocks.Lock(session.Path)
+	defer unlock()
+	session, ok = store.Session(session.Path)
+	if !ok {
+		http.NotFound(response, request)
+		return
+	}
+
 	countText, generation := request.FormValue("assistant_response_count"), request.FormValue("session_generation")
 	if len(countText) == 0 || len(countText) > 10 || len(generation) > 256 {
 		writeText(response, http.StatusBadRequest, "Invalid read state")
