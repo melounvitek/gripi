@@ -84,6 +84,21 @@ test("open and zoom live and persisted images on the first mobile tap", async ({
   await expect(viewer).toBeHidden();
 });
 
+test("do not highlight unopened sessions on coarse pointers", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+
+  expect(await page.evaluate(() => matchMedia("(hover: hover) and (pointer: fine)").matches)).toBe(false);
+
+  const session = page.locator('.session-row[data-current="false"] a.session').first();
+  const restingStyle = await session.evaluate(sessionStyle);
+  await session.hover();
+  await session.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+
+  expect(await session.evaluate(sessionStyle)).toEqual(restingStyle);
+  await expect(session).not.toHaveAttribute("aria-current", "page");
+});
+
 test("open selected session actions on the first mobile tap", async ({ page }) => {
   await page.goto("/");
   await page.locator('label[aria-label="Open sessions"]').tap();
@@ -330,6 +345,11 @@ test("cancel a native bash command on the first mobile tap", async ({ page }) =>
   await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("cancelled");
   await expectRunFinished(page);
 });
+
+function sessionStyle(element) {
+  const style = getComputedStyle(element);
+  return { backgroundColor: style.backgroundColor, borderColor: style.borderColor };
+}
 
 async function expectWrappedOutputCollapsed(card) {
   const body = card.locator("[data-tool-output-body]");

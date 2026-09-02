@@ -190,7 +190,9 @@
     .session-row a.session { padding-right: 0.75rem; }
     .session-row .session-project, .session-row .session-meta { width: fit-content; max-width: calc(100% - 4.5rem); }
     a.session { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; padding: 0.65rem 0.75rem; margin: 0.25rem 0; border-radius: 0.35rem; color: inherit; text-decoration: none; border: 1px solid transparent; transition: background 120ms ease, border-color 120ms ease; }
-    a.session:hover { background: var(--accent-tint-04); border-color: var(--border); }
+    @media (hover: hover) and (pointer: fine) {
+      a.session:hover { background: var(--accent-tint-04); border-color: var(--border); }
+    }
     .session-pin-toggle, .session-actions-toggle { position: absolute; z-index: 1; bottom: 0.55rem; display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem; border: 1px solid transparent; border-radius: 0.25rem; background: transparent; color: var(--muted); opacity: 0; }
     .session-pin-toggle { right: 2.45rem; padding: 0.3rem; }
     .session-pin-toggle svg { width: 100%; height: 100%; }
@@ -222,8 +224,10 @@
     a.session.selected { background: var(--panel-softer); border-color: var(--accent-line-35); }
     a.session.selected::before { content: ""; position: absolute; left: -1rem; top: 0.7rem; bottom: 0.7rem; width: 3px; background: var(--accent); }
     a.session.unread { background: var(--accent-tint-08); box-shadow: inset 3px 0 0 var(--accent); }
-    a.session.unread:hover { background: var(--accent-tint-14); }
     a.session.unread .session-title { color: var(--text); font-weight: 700; }
+    @media (hover: hover) and (pointer: fine) {
+      a.session.unread:hover { background: var(--accent-tint-14); }
+    }
     .session-content { min-width: 0; }
     .session-indicators { align-self: start; display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; min-width: 0.7rem; }
     .session-fork-indicator { display: inline-flex; align-items: center; justify-content: center; min-width: 1.15rem; height: 1.15rem; border: 1px solid #f0c67447; border-radius: 0.2rem; background: #f0c67414; color: var(--gold); font-size: 0.86rem; font-weight: 700; line-height: 1; }
