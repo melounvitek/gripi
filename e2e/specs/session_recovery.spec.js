@@ -51,3 +51,34 @@ test("polling after sleep restores completed compaction without a browser wake e
   await message(page, "assistant", replies.standard).scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("recovered-session.png") });
 });
+
+test("failed wake recovery keeps the draft and warning while backing off before retrying", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  const draft = "Keep this draft while reconnecting";
+  await page.getByLabel("Message to Pi").fill(draft);
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(now + 100);
+  await page.route(/\/events(?:\?|$)/, (route) => route.fulfill({ json: { events: [], last_seq: 0, missed: false } }));
+
+  let refreshes = 0;
+  let available = false;
+  await page.route(/\/session_fragment(?:\?|$)/, async (route) => {
+    refreshes += 1;
+    if (available) await route.continue();
+    else await route.fulfill({ status: 503, body: "Temporarily unavailable" });
+  });
+  await page.clock.setSystemTime(now + 61_000);
+  await page.clock.resume();
+
+  await expect(page.getByText("Session may be stale.")).toBeVisible();
+  await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
+  await page.waitForTimeout(1000);
+  expect(refreshes).toBe(1);
+
+  available = true;
+  await expect(page.getByText("Session may be stale.")).toBeHidden();
+  await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
+  expect(refreshes).toBe(2);
+});

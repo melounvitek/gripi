@@ -1660,7 +1660,8 @@ async function pollEvents() {
     const payload = await response.json();
     if (!eventPollCurrent(generation, sessionViewGeneration)) return;
     if (!document.hidden && Date.now() - lastSessionSyncAt >= STALE_SESSION_REFRESH_AFTER_MS) {
-      await resumeEventPolling();
+      const refreshed = await refreshStaleSessionAfterResume();
+      if (!refreshed && eventPollCurrent(generation, sessionViewGeneration)) scheduleNextEventPoll(nextEventPollDelay(true));
       return;
     }
     lastSessionSyncAt = Date.now();

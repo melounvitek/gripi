@@ -5,6 +5,42 @@ import { expectRunFinished, message, selectSession, sendPrompt } from "../suppor
 
 const fakePiLog = process.env.GRIPI_E2E_FAKE_PI_LOG;
 
+test("restore a missed completion after the Pi client retires", async ({ page }) => {
+  test.skip(!fakePiLog, "requires the managed fake Pi runtime");
+
+  await page.goto("/");
+  await selectSession(page, sessions.idleClient);
+  const started = page.waitForResponse(async (response) => {
+    if (new URL(response.url()).pathname !== "/events" || !response.ok()) return false;
+    return (await response.json()).events.some((event) => event.type === "agent_start");
+  });
+  await sendPrompt(page, prompts.steerStart);
+  await started;
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
+
+  let releaseEvents;
+  const eventsPaused = new Promise((resolve) => { releaseEvents = resolve; });
+  await page.route(/\/events(?:\?|$)/, async (route) => {
+    await eventsPaused;
+    await route.continue().catch(() => {});
+  });
+  try {
+    await sendPrompt(page, prompts.steerMessage);
+    const pid = startedPids(await fakePiRecords()).at(-1);
+    expect(pid).toBeTruthy();
+    await expect.poll(async () => stoppedPids(await fakePiRecords())).toContain(pid);
+    await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
+    releaseEvents();
+
+    await expect(message(page, "assistant", replies.steer)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
+    await expect(page.getByLabel("Message to Pi")).toBeEnabled();
+  } finally {
+    releaseEvents();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+});
+
 test("retire an idle Pi client despite browser polling and restart it on demand", async ({ page }) => {
   test.skip(!fakePiLog, "requires the managed fake Pi runtime");
 
