@@ -232,6 +232,9 @@ test("clears pending compaction UI after retry exhaustion", async ({ page }) => 
 
   await page.goto("/");
   await selectSession(page, sessions.promptRetryCompact);
+  // Keep autocomplete from starting an idle Pi client while prompt requests are mocked.
+  const commands = await page.locator("#command-list").evaluate((list) => list.outerHTML);
+  await page.route("**/commands?**", (route) => route.fulfill({ contentType: "text/html", body: commands }));
   const composer = page.getByLabel("Message to Pi");
   await composer.fill("/compact");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());

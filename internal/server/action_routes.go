@@ -1382,8 +1382,21 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 		var stateRollback func() error
 		if wasPending {
 			var err error
-			stateRollback, err = app.migratePendingSessionState(from, to)
+			stateRollback, err = app.migratePendingSessionState(from, to, false)
 			if err != nil {
+				if claimed && app.releaseSession != nil {
+					err = errors.Join(err, app.releaseSession(request, to))
+				}
+				return nil, err
+			}
+		}
+		var tagRollback func() error
+		if operation != "new" && app.gatewayState != nil {
+			tagRollback, err = app.gatewayState.CopyTags(from, to)
+			if err != nil {
+				if stateRollback != nil {
+					err = errors.Join(err, stateRollback())
+				}
 				if claimed && app.releaseSession != nil {
 					err = errors.Join(err, app.releaseSession(request, to))
 				}
@@ -1392,8 +1405,11 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 		}
 		return func() error {
 			var stateErr error
+			if tagRollback != nil {
+				stateErr = tagRollback()
+			}
 			if stateRollback != nil {
-				stateErr = stateRollback()
+				stateErr = errors.Join(stateErr, stateRollback())
 			}
 			var ownershipErr error
 			if claimed && app.releaseSession != nil {
@@ -1435,6 +1451,13 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 }
 
 func (app *application) startNewSession(request *http.Request, cwd string) (string, error) {
+	if err := request.ParseForm(); err != nil {
+		return "", err
+	}
+	names, err := sessions.NormalizeTags(request.PostForm["tags"])
+	if err != nil {
+		return "", err
+	}
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
@@ -1443,22 +1466,31 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 		if !ok {
 			return "", nil, errors.New("Pi reported a session path outside the configured sessions root")
 		}
-		if app.claimSession == nil {
-			return path, nil, nil
-		}
-		claimed, err := app.claimSession(request, path)
-		if err != nil {
-			return "", nil, err
-		}
-		return path, func() error {
-			if !claimed {
-				return nil
+		claimed := false
+		if app.claimSession != nil {
+			claimed, err = app.claimSession(request, path)
+			if err != nil {
+				return "", nil, err
 			}
-			if app.releaseSession == nil {
-				return nil
+		}
+		var tagRollback func() error
+		rollback := func() error {
+			var rollbackErr error
+			if tagRollback != nil {
+				rollbackErr = tagRollback()
 			}
-			return app.releaseSession(request, path)
-		}, nil
+			if claimed && app.releaseSession != nil {
+				rollbackErr = errors.Join(rollbackErr, app.releaseSession(request, path))
+			}
+			return rollbackErr
+		}
+		if app.gatewayState != nil {
+			tagRollback, err = app.gatewayState.SetTags(path, names)
+			if err != nil {
+				return "", nil, errors.Join(err, rollback())
+			}
+		}
+		return path, rollback, nil
 	})
 }
 
@@ -1646,6 +1678,10 @@ func (app *application) writeActionRPCError(response http.ResponseWriter, err er
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, sessions.ErrInvalidTag) || errors.Is(err, sessions.ErrTooManyTags) {
+		writeJSONStatus(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return true
+	}
 	var pending *pendingIdentificationError
 	if errors.As(err, &pending) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": pending.Error()})
@@ -1705,7 +1741,7 @@ func (app *application) writePromptResult(response http.ResponseWriter, request 
 
 func (app *application) sessionRedirectPath(request *http.Request, path string) string {
 	values := url.Values{"session": []string{path}}
-	for _, key := range []string{"project", "session_search", "session_only"} {
+	for _, key := range []string{"project", "session_search", "session_only", "tag"} {
 		if value := request.FormValue(key); value != "" && (key != "session_only" || value == "1") {
 			values.Set(key, value)
 		}

@@ -176,11 +176,13 @@ test("find, select, and pin a session with persisted history", async ({ page }) 
 
 test("rename and delete a background session from its contextual actions", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "New session" }).click();
+  await page.getByRole("button", { name: "New session", exact: true }).click();
   const newSessionDialog = page.getByRole("dialog", { name: "New session" });
   await newSessionDialog.getByRole("combobox", { name: "Project" }).click();
   await page.getByRole("option", { name: /new-session-desktop/ }).click();
+  const previousURL = page.url();
   await newSessionDialog.getByRole("button", { name: "Start session" }).click();
+  await expect(page).not.toHaveURL(previousURL);
   await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
   await sendPrompt(page, prompts.newSession);
   await expectRunFinished(page);

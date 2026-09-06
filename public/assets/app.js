@@ -39,6 +39,7 @@ import { BrowserAccessRequestController, WorkspaceAccessRequestController } from
 import { ProjectSelectController } from "./project_select_controller.js";
 import { NewSessionFormController } from "./new_session_form_controller.js";
 import { SessionActionsController } from "./session_actions_controller.js";
+import { SessionTagsController } from "./session_tags_controller.js";
 import { SidebarController } from "./sidebar_controller.js";
 import { ConversationController } from "./conversation_controller.js";
 import { ComposerAutocompleteController } from "./composer_autocomplete_controller.js";
@@ -74,7 +75,15 @@ const sidebarController = new SidebarController(
     showGripiNotification(name, body, url, tag).catch(() => {});
   }
 );
+const sessionTagsController = new SessionTagsController(document, window, {
+  openModal,
+  closeModal,
+  invalidate: () => sidebarController.invalidate(),
+  refresh: () => sidebarController.refresh({ force: true }),
+  filter: (url) => sidebarController.applyFilters(url)
+});
 const sessionActionsController = new SessionActionsController(document, window, {
+  editTags: (target) => sessionTagsController.open(target.path, target.row.querySelector("[data-session-actions-toggle]")),
   currentSessionPath: () => currentSessionPath(),
   openModal: (modal) => openModal(modal),
   closeModal: (modal) => closeModal(modal),
@@ -2524,6 +2533,7 @@ function replaceNewSessionModalHtml(html) {
   const currentModal = document.querySelector('[data-modal="new-session-modal"]');
   if (!html || !currentModal) return;
 
+  if (sessionTagsController.state?.form === currentModal.querySelector("form") && sessionTagsController.dialog?.open) sessionTagsController.close();
   newSessionFormController.destroy(currentModal);
   projectSelectController.destroy(currentModal);
   currentModal.outerHTML = html;
@@ -2734,6 +2744,7 @@ function openNewSessionModal() {
   if (sessionSwitching()) return;
 
   const modal = document.querySelector('[data-modal="new-session-modal"]');
+  sessionTagsController.resetDraft(modal?.querySelector(".new-session-cwd-form"));
   newSessionFormController.open(modal?.querySelector(".new-session-cwd-form"));
   openModal(modal);
 }
@@ -2839,6 +2850,8 @@ function addSessionViewFormParams(formData) {
   if (project) formData.set("project", project);
   const sessionSearch = sidebarController.activeSearch();
   if (sessionSearch) formData.set("session_search", sessionSearch);
+  const tag = new URLSearchParams(window.location.search).get("tag");
+  if (tag) formData.set("tag", tag);
   if (new URLSearchParams(window.location.search).get("session_only") === "1") formData.set("session_only", "1");
 }
 
@@ -3019,7 +3032,7 @@ document.addEventListener("submit", async (event) => {
 
   event.preventDefault();
   const submit = form.querySelector("[data-new-session-submit]");
-  if (submit?.disabled || form.dataset.submitting === "true") return;
+  if (submit?.disabled || form.dataset.submitting === "true" || sessionTagsController.dialog?.open) return;
 
   newSessionFormController.sync(form);
   const formData = new FormData(form);
@@ -3066,11 +3079,11 @@ window.addEventListener("gripi:session-search-requested", requestSessionSearch);
 window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
 function handleModalTab(event) {
-  if (event.key !== "Tab") return;
-  const modal = document.querySelector('[data-modal]:not([hidden])');
+  if (event.key !== "Tab" || event.defaultPrevented) return;
+  const modal = document.querySelector('dialog[open]') || document.querySelector('[data-modal]:not([hidden])');
   if (!modal) return;
   const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
-    .filter((element) => !element.closest("[hidden]"));
+    .filter((element) => element.tabIndex >= 0 && !element.closest("[hidden]"));
   if (focusable.length === 0) return;
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
@@ -3368,6 +3381,7 @@ function bootstrapPage() {
   }).catch(() => {});
   sidebarController.initialize();
   sessionActionsController.initialize();
+  sessionTagsController.initialize();
   bindPageLifetimeControls();
   bindSessionDom();
   bindSessionControls();

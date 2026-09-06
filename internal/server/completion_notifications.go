@@ -255,14 +255,24 @@ func (notifier *completionNotifier) sessionPath(ctx context.Context, reply compl
 		return path, nil
 	}
 	reported = session.Path
-	if !notifier.app.config.MultiUserMode {
-		return reported, nil
-	}
-	owner, err := notifier.app.ownershipStore.Owner(path)
-	if err != nil || owner == "" {
-		return path, err
-	}
-	if _, err := notifier.app.ownershipStore.Claim(reported, owner); err != nil {
+	err = notifier.app.remapPendingRPCClient(path, reported, func() (func() error, error) {
+		if !notifier.app.config.MultiUserMode {
+			return nil, nil
+		}
+		owner, err := notifier.app.ownershipStore.Owner(path)
+		if err != nil {
+			return nil, err
+		}
+		if owner == "" {
+			return nil, errors.New("pending session has no owner")
+		}
+		claimed, err := notifier.app.ownershipStore.Claim(reported, owner)
+		if err != nil || !claimed {
+			return nil, err
+		}
+		return func() error { return notifier.app.ownershipStore.Release(reported, owner) }, nil
+	})
+	if err != nil {
 		return path, err
 	}
 	return reported, nil

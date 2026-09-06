@@ -163,6 +163,7 @@ export class SessionActionsController {
     const target = this.target;
     if (!target || action === "delete" && (target.current || target.busy)) return;
     this.closeMenu();
+    if (action === "tags") this.callbacks.editTags?.(target);
     if (action === "rename") this.openRename(target);
     if (action === "pin") {
       this.restoreFocus();

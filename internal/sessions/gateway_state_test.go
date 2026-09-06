@@ -13,7 +13,7 @@ func TestGatewayStatePreservesMalformedReadState(t *testing.T) {
 	if err := os.WriteFile(path, malformed, 0600); err != nil {
 		t.Fatal(err)
 	}
-	state := NewGatewayState(path, filepath.Join(t.TempDir(), "pinned.json"), "")
+	state := NewGatewayState(path, filepath.Join(t.TempDir(), "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
 	session := &Session{Path: "/session", AssistantResponseCount: 1}
 
 	if _, _, err := state.ReadAndObserve([]*Session{session}, session, true); err == nil {
@@ -30,7 +30,7 @@ func TestGatewayStatePreservesMalformedReadState(t *testing.T) {
 
 func TestGatewayStateReportsThePersistedReadCount(t *testing.T) {
 	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root)
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root)
 	path := filepath.Join(root, "session.jsonl")
 	if err := state.MarkRead(path, 3); err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestGatewayStatePreservesMalformedPinnedState(t *testing.T) {
 	if err := os.WriteFile(path, malformed, 0600); err != nil {
 		t.Fatal(err)
 	}
-	state := NewGatewayState(filepath.Join(t.TempDir(), "read.json"), path, "")
+	state := NewGatewayState(filepath.Join(t.TempDir(), "read.json"), path, filepath.Join(t.TempDir(), "tags.json"), "")
 
 	if _, _, err := state.ReadAndObserve(nil, nil, false); err == nil {
 		t.Fatal("ReadAndObserve() succeeded")
@@ -81,7 +81,7 @@ func TestGatewayStateNormalizesPhysicalReadAndPinnedPaths(t *testing.T) {
 	if err := os.WriteFile(pinnedPath, pinnedPaths, 0600); err != nil {
 		t.Fatal(err)
 	}
-	state := NewGatewayState(readPath, pinnedPath, configuredRoot)
+	state := NewGatewayState(readPath, pinnedPath, filepath.Join(t.TempDir(), "tags.json"), configuredRoot)
 	session := &Session{Path: configuredPath, AssistantResponseCount: 2}
 
 	unread, pinned, err := state.ReadAndObserve([]*Session{session}, nil, false)
@@ -105,7 +105,7 @@ func TestGatewayStateNormalizesPhysicalReadAndPinnedPaths(t *testing.T) {
 
 func TestGatewayStatePinnedMigrationRollbackPreservesNewerChanges(t *testing.T) {
 	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
 	if err := state.SetPinned("/pending", true); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestGatewayStatePinnedMigrationRollbackPreservesNewerDestinationChange(t *t
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")
+			state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
 			if err := state.SetPinned("/pending", true); err != nil {
 				t.Fatal(err)
 			}
@@ -174,7 +174,7 @@ func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
 	readPath := filepath.Join(root, "read.json")
 	pinnedPath := filepath.Join(root, "pinned.json")
 	sessionPath := filepath.Join(root, "sessions", "session.jsonl")
-	state := NewGatewayState(readPath, pinnedPath, filepath.Join(root, "sessions"))
+	state := NewGatewayState(readPath, pinnedPath, filepath.Join(t.TempDir(), "tags.json"), filepath.Join(root, "sessions"))
 
 	if err := state.MarkRead(sessionPath, 3); err != nil {
 		t.Fatal(err)
@@ -207,7 +207,7 @@ func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
 func TestGatewayStateTracksForgottenSessionWhenCleanupStateIsMalformed(t *testing.T) {
 	root := t.TempDir()
 	readPath := filepath.Join(root, "read.json")
-	state := NewGatewayState(readPath, filepath.Join(root, "pinned.json"), "")
+	state := NewGatewayState(readPath, filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
 	if err := os.WriteFile(readPath, []byte("{"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestGatewayStateTracksForgottenSessionWhenCleanupStateIsMalformed(t *testin
 
 func TestGatewayStateTreatsMissingFilesAsEmpty(t *testing.T) {
 	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
 	session := &Session{Path: "/session", AssistantResponseCount: 1}
 
 	unread, pinned, err := state.ReadAndObserve([]*Session{session}, nil, false)

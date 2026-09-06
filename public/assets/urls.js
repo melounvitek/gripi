@@ -10,6 +10,10 @@ export function sessionUrl(sessionPath, location = window.location) {
   const currentProject = new URLSearchParams(location.search).get("project");
   url.searchParams.set("session", sessionPath);
   if (currentProject) url.searchParams.set("project", currentProject);
+  for (const key of ["tag", "session_search"]) {
+    const value = new URLSearchParams(location.search).get(key);
+    if (value) url.searchParams.set(key, value);
+  }
   return `${url.pathname}${url.search}`;
 }
 

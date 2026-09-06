@@ -29,6 +29,9 @@ func (app *application) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /composer/path_suggestions", app.composerPathSuggestions)
 	mux.HandleFunc("POST /markdown", app.renderMarkdown)
 	mux.HandleFunc("POST /sessions/pin", app.pinSession)
+	mux.HandleFunc("GET /tags", app.tags)
+	mux.HandleFunc("GET /sessions/tags", app.sessionTags)
+	mux.HandleFunc("POST /sessions/tags", app.sessionTags)
 	mux.HandleFunc("POST /sessions/mark_read", app.markSessionRead)
 	mux.HandleFunc("GET /events", app.events)
 	mux.HandleFunc("GET /status", app.liveSessionStatus)
@@ -145,6 +148,9 @@ func sessionViewURL(view *pageView) string {
 	}
 	if view.SearchQuery != "" {
 		values.Set("session_search", view.SearchQuery)
+	}
+	if view.SelectedTag != "" {
+		values.Set("tag", view.SelectedTag)
 	}
 	if view.SessionOnly {
 		values.Set("session_only", "1")
@@ -308,29 +314,11 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 	if !parseForm(response, request) {
 		return
 	}
-	path, ok := app.requireOwnedSession(response, request, request.FormValue("session"))
+	path, unlock, ok := app.lockGatewayStateSession(response, request, request.FormValue("session"))
 	if !ok {
-		return
-	}
-	path, unlock, err := app.lockResolvedImagePromptPath(request, path)
-	if err != nil {
-		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
 	}
 	defer unlock()
-
-	path, ok = app.gatewayStateSessionPath(path)
-	if !ok {
-		http.NotFound(response, request)
-		return
-	}
-	unlockMutation := app.sessionMutationLocks.Lock(path)
-	defer unlockMutation()
-	path, ok = app.gatewayStateSessionPath(path)
-	if !ok {
-		http.NotFound(response, request)
-		return
-	}
 
 	var pinned bool
 	switch request.FormValue("pinned") {

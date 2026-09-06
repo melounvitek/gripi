@@ -58,7 +58,11 @@ When running Gripi behind a reverse proxy, enforce a corresponding request-body 
 
 ## Parallel development instances
 
-A second gateway may read the same Pi session directory, but it must not mutate a session being used by another gateway or Pi process. Isolate gateway-owned metadata with `GRIPI_ATTACHMENTS_ROOT`, `GRIPI_SESSION_CWDS_PATH`, `GRIPI_READ_STATE_PATH`, `GRIPI_PINNED_SESSIONS_PATH`, `GRIPI_BROWSER_ACCESS_PATH`, `GRIPI_WORKSPACE_SECRET_PATH`, `GRIPI_WORKSPACE_ACCESS_PATH`, `GRIPI_WORKSPACE_OWNERSHIP_PATH`, `GRIPI_WEB_PUSH_VAPID_PATH`, `GRIPI_PUSH_SUBSCRIPTIONS_PATH`, and the process-only `GRIPI_RESTART_PATH`. Use a separate port and limit mutations to sessions dedicated to that instance.
+A second gateway may read the same Pi session directory, but it must not mutate a session being used by another gateway or Pi process. Isolate gateway-owned metadata with `GRIPI_ATTACHMENTS_ROOT`, `GRIPI_SESSION_CWDS_PATH`, `GRIPI_READ_STATE_PATH`, `GRIPI_PINNED_SESSIONS_PATH`, `GRIPI_SESSION_TAGS_PATH`, `GRIPI_BROWSER_ACCESS_PATH`, `GRIPI_WORKSPACE_SECRET_PATH`, `GRIPI_WORKSPACE_ACCESS_PATH`, `GRIPI_WORKSPACE_OWNERSHIP_PATH`, `GRIPI_WEB_PUSH_VAPID_PATH`, `GRIPI_PUSH_SUBSCRIPTIONS_PATH`, and the process-only `GRIPI_RESTART_PATH`. Use a separate port and limit mutations to sessions dedicated to that instance.
+
+## Session tags
+
+Session tags are stored in `~/.pi/gripi/session-tags.json`, separately from Pi session files. Override the path with `GRIPI_SESSION_TAGS_PATH`. Tag edits do not start Pi or change its files. Names are trimmed and lowercased, contain at most 64 characters with no control characters, and are limited to 32 tags per session. Suggestions include only tags assigned to sessions visible to the current user; unused tags disappear.
 
 ## Web Push notifications
 

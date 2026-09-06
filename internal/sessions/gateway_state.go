@@ -14,6 +14,9 @@ import (
 type GatewayState struct {
 	readPath       string
 	pinnedPath     string
+	tagsPath       string
+	tagChanges     map[string]uint64
+	tagRevision    uint64
 	sessionsRoot   string
 	pinnedChanges  map[string]uint64
 	pinnedRevision uint64
@@ -21,8 +24,8 @@ type GatewayState struct {
 	mu             sync.Mutex
 }
 
-func NewGatewayState(readPath, pinnedPath, sessionsRoot string) *GatewayState {
-	return &GatewayState{readPath: readPath, pinnedPath: pinnedPath, sessionsRoot: sessionsRoot}
+func NewGatewayState(readPath, pinnedPath, tagsPath, sessionsRoot string) *GatewayState {
+	return &GatewayState{readPath: readPath, pinnedPath: pinnedPath, tagsPath: tagsPath, sessionsRoot: sessionsRoot}
 }
 
 func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool) (map[string]bool, map[string]bool, error) {
@@ -239,6 +242,13 @@ func (state *GatewayState) Forget(path string) error {
 		pinned = append(pinned, candidate)
 	}
 
+	tags, err := state.readSessionTags()
+	if err != nil {
+		return err
+	}
+	if _, err := state.replaceTags(tags, map[string][]string{path: nil}); err != nil {
+		return err
+	}
 	if err := writeJSON(state.readPath, counts); err != nil {
 		return fmt.Errorf("write session read state: %w", err)
 	}

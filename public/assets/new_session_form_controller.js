@@ -298,6 +298,7 @@ export class NewSessionFormController {
       projectTrigger || select,
       form.querySelector("[data-new-session-cwd-input]"),
       form.querySelector("[data-new-session-project-mode]"),
+      ...form.querySelectorAll("[data-tag-draft-remove], [data-tag-draft-add]"),
       form.querySelector("[data-new-session-submit]")
     ].filter((control) => control && !control.disabled && !control.closest("[hidden]"));
     if (controls.length === 0) return;

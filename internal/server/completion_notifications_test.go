@@ -536,7 +536,7 @@ func notificationTestApplication(t *testing.T, root string, multiUser, authDisab
 		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
 		pushSubscriptions:    push.NewSubscriptionStore(cfg.PushSubscriptionsPath),
 		pushNotifier:         notifier,
-		gatewayState:         sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root),
+		gatewayState:         sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root),
 		notificationPresence: newNotificationPresence(time.Now),
 		sessionCache:         sessions.NewCache(),
 		pendingSessions:      rpc.NewPendingSessionRegistry(nil),

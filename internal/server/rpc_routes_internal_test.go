@@ -50,8 +50,11 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project)
-	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), sessionsRoot)
+	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), sessionsRoot)
 	if err := gatewayState.SetPinned(pendingPath, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := gatewayState.SetTag(pendingPath, "work", true); err != nil {
 		t.Fatal(err)
 	}
 	metadata := filepath.Join(attachmentsRoot, sessions.SessionHash(pendingPath)+".jsonl")
@@ -80,6 +83,10 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	_, pinned, err := gatewayState.ReadAndObserve([]*sessions.Session{{Path: realPath, CWD: project}}, nil, false)
 	if err != nil || !pinned[realPath] {
 		t.Fatalf("migrated pin = %v, %v", pinned, err)
+	}
+	tags, err := gatewayState.SessionTags()
+	if err != nil || len(tags) != 1 || len(tags[realPath]) != 1 || tags[realPath][0] != "work" {
+		t.Fatalf("migrated tags = %v, %v", tags, err)
 	}
 	form := url.Values{"session": {pendingPath}, "pinned": {"false"}}
 	request := httptest.NewRequest(http.MethodPost, "/sessions/pin", strings.NewReader(form.Encode()))
@@ -129,6 +136,10 @@ func TestCanonicalRPCSessionPathNormalizesNativePhysicalPathToConfiguredRoot(t *
 		rpcClients:      registry,
 		pendingSessions: pending,
 		claimSession:    func(_ *http.Request, path string) (bool, error) { claimed = path; return true, nil },
+		gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), configuredRoot),
+	}
+	if err := app.gatewayState.SetTag(pendingPath, "work", true); err != nil {
+		t.Fatal(err)
 	}
 
 	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), pendingPath)
@@ -137,6 +148,10 @@ func TestCanonicalRPCSessionPathNormalizesNativePhysicalPathToConfiguredRoot(t *
 	}
 	if registry.Active(pendingPath) || registry.Active(physicalPath) || !registry.Active(configuredPath) {
 		t.Fatalf("active paths: pending=%v physical=%v configured=%v", registry.Active(pendingPath), registry.Active(physicalPath), registry.Active(configuredPath))
+	}
+	tags, err := app.gatewayState.SessionTags()
+	if err != nil || len(tags) != 1 || len(tags[configuredPath]) != 1 || tags[configuredPath][0] != "work" {
+		t.Fatalf("symlink remapped tags = %v, %v", tags, err)
 	}
 	migrated, err := os.ReadFile(filepath.Join(attachmentsRoot, sessions.SessionHash(configuredPath)+".jsonl"))
 	if err != nil || string(migrated) != "gateway metadata\n" {
@@ -300,7 +315,7 @@ func TestPreparePageCanonicalizesSelectedPendingSessionBeforeBuildingView(t *tes
 	pending := rpc.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project)
 	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), root), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: pending}
 	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
 
@@ -329,7 +344,7 @@ func TestPreparePageOrdersPendingSessionByRecentActivity(t *testing.T) {
 	})
 	pending.Remember(pendingPath, project)
 	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
-	app := &application{config: config.Config{SessionsRoot: root, Home: root}, sessionCache: sessions.NewCache(), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), root), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: root, Home: root}, sessionCache: sessions.NewCache(), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: pending}
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
 
 	view, err := app.preparePage(request, false)
@@ -421,7 +436,7 @@ func TestPendingRemapRejectsADeletedDestination(t *testing.T) {
 	pending := rpc.NewPendingSessionRegistry(nil)
 	pending.Remember("/pending", "/project")
 	root := t.TempDir()
-	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), "")
+	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
 	if err := gatewayState.Forget("/real"); err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +624,7 @@ func TestSidebarRendersRPCActivityIndicators(t *testing.T) {
 			app := &application{
 				config:          config.Config{SessionsRoot: root, Home: root},
 				sessionCache:    cache,
-				gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root),
+				gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root),
 				rpcClients:      registry,
 				pendingSessions: rpc.NewPendingSessionRegistry(nil),
 				heavyRequests:   make(chan struct{}, 1),
@@ -670,7 +685,7 @@ func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
 	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	view, err := app.preparePage(request, true)
@@ -711,7 +726,7 @@ func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {
 	writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": project}, {"type": "message", "id": "old", "parentId": nil, "timestamp": "2026-01-01T00:00:01Z", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Old"}}}}})
 	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
 	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
 	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	if _, err := app.preparePage(request, true); err != nil {
@@ -1089,7 +1104,7 @@ func TestPreparePageOmitsCompletedSubagentSnapshotPersistedOutsideInitialWindow(
 		t.Fatal(err)
 	}
 	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
 	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
 
 	view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true)
