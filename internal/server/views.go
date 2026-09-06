@@ -86,7 +86,6 @@ type pageView struct {
 	SearchQuery               string
 	SelectedTag               string
 	SessionTags               map[string][]string
-	KnownTags                 []sessions.TagCount
 	Unread                    map[string]bool
 	Pinned                    map[string]bool
 	UnreadCount               int
@@ -215,17 +214,9 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		return nil, err
 	}
 	view.SessionTags = make(map[string][]string, len(all))
-	counts := make(map[string]int)
 	for _, session := range all {
 		view.SessionTags[session.Path] = assignments[session.Path]
-		for _, tag := range assignments[session.Path] {
-			counts[tag]++
-		}
 	}
-	for name, count := range counts {
-		view.KnownTags = append(view.KnownTags, sessions.TagCount{Name: name, Count: count})
-	}
-	sort.Slice(view.KnownTags, func(i, j int) bool { return view.KnownTags[i].Name < view.KnownTags[j].Name })
 	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))
 	view.prepareSidebar()
 	renderedSessions := make([]*sessions.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)

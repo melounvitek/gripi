@@ -47,7 +47,8 @@ export class SessionTagsController {
         if (!controls.length) return;
         event.preventDefault();
         const index = controls.indexOf(this.document.activeElement);
-        controls[(index + (event.key === "ArrowDown" ? 1 : controls.length - 1)) % controls.length].focus();
+        if (index < 0) controls[event.key === "ArrowDown" ? 0 : controls.length - 1].focus();
+        else controls[(index + (event.key === "ArrowDown" ? 1 : controls.length - 1)) % controls.length].focus();
       }
     }, true);
     this.search.addEventListener("input", () => {
@@ -55,6 +56,7 @@ export class SessionTagsController {
       this.renderOptions();
     });
     this.document.addEventListener("gripi:sidebar-tags", () => this.syncHeader());
+    this.window.addEventListener("resize", () => { if (this.dialog.open) this.position(); });
   }
 
   resetDraft(form) {
@@ -89,6 +91,7 @@ export class SessionTagsController {
 
   open(path, trigger, form = null) {
     this.trigger = trigger;
+    this.anchor = trigger?.getBoundingClientRect();
     this.triggerPath = path;
     this.triggerKind = trigger?.matches("[data-session-actions-toggle]") ? "actions" : path ? "edit" : "filter";
     let state = path ? this.editors.get(path) : null;
@@ -113,6 +116,18 @@ export class SessionTagsController {
     this.search.focus();
     this.render();
     if (!state.pending && !state.error) this.load(state);
+  }
+
+  position() {
+    if (this.window.matchMedia("(max-width: 760px)").matches) return;
+    const anchor = this.trigger?.isConnected ? this.trigger.getBoundingClientRect() : this.anchor;
+    if (!anchor) return;
+    const { width, height } = this.dialog.getBoundingClientRect();
+    const left = Math.max(12, Math.min(anchor.left, this.window.innerWidth - width - 12));
+    const below = anchor.bottom + 6;
+    const top = below + height <= this.window.innerHeight - 12 ? below : Math.max(12, anchor.top - height - 6);
+    this.dialog.style.setProperty("--tag-picker-left", `${left}px`);
+    this.dialog.style.setProperty("--tag-picker-top", `${top}px`);
   }
 
   close() {
@@ -241,7 +256,7 @@ export class SessionTagsController {
     }
     if (!editable) this.addOption("All tags", "", null);
     for (const tag of available.filter((tag) => tag.name.includes(query))) {
-      this.addOption(tag.name, tag.name, tag.count);
+      this.addOption(tag.name, tag.name, editable ? null : tag.count);
     }
     if (editable && query && !available.some((tag) => tag.name === query)) {
       const button = this.document.createElement("button");
@@ -254,6 +269,7 @@ export class SessionTagsController {
     }
     if (!this.options.children.length) this.options.textContent = "No matching tags.";
     if (focusedTag !== undefined) [...this.options.querySelectorAll("[data-tag-option]")].find((control) => control.dataset.tagOption === focusedTag)?.focus({ preventScroll: true });
+    this.position();
   }
 
   addOption(label, tag, count) {

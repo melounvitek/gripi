@@ -222,9 +222,10 @@ export class SidebarController {
     const previousSearchForm = preserveSearch ? oldElement.querySelector(".sidebar-session-search") : null;
     const previousSearchQuery = previousSearchForm?.querySelector('input[name="session_search"]')?.value;
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
-    const focusedSessionControl = this.document.activeElement?.closest?.("[data-session-pin-toggle], [data-session-actions-toggle]");
-    const focusedSessionPath = focusedSessionControl?.closest(".session-row")?.dataset.sessionPath;
-    const focusedSessionControlSelector = focusedSessionControl?.matches("[data-session-pin-toggle]") ? "[data-session-pin-toggle]" : "[data-session-actions-toggle]";
+    const focusedControl = oldElement.contains(this.document.activeElement) ? this.document.activeElement : null;
+    const focusedControlSelector = ["[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]"].find((selector) => focusedControl?.matches(selector));
+    const focusedSessionPath = focusedControl?.closest(".session-row")?.dataset.sessionPath;
+    const focusedTag = focusedControl?.dataset.tagFilter;
     const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");
     const visibilityToggleFocused = !!focusedVisibilityToggle && oldElement.contains(focusedVisibilityToggle);
     this.projectSelectController.destroy(oldElement);
@@ -239,9 +240,11 @@ export class SidebarController {
     if (previousSearchOpen !== undefined) this.setSearchOpen(replacementSearchForm, replacementSearchButton, previousSearchOpen);
     if (notificationToggle) this.element.querySelector("[data-notification-toggle]")?.replaceWith(notificationToggle);
     if (resourceUsage) this.element.querySelector("[data-resource-usage]")?.replaceWith(resourceUsage);
-    if (focusedSessionPath) {
+    if (focusedControlSelector) {
       const focusedRow = [...this.element.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === focusedSessionPath);
-      (focusedRow?.querySelector(focusedSessionControlSelector) || this.element.querySelector("[data-sidebar-search-toggle]"))?.focus({ preventScroll: true });
+      const root = focusedSessionPath ? focusedRow : this.element;
+      const replacement = [...(root?.querySelectorAll(focusedControlSelector) || [])].find((control) => focusedTag === undefined || control.dataset.tagFilter === focusedTag);
+      (replacement || focusedRow?.querySelector("[data-session-actions-toggle]") || this.element.querySelector("[data-sidebar-search-toggle]"))?.focus({ preventScroll: true });
     } else if (visibilityToggleFocused) {
       this.element.querySelector("[data-sidebar-visibility-toggle]")?.focus({ preventScroll: true });
     }

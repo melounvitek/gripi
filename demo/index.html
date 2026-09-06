@@ -763,7 +763,7 @@
     .tag-picker[hidden] { display: none; }
     .tag-picker::backdrop { background: #0006; }
     .tag-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .tag-picker-heading h2 { font: 600 14px var(--sans); text-transform: none; letter-spacing: normal; }
+    .tag-picker-heading h2 { color: var(--text); font: 600 14px var(--sans); text-transform: none; letter-spacing: normal; }
     .tag-picker-heading button { padding: 4px 8px; border: 0; background: transparent; color: var(--muted); font-size: 22px; }
     .tag-picker-context { margin: 0 0 12px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     .tag-picker input[type="search"] { width: 100%; margin: 8px 0; padding: 10px; font: 13px var(--sans); }
@@ -780,12 +780,20 @@
     @media (hover: hover) and (pointer: fine) {
       .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover, .tag-picker-option:hover { background: #ffffff09; color: var(--text); }
     }
+    @media (min-width: 761px) {
+      .tag-picker { inset: var(--tag-picker-top, 12px) auto auto var(--tag-picker-left, 12px); margin: 0; }
+      .tag-picker::backdrop { background: transparent; }
+    }
     @media (max-width: 760px), (pointer: coarse) {
-      .compact-tag-filter button { min-height: 44px; }
+      .compact-tag-filter button { position: relative; min-height: 32px; }
+      .compact-tag-filter button::after { content: ""; position: absolute; inset: -6px 0; }
       .compact-tag-filter .tag-filter-clear { min-width: 32px; }
       .session-row.has-tags a.session { padding-bottom: 3.7rem; }
-      .session-tags { right: 6.5rem; bottom: 0.45rem; }
-      .tag-chip, .tag-overflow, .edit-tags { min-height: 44px; }
+      .session-tags { right: 6.5rem; bottom: 0.45rem; min-height: 44px; }
+      .tag-chip { position: relative; min-height: 28px; }
+      .tag-chip::after { content: ""; position: absolute; inset: -8px 0; }
+      .header-tags { row-gap: 16px; margin-top: 8px; }
+      .tag-overflow, .edit-tags { min-height: 44px; }
       .tag-picker-heading button { min-width: 44px; min-height: 44px; }
       .tag-picker input[type="search"] { font-size: 16px; }
       .tag-picker-option { min-height: 48px; font-size: 15px; }

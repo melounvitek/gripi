@@ -8,6 +8,9 @@ async function fixtureSessions(page) {
     const row = page.locator(".session-row").filter({ has: page.locator(".session-title", { hasText: name }) });
     result[key] = { path: await row.getAttribute("data-session-path"), project: await row.locator(".session-project").getAttribute("title"), name };
   }
+  for (const session of [result.current, result.other]) {
+    expect((await page.request.post("/sessions/pin", { form: { session: session.path, pinned: "false" } })).ok()).toBe(true);
+  }
   return result;
 }
 
@@ -17,6 +20,57 @@ async function assign(page, session, tag, assigned = true) {
 }
 
 const dialogFor = (page) => page.getByRole("dialog", { name: "Session tags", exact: true });
+
+test("tag pickers stay beside desktop controls and fit narrow phone screens", async ({ page, isMobile }, testInfo) => {
+  const { current } = await fixtureSessions(page);
+  await page.setViewportSize(isMobile ? { width: 360, height: 640 } : { width: 1280, height: 800 });
+  await page.goto(`/?session=${encodeURIComponent(current.path)}`);
+  const edit = page.locator(".header-tags [data-tag-edit]");
+  if (isMobile) await edit.tap();
+  else await edit.click();
+  const dialog = dialogFor(page);
+  await expect(dialog.getByRole("status")).toBeHidden();
+  const bounds = await dialog.boundingBox();
+  const control = await edit.boundingBox();
+  const viewport = page.viewportSize();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+  if (!isMobile) {
+    expect(Math.abs(bounds.x - control.x)).toBeLessThan(20);
+    expect(Math.abs(bounds.y - (control.y + control.height))).toBeLessThan(20);
+  }
+  await page.screenshot({ path: testInfo.outputPath("tag-picker-layout.png"), animations: "disabled" });
+});
+
+test("sidebar tag controls retain keyboard focus across polling and ArrowUp selects the last choice", async ({ page, isMobile }, testInfo) => {
+  const { current } = await fixtureSessions(page);
+  const tags = ["alpha", "beta", "gamma"].map((name) => `keyboard-${name}-${testInfo.project.name}`);
+  for (const tag of tags) await assign(page, current, tag);
+  try {
+    await page.clock.install();
+    await page.goto(`/?${new URLSearchParams({ session: current.path, tag: tags[0] })}`);
+    if (isMobile) await page.locator('label[aria-label="Open sessions"]').tap();
+    const row = page.locator('.sessions-list .session-row');
+    for (const control of [row.locator('.tag-chip').first(), row.locator('.tag-overflow'), page.locator('[data-tag-chooser]'), page.getByRole('button', { name: 'Clear tag filter', exact: true })]) {
+      await control.focus();
+      const original = await control.elementHandle();
+      await page.clock.runFor(10_100);
+      await expect.poll(() => original.evaluate((element) => element.isConnected)).toBe(false);
+      await expect(control).toBeFocused();
+    }
+    if (isMobile) await row.locator('.tag-overflow').tap();
+    else await row.locator('.tag-overflow').click();
+    const dialog = dialogFor(page);
+    const search = dialog.getByRole('searchbox');
+    await expect(dialog.getByRole('checkbox').last()).toBeVisible();
+    await search.fill('');
+    await search.press('ArrowUp');
+    await expect(dialog.getByRole('checkbox').last()).toBeFocused();
+  } finally {
+    for (const tag of tags) await assign(page, current, tag, false);
+  }
+});
 
 test("create, reuse and remove tags immediately with reload and keyboard access", async ({ page, isMobile }, testInfo) => {
   const activate = (control) => isMobile ? control.tap() : control.click();
@@ -76,7 +130,7 @@ test("tag filter combines across projects without switching conversation; pins b
     await expect(page.locator("[data-tag-filter-count]")).toHaveText("2");
     await expect(page.locator(".session-header-name")).toHaveText(current.name);
     await expect(page.getByLabel("Message to Pi")).toHaveValue("Keep this draft");
-    await expect(page.locator(".pinned-sessions-list .session-row")).toHaveAttribute("data-session-path", pin.path);
+    await expect(page.locator(".pinned-sessions-list .session-row").filter({ has: page.locator(".session-title", { hasText: pin.name }) })).toHaveAttribute("data-session-path", pin.path);
     const chip = page.locator(".sessions-list .session-row").filter({ has: page.locator(`.session-title`, { hasText: other.name }) }).getByRole("button", { name: `Filter sessions by ${tag}`, exact: true });
     await activate(chip);
     await expect.poll(() => new URL(page.url()).searchParams.get("session")).toBe(current.path);

@@ -110,6 +110,12 @@ While Pi is running, the send button steers by default; use its menu to select F
 
 Gripi supports RPC-compatible extension UI such as select, confirm, input, editor, notify, status, title, and editor-prefill requests. `/reload` refreshes the current Pi process’s extensions, skills, prompts, themes, and context files, then refreshes Gripi’s slash-command catalog. Pi terminal keybindings are not reloaded because the web interface uses Gripi’s browser controls. If a workflow depends on Pi’s native terminal UI, custom TUI components, terminal keybindings, or `ctx.mode === "tui"`, use Pi CLI directly.
 
+## Session tags
+
+Use **Add tags** in the conversation header or **Tags…** in a session’s menu to group related sessions across projects. Click a tag to filter the sidebar; the adjacent × clears that tag filter. Pinned sessions remain visible. Tags are saved separately from Pi session files and are private to each user in multi-user mode.
+
+Forks and clones inherit tags. The new-session dialog prefills the active filter’s tag, which you can remove before starting. Tag names are normalized to lowercase; unused tags disappear from suggestions.
+
 ## Optional Pi setup
 
 If you do not already have a session-naming workflow, consider installing [`@furbyhaxx/pi-session-naming`](https://github.com/furbyhaxx/pi-session-naming):
