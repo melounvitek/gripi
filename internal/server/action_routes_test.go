@@ -44,7 +44,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	cfg := config.Config{
 		Address: "127.0.0.1:4567", Environment: "test", Home: home,
 		SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot,
-		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"),
+		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
 		PiCommand: []string{"node", fakePi}, RPCIdleTimeout: 0,
 	}
@@ -318,7 +318,7 @@ func TestGoGatewayRejectsInvalidMutationValuesBeforeStartingPi(t *testing.T) {
 	}
 	path := filepath.Join(sessionsRoot, "session.jsonl")
 	writeActionSession(t, path, project)
-	cfg := config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: root, SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(root, "attachments"), ReadStatePath: filepath.Join(root, "read"), PinnedSessionsPath: filepath.Join(root, "pinned"), BrowserAccessPath: filepath.Join(root, "browser"), BrowserAuthDisabled: true, PiCommand: []string{"false"}}
+	cfg := config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: root, SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(root, "attachments"), ReadStatePath: filepath.Join(root, "read"), PinnedSessionsPath: filepath.Join(root, "pinned"), SessionTagsPath: filepath.Join(root, "tags.json"), BrowserAccessPath: filepath.Join(root, "browser"), BrowserAuthDisabled: true, PiCommand: []string{"false"}}
 	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
@@ -449,7 +449,7 @@ func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
 	cfg := config.Config{
 		Address: "127.0.0.1:4567", Environment: "test", Home: home,
 		SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot,
-		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"),
+		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
 		PiCommand: []string{"node", fakePi}, RPCIdleTimeout: time.Hour,
 	}

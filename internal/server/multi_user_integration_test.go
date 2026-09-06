@@ -224,7 +224,7 @@ func TestMultiUserListsSessionsThroughASymlinkedSessionsRoot(t *testing.T) {
 }
 
 func multiUserConfig(root string) config.Config {
-	return config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: root, SessionsRoot: filepath.Join(root, "sessions"), AttachmentsRoot: filepath.Join(root, "attachments"), ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), BrowserAccessPath: filepath.Join(root, "browser.json"), WorkspaceSecretPath: filepath.Join(root, "secret"), WorkspaceAccessPath: filepath.Join(root, "workspace-access.json"), WorkspaceOwnershipPath: filepath.Join(root, "owners.json"), RestartPath: filepath.Join(root, "restart"), BrowserAuthDisabled: true, MultiUserMode: true}
+	return config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: root, SessionsRoot: filepath.Join(root, "sessions"), AttachmentsRoot: filepath.Join(root, "attachments"), ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"), BrowserAccessPath: filepath.Join(root, "browser.json"), WorkspaceSecretPath: filepath.Join(root, "secret"), WorkspaceAccessPath: filepath.Join(root, "workspace-access.json"), WorkspaceOwnershipPath: filepath.Join(root, "owners.json"), RestartPath: filepath.Join(root, "restart"), BrowserAuthDisabled: true, MultiUserMode: true}
 }
 func multiUserHandler(t *testing.T, cfg config.Config) http.Handler {
 	t.Helper()
