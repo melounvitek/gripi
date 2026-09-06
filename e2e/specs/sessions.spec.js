@@ -115,6 +115,25 @@ test("opens conversation find for a known session search match without trapping 
   await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBe(manualTop);
 });
 
+test("session initialization preserves focus when the user starts composing", async ({ page }) => {
+  await page.goto("/");
+  await searchSessions(page, "Persisted browser");
+  await page.clock.install();
+  await page.clock.pauseAt(new Date(Date.now() + 1000));
+  await page.getByRole("link", { name: new RegExp(sessions.history) }).click();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.history })).toBeVisible();
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.focus();
+  await page.clock.runFor(100);
+  await expect(composer).toBeFocused();
+  await page.clock.resume();
+
+  const prompt = "Keep this prompt in the composer";
+  await page.keyboard.insertText(prompt);
+  await expect(composer).toHaveValue(prompt);
+});
+
 test("clears session filters without reloading the page", async ({ page }) => {
   await page.goto("/");
 

@@ -3311,15 +3311,17 @@ function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery 
     hydrateExtensionUiState();
     scheduleNextEventPoll(0);
     if (!scrollSnapshot || scrollSnapshot.nearBottom) conversationController.positionInitialAtBottom();
+    const focusedElement = document.activeElement;
     requestAnimationFrame(async () => {
       await liveMessageRenderer.terminalHydration;
       if (generation !== sessionViewGeneration) return;
       loadStoredComposerDraft();
       updatePromptPlaceholder();
       resizePromptTextarea();
-      if (focus) syncComposerFocus();
+      const focusUnchanged = document.activeElement === focusedElement;
+      if (focus && focusUnchanged) syncComposerFocus();
       if (!restorePreservedConversationScroll(scrollSnapshot)) conversationController.forceInitialBottomFollow();
-      if (findQuery) currentSessionFindController.show(findQuery).catch(() => {});
+      if (findQuery && focusUnchanged) currentSessionFindController.show(findQuery).catch(() => {});
     });
   }
   sidebarController.scheduleRefresh();
