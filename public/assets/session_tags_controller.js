@@ -136,7 +136,7 @@ export class SessionTagsController {
     this.callbacks.closeModal?.(this.dialog);
     const header = this.document.querySelector("[data-tag-session]");
     const row = [...this.document.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === this.triggerPath);
-    const fallback = this.triggerKind === "actions" ? row?.querySelector("[data-session-actions-toggle]") : this.triggerKind === "edit" && header?.dataset.tagSession === this.triggerPath ? header.querySelector("[data-tag-edit]") : this.document.querySelector("[data-tag-chooser]");
+    const fallback = this.triggerKind === "actions" ? row?.querySelector("[data-session-actions-toggle]") : this.triggerKind === "edit" && header?.dataset.tagSession === this.triggerPath ? this.document.querySelector(".session-header [data-tag-edit]") : this.document.querySelector("[data-tag-chooser]");
     (this.trigger?.isConnected ? this.trigger : fallback)?.focus({ preventScroll: true });
   }
 
@@ -318,9 +318,9 @@ export class SessionTagsController {
     if (!header || header.dataset.tagSession !== path) return;
     const chips = [...header.querySelectorAll("[data-tag-filter]")];
     if (chips.length === tags.length && chips.every((chip, index) => chip.dataset.tagFilter === tags[index])) return;
-    const edit = header.querySelector("[data-tag-edit]");
+    const edit = this.document.querySelector(".session-header [data-tag-edit]");
     const focusedTag = chips.includes(this.document.activeElement) ? this.document.activeElement.dataset.tagFilter : null;
-    chips.forEach((chip) => chip.remove());
+    header.replaceChildren();
     for (const tag of tags) {
       const chip = this.document.createElement("button");
       chip.type = "button";
@@ -330,9 +330,8 @@ export class SessionTagsController {
       const label = this.document.createElement("span");
       label.textContent = tag;
       chip.append(label);
-      header.insertBefore(chip, edit);
+      header.append(chip);
     }
-    edit.textContent = tags.length ? "Edit tags" : "Add tags";
     if (focusedTag !== null) ([...header.querySelectorAll("[data-tag-filter]")].find((chip) => chip.dataset.tagFilter === focusedTag) || edit).focus({ preventScroll: true });
   }
 }

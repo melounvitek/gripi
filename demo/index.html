@@ -69,9 +69,11 @@
     .session-sidebar-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
     .session-sidebar-content { scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
     .conversation-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: transparent; }
-    .session-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.5rem 0.75rem; border-bottom: 1px solid var(--border); background: #1e1e24f0; backdrop-filter: blur(8px); }
-    .session-header-title { flex: 1 1 auto; min-width: 0; display: grid; gap: 0.15rem; }
-    .session-header h1 { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-header { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; row-gap: 0.15rem; padding: 1rem 1.5rem 0.75rem; border-bottom: 1px solid var(--border); background: #1e1e24f0; backdrop-filter: blur(8px); }
+    .session-header-title { display: contents; }
+    .session-header-project, .header-tags, .session-relation-tree { grid-column: 2 / -1; }
+    .session-header .mobile-sessions-button, .session-header .desktop-sessions-open-button { grid-column: 1; grid-row: 1; margin-right: 0.75rem; }
+    .session-header h1 { grid-column: 2; grid-row: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-project { min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.76rem; font-weight: 500; }
     .session-header-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-project .session-header-project-icon { width: 1.55rem; min-width: 1.55rem; height: 1.25rem; border-radius: 0.2rem; font-size: 0.56rem; }
@@ -84,10 +86,13 @@
     .session-header-view-toggle-track::before { content: ""; position: absolute; top: 2px; left: 2px; width: 0.75rem; height: 0.75rem; border-radius: 50%; background: var(--text); }
     .session-header-view-toggle[aria-checked="true"] .session-header-view-toggle-track { border-color: var(--accent); background: var(--accent); }
     .session-header-view-toggle[aria-checked="true"] .session-header-view-toggle-track::before { transform: translateX(0.875rem); background: var(--button-text); }
-    .session-header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 0.45rem; }
+    .session-header-actions { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 0.45rem; margin-left: 0.75rem; }
     .session-header-actions form { margin: 0; }
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.7rem; }
-    .session-header-window-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; line-height: 1; text-decoration: none; }
+    .session-header-window-action, .session-header-tag-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; line-height: 1; text-decoration: none; }
+    .session-header-tag-action { padding: 0; }
+    .session-header-tag-action svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+    .session-header-tag-action:hover { background: transparent; color: var(--text); }
     .session-header-window-action:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.5rem; }
     .focus-activity-summary { display: none; }
@@ -672,9 +677,9 @@
       a.session { padding: 0.55rem 0.65rem; }
       a.session.selected::before { left: -0.75rem; }
       .conversation-panel { width: 100%; max-width: 100vw; height: 100dvh; min-width: 0; min-height: 0; overflow-x: hidden; }
-      .session-header { width: 100%; max-width: 100vw; min-width: 0; padding: 0.75rem 1rem 0.6rem; gap: 0.75rem; overflow: hidden; }
-      .session-header-title { flex: 1 1 0; }
-      .session-header-actions { gap: 0.35rem; }
+      .session-header { width: 100%; max-width: 100vw; min-width: 0; padding: 0.6rem 0.75rem 0.5rem; overflow: hidden; }
+      .session-header .mobile-sessions-button { margin-right: 0.6rem; }
+      .session-header-actions { gap: 0.35rem; margin-left: 0.6rem; }
       .session-header-window-action { display: none; }
       .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.66rem; }
       .session-header h1 { font-size: 1rem; }
@@ -755,6 +760,7 @@
     .tag-overflow { flex: none; }
     .tag-overflow, .edit-tags { border-color: transparent; background: transparent; color: var(--muted); }
     .header-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; margin-top: 5px; }
+    .header-tags:empty { display: none; }
     .header-tags .tag-chip { max-width: 100%; }
     .header-tags .tag-chip span { white-space: normal; overflow-wrap: anywhere; }
     .tag-chip:hover { background: #ffffff05; }
@@ -785,6 +791,8 @@
       .tag-picker::backdrop { background: transparent; }
     }
     @media (max-width: 760px), (pointer: coarse) {
+      .session-header-tag-action { position: relative; min-width: 2.4rem; min-height: 2.4rem; }
+      .session-header-tag-action::after { content: ""; position: absolute; inset: -3px; }
       .compact-tag-filter button { position: relative; min-height: 32px; }
       .compact-tag-filter button::after { content: ""; position: absolute; inset: -6px 0; }
       .compact-tag-filter .tag-filter-clear { min-width: 32px; }
