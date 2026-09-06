@@ -25,7 +25,7 @@ test("tag pickers stay beside desktop controls and fit narrow phone screens", as
   const { current } = await fixtureSessions(page);
   await page.setViewportSize(isMobile ? { width: 360, height: 640 } : { width: 1280, height: 800 });
   await page.goto(`/?session=${encodeURIComponent(current.path)}`);
-  const edit = page.locator(".header-tags [data-tag-edit]");
+  const edit = page.getByRole("button", { name: "Edit session tags", exact: true });
   if (isMobile) await edit.tap();
   else await edit.click();
   const dialog = dialogFor(page);
@@ -37,10 +37,98 @@ test("tag pickers stay beside desktop controls and fit narrow phone screens", as
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
   if (!isMobile) {
-    expect(Math.abs(bounds.x - control.x)).toBeLessThan(20);
+    expect(control.x + control.width / 2).toBeGreaterThanOrEqual(bounds.x);
+    expect(control.x + control.width / 2).toBeLessThanOrEqual(bounds.x + bounds.width);
     expect(Math.abs(bounds.y - (control.y + control.height))).toBeLessThan(20);
   }
   await page.screenshot({ path: testInfo.outputPath("tag-picker-layout.png"), animations: "disabled" });
+});
+
+test("compact tag header keeps its editor on the title row through tag changes", async ({ page, isMobile }, testInfo) => {
+  const activate = (control) => isMobile ? control.tap() : control.click();
+  const { current } = await fixtureSessions(page);
+  const tag = `compact-${testInfo.project.name}`;
+  await page.setViewportSize(isMobile ? { width: 360, height: 640 } : { width: 1280, height: 800 });
+  try {
+    await page.goto(`/?session=${encodeURIComponent(current.path)}`);
+    const header = page.locator(".session-header");
+    const edit = header.locator("[data-tag-edit]");
+    const chip = header.getByRole("button", { name: `Filter sessions by ${tag}`, exact: true });
+    const expectTitleRowEditor = async () => {
+      const title = await header.locator(".session-header-name").boundingBox();
+      const control = await edit.boundingBox();
+      expect(Math.abs(control.y + control.height / 2 - (title.y + title.height / 2))).toBeLessThanOrEqual(4);
+      expect(control.x).toBeGreaterThanOrEqual(title.x + title.width - 1);
+      expect(control.width).toBeLessThanOrEqual(44);
+      expect(control.height).toBeLessThanOrEqual(44);
+    };
+    const emptyHeight = (await header.boundingBox()).height;
+    await page.screenshot({ path: testInfo.outputPath("compact-header-empty.png"), animations: "disabled" });
+    expect.soft(emptyHeight).toBeLessThanOrEqual(110);
+    await expectTitleRowEditor();
+    await expect(edit).toHaveAccessibleName("Edit session tags");
+    await activate(edit);
+    const dialog = dialogFor(page);
+    const search = dialog.getByRole("searchbox", { name: "Find or create a tag" });
+    await expect(search).toBeFocused();
+    await search.fill(tag);
+    await activate(dialog.getByRole("button", { name: `Create “${tag}”`, exact: true }));
+    const checkbox = dialog.getByRole("checkbox", { name: tag, exact: true });
+    await expect(checkbox).toBeChecked();
+    await activate(dialog.getByRole("button", { name: "Close tag picker", exact: true }));
+    await expect(dialog).toBeHidden();
+    await expect(edit).toBeFocused();
+    await expect(chip).toBeVisible();
+    await expect.poll(async () => (await header.boundingBox()).height).toBeGreaterThan(emptyHeight);
+    await expectTitleRowEditor();
+    await expect(edit).toHaveAccessibleName("Edit session tags");
+    await page.screenshot({ path: testInfo.outputPath("compact-header-tagged.png"), animations: "disabled" });
+
+    await page.reload();
+    await expect(chip).toBeVisible();
+    await expectTitleRowEditor();
+    await activate(edit);
+    await expect(checkbox).toBeChecked();
+    await activate(checkbox);
+    await expect(checkbox).toHaveCount(0);
+    await activate(dialog.getByRole("button", { name: "Close tag picker", exact: true }));
+    await expect(dialog).toBeHidden();
+    await expect(edit).toBeFocused();
+    await expect(chip).toBeHidden();
+    await expect.poll(async () => Math.abs((await header.boundingBox()).height - emptyHeight)).toBeLessThanOrEqual(1);
+    await expectTitleRowEditor();
+    await expect(edit).toHaveAccessibleName("Edit session tags");
+    await page.reload();
+    await expect(chip).toBeHidden();
+    await expect.poll(async () => Math.abs((await header.boundingBox()).height - emptyHeight)).toBeLessThanOrEqual(1);
+  } finally {
+    await assign(page, current, tag, false);
+  }
+});
+
+test("closing the current session overflow editor restores focus after a sidebar refresh", async ({ page, isMobile }, testInfo) => {
+  const activate = (control) => isMobile ? control.tap() : control.click();
+  const { current } = await fixtureSessions(page);
+  const tags = ["one", "two", "three"].map((tag) => `overflow-focus-${tag}-${testInfo.project.name}`);
+  for (const tag of tags) await assign(page, current, tag);
+  try {
+    await page.goto(`/?${new URLSearchParams({ session: current.path, tag: tags[0] })}`);
+    if (isMobile) await activate(page.locator('label[aria-label="Open sessions"]'));
+    const overflow = page.locator('.session-row[data-current="true"]').getByRole("button", { name: "Edit all 3 tags" });
+    await activate(overflow);
+    const dialog = dialogFor(page);
+    const checkbox = dialog.getByRole("checkbox", { name: tags[0], exact: true });
+    await expect(checkbox).toBeChecked();
+    const original = await overflow.elementHandle();
+    await activate(checkbox);
+    await expect(checkbox).toHaveCount(0);
+    await expect.poll(() => original.evaluate((element) => element.isConnected)).toBe(false);
+    await activate(dialog.getByRole("button", { name: "Close tag picker", exact: true }));
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole("button", { name: "Edit session tags", exact: true })).toBeFocused();
+  } finally {
+    for (const tag of tags) await assign(page, current, tag, false);
+  }
 });
 
 test("sidebar tag controls retain keyboard focus across polling and ArrowUp selects the last choice", async ({ page, isMobile }, testInfo) => {
@@ -77,7 +165,7 @@ test("create, reuse and remove tags immediately with reload and keyboard access"
   const { current, other } = await fixtureSessions(page);
   const tag = `review-${testInfo.project.name}`;
   await page.goto(`/?session=${encodeURIComponent(current.path)}`);
-  await activate(page.getByRole("button", { name: "Add tags", exact: true }));
+  await activate(page.getByRole("button", { name: "Edit session tags", exact: true }));
   const dialog = dialogFor(page);
   const search = dialog.getByRole("searchbox", { name: "Find or create a tag" });
   await expect(search).toBeFocused();
@@ -90,12 +178,12 @@ test("create, reuse and remove tags immediately with reload and keyboard access"
   await page.screenshot({ path: testInfo.outputPath("tag-editor.png"), animations: "disabled" });
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("button", { name: "Edit tags", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Edit session tags", exact: true })).toBeFocused();
   await page.reload();
   await expect(page.locator(".header-tags").getByRole("button", { name: `Filter sessions by ${tag}`, exact: true })).toBeVisible();
 
   await page.goto(`/?session=${encodeURIComponent(other.path)}`);
-  await activate(page.getByRole("button", { name: "Add tags", exact: true }));
+  await activate(page.getByRole("button", { name: "Edit session tags", exact: true }));
   await search.fill(tag.toUpperCase());
   if (isMobile) await activate(checkbox);
   else {
@@ -109,7 +197,7 @@ test("create, reuse and remove tags immediately with reload and keyboard access"
   await expect(checkbox).not.toBeChecked();
   await activate(dialog.getByRole("button", { name: "Close tag picker" }));
   await page.reload();
-  await expect(page.getByRole("button", { name: "Add tags", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit session tags", exact: true })).toBeVisible();
   await assign(page, current, tag, false);
 });
 
@@ -167,7 +255,7 @@ test("failed and pending tag writes stay honest and retain the editor search", a
   const tag = `retry-${testInfo.project.name}`;
   await assign(page, other, tag);
   await page.goto(`/?session=${encodeURIComponent(current.path)}`);
-  await activate(page.getByRole("button", { name: "Add tags", exact: true }));
+  await activate(page.getByRole("button", { name: "Edit session tags", exact: true }));
   const dialog = dialogFor(page);
   const search = dialog.getByRole("searchbox");
   await search.fill(tag);
@@ -185,7 +273,7 @@ test("failed and pending tag writes stay honest and retain the editor search", a
     await expect(search).toHaveValue(tag);
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
-    await activate(page.getByRole("button", { name: "Add tags", exact: true }));
+    await activate(page.getByRole("button", { name: "Edit session tags", exact: true }));
     await expect(checkbox).toBeDisabled();
     await expect(search).toHaveValue(tag);
   } finally {
@@ -238,13 +326,13 @@ test("background actions and overflow edit tags without navigating, and stale ed
       await route.fulfill({ response });
     });
     try {
-      await activate(page.getByRole("button", { name: "Edit tags", exact: true }));
+      await activate(page.getByRole("button", { name: "Edit session tags", exact: true }));
       await started;
       await expect(dialog.getByRole("status")).toHaveText("Loading tags…");
       await page.keyboard.press("Escape");
       await page.goBack();
       await expect(page.locator(".session-header-name")).toHaveText(current.name);
-      await activate(page.getByRole("button", { name: "Add tags", exact: true }));
+      await activate(page.getByRole("button", { name: "Edit session tags", exact: true }));
       await expect(dialog.getByRole("checkbox", { name: tags[0], exact: true })).not.toBeChecked();
       release();
       await page.unrouteAll({ behavior: "wait" });
@@ -274,7 +362,7 @@ test("finishing a tag write does not cancel a newer filter request", async ({ pa
   const filterStarted = new Promise((resolve) => { requestedFilter = resolve; });
   try {
     await page.goto(`/?session=${encodeURIComponent(current.path)}`);
-    await activate(page.getByRole("button", { name: "Edit tags", exact: true }));
+    await activate(page.getByRole("button", { name: "Edit session tags", exact: true }));
     await page.route("**/sessions/tags", async (route) => { await writePending; await route.continue(); });
     const dialog = dialogFor(page);
     await activate(dialog.getByRole("checkbox", { name: addedTag, exact: true }));
@@ -333,7 +421,7 @@ test("polling preserves focused chips and cancelled filtering leaves a newer edi
     });
     await activate(chip);
     await started;
-    await activate(page.getByRole("button", { name: "Edit tags", exact: true }));
+    await activate(page.getByRole("button", { name: "Edit session tags", exact: true }));
     const dialog = dialogFor(page);
     const search = dialog.getByRole("searchbox");
     await search.fill("Keep this editor search");
@@ -342,6 +430,11 @@ test("polling preserves focused chips and cancelled filtering leaves a newer edi
     await expect(dialog).toBeVisible();
     await expect(search).toHaveValue("Keep this editor search");
     await expect(search).toBeFocused();
+    await activate(dialog.getByRole("button", { name: "Close tag picker", exact: true }));
+    await chip.focus();
+    await assign(page, current, tag, false);
+    await page.clock.runFor(10_100);
+    await expect(page.getByRole("button", { name: "Edit session tags", exact: true })).toBeFocused();
   } finally {
     releaseFilter();
     await page.unrouteAll({ behavior: "wait" });

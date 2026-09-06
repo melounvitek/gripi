@@ -112,7 +112,7 @@ Gripi supports RPC-compatible extension UI such as select, confirm, input, edito
 
 ## Session tags
 
-Use **Add tags** in the conversation header or **Tags…** in a session’s menu to group related sessions across projects. Click a tag to filter the sidebar; the adjacent × clears that tag filter. Pinned sessions remain visible. Tags are saved separately from Pi session files and are private to each user in multi-user mode.
+Use the tag icon in the conversation header or **Tags…** in a session’s menu to group related sessions across projects. Click a tag to filter the sidebar; the adjacent × clears that tag filter. Pinned sessions remain visible. Tags are saved separately from Pi session files and are private to each user in multi-user mode.
 
 Forks and clones inherit tags. The new-session dialog prefills the active filter’s tag, which you can remove before starting. Tag names are normalized to lowercase; unused tags disappear from suggestions.
 
