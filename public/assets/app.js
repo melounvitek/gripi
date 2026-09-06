@@ -39,6 +39,7 @@ import { BrowserAccessRequestController, WorkspaceAccessRequestController } from
 import { ProjectSelectController } from "./project_select_controller.js";
 import { NewSessionFormController } from "./new_session_form_controller.js";
 import { SessionActionsController } from "./session_actions_controller.js";
+import { SessionTagsController } from "./session_tags_controller.js";
 import { SidebarController } from "./sidebar_controller.js";
 import { ConversationController } from "./conversation_controller.js";
 import { ComposerAutocompleteController } from "./composer_autocomplete_controller.js";
@@ -74,7 +75,15 @@ const sidebarController = new SidebarController(
     showGripiNotification(name, body, url, tag).catch(() => {});
   }
 );
+const sessionTagsController = new SessionTagsController(document, window, {
+  openModal,
+  closeModal,
+  invalidate: () => sidebarController.invalidate(),
+  refresh: () => sidebarController.refresh({ force: true }),
+  filter: (url) => sidebarController.applyFilters(url)
+});
 const sessionActionsController = new SessionActionsController(document, window, {
+  editTags: (target) => sessionTagsController.open(target.path, target.row.querySelector("[data-session-actions-toggle]")),
   currentSessionPath: () => currentSessionPath(),
   openModal: (modal) => openModal(modal),
   closeModal: (modal) => closeModal(modal),
@@ -2839,6 +2848,8 @@ function addSessionViewFormParams(formData) {
   if (project) formData.set("project", project);
   const sessionSearch = sidebarController.activeSearch();
   if (sessionSearch) formData.set("session_search", sessionSearch);
+  const tag = new URLSearchParams(window.location.search).get("tag");
+  if (tag) formData.set("tag", tag);
   if (new URLSearchParams(window.location.search).get("session_only") === "1") formData.set("session_only", "1");
 }
 
@@ -3368,6 +3379,7 @@ function bootstrapPage() {
   }).catch(() => {});
   sidebarController.initialize();
   sessionActionsController.initialize();
+  sessionTagsController.initialize();
   bindPageLifetimeControls();
   bindSessionDom();
   bindSessionControls();

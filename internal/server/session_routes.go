@@ -149,6 +149,9 @@ func sessionViewURL(view *pageView) string {
 	if view.SearchQuery != "" {
 		values.Set("session_search", view.SearchQuery)
 	}
+	if view.SelectedTag != "" {
+		values.Set("tag", view.SelectedTag)
+	}
 	if view.SessionOnly {
 		values.Set("session_only", "1")
 	}

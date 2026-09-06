@@ -179,6 +179,10 @@ export class SidebarController {
 
   async refresh({ force = false } = {}) {
     if (!this.element || (!force && this.modalIsOpen())) return;
+    if (force && this.filterOperationActive) {
+      this.refreshRequestVersion += 1;
+      return;
+    }
     if (!force && (this.filterOperationActive || this.controlsActive() || this.recentlyInteracted())) {
       this.scheduleRefresh(1000);
       return;
@@ -247,6 +251,7 @@ export class SidebarController {
 
     const title = this.element.querySelector("a.session.selected .session-title")?.textContent.trim();
     if (title) this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-selected-title", { detail: { title } }));
+    this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-tags"));
     return title || null;
   }
 
@@ -312,6 +317,7 @@ export class SidebarController {
   }
 
   async applyFilters(targetUrl) {
+    const refreshRequestVersion = this.refreshRequestVersion;
     this.setFiltering(true);
     this.filterOperationActive = true;
     targetUrl.searchParams.delete("sidebar_sessions_limit");
@@ -333,7 +339,7 @@ export class SidebarController {
       this.replace(html, { scrollTop: 0, notify: false, preserveSearch: false });
       this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-filtered", { detail: { modalHtml } }));
       this.window.history.pushState(this.window.history.state, "", targetUrl.href);
-      this.scheduleRefresh();
+      this.scheduleRefresh(refreshRequestVersion !== this.refreshRequestVersion ? 0 : undefined);
       return modalHtml;
     } catch (error) {
       if (!this.current(epoch, boundElement)) return null;

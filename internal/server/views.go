@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,6 +84,9 @@ type pageView struct {
 	NewSessionCWDs            []string
 	SelectedProject           string
 	SearchQuery               string
+	SelectedTag               string
+	SessionTags               map[string][]string
+	KnownTags                 []sessions.TagCount
 	Unread                    map[string]bool
 	Pinned                    map[string]bool
 	UnreadCount               int
@@ -206,6 +210,23 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		return nil, err
 	}
 	view := &pageView{Request: request, ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity)}
+	assignments, err := app.gatewayState.SessionTags()
+	if err != nil {
+		return nil, err
+	}
+	view.SessionTags = make(map[string][]string, len(all))
+	counts := make(map[string]int)
+	for _, session := range all {
+		view.SessionTags[session.Path] = assignments[session.Path]
+		for _, tag := range assignments[session.Path] {
+			counts[tag]++
+		}
+	}
+	for name, count := range counts {
+		view.KnownTags = append(view.KnownTags, sessions.TagCount{Name: name, Count: count})
+	}
+	sort.Slice(view.KnownTags, func(i, j int) bool { return view.KnownTags[i].Name < view.KnownTags[j].Name })
+	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))
 	view.prepareSidebar()
 	renderedSessions := make([]*sessions.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)
 	renderedSessions = append(renderedSessions, view.PinnedSessions...)
@@ -461,6 +482,9 @@ func (view *pageView) prepareSidebar() {
 		if view.Pinned[session.Path] {
 			continue
 		}
+		if view.SelectedTag != "" && !slices.Contains(view.SessionTags[session.Path], view.SelectedTag) {
+			continue
+		}
 		if view.SelectedProject != "" && session.CWD != view.SelectedProject {
 			continue
 		}
@@ -651,6 +675,9 @@ func plural(value int) string {
 }
 func sessionURL(view *pageView, session *sessions.Session) string {
 	values := url.Values{"session": {session.Path}}
+	if view.SelectedTag != "" {
+		values.Set("tag", view.SelectedTag)
+	}
 	if view.SessionOnly {
 		values.Set("session_only", "1")
 	} else {
@@ -707,6 +734,9 @@ func sessionRoot(view *pageView, session *sessions.Session) *sessions.Session {
 }
 func sidebarLoadURL(view *pageView) string {
 	values := url.Values{}
+	if view.SelectedTag != "" {
+		values.Set("tag", view.SelectedTag)
+	}
 	if view.Selected != nil {
 		values.Set("session", view.Selected.Path)
 	}
