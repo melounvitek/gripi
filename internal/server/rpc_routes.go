@@ -380,41 +380,55 @@ func (app *application) lockResolvedImagePromptPath(request *http.Request, path 
 }
 
 func (app *application) movePendingRPCClient(request *http.Request, from, to string) error {
+	return app.remapPendingRPCClient(from, to, func() (func() error, error) {
+		if app.ownsSession != nil && !app.ownsSession(request, from) {
+			return nil, errors.New("pending session is not owned by the requester")
+		}
+		if app.claimSession == nil {
+			return nil, nil
+		}
+		claimed, err := app.claimSession(request, to)
+		if err != nil || !claimed || app.releaseSession == nil {
+			return nil, err
+		}
+		return func() error { return app.releaseSession(request, to) }, nil
+	})
+}
+
+func (app *application) remapPendingRPCClient(from, to string, claim func() (func() error, error)) error {
 	unlock := app.imagePromptLocks.Lock(from)
 	defer unlock()
 	app.pendingRemapMu.Lock()
 	defer app.pendingRemapMu.Unlock()
-	if app.ownsSession != nil && !app.ownsSession(request, from) {
-		return errors.New("pending session is not owned by the requester")
-	}
 	unlockMutation := app.sessionMutationLocks.Lock(to)
 	defer unlockMutation()
 	if app.gatewayState != nil && app.gatewayState.SessionForgotten(to) {
 		return os.ErrNotExist
 	}
 
+	if resolved, remapped := app.pendingSessions.Resolve(from); remapped {
+		if resolved != to {
+			return errors.New("pending session was remapped to a different path")
+		}
+		_, err := claim()
+		return err
+	}
 	if from == to {
-		if app.claimSession != nil {
-			if _, err := app.claimSession(request, to); err != nil {
-				return err
-			}
+		if _, err := claim(); err != nil {
+			return err
 		}
 		app.pendingSessions.Forget(from)
 		return nil
 	}
 	return app.rpcClients.MoveWithCommit(from, to, func() (func() error, error) {
-		claimed := false
-		if app.claimSession != nil {
-			var err error
-			claimed, err = app.claimSession(request, to)
-			if err != nil {
-				return nil, err
-			}
-		}
-		stateRollback, err := app.migratePendingSessionState(from, to)
+		ownershipRollback, err := claim()
 		if err != nil {
-			if claimed && app.releaseSession != nil {
-				err = errors.Join(err, app.releaseSession(request, to))
+			return nil, err
+		}
+		stateRollback, err := app.migratePendingSessionState(from, to, true)
+		if err != nil {
+			if ownershipRollback != nil {
+				err = errors.Join(err, ownershipRollback())
 			}
 			return nil, err
 		}
@@ -424,8 +438,8 @@ func (app *application) movePendingRPCClient(request *http.Request, from, to str
 				stateErr = stateRollback()
 			}
 			var ownershipErr error
-			if claimed && app.releaseSession != nil {
-				ownershipErr = app.releaseSession(request, to)
+			if ownershipRollback != nil {
+				ownershipErr = ownershipRollback()
 			}
 			return errors.Join(stateErr, ownershipErr)
 		}, nil
@@ -434,7 +448,7 @@ func (app *application) movePendingRPCClient(request *http.Request, from, to str
 	})
 }
 
-func (app *application) migratePendingSessionState(from, to string) (func() error, error) {
+func (app *application) migratePendingSessionState(from, to string, migrateTags bool) (func() error, error) {
 	attachmentRollback, err := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot}).Migrate(from, to)
 	if err != nil {
 		return nil, err
@@ -449,6 +463,19 @@ func (app *application) migratePendingSessionState(from, to string) (func() erro
 		}
 		return nil, err
 	}
+	var tagRollback func() error
+	if migrateTags && app.gatewayState != nil {
+		tagRollback, err = app.gatewayState.MigrateTags(from, to)
+		if err != nil {
+			if pinRollback != nil {
+				err = errors.Join(err, pinRollback())
+			}
+			if attachmentRollback != nil {
+				err = errors.Join(err, attachmentRollback())
+			}
+			return nil, err
+		}
+	}
 	return func() error {
 		var attachmentErr error
 		if attachmentRollback != nil {
@@ -458,7 +485,11 @@ func (app *application) migratePendingSessionState(from, to string) (func() erro
 		if pinRollback != nil {
 			pinErr = pinRollback()
 		}
-		return errors.Join(attachmentErr, pinErr)
+		var tagErr error
+		if tagRollback != nil {
+			tagErr = tagRollback()
+		}
+		return errors.Join(attachmentErr, pinErr, tagErr)
 	}, nil
 }
 

@@ -82,14 +82,112 @@ func (state *GatewayState) SetTag(path, name string, assigned bool) error {
 	} else if !assigned && found {
 		names = slices.Delete(names, index, index+1)
 	}
-	if len(names) == 0 {
-		delete(tags, path)
-	} else {
-		tags[path] = names
+	_, err = state.replaceTags(tags, map[string][]string{path: names})
+	if err == nil {
+		delete(state.forgotten, path)
+	}
+	return err
+}
+
+func NormalizeTags(names []string) ([]string, error) {
+	result := make([]string, 0, len(names))
+	for _, name := range names {
+		normalized, err := NormalizeTag(name)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, normalized)
+	}
+	slices.Sort(result)
+	result = slices.Compact(result)
+	if len(result) > 32 {
+		return nil, ErrTooManyTags
+	}
+	return result, nil
+}
+
+func (state *GatewayState) SetTags(path string, names []string) (func() error, error) {
+	names, err := NormalizeTags(names)
+	if err != nil {
+		return nil, err
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	tags, err := state.readSessionTags()
+	if err != nil {
+		return nil, err
+	}
+	return state.replaceTags(tags, map[string][]string{state.configuredPath(path): names})
+}
+
+func (state *GatewayState) CopyTags(from, to string) (func() error, error) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	tags, err := state.readSessionTags()
+	if err != nil {
+		return nil, err
+	}
+	from, to = state.configuredPath(from), state.configuredPath(to)
+	if from == to {
+		return nil, nil
+	}
+	return state.replaceTags(tags, map[string][]string{to: tags[from]})
+}
+
+func (state *GatewayState) MigrateTags(from, to string) (func() error, error) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	tags, err := state.readSessionTags()
+	if err != nil {
+		return nil, err
+	}
+	from, to = state.configuredPath(from), state.configuredPath(to)
+	if from == to || len(tags[from]) == 0 {
+		return nil, nil
+	}
+	names, err := NormalizeTags(append(slices.Clone(tags[to]), tags[from]...))
+	if err != nil {
+		return nil, err
+	}
+	return state.replaceTags(tags, map[string][]string{from: nil, to: names})
+}
+
+// The caller holds state.mu. Rollback touches only paths that have not been edited since.
+func (state *GatewayState) replaceTags(tags, changes map[string][]string) (func() error, error) {
+	previous := make(map[string][]string, len(changes))
+	for path, names := range changes {
+		previous[path] = slices.Clone(tags[path])
+		if len(names) == 0 {
+			delete(tags, path)
+		} else {
+			tags[path] = names
+		}
 	}
 	if err := writeJSON(state.tagsPath, tags); err != nil {
-		return fmt.Errorf("write session tags state: %w", err)
+		return nil, fmt.Errorf("write session tags state: %w", err)
 	}
-	delete(state.forgotten, path)
-	return nil
+	state.tagRevision++
+	revision := state.tagRevision
+	if state.tagChanges == nil {
+		state.tagChanges = make(map[string]uint64)
+	}
+	for path := range changes {
+		state.tagChanges[path] = revision
+	}
+	return func() error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		current, err := state.readSessionTags()
+		if err != nil {
+			return err
+		}
+		restore := make(map[string][]string)
+		for path, names := range previous {
+			if state.tagChanges[path] == revision {
+				restore[path] = names
+			}
+		}
+		_, err = state.replaceTags(current, restore)
+		return err
+	}, nil
 }

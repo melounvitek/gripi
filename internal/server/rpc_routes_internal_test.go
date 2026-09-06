@@ -54,6 +54,9 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	if err := gatewayState.SetPinned(pendingPath, true); err != nil {
 		t.Fatal(err)
 	}
+	if err := gatewayState.SetTag(pendingPath, "work", true); err != nil {
+		t.Fatal(err)
+	}
 	metadata := filepath.Join(attachmentsRoot, sessions.SessionHash(pendingPath)+".jsonl")
 	if err := os.WriteFile(metadata, []byte("gateway metadata\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -80,6 +83,10 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	_, pinned, err := gatewayState.ReadAndObserve([]*sessions.Session{{Path: realPath, CWD: project}}, nil, false)
 	if err != nil || !pinned[realPath] {
 		t.Fatalf("migrated pin = %v, %v", pinned, err)
+	}
+	tags, err := gatewayState.SessionTags()
+	if err != nil || len(tags) != 1 || len(tags[realPath]) != 1 || tags[realPath][0] != "work" {
+		t.Fatalf("migrated tags = %v, %v", tags, err)
 	}
 	form := url.Values{"session": {pendingPath}, "pinned": {"false"}}
 	request := httptest.NewRequest(http.MethodPost, "/sessions/pin", strings.NewReader(form.Encode()))
@@ -129,6 +136,10 @@ func TestCanonicalRPCSessionPathNormalizesNativePhysicalPathToConfiguredRoot(t *
 		rpcClients:      registry,
 		pendingSessions: pending,
 		claimSession:    func(_ *http.Request, path string) (bool, error) { claimed = path; return true, nil },
+		gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), configuredRoot),
+	}
+	if err := app.gatewayState.SetTag(pendingPath, "work", true); err != nil {
+		t.Fatal(err)
 	}
 
 	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), pendingPath)
@@ -137,6 +148,10 @@ func TestCanonicalRPCSessionPathNormalizesNativePhysicalPathToConfiguredRoot(t *
 	}
 	if registry.Active(pendingPath) || registry.Active(physicalPath) || !registry.Active(configuredPath) {
 		t.Fatalf("active paths: pending=%v physical=%v configured=%v", registry.Active(pendingPath), registry.Active(physicalPath), registry.Active(configuredPath))
+	}
+	tags, err := app.gatewayState.SessionTags()
+	if err != nil || len(tags) != 1 || len(tags[configuredPath]) != 1 || tags[configuredPath][0] != "work" {
+		t.Fatalf("symlink remapped tags = %v, %v", tags, err)
 	}
 	migrated, err := os.ReadFile(filepath.Join(attachmentsRoot, sessions.SessionHash(configuredPath)+".jsonl"))
 	if err != nil || string(migrated) != "gateway metadata\n" {

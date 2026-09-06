@@ -2533,6 +2533,7 @@ function replaceNewSessionModalHtml(html) {
   const currentModal = document.querySelector('[data-modal="new-session-modal"]');
   if (!html || !currentModal) return;
 
+  if (sessionTagsController.state?.form === currentModal.querySelector("form") && sessionTagsController.dialog?.open) sessionTagsController.close();
   newSessionFormController.destroy(currentModal);
   projectSelectController.destroy(currentModal);
   currentModal.outerHTML = html;
@@ -2743,6 +2744,7 @@ function openNewSessionModal() {
   if (sessionSwitching()) return;
 
   const modal = document.querySelector('[data-modal="new-session-modal"]');
+  sessionTagsController.resetDraft(modal?.querySelector(".new-session-cwd-form"));
   newSessionFormController.open(modal?.querySelector(".new-session-cwd-form"));
   openModal(modal);
 }
@@ -3030,7 +3032,7 @@ document.addEventListener("submit", async (event) => {
 
   event.preventDefault();
   const submit = form.querySelector("[data-new-session-submit]");
-  if (submit?.disabled || form.dataset.submitting === "true") return;
+  if (submit?.disabled || form.dataset.submitting === "true" || sessionTagsController.dialog?.open) return;
 
   newSessionFormController.sync(form);
   const formData = new FormData(form);
@@ -3077,11 +3079,11 @@ window.addEventListener("gripi:session-search-requested", requestSessionSearch);
 window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
 function handleModalTab(event) {
-  if (event.key !== "Tab") return;
-  const modal = document.querySelector('[data-modal]:not([hidden])');
+  if (event.key !== "Tab" || event.defaultPrevented) return;
+  const modal = document.querySelector('dialog[open]') || document.querySelector('[data-modal]:not([hidden])');
   if (!modal) return;
   const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
-    .filter((element) => !element.closest("[hidden]"));
+    .filter((element) => element.tabIndex >= 0 && !element.closest("[hidden]"));
   if (focusable.length === 0) return;
   const first = focusable[0];
   const last = focusable[focusable.length - 1];

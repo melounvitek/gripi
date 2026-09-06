@@ -15,6 +15,8 @@ type GatewayState struct {
 	readPath       string
 	pinnedPath     string
 	tagsPath       string
+	tagChanges     map[string]uint64
+	tagRevision    uint64
 	sessionsRoot   string
 	pinnedChanges  map[string]uint64
 	pinnedRevision uint64
@@ -244,10 +246,8 @@ func (state *GatewayState) Forget(path string) error {
 	if err != nil {
 		return err
 	}
-	delete(tags, path)
-
-	if err := writeJSON(state.tagsPath, tags); err != nil {
-		return fmt.Errorf("write session tags state: %w", err)
+	if _, err := state.replaceTags(tags, map[string][]string{path: nil}); err != nil {
+		return err
 	}
 	if err := writeJSON(state.readPath, counts); err != nil {
 		return fmt.Errorf("write session read state: %w", err)
