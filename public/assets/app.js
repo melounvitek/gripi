@@ -132,7 +132,7 @@ let markReadInFlight = false;
 const markReadQueued = new Map();
 let markReadAfterVisible = null;
 let hiddenAt = null;
-let lastEventPollSuccessAt = Date.now();
+let lastSessionSyncAt = Date.now();
 let lastEventSeq = 0;
 let waitingForOutputSince = null;
 let waitingForOutputTimer = null;
@@ -1597,7 +1597,7 @@ async function refreshStaleSessionAfterResume(hiddenDuration = 0) {
   if (!liveOutput || document.hidden || sessionSwitching()) return false;
   if (staleSessionRefreshInFlight) return true;
 
-  const pollingGap = Date.now() - lastEventPollSuccessAt;
+  const pollingGap = Date.now() - lastSessionSyncAt;
   if (hiddenDuration < STALE_SESSION_REFRESH_AFTER_MS && pollingGap < STALE_SESSION_REFRESH_AFTER_MS) return false;
 
   staleSessionRefreshInFlight = true;
@@ -1620,7 +1620,7 @@ async function resumeEventPolling(hiddenDuration = 0) {
   if (await refreshStaleSessionAfterResume(hiddenDuration)) return;
   scheduleNextEventPoll(0);
   eventPollResumeTimer = setTimeout(() => {
-    if (!document.hidden && lastEventPollSuccessAt < resumeStartedAt) showReconnectBanner();
+    if (!document.hidden && lastSessionSyncAt < resumeStartedAt) showReconnectBanner();
   }, 5000);
 }
 
@@ -1659,7 +1659,11 @@ async function pollEvents() {
 
     const payload = await response.json();
     if (!eventPollCurrent(generation, sessionViewGeneration)) return;
-    lastEventPollSuccessAt = Date.now();
+    if (!document.hidden && Date.now() - lastSessionSyncAt >= STALE_SESSION_REFRESH_AFTER_MS) {
+      await resumeEventPolling();
+      return;
+    }
+    lastSessionSyncAt = Date.now();
     pollSucceeded = true;
     hideReconnectBanner();
     if (sessionSyncRefreshRequired(payload.session_sync)) {
@@ -3280,6 +3284,7 @@ function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery 
   browserAccessController.resume();
   workspaceAccessController.resume();
   if (liveOutput) {
+    lastSessionSyncAt = Date.now();
     enhanceMarkdownCodeBlocks(conversationScroll);
     enhanceMessageLinks(conversationScroll);
     resetEventCursor();

@@ -170,6 +170,7 @@ export async function seedFixtures(root) {
     ["controls-project", "parallel-subagents", sessions.parallelSubagents],
     ["mobile-project", "wrapped-tool-output", sessions.wrappedToolOutput],
     ["controls-project", "compaction-follow-up", sessions.compactionFollowUp],
+    ["controls-project", "sleep-recovery", sessions.sleepRecovery],
     ["bash-project", "bash-reload", sessions.bashReload],
     ["controls-project", "write-output", sessions.writeOutput],
     ["prompt-project", "delta-streaming", sessions.deltaStreaming],

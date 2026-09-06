@@ -23,6 +23,7 @@ export const sessions = {
   controlsSteer: "E2E Steer Desktop",
   controlsFollowUp: "E2E Follow-up Desktop",
   compactionFollowUp: "E2E Compaction Follow-up Desktop",
+  sleepRecovery: "E2E Sleep Recovery Desktop",
   controlsAbort: "E2E Abort Desktop",
   parallelSubagents: "E2E Parallel Subagents Desktop",
   parallelSubagentsMobile: "E2E Parallel Subagents Mobile",
