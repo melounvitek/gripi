@@ -57,18 +57,19 @@ export class SessionActionsController {
 
   handleKeydown(event) {
     const menu = this.menu();
-    if (event.key === "Escape" && !menu?.hidden) {
+    if (!menu) return;
+    if (event.key === "Escape" && !menu.hidden) {
       event.preventDefault();
       event.stopImmediatePropagation?.();
       this.closeMenu({ restoreFocus: true });
       return;
     }
-    if (!menu?.hidden && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    if (!menu.hidden && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
       this.moveMenuFocus(event.key);
       return;
     }
-    if (event.key === "Tab" && !menu?.hidden) this.closeMenu({ restoreFocus: true });
+    if (event.key === "Tab" && !menu.hidden) this.closeMenu({ restoreFocus: true });
     this.openKeyboardMenu(event);
   }
 

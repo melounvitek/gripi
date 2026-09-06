@@ -35,6 +35,31 @@ test("stop immediately and restore a queued steering message", async ({ page }) 
   await expect(page.locator("[data-session-sync-banner]")).toHaveCount(0);
 });
 
+for (const width of [1440, 700]) {
+  test(`stop with double Escape in a separate session window at ${width}px`, async ({ page }) => {
+    await page.goto("/");
+    await selectSession(page, sessions.controlsAbort);
+    const popupPromise = page.waitForEvent("popup");
+    await page.getByRole("link", { name: "Open session in new window" }).click();
+    const sessionWindow = await popupPromise;
+    await sessionWindow.setViewportSize({ width, height: 900 });
+    await expect(sessionWindow).toHaveURL(/session_only=1/);
+    await sendPrompt(sessionWindow, prompts.abortStart);
+    const abort = sessionWindow.getByRole("button", { name: "Abort running Pi" });
+    await expect(abort).toBeVisible();
+    await expect(sessionWindow.locator(".composer-state")).toHaveAttribute("data-state", "running");
+    await sessionWindow.getByLabel("Message to Pi").focus();
+
+    await sessionWindow.keyboard.press("Escape");
+    await expect(sessionWindow.locator(".composer-state")).toHaveText("Press ESC again to stop current task");
+    await expect(abort).toBeVisible();
+    await sessionWindow.keyboard.press("Escape");
+
+    await expectRunFinished(sessionWindow);
+    await sessionWindow.close();
+  });
+}
+
 test("use slash commands while Pi is running", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.controlsSteer);
