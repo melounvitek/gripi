@@ -161,12 +161,7 @@ export class ConversationController {
     } : null;
 
     this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
-    if (this.viewToggle) {
-      this.viewToggle.dataset.view = this.focusedView ? "conversation" : "full";
-      this.viewToggle.setAttribute("aria-pressed", String(this.focusedView));
-      this.viewToggle.setAttribute("aria-label", "Messages-only transcript view");
-      this.viewToggle.title = this.focusedView ? "Show all details" : "Show messages only";
-    }
+    this.viewToggle?.setAttribute("aria-checked", String(!this.focusedView));
 
     if (!scrollSnapshot) return;
     if (scrollSnapshot.nearBottom) {

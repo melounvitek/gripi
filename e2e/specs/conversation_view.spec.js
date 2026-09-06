@@ -14,7 +14,7 @@ test("shows one tool result after reloading an active command", async ({ page })
   await expectRunFinished(page);
 });
 
-test("toggles transcript details with a single button", async ({ page }) => {
+test("shows agent activity with an accessible switch", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.toolSummary);
   await sendPrompt(page, prompts.longCommand);
@@ -22,29 +22,32 @@ test("toggles transcript details with a single button", async ({ page }) => {
   const toolCall = message(page, "assistant", `$ ${tool.longCommand}`).last();
   await expect(toolCall).toBeVisible();
 
-  const toggle = page.getByRole("button", { name: "Messages-only transcript view" });
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
-  await expect(toggle).toHaveAttribute("title", "Show messages only");
-  await expect(toggle.locator('[data-view-icon="full"]')).toBeVisible();
-  await expect(toggle.locator('[data-view-icon="messages"]')).toBeHidden();
-  await expect(toggle.getByText("All", { exact: true })).toBeVisible();
-  await expect(toggle.getByText("Chat", { exact: true })).toBeHidden();
+  const toggle = page.getByRole("switch", { name: "Show agent activity" });
+  await expect(toggle).toBeChecked();
+  await expect(toggle).toHaveText("Show agent activity");
   await toggle.click();
 
   await expect(page.locator(".conversation-panel")).toHaveClass(/is-conversation-focused/);
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
-  await expect(toggle).toHaveAttribute("title", "Show all details");
-  await expect(toggle.locator('[data-view-icon="messages"]')).toBeVisible();
-  await expect(toggle.locator('[data-view-icon="full"]')).toBeHidden();
-  await expect(toggle.getByText("Chat", { exact: true })).toBeVisible();
-  await expect(toggle.getByText("All", { exact: true })).toBeHidden();
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toHaveText("Show agent activity");
   await expect(toolCall).toBeHidden();
 
   await toggle.click();
   await expect(page.locator(".conversation-panel")).not.toHaveClass(/is-conversation-focused/);
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toBeChecked();
   await expect(toolCall).toBeVisible();
   await expectRunFinished(page);
+
+  await page.reload();
+  await expect(toggle).toBeChecked();
+  await expect(toolCall).toBeVisible();
+  await toggle.focus();
+  await page.keyboard.press("Space");
+  await expect(toggle).not.toBeChecked();
+  await expect(toolCall).toBeHidden();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toBeChecked();
+  await expect(toolCall).toBeVisible();
 
   await page.keyboard.press("Control+f");
   const find = page.getByRole("searchbox", { name: "Find in conversation" });

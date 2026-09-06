@@ -195,33 +195,38 @@ test("keep parallel subagent order and timestamps stable on mobile", async ({ pa
   await expect(cards).toHaveCount(2);
 });
 
-test("show a compact transcript toggle that switches on the first tap", async ({ page }) => {
+test("show an agent activity switch that activates on the first tap", async ({ page }) => {
   await page.goto("/");
 
   await page.locator('label[aria-label="Open sessions"]').tap();
-  const history = page.getByRole("link", { name: new RegExp(sessions.history) });
-  if (!await history.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
-  await history.tap();
+  await page.getByRole("link", { name: new RegExp(sessions.toolSummary) }).tap();
+  await sendPrompt(page, prompts.longCommand);
 
-  const toggle = page.getByRole("button", { name: "Messages-only transcript view" });
-  await expect(toggle.getByText("All", { exact: true })).toBeVisible();
-  const projectIcon = await page.locator(".session-header-project-icon").boundingBox();
-  const viewIcon = await toggle.locator("[data-view-icon-frame]").boundingBox();
+  const toolCall = message(page, "assistant", `$ ${tool.longCommand}`).last();
+  await expect(toolCall).toBeVisible();
+
+  const toggle = page.getByRole("switch", { name: "Show agent activity" });
+  await expect(toggle).toBeChecked();
+  await expect(toggle).toHaveText("Show agent activity");
   const tapTarget = await toggle.boundingBox();
-  expect(projectIcon).not.toBeNull();
-  expect(viewIcon).not.toBeNull();
   expect(tapTarget).not.toBeNull();
-  expect(viewIcon.width).toBe(projectIcon.width);
-  expect(viewIcon.height).toBe(projectIcon.height);
   expect(tapTarget.width).toBeGreaterThanOrEqual(44);
   expect(tapTarget.height).toBeGreaterThanOrEqual(44);
+  expect(tapTarget.x).toBeGreaterThanOrEqual(0);
+  expect(tapTarget.x + tapTarget.width).toBeLessThanOrEqual(page.viewportSize().width);
 
   await toggle.tap();
 
-  await expect(toggle).toHaveAttribute("aria-label", "Messages-only transcript view");
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
-  await expect(toggle).toHaveAttribute("title", "Show all details");
-  await expect(toggle.getByText("Chat", { exact: true })).toBeVisible();
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toHaveText("Show agent activity");
+  await expect(toolCall).toBeHidden();
+  await expect(message(page, "user", prompts.longCommand).last()).toBeVisible();
+
+  await toggle.tap();
+
+  await expect(toggle).toBeChecked();
+  await expect(toolCall).toBeVisible();
+  await expectRunFinished(page);
 });
 
 test("keep native Tab order for coarse pointers", async ({ page }) => {

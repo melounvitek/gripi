@@ -256,23 +256,17 @@ test("project selector opens on the first valid touch without sticky-hover behav
   }
 });
 
-test("conversation view toggle button reflects the focused state", () => {
+test("agent activity switch is checked only in the full view", () => {
   const conversation = new ConversationController({}, {});
   const toggle = new FakeElement("button");
   conversation.viewToggle = toggle;
 
   conversation.applyFocusedView();
-  assert.equal(toggle.dataset.view, "full");
-  assert.equal(toggle.getAttribute("aria-pressed"), "false");
-  assert.equal(toggle.getAttribute("aria-label"), "Messages-only transcript view");
-  assert.equal(toggle.title, "Show messages only");
+  assert.equal(toggle.getAttribute("aria-checked"), "true");
 
   conversation.focusedView = true;
   conversation.applyFocusedView();
-  assert.equal(toggle.dataset.view, "conversation");
-  assert.equal(toggle.getAttribute("aria-pressed"), "true");
-  assert.equal(toggle.getAttribute("aria-label"), "Messages-only transcript view");
-  assert.equal(toggle.title, "Show all details");
+  assert.equal(toggle.getAttribute("aria-checked"), "false");
 });
 
 test("tree model covers search, folding, navigation, labels, and exact filters", () => {

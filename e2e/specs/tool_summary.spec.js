@@ -33,7 +33,7 @@ test("show the full wrapped tool command live and after reload", async ({ page }
 });
 
 async function showMessagesOnly(page) {
-  await page.getByRole("button", { name: "Messages-only transcript view" }).click();
+  await page.getByRole("switch", { name: "Show agent activity" }).click();
 }
 
 async function activityFor(page, card) {
