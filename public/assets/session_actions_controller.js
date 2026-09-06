@@ -263,6 +263,8 @@ export class SessionActionsController {
     if (modal.dataset.sessionActionPending === "true") return;
     if (action === "delete") form.querySelector('[name="current_session"]').value = this.callbacks.currentSessionPath?.() || "";
     const body = new FormData(form);
+    const renameButton = action === "rename" ? form.querySelector('[type="submit"]') : null;
+    if (renameButton) renameButton.textContent = "Renaming…";
     const controls = Array.from(modal.querySelectorAll("button, input"));
     controls.forEach((control) => { control.disabled = true; });
     modal.dataset.sessionActionPending = "true";
@@ -271,6 +273,7 @@ export class SessionActionsController {
       await this.sendMutation(form, action, body);
     } finally {
       delete modal.dataset.sessionActionPending;
+      if (renameButton) renameButton.textContent = "Rename";
       controls.forEach((control) => { control.disabled = false; });
     }
   }

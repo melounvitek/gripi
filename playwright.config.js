@@ -38,7 +38,7 @@ export default defineConfig({
     {
       name: "mobile",
       dependencies: ["setup"],
-      testMatch: [/mobile\.spec\.js/, /markdown_classes\.spec\.js/],
+      testMatch: [/mobile\.spec\.js/, /markdown_classes\.spec\.js/, /session_rename\.spec\.js/],
       use: {
         ...devices["Pixel 7"],
         storageState
