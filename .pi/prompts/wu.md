@@ -4,7 +4,10 @@ description: "Wrap up repo work: commit, merge, push, clean branch, restart if n
 Wrap up the current work for this repo.
 
 1. Check git status and current branch.
-2. If there are TODO/PLAN checklist items related to this work, ensure completed items are checked before committing.
+2. Clean up planning files before committing:
+   - remove completed TODO items related to this work rather than leaving them checked off
+   - delete `TODO.md` when no outstanding items remain
+   - delete `PLAN.md` when its plan is complete; preserve unfinished work
 3. If there are uncommitted changes:
    - inspect the diff
    - run focused tests if appropriate
