@@ -621,10 +621,7 @@ func commandError(fallback string, result commandResult) string {
 	if result.timedOut {
 		return fallback + " timed out"
 	}
-	detail := strings.TrimSpace(result.stderr)
-	if detail == "" {
-		detail = strings.TrimSpace(result.stdout)
-	}
+	detail := strings.TrimSpace(result.stdout + "\n" + result.stderr)
 	if detail == "" {
 		return fallback
 	}
