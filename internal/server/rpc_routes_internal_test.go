@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -491,6 +492,86 @@ func TestEventsContinuesResolvingACompletedPendingSessionRemap(t *testing.T) {
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"session_sync":{"error":null,"gateway_busy":false,"mode":"available"`) {
 			t.Fatalf("event poll %d = %d %s", iteration, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestEventsReportsUnreplayableCursors(t *testing.T) {
+	for _, state := range []string{"absent", "retired", "reset", "active"} {
+		t.Run(state, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "session.jsonl")
+			registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) {
+				t.Error("event polling must not create a client")
+				return nil, os.ErrNotExist
+			}, nil)
+			cache := sessions.NewCache()
+			app := &application{
+				config:          config.Config{SessionsRoot: root, Home: root},
+				sessionCache:    cache,
+				rpcClients:      registry,
+				pendingSessions: rpc.NewPendingSessionRegistry(nil),
+				synchronizer:    sessions.NewSynchronizer(root, root, cache, registry),
+			}
+			var sequence int64
+			if state != "absent" {
+				stdinReader, stdinWriter := io.Pipe()
+				stdoutReader, stdoutWriter := io.Pipe()
+				observed := make(chan struct{}, 1)
+				client := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{
+					EventObserver: func(*rpc.Client, map[string]any) { observed <- struct{}{} },
+				})
+				t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+				if err := registry.Register(path, client); err != nil {
+					t.Fatal(err)
+				}
+				if state != "reset" {
+					if _, err := io.WriteString(stdoutWriter, `{"type":"agent_end"}`+"\n"); err != nil {
+						t.Fatal(err)
+					}
+					select {
+					case <-observed:
+					case <-time.After(time.Second):
+						t.Fatal("event was not stored")
+					}
+					sequence = client.EventSequence()
+				}
+				if state == "retired" {
+					if closed, err := registry.CloseClientIfIdle(path); err != nil || !closed {
+						t.Fatalf("retirement = %v, %v", closed, err)
+					}
+					sequence = 0
+				}
+			}
+
+			if state == "absent" || state == "retired" {
+				path = writeNotificationSession(t, root, "Idle session")
+			}
+
+			for _, after := range []int64{0, 1, 2} {
+				request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/events?session=%s&after=%d", url.QueryEscape(path), after), nil)
+				response := httptest.NewRecorder()
+				app.events(response, request)
+				if response.Code != http.StatusOK {
+					t.Fatalf("event poll = %d %s", response.Code, response.Body.String())
+				}
+				var batch struct {
+					Events  []map[string]any `json:"events"`
+					LastSeq int64            `json:"last_seq"`
+					Missed  bool             `json:"missed"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &batch); err != nil {
+					t.Fatal(err)
+				}
+				missed := after > sequence
+				eventCount := 0
+				if state == "active" && after == 0 {
+					eventCount = 1
+				}
+				if batch.Missed != missed || batch.LastSeq != sequence || batch.Events == nil || len(batch.Events) != eventCount {
+					t.Errorf("after=%d: batch=%#v; want missed=%v, last_seq=%d, events=%d", after, batch, missed, sequence, eventCount)
+				}
+			}
+		})
 	}
 }
 

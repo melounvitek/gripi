@@ -548,7 +548,7 @@ func (registry *Registry) moveWithCommit(oldPath, newPath string, prepare func()
 }
 
 func (registry *Registry) EventsAfter(path string, after int64) EventBatch {
-	result := EventBatch{Events: []map[string]any{}}
+	result := EventBatch{Events: []map[string]any{}, Missed: after > 0}
 	_ = registry.WithActiveClient(context.Background(), path, false, func(client RPCClient) error { result = client.EventsAfter(after); return nil })
 	return result
 }

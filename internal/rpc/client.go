@@ -1119,7 +1119,7 @@ func (client *Client) EventsAfter(after int64) EventBatch {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	client.pruneExpiredDialogsLocked()
-	result := EventBatch{LastSeq: client.eventSequence, Missed: after < client.eventReplayFloor, Events: []map[string]any{}}
+	result := EventBatch{LastSeq: client.eventSequence, Missed: after < client.eventReplayFloor || after > client.eventSequence, Events: []map[string]any{}}
 	if result.Missed {
 		return result
 	}

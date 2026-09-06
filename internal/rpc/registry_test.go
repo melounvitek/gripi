@@ -133,6 +133,12 @@ func TestRegistryCreationLanesAndRetirementAreRaceSafe(t *testing.T) {
 	if _, err := registry.EnsureClient("/session"); !errors.Is(err, ErrClientStarting) {
 		t.Fatalf("duplicate creation error = %v", err)
 	}
+	for _, after := range []int64{0, 1} {
+		batch := registry.EventsAfter("/session", after)
+		if batch.Missed != (after > 0) || batch.LastSeq != 0 || batch.Events == nil || len(batch.Events) != 0 {
+			t.Errorf("event poll during creation, after=%d: %#v", after, batch)
+		}
+	}
 	close(releaseCreation)
 	if err := <-createdResult; err != nil {
 		t.Fatal(err)
@@ -170,6 +176,12 @@ func TestRegistryCreationLanesAndRetirementAreRaceSafe(t *testing.T) {
 	<-closeStarted
 	if _, err := registry.EnsureClient("/session"); !errors.Is(err, ErrClientRetiring) {
 		t.Fatalf("retiring error = %v", err)
+	}
+	for _, after := range []int64{0, 1} {
+		batch := registry.EventsAfter("/session", after)
+		if batch.Missed != (after > 0) || batch.LastSeq != 0 || batch.Events == nil || len(batch.Events) != 0 {
+			t.Errorf("event poll during retirement, after=%d: %#v", after, batch)
+		}
 	}
 	close(releaseClose)
 	if err := <-failureDone; !errors.Is(err, ErrProcessExited) {
