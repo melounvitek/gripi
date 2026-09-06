@@ -345,6 +345,8 @@ function acceptPrompt(command) {
   let reply = replies.standard;
   if (path.basename(process.cwd()).startsWith("new-session-")) reply = replies.newSession;
   else if (command.message === prompts.markdownTable) reply = replies.markdownTable;
+  else if (command.message === prompts.markdownRaw) reply = replies.markdownRaw;
+  else if (command.message === prompts.markdownFence) reply = replies.markdownFence;
 
   if (command.message === prompts.imageRead) {
     schedule(120, () => completeWithImageRead(reply));

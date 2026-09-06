@@ -7,6 +7,10 @@ export const sessions = {
   prompt: "E2E Prompt Desktop",
   deltaStreaming: "E2E Delta Streaming Desktop",
   markdownTable: "E2E Markdown Table Desktop",
+  markdownRawDesktop: "E2E Markdown Raw Desktop",
+  markdownRawMobile: "E2E Markdown Raw Mobile",
+  markdownFenceDesktop: "E2E Markdown Fence Desktop",
+  markdownFenceMobile: "E2E Markdown Fence Mobile",
   toolSummary: "E2E Tool Summary Desktop",
   toolReload: "E2E Tool Reload Desktop",
   markRead: "E2E Mark Read Desktop",
@@ -59,6 +63,8 @@ export const prompts = {
   terminal: "Show terminal screen updates",
   longCommand: "Run the long tool command scenario",
   markdownTable: "Show a detailed Markdown status table",
+  markdownRaw: "Show raw HTML with application classes",
+  markdownFence: "Show code fences with application class languages",
   extension: "Ask me for release approval",
   extensionRace: "Exercise queued extension requests",
   wrappedToolOutput: "Show wrapped tool output",
@@ -142,6 +148,8 @@ export const replies = {
   deltaThinking: "Reasoning is already visible",
   deltaTextStart: "Answer started",
   deltaText: "Answer started and completed.",
+  markdownRaw: '<span class="modal-overlay">Raw span stays in conversation</span>\n\n<code class="image-viewer">Raw code stays in conversation</code>',
+  markdownFence: '```modal-overlay\nModal fence stays in conversation\n```\n\n```image-viewer\nImage fence stays in conversation\n```\n\n```javascript\nconst safeValue = 42;\n```',
   markdownTable: `| # | Revised status | What we can infer |
 |---:|---|---|
 | 9 | **Clear** | Table row nine remains readable alongside a detailed explanation. |

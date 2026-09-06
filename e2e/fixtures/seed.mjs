@@ -182,6 +182,10 @@ export async function seedFixtures(root) {
   }
   await writeSession(root, projects["mobile-project"], "parallel-subagents-mobile", sessions.parallelSubagentsMobile, 0);
   await writePaginatedSubagentSession(root, projects["controls-project"], 0);
+  await writeSession(root, projects["prompt-project"], "markdown-raw-desktop", sessions.markdownRawDesktop, 0);
+  await writeSession(root, projects["mobile-project"], "markdown-raw-mobile", sessions.markdownRawMobile, 0);
+  await writeSession(root, projects["prompt-project"], "markdown-fence-desktop", sessions.markdownFenceDesktop, 0);
+  await writeSession(root, projects["mobile-project"], "markdown-fence-mobile", sessions.markdownFenceMobile, 0);
 
   const configuredCwdsPath = path.join(state, "configured-cwds");
   await writeFile(configuredCwdsPath, `${projects["new-session-desktop"]}\n${projects["new-session-mobile"]}\n`);

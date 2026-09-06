@@ -21,7 +21,8 @@ import (
 )
 
 var unsafeMarkdownLink = regexp.MustCompile(`(?i)\]\(\s*javascript:[^)]*\)`)
-var safeLanguageClass = regexp.MustCompile(`^[A-Za-z0-9_.+#-]+$`)
+var codeHighlightClass = regexp.MustCompile(`^highlight (javascript|json|ruby|shell)$`)
+var syntaxHighlightClass = regexp.MustCompile(`^syntax-(comment|string|number|keyword|literal|symbol|function|variable)$`)
 
 var languageAliases = map[string]string{"bash": "shell", "sh": "shell", "shell": "shell", "zsh": "shell", "js": "javascript", "javascript": "javascript", "ts": "javascript", "typescript": "javascript", "json": "json", "rb": "ruby", "ruby": "ruby"}
 
@@ -44,7 +45,8 @@ type Markdown struct {
 
 func NewMarkdown() *Markdown {
 	policy := bluemonday.UGCPolicy()
-	policy.AllowAttrs("class").Matching(bluemonday.SpaceSeparatedTokens).OnElements("code", "span")
+	policy.AllowAttrs("class").Matching(codeHighlightClass).OnElements("code")
+	policy.AllowAttrs("class").Matching(syntaxHighlightClass).OnElements("span")
 	policy.AllowAttrs("start").Matching(bluemonday.Integer).OnElements("ol")
 	policy.AllowAttrs("target", "rel").OnElements("a")
 	policy.RequireNoFollowOnLinks(true)
@@ -88,11 +90,7 @@ func renderFencedCode(writer util.BufWriter, source []byte, node ast.Node, enter
 	if normalized := languageAliases[strings.ToLower(language)]; normalized != "" {
 		_, _ = writer.WriteString(`<pre><code class="highlight ` + normalized + `">` + highlightCode(code.String(), normalized) + "</code></pre>\n")
 	} else {
-		class := ""
-		if safeLanguageClass.MatchString(language) {
-			class = ` class="` + stdhtml.EscapeString(language) + `"`
-		}
-		_, _ = writer.WriteString("<pre><code" + class + ">" + stdhtml.EscapeString(code.String()) + "</code></pre>\n")
+		_, _ = writer.WriteString("<pre><code>" + stdhtml.EscapeString(code.String()) + "</code></pre>\n")
 	}
 	return ast.WalkSkipChildren, nil
 }

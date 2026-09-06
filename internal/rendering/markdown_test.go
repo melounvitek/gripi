@@ -34,6 +34,45 @@ func TestMarkdownSanitizerStripsUnsafeLinkTargets(t *testing.T) {
 	}
 }
 
+func TestMarkdownDoesNotApplyApplicationClasses(t *testing.T) {
+	for _, source := range []string{
+		`<span class="modal-overlay">Content</span>`,
+		`<code class="image-viewer">Content</code>`,
+		`<span class="syntax-string modal-overlay">Content</span>`,
+		`<span class="modal-overlay syntax-string">Content</span>`,
+		`<code class="highlight ruby image-viewer">Content</code>`,
+		"```modal-overlay\nContent\n```",
+		"```image-viewer\nContent\n```",
+	} {
+		t.Run(source, func(t *testing.T) {
+			rendered := NewMarkdown().Render(source)
+			if !strings.Contains(rendered, "Content") {
+				t.Fatalf("content was lost: %s", rendered)
+			}
+			for _, unsafe := range []string{"modal-overlay", "image-viewer"} {
+				if strings.Contains(rendered, unsafe) {
+					t.Errorf("rendered markdown applies application class %q: %s", unsafe, rendered)
+				}
+			}
+		})
+	}
+}
+
+func TestMarkdownPreservesSupportedHighlighting(t *testing.T) {
+	for language, normalized := range map[string]string{
+		"bash": "shell", "sh": "shell", "shell": "shell", "zsh": "shell",
+		"js": "javascript", "javascript": "javascript", "ts": "javascript", "typescript": "javascript",
+		"json": "json", "rb": "ruby", "ruby": "ruby",
+	} {
+		t.Run(language, func(t *testing.T) {
+			rendered := NewMarkdown().Render("```" + language + "\n\"Content\"\n```")
+			if !strings.Contains(rendered, `<code class="highlight `+normalized+`">`) || !strings.Contains(rendered, `<span class="syntax-string">`) {
+				t.Fatalf("fenced code highlighting missing: %s", rendered)
+			}
+		})
+	}
+}
+
 func TestMarkdownContinuesOrderedListsAcrossCodeBlocks(t *testing.T) {
 	rendered := NewMarkdown().Render("1. First\n1. Second\n\n```ruby\nputs :code\n```\n\n1. Third")
 	if strings.Count(rendered, "<ol") != 2 || !strings.Contains(rendered, `<ol start="3">`) {
