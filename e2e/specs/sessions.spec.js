@@ -184,15 +184,37 @@ test("rename and delete a background session from its contextual actions", async
   await row.click({ button: "right" });
   await page.getByRole("menuitem", { name: "Rename…" }).click();
   const renameDialog = page.getByRole("dialog", { name: "Rename session" });
-  await renameDialog.getByRole("textbox", { name: "Name" }).fill("E2E Sidebar Session Actions");
-  await renameDialog.getByRole("button", { name: "Rename" }).click();
-  await expect(renameDialog).toBeHidden();
-  await expect(row).toHaveAttribute("data-session-name", "E2E Sidebar Session Actions");
+  const renamedName = "E2E Sidebar Session Actions";
+  await renameDialog.getByRole("textbox", { name: "Name" }).fill(renamedName);
+  let releaseSidebar;
+  const sidebarRelease = new Promise((resolve) => { releaseSidebar = resolve; });
+  await page.route(/\/sidebar(?:\?|$)/, async (route) => {
+    await sidebarRelease;
+    await route.continue();
+  });
+  try {
+    await renameDialog.getByRole("button", { name: "Rename" }).click();
+    await expect(renameDialog).toBeHidden();
+    await expect(row.locator(".session-title")).toHaveText(renamedName);
+    await expect(row.locator(".session-title")).toHaveAttribute("title", renamedName);
+    await expect(row).toHaveAttribute("data-session-name", renamedName);
+    await expect(row.getByRole("button", { name: `Pin session ${renamedName}`, exact: true })).toBeVisible();
+    await expect(row.getByRole("button", { name: `Session actions for ${renamedName}` })).toBeFocused();
+    await row.getByRole("button", { name: `Session actions for ${renamedName}` }).click();
+    await page.getByRole("menuitem", { name: "Rename…" }).click();
+    await expect(renameDialog.getByRole("textbox", { name: "Name" })).toHaveValue(renamedName);
+    await renameDialog.getByRole("button", { name: "Cancel" }).click();
+  } finally {
+    releaseSidebar();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+  await page.reload();
+  await expect(row.locator(".session-title")).toHaveText(renamedName);
 
-  await row.getByRole("button", { name: "Session actions for E2E Sidebar Session Actions" }).click();
+  await row.getByRole("button", { name: `Session actions for ${renamedName}` }).click();
   await page.getByRole("menuitem", { name: "Delete session…" }).click();
   const deleteDialog = page.getByRole("dialog", { name: "Delete session" });
-  await expect(deleteDialog).toContainText("E2E Sidebar Session Actions");
+  await expect(deleteDialog).toContainText(renamedName);
   await deleteDialog.getByRole("button", { name: "Delete session" }).click();
   await expect(deleteDialog).toBeHidden();
   await expect(row).toHaveCount(0);

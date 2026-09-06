@@ -250,6 +250,23 @@ export class SidebarController {
     return title || null;
   }
 
+  updateSessionName(path, name) {
+    this.invalidate();
+    this.element?.querySelectorAll(".session-row").forEach((row) => {
+      if (row.dataset.sessionPath !== path) return;
+
+      row.dataset.sessionName = name;
+      const title = row.querySelector(".session-title");
+      title.textContent = name;
+      title.title = name;
+      row.querySelector("[data-session-actions-toggle]")?.setAttribute("aria-label", `Session actions for ${name}`);
+      row.querySelector("[data-session-pin-toggle]")?.setAttribute("aria-label", `${row.dataset.pinned === "true" ? "Unpin" : "Pin"} session ${name}`);
+      if (row.dataset.current === "true") {
+        this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-selected-title", { detail: { title: name } }));
+      }
+    });
+  }
+
   assistantResponseCounts(root = this.element) {
     const counts = new Map();
     root?.querySelectorAll("a.session[data-session-path][data-assistant-response-count]").forEach((link) => {

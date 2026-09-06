@@ -282,10 +282,11 @@ export class SessionActionsController {
       let payload = null;
       try { payload = JSON.parse(responseText); } catch (_error) {}
       if (!response.ok) throw new Error(payload?.error || responseText.trim() || `Could not ${action} session`);
+      if (action === "rename") this.callbacks.renamed?.(payload);
       delete form.closest("[data-modal]").dataset.sessionActionPending;
       this.callbacks.closeModal?.(form.closest("[data-modal]"));
-      await this.callbacks.refresh?.();
       this.callbacks.showStatus?.(action === "delete" ? "Session deleted" : "Session renamed");
+      this.callbacks.refresh?.().catch(() => {});
     } catch (error) {
       this.showError(form, error.message);
     }

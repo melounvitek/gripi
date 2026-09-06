@@ -79,6 +79,7 @@ const sessionActionsController = new SessionActionsController(document, window, 
   openModal: (modal) => openModal(modal),
   closeModal: (modal) => closeModal(modal),
   refresh: () => sidebarController.refresh({ force: true }),
+  renamed: ({ session, name }) => sidebarController.updateSessionName(session, name),
   showStatus: (message) => showStatus(message, true)
 });
 
