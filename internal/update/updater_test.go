@@ -218,28 +218,55 @@ func TestUpdaterRefusesCutoverWhenLiveCheckoutChangesDuringValidation(t *testing
 	}
 }
 
-func TestUpdaterValidationFailureLeavesLiveCheckoutAndBinaryUntouched(t *testing.T) {
-	fixture := newGitFixture(t)
-	binary := installFixtureBinary(t, fixture.checkout, "old binary\n")
-	old := gitOutput(t, fixture.checkout, "rev-parse", "HEAD")
-	upstreamCommit(t, fixture, "app.txt", "updated\n", "Break build")
-	updater := NewUpdater(fixture.checkout)
-	updater.StageParent = fixture.root
-	updater.Validate = func(context.Context, string, string) error { return os.ErrInvalid }
+func TestUpdaterReportsValidationFailureWithoutChangingLiveCheckoutOrBinary(t *testing.T) {
+	bin := t.TempDir()
+	script := `#!/bin/sh
+if [ "$*" = "install" ]; then exit 0; fi
+printf '%s' "$VALIDATION_STDOUT"
+printf '%s' "$VALIDATION_STDERR" >&2
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(bin, "mise"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	result := updater.Update(context.Background())
+	for _, test := range []struct{ name, stdout, stderr string }{
+		{"both streams", "Cannot find module jiti", "[test] ERROR task failed"},
+		{"stdout only", "test assertion failed", ""},
+		{"stderr only", "", "dependency installation failed"},
+		{"no output", "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("VALIDATION_STDOUT", test.stdout)
+			t.Setenv("VALIDATION_STDERR", test.stderr)
+			fixture := newGitFixture(t)
+			binary := installFixtureBinary(t, fixture.checkout, "old binary\n")
+			old := gitOutput(t, fixture.checkout, "rev-parse", "HEAD")
+			upstreamCommit(t, fixture, "app.txt", "updated\n", "Break build")
+			updater := NewUpdater(fixture.checkout)
+			updater.StageParent = fixture.root
 
-	if result.State != "dependency_failed" || result.RolledBack {
-		t.Fatalf("result = %+v", result)
+			result := updater.Update(context.Background())
+
+			if result.State != "dependency_failed" || result.RolledBack {
+				t.Fatalf("result = %+v", result)
+			}
+			for _, detail := range []string{"Could not validate updated checkout", test.stdout, test.stderr} {
+				if !strings.Contains(result.Message, detail) {
+					t.Fatalf("message = %q; missing %q", result.Message, detail)
+				}
+			}
+			if got := gitOutput(t, fixture.checkout, "rev-parse", "HEAD"); got != old {
+				t.Fatalf("HEAD = %s, want %s", got, old)
+			}
+			if contents, _ := os.ReadFile(binary); string(contents) != "old binary\n" {
+				t.Fatalf("binary = %q", contents)
+			}
+			assertNoUpdateStages(t, fixture.root)
+			assertNoPendingCutover(t, fixture.checkout)
+		})
 	}
-	if got := gitOutput(t, fixture.checkout, "rev-parse", "HEAD"); got != old {
-		t.Fatalf("HEAD = %s, want %s", got, old)
-	}
-	if contents, _ := os.ReadFile(binary); string(contents) != "old binary\n" {
-		t.Fatalf("binary = %q", contents)
-	}
-	assertNoUpdateStages(t, fixture.root)
-	assertNoPendingCutover(t, fixture.checkout)
 }
 
 func TestUpdaterRollsBackTrackedCheckoutAndPreservesBinaryAfterPostCheckoutFailure(t *testing.T) {
