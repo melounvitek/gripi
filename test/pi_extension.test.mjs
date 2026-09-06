@@ -1,16 +1,47 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 
 const piExecutable = process.env.GRIPI_PI || execFileSync("sh", ["-c", "command -v pi"], { encoding: "utf8" }).trim();
-const piPackageRoot = path.resolve(path.dirname(await realpath(piExecutable)), "..");
+const piPackageRoot = await resolvePiPackageRoot(piExecutable);
 const { createJiti } = await import(pathToFileURL(path.join(piPackageRoot, "node_modules/jiti/lib/jiti.mjs")));
 const piIndex = path.join(piPackageRoot, "dist/index.js");
 const extensionPath = path.resolve("pi_extensions/gripi-tree.ts");
+
+async function resolvePiPackageRoot(executable) {
+  let directory = path.dirname(await realpath(executable));
+  while (!existsSync(path.join(directory, "package.json"))) {
+    const parent = path.dirname(directory);
+    if (parent === directory) throw new Error(`Cannot find Pi package root for ${executable}`);
+    directory = parent;
+  }
+  return directory;
+}
+
+for (const entrypoint of ["dist/cli.js", "dist/bundle/cli.js"]) {
+  test(`resolves the Pi package root for ${entrypoint}`, async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "gripi-pi-package-"));
+    try {
+      const packageRoot = path.join(directory, "pi-package");
+      const cli = path.join(packageRoot, entrypoint);
+      await mkdir(path.dirname(cli), { recursive: true });
+      await writeFile(path.join(packageRoot, "package.json"), JSON.stringify({ type: "module" }));
+      await writeFile(cli, "");
+      const executable = path.join(directory, "pi");
+      await symlink(cli, executable);
+
+      assert.equal(await resolvePiPackageRoot(cli), packageRoot);
+      assert.equal(await resolvePiPackageRoot(executable), packageRoot);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
 
 test("reload bridge refreshes native Pi resources in RPC mode", { timeout: 20_000 }, async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "gripi-reload-extension-"));
