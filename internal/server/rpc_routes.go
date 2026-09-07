@@ -233,6 +233,9 @@ func (app *application) writeRPCError(response http.ResponseWriter, err error) b
 	case errors.As(err, &blocked):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": blocked.Error(), "session_sync_mode": blocked.Mode})
 		return true
+	case errors.Is(err, errSessionNavigating):
+		writeJSONStatus(response, http.StatusConflict, map[string]any{"code": "session_operation_pending", "retryable": false, "error": err.Error()})
+		return true
 	case errors.Is(err, sessions.ErrSyncBusy), errors.Is(err, rpc.ErrOperationPending):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"code": "session_operation_pending", "error": "Another session operation is pending. Please retry."})
 		return true
@@ -420,9 +423,14 @@ func (app *application) remapPendingRPCClient(from, to string, claim func() (fun
 		app.pendingSessions.Forget(from)
 		return nil
 	}
-	releaseDestination, admitted := app.promptAdmissions.tryPrompt(to)
-	if !admitted {
-		return rpc.ErrOperationPending
+	releaseSource, err := app.promptAdmissions.tryPrompt(from)
+	if err != nil {
+		return err
+	}
+	defer releaseSource()
+	releaseDestination, err := app.promptAdmissions.tryPrompt(to)
+	if err != nil {
+		return err
 	}
 	defer releaseDestination()
 	return app.rpcClients.MoveWithCommit(from, to, func() (func() error, error) {

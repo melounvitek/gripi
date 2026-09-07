@@ -1029,13 +1029,21 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 		writeText(response, http.StatusBadRequest, "Custom summary instructions are too long")
 		return
 	}
+	path, releaseNavigation, err := app.promptAdmissions.navigate(func() (string, error) {
+		resolved, _, err := app.resolveOwnedPendingPath(request, path)
+		return resolved, err
+	})
+	if app.writeSettingError(response, err) {
+		return
+	}
+	defer releaseNavigation()
 	if app.rpcClients.DeferringCompactionPrompts(path) {
 		app.writeSettingError(response, errSessionBusy)
 		return
 	}
 	restoredQueuedText := ""
 	abortedRun := false
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err = app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
 		state, err := client.GetState(request.Context())
 		if err != nil {
 			return err
@@ -1561,6 +1569,9 @@ func (app *application) actionSessionPath(response http.ResponseWriter, request 
 	}
 	canonical, err := app.canonicalRPCSessionPath(request, path)
 	if err != nil {
+		if app.writeRPCError(response, err) {
+			return "", false
+		}
 		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return "", false
 	}

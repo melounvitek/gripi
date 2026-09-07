@@ -2,20 +2,26 @@ package server
 
 import (
 	"context"
+	"errors"
 	"sync"
+
+	"github.com/melounvitek/gripi/internal/rpc"
 )
+
+var errSessionNavigating = errors.New("The session tree is changing. Review the selected branch before sending again.")
 
 type sessionPromptLease struct {
 	path string
 }
 
 type sessionAdmission struct {
-	prompts  map[*sessionPromptLease]struct{}
-	idleDone chan struct{}
+	prompts    map[*sessionPromptLease]struct{}
+	idleDone   chan struct{}
+	navigating bool
 }
 
-// sessionAdmissions keeps prompt handlers and idle cleanup from overlapping,
-// including the gaps between their individual RPC operations.
+// sessionAdmissions excludes idle cleanup and tree navigation from prompt
+// handlers, including the gaps between their individual RPC operations.
 type sessionAdmissions struct {
 	mu       sync.Mutex
 	sessions map[string]*sessionAdmission
@@ -35,6 +41,10 @@ func (admissions *sessionAdmissions) prompt(ctx context.Context, resolve func() 
 			return "", nil, err
 		}
 		entry := admissions.sessions[path]
+		if entry != nil && entry.navigating {
+			admissions.mu.Unlock()
+			return "", nil, errSessionNavigating
+		}
 		if entry != nil && entry.idleDone != nil {
 			done := entry.idleDone
 			admissions.mu.Unlock()
@@ -51,15 +61,20 @@ func (admissions *sessionAdmissions) prompt(ctx context.Context, resolve func() 
 	}
 }
 
-// tryPrompt protects a remap destination without waiting for idle retirement
-// while the caller holds the remap locks.
-func (admissions *sessionAdmissions) tryPrompt(path string) (func(), bool) {
+// tryPrompt protects a remap path without waiting for idle retirement or
+// overlapping navigation while the caller holds the remap locks.
+func (admissions *sessionAdmissions) tryPrompt(path string) (func(), error) {
 	admissions.mu.Lock()
 	defer admissions.mu.Unlock()
-	if entry := admissions.sessions[path]; entry != nil && entry.idleDone != nil {
-		return nil, false
+	if entry := admissions.sessions[path]; entry != nil {
+		if entry.navigating {
+			return nil, errSessionNavigating
+		}
+		if entry.idleDone != nil {
+			return nil, rpc.ErrOperationPending
+		}
 	}
-	return admissions.addPromptLocked(path), true
+	return admissions.addPromptLocked(path), nil
 }
 
 func (admissions *sessionAdmissions) addPromptLocked(path string) func() {
@@ -84,20 +99,44 @@ func (admissions *sessionAdmissions) addPromptLocked(path string) func() {
 	}
 }
 
-// The caller protects to with tryPrompt until the move finishes. Transfer all
-// ongoing handlers and publish the alias in the same admission critical section.
+// The caller protects both paths with tryPrompt until the move finishes.
+// Transfer handlers and publish the alias in the same critical section.
 func (admissions *sessionAdmissions) remap(from, to string, commit func()) {
 	admissions.mu.Lock()
 	defer admissions.mu.Unlock()
-	if source := admissions.sessions[from]; source != nil && len(source.prompts) > 0 {
-		destination := admissions.sessions[to]
-		for lease := range source.prompts {
-			lease.path = to
-			destination.prompts[lease] = struct{}{}
-		}
-		delete(admissions.sessions, from)
+	source, destination := admissions.sessions[from], admissions.sessions[to]
+	for lease := range source.prompts {
+		lease.path = to
+		destination.prompts[lease] = struct{}{}
 	}
+	delete(admissions.sessions, from)
 	commit()
+}
+
+// Navigation rejects competing requests rather than waiting and submitting
+// their prompts on a different branch. Resolve has the same contract as prompt.
+func (admissions *sessionAdmissions) navigate(resolve func() (string, error)) (string, func(), error) {
+	admissions.mu.Lock()
+	defer admissions.mu.Unlock()
+	path, err := resolve()
+	if err != nil {
+		return "", nil, err
+	}
+	if entry := admissions.sessions[path]; entry != nil {
+		if entry.navigating {
+			return "", nil, errSessionNavigating
+		}
+		return "", nil, rpc.ErrOperationPending
+	}
+	if admissions.sessions == nil {
+		admissions.sessions = make(map[string]*sessionAdmission)
+	}
+	admissions.sessions[path] = &sessionAdmission{navigating: true}
+	return path, func() {
+		admissions.mu.Lock()
+		defer admissions.mu.Unlock()
+		delete(admissions.sessions, path)
+	}, nil
 }
 
 func (admissions *sessionAdmissions) retireIdle(path string) (func(), bool) {
