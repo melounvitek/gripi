@@ -420,6 +420,11 @@ func (app *application) remapPendingRPCClient(from, to string, claim func() (fun
 		app.pendingSessions.Forget(from)
 		return nil
 	}
+	releaseDestination, admitted := app.promptAdmissions.tryPrompt(to)
+	if !admitted {
+		return rpc.ErrOperationPending
+	}
+	defer releaseDestination()
 	return app.rpcClients.MoveWithCommit(from, to, func() (func() error, error) {
 		ownershipRollback, err := claim()
 		if err != nil {
@@ -444,7 +449,9 @@ func (app *application) remapPendingRPCClient(from, to string, claim func() (fun
 			return errors.Join(stateErr, ownershipErr)
 		}, nil
 	}, func() {
-		app.pendingSessions.Remap(from, to)
+		app.promptAdmissions.remap(from, to, func() {
+			app.pendingSessions.Remap(from, to)
+		})
 	})
 }
 
@@ -504,26 +511,35 @@ func (app *application) cleanupIdleRPCClients(ctx context.Context) error {
 		if _, pending := app.pendingSessions.CWD(path); pending {
 			continue
 		}
-		var closed bool
-		var err error
-		if _, statErr := os.Stat(path); statErr == nil {
-			app.synchronizer.ReconcileIfAvailable(ctx, path, false, func(sessions.SyncResult) {
-				closed, err = app.rpcClients.CloseClientIfExpired(path, app.config.RPCIdleTimeout, now, nil)
-				if closed {
-					app.synchronizer.Forget(path)
-				}
-			})
-		} else {
-			closed, err = app.rpcClients.CloseClientIfExpired(path, app.config.RPCIdleTimeout, now, nil)
-		}
-		if err != nil && first == nil {
+		if err := app.cleanupIdleRPCClient(ctx, path, now); err != nil && first == nil {
 			first = err
-		}
-		if closed {
-			app.pendingSessions.Forget(path)
 		}
 	}
 	return first
+}
+
+func (app *application) cleanupIdleRPCClient(ctx context.Context, path string, now time.Time) error {
+	release, admitted := app.promptAdmissions.retireIdle(path)
+	if !admitted {
+		return nil
+	}
+	defer release()
+	var closed bool
+	var err error
+	if _, statErr := os.Stat(path); statErr == nil {
+		app.synchronizer.ReconcileIfAvailable(ctx, path, false, func(sessions.SyncResult) {
+			closed, err = app.rpcClients.CloseClientIfExpired(path, app.config.RPCIdleTimeout, now, nil)
+			if closed {
+				app.synchronizer.Forget(path)
+			}
+		})
+	} else {
+		closed, err = app.rpcClients.CloseClientIfExpired(path, app.config.RPCIdleTimeout, now, nil)
+	}
+	if closed {
+		app.pendingSessions.Forget(path)
+	}
+	return err
 }
 
 func successfulData(response map[string]any) map[string]any {
