@@ -91,7 +91,7 @@
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.7rem; }
     .session-header-window-action, .session-header-tag-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; line-height: 1; text-decoration: none; }
     .session-header-tag-action { padding: 0; }
-    .session-header-tag-action svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+    .session-header-tag-action svg, .tag-filter-toggle svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
     .session-header-tag-action:hover { background: transparent; color: var(--text); }
     .session-header-window-action:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.5rem; }
@@ -171,6 +171,8 @@
     .sidebar-search-toggle.is-active { border: 1px solid var(--accent-line-55); background: var(--accent-tint-08); color: var(--accent); box-shadow: 0 0 0 2px var(--accent-tint-08); }
     .sidebar-project-filter-form { margin: 0; }
     .sidebar-filter-row { display: flex; align-items: center; gap: 0.45rem; }
+    .sidebar-filter-row .project-select-trigger, .sidebar-filter-row .compact-tag-filter, .sidebar-filter-row .sidebar-search-toggle { height: 2.25rem; min-height: 0; padding-block: 0; }
+    .sidebar-filter-row .sidebar-search-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; padding: 0; }
     .sidebar-project-filter { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.8rem; font-weight: 500; background: var(--bg); }
     .sidebar-filter-spinner { display: none; flex: 0 0 auto; width: 0.9rem; height: 0.9rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     .session-sidebar.is-filtering .sidebar-filter-spinner { display: inline-block; }
@@ -746,7 +748,7 @@
     }
 
     .compact-tag-filter { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 48%; border: 1px solid var(--border-strong); border-radius: 4px; }
-    .compact-tag-filter button { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 7px 8px; border: 0; background: transparent; color: var(--muted); font: 11px var(--sans); text-transform: none; letter-spacing: normal; }
+    .compact-tag-filter button { display: inline-flex; align-items: center; gap: 5px; height: 100%; min-width: 0; padding: 0 8px; border: 0; background: transparent; color: var(--muted); font: 11px var(--sans); text-transform: none; letter-spacing: normal; }
     .compact-tag-filter .tag-filter-toggle span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .compact-tag-filter .tag-filter-clear { flex: none; padding-left: 4px; font-size: 16px; }
     .compact-tag-filter.is-active { border-color: var(--tag-bg); background: var(--tag-bg); }
@@ -794,7 +796,9 @@
     @media (max-width: 760px), (pointer: coarse) {
       .session-header-tag-action { position: relative; min-width: 2.4rem; min-height: 2.4rem; }
       .session-header-tag-action::after { content: ""; position: absolute; inset: -3px; }
-      .compact-tag-filter button { position: relative; min-height: 32px; }
+      .sidebar-filter-row .project-select-trigger, .sidebar-filter-row .sidebar-search-toggle { position: relative; }
+      .sidebar-filter-row .project-select-trigger::after, .sidebar-filter-row .sidebar-search-toggle::after { content: ""; position: absolute; inset: -4px 0; }
+      .compact-tag-filter button { position: relative; }
       .compact-tag-filter button::after { content: ""; position: absolute; inset: -6px 0; }
       .compact-tag-filter .tag-filter-clear { min-width: 32px; }
       .session-row.has-tags a.session { padding-bottom: 3.7rem; }

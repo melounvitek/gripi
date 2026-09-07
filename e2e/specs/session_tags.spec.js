@@ -21,6 +21,40 @@ async function assign(page, session, tag, assigned = true) {
 
 const dialogFor = (page) => page.getByRole("dialog", { name: "Session tags", exact: true });
 
+test("sidebar filters have matching heights and open on first activation", async ({ page, isMobile }, testInfo) => {
+  await page.goto("/");
+  if (isMobile) await page.locator('label[aria-label="Open sessions"]').tap();
+  const row = page.locator(".sidebar-filter-row");
+  const project = row.locator(".project-select-trigger");
+  const tags = row.locator("[data-tag-chooser]");
+  const search = row.getByRole("button", { name: "Search sessions", exact: true });
+  const bounds = await row.locator(".project-select-trigger, .compact-tag-filter, .sidebar-search-toggle").evaluateAll((controls) => controls.map((control) => {
+    const { y, height } = control.getBoundingClientRect();
+    return { y, height };
+  }));
+  expect(bounds).toHaveLength(3);
+  for (const bound of bounds) {
+    expect(bound.height).toBe(36);
+    expect(bound.y).toBe(bounds[0].y);
+  }
+  await page.locator(".sidebar-filters").screenshot({ path: testInfo.outputPath("sidebar-filters-36px.png"), animations: "disabled" });
+  const activate = async (control) => {
+    if (isMobile) {
+      const bounds = await control.boundingBox();
+      // Hit the extended touch target just above the visible border.
+      await page.touchscreen.tap(bounds.x + bounds.width / 2, bounds.y - 2);
+    } else await control.click();
+  };
+  await activate(project);
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await activate(tags);
+  await expect(page.getByRole("dialog", { name: "Filter by tag", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await activate(search);
+  await expect(search).toHaveAttribute("aria-expanded", "true");
+});
+
 test("tag pickers stay beside desktop controls and fit narrow phone screens", async ({ page, isMobile }, testInfo) => {
   const { current } = await fixtureSessions(page);
   await page.setViewportSize(isMobile ? { width: 360, height: 640 } : { width: 1280, height: 800 });
@@ -216,6 +250,8 @@ test("tag filter combines across projects without switching conversation; pins b
     await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(tag);
     await expect(page.locator(".sessions-list .session-row")).toHaveCount(2);
     await expect(page.locator("[data-tag-filter-count]")).toHaveText("2");
+    const filterHeights = await page.locator(".sidebar-filter-row .project-select-trigger, .compact-tag-filter, .sidebar-search-toggle").evaluateAll((controls) => controls.map((control) => control.getBoundingClientRect().height));
+    expect(filterHeights).toEqual([36, 36, 36]);
     await expect(page.locator(".session-header-name")).toHaveText(current.name);
     await expect(page.getByLabel("Message to Pi")).toHaveValue("Keep this draft");
     await expect(page.locator(".pinned-sessions-list .session-row").filter({ has: page.locator(".session-title", { hasText: pin.name }) })).toHaveAttribute("data-session-path", pin.path);
@@ -237,8 +273,20 @@ test("tag filter combines across projects without switching conversation; pins b
     await page.screenshot({ path: testInfo.outputPath("tag-filter.png"), animations: "disabled" });
     await activate(page.getByRole("button", { name: "Clear tag filter", exact: true }));
     await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(null);
-    const filterLabel = page.locator(".tag-filter-toggle span").first();
-    expect(await filterLabel.evaluate((label) => label.scrollWidth <= label.clientWidth)).toBe(true);
+    const filter = page.getByRole("button", { name: "Filter sessions by tag", exact: true });
+    await expect(filter).toHaveAttribute("title", "Filter by tags");
+    await expect(filter.locator("svg")).toBeVisible();
+    expect(await filter.evaluate((button) => button.scrollWidth <= button.clientWidth)).toBe(true);
+    await activate(filter);
+    await expect(chooser).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.reload();
+    if (isMobile) await activate(page.locator('label[aria-label="Open sessions"]'));
+    await expect(filter.locator("svg")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("tag-filter-icon.png"), animations: "disabled" });
+    await activate(filter);
+    await expect(chooser).toBeVisible();
+    await page.keyboard.press("Escape");
     expect(new URL(page.url()).searchParams.get("project")).toBe(other.project);
     expect(new URL(page.url()).searchParams.get("session_search")).toBe("History");
     await expect(page.locator(".sessions-list .session-row")).toHaveAttribute("data-session-path", other.path);
