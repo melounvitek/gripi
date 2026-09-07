@@ -75,7 +75,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 		t.Fatalf("attachment metadata = %s, %v", metadata, err)
 	}
 
-	waitForFakePiSettled(t, handler, sessionPath)
+	waitForFakePiSettled(t, handler, sessionPath, 0)
 	extensionImageRequest := multipartRequest(t, "/prompt", map[string]string{"session": sessionPath, "message": "/immediate-command"}, "images[]", "ignored.png", "image/png", []byte("ignored-extension-image"))
 	extensionImageRequest.Header.Set("Accept", "application/json")
 	extensionImage := serveAction(handler, extensionImageRequest)
@@ -136,6 +136,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 		t.Fatalf("cycle thinking = %d %s", cycle.Code, cycle.Body.String())
 	}
 
+	steerCursor := fakePiEventCursor(t, handler, sessionPath)
 	steerStart := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "Start the steer scenario"}, true))
 	if steerStart.Code != http.StatusOK {
 		t.Fatalf("steer start = %d %s", steerStart.Code, steerStart.Body.String())
@@ -152,7 +153,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if steeredSlash.Code != http.StatusOK || !strings.Contains(steeredSlash.Body.String(), `"steer":true`) {
 		t.Fatalf("steered slash = %d %s", steeredSlash.Code, steeredSlash.Body.String())
 	}
-	waitForFakePiSettled(t, handler, sessionPath)
+	waitForFakePiSettled(t, handler, sessionPath, steerCursor)
 
 	activeTreeStart := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "Start the steer scenario"}, true))
 	if activeTreeStart.Code != http.StatusOK {
@@ -163,6 +164,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 		t.Fatalf("active tree = %d %s", activeTree.Code, activeTree.Body.String())
 	}
 
+	followUpCursor := fakePiEventCursor(t, handler, sessionPath)
 	followUpStart := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": sessionPath, "message": "Start the follow-up scenario"}, true))
 	if followUpStart.Code != http.StatusOK {
 		t.Fatalf("follow-up start = %d %s", followUpStart.Code, followUpStart.Body.String())
@@ -171,7 +173,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if followUpCommand.Code != http.StatusOK || !strings.Contains(followUpCommand.Body.String(), `"follow_up":true`) || strings.Contains(followUpCommand.Body.String(), `"command":"logout"`) {
 		t.Fatalf("follow-up slash command = %d %s", followUpCommand.Code, followUpCommand.Body.String())
 	}
-	waitForFakePiSettled(t, handler, sessionPath)
+	waitForFakePiSettled(t, handler, sessionPath, followUpCursor)
 
 	tree := serveAction(handler, getActionRequest("/sessions/tree_entries?session="+url.QueryEscape(sessionPath)+"&filter=all"))
 	if tree.Code != http.StatusOK || !strings.Contains(tree.Body.String(), `"settings"`) || !strings.Contains(tree.Body.String(), `"entries"`) {
@@ -471,7 +473,7 @@ func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
 	if err != nil || !strings.Contains(string(contents), `"type":"session_info"`) || !strings.Contains(string(contents), `"name":"Renamed in sidebar"`) {
 		t.Fatalf("renamed session = %s, %v", contents, err)
 	}
-	started := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": targetPath, "message": "Keep this session busy while delete is attempted"}, true))
+	started := serveAction(handler, formActionRequest("/prompt", map[string]string{"session": targetPath, "message": "Start the steer scenario"}, true))
 	if started.Code != http.StatusOK {
 		t.Fatalf("start target = %d %s", started.Code, started.Body.String())
 	}
@@ -479,7 +481,14 @@ func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
 	if busyDelete.Code != http.StatusConflict || !strings.Contains(busyDelete.Body.String(), "Cannot delete a running session") {
 		t.Fatalf("busy delete = %d %s", busyDelete.Code, busyDelete.Body.String())
 	}
-	waitForFakePiSettled(t, handler, targetPath)
+	if _, err := os.Stat(targetPath); err != nil {
+		t.Fatalf("busy session was deleted: %v", err)
+	}
+	aborted := serveAction(handler, formActionRequest("/abort", map[string]string{"session": targetPath}, true))
+	if aborted.Code != http.StatusOK {
+		t.Fatalf("abort target = %d %s", aborted.Code, aborted.Body.String())
+	}
+	waitForFakePiSettled(t, handler, targetPath, 0)
 
 	currentDelete := serveAction(handler, formActionRequest("/sessions/delete", map[string]string{"session": currentPath, "current_session": currentPath}, true))
 	if currentDelete.Code != http.StatusConflict || !strings.Contains(currentDelete.Body.String(), "Cannot delete the current session") {
@@ -530,11 +539,24 @@ func waitForDeferredSidebar(t *testing.T, handler http.Handler) {
 	t.Fatal("sidebar metadata was not deferred while Pi was busy")
 }
 
-func waitForFakePiSettled(t *testing.T, handler http.Handler, sessionPath string) {
+func fakePiEventCursor(t *testing.T, handler http.Handler, sessionPath string) int64 {
+	t.Helper()
+	response := serveAction(handler, getActionRequest("/events?session="+url.QueryEscape(sessionPath)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("events = %d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		LastSeq int64 `json:"last_seq"`
+	}
+	decodeActionJSON(t, response, &payload)
+	return payload.LastSeq
+}
+
+func waitForFakePiSettled(t *testing.T, handler http.Handler, sessionPath string, after int64) {
 	t.Helper()
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
-		response := serveAction(handler, getActionRequest("/events?session="+url.QueryEscape(sessionPath)+"&after=0"))
+		response := serveAction(handler, getActionRequest(fmt.Sprintf("/events?session=%s&after=%d", url.QueryEscape(sessionPath), after)))
 		if response.Code == http.StatusOK && strings.Contains(response.Body.String(), `"type":"agent_settled"`) && strings.Contains(response.Body.String(), `"gateway_busy":false`) {
 			return
 		}

@@ -204,6 +204,55 @@ test("fake Pi supports model, tree, compaction, and branch control contracts", {
   assert.notEqual((await nextRecord(records)).data.sessionFile, sessionPath);
 });
 
+test("fake Pi can hold prompt lifecycle delivery until abort without hiding native state", { timeout: 5_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-held-events-"));
+  const fixture = await seedFixtures(root);
+  const child = spawnFake(fixture, ["--mode", "rpc"], undefined, { GRIPI_E2E_HOLD_PROMPT_EVENTS: "1" });
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+
+  child.stdin.write(`${JSON.stringify({ id: "held", type: "prompt", message: prompts.steerStart })}\n`);
+  assert.equal((await nextRecord(records)).id, "held");
+  child.stdin.write(`${JSON.stringify({ id: "busy", type: "get_state" })}\n`);
+  const state = await nextRecord(records);
+  assert.equal(state.id, "busy");
+  assert.equal(state.data.isStreaming, true);
+  child.stdin.write(`${JSON.stringify({ id: "abort", type: "abort" })}\n`);
+  assert.deepEqual((await readRecords(records, 6)).map((record) => record.type), [
+    "agent_start", "message_start", "message_end", "turn_start", "agent_end", "agent_settled"
+  ]);
+  assert.equal((await nextRecord(records)).id, "abort");
+  child.stdin.write(`${JSON.stringify({ id: "idle", type: "get_state" })}\n`);
+  assert.equal((await nextRecord(records)).data.isStreaming, false);
+});
+
+test("fake Pi rejects tree mutations while running but keeps extension prompts idle", { timeout: 5_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-busy-tree-"));
+  const fixture = await seedFixtures(root);
+  const sessionPath = path.join(fixture.sessionsRoot, "e2e", "prompt.jsonl");
+  const child = spawnFake(fixture, ["--mode", "rpc", "--session", sessionPath]);
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+
+  child.stdin.write(`${JSON.stringify({ id: "extension", type: "prompt", message: "/immediate-command" })}\n`);
+  assert.equal((await nextRecord(records)).success, true);
+  child.stdin.write(`${JSON.stringify({ id: "idle", type: "get_state" })}\n`);
+  assert.equal((await nextRecord(records)).data.isStreaming, false);
+
+  child.stdin.write(`${JSON.stringify({ id: "entries", type: "get_entries" })}\n`);
+  const before = (await nextRecord(records)).data;
+  child.stdin.write(`${JSON.stringify({ id: "held", type: "prompt", message: prompts.steerStart })}\n`);
+  assert.equal((await nextRecord(records)).id, "held");
+  await readRecords(records, 4);
+  for (const mutation of ["navigate", "label"]) {
+    const payload = Buffer.from(JSON.stringify({ entryId: before.entries[0].id, summary: "none", label: "blocked" })).toString("base64url");
+    child.stdin.write(`${JSON.stringify({ id: mutation, type: "prompt", message: `/gripi_tree_${mutation} abc123 ${payload}` })}\n`);
+    assert.equal((await nextRecord(records)).success, true);
+    const result = JSON.parse((await nextRecord(records)).statusText);
+    assert.deepEqual(result, { ok: false, error: "Session is busy" });
+  }
+});
+
 test("fake Pi uses LF framing rather than Unicode line separators", { timeout: 5_000 }, async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-framing-"));
   const fixture = await seedFixtures(root);
@@ -220,10 +269,10 @@ test("fake Pi uses LF framing rather than Unicode line separators", { timeout: 5
   assert.equal(response.success, false);
 });
 
-function spawnFake(fixture, args, cwd) {
+function spawnFake(fixture, args, cwd, env = {}) {
   return spawn(process.execPath, [fakePiPath, ...args], {
     cwd,
-    env: { ...process.env, GRIPI_E2E_SESSIONS_ROOT: fixture.sessionsRoot },
+    env: { ...process.env, GRIPI_E2E_SESSIONS_ROOT: fixture.sessionsRoot, ...env },
     stdio: ["pipe", "pipe", "pipe"]
   });
 }

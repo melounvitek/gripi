@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"io"
 	"mime"
@@ -793,9 +794,28 @@ func (app *application) deleteSessionBlockReason(currentPath, targetPath string)
 	return ""
 }
 
-func (app *application) closeDeleteSessionClient(path string) error {
+func (app *application) closeDeleteSessionClient(ctx context.Context, path string) error {
 	if !app.rpcClients.Active(path) {
 		return nil
+	}
+	// Prompt acceptance can precede agent_start delivery. The caller holds the
+	// session's exclusive operation lock through this check, close, and deletion.
+	err := app.rpcClients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error {
+		state, err := client.GetState(ctx)
+		if err != nil {
+			return err
+		}
+		if !successfulRPCResponse(state) {
+			return &rpcSettingError{response: state}
+		}
+		data := responseData(state)
+		if data["isStreaming"] == true || data["isCompacting"] == true {
+			return errDeleteRunning
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	closed, err := app.rpcClients.CloseClientIfIdle(path)
 	if err != nil {
@@ -813,7 +833,7 @@ func (app *application) deletePersistedSession(request *http.Request, path strin
 		if app.rpcClients.Busy(path) || app.rpcClients.Compacting(path) {
 			return errDeleteRunning
 		}
-		if err := app.closeDeleteSessionClient(path); err != nil {
+		if err := app.closeDeleteSessionClient(request.Context(), path); err != nil {
 			return err
 		}
 		var err error
@@ -1006,26 +1026,45 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 		return
 	}
 	restoredQueuedText := ""
-	if app.rpcClients.AgentRunning(path) {
-		queued := app.rpcClients.LiveSnapshot(path).QueuedMessages
-		restoredQueuedText = strings.Join(append(append([]string{}, queued["steering"]...), queued["followUp"]...), "\n\n")
-		err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
-			actions, actionErr := checkedActionClient(client)
-			if actionErr != nil {
-				return actionErr
-			}
-			aborted, actionErr := actions.Abort(request.Context())
-			if actionErr != nil {
-				return actionErr
-			}
-			if !successfulRPCResponse(aborted) {
-				return &rpcSettingError{response: aborted}
+	abortedRun := false
+	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+		state, err := client.GetState(request.Context())
+		if err != nil {
+			return err
+		}
+		if !successfulRPCResponse(state) {
+			return &rpcSettingError{response: state}
+		}
+		data := responseData(state)
+		if data["isCompacting"] == true || client.Compacting() {
+			return errSessionBusy
+		}
+		if data["isStreaming"] != true && !client.AgentRunning() {
+			if client.Busy() {
+				return errSessionBusy
 			}
 			return nil
-		})
-		if app.writeSettingError(response, err) {
-			return
 		}
+		queued := client.LiveSnapshot().QueuedMessages
+		restoredQueuedText = strings.Join(append(append([]string{}, queued["steering"]...), queued["followUp"]...), "\n\n")
+		actions, err := checkedActionClient(client)
+		if err != nil {
+			return err
+		}
+		aborted, err := actions.Abort(request.Context())
+		if err != nil {
+			return err
+		}
+		if !successfulRPCResponse(aborted) {
+			return &rpcSettingError{response: aborted}
+		}
+		abortedRun = true
+		return nil
+	})
+	if app.writeSettingError(response, err) {
+		return
+	}
+	if abortedRun {
 		closed, err := app.rpcClients.CloseClientWithoutOperations(path)
 		if err != nil {
 			app.writeActionRPCError(response, err)
@@ -1037,7 +1076,7 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 		}
 	}
 	var result map[string]any
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err = app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
