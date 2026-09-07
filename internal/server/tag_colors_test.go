@@ -12,14 +12,14 @@ import (
 func TestTagColorsRenderAcrossPageAndFragments(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	handler := fixtureHandler(t, fixture)
-	// These UTF-8 FNV-1a fixtures cover every project palette entry.
+	// These UTF-8 FNV-1a fixtures cover every tag palette entry.
 	colors := map[string][2]string{
-		"color-7": {"#6a3b1d33", "#e6a66f"}, "color-8": {"#334f7833", "#8db9ef"},
-		"color-9": {"#563a7033", "#c5a0e8"}, "color-35": {"#70374633", "#ef9aae"},
-		"color-34": {"#4b612b33", "#acd276"}, "color-0": {"#285d7033", "#75c5df"},
-		"color-1": {"#67365f33", "#dfa0d4"}, "color-é": {"#66502033", "#e0bd65"},
-		"color-3": {"#315d3b33", "#86cb98"}, "color-東京": {"#3f477533", "#a5afe9"},
-		"color-5": {"#713f3233", "#eda18b"}, "color-🧪": {"#215f5933", "#76cbbf"},
+		"color-7": {"#5ff5ce1f", "#5ff5ce"}, "color-8": {"#4df3e51f", "#4df3e5"},
+		"color-9": {"#50e3ff1f", "#50e3ff"}, "color-35": {"#68ceff1f", "#68ceff"},
+		"color-34": {"#8dbbff1f", "#8dbbff"}, "color-0": {"#b1b6ff1f", "#b1b6ff"},
+		"color-1": {"#c2adff1f", "#c2adff"}, "color-é": {"#d3a2ff1f", "#d3a2ff"},
+		"color-3": {"#e69cff1f", "#e69cff"}, "color-東京": {"#f59afa1f", "#f59afa"},
+		"color-5": {"#ff95dc1f", "#ff95dc"}, "color-🧪": {"#ff9ecb1f", "#ff9ecb"},
 	}
 	for tag := range colors {
 		response := serve(t, handler, http.MethodPost, "/sessions/tags", url.Values{"session": {fixture.markerPath}, "tag": {tag}, "assigned": {"true"}}.Encode())

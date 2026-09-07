@@ -1,8 +1,8 @@
-// Same readable palette as projectColors in internal/server/views.go.
+// Keep this tag-only palette in sync with internal/server/tag_colors.go.
 const tagColors = [
-  ["#6a3b1d33", "#e6a66f"], ["#334f7833", "#8db9ef"], ["#563a7033", "#c5a0e8"], ["#70374633", "#ef9aae"],
-  ["#4b612b33", "#acd276"], ["#285d7033", "#75c5df"], ["#67365f33", "#dfa0d4"], ["#66502033", "#e0bd65"],
-  ["#315d3b33", "#86cb98"], ["#3f477533", "#a5afe9"], ["#713f3233", "#eda18b"], ["#215f5933", "#76cbbf"]
+  ["#5ff5ce1f", "#5ff5ce"], ["#4df3e51f", "#4df3e5"], ["#50e3ff1f", "#50e3ff"], ["#68ceff1f", "#68ceff"],
+  ["#8dbbff1f", "#8dbbff"], ["#b1b6ff1f", "#b1b6ff"], ["#c2adff1f", "#c2adff"], ["#d3a2ff1f", "#d3a2ff"],
+  ["#e69cff1f", "#e69cff"], ["#f59afa1f", "#f59afa"], ["#ff95dc1f", "#ff95dc"], ["#ff9ecb1f", "#ff9ecb"]
 ];
 
 function applyTagColors(element, tag) {
