@@ -200,9 +200,12 @@ test("show an agent activity switch that activates on the first tap", async ({ p
 
   await page.locator('label[aria-label="Open sessions"]').tap();
   await page.getByRole("link", { name: new RegExp(sessions.toolSummary) }).tap();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.toolSummary })).toBeVisible();
+  const toolCalls = message(page, "assistant", `$ ${tool.longCommand}`);
+  const previousCount = await toolCalls.count();
   await sendPrompt(page, prompts.longCommand);
 
-  const toolCall = message(page, "assistant", `$ ${tool.longCommand}`).last();
+  const toolCall = toolCalls.nth(previousCount);
   await expect(toolCall).toBeVisible();
 
   const toggle = page.getByRole("switch", { name: "Show agent activity" });
