@@ -24,4 +24,6 @@ For changes affecting conversation/message rendering, check both server-rendered
 
 The dev server runs as the user systemd service `gripi.service`, logging to `/tmp/gripi.log`.
 
-Do not restart it unless explicitly asked; for code changes, tell the user a restart is needed. For design-only changes (CSS/markup presentation tweaks), a restart is not needed; a browser refresh is enough.
+Do not restart it unless explicitly asked. Go code, HTML templates, and frontend assets (including CSS and JavaScript) are compiled into the gateway binary. Changes to these files require a rebuild and service restart, followed by a browser refresh; presentation-only changes are not an exception.
+
+Before restarting, verify whether the launcher rebuilds changed files. The current `bin/start` only builds from source when `tmp/gripi` is missing; otherwise it reuses the binary or installs a staged update. Rebuild the current code before restarting an existing binary. After restarting, verify that `gripi.service` is running and the gateway responds.
