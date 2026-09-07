@@ -1,3 +1,19 @@
+// Same readable palette as projectColors in internal/server/views.go.
+const tagColors = [
+  ["#6a3b1d33", "#e6a66f"], ["#334f7833", "#8db9ef"], ["#563a7033", "#c5a0e8"], ["#70374633", "#ef9aae"],
+  ["#4b612b33", "#acd276"], ["#285d7033", "#75c5df"], ["#67365f33", "#dfa0d4"], ["#66502033", "#e0bd65"],
+  ["#315d3b33", "#86cb98"], ["#3f477533", "#a5afe9"], ["#713f3233", "#eda18b"], ["#215f5933", "#76cbbf"]
+];
+
+function applyTagColors(element, tag) {
+  // UTF-8 FNV-1a, matching tagStyle in internal/server/tag_colors.go.
+  let hash = 2166136261;
+  for (const byte of new TextEncoder().encode(tag)) hash = Math.imul(hash ^ byte, 16777619) >>> 0;
+  const [background, foreground] = tagColors[hash % tagColors.length];
+  element.style.setProperty("--tag-bg", background);
+  element.style.setProperty("--tag-fg", foreground);
+}
+
 export class SessionTagsController {
   constructor(document, window, callbacks = {}) {
     this.document = document;
@@ -76,6 +92,7 @@ export class SessionTagsController {
       const chip = this.document.createElement("button");
       chip.type = "button";
       chip.className = "tag-chip";
+      applyTagColors(chip, tag);
       chip.dataset.tagDraftRemove = tag;
       chip.setAttribute("aria-label", `Remove ${tag}`);
       const label = this.document.createElement("span");
@@ -262,6 +279,7 @@ export class SessionTagsController {
       const button = this.document.createElement("button");
       button.type = "button";
       button.className = "tag-picker-option tag-create";
+      applyTagColors(button, query);
       button.textContent = `Create “${query}”`;
       button.disabled = state.pending;
       button.addEventListener("click", () => this.mutate(state, query, true));
@@ -276,6 +294,7 @@ export class SessionTagsController {
     const state = this.state;
     const option = this.document.createElement(state.path || state.form ? "label" : "button");
     option.className = "tag-picker-option";
+    if (tag) applyTagColors(option, tag);
     if (state.path || state.form) {
       const checkbox = this.document.createElement("input");
       checkbox.type = "checkbox";
@@ -325,6 +344,7 @@ export class SessionTagsController {
       const chip = this.document.createElement("button");
       chip.type = "button";
       chip.className = "tag-chip";
+      applyTagColors(chip, tag);
       chip.dataset.tagFilter = tag;
       chip.setAttribute("aria-label", `Filter sessions by ${tag}`);
       const label = this.document.createElement("span");

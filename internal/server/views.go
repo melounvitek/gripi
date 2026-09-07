@@ -582,7 +582,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return b
 		},
 		"base": filepath.Base, "urlquery": url.QueryEscape, "json": func(value any) string { data, _ := json.Marshal(value); return string(data) },
-		"projectIdentity": identityFor, "relativeTime": relativeTime, "formatTime": func(value time.Time) string {
+		"projectIdentity": identityFor, "tagStyle": tagStyle, "relativeTime": relativeTime, "formatTime": func(value time.Time) string {
 			if value.IsZero() {
 				return "unknown"
 			}

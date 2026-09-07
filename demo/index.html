@@ -749,13 +749,13 @@
     .compact-tag-filter button { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 7px 8px; border: 0; background: transparent; color: var(--muted); font: 11px var(--sans); text-transform: none; letter-spacing: normal; }
     .compact-tag-filter .tag-filter-toggle span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .compact-tag-filter .tag-filter-clear { flex: none; padding-left: 4px; font-size: 16px; }
-    .compact-tag-filter.is-active { border-color: var(--accent-line-35); background: var(--accent-tint-04); }
-    .compact-tag-filter.is-active button { color: var(--accent-bright); }
+    .compact-tag-filter.is-active { border-color: var(--tag-bg); background: var(--tag-bg); }
+    .compact-tag-filter.is-active button { color: var(--tag-fg); }
     .tag-filter-count { margin-left: 5px; color: var(--muted-soft); letter-spacing: normal; }
     .session-row.has-tags a.session { padding-bottom: 2.9rem; }
     .session-tags { position: absolute; left: 0.75rem; right: 4.5rem; bottom: 0.6rem; display: flex; align-items: center; gap: 5px; min-width: 0; }
     .tag-chip, .tag-overflow, .edit-tags { display: inline-flex; align-items: center; min-width: 0; padding: 5px 6px; border: 1px solid #ffffff16; border-radius: 4px; background: #ffffff05; color: #bbbcc6; font: 11px var(--sans); text-transform: none; letter-spacing: normal; }
-    .tag-chip { flex: 0 1 auto; }
+    .tag-chip { flex: 0 1 auto; background: var(--tag-bg); color: var(--tag-fg); }
     .tag-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tag-overflow { flex: none; }
     .tag-overflow, .edit-tags { border-color: transparent; background: transparent; color: var(--muted); }
@@ -763,7 +763,7 @@
     .header-tags:empty { display: none; }
     .header-tags .tag-chip { max-width: 100%; }
     .header-tags .tag-chip span { white-space: normal; overflow-wrap: anywhere; }
-    .tag-chip:hover { background: #ffffff05; }
+    .tag-chip:hover { background: var(--tag-bg); }
     .tag-overflow:hover, .edit-tags:hover { background: transparent; }
     .tag-picker { position: fixed; inset: 0; width: min(340px, calc(100vw - 24px)); max-height: min(600px, 85dvh); margin: auto; padding: 12px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-soft); overflow-y: auto; }
     .tag-picker[hidden] { display: none; }
@@ -774,17 +774,18 @@
     .tag-picker-context { margin: 0 0 12px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     .tag-picker input[type="search"] { width: 100%; margin: 8px 0; padding: 10px; font: 13px var(--sans); }
     .tag-picker-options { display: grid; gap: 3px; }
-    .tag-picker-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font: 13px var(--sans); text-transform: none; letter-spacing: normal; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
-    .tag-picker-option:hover { background: transparent; }
-    .tag-picker-option input { flex: none; width: 17px; height: 17px; margin: 0; accent-color: #bbbcc6; }
+    .tag-picker-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px; border: 0; border-radius: 4px; background: var(--tag-bg, transparent); color: var(--tag-fg, var(--text)); font: 13px var(--sans); text-transform: none; letter-spacing: normal; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+    .tag-picker-option:hover { background: var(--tag-bg, transparent); }
+    .tag-picker-option input { flex: none; width: 17px; height: 17px; margin: 0; accent-color: var(--tag-fg, #bbbcc6); }
     .tag-picker-option .tag-count { flex: none; margin-left: auto; color: var(--muted); font: 11px var(--mono); }
-    .tag-picker-option[aria-pressed="true"], .tag-create { background: var(--accent-tint-08); }
+    .tag-picker-option[aria-pressed="true"], .tag-create { background: var(--tag-bg, var(--accent-tint-08)); }
+    .tag-picker-option[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--tag-fg, var(--accent-line-35)); }
     .tag-picker-option:has(:disabled) { opacity: 0.65; cursor: wait; }
     .tag-picker-footer, .tag-picker [role="status"] { color: var(--muted); font-size: 11px; line-height: 1.6; }
     .tag-picker-footer { padding-top: 10px; margin: 10px 0 0; border-top: 1px solid var(--border); }
     .tag-picker-error { color: var(--danger); font-size: 12px; }
     @media (hover: hover) and (pointer: fine) {
-      .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover, .tag-picker-option:hover { background: #ffffff09; color: var(--text); }
+      .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover, .tag-picker-option:hover { background: var(--tag-bg, #ffffff09); color: var(--tag-fg, var(--text)); }
     }
     @media (min-width: 761px) {
       .tag-picker { inset: var(--tag-picker-top, 12px) auto auto var(--tag-picker-left, 12px); margin: 0; }
