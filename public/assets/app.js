@@ -119,7 +119,7 @@ let reconnectButton = null;
 let liveAgentRunning = false;
 let liveBash = null;
 let liveBusySince = null;
-let liveErrorSeen = false;
+let liveErrorText = "";
 let liveStatusModel = null;
 let liveStatusThinking = null;
 let modelSettingsModels = [];
@@ -1294,7 +1294,7 @@ function renderErrorEvent(event) {
   const errorText = eventErrorText(event);
   if (!errorText) return false;
   conversationController.setAgentRunning(false);
-  liveErrorSeen = true;
+  liveErrorText = errorText;
   liveMessageRenderer.appendMessage("error", errorText, true, true, eventTimestamp(event));
   showStatus(errorText, true);
   showCurrentActiveTask("error", errorText);
@@ -1342,7 +1342,7 @@ function renderEvent(event) {
     liveAgentRunning = true;
     conversationController.setAgentRunning(true);
     liveBusySince = eventTimeMilliseconds(event);
-    liveErrorSeen = false;
+    liveErrorText = "";
     setComposerState("running", "Pi is running…", { since: liveBusySince });
     showStatus("Pi is thinking…");
     return;
@@ -1351,7 +1351,7 @@ function renderEvent(event) {
   if (event.type === "turn_start") {
     conversationController.setAgentRunning(true);
     liveBusySince ||= eventTimeMilliseconds(event);
-    liveErrorSeen = false;
+    liveErrorText = "";
     setComposerState("running", "Pi is running…", { since: liveBusySince });
     showStatus("Pi is thinking…");
     return;
@@ -1365,7 +1365,10 @@ function renderEvent(event) {
       markCurrentSessionRead();
     }
     notifyFinalAssistantReply(event);
-    if (event.type === "message_end") refreshSessionStatus().catch(() => {});
+    if (event.type === "message_end") {
+      renderErrorEvent(event);
+      refreshSessionStatus().catch(() => {});
+    }
     return;
   }
 
@@ -1460,11 +1463,11 @@ function renderEvent(event) {
       conversationController.setAgentRunning(false);
       liveBusySince = null;
     }
-    if (!liveErrorSeen) {
+    if (!liveErrorText) {
       if (liveMessageRenderer.liveAssistantSeen) showStatus("Done");
       if (!liveAgentRunning) showCurrentActiveTask();
-    } else if (!liveAgentRunning && liveBash) {
-      showCurrentActiveTask();
+    } else if (!liveAgentRunning) {
+      showCurrentActiveTask("error", liveErrorText);
     }
     liveMessageRenderer.clearLiveAssistantStreaming();
     liveMessageRenderer.resetLiveAssistantTracking();
@@ -1480,11 +1483,11 @@ function renderEvent(event) {
       liveMessageRenderer.resetLiveAssistantTracking();
       return;
     }
-    if (!liveErrorSeen) {
+    if (!liveErrorText) {
       if (liveMessageRenderer.liveAssistantSeen) showStatus("Done");
       showCurrentActiveTask();
-    } else if (liveBash) {
-      showCurrentActiveTask();
+    } else {
+      showCurrentActiveTask("error", liveErrorText);
     }
     liveMessageRenderer.clearLiveAssistantStreaming();
     liveMessageRenderer.resetLiveAssistantTracking();
@@ -2514,7 +2517,7 @@ function resetSessionViewState() {
   liveAgentRunning = false;
   liveBash = null;
   liveBusySince = null;
-  liveErrorSeen = false;
+  liveErrorText = "";
   resetEventPollBackoff();
   clearTimeout(escapeStopConfirmationTimer);
   escapeStopConfirmationTimer = null;

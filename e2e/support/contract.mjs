@@ -5,6 +5,7 @@ export const sessions = {
   marker: FIXTURE_MARKER,
   history: "E2E History Desktop",
   prompt: "E2E Prompt Desktop",
+  assistantError: "E2E Assistant Error Desktop",
   deltaStreaming: "E2E Delta Streaming Desktop",
   markdownTable: "E2E Markdown Table Desktop",
   markdownRawDesktop: "E2E Markdown Raw Desktop",
@@ -48,6 +49,8 @@ export const sessions = {
 
 export const prompts = {
   standard: "Show the deterministic browser response",
+  assistantError: "Fail with an expired authentication token",
+  assistantPartialError: "Fail after a partial response",
   deltaStreaming: "Stream a delta-only response",
   retry: "Retry this deterministic browser response",
   retryExhausted: "Keep this prompt available after retry exhaustion",

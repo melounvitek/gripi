@@ -181,6 +181,7 @@ export async function seedFixtures(root) {
   for (const [index, [projectName, slug, title, history]] of definitions.entries()) {
     await writeSession(root, projects[projectName], slug, title, index + 1, history);
   }
+  await writeSession(root, projects["prompt-project"], "assistant-error", sessions.assistantError, 0);
   await writeSession(root, projects["mobile-project"], "parallel-subagents-mobile", sessions.parallelSubagentsMobile, 0);
   await writePaginatedSubagentSession(root, projects["controls-project"], 0);
   await writeSession(root, projects["prompt-project"], "markdown-raw-desktop", sessions.markdownRawDesktop, 0);

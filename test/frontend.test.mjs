@@ -101,6 +101,15 @@ test("extension notices and errors distinguish supported and terminal-only UI", 
   assert.equal(eventErrorText({ type: "compaction_end", result: null, errorMessage: "Compaction failed" }), "Compaction failed");
 });
 
+test("completed assistant failures expose the native error message", () => {
+  const message = { role: "assistant", content: [], stopReason: "error", errorMessage: "Provided authentication token is expired." };
+  assert.equal(eventErrorText({ type: "message_end", message }), message.errorMessage);
+  assert.equal(eventErrorText({ type: "message_start", message }), "");
+  assert.equal(eventErrorText({ type: "message_update", message }), "");
+  assert.equal(eventErrorText({ type: "message_end", message: { ...message, role: "toolResult" } }), "");
+  assert.equal(eventErrorText({ type: "message_end", message: { ...message, stopReason: "stop" } }), "");
+});
+
 test("native bash, polling, shortcut, and URL helpers remain directly importable", () => {
   assert.deepEqual(parseNativeBash("!  printf one\nprintf two  "), { command: "printf one\nprintf two", excludeFromContext: false });
   assert.deepEqual(parseNativeBash("!! git status"), { command: "git status", excludeFromContext: true });

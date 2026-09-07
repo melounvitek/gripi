@@ -22,6 +22,35 @@ func TestPersistedAssistantThinkingAndFinalAnswerRemainSeparateLikeLiveMessages(
 	}
 }
 
+func TestPersistedAssistantErrorsRemainVisible(t *testing.T) {
+	for _, partial := range []string{"", "Partial answer", strings.Repeat("x", MaxIndexedEntryBytes+1024)} {
+		t.Run(fmt.Sprintf("partial bytes %d", len(partial)), func(t *testing.T) {
+			root, project, path := sessionFixture(t)
+			content := "[]"
+			if partial != "" {
+				content = fmt.Sprintf(`[{"type":"text","text":%q}]`, partial)
+			}
+			writeSessionLines(t, path, []string{sessionLine(project),
+				`{"type":"message","id":"failed","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":` + content + `,"api":"responses","provider":"test","model":"model","usage":{"totalTokens":0},"stopReason":"error","timestamp":1,"errorMessage":"Provided authentication token is expired."}}`,
+			})
+			window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(window.Messages) == 0 {
+				t.Fatal("assistant error was hidden")
+			}
+			failure := window.Messages[len(window.Messages)-1]
+			if failure.Role != "error" || !failure.Error || failure.Text != "Provided authentication token is expired." || failure.FinalAssistantResponse {
+				t.Fatalf("error message = %#v", failure)
+			}
+			if partial == "Partial answer" && (len(window.Messages) != 2 || window.Messages[0].Text != partial) {
+				t.Fatalf("partial response was lost: %#v", window.Messages)
+			}
+		})
+	}
+}
+
 func TestPersistedCommentarySignatureMatchesLiveParser(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -306,6 +306,17 @@ function acceptPrompt(command) {
   emitMessage(user);
   emit({ type: "turn_start" });
 
+  if ([prompts.assistantError, prompts.assistantPartialError].includes(command.message)) {
+    schedule(120, () => {
+      const started = assistantMessage([], "stop");
+      emit({ type: "message_start", message: started });
+      const content = command.message === prompts.assistantPartialError ? [{ type: "text", text: "Partial answer before failure" }] : [];
+      const partial = { ...started, content };
+      emit({ type: "message_update", message: partial });
+      schedule(content.length ? 1500 : 0, () => finishAssistant({ ...partial, stopReason: "error", errorMessage: "Provided authentication token is expired." }));
+    });
+    return;
+  }
   if ([prompts.parallelSubagents, prompts.parallelSubagentsMobile].includes(command.message)) {
     schedule(120, startParallelSubagents);
     return;

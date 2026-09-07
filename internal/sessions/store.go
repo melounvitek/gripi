@@ -1562,7 +1562,11 @@ func messagesFromRaw(raw map[string]any, home string) []*Message {
 		}
 		return []*Message{{Role: role, Text: text, Timestamp: when, EntryID: stringValue(raw["id"]), Compact: role == "toolResult", Summary: summary, Error: boolValue(message["isError"]), ToolCallID: stringValue(message["toolCallId"]), ToolName: toolName, Images: images, ToolTranscript: generalSubagent || transcriptTool(toolName), ToolPrompt: subagentPrompt(message["details"])}}
 	}
-	return assistantMessages(message, when, home)
+	messages := assistantMessages(message, when, home)
+	if text := strings.TrimSpace(stringValue(message["errorMessage"])); stringValue(message["stopReason"]) == "error" && text != "" {
+		messages = append(messages, &Message{Role: "error", Text: text, Timestamp: when, Error: true})
+	}
+	return messages
 }
 
 func assistantMessages(message map[string]any, when time.Time, home string) []*Message {

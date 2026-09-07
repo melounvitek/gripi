@@ -132,6 +132,44 @@ test("shows Pi CLI guidance for login and logout commands", async ({ page }) => 
   await expect(message(page, "user", "/logout")).toHaveCount(0);
 });
 
+test("shows native assistant errors live and after reload", async ({ page }, testInfo) => {
+  const errorText = "Provided authentication token is expired.";
+  await page.goto("/");
+  await selectSession(page, sessions.assistantError);
+
+  let failures = 0;
+  for (const prompt of [prompts.assistantError, prompts.assistantPartialError]) {
+    await sendPrompt(page, prompt);
+    if (prompt === prompts.assistantPartialError) {
+      await expect(message(page, "assistant", "Partial answer before failure")).toBeVisible();
+      await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+    }
+    failures += 1;
+    const errors = message(page, "error", errorText);
+    await expect(errors).toHaveCount(failures);
+    await expect(errors.last()).toBeVisible();
+    await expect(errors.last()).toHaveClass(/message--error/);
+    await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "error");
+    await expect(page.locator(".composer-state")).toHaveText(errorText);
+    await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
+    await expect(page.getByLabel("Message to Pi")).toBeEnabled();
+    if (prompt === prompts.assistantPartialError) {
+      await expect(message(page, "assistant", "Partial answer before failure")).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("assistant-error.png") });
+      await sendPrompt(page, prompts.standard);
+      await expect(message(page, "assistant", replies.standard)).toBeVisible();
+      await expectRunFinished(page);
+    }
+
+    await page.reload();
+    await expect(errors).toHaveCount(failures);
+    await expect(errors.last()).toBeVisible();
+    if (prompt === prompts.assistantPartialError) {
+      await expect(message(page, "assistant", "Partial answer before failure")).toBeVisible();
+    }
+  }
+});
+
 test("automatically retries transient session contention", async ({ page }) => {
   let promptRequests = 0;
   await page.route("**/prompt", async (route) => {

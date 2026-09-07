@@ -898,6 +898,9 @@ func (collector *indexCollector) messageMetadata() (entry, bool) {
 		}
 		result.SubagentPrompts = assistantSubagentPrompts(parts, collector.argumentTasks)
 		result.Status = collector.assistantStatus(parts)
+		if text := collector.stringStats("message", "errorMessage"); result.Status.StopReason == "error" && text != nil && text.nonTrimWhitespace > 0 {
+			result.Segments = append(result.Segments, segment{Role: "error", Minimum: int64(text.nonTrimWhitespace * 2)})
+		}
 		result.Session.FinalText, result.Session.HasFinalText, result.Session.MetadataKnown = finalScannedAssistantText(parts)
 	case "user":
 		if visibleScannedContent(parts) {
@@ -1602,7 +1605,7 @@ func interestingString(path []scanPathPart) bool {
 	if len(path) == 1 && !path[0].array && contains([]string{"type", "id", "parentId", "timestamp", "summary", "firstKeptEntryId", "customType", "fromId", "content"}, path[0].key) {
 		return true
 	}
-	if len(path) == 2 && pathEqualsPrefix(path, "message") && contains([]string{"role", "toolCallId", "toolName", "provider", "model", "stopReason", "content", "command", "output", "fullOutputPath"}, path[1].key) {
+	if len(path) == 2 && pathEqualsPrefix(path, "message") && contains([]string{"role", "toolCallId", "toolName", "provider", "model", "stopReason", "errorMessage", "content", "command", "output", "fullOutputPath"}, path[1].key) {
 		return true
 	}
 	if messageContentItem(path) || customContentItem(path) || messagePartValuePath(path) || customPartValuePath(path) {

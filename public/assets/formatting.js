@@ -164,6 +164,9 @@ export function eventErrorText(event) {
     return "This extension command requires terminal UI that Gripi does not support yet.";
   }
   if (errorText) return errorText;
+  if (event.type === "message_end" && event.message?.role === "assistant" && event.message.stopReason === "error") {
+    return errorValueText(event.message.errorMessage);
+  }
   if (event.type === "error" || /(?:error|fail(?:ed|ure)?)/i.test(event.type || "")) return errorValueText(event);
   return "";
 }
