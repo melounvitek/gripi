@@ -112,7 +112,16 @@ test("open selected session actions on the first mobile tap", async ({ page }) =
 
   await pin.tap();
   await expect(currentRow).toHaveAttribute("data-pinned", "true");
-  await expect(currentRow.getByRole("button", { name: /Unpin session/ })).toHaveAttribute("aria-pressed", "true");
+  const unpin = currentRow.getByRole("button", { name: /Unpin session/ });
+  await expect(unpin).toHaveAttribute("aria-pressed", "true");
+  await expect(unpin).toBeEnabled();
+  await expect(unpin).not.toBeFocused();
+  await expect(unpin).toHaveCSS("outline-style", "none");
+  await unpin.tap();
+  await expect(currentRow).toHaveAttribute("data-pinned", "false");
+  await expect(pin).toBeEnabled();
+  await expect(pin).not.toBeFocused();
+  await expect(pin).toHaveCSS("outline-style", "none");
 
   const actions = currentRow.getByRole("button", { name: /Session actions/ });
   const indicators = currentRow.locator(".session-indicators");

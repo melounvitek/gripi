@@ -26,7 +26,7 @@ export class SessionActionsController {
       event.stopPropagation?.();
       this.closeMenu();
       this.target = this.targetFor(row);
-      this.togglePin(this.target, { restoreFocus: true }).catch(() => {});
+      this.togglePin(this.target, { restoreFocus: event.detail === 0 }).catch(() => {});
       return;
     }
 

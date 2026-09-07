@@ -149,6 +149,26 @@ test("clears session filters without reloading the page", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.__clearFiltersPageSentinel)).toBe(true);
 });
 
+test("pin and unpin with the mouse without leaving a focus outline", async ({ page }) => {
+  await page.goto("/?show_all_sessions=1");
+  const row = page.locator(".session-row").filter({ has: page.locator(".session-title", { hasText: sessions.marker }) });
+  const url = page.url();
+  // Start in keyboard mode to cover switching back to pointer activation.
+  await page.keyboard.press("Tab");
+  await row.getByRole("button", { name: `Pin session ${sessions.marker}`, exact: true }).click();
+  const unpin = row.getByRole("button", { name: `Unpin session ${sessions.marker}`, exact: true });
+  await expect(unpin).toBeEnabled();
+  await expect(unpin).not.toBeFocused();
+  await expect(unpin).toHaveCSS("outline-style", "none");
+
+  await unpin.click();
+  const pin = row.getByRole("button", { name: `Pin session ${sessions.marker}`, exact: true });
+  await expect(pin).toBeEnabled();
+  await expect(pin).not.toBeFocused();
+  await expect(pin).toHaveCSS("outline-style", "none");
+  await expect(page).toHaveURL(url);
+});
+
 test("find, select, and pin a session with persisted history", async ({ page }) => {
   await page.goto("/");
 
@@ -169,9 +189,17 @@ test("find, select, and pin a session with persisted history", async ({ page }) 
   await expect(row).toHaveAttribute("data-pinned", "true");
   await expect(row.getByRole("button", { name: `Unpin session ${sessions.history}` })).toHaveAttribute("aria-pressed", "true");
   await expect(row.getByRole("button", { name: `Unpin session ${sessions.history}` })).toBeFocused();
+  await expect(row.getByRole("button", { name: `Unpin session ${sessions.history}` })).toHaveCSS("outline-style", "solid");
   await expect(page.getByRole("heading", { level: 2, name: "Pinned" })).toBeVisible();
   await row.getByRole("button", { name: new RegExp(`Session actions for ${sessions.history}`) }).click();
   await expect(page.getByRole("menuitem", { name: "Unpin", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await row.getByRole("button", { name: `Unpin session ${sessions.history}` }).focus();
+  await page.keyboard.press("Space");
+  const pin = row.getByRole("button", { name: `Pin session ${sessions.history}`, exact: true });
+  await expect(pin).toHaveAttribute("aria-pressed", "false");
+  await expect(pin).toBeFocused();
+  await expect(pin).toHaveCSS("outline-style", "solid");
 });
 
 test("rename and delete a background session from its contextual actions", async ({ page }) => {
