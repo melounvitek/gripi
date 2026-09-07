@@ -7,9 +7,20 @@ test.use({ hasTouch: true });
 test("show the full wrapped tool command live and after reload", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.toolSummary);
+  // Reproduce the matching history left by conversation_view.spec.js, even in isolation.
   await sendPrompt(page, prompts.longCommand);
+  await expectRunFinished(page);
+  const delivery = await controlToolEvents(page);
+  await page.reload();
+  const cards = message(page, "assistant", "pi --no-session");
+  const previousCount = await cards.count();
+  expect(previousCount).toBeGreaterThan(0);
 
-  const card = message(page, "assistant", "pi --no-session").last();
+  await sendPrompt(page, prompts.longCommand);
+  const card = cards.nth(previousCount);
+  // History must not satisfy readiness while the current run's events are withheld.
+  await expect(card).toHaveCount(0);
+  delivery.phase = "command";
   await expectFullCommand(card);
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -17,8 +28,29 @@ test("show the full wrapped tool command live and after reload", async ({ page }
   await showMessagesOnly(page);
   const activity = await activityFor(page, card);
   await expectCollapsedActivity(activity);
-  await activity.locator("[data-focus-activity-toggle]").tap();
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  const toggle = activity.locator("[data-focus-activity-toggle]");
+  await toggle.tap({ trial: true });
+  // Keep the target visible but slightly above the follow-live destination.
+  const conversation = page.locator("#conversation-scroll");
+  await conversation.evaluate((element) => {
+    element.scrollTop = element.scrollHeight - element.clientHeight - 40;
+  });
+  const box = await toggle.boundingBox();
+  const touch = await page.context().newCDPSession(page);
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }]
+  });
+  // Deliver real tool output between touch-down and touch-up, not after completion.
+  delivery.phase = "output";
+  await expect(card).toContainText(tool.result);
+  // Let scheduled layout/scroll work run while the finger is still down.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touch.detach();
   await expectExpandedActivity(activity);
+  delivery.phase = "complete";
   await expectRunFinished(page);
   await expectExpandedActivity(activity);
 
@@ -31,6 +63,27 @@ test("show the full wrapped tool command live and after reload", async ({ page }
   await restoredActivity.locator("[data-focus-activity-toggle]").tap();
   await expectExpandedActivity(restoredActivity);
 });
+
+// Keep real gateway events ordered, but control their delivery to the live renderer.
+// Advancing the server cursor is safe because withheld events remain in this queue.
+async function controlToolEvents(page) {
+  const delivery = { phase: "held" };
+  const pending = [];
+  await page.route(/\/events(?:\?|$)/, async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    pending.push(...payload.events);
+    const events = [];
+    while (pending.length > 0 && delivery.phase !== "held") {
+      const next = pending[0];
+      if (delivery.phase === "command" && next.type === "tool_execution_start") break;
+      if (delivery.phase === "output" && next.type === "tool_execution_end") break;
+      events.push(pending.shift());
+    }
+    await route.fulfill({ response, json: { ...payload, events } });
+  });
+  return delivery;
+}
 
 async function showMessagesOnly(page) {
   await page.getByRole("switch", { name: "Show agent activity" }).click();

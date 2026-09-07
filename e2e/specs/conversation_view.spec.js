@@ -17,9 +17,11 @@ test("shows one tool result after reloading an active command", async ({ page })
 test("shows agent activity with an accessible switch", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.toolSummary);
+  const toolCalls = message(page, "assistant", `$ ${tool.longCommand}`);
+  const previousCount = await toolCalls.count();
   await sendPrompt(page, prompts.longCommand);
 
-  const toolCall = message(page, "assistant", `$ ${tool.longCommand}`).last();
+  const toolCall = toolCalls.nth(previousCount);
   await expect(toolCall).toBeVisible();
 
   const toggle = page.getByRole("switch", { name: "Show agent activity" });

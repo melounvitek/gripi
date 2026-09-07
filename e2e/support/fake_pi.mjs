@@ -28,6 +28,7 @@ const deferredBashMessages = [];
 let sessionPersisted = false;
 let entrySequence = 0;
 const timers = new Set();
+let heldPromptEvents = null;
 
 if (sessionPath) loadSession(sessionPath);
 else prepareNewSession();
@@ -302,6 +303,7 @@ function acceptPrompt(command) {
   respond(command, true);
   busy = true;
   activeScenario = command.message;
+  if (process.env.GRIPI_E2E_HOLD_PROMPT_EVENTS === "1") heldPromptEvents = [];
   emit({ type: "agent_start" });
   emitMessage(user);
   emit({ type: "turn_start" });
@@ -396,6 +398,10 @@ function acceptTreeBridge(command) {
     payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   } catch (_error) {
     emitTreeBridge(name, requestId, { ok: false, error: "Invalid extension request payload" });
+    return true;
+  }
+  if (["gripi_tree_navigate", "gripi_tree_label"].includes(name) && (busy || compacting)) {
+    emitTreeBridge(name, requestId, { ok: false, error: "Session is busy" });
     return true;
   }
   if (name === "gripi_tree_snapshot") {
@@ -526,6 +532,10 @@ function acceptFollowUp(command) {
 }
 
 function acceptAbort(command) {
+  // Let tests hold lifecycle delivery without changing native prompt acceptance or state.
+  const held = heldPromptEvents;
+  heldPromptEvents = null;
+  for (const event of held || []) send(event);
   if (!busy) {
     respond(command, true);
     return;
@@ -948,6 +958,10 @@ function emit(event) {
 }
 
 function send(record) {
+  if (heldPromptEvents && !["response", "extension_ui_request"].includes(record.type)) {
+    heldPromptEvents.push(record);
+    return;
+  }
   process.stdout.write(`${JSON.stringify(record)}\n`);
 }
 

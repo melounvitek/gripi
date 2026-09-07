@@ -757,7 +757,7 @@ export class ConversationController {
   }
 
   applyAutoScroll(behavior = "auto") {
-    if (!this.element || !this.autoScrollEnabled) return;
+    if (!this.element || !this.autoScrollEnabled || this.focusedActivityTouchActive) return;
     this.withProgrammaticScroll(() => {
       const latestAssistant = this.latestReadableAssistantMessage();
       if (!this.forceBottomAutoScroll && !this.followOversizedMessageBottom && latestAssistant && latestAssistant === this.latestMessageElement() && latestAssistant.offsetHeight > this.element.clientHeight) {
