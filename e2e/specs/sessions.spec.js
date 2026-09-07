@@ -2,6 +2,30 @@ import { expect, test } from "@playwright/test";
 import { prompts, sessions } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
+test("center desktop session activity indicators for short and multiline titles", async ({ page }) => {
+  await page.goto("/");
+  const row = page.locator('.session-row[data-current="true"]');
+  const title = row.locator(".session-title");
+  const indicators = row.locator(".session-indicators");
+  await indicators.evaluate((element) => {
+    const dot = document.createElement("span");
+    dot.className = "session-running-indicator";
+    element.append(dot);
+  });
+
+  for (const text of ["Short title", "Fix sidebar session deletion and native rename behavior"]) {
+    await title.evaluate((element, text) => { element.textContent = text; }, text);
+    const titleBounds = await title.boundingBox();
+    const lineHeight = await title.evaluate((element) => Number.parseFloat(getComputedStyle(element).lineHeight));
+    expect(Math.round(titleBounds.height / lineHeight)).toBe(text === "Short title" ? 1 : 2);
+    const linkBounds = await row.locator("a.session").boundingBox();
+    const dotBounds = await indicators.locator(".session-running-indicator").boundingBox();
+    expect(Math.abs(dotBounds.y + dotBounds.height / 2 - linkBounds.y - linkBounds.height / 2)).toBeLessThan(1);
+    const actionsBounds = await row.locator(".session-actions-toggle").boundingBox();
+    expect(dotBounds.y + dotBounds.height).toBeLessThanOrEqual(actionsBounds.y);
+  }
+});
+
 test("hide the desktop sidebar and remember the preference", async ({ page }) => {
   await page.goto("/");
 
