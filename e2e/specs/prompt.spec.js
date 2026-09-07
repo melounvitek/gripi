@@ -201,6 +201,36 @@ test("automatically retries transient session contention", async ({ page }) => {
   expect(promptRequests).toBeGreaterThanOrEqual(2);
 });
 
+test("keeps a prompt rejected during tree navigation for explicit resubmission", async ({ page }) => {
+  const text = "Only send this after reviewing the selected branch";
+  const error = "The session tree is changing. Review the selected branch before sending again.";
+  let promptRequests = 0;
+  let navigationFinished = false;
+  await page.route("**/prompt", async (route) => {
+    promptRequests += 1;
+    if (navigationFinished) return route.continue();
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ code: "session_operation_pending", retryable: false, error })
+    });
+  });
+
+  await page.goto("/");
+  await selectSession(page, sessions.promptRetry);
+  await sendPrompt(page, text);
+  await expect(message(page, "assistant", error)).toBeVisible();
+  await expect(page.getByLabel("Message to Pi")).toHaveValue(text);
+  await expect(message(page, "user", text)).toHaveCount(0);
+  expect(promptRequests).toBe(1);
+
+  navigationFinished = true;
+  await sendPrompt(page, text);
+  await expect(message(page, "user", text)).toHaveCount(1);
+  await expectRunFinished(page);
+  expect(promptRequests).toBe(2);
+});
+
 test("stops a delayed prompt retry when the user stops", async ({ page }) => {
   let promptRequests = 0;
   await page.route("**/prompt", async (route) => {

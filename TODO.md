@@ -1,4 +1,0 @@
-# Follow-up work
-
-- [ ] Reproduce a prompt arriving during idle RPC-client retirement. Browser stress testing reported a `503 Pi RPC client is restarting` during initial prompt setup; the failed trace was not retained, so the cause remains unconfirmed. The E2E gateway uses a 2-second idle timeout versus the production default of 300 seconds. Add a deterministic retirement/request regression before choosing a fix; do not mask it with blanket retries or disabled idle eviction. Retain future failing runtimes with `GRIPI_E2E_KEEP_RUNTIME=1`.
-- [ ] Cover a concurrent prompt between tree-navigation abort, client closure, and navigation. These steps currently use separate synchronization scopes in `internal/server/action_routes.go`. Verify the gap with a deterministic regression before changing the client-restart workflow.

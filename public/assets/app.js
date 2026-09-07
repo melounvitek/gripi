@@ -1847,7 +1847,7 @@ async function sendExportRequest(formData, { retryCancelled, onRetry }) {
 
     const payload = await response.json().catch(() => null);
     const retryDelay = PROMPT_RETRY_DELAYS[attempt];
-    const retryable = response.status === 409 && payload?.code === "session_operation_pending" && retryDelay !== undefined;
+    const retryable = response.status === 409 && payload?.code === "session_operation_pending" && payload?.retryable !== false && retryDelay !== undefined;
     if (!retryable) return { response, payload };
     if (retryCancelled()) return { cancelled: true };
 
@@ -1865,7 +1865,7 @@ async function sendPromptRequest(action, formData, { retryCancelled, onRetry }) 
     const payload = await response.json().catch(() => null);
     if (response.ok) return { response, payload };
     const retryDelay = PROMPT_RETRY_DELAYS[attempt];
-    const retryable = response.status === 409 && payload?.code === "session_operation_pending" && retryDelay !== undefined;
+    const retryable = response.status === 409 && payload?.code === "session_operation_pending" && payload?.retryable !== false && retryDelay !== undefined;
     if (!retryable) return { response, payload };
     if (retryCancelled()) return { cancelled: true };
 
