@@ -44,9 +44,7 @@ test("new-session tags are removable local drafts, with reusable tags, retry and
     await openNew(page, isMobile);
     const modal = newDialog(page);
     const add = modal.getByRole("button", { name: "Add tag", exact: true });
-    await expect(modal.getByRole("button", { name: `Remove ${tag}`, exact: true })).toBeVisible();
-    await activate(modal.getByRole("button", { name: `Remove ${tag}`, exact: true }), isMobile);
-    await expect(add).toBeFocused();
+    await expect(modal.getByRole("button", { name: /^Remove / })).toHaveCount(0);
     await page.route("**/tags", (route) => route.fulfill({ status: 503, json: { error: "Catalog unavailable" } }));
     await activate(add, isMobile);
     await expect(picker(page).getByRole("alert")).toHaveText("Catalog unavailable");
@@ -75,16 +73,18 @@ test("new-session tags are removable local drafts, with reusable tags, retry and
     await page.keyboard.press("Tab");
     await expect(modal.getByRole("button", { name: "Start session" })).toBeFocused();
     await page.screenshot({ path: testInfo.outputPath("new-session-draft-tags.png"), animations: "disabled" });
+    await activate(modal.getByRole("button", { name: `Remove ${created}`, exact: true }), isMobile);
+    await expect(add).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(modal).toBeHidden();
     expect(writes).toHaveLength(0);
     expect(await (await page.request.get("/tags")).json()).toEqual(catalogBefore);
     expect(await (await page.request.get(`/sessions/tags?${new URLSearchParams({ session })}`)).json()).toEqual(savedBefore);
     await openNew(page, isMobile);
-    await expect(modal.getByRole("button", { name: /^Remove / })).toHaveText([`${tag} ×`]);
+    await expect(modal.getByRole("button", { name: /^Remove / })).toHaveCount(0);
     await activate(add, isMobile);
     await expect(search).toHaveValue("");
-    await expect(picker(page).getByRole("checkbox", { name: tag, exact: true })).toBeChecked();
+    await expect(picker(page).getByRole("checkbox", { name: tag, exact: true })).not.toBeChecked();
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     if (isMobile && !(await page.locator("#mobile-session-toggle").isChecked())) await activate(page.locator('label[aria-label="Open sessions"]'), isMobile);
@@ -105,7 +105,6 @@ test("explicit draft tags survive first response and reload while the URL tag re
     const modal = newDialog(page);
     await activate(modal.getByRole("combobox", { name: "Project" }), isMobile);
     await activate(page.getByRole("option", { name: new RegExp(`new-session-${testInfo.project.name}`) }), isMobile);
-    await activate(modal.getByRole("button", { name: `Remove ${tag}`, exact: true }), isMobile);
     await activate(modal.getByRole("button", { name: "Add tag", exact: true }), isMobile);
     await activate(picker(page).getByRole("checkbox", { name: reusable, exact: true }), isMobile);
     await picker(page).getByRole("searchbox").fill(created);
@@ -128,12 +127,11 @@ test("explicit draft tags survive first response and reload while the URL tag re
   }
 });
 
-test("removing the filter prefill starts an untagged session and navigation resets subsequent drafts", async ({ page, isMobile }, testInfo) => {
+test("starting without selecting tags creates an untagged session and navigation keeps subsequent drafts empty", async ({ page, isMobile }, testInfo) => {
   const { session, tag, reusable } = await setup(page, testInfo);
   try {
     await openNew(page, isMobile);
     const modal = newDialog(page);
-    await activate(modal.getByRole("button", { name: `Remove ${tag}`, exact: true }), isMobile);
     await activate(modal.getByRole("button", { name: "Start session" }), isMobile);
     await expect(modal).toBeHidden();
     await expect(page.locator(".session-header-name")).toHaveText("New session (pending first assistant response)");
@@ -141,13 +139,12 @@ test("removing the filter prefill starts an untagged session and navigation rese
     const createdSession = new URL(page.url()).searchParams.get("session");
     expect((await (await page.request.get(`/sessions/tags?${new URLSearchParams({ session: createdSession })}`)).json()).tags || []).toEqual([]);
     await openNew(page, isMobile);
-    await expect(modal.getByRole("button", { name: `Remove ${tag}`, exact: true })).toBeVisible();
-    await activate(modal.getByRole("button", { name: `Remove ${tag}`, exact: true }), isMobile);
+    await expect(modal.getByRole("button", { name: /^Remove / })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await page.goBack();
     await expect(page.locator(".session-header-name")).toHaveText(sessions.marker);
     await openNew(page, isMobile);
-    await expect(modal.getByRole("button", { name: `Remove ${tag}`, exact: true })).toBeVisible();
+    await expect(modal.getByRole("button", { name: /^Remove / })).toHaveCount(0);
   } finally {
     await cleanup(page, session, [tag, reusable]);
   }

@@ -78,7 +78,7 @@ export class SessionTagsController {
   resetDraft(form) {
     const field = form?.querySelector("[data-new-session-tags]");
     if (!field) return;
-    this.renderDraft(form, field.dataset.prefillTag ? [field.dataset.prefillTag] : []);
+    this.renderDraft(form, []);
   }
 
   renderDraft(form, tags) {
@@ -100,10 +100,6 @@ export class SessionTagsController {
       chip.append(label, " ×");
       chips.append(input, chip);
     }
-    const field = form.querySelector("[data-new-session-tags]");
-    field.querySelector("[data-tag-draft-help]").textContent = field.dataset.prefillTag && tags.includes(field.dataset.prefillTag)
-      ? "Added from your current filter. Remove it if this session is unrelated."
-      : "Optional. Group related sessions across projects.";
   }
 
   open(path, trigger, form = null) {

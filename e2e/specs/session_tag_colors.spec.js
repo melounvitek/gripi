@@ -64,10 +64,9 @@ test("tag text selects the same palette colors in server and live surfaces, incl
 
     await page.getByRole("button", { name: "New session", exact: true }).click();
     const draft = page.getByRole("dialog", { name: "New session", exact: true });
-    await expectColors(draft.getByRole("button", { name: `Remove ${selected}`, exact: true }), expected[selected]);
     await draft.getByRole("button", { name: "Add tag", exact: true }).click();
     const picker = page.getByRole("dialog", { name: "New session tags", exact: true });
-    for (const tag of tags.filter((tag) => tag !== selected)) {
+    for (const tag of tags) {
       await picker.getByRole("checkbox", { name: tag, exact: true }).check();
       await expectColors(draft.getByRole("button", { name: `Remove ${tag}`, exact: true }), expected[tag]);
     }

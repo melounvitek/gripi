@@ -62,5 +62,4 @@ func TestTagColorsRenderAcrossPageAndFragments(t *testing.T) {
 		}
 		assertColors(t, markup, `class="compact-tag-filter is-active"`, "color-🧪")
 	}
-	assertColors(t, page.Body.String(), `data-tag-draft-remove="color-🧪"`, "color-🧪")
 }
