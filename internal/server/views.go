@@ -143,6 +143,10 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if err != nil {
 		return nil, err
 	}
+	projectCWDs, err := app.gatewayState.ProjectCWDs(all)
+	if err != nil {
+		return nil, err
+	}
 	knownPaths := make(map[string]bool, len(all))
 	for _, session := range all {
 		knownPaths[session.Path] = true
@@ -182,7 +186,9 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	selectedProject := params.Get("project")
 	knownProjects := make(map[string]bool)
 	for _, session := range all {
-		knownProjects[session.CWD] = true
+		if projectCWDs[session.CWD] {
+			knownProjects[session.CWD] = true
+		}
 	}
 	if !knownProjects[selectedProject] {
 		selectedProject = ""
@@ -249,7 +255,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			view.SidebarActivity[session.Path] = activity
 		}
 	}
-	view.KnownCWDs = knownCWDs(all)
+	view.KnownCWDs = knownCWDs(all, knownProjects)
 	view.NewSessionCWDs = app.newSessionCWDs(view)
 	if includeConversation && selected != nil {
 		view.HideThinkingBlock = app.piDisplaySettings(selected.CWD).HideThinkingBlock
@@ -523,10 +529,10 @@ func (view *pageView) prepareSidebar() {
 	}
 }
 
-func knownCWDs(all []*sessions.Session) []string {
+func knownCWDs(all []*sessions.Session, projects map[string]bool) []string {
 	latest := make(map[string]time.Time)
 	for _, session := range all {
-		if session.ConversationActivityAt.After(latest[session.CWD]) {
+		if projects[session.CWD] && session.ConversationActivityAt.After(latest[session.CWD]) {
 			latest[session.CWD] = session.ConversationActivityAt
 		}
 	}
@@ -577,7 +583,7 @@ func (app *application) newSessionCWDs(view *pageView) []string {
 	if preferred == "" && view.Selected != nil {
 		preferred = view.Selected.CWD
 	}
-	if preferred != "" {
+	if preferred != "" && slices.Contains(unique, preferred) {
 		result := []string{preferred}
 		for _, value := range unique {
 			if value != preferred {

@@ -1375,7 +1375,10 @@ func (app *application) takeOverSession(response http.ResponseWriter, request *h
 		if !found {
 			return errors.New("session disappeared during takeover")
 		}
-		return app.gatewayState.MarkExternalRead(path, session.AssistantResponseCount)
+		if err := app.gatewayState.MarkExternalRead(path, session.AssistantResponseCount); err != nil {
+			return err
+		}
+		return app.gatewayState.RememberProject(session.CWD)
 	})
 	if err != nil {
 		if errors.Is(err, sessions.ErrSyncBusy) {
@@ -1523,7 +1526,7 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
-	return rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, app.newRPCClient, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
+	path, err := rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, app.newRPCClient, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
 		path, ok := sessions.ConfiguredSessionPath(app.config.SessionsRoot, path)
 		if !ok {
 			return "", nil, errors.New("Pi reported a session path outside the configured sessions root")
@@ -1554,6 +1557,10 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 		}
 		return path, rollback, nil
 	})
+	if err == nil && app.gatewayState != nil {
+		err = app.gatewayState.RememberProject(cwd)
+	}
+	return path, err
 }
 
 func (app *application) redirectToNewSession(response http.ResponseWriter, request *http.Request, path, command string) {

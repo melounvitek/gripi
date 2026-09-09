@@ -193,6 +193,16 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		knownSessionHashes:   make(map[string]bool),
 		pendingSessions:      rpc.NewPendingSessionRegistry(nil),
 	}
+	if cfg.ReadStatePath != "" {
+		store := sessions.Store{Root: cfg.SessionsRoot, Home: cfg.Home, Cache: app.sessionCache}
+		existing, err := store.Sessions()
+		if err != nil {
+			return nil, fmt.Errorf("list existing projects: %w", err)
+		}
+		if _, err := app.gatewayState.ProjectCWDs(existing); err != nil {
+			return nil, err
+		}
+	}
 	diagnostics := &rpc.Diagnostics{Enabled: cfg.RPCDiagnosticsEnabled, Writer: os.Stderr}
 	app.rpcDiagnostics = diagnostics
 	app.completionNotifications = newCompletionNotifier(app)

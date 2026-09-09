@@ -14,6 +14,7 @@ import (
 
 type GatewayState struct {
 	readPath               string
+	projectsPath           string
 	externalResponseCounts map[string]int
 	pinnedPath             string
 	tagsPath               string
@@ -27,7 +28,7 @@ type GatewayState struct {
 }
 
 func NewGatewayState(readPath, pinnedPath, tagsPath, sessionsRoot string) *GatewayState {
-	return &GatewayState{readPath: readPath, pinnedPath: pinnedPath, tagsPath: tagsPath, sessionsRoot: sessionsRoot, externalResponseCounts: make(map[string]int)}
+	return &GatewayState{readPath: readPath, projectsPath: filepath.Join(filepath.Dir(readPath), "projects.json"), pinnedPath: pinnedPath, tagsPath: tagsPath, sessionsRoot: sessionsRoot, externalResponseCounts: make(map[string]int)}
 }
 
 func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool, externalFollow map[string]bool) (map[string]bool, map[string]bool, error) {
