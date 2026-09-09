@@ -200,6 +200,61 @@ func TestCompletionNotifierSuppressesAReplyReadBeforeDelivery(t *testing.T) {
 	}
 }
 
+func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
+	root := t.TempDir()
+	path := writeNotificationSession(t, root, "External session")
+	fake := &recordingPushNotifier{}
+	app := notificationTestApplication(t, root, false, true, fake)
+	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "external"}}
+	app.rpcClients = rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = io.WriteString(file, `{"type":"message","id":"external","message":{"role":"assistant","content":[{"type":"text","text":"CLI reply"}]}}`+"\n")
+	_ = file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil || state.Mode != sessions.SyncExternalFollow {
+		t.Fatalf("external sync = %#v, %v", state, err)
+	}
+
+	notifier := newCompletionNotifier(app)
+	// Keep the queue under test control instead of starting the delivery worker.
+	notifier.started = true
+	reply := completedReply{client: client, path: path, text: "CLI reply", id: "external"}
+	notifier.schedule(reply)
+	if len(notifier.queue) != 0 {
+		t.Error("external reply was queued for later delivery")
+	}
+	// Replies queued before external follow must also be dropped at delivery time.
+	if err := notifier.deliver(context.Background(), reply); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.owners) != 0 {
+		t.Error("notification delivered during external follow")
+	}
+
+	if _, err := app.synchronizer.TakeOver(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	notifier.schedule(completedReply{client: client, path: path, text: "Gateway reply", id: "managed"})
+	if len(notifier.queue) != 1 {
+		t.Fatalf("queued replies after takeover = %d, want only the new gateway reply", len(notifier.queue))
+	}
+	if err := notifier.deliver(context.Background(), <-notifier.queue); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.payloads) != 1 || !strings.Contains(string(fake.payloads[0]), "Gateway reply") {
+		t.Fatalf("takeover notifications = %q", fake.payloads)
+	}
+}
+
 func TestCompletionNotifierCloseCancelsRepliesWaitingForTheGracePeriod(t *testing.T) {
 	root := t.TempDir()
 	sessionPath := writeNotificationSession(t, root, "Canceled session")

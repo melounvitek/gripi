@@ -70,6 +70,11 @@ func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string
 }
 
 func (notifier *completionNotifier) schedule(reply completedReply) {
+	if notifier.app.synchronizer != nil {
+		if state := notifier.app.synchronizer.KnownBlocked(reply.path); state != nil && state.Mode == sessions.SyncExternalFollow {
+			return
+		}
+	}
 	reply.observedAt = notifier.now()
 	if notifier.app.gatewayState != nil {
 		readCount, err := notifier.app.gatewayState.ReadCount(reply.path)
@@ -156,6 +161,11 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	path, err := notifier.sessionPath(ctx, reply)
 	if err != nil {
 		return err
+	}
+	if notifier.app.synchronizer != nil {
+		if state := notifier.app.synchronizer.KnownBlocked(path); state != nil && state.Mode == sessions.SyncExternalFollow {
+			return nil
+		}
 	}
 	if reply.readCountKnown && notifier.app.gatewayState != nil {
 		readBaselines := map[string]int{reply.path: reply.readCount}

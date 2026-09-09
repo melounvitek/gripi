@@ -52,6 +52,46 @@ test("background reply notifications preserve literal Markdown punctuation", () 
   assert.deepEqual(notifications, [["Background task", "Finished feat/my_branch_name", "/?session=background", "gripi-final-reply:background"]]);
 });
 
+for (const initialMode of ["", "external_follow"]) {
+  test(`background replies stay quiet during external follow and takeover from ${initialMode || "normal"}`, () => {
+    const originalWindow = globalThis.window;
+    const window = { location: { href: "https://example.test/?session=current", origin: "https://example.test", search: "?session=current" } };
+    const notifications = [];
+    const controller = new SidebarController({}, window, {}, {}, (...notification) => notifications.push(notification));
+    const link = {
+      dataset: {
+        sessionPath: "background",
+        sessionSyncMode: initialMode,
+        assistantResponseCount: "1",
+        latestAssistantResponsePreview: "CLI reply",
+      },
+      querySelector: () => ({ textContent: "Background task" }),
+    };
+    controller.element = { querySelector: () => null, querySelectorAll: () => [link] };
+    globalThis.window = window;
+
+    try {
+      for (const [mode, count] of [["external_follow", "2"], ["external_follow", "3"], ["managed", "5"], ["managed", "5"]]) {
+        const previousCounts = controller.assistantResponseCounts();
+        link.dataset.sessionSyncMode = mode;
+        link.dataset.assistantResponseCount = count;
+        controller.notifyBackgroundFinalReplies(previousCounts);
+        assert.deepEqual(notifications, [], `${mode} at count ${count} must not catch up CLI replies`);
+      }
+
+      const previousCounts = controller.assistantResponseCounts();
+      link.dataset.assistantResponseCount = "6";
+      link.dataset.latestAssistantResponsePreview = "New gateway reply";
+      controller.notifyBackgroundFinalReplies(previousCounts);
+      controller.notifyBackgroundFinalReplies(previousCounts);
+      assert.deepEqual(notifications, [["Background task", "New gateway reply", "/?session=background", "gripi-final-reply:background"]]);
+    } finally {
+      if (originalWindow === undefined) delete globalThis.window;
+      else globalThis.window = originalWindow;
+    }
+  });
+}
+
 test("session actions open from the first button tap and from right click", () => {
   const document = new FakeDocument();
   const window = { innerWidth: 400, innerHeight: 800 };

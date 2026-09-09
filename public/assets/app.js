@@ -738,7 +738,7 @@ function finalAssistantReplyKey(sessionPath, event) {
 }
 
 function notifyFinalAssistantReply(event) {
-  if (webPushController.enabled()) return;
+  if (liveOutput?.dataset.sessionSyncMode === "external_follow" || webPushController.enabled()) return;
 
   const message = liveMessageParser.eventMessage(event);
   const roleName = liveMessageParser.liveEventRole(event, message);
