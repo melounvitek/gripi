@@ -80,7 +80,7 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	if err != nil || string(migrated) != "gateway metadata\n" {
 		t.Fatalf("migrated metadata = %q, %v", migrated, err)
 	}
-	_, pinned, err := gatewayState.ReadAndObserve([]*sessions.Session{{Path: realPath, CWD: project}}, nil, false)
+	_, pinned, err := gatewayState.ReadAndObserve([]*sessions.Session{{Path: realPath, CWD: project}}, nil, false, nil)
 	if err != nil || !pinned[realPath] {
 		t.Fatalf("migrated pin = %v, %v", pinned, err)
 	}

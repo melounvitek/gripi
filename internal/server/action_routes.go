@@ -1381,6 +1381,13 @@ func (app *application) takeOverSession(response http.ResponseWriter, request *h
 		http.Error(response, "Unable to take over session", http.StatusInternalServerError)
 		return
 	}
+	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+	if session, found := store.Session(path); found {
+		if err := app.gatewayState.MarkRead(path, session.AssistantResponseCount); err != nil {
+			http.Error(response, "Unable to update session read state", http.StatusInternalServerError)
+			return
+		}
+	}
 	writeJSON(response, map[string]any{"ok": true, "session": path, "session_sync": map[string]any{"mode": state.Mode, "revision": state.Revision}})
 }
 

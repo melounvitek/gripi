@@ -28,7 +28,7 @@ func NewGatewayState(readPath, pinnedPath, tagsPath, sessionsRoot string) *Gatew
 	return &GatewayState{readPath: readPath, pinnedPath: pinnedPath, tagsPath: tagsPath, sessionsRoot: sessionsRoot}
 }
 
-func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool) (map[string]bool, map[string]bool, error) {
+func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool, externalFollow map[string]bool) (map[string]bool, map[string]bool, error) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	counts := map[string]int{}
@@ -54,7 +54,7 @@ func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, mar
 			continue
 		}
 		value, known := counts[session.Path]
-		if !known || value > session.AssistantResponseCount {
+		if !known || value > session.AssistantResponseCount || (externalFollow[session.Path] && value != session.AssistantResponseCount) {
 			counts[session.Path] = session.AssistantResponseCount
 			changed = true
 		}

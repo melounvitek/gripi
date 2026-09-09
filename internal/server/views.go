@@ -87,6 +87,7 @@ type pageView struct {
 	SelectedTag               string
 	SessionTags               map[string][]string
 	Unread                    map[string]bool
+	ExternalFollow            map[string]bool
 	Pinned                    map[string]bool
 	UnreadCount               int
 	SessionsLimit             int
@@ -203,12 +204,27 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			}
 		}
 	}
+	var selectedSync *sessions.SyncResult
+	if includeConversation && selected != nil {
+		if _, err := os.Stat(selected.Path); err == nil {
+			selectedSync = app.synchronizer.InspectIfAvailable(request.Context(), selected.Path, true)
+		}
+	}
+	externalFollow := make(map[string]bool)
+	if app.synchronizer != nil {
+		for _, session := range all {
+			if state := app.synchronizer.KnownBlocked(session.Path); state != nil && state.Mode == sessions.SyncExternalFollow {
+				externalFollow[session.Path] = true
+			}
+		}
+	}
 	markRead := request.URL.Path != "/sidebar" || params.Get("session") != ""
-	unread, pinned, err := app.gatewayState.ReadAndObserve(all, selected, markRead)
+	unread, pinned, err := app.gatewayState.ReadAndObserve(all, selected, markRead, externalFollow)
 	if err != nil {
 		return nil, err
 	}
 	view := &pageView{Request: request, ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity)}
+	view.ExternalFollow = externalFollow
 	assignments, err := app.gatewayState.SessionTags()
 	if err != nil {
 		return nil, err
@@ -238,15 +254,13 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		leafID, leafSupplied := "", false
 		view.SessionSyncMode = sessions.SyncAvailable
 		_, statErr := os.Stat(selected.Path)
-		if statErr == nil {
-			if state := app.synchronizer.InspectIfAvailable(request.Context(), selected.Path, true); state != nil {
-				view.SessionSyncMode, view.SessionSyncRevision, view.SessionSyncError = state.Mode, state.Revision, state.Error
-				view.SessionSyncBlocked = state.Blocked()
-				if state.Mode == sessions.SyncManaged {
-					leafID, leafSupplied = state.RPCLeafID, true
-				} else if state.Blocked() {
-					leafID, leafSupplied = state.PersistedLeafID, true
-				}
+		if state := selectedSync; state != nil {
+			view.SessionSyncMode, view.SessionSyncRevision, view.SessionSyncError = state.Mode, state.Revision, state.Error
+			view.SessionSyncBlocked = state.Blocked()
+			if state.Mode == sessions.SyncManaged {
+				leafID, leafSupplied = state.RPCLeafID, true
+			} else if state.Blocked() {
+				leafID, leafSupplied = state.PersistedLeafID, true
 			}
 		}
 		view.SessionSyncGatewayBusy = view.SessionSyncBlocked && app.rpcClients.Busy(selected.Path)

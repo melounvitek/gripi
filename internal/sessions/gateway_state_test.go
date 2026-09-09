@@ -16,7 +16,7 @@ func TestGatewayStatePreservesMalformedReadState(t *testing.T) {
 	state := NewGatewayState(path, filepath.Join(t.TempDir(), "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
 	session := &Session{Path: "/session", AssistantResponseCount: 1}
 
-	if _, _, err := state.ReadAndObserve([]*Session{session}, session, true); err == nil {
+	if _, _, err := state.ReadAndObserve([]*Session{session}, session, true, nil); err == nil {
 		t.Fatal("ReadAndObserve() succeeded")
 	}
 	if err := state.MarkRead(session.Path, 1); err == nil {
@@ -50,7 +50,7 @@ func TestGatewayStatePreservesMalformedPinnedState(t *testing.T) {
 	}
 	state := NewGatewayState(filepath.Join(t.TempDir(), "read.json"), path, filepath.Join(t.TempDir(), "tags.json"), "")
 
-	if _, _, err := state.ReadAndObserve(nil, nil, false); err == nil {
+	if _, _, err := state.ReadAndObserve(nil, nil, false, nil); err == nil {
 		t.Fatal("ReadAndObserve() succeeded")
 	}
 	if err := state.SetPinned("/session", true); err == nil {
@@ -84,7 +84,7 @@ func TestGatewayStateNormalizesPhysicalReadAndPinnedPaths(t *testing.T) {
 	state := NewGatewayState(readPath, pinnedPath, filepath.Join(t.TempDir(), "tags.json"), configuredRoot)
 	session := &Session{Path: configuredPath, AssistantResponseCount: 2}
 
-	unread, pinned, err := state.ReadAndObserve([]*Session{session}, nil, false)
+	unread, pinned, err := state.ReadAndObserve([]*Session{session}, nil, false, nil)
 	if err != nil || unread[configuredPath] || !pinned[configuredPath] {
 		t.Fatalf("unread=%v pinned=%v err=%v", unread, pinned, err)
 	}
@@ -121,7 +121,7 @@ func TestGatewayStatePinnedMigrationRollbackPreservesNewerChanges(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	_, pinned, err := state.ReadAndObserve([]*Session{{Path: "/pending"}, {Path: "/persisted"}, {Path: "/other"}}, nil, false)
+	_, pinned, err := state.ReadAndObserve([]*Session{{Path: "/pending"}, {Path: "/persisted"}, {Path: "/other"}}, nil, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestGatewayStatePinnedMigrationRollbackPreservesNewerDestinationChange(t *t
 				t.Fatal(err)
 			}
 
-			_, pinned, err := state.ReadAndObserve([]*Session{{Path: "/pending"}, {Path: "/persisted"}}, nil, false)
+			_, pinned, err := state.ReadAndObserve([]*Session{{Path: "/pending"}, {Path: "/persisted"}}, nil, false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -192,7 +192,7 @@ func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
 		t.Fatal("forgotten session was not tracked")
 	}
 	stale := &Session{Path: sessionPath, AssistantResponseCount: 5}
-	unread, pinned, err := state.ReadAndObserve([]*Session{stale}, stale, true)
+	unread, pinned, err := state.ReadAndObserve([]*Session{stale}, stale, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestGatewayStateTreatsMissingFilesAsEmpty(t *testing.T) {
 	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
 	session := &Session{Path: "/session", AssistantResponseCount: 1}
 
-	unread, pinned, err := state.ReadAndObserve([]*Session{session}, nil, false)
+	unread, pinned, err := state.ReadAndObserve([]*Session{session}, nil, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

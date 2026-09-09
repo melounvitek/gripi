@@ -212,7 +212,7 @@ func TestPendingTagMigrationFailureRollsBackMetadataAndOwnership(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(tags, before) {
 		t.Fatalf("failed migration tags=%v, %v", tags, err)
 	}
-	_, pins, err := state.ReadAndObserve(nil, nil, false)
+	_, pins, err := state.ReadAndObserve(nil, nil, false, nil)
 	if err != nil || !pins[from] || pins[to] {
 		t.Fatalf("failed migration pins=%v, %v", pins, err)
 	}
