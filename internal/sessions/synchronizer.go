@@ -207,7 +207,7 @@ func (synchronizer *Synchronizer) WithInterruptClient(ctx context.Context, path 
 	return err
 }
 
-func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string) (SyncResult, error) {
+func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string, beforeManaged func() error) (SyncResult, error) {
 	unlock := synchronizer.locks.Lock(path)
 	defer unlock()
 	if synchronizer.clients.Busy(path) {
@@ -237,6 +237,11 @@ func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string) (Sy
 		if before.Revision() != after.Revision() || position.LeafID != before.PersistedLeafID {
 			synchronizer.update(path, after, SyncExternalFollow, "", "")
 			return &SyncBlockedError{Mode: SyncExternalFollow, Message: "The session changed while the gateway was taking over. Finish using it in Pi CLI and try again."}
+		}
+		if beforeManaged != nil {
+			if err := beforeManaged(); err != nil {
+				return err
+			}
 		}
 		synchronizer.update(path, after, SyncManaged, position.LeafID, "")
 		succeeded = true

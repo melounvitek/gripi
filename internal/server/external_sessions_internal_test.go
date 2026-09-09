@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -43,7 +44,7 @@ func TestExternalFollowIsReadAcrossPageAndSidebarViews(t *testing.T) {
 				if err := app.templates.ExecuteTemplate(&html, "sidebar", view); err != nil {
 					t.Fatal(err)
 				}
-				for _, expected := range []string{`data-session-sync-mode="external_follow"`, `class="session-external-indicator"`, `title="Active outside Gripi · notifications and unread indicators paused"`, `data-unread-session-count="0"`} {
+				for _, expected := range []string{`data-session-sync-mode="external_follow"`, `class="session-external-indicator"`, `title="Active outside Gripi · notifications and unread indicators paused"`, `data-unread-session-count="0"`, `data-external-response-count="1"`} {
 					if !strings.Contains(html.String(), expected) {
 						t.Errorf("sidebar missing %s", expected)
 					}
@@ -83,6 +84,9 @@ func TestTakeoverClearsUnobservedExternalRepliesButNewRepliesBecomeUnread(t *tes
 	if err := app.templates.ExecuteTemplate(&html, "sidebar", view); err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(html.String(), `data-external-response-count="2"`) {
+		t.Fatal("sidebar missing takeover reply boundary")
+	}
 	if strings.Contains(html.String(), `class="session-external-indicator"`) {
 		t.Fatal("external icon remained after takeover")
 	}
@@ -102,6 +106,59 @@ func TestTakeoverClearsUnobservedExternalRepliesButNewRepliesBecomeUnread(t *tes
 	}
 	if !view.Unread[path] || view.UnreadCount != 1 {
 		t.Fatalf("new gateway reply was not unread: %v, total %d", view.Unread, view.UnreadCount)
+	}
+}
+
+func TestTakeoverKeepsQueuedNotificationsQuietWhileSavingTheReadBoundary(t *testing.T) {
+	app, path, client := externalSessionTestApplication(t)
+	appendExternalSessionReply(t, path, "external", "")
+	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+		t.Fatal(err)
+	}
+	client.position = rpc.SessionEntries{Known: true, LeafID: "external"}
+	notifier := newCompletionNotifier(app)
+	reply := completedReply{client: client, path: path, text: "Old reply", readCountKnown: true}
+	_, err := app.synchronizer.TakeOver(context.Background(), path, func() error {
+		// Delivery interleaves after Pi loaded the file but before read state is saved.
+		if err := notifier.deliver(context.Background(), reply); err != nil {
+			return err
+		}
+		if deliveries := app.pushNotifier.(*recordingPushNotifier).owners; len(deliveries) != 0 {
+			t.Errorf("notification delivered before takeover read boundary was saved: %v", deliveries)
+		}
+		return app.gatewayState.MarkExternalRead(path, 1)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := notifier.deliver(context.Background(), reply); err != nil {
+		t.Fatal(err)
+	}
+	if deliveries := app.pushNotifier.(*recordingPushNotifier).owners; len(deliveries) != 0 {
+		t.Fatalf("notification delivered after takeover: %v", deliveries)
+	}
+}
+
+func TestTakeoverReadStateFailureKeepsExternalFollow(t *testing.T) {
+	app, path, client := externalSessionTestApplication(t)
+	appendExternalSessionReply(t, path, "external", "")
+	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+		t.Fatal(err)
+	}
+	// Force persistence to fail after Pi has successfully loaded the external leaf.
+	client.position = rpc.SessionEntries{Known: true, LeafID: "external"}
+	if err := os.WriteFile(filepath.Join(app.config.SessionsRoot, "read.json"), []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "http://app.test/sessions/takeover", strings.NewReader(url.Values{"session": {path}}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	app.takeOverSession(response, request)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("takeover with broken read state = %d", response.Code)
+	}
+	if state := app.synchronizer.KnownBlocked(path); state == nil || state.Mode != sessions.SyncExternalFollow {
+		t.Fatalf("failed takeover enabled the session: %#v", state)
 	}
 }
 

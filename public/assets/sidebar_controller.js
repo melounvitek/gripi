@@ -278,9 +278,6 @@ export class SidebarController {
   assistantResponseCounts(root = this.element) {
     const counts = new Map();
     root?.querySelectorAll("a.session[data-session-path][data-assistant-response-count]").forEach((link) => {
-      // Establish a fresh baseline after takeover instead of catching up CLI replies.
-      if (link.dataset.sessionSyncMode === "external_follow") return;
-
       const sessionPath = link.dataset.sessionPath;
       const count = Number(link.dataset.assistantResponseCount || 0);
       counts.set(sessionPath, Math.max(counts.get(sessionPath) || 0, count));
@@ -295,7 +292,7 @@ export class SidebarController {
       const sessionPath = link.dataset.sessionPath;
       const previousCount = previousAssistantCounts.get(sessionPath);
       const currentCount = Number(link.dataset.assistantResponseCount || 0);
-      if (previousCount == null || currentCount <= previousCount || sessionPath === this.currentSessionPath()) return;
+      if (previousCount == null || currentCount <= Math.max(previousCount, Number(link.dataset.externalResponseCount || 0)) || sessionPath === this.currentSessionPath()) return;
 
       const key = `${sessionPath}:${currentCount}`;
       if (this.notifiedFinalReplyKeys.has(key)) return;

@@ -73,6 +73,9 @@ for (const touch of [false, true]) {
       expect(await background.evaluate(() => window.replyNotifications)).toEqual([]);
       expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
 
+      // Keep the background sidebar external until the first gateway reply has completed.
+      const sidebarURL = /\/sidebar(?:\?|$)/;
+      await background.route(sidebarURL, (route) => route.abort());
       await background.reload();
       await openSidebar(background, touch);
       await expectExternalIcon(backgroundLink);
@@ -89,15 +92,18 @@ for (const touch of [false, true]) {
       await expect(page.getByLabel("Message to Pi")).toBeEnabled();
       await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "managed");
       await expect(selectedLink.locator(".session-external-indicator")).toHaveCount(0);
-      await expect(backgroundLink.locator(".session-external-indicator")).toHaveCount(0, { timeout: 15_000 });
-      await expect(backgroundLink).not.toHaveClass(/\bunread\b/);
-      await expect(sidebar).toHaveAttribute("data-unread-session-count", unreadCount);
       expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
       expect(await background.evaluate(() => window.replyNotifications)).toEqual([]);
 
       await sendPrompt(page, prompts.standard);
       await expect(message(page, "assistant", replies.standard)).toBeVisible();
       await expectRunFinished(page);
+      await expectExternalIcon(backgroundLink);
+      expect(await background.evaluate(() => window.replyNotifications)).toEqual([]);
+      await background.unroute(sidebarURL);
+      await expect(backgroundLink.locator(".session-external-indicator")).toHaveCount(0, { timeout: 15_000 });
+      await expect(backgroundLink).toHaveAttribute("data-external-response-count", String(responseCount + 1));
+      await expect(backgroundLink).toHaveAttribute("data-assistant-response-count", String(responseCount + 2));
       await expect.poll(() => page.evaluate(() => window.replyNotifications.map((notification) => notification.body)))
         .toEqual([replies.standard]);
       await expect.poll(() => background.evaluate(() => window.replyNotifications.map((notification) => notification.body)), { timeout: 15_000 })

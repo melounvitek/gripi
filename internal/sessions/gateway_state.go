@@ -6,26 +6,28 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
 )
 
 type GatewayState struct {
-	readPath       string
-	pinnedPath     string
-	tagsPath       string
-	tagChanges     map[string]uint64
-	tagRevision    uint64
-	sessionsRoot   string
-	pinnedChanges  map[string]uint64
-	pinnedRevision uint64
-	forgotten      map[string]bool
-	mu             sync.Mutex
+	readPath               string
+	externalResponseCounts map[string]int
+	pinnedPath             string
+	tagsPath               string
+	tagChanges             map[string]uint64
+	tagRevision            uint64
+	sessionsRoot           string
+	pinnedChanges          map[string]uint64
+	pinnedRevision         uint64
+	forgotten              map[string]bool
+	mu                     sync.Mutex
 }
 
 func NewGatewayState(readPath, pinnedPath, tagsPath, sessionsRoot string) *GatewayState {
-	return &GatewayState{readPath: readPath, pinnedPath: pinnedPath, tagsPath: tagsPath, sessionsRoot: sessionsRoot}
+	return &GatewayState{readPath: readPath, pinnedPath: pinnedPath, tagsPath: tagsPath, sessionsRoot: sessionsRoot, externalResponseCounts: make(map[string]int)}
 }
 
 func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool, externalFollow map[string]bool) (map[string]bool, map[string]bool, error) {
@@ -54,14 +56,19 @@ func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, mar
 			continue
 		}
 		value, known := counts[session.Path]
-		if !known || value > session.AssistantResponseCount || (externalFollow[session.Path] && value != session.AssistantResponseCount) {
-			counts[session.Path] = session.AssistantResponseCount
+		// An in-flight sidebar may still carry a pre-takeover snapshot.
+		baseline := max(session.AssistantResponseCount, state.externalResponseCounts[session.Path])
+		if !known || value > baseline || (externalFollow[session.Path] && value != baseline) {
+			counts[session.Path] = baseline
 			changed = true
 		}
 	}
-	if selected != nil && markSelected && !state.sessionForgotten(selected.Path) && counts[selected.Path] != selected.AssistantResponseCount {
-		counts[selected.Path] = selected.AssistantResponseCount
-		changed = true
+	if selected != nil && markSelected && !state.sessionForgotten(selected.Path) {
+		baseline := max(selected.AssistantResponseCount, state.externalResponseCounts[selected.Path])
+		if counts[selected.Path] != baseline {
+			counts[selected.Path] = baseline
+			changed = true
+		}
 	}
 	if changed {
 		if err := writeJSON(state.readPath, counts); err != nil {
@@ -70,7 +77,11 @@ func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, mar
 	}
 	unread := make(map[string]bool)
 	for _, session := range all {
-		unread[session.Path] = !state.sessionForgotten(session.Path) && counts[session.Path] < session.AssistantResponseCount
+		forgotten := state.sessionForgotten(session.Path)
+		unread[session.Path] = !forgotten && counts[session.Path] < session.AssistantResponseCount
+		if externalFollow[session.Path] && !forgotten {
+			state.externalResponseCounts[session.Path] = max(state.externalResponseCounts[session.Path], session.AssistantResponseCount)
+		}
 	}
 	pinned := make(map[string]bool)
 	for _, path := range paths {
@@ -219,6 +230,7 @@ func (state *GatewayState) Forget(path string) error {
 		state.forgotten = make(map[string]bool)
 	}
 	state.forgotten[path] = true
+	delete(state.externalResponseCounts, path)
 
 	counts := map[string]int{}
 	if err := readJSONIfExists(state.readPath, &counts); err != nil {
@@ -275,7 +287,23 @@ func (state *GatewayState) ReadCount(path string) (int, error) {
 	return values[state.configuredPath(path)], nil
 }
 
+// ExternalResponseCounts records the CLI reply boundary for connected browsers,
+// including browsers that miss the external-follow interval between sidebar polls.
+func (state *GatewayState) ExternalResponseCounts() map[string]int {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return maps.Clone(state.externalResponseCounts)
+}
+
 func (state *GatewayState) MarkRead(path string, count int) error {
+	return state.markRead(path, count, false)
+}
+
+func (state *GatewayState) MarkExternalRead(path string, count int) error {
+	return state.markRead(path, count, true)
+}
+
+func (state *GatewayState) markRead(path string, count int, external bool) error {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	values := map[string]int{}
@@ -293,6 +321,9 @@ func (state *GatewayState) MarkRead(path string, count int) error {
 	}
 	if err := writeJSON(state.readPath, values); err != nil {
 		return fmt.Errorf("write session read state: %w", err)
+	}
+	if external {
+		state.externalResponseCounts[path] = count
 	}
 	return nil
 }

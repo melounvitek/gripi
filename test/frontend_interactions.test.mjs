@@ -75,6 +75,7 @@ for (const initialMode of ["", "external_follow"]) {
         const previousCounts = controller.assistantResponseCounts();
         link.dataset.sessionSyncMode = mode;
         link.dataset.assistantResponseCount = count;
+        link.dataset.externalResponseCount = count;
         controller.notifyBackgroundFinalReplies(previousCounts);
         assert.deepEqual(notifications, [], `${mode} at count ${count} must not catch up CLI replies`);
       }
@@ -85,6 +86,53 @@ for (const initialMode of ["", "external_follow"]) {
       controller.notifyBackgroundFinalReplies(previousCounts);
       controller.notifyBackgroundFinalReplies(previousCounts);
       assert.deepEqual(notifications, [["Background task", "New gateway reply", "/?session=background", "gripi-final-reply:background"]]);
+    } finally {
+      if (originalWindow === undefined) delete globalThis.window;
+      else globalThis.window = originalWindow;
+    }
+  });
+}
+
+for (const observedExternal of [true, false]) {
+  test(`background replies respect the takeover boundary when external follow was ${observedExternal ? "observed" : "missed"}`, () => {
+    const originalWindow = globalThis.window;
+    const window = { location: { href: "https://example.test/?session=current", origin: "https://example.test", search: "?session=current" } };
+    const notifications = [];
+    const controller = new SidebarController({}, window, {}, {}, (...notification) => notifications.push(notification));
+    const link = {
+      dataset: {
+        sessionPath: "background",
+        sessionSyncMode: observedExternal ? "external_follow" : "managed",
+        assistantResponseCount: "2",
+        latestAssistantResponsePreview: "CLI reply",
+      },
+      querySelector: () => ({ textContent: "Background task" }),
+    };
+    controller.element = { querySelector: () => null, querySelectorAll: () => [link] };
+    globalThis.window = window;
+
+    try {
+      const previousCounts = controller.assistantResponseCounts();
+      link.dataset.sessionSyncMode = "managed";
+      link.dataset.externalResponseCount = "5";
+      link.dataset.assistantResponseCount = observedExternal ? "6" : "5";
+      link.dataset.latestAssistantResponsePreview = observedExternal ? "New gateway reply" : "CLI reply";
+      controller.notifyBackgroundFinalReplies(previousCounts);
+
+      if (!observedExternal) {
+        assert.deepEqual(notifications, [], "missed CLI replies must not notify at takeover");
+        const takeoverCounts = controller.assistantResponseCounts();
+        link.dataset.assistantResponseCount = "6";
+        link.dataset.latestAssistantResponsePreview = "New gateway reply";
+        controller.notifyBackgroundFinalReplies(takeoverCounts);
+      }
+      assert.deepEqual(notifications, [["Background task", "New gateway reply", "/?session=background", "gripi-final-reply:background"]]);
+      assert.equal(previousCounts.get("background"), 2, "external rows must retain their previous assistant count");
+      controller.notifyBackgroundFinalReplies(previousCounts);
+      assert.equal(notifications.length, 1, "repeated refreshes must not notify twice");
+      link.dataset.assistantResponseCount = "7";
+      controller.notifyBackgroundFinalReplies(new Map());
+      assert.equal(notifications.length, 1, "a new sidebar row must not notify without a previous count");
     } finally {
       if (originalWindow === undefined) delete globalThis.window;
       else globalThis.window = originalWindow;

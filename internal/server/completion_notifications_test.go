@@ -240,7 +240,7 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 		t.Error("notification delivered during external follow")
 	}
 
-	if _, err := app.synchronizer.TakeOver(context.Background(), path); err != nil {
+	if _, err := app.synchronizer.TakeOver(context.Background(), path, nil); err != nil {
 		t.Fatal(err)
 	}
 	notifier.schedule(completedReply{client: client, path: path, text: "Gateway reply", id: "managed"})

@@ -1369,7 +1369,14 @@ func (app *application) takeOverSession(response http.ResponseWriter, request *h
 	if !ok {
 		return
 	}
-	state, err := app.synchronizer.TakeOver(request.Context(), path)
+	state, err := app.synchronizer.TakeOver(request.Context(), path, func() error {
+		store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+		session, found := store.Session(path)
+		if !found {
+			return errors.New("session disappeared during takeover")
+		}
+		return app.gatewayState.MarkExternalRead(path, session.AssistantResponseCount)
+	})
 	if err != nil {
 		if errors.Is(err, sessions.ErrSyncBusy) {
 			writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Wait for the gateway task to finish before taking over."})
@@ -1380,13 +1387,6 @@ func (app *application) takeOverSession(response http.ResponseWriter, request *h
 		}
 		http.Error(response, "Unable to take over session", http.StatusInternalServerError)
 		return
-	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	if session, found := store.Session(path); found {
-		if err := app.gatewayState.MarkRead(path, session.AssistantResponseCount); err != nil {
-			http.Error(response, "Unable to update session read state", http.StatusInternalServerError)
-			return
-		}
 	}
 	writeJSON(response, map[string]any{"ok": true, "session": path, "session_sync": map[string]any{"mode": state.Mode, "revision": state.Revision}})
 }

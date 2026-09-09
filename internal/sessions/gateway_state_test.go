@@ -7,6 +7,40 @@ import (
 	"testing"
 )
 
+func TestGatewayStateStaleObservationCannotUndoTakeover(t *testing.T) {
+	for _, selected := range []bool{false, true} {
+		for _, external := range []bool{false, true} {
+			root := t.TempDir()
+			state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(root, "tags.json"), root)
+			path := filepath.Join(root, "session.jsonl")
+			stale := &Session{Path: path, AssistantResponseCount: 2}
+			var current *Session
+			if selected {
+				current = stale
+			}
+			// A request captured count 2 before takeover saved the CLI boundary at 5.
+			if err := state.MarkExternalRead(path, 5); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := state.ReadAndObserve([]*Session{stale}, current, selected, map[string]bool{path: external}); err != nil {
+				t.Fatal(err)
+			}
+			if count, err := state.ReadCount(path); err != nil || count != 5 {
+				t.Errorf("selected=%t external=%t: read boundary = %d, %v", selected, external, count, err)
+			}
+			if count := state.ExternalResponseCounts()[path]; count != 5 {
+				t.Errorf("selected=%t external=%t: external boundary = %d", selected, external, count)
+			}
+			for _, count := range []int{5, 6} {
+				unread, _, err := state.ReadAndObserve([]*Session{{Path: path, AssistantResponseCount: count}}, nil, false, nil)
+				if err != nil || unread[path] != (count == 6) {
+					t.Errorf("selected=%t external=%t: count=%d unread=%v, %v", selected, external, count, unread, err)
+				}
+			}
+		}
+	}
+}
+
 func TestGatewayStatePreservesMalformedReadState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "read.json")
 	malformed := []byte(`{"session":`)

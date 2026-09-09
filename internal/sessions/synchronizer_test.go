@@ -194,7 +194,7 @@ func TestSynchronizerTakeoverDetectsConcurrentPiCLIWrite(t *testing.T) {
 	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow {
 		t.Fatalf("stale result = %#v", result)
 	}
-	_, err := synchronizer.TakeOver(context.Background(), path)
+	_, err := synchronizer.TakeOver(context.Background(), path, nil)
 	var blocked *SyncBlockedError
 	if !errors.As(err, &blocked) || blocked.Mode != SyncExternalFollow {
 		t.Fatalf("takeover error = %v", err)
