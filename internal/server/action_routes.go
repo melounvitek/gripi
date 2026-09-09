@@ -1378,7 +1378,8 @@ func (app *application) takeOverSession(response http.ResponseWriter, request *h
 		if err := app.gatewayState.MarkExternalRead(path, session.AssistantResponseCount); err != nil {
 			return err
 		}
-		return app.gatewayState.RememberProject(session.CWD)
+		_, err := app.gatewayState.RememberProject(session.CWD)
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, sessions.ErrSyncBusy) {
@@ -1455,7 +1456,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 				return nil, err
 			}
 		}
-		var tagRollback func() error
+		var tagRollback, projectRollback func() error
 		if operation != "new" && app.gatewayState != nil {
 			tagRollback, err = app.gatewayState.CopyTags(from, to)
 			if err != nil {
@@ -1468,7 +1469,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 				return nil, err
 			}
 		}
-		return func() error {
+		rollback := func() error {
 			var stateErr error
 			if tagRollback != nil {
 				stateErr = tagRollback()
@@ -1476,12 +1477,22 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 			if stateRollback != nil {
 				stateErr = errors.Join(stateErr, stateRollback())
 			}
+			if projectRollback != nil {
+				stateErr = errors.Join(stateErr, projectRollback())
+			}
 			var ownershipErr error
 			if claimed && app.releaseSession != nil {
 				ownershipErr = app.releaseSession(request, to)
 			}
 			return errors.Join(stateErr, ownershipErr)
-		}, nil
+		}
+		if app.gatewayState != nil {
+			projectRollback, err = app.gatewayState.RememberProject(cwd)
+			if err != nil {
+				return nil, errors.Join(err, rollback())
+			}
+		}
+		return rollback, nil
 	})
 	if err != nil {
 		app.writeActionRPCError(response, err)
@@ -1526,7 +1537,7 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
-	path, err := rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, app.newRPCClient, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
+	return rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, app.newRPCClient, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
 		path, ok := sessions.ConfiguredSessionPath(app.config.SessionsRoot, path)
 		if !ok {
 			return "", nil, errors.New("Pi reported a session path outside the configured sessions root")
@@ -1538,11 +1549,14 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 				return "", nil, err
 			}
 		}
-		var tagRollback func() error
+		var tagRollback, projectRollback func() error
 		rollback := func() error {
 			var rollbackErr error
 			if tagRollback != nil {
 				rollbackErr = tagRollback()
+			}
+			if projectRollback != nil {
+				rollbackErr = errors.Join(rollbackErr, projectRollback())
 			}
 			if claimed && app.releaseSession != nil {
 				rollbackErr = errors.Join(rollbackErr, app.releaseSession(request, path))
@@ -1554,13 +1568,13 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 			if err != nil {
 				return "", nil, errors.Join(err, rollback())
 			}
+			projectRollback, err = app.gatewayState.RememberProject(cwd)
+			if err != nil {
+				return "", nil, errors.Join(err, rollback())
+			}
 		}
 		return path, rollback, nil
 	})
-	if err == nil && app.gatewayState != nil {
-		err = app.gatewayState.RememberProject(cwd)
-	}
-	return path, err
 }
 
 func (app *application) redirectToNewSession(response http.ResponseWriter, request *http.Request, path, command string) {

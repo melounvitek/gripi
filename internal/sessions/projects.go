@@ -28,23 +28,43 @@ func (state *GatewayState) ProjectCWDs(existing []*Session) (map[string]bool, er
 	return projects, nil
 }
 
-func (state *GatewayState) RememberProject(cwd string) error {
+func (state *GatewayState) RememberProject(cwd string) (func() error, error) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
 	projects := make(map[string]bool)
 	if err := readJSONIfExists(state.projectsPath, &projects); err != nil {
-		return fmt.Errorf("read projects: %w", err)
+		return nil, fmt.Errorf("read projects: %w", err)
 	}
 	if projects[cwd] {
-		return nil
+		state.projectChanges[cwd]++
+		return nil, nil
 	}
 	if projects == nil {
 		projects = make(map[string]bool)
 	}
 	projects[cwd] = true
 	if err := writeJSON(state.projectsPath, projects); err != nil {
-		return fmt.Errorf("remember project: %w", err)
+		return nil, fmt.Errorf("remember project: %w", err)
 	}
-	return nil
+	state.projectChanges[cwd]++
+	revision := state.projectChanges[cwd]
+	return func() error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		// A later gateway action may have also adopted this directory.
+		if state.projectChanges[cwd] != revision {
+			return nil
+		}
+		var current map[string]bool
+		if err := readJSON(state.projectsPath, &current); err != nil {
+			return fmt.Errorf("read projects for rollback: %w", err)
+		}
+		delete(current, cwd)
+		if err := writeJSON(state.projectsPath, current); err != nil {
+			return fmt.Errorf("roll back project: %w", err)
+		}
+		state.projectChanges[cwd]++
+		return nil
+	}, nil
 }

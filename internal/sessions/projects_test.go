@@ -31,10 +31,10 @@ func TestProjectsPreserveExistingDirectoriesWithoutImportingLaterCLISessions(t *
 			if err != nil || projects["/cli-only"] {
 				t.Fatalf("restart imported CLI project: %v, %v", projects, err)
 			}
-			if err := state.RememberProject("/gateway"); err != nil {
+			if _, err := state.RememberProject("/gateway"); err != nil {
 				t.Fatal(err)
 			}
-			if err := state.RememberProject("/cli-only"); err != nil {
+			if _, err := state.RememberProject("/cli-only"); err != nil {
 				t.Fatal(err)
 			}
 			projects, err = newState().ProjectCWDs(all)
@@ -49,6 +49,32 @@ func TestProjectsPreserveExistingDirectoriesWithoutImportingLaterCLISessions(t *
 	}
 }
 
+func TestProjectRollbackPreservesLaterGatewayAdoption(t *testing.T) {
+	for _, laterAdoption := range []bool{false, true} {
+		root := t.TempDir()
+		state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), root)
+		rollback, err := state.RememberProject("/new")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := state.RememberProject("/other"); err != nil {
+			t.Fatal(err)
+		}
+		if laterAdoption {
+			if _, err := state.RememberProject("/new"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := rollback(); err != nil {
+			t.Fatal(err)
+		}
+		projects, err := state.ProjectCWDs(nil)
+		if err != nil || !projects["/other"] || projects["/new"] != laterAdoption {
+			t.Fatalf("later adoption=%t: projects after rollback = %v, %v", laterAdoption, projects, err)
+		}
+	}
+}
+
 func TestProjectsDoNotReplaceMalformedStateWithDiscoveredDirectories(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "projects.json")
@@ -60,7 +86,7 @@ func TestProjectsDoNotReplaceMalformedStateWithDiscoveredDirectories(t *testing.
 	if _, err := state.ProjectCWDs([]*Session{{CWD: "/cli-only"}}); err == nil {
 		t.Fatal("malformed project state was ignored")
 	}
-	if err := state.RememberProject("/gateway"); err == nil {
+	if _, err := state.RememberProject("/gateway"); err == nil {
 		t.Fatal("malformed project state was overwritten")
 	}
 	assertFileContents(t, path, malformed)

@@ -105,6 +105,10 @@ func TestNewSessionTagsRollbackRegistrationFailure(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(tags, map[string][]string{"/unrelated": {"keep"}}) || len(owned) != 0 {
 				t.Fatalf("failed creation left tags=%v ownership=%v err=%v", tags, owned, err)
 			}
+			projects, err := state.ProjectCWDs(nil)
+			if err != nil || projects[root] {
+				t.Fatalf("failed registration left project=%v err=%v", projects, err)
+			}
 		})
 	}
 }
