@@ -50,7 +50,7 @@ test("server-assigned tag colors agree across SSR, live, reload, picker, filter 
     }
     await page.goto(`/?${new URLSearchParams({ session: paths[0] })}`);
     for (const tag of tags) await expectColors(headerChip(page, tag), expected.get(tag));
-    for (const tag of [...tags].sort().slice(0, 2)) await expectColors(sidebarChip(tag), expected.get(tag));
+    for (const tag of [...tags].sort().slice(0, 2)) await expect(sidebarChip(tag)).toHaveCSS("color", expected.get(tag).foreground);
 
     await page.goto(`/?${new URLSearchParams({ session: paths[1] })}`);
     await page.getByRole("button", { name: "Edit session tags", exact: true }).click();
@@ -66,7 +66,7 @@ test("server-assigned tag colors agree across SSR, live, reload, picker, filter 
     await page.screenshot({ path: testInfo.outputPath("tag-colors.png"), animations: "disabled" });
     await page.reload();
     for (const tag of tags) await expectColors(headerChip(page, tag), expected.get(tag));
-    for (const tag of [...tags].sort().slice(0, 2)) await expectColors(sidebarChip(tag), expected.get(tag));
+    for (const tag of [...tags].sort().slice(0, 2)) await expect(sidebarChip(tag)).toHaveCSS("color", expected.get(tag).foreground);
 
     const selected = "color-🧪";
     await headerChip(page, selected).click();

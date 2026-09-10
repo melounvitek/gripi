@@ -33,7 +33,27 @@ export class SessionTagsController {
     if (!this.dialog) return;
     this.search = this.dialog.querySelector("[data-tag-search]");
     this.options = this.dialog.querySelector("[data-tag-options]");
+    this.document.addEventListener("pointerover", (event) => {
+      if (this.tooltipTrigger && !this.tooltipTrigger.isConnected) this.hideTooltip();
+      const trigger = event.target.closest?.(".session-tag-icon");
+      if (trigger && !trigger.contains(event.relatedTarget) && event.pointerType !== "touch" && this.window.matchMedia("(hover: hover) and (pointer: fine)").matches) this.showTooltip(trigger);
+    });
+    this.document.addEventListener("pointerout", (event) => {
+      const trigger = event.target.closest?.(".session-tag-icon");
+      if (trigger && trigger === this.tooltipTrigger && !trigger.contains(event.relatedTarget) && !trigger.matches(":focus-visible")) this.hideTooltip(120);
+    });
+    this.document.addEventListener("focusin", (event) => {
+      const trigger = event.target.closest?.(".session-tag-icon");
+      if (trigger?.matches(":focus-visible")) this.showTooltip(trigger);
+      else this.hideTooltip();
+    });
+    this.document.addEventListener("focusout", (event) => {
+      if (event.target === this.tooltipTrigger) this.hideTooltip();
+    });
+    this.document.addEventListener("scroll", () => this.hideTooltip(), true);
+    this.window.addEventListener("blur", () => this.hideTooltip());
     this.document.addEventListener("click", (event) => {
+      this.hideTooltip();
       const filter = event.target.closest?.("[data-tag-filter]");
       const edit = event.target.closest?.("[data-tag-edit]");
       const chooser = event.target.closest?.("[data-tag-chooser]");
@@ -58,6 +78,7 @@ export class SessionTagsController {
     });
     this.dialog.addEventListener("cancel", (event) => { event.preventDefault(); this.close(); });
     this.document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") this.hideTooltip();
       if (!this.dialog.open) return;
       if (event.key === "Escape") {
         event.preventDefault();
@@ -76,8 +97,64 @@ export class SessionTagsController {
       this.state.query = this.search.value;
       this.renderOptions();
     });
-    this.document.addEventListener("gripi:sidebar-tags", () => this.syncHeader());
-    this.window.addEventListener("resize", () => { if (this.dialog.open) this.position(); });
+    this.document.addEventListener("gripi:sidebar-tags", () => {
+      this.hideTooltip();
+      this.syncHeader();
+    });
+    this.window.addEventListener("resize", () => {
+      this.hideTooltip();
+      if (this.dialog.open) this.position();
+    });
+  }
+
+  showTooltip(trigger) {
+    this.hideTooltip();
+    if (!trigger.isConnected) return;
+    if (!this.tooltip) {
+      this.tooltip = this.document.createElement("div");
+      this.tooltip.className = "session-tag-tooltip";
+      this.tooltip.id = "session-tag-tooltip";
+      this.tooltip.setAttribute("role", "tooltip");
+      this.tooltip.hidden = true;
+      this.tooltip.addEventListener("pointerenter", () => {
+        if (this.tooltipTrigger?.isConnected) this.window.clearTimeout(this.tooltipHideTimer);
+        else this.hideTooltip();
+      });
+      this.tooltip.addEventListener("pointerleave", () => {
+        if (!this.tooltipTrigger?.matches(":focus-visible")) this.hideTooltip(120);
+      });
+      this.document.body.append(this.tooltip);
+    }
+    this.ingestHTMLColors();
+    this.tooltip.textContent = trigger.dataset.tagFilter;
+    this.applyTagColors(this.tooltip, trigger.dataset.tagFilter);
+    this.tooltipTrigger = trigger;
+    this.tooltipDescription = trigger.getAttribute("aria-describedby");
+    trigger.setAttribute("aria-describedby", [this.tooltipDescription, this.tooltip.id].filter(Boolean).join(" "));
+    this.tooltip.style.left = "8px";
+    this.tooltip.style.top = "8px";
+    this.tooltip.hidden = false;
+    const anchor = trigger.getBoundingClientRect();
+    const { width, height } = this.tooltip.getBoundingClientRect();
+    const left = Math.max(8, Math.min(anchor.left, this.window.innerWidth - width - 8));
+    const below = anchor.bottom + 6;
+    const top = below + height <= this.window.innerHeight - 8 ? below : anchor.top - height - 6;
+    this.tooltip.style.left = `${left}px`;
+    this.tooltip.style.top = `${Math.max(8, Math.min(top, this.window.innerHeight - height - 8))}px`;
+  }
+
+  hideTooltip(delay = 0) {
+    this.window.clearTimeout(this.tooltipHideTimer);
+    if (delay) {
+      this.tooltipHideTimer = this.window.setTimeout(() => this.hideTooltip(), delay);
+      return;
+    }
+    if (this.tooltip) this.tooltip.hidden = true;
+    if (this.tooltipTrigger) {
+      if (this.tooltipDescription === null) this.tooltipTrigger.removeAttribute("aria-describedby");
+      else this.tooltipTrigger.setAttribute("aria-describedby", this.tooltipDescription);
+      this.tooltipTrigger = null;
+    }
   }
 
   resetDraft(form) {
@@ -109,6 +186,8 @@ export class SessionTagsController {
   }
 
   open(path, trigger, form = null) {
+    this.hideTooltip();
+    this.ingestHTMLColors();
     this.trigger = trigger;
     this.anchor = trigger?.getBoundingClientRect();
     this.triggerPath = path;
@@ -265,7 +344,6 @@ export class SessionTagsController {
   }
 
   renderOptions() {
-    this.ingestHTMLColors();
     const state = this.state;
     const focusedTag = this.document.activeElement?.dataset.tagOption;
     this.options.replaceChildren();

@@ -539,13 +539,15 @@
     const projectLabel = document.createElement("span"); projectLabel.className = "session-project-label"; projectLabel.textContent = session.project;
     project.append(monogram, projectLabel);
     const meta = document.createElement("div"); meta.className = "session-meta"; meta.textContent = session.age;
-    content.append(title, project, meta);
+    content.append(title);
+    const details = document.createElement("div"); details.className = "session-details";
+    details.append(project);
     const indicators = document.createElement("div"); indicators.className = "session-indicators";
     link.append(content, indicators);
     const pin = document.createElement("button");
     pin.type = "button"; pin.className = `session-pin-toggle demo-pin-toggle${session.pinned ? " is-pinned" : ""}`; pin.dataset.pinId = session.id; pin.setAttribute("aria-pressed", String(!!session.pinned)); pin.setAttribute("aria-label", session.pinned ? `Unpin session ${session.name}` : `Pin session ${session.name}`); pin.title = session.pinned ? "Unpin session" : "Pin session";
     pin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 5 3 3v2h-4l-1 8-1-8H7v-2l3-3-1-5Z"/></svg>';
-    wrapper.append(link, pin);
+    wrapper.append(link, details, meta, pin);
     return wrapper;
   }
 

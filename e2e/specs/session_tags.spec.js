@@ -174,7 +174,7 @@ test("sidebar tag controls retain keyboard focus across polling and ArrowUp sele
     await page.goto(`/?${new URLSearchParams({ session: current.path, tag: tags[0] })}`);
     if (isMobile) await page.locator('label[aria-label="Open sessions"]').tap();
     const row = page.locator('.sessions-list .session-row');
-    for (const control of [row.locator('.tag-chip').first(), row.locator('.tag-overflow'), page.locator('[data-tag-chooser]'), page.getByRole('button', { name: 'Clear tag filter', exact: true })]) {
+    for (const control of [row.locator('[data-tag-filter]').first(), row.locator('.tag-overflow'), page.locator('[data-tag-chooser]'), page.getByRole('button', { name: 'Clear tag filter', exact: true })]) {
       await control.focus();
       const original = await control.elementHandle();
       await page.clock.runFor(10_100);
@@ -349,7 +349,7 @@ test("background actions and overflow edit tags without navigating, and stale ed
     if (isMobile) await activate(page.locator('label[aria-label="Open sessions"]'));
     const row = page.locator(".sessions-list .session-row");
     await expect(row).toHaveAttribute("data-session-path", other.path);
-    await expect(row.locator(".tag-chip")).toHaveCount(2);
+    await expect(row.locator("[data-tag-filter]")).toHaveCount(2);
     await activate(row.getByRole("button", { name: "Edit all 3 tags" }));
     const dialog = dialogFor(page);
     for (const tag of tags) await expect(dialog.getByRole("checkbox", { name: tag, exact: true })).toBeChecked();
