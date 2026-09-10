@@ -86,6 +86,7 @@ type pageView struct {
 	SearchQuery               string
 	SelectedTag               string
 	SessionTags               map[string][]string
+	TagColors                 map[string]string
 	Unread                    map[string]bool
 	ExternalFollow            map[string]bool
 	ExternalResponseCounts    map[string]int
@@ -237,9 +238,17 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if err != nil {
 		return nil, err
 	}
+	colors, err := app.gatewayState.TagColors()
+	if err != nil {
+		return nil, err
+	}
 	view.SessionTags = make(map[string][]string, len(all))
+	view.TagColors = make(map[string]string)
 	for _, session := range all {
 		view.SessionTags[session.Path] = assignments[session.Path]
+		for _, name := range assignments[session.Path] {
+			view.TagColors[name] = colors[name]
+		}
 	}
 	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))
 	view.prepareSidebar()

@@ -47,8 +47,14 @@ func (app *application) tags(response http.ResponseWriter, request *http.Request
 		http.Error(response, "Unable to list session tags", http.StatusInternalServerError)
 		return
 	}
+	colors, err := app.visibleTagColors(available)
+	if err != nil {
+		logInternalError("read tag colors", err)
+		http.Error(response, "Unable to read tag colors", http.StatusInternalServerError)
+		return
+	}
 	response.Header().Set("Cache-Control", "no-store")
-	writeJSON(response, map[string]any{"tags": available})
+	writeJSON(response, map[string]any{"tags": available, "tag_colors": colors})
 }
 
 func (app *application) sessionTags(response http.ResponseWriter, request *http.Request) {
@@ -93,12 +99,18 @@ func (app *application) sessionTags(response http.ResponseWriter, request *http.
 		http.Error(response, "Unable to list session tags", http.StatusInternalServerError)
 		return
 	}
+	colors, err := app.visibleTagColors(available)
+	if err != nil {
+		logInternalError("read tag colors", err)
+		http.Error(response, "Unable to read tag colors", http.StatusInternalServerError)
+		return
+	}
 	names := tags[path]
 	if names == nil {
 		names = []string{}
 	}
 	response.Header().Set("Cache-Control", "no-store")
-	writeJSON(response, map[string]any{"session": path, "tags": names, "available_tags": available})
+	writeJSON(response, map[string]any{"session": path, "tags": names, "available_tags": available, "tag_colors": colors})
 }
 
 func (app *application) visibleTagCounts(request *http.Request, tags map[string][]string) ([]sessions.TagCount, error) {

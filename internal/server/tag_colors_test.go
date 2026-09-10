@@ -12,21 +12,20 @@ import (
 func TestTagColorsRenderAcrossPageAndFragments(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	handler := fixtureHandler(t, fixture)
-	// These UTF-8 FNV-1a fixtures cover every tag palette entry.
-	colors := map[string][2]string{
-		"color-7": {"#5ff5ce1f", "#5ff5ce"}, "color-8": {"#4df3e51f", "#4df3e5"},
-		"color-9": {"#50e3ff1f", "#50e3ff"}, "color-35": {"#68ceff1f", "#68ceff"},
-		"color-34": {"#8dbbff1f", "#8dbbff"}, "color-0": {"#b1b6ff1f", "#b1b6ff"},
-		"color-1": {"#c2adff1f", "#c2adff"}, "color-é": {"#d3a2ff1f", "#d3a2ff"},
-		"color-3": {"#e69cff1f", "#e69cff"}, "color-東京": {"#f59afa1f", "#f59afa"},
-		"color-5": {"#ff95dc1f", "#ff95dc"}, "color-🧪": {"#ff9ecb1f", "#ff9ecb"},
-	}
-	for tag := range colors {
+	colors := make(map[string][2]string)
+	for _, tag := range []string{"color-0", "color-1", "color-é", "color-東京", "color-🧪", "__proto__"} {
 		response := serve(t, handler, http.MethodPost, "/sessions/tags", url.Values{"session": {fixture.markerPath}, "tag": {tag}, "assigned": {"true"}}.Encode())
-		if response.Code != http.StatusOK {
-			t.Fatalf("assign tag: %d %s", response.Code, response.Body.String())
+		result := readTagResponse(t, response)
+		color := result.TagColors[tag]
+		if !regexp.MustCompile(`^#[0-9a-f]{6}$`).MatchString(color) {
+			t.Fatalf("missing saved color for %q: %s", tag, response.Body.String())
 		}
+		colors[tag] = [2]string{color + "1f", color}
 	}
+	if colors["color-0"][1] != "#e69cff" || colors["color-1"][1] != "#5ff5ce" {
+		t.Fatalf("first colors should be purple and mint: %v", colors)
+	}
+	handler = fixtureHandler(t, fixture)
 	params := url.Values{"session": {fixture.markerPath}, "tag": {"color-🧪"}}
 	page := serve(t, handler, http.MethodGet, "/?"+params.Encode(), "")
 	sidebar := serve(t, handler, http.MethodGet, "/sidebar?"+params.Encode(), "")
@@ -57,7 +56,7 @@ func TestTagColorsRenderAcrossPageAndFragments(t *testing.T) {
 		})
 	}
 	for _, markup := range []string{page.Body.String(), sidebar.Body.String(), payload["sidebar_html"]} {
-		for _, tag := range []string{"color-0", "color-1"} {
+		for _, tag := range []string{"__proto__", "color-0"} {
 			assertColors(t, markup, `data-tag-filter="`+tag+`"`, tag)
 		}
 		assertColors(t, markup, `class="compact-tag-filter is-active"`, "color-🧪")

@@ -3,12 +3,14 @@ package server_test
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +23,7 @@ type tagResponse struct {
 	Session       string              `json:"session"`
 	Tags          []string            `json:"tags"`
 	AvailableTags []sessions.TagCount `json:"available_tags"`
+	TagColors     map[string]string   `json:"tag_colors"`
 }
 
 func readTagResponse(t *testing.T, response *httptest.ResponseRecorder) tagResponse {
@@ -244,12 +247,47 @@ func TestMultiUserSessionTagCatalogIsIsolated(t *testing.T) {
 		if !reflect.DeepEqual(result.AvailableTags, expected) {
 			t.Fatalf("visible tags = %+v", result)
 		}
+		if len(result.TagColors) != 2 || result.TagColors[workspace] == "" || result.TagColors["shared"] == "" {
+			t.Fatalf("visible colors = %v", result.TagColors)
+		}
 		var catalog struct {
-			Tags []sessions.TagCount `json:"tags"`
+			Tags      []sessions.TagCount `json:"tags"`
+			TagColors map[string]string   `json:"tag_colors"`
 		}
 		response := getWorkspace(handler, "/tags", cookie)
 		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &catalog) != nil || !reflect.DeepEqual(catalog.Tags, expected) {
 			t.Fatalf("isolated catalog = %d %s", response.Code, response.Body.String())
+		}
+		if !reflect.DeepEqual(catalog.TagColors, result.TagColors) {
+			t.Fatalf("catalog colors = %v, session colors = %v", catalog.TagColors, result.TagColors)
+		}
+		for _, route := range []string{"/", "/sidebar", "/session_fragment"} {
+			response := getWorkspace(handler, route+"?"+url.Values{"session": {all[i].Path}, "tag": {"workspace-" + []string{"b", "a"}[i]}}.Encode(), cookie)
+			if response.Code != http.StatusOK {
+				t.Fatalf("%s = %d %s", route, response.Code, response.Body.String())
+			}
+			markup := response.Body.String()
+			if route == "/session_fragment" {
+				var fragment map[string]string
+				if err := json.Unmarshal(response.Body.Bytes(), &fragment); err != nil {
+					t.Fatal(err)
+				}
+				markup = fragment["sidebar_html"] + fragment["conversation_html"]
+			}
+			attributes := regexp.MustCompile(`data-tag-colors="([^"]*)"`).FindAllStringSubmatch(markup, -1)
+			if len(attributes) == 0 {
+				t.Fatalf("%s missing visible color metadata", route)
+			}
+			for _, attribute := range attributes {
+				var colors map[string]string
+				if err := json.Unmarshal([]byte(html.UnescapeString(attribute[1])), &colors); err != nil || !reflect.DeepEqual(colors, catalog.TagColors) {
+					t.Fatalf("%s color metadata = %v (%v)", route, colors, err)
+				}
+			}
+			// An arbitrary filter may echo its name, but never its private saved color.
+			if !strings.Contains(markup, "#a0a0a0") {
+				t.Fatalf("%s did not use neutral styling for an invisible filter", route)
+			}
 		}
 		other := all[1-i].Path
 		if response := getWorkspace(handler, "/sessions/tags?session="+url.QueryEscape(other), cookie); response.Code != http.StatusNotFound {

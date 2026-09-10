@@ -1,29 +1,34 @@
-// Keep this tag-only palette in sync with internal/server/tag_colors.go.
-const tagColors = [
-  ["#5ff5ce1f", "#5ff5ce"], ["#4df3e51f", "#4df3e5"], ["#50e3ff1f", "#50e3ff"], ["#68ceff1f", "#68ceff"],
-  ["#8dbbff1f", "#8dbbff"], ["#b1b6ff1f", "#b1b6ff"], ["#c2adff1f", "#c2adff"], ["#d3a2ff1f", "#d3a2ff"],
-  ["#e69cff1f", "#e69cff"], ["#f59afa1f", "#f59afa"], ["#ff95dc1f", "#ff95dc"], ["#ff9ecb1f", "#ff9ecb"]
-];
-
-function applyTagColors(element, tag) {
-  // UTF-8 FNV-1a, matching tagStyle in internal/server/tag_colors.go.
-  let hash = 2166136261;
-  for (const byte of new TextEncoder().encode(tag)) hash = Math.imul(hash ^ byte, 16777619) >>> 0;
-  const [background, foreground] = tagColors[hash % tagColors.length];
-  element.style.setProperty("--tag-bg", background);
-  element.style.setProperty("--tag-fg", foreground);
-}
-
 export class SessionTagsController {
   constructor(document, window, callbacks = {}) {
     this.document = document;
     this.window = window;
     this.callbacks = callbacks;
     this.editors = new Map();
+    this.tagColors = new Map();
     this.state = null;
   }
 
+  ingestColors(colors) {
+    for (const [tag, color] of Object.entries(colors || {})) {
+      // Saved assignments are immutable; older HTML must not replace an API assignment.
+      if (!this.tagColors.has(tag)) this.tagColors.set(tag, color);
+    }
+  }
+
+  ingestHTMLColors() {
+    for (const element of this.document.querySelectorAll(".session-sidebar[data-tag-colors], .header-tags[data-tag-colors]")) {
+      this.ingestColors(JSON.parse(element.dataset.tagColors));
+    }
+  }
+
+  applyTagColors(element, tag) {
+    const foreground = this.tagColors.get(tag) || "#a0a0a0";
+    element.style.setProperty("--tag-bg", `${foreground}1f`);
+    element.style.setProperty("--tag-fg", foreground);
+  }
+
   initialize() {
+    this.ingestHTMLColors();
     this.dialog = this.document.querySelector(".tag-picker");
     if (!this.dialog) return;
     this.search = this.dialog.querySelector("[data-tag-search]");
@@ -82,6 +87,7 @@ export class SessionTagsController {
   }
 
   renderDraft(form, tags) {
+    this.ingestHTMLColors();
     const chips = form.querySelector("[data-tag-draft-chips]");
     chips.replaceChildren();
     for (const tag of tags) {
@@ -92,7 +98,7 @@ export class SessionTagsController {
       const chip = this.document.createElement("button");
       chip.type = "button";
       chip.className = "tag-chip";
-      applyTagColors(chip, tag);
+      this.applyTagColors(chip, tag);
       chip.dataset.tagDraftRemove = tag;
       chip.setAttribute("aria-label", `Remove ${tag}`);
       const label = this.document.createElement("span");
@@ -163,7 +169,10 @@ export class SessionTagsController {
       const payload = await this.request(url);
       if (version !== state.version) return;
       state.available = state.path ? payload.available_tags : payload.tags;
-      if (state.path) state.tags = payload.tags;
+      if (state.path) {
+        state.tags = payload.tags;
+        this.updateHeader(state.path, payload.tags);
+      }
     } catch (error) {
       if (version === state.version) state.error = error.message;
     } finally {
@@ -214,6 +223,7 @@ export class SessionTagsController {
     try { payload = JSON.parse(text); } catch (_error) {}
     if (!response.ok) throw new Error(payload?.error || text.trim() || "Could not update tags");
     if (!payload) throw new Error("Could not load tags");
+    this.ingestColors(payload.tag_colors);
     return payload;
   }
 
@@ -255,6 +265,7 @@ export class SessionTagsController {
   }
 
   renderOptions() {
+    this.ingestHTMLColors();
     const state = this.state;
     const focusedTag = this.document.activeElement?.dataset.tagOption;
     this.options.replaceChildren();
@@ -275,7 +286,7 @@ export class SessionTagsController {
       const button = this.document.createElement("button");
       button.type = "button";
       button.className = "tag-picker-option tag-create";
-      applyTagColors(button, query);
+      this.applyTagColors(button, query);
       button.textContent = `Create “${query}”`;
       button.disabled = state.pending;
       button.addEventListener("click", () => this.mutate(state, query, true));
@@ -290,7 +301,7 @@ export class SessionTagsController {
     const state = this.state;
     const option = this.document.createElement(state.path || state.form ? "label" : "button");
     option.className = "tag-picker-option";
-    if (tag) applyTagColors(option, tag);
+    if (tag) this.applyTagColors(option, tag);
     if (state.path || state.form) {
       const checkbox = this.document.createElement("input");
       checkbox.type = "checkbox";
@@ -323,6 +334,7 @@ export class SessionTagsController {
   }
 
   syncHeader() {
+    this.ingestHTMLColors();
     const header = this.document.querySelector("[data-tag-session]");
     const row = [...this.document.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === header?.dataset.tagSession);
     if (row) this.updateHeader(row.dataset.sessionPath, JSON.parse(row.dataset.sessionTags || "[]") || []);
@@ -332,7 +344,10 @@ export class SessionTagsController {
     const header = this.document.querySelector("[data-tag-session]");
     if (!header || header.dataset.tagSession !== path) return;
     const chips = [...header.querySelectorAll("[data-tag-filter]")];
-    if (chips.length === tags.length && chips.every((chip, index) => chip.dataset.tagFilter === tags[index])) return;
+    if (chips.length === tags.length && chips.every((chip, index) => chip.dataset.tagFilter === tags[index])) {
+      for (const chip of chips) this.applyTagColors(chip, chip.dataset.tagFilter);
+      return;
+    }
     const edit = this.document.querySelector(".session-header [data-tag-edit]");
     const focusedTag = chips.includes(this.document.activeElement) ? this.document.activeElement.dataset.tagFilter : null;
     header.replaceChildren();
@@ -340,7 +355,7 @@ export class SessionTagsController {
       const chip = this.document.createElement("button");
       chip.type = "button";
       chip.className = "tag-chip";
-      applyTagColors(chip, tag);
+      this.applyTagColors(chip, tag);
       chip.dataset.tagFilter = tag;
       chip.setAttribute("aria-label", `Filter sessions by ${tag}`);
       const label = this.document.createElement("span");
