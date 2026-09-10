@@ -86,7 +86,7 @@ test("compact tag header keeps its editor on the title row through tag changes",
   try {
     await page.goto(`/?session=${encodeURIComponent(current.path)}`);
     const header = page.locator(".session-header");
-    const edit = header.locator("[data-tag-edit]");
+    const edit = header.locator(".session-header-actions [data-tag-edit]");
     const chip = header.getByRole("button", { name: `Filter sessions by ${tag}`, exact: true });
     const expectTitleRowEditor = async () => {
       const title = await header.locator(".session-header-name").boundingBox();
@@ -113,7 +113,7 @@ test("compact tag header keeps its editor on the title row through tag changes",
     await expect(dialog).toBeHidden();
     await expect(edit).toBeFocused();
     await expect(chip).toBeVisible();
-    await expect.poll(async () => (await header.boundingBox()).height).toBeGreaterThan(emptyHeight);
+    await expect.poll(async () => Math.abs((await header.boundingBox()).height - emptyHeight)).toBeLessThanOrEqual(1);
     await expectTitleRowEditor();
     await expect(edit).toHaveAccessibleName("Edit session tags");
     await page.screenshot({ path: testInfo.outputPath("compact-header-tagged.png"), animations: "disabled" });
@@ -360,7 +360,8 @@ test("background actions and overflow edit tags without navigating, and stale ed
     await expect(dialog.getByRole("checkbox", { name: tags[0], exact: true })).toBeChecked();
     await activate(dialog.getByRole("button", { name: "Close tag picker" }));
     await activate(row.locator("a.session"));
-    for (const tag of tags) await expect(page.locator(".header-tags").getByRole("button", { name: `Filter sessions by ${tag}`, exact: true })).toBeVisible();
+    for (const tag of [...tags].sort().slice(0, 2)) await expect(page.locator(".header-tags").getByRole("button", { name: `Filter sessions by ${tag}`, exact: true })).toBeVisible();
+    await expect(page.locator(".header-tags").getByRole("button", { name: "Edit all 3 tags", exact: true })).toBeVisible();
 
     let release;
     const pending = new Promise((resolve) => { release = resolve; });

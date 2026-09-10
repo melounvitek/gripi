@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -82,10 +83,27 @@ func TestTagsRenderOnPageAndBothFragments(t *testing.T) {
 			t.Errorf("%s missing tag editor", name)
 		}
 	}
-	if !strings.Contains(payload["conversation_html"], `data-tag-filter="`+tags[2]+`"`) {
-		t.Fatal("header must show all tags")
-	}
-	if !strings.Contains(sidebar.Body.String(), ">+1</button>") {
-		t.Fatal("sidebar must expose overflowing tags")
+	header := regexp.MustCompile(`(?s)<header class="session-header">.*?</header>`)
+	for name, markup := range map[string]string{"page header": header.FindString(page.Body.String()), "conversation header": header.FindString(payload["conversation_html"]), "sidebar": sidebar.Body.String(), "fragment sidebar": payload["sidebar_html"]} {
+		t.Run(name, func(t *testing.T) {
+			icons := regexp.MustCompile(`(?s)<button[^>]*class="session-tag-icon"[^>]*data-tag-filter="([^"]+)"[^>]*>(.*?)</button>`).FindAllStringSubmatch(markup, -1)
+			if len(icons) != 2 {
+				t.Fatalf("got %d tag icons, want 2", len(icons))
+			}
+			for i, icon := range icons {
+				if icon[1] != tags[i] || !strings.Contains(icon[0], `aria-label="Filter sessions by `+tags[i]+`"`) {
+					t.Errorf("icon %d must filter by %s: %s", i, tags[i], icon[0])
+				}
+				var svg struct {
+					XMLName xml.Name `xml:"svg"`
+				}
+				if err := xml.Unmarshal([]byte(icon[2]), &svg); err != nil {
+					t.Errorf("invalid tag icon SVG: %v", err)
+				}
+			}
+			if !strings.Contains(markup, `class="tag-overflow" data-tag-edit="`+fixture.markerPath+`" aria-label="Edit all 3 tags">+1</button>`) {
+				t.Fatal("overflow must open the editor for all three tags")
+			}
+		})
 	}
 }

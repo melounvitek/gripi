@@ -112,13 +112,17 @@ test("explicit draft tags survive first response and reload while the URL tag re
     await activate(picker(page).getByRole("button", { name: "Close tag picker" }), isMobile);
     await activate(modal.getByRole("button", { name: "Start session" }), isMobile);
     await expect(modal).toBeHidden();
-    await expect(page.locator(".header-tags .tag-chip")).toHaveText([created, reusable]);
+    for (const name of [created, reusable]) {
+      await expect(page.locator(".header-tags").getByRole("button", { name: `Filter sessions by ${name}`, exact: true })).toBeVisible();
+    }
     expect(new URL(page.url()).searchParams.get("tag")).toBe(tag);
     await sendPrompt(page, prompts.newSession);
     await expect(message(page, "assistant", replies.newSession)).toBeVisible();
     await expectRunFinished(page);
     await page.reload();
-    await expect(page.locator(".header-tags .tag-chip")).toHaveText([created, reusable]);
+    for (const name of [created, reusable]) {
+      await expect(page.locator(".header-tags").getByRole("button", { name: `Filter sessions by ${name}`, exact: true })).toBeVisible();
+    }
     expect(new URL(page.url()).searchParams.get("tag")).toBe(tag);
     const createdSession = new URL(page.url()).searchParams.get("session");
     expect((await (await page.request.get(`/sessions/tags?${new URLSearchParams({ session: createdSession })}`)).json()).tags).toEqual([created, reusable]);

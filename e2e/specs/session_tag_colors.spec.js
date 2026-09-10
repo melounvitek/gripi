@@ -20,7 +20,7 @@ async function assign(page, session, tag, assigned = true) {
   return response.json();
 }
 
-const headerChip = (page, tag) => page.locator(".header-tags").getByRole("button", { name: `Filter sessions by ${tag}`, exact: true });
+const headerIcon = (page, tag) => page.locator(".header-tags.session-tags").getByRole("button", { name: `Filter sessions by ${tag}`, exact: true });
 const pickerOption = (picker, tag) => picker.getByRole("checkbox", { name: tag, exact: true }).locator("..");
 
 async function fixturePaths(page) {
@@ -48,34 +48,57 @@ test("server-assigned tag colors agree across SSR, live, reload, picker, filter 
       const payload = await (await page.request.get(url)).json();
       for (const tag of tags) expect(colors(payload.tag_colors[tag])).toEqual(expected.get(tag));
     }
+    const expectHeader = async (session) => {
+      const header = page.locator(".header-tags.session-tags");
+      await expect(header.locator(".session-tag-icon")).toHaveCount(2);
+      for (const [index, tag] of [...tags].sort().slice(0, 2).entries()) {
+        await expect(header.locator(".session-tag-icon").nth(index)).toHaveAccessibleName(`Filter sessions by ${tag}`);
+        await expect(headerIcon(page, tag)).toHaveText("");
+        await expect(headerIcon(page, tag)).toHaveCSS("color", expected.get(tag).foreground);
+        await expect(headerIcon(page, tag)).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await expect(sidebarChip(tag)).toHaveCSS("color", expected.get(tag).foreground);
+      }
+      const overflow = header.getByRole("button", { name: `Edit all ${tags.length} tags`, exact: true });
+      await expect(overflow).toHaveText(`+${tags.length - 2}`);
+      await expect(overflow).toHaveAttribute("data-tag-edit", session);
+      await overflow.click();
+      const editor = page.getByRole("dialog", { name: "Session tags", exact: true });
+      for (const tag of tags) {
+        await expect(editor.getByRole("checkbox", { name: tag, exact: true })).toBeChecked();
+        await expectColors(pickerOption(editor, tag), expected.get(tag));
+      }
+      await editor.getByRole("button", { name: "Close tag picker" }).click();
+    };
     await page.goto(`/?${new URLSearchParams({ session: paths[0] })}`);
-    for (const tag of tags) await expectColors(headerChip(page, tag), expected.get(tag));
-    for (const tag of [...tags].sort().slice(0, 2)) await expect(sidebarChip(tag)).toHaveCSS("color", expected.get(tag).foreground);
+    await expectHeader(paths[0]);
 
     await page.goto(`/?${new URLSearchParams({ session: paths[1] })}`);
     await page.getByRole("button", { name: "Edit session tags", exact: true }).click();
     const editor = page.getByRole("dialog", { name: "Session tags", exact: true });
-    for (const tag of tags) {
+    // Each new assignment sorts into the visible pair, including Unicode and prototype-like names.
+    for (const tag of [...tags].sort().reverse()) {
       const checkbox = editor.getByRole("checkbox", { name: tag, exact: true });
       await expectColors(pickerOption(editor, tag), expected.get(tag));
       await checkbox.check();
       await expect(checkbox).toBeChecked();
-      await expectColors(headerChip(page, tag), expected.get(tag));
+      await expect(headerIcon(page, tag)).toHaveCSS("color", expected.get(tag).foreground);
     }
+    await expect(page.locator(".header-tags .session-tag-icon")).toHaveCount(2);
     await editor.getByRole("button", { name: "Close tag picker" }).click();
     await page.screenshot({ path: testInfo.outputPath("tag-colors.png"), animations: "disabled" });
     await page.reload();
-    for (const tag of tags) await expectColors(headerChip(page, tag), expected.get(tag));
-    for (const tag of [...tags].sort().slice(0, 2)) await expect(sidebarChip(tag)).toHaveCSS("color", expected.get(tag).foreground);
+    await expectHeader(paths[1]);
 
-    const selected = "color-🧪";
-    await headerChip(page, selected).click();
+    await headerIcon(page, [...tags].sort()[0]).click();
     const filter = page.getByRole("button", { name: "Filter sessions by tag", exact: true });
+    await filter.click();
+    const chooser = page.getByRole("dialog", { name: "Filter by tag", exact: true });
+    const selected = "color-🧪";
+    await chooser.locator(`[data-tag-option="${selected}"]`).click();
     await expect(filter).toContainText(selected);
     await expect(filter).toHaveCSS("color", expected.get(selected).foreground);
     await expect(page.locator(".compact-tag-filter")).toHaveCSS("background-color", expected.get(selected).background);
     await filter.click();
-    const chooser = page.getByRole("dialog", { name: "Filter by tag", exact: true });
     for (const tag of tags) await expectColors(chooser.locator(`[data-tag-option="${tag}"]`), expected.get(tag));
     await chooser.getByRole("button", { name: "Close tag picker" }).click();
 
@@ -111,7 +134,7 @@ test("session-only HTML initializes colors, swapped HTML is reingested, and new 
     const initial = await assign(page, paths[0], names[0]);
     await page.goto(`/?${new URLSearchParams({ session: paths[0], session_only: "1" })}`);
     await expect(page.locator(".session-sidebar")).toHaveCount(0);
-    await expectColors(headerChip(page, names[0]), colors(initial.tag_colors[names[0]]));
+    await expect(headerIcon(page, names[0])).toHaveCSS("color", colors(initial.tag_colors[names[0]]).foreground);
     // With the API unavailable, a known-name preview must use the HTML map.
     await page.route("**/sessions/tags?*", (route) => route.abort());
     await open();
@@ -144,18 +167,18 @@ test("session-only HTML initializes colors, swapped HTML is reingested, and new 
     await create.click();
     const saved = await (await savedResponse).json();
     const expected = colors(saved.tag_colors[names[2]]);
-    await expectColors(headerChip(page, names[2]), expected);
+    await expect(headerIcon(page, names[2])).toHaveCSS("color", expected.foreground);
     await expectColors(pickerOption(editor, names[2]), expected);
     await close();
     await page.reload();
-    await expectColors(headerChip(page, names[2]), expected);
+    await expect(headerIcon(page, names[2])).toHaveCSS("color", expected.foreground);
   } finally {
     await page.unrouteAll({ behavior: "wait" });
     for (const session of paths) for (const tag of names) await assign(page, session, tag, false);
   }
 });
 
-test("sidebar refresh imports new colors and recolors unchanged header chips without losing focus", async ({ page }) => {
+test("sidebar refresh imports new colors and recolors unchanged header icons without losing focus", async ({ page }) => {
   const [session] = await fixturePaths(page);
   const tag = "color-polled";
   try {
@@ -164,8 +187,8 @@ test("sidebar refresh imports new colors and recolors unchanged header chips wit
     const payload = await assign(page, session, tag);
     const expected = colors(payload.tag_colors[tag]);
     await page.clock.runFor(10_100);
-    const chip = headerChip(page, tag);
-    await expectColors(chip, expected);
+    const chip = headerIcon(page, tag);
+    await expect(chip).toHaveCSS("color", expected.foreground);
     await chip.focus();
     const original = await chip.elementHandle();
     await chip.evaluate((element) => {
@@ -173,7 +196,7 @@ test("sidebar refresh imports new colors and recolors unchanged header chips wit
       element.style.setProperty("--tag-bg", "#a0a0a01f");
       document.dispatchEvent(new CustomEvent("gripi:sidebar-tags"));
     });
-    await expectColors(chip, expected);
+    await expect(chip).toHaveCSS("color", expected.foreground);
     expect(await original.evaluate((element) => element.isConnected)).toBe(true);
     await expect(chip).toBeFocused();
   } finally {

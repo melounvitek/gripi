@@ -71,17 +71,17 @@
     .conversation-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: transparent; }
     .session-header { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; row-gap: 0.15rem; padding: 1rem 1.5rem 0.75rem; border-bottom: 1px solid var(--border); background: #1e1e24f0; backdrop-filter: blur(8px); }
     .session-header-title { display: contents; }
-    .session-header-project, .header-tags, .session-relation-tree { grid-column: 2 / -1; }
+    .session-header-project, .session-relation-tree { grid-column: 2 / -1; }
     .session-header .mobile-sessions-button, .session-header .desktop-sessions-open-button { grid-column: 1; grid-row: 1; margin-right: 0.75rem; }
     .session-header h1 { grid-column: 2; grid-row: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-project { min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.76rem; font-weight: 500; }
     .session-header-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-project .session-header-project-icon { width: 1.55rem; min-width: 1.55rem; height: 1.25rem; border-radius: 0.2rem; font-size: 0.56rem; }
     .session-header-project-separator { flex: 0 0 auto; color: var(--muted-soft); }
-    .session-header-view-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.1rem; padding: 0.35rem 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-family: var(--sans); font-weight: 500; letter-spacing: normal; text-transform: none; }
+    .session-header-view-toggle { flex: 0 1 auto; min-width: 2.5rem; display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.1rem; padding: 0.35rem 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-family: var(--sans); font-weight: 500; letter-spacing: normal; text-transform: none; }
     .session-header-view-toggle:hover { background: transparent; transform: none; }
     .session-header-view-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
-    .session-header-view-toggle-label { white-space: nowrap; }
+    .session-header-view-toggle-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-view-toggle-track { position: relative; flex: 0 0 auto; width: 2rem; height: 1.125rem; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--panel-softer); }
     .session-header-view-toggle-track::before { content: ""; position: absolute; top: 2px; left: 2px; width: 0.75rem; height: 0.75rem; border-radius: 50%; background: var(--text); }
     .session-header-view-toggle[aria-checked="true"] .session-header-view-toggle-track { border-color: var(--accent); background: var(--accent); }
@@ -777,10 +777,7 @@
     .tag-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tag-overflow { flex: none; }
     .tag-overflow, .edit-tags { border-color: transparent; background: transparent; color: var(--muted); }
-    .header-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; margin-top: 5px; }
     .header-tags:empty { display: none; }
-    .header-tags .tag-chip { max-width: 100%; }
-    .header-tags .tag-chip span { white-space: normal; overflow-wrap: anywhere; }
     .tag-chip:hover { background: var(--tag-bg); }
     .tag-overflow:hover, .edit-tags:hover { background: transparent; }
     .tag-picker { position: fixed; inset: 0; width: min(340px, calc(100vw - 24px)); max-height: min(600px, 85dvh); margin: auto; padding: 12px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-soft); overflow-y: auto; }
@@ -821,7 +818,6 @@
       .session-row .session-meta { min-height: 38px; }
       .tag-chip { position: relative; min-height: 28px; }
       .tag-chip::after { content: ""; position: absolute; inset: -8px 0; }
-      .header-tags { row-gap: 16px; margin-top: 8px; }
       .tag-overflow, .edit-tags { min-height: 44px; }
       .tag-picker-heading button { min-width: 44px; min-height: 44px; }
       .tag-picker input[type="search"] { font-size: 16px; }

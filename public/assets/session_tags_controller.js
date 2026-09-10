@@ -234,7 +234,7 @@ export class SessionTagsController {
     this.callbacks.closeModal?.(this.dialog);
     const header = this.document.querySelector("[data-tag-session]");
     const row = [...this.document.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === this.triggerPath);
-    const fallback = this.triggerKind === "actions" ? row?.querySelector("[data-session-actions-toggle]") : this.triggerKind === "edit" && header?.dataset.tagSession === this.triggerPath ? this.document.querySelector(".session-header [data-tag-edit]") : this.document.querySelector("[data-tag-chooser]");
+    const fallback = this.triggerKind === "actions" ? row?.querySelector("[data-session-actions-toggle]") : this.triggerKind === "edit" && header?.dataset.tagSession === this.triggerPath ? this.document.querySelector(".session-header-actions [data-tag-edit]") : this.document.querySelector("[data-tag-chooser]");
     (this.trigger?.isConnected ? this.trigger : fallback)?.focus({ preventScroll: true });
   }
 
@@ -421,26 +421,39 @@ export class SessionTagsController {
   updateHeader(path, tags) {
     const header = this.document.querySelector("[data-tag-session]");
     if (!header || header.dataset.tagSession !== path) return;
+    const visibleTags = tags.slice(0, 2);
     const chips = [...header.querySelectorAll("[data-tag-filter]")];
-    if (chips.length === tags.length && chips.every((chip, index) => chip.dataset.tagFilter === tags[index])) {
+    const overflow = header.querySelector("[data-tag-edit]");
+    const extra = Math.max(0, tags.length - visibleTags.length);
+    if (chips.length === visibleTags.length && chips.every((chip, index) => chip.dataset.tagFilter === visibleTags[index]) && (overflow?.textContent || "") === (extra ? `+${extra}` : "")) {
       for (const chip of chips) this.applyTagColors(chip, chip.dataset.tagFilter);
       return;
     }
-    const edit = this.document.querySelector(".session-header [data-tag-edit]");
+    const edit = this.document.querySelector(".session-header-actions [data-tag-edit]");
     const focusedTag = chips.includes(this.document.activeElement) ? this.document.activeElement.dataset.tagFilter : null;
+    const overflowFocused = overflow === this.document.activeElement;
+    if (header.contains(this.tooltipTrigger)) this.hideTooltip();
     header.replaceChildren();
-    for (const tag of tags) {
+    for (const tag of visibleTags) {
       const chip = this.document.createElement("button");
       chip.type = "button";
-      chip.className = "tag-chip";
+      chip.className = "session-tag-icon";
       this.applyTagColors(chip, tag);
       chip.dataset.tagFilter = tag;
       chip.setAttribute("aria-label", `Filter sessions by ${tag}`);
-      const label = this.document.createElement("span");
-      label.textContent = tag;
-      chip.append(label);
+      chip.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 13-7 7a2 2 0 0 1-3 0l-7-7V3h10l7 7a2 2 0 0 1 0 3Z"/><circle cx="7.5" cy="7.5" r="1"/></svg>';
       header.append(chip);
     }
+    if (extra) {
+      const more = this.document.createElement("button");
+      more.type = "button";
+      more.className = "tag-overflow";
+      more.dataset.tagEdit = path;
+      more.setAttribute("aria-label", `Edit all ${tags.length} tags`);
+      more.textContent = `+${extra}`;
+      header.append(more);
+    }
     if (focusedTag !== null) ([...header.querySelectorAll("[data-tag-filter]")].find((chip) => chip.dataset.tagFilter === focusedTag) || edit).focus({ preventScroll: true });
+    else if (overflowFocused) (header.querySelector("[data-tag-edit]") || edit).focus({ preventScroll: true });
   }
 }
