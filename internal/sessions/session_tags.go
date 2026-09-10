@@ -72,7 +72,7 @@ func (state *GatewayState) SetTag(path, name string, assigned bool) error {
 		return err
 	}
 	path = state.configuredPath(path)
-	names := tags[path]
+	names := slices.Clone(tags[path])
 	index, found := slices.BinarySearch(names, name)
 	if assigned && !found {
 		if len(names) >= 32 {
@@ -154,6 +154,9 @@ func (state *GatewayState) MigrateTags(from, to string) (func() error, error) {
 
 // The caller holds state.mu. Rollback touches only paths that have not been edited since.
 func (state *GatewayState) replaceTags(tags, changes map[string][]string) (func() error, error) {
+	if _, err := state.reserveTagColors(tags, changes); err != nil {
+		return nil, err
+	}
 	previous := make(map[string][]string, len(changes))
 	for path, names := range changes {
 		previous[path] = slices.Clone(tags[path])
