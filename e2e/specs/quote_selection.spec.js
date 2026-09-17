@@ -76,6 +76,80 @@ test("quotes multiline code without Copy labels", async ({ page }) => {
   await expect(page.getByLabel("Message to Pi")).toHaveValue(text.split("\n").map((line) => `> ${line}`).join("\n") + "\n\n");
 });
 
+test("quotes a mouse-drag selection", async ({ page }) => {
+  const body = message(page, "assistant", `Fixture answer for ${sessions.prompt}`).locator(".message-body");
+  await body.scrollIntoViewIfNeeded();
+  const bounds = await body.evaluate((element) => {
+    const text = element.querySelector("p").firstChild;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, "Fixture answer".length);
+    const rect = range.getBoundingClientRect();
+    return { x: rect.x, y: rect.y + rect.height / 2, right: rect.right };
+  });
+  await page.mouse.move(bounds.x, bounds.y);
+  await page.mouse.down();
+  await page.mouse.move(bounds.right, bounds.y, { steps: 5 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => getSelection().toString())).toBe("Fixture answer");
+  await page.getByRole("button", { name: "Quote selection", exact: true }).click();
+  await expect(page.getByLabel("Message to Pi")).toHaveValue("> Fixture answer\n\n");
+});
+
+test("dismisses a selected streaming passage when its source is replaced", async ({ page }) => {
+  await sendPrompt(page, prompts.deltaStreaming);
+  const body = message(page, "assistant", replies.deltaTextStart).last().locator(".message-body");
+  await expect(body).toHaveText(replies.deltaTextStart);
+  await selectText(body);
+  const quote = page.getByRole("button", { name: "Quote selection", exact: true });
+  await expect(quote).toBeVisible();
+  await expectRunFinished(page);
+  await expect(quote).toBeHidden();
+  await expect(page.getByLabel("Message to Pi")).toHaveValue("");
+  await expect(body).toHaveText(replies.deltaText);
+  await selectText(body);
+  await quote.click();
+  await expect(page.getByLabel("Message to Pi")).toHaveValue(`> ${replies.deltaText}\n\n`);
+});
+
+test("cleans up selections across session switches and does not duplicate handlers", async ({ page }) => {
+  const url = new URL(page.url());
+  url.searchParams.delete("session_search");
+  url.searchParams.set("sidebar_sessions_limit", "100");
+  await page.goto(url.toString());
+  await page.evaluate(() => { window.quoteNavigationSentinel = true; });
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("Saved draft");
+  const body = message(page, "assistant", `Fixture answer for ${sessions.prompt}`).locator(".message-body");
+  const quote = page.getByRole("button", { name: "Quote selection", exact: true });
+  await selectText(body);
+  await expect(quote).toBeVisible();
+  await selectSession(page, sessions.history);
+  await expect(quote).toBeHidden();
+  await expect(composer).toHaveValue("");
+  await selectSession(page, sessions.prompt);
+  await expect(composer).toHaveValue("Saved draft");
+  await expect(quote).toBeHidden();
+  const text = await selectText(body);
+  await quote.click();
+  await expect(composer).toHaveValue(`Saved draft\n\n> ${text}\n\n`);
+  expect(await page.evaluate(() => window.quoteNavigationSentinel)).toBe(true);
+});
+
+test("does not insert into a composer that becomes disabled", async ({ page }) => {
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("Keep this");
+  const body = message(page, "assistant", `Fixture answer for ${sessions.prompt}`).locator(".message-body");
+  const quote = page.getByRole("button", { name: "Quote selection", exact: true });
+  await selectText(body);
+  await expect(quote).toBeVisible();
+  await composer.evaluate((element) => { element.disabled = true; });
+  await quote.click();
+  await expect(composer).toHaveValue("Keep this");
+  await selectText(body);
+  await expect(quote).toBeHidden();
+});
+
 test("dismisses invalid selections and Escape without changing the draft", async ({ page }) => {
   const composer = page.getByLabel("Message to Pi");
   await composer.fill("Keep this");
