@@ -93,7 +93,7 @@ let exitCode = 1;
 try {
   await waitForServer(baseURL, server);
   const playwright = path.join(repoRoot, "node_modules", "@playwright", "test", "cli.js");
-  const args = ["test", ...(playwrightArgs.length ? playwrightArgs : ["--project=desktop", "--project=mobile"])];
+  const args = ["test", ...(playwrightArgs.length ? playwrightArgs : ["--project=desktop", "--project=mobile", "--project=iphone"])];
   const tests = spawn(process.execPath, [playwright, ...args], {
     cwd: repoRoot,
     env: {

@@ -159,9 +159,7 @@ export class ConversationController {
 
   bindQuoteSelection() {
     if (!this.quoteButton || !this.promptTextarea) return;
-    this.listen(this.document, "selectionchange", () => {
-      if (!this.quotePointerActive && this.document.activeElement !== this.quoteButton) this.updateQuoteSelection();
-    });
+    this.listen(this.document, "selectionchange", () => this.scheduleQuoteSelectionUpdate());
     this.listen(this.document, "pointerdown", (event) => {
       if (this.quoteButton.contains(event.target)) {
         this.quotePointerActive = true;
@@ -174,10 +172,14 @@ export class ConversationController {
     this.listen(this.document, "pointerup", (event) => {
       if (!this.quoteButton.contains(event.target)) {
         this.quotePointerActive = false;
-        this.updateQuoteSelection();
+        this.scheduleQuoteSelectionUpdate();
       }
     });
-    this.listen(this.document, "pointercancel", () => this.dismissQuoteSelection());
+    this.listen(this.document, "pointercancel", () => {
+      // Native long-press selection can take over the pointer without clearing the selection.
+      if (this.quotePointerActive) this.dismissQuoteSelection();
+      else this.scheduleQuoteSelectionUpdate();
+    });
     this.listen(this.quoteButton, "click", () => this.insertQuoteSelection());
     this.listen(this.quoteButton, "blur", () => {
       if (!this.quotePointerActive) this.dismissQuoteSelection();
@@ -190,13 +192,28 @@ export class ConversationController {
         this.quoteButton.focus({ preventScroll: true });
       }
     });
-    this.listen(this.element, "scroll", () => this.dismissQuoteSelection(), { passive: true });
-    this.listen(this.window, "resize", () => this.dismissQuoteSelection());
-    this.listen(this.window.visualViewport, "resize", () => this.dismissQuoteSelection());
-    this.listen(this.window.visualViewport, "scroll", () => this.dismissQuoteSelection());
+    const reposition = () => {
+      if (!this.quoteSelection || this.quotePointerActive) return;
+      if (this.window.matchMedia("(pointer: coarse)").matches) this.scheduleQuoteSelectionUpdate();
+      else this.dismissQuoteSelection();
+    };
+    this.listen(this.element, "scroll", reposition, { passive: true });
+    this.listen(this.window, "resize", reposition);
+    this.listen(this.window.visualViewport, "resize", reposition);
+    this.listen(this.window.visualViewport, "scroll", reposition);
+  }
+
+  scheduleQuoteSelectionUpdate() {
+    if (this.quoteUpdateFrame || this.quotePointerActive || this.document.activeElement === this.quoteButton) return;
+    this.quoteUpdateFrame = this.window.requestAnimationFrame(() => {
+      this.quoteUpdateFrame = null;
+      if (!this.quotePointerActive && this.document.activeElement !== this.quoteButton) this.updateQuoteSelection();
+    });
   }
 
   dismissQuoteSelection() {
+    if (this.quoteUpdateFrame) this.window.cancelAnimationFrame(this.quoteUpdateFrame);
+    this.quoteUpdateFrame = null;
     if (this.quoteButton) this.quoteButton.hidden = true;
     this.quoteSelection = null;
     this.quotePointerActive = false;
@@ -205,22 +222,26 @@ export class ConversationController {
   }
 
   updateQuoteSelection() {
-    this.dismissQuoteSelection();
-    if (!this.quoteButton || !this.promptTextarea || this.promptTextarea.disabled || this.promptTextarea.readOnly || this.document.body.classList.contains("session-switching")) return;
+    if (!this.quoteButton || !this.promptTextarea || this.promptTextarea.disabled || this.promptTextarea.readOnly || this.document.body.classList.contains("session-switching")) return this.dismissQuoteSelection();
     const selection = this.window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return;
+    if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return this.dismissQuoteSelection();
     const range = selection.getRangeAt(0);
     const container = range.commonAncestorContainer;
     const body = (container.nodeType === 1 ? container : container.parentElement)?.closest(".message-body");
-    if (!body || !this.element?.contains(body)) return;
+    if (!body || !this.element?.contains(body) || !body.getClientRects().length) return this.dismissQuoteSelection();
     const text = selection.toString();
-    if (!text.trim()) return;
+    if (!text.trim()) return this.dismissQuoteSelection();
+    const touch = this.window.matchMedia("(pointer: coarse)").matches;
     const rect = range.getBoundingClientRect();
     const scrollRect = this.element.getBoundingClientRect();
-    if (!rect.width || !rect.height || rect.bottom <= scrollRect.top || rect.top >= scrollRect.bottom) return;
+    // Touch uses a composer-anchored action, even while iOS is adjusting range geometry.
+    if (!touch && (!rect.width || !rect.height || rect.bottom <= scrollRect.top || rect.top >= scrollRect.bottom)) return this.dismissQuoteSelection();
+    if (this.quoteSelection?.body !== body) {
+      this.quoteObserver?.disconnect();
+      this.quoteObserver = new this.window.MutationObserver(() => this.dismissQuoteSelection());
+      this.quoteObserver.observe(body, { childList: true, characterData: true, subtree: true });
+    }
     this.quoteSelection = { body, text };
-    this.quoteObserver = new this.window.MutationObserver(() => this.dismissQuoteSelection());
-    this.quoteObserver.observe(body, { childList: true, characterData: true, subtree: true });
     this.quoteButton.hidden = false;
     const { width, height } = this.quoteButton.getBoundingClientRect();
     const viewport = this.window.visualViewport;
@@ -228,7 +249,6 @@ export class ConversationController {
     const top = viewport?.offsetTop || 0;
     const viewportWidth = viewport?.width || this.window.innerWidth;
     const viewportHeight = viewport?.height || this.window.innerHeight;
-    const touch = this.window.matchMedia("(pointer: coarse)").matches;
     const x = touch ? left + viewportWidth - width - 8 : rect.left;
     const y = touch ? this.document.querySelector(".composer").getBoundingClientRect().top - height - 8
       : rect.top - height - 8 >= Math.max(top, scrollRect.top) ? rect.top - height - 8 : rect.bottom + 8;

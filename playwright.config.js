@@ -29,7 +29,7 @@ export default defineConfig({
     {
       name: "desktop",
       dependencies: ["setup"],
-      testIgnore: [/access\.setup\.js/, /mobile\.spec\.js/, /real_pi\.spec\.js/],
+      testIgnore: [/access\.setup\.js/, /mobile\.spec\.js/, /quote_touch\.spec\.js/, /real_pi\.spec\.js/],
       use: {
         storageState,
         viewport: { width: 1440, height: 900 }
@@ -38,9 +38,18 @@ export default defineConfig({
     {
       name: "mobile",
       dependencies: ["setup"],
-      testMatch: [/mobile\.spec\.js/, /markdown_classes\.spec\.js/, /session_rename\.spec\.js/, /session_tags\.spec\.js/, /session_tag_creation\.spec\.js/, /session_tag_icons\.spec\.js/, /header_tag_icons\.spec\.js/],
+      testMatch: [/mobile\.spec\.js/, /quote_touch\.spec\.js/, /markdown_classes\.spec\.js/, /session_rename\.spec\.js/, /session_tags\.spec\.js/, /session_tag_creation\.spec\.js/, /session_tag_icons\.spec\.js/, /header_tag_icons\.spec\.js/],
       use: {
         ...devices["Pixel 7"],
+        storageState
+      }
+    },
+    {
+      name: "iphone",
+      dependencies: ["setup"],
+      testMatch: /quote_touch\.spec\.js/,
+      use: {
+        ...devices["iPhone 13"],
         storageState
       }
     },

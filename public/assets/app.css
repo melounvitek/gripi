@@ -389,8 +389,16 @@
     .message-body--markdown code.highlight .syntax-string { color: #ce9178; }
     .message-body--markdown code.highlight .syntax-number, .message-body--markdown code.highlight .syntax-symbol, .message-body--markdown code.highlight .syntax-literal { color: #b5cea8; }
     .message-body--markdown code.highlight .syntax-function, .message-body--markdown code.highlight .syntax-key, .message-body--markdown code.highlight .syntax-variable { color: #9cdcfe; }
-    .quote-selection-button { position: fixed; z-index: 20; min-width: 44px; min-height: 44px; padding: 0.4rem 0.7rem; font-size: 0.75rem; box-shadow: var(--shadow-soft); touch-action: manipulation; }
-    .code-block-copy-button { user-select: none; position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; background: #18181ee0; }
+    .quote-selection-button, .quote-selection-button:hover { position: fixed; z-index: 20; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 30px; padding: 0 10px; border: 1px solid #60606d; border-radius: 6px; background: var(--panel-soft); color: var(--text); font: 500 12px var(--sans); letter-spacing: normal; text-transform: none; box-shadow: 0 3px 12px #0004; touch-action: manipulation; }
+    .quote-selection-button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+    .quote-selection-touch-label { display: none; }
+    @media (hover: hover) and (pointer: fine) { .quote-selection-button:hover { background: var(--panel-softer); border-color: var(--muted); } }
+    @media (pointer: coarse) {
+      .quote-selection-button, .quote-selection-button:hover { min-width: 44px; height: 44px; padding: 0 14px; font-size: 13px; }
+      .quote-selection-button svg { width: 15px; height: 15px; }
+      .quote-selection-touch-label { display: inline; }
+    }
+    .code-block-copy-button { -webkit-user-select: none; user-select: none; position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; background: #18181ee0; }
     .message-body--markdown a, .message--user > .message-body a { color: var(--link); }
     .message-images { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.65rem; }
     .message-image-button { display: inline-flex; min-width: 2.75rem; max-width: min(100%, 28rem); min-height: 2.75rem; padding: 0; overflow: hidden; border: 0; border-radius: 0.3rem; background: var(--panel-soft); cursor: zoom-in; }

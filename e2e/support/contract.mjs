@@ -9,6 +9,8 @@ export const sessions = {
   quoteLive: "E2E Quote Live Desktop",
   quoteMobileHistory: "E2E Quote Persisted Mobile",
   quoteMobileLive: "E2E Quote Live Mobile",
+  quoteIphoneHistory: "E2E Quote Persisted iPhone",
+  quoteIphoneLive: "E2E Quote Live iPhone",
   assistantError: "E2E Assistant Error Desktop",
   deltaStreaming: "E2E Delta Streaming Desktop",
   markdownTable: "E2E Markdown Table Desktop",
