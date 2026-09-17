@@ -363,25 +363,30 @@ test("cancel a native bash command on the first mobile tap", async ({ page }) =>
 });
 
 test.describe("mobile Quote selection", () => {
-  test.beforeEach(async ({ page }) => {
+  async function openQuoteSession(page, title) {
     await page.setViewportSize({ width: 300, height: 700 });
-    await page.goto(`/?${new URLSearchParams({ session_search: sessions.mobile })}`);
+    await page.goto(`/?${new URLSearchParams({ session_search: title })}`);
     await page.locator('label[aria-label="Open sessions"]').tap();
-    await page.getByRole("link", { name: new RegExp(sessions.mobile) }).tap();
-    await expect(page.getByRole("heading", { level: 1, name: sessions.mobile })).toBeVisible();
+    await page.getByRole("link", { name: new RegExp(title) }).tap();
+    await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
     expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
-  });
+  }
 
   for (const rendering of ["persisted", "live"]) {
     test(`quote ${rendering} text exactly once on the first tap and allow another selection`, async ({ page }) => {
+      const title = rendering === "live" ? sessions.quoteMobileLive : sessions.quoteMobileHistory;
+      await openQuoteSession(page, title);
       if (rendering === "live") {
+        const responses = message(page, "assistant", replies.standard);
+        const previousCount = await responses.count();
         await sendPrompt(page, prompts.standard);
         await expectRunFinished(page);
+        await expect(responses).toHaveCount(previousCount + 1);
       }
-      const text = rendering === "live" ? replies.standard : `Fixture answer for ${sessions.mobile}`;
+      const text = rendering === "live" ? replies.standard : `Fixture answer for ${title}`;
       const body = message(page, "assistant", text).last().locator(".message-body");
       const selectedText = rendering === "live" ? "browser response" : "Fixture answer";
-      const secondText = rendering === "live" ? "complete." : sessions.mobile;
+      const secondText = rendering === "live" ? "complete." : title;
       const composer = page.getByLabel("Message to Pi");
       const draft = "Keep this mobile draft";
       await composer.fill(draft);
@@ -430,7 +435,8 @@ test.describe("mobile Quote selection", () => {
   }
 
   test("cancel a Quote selection touch without inserting or sending", async ({ page, context }) => {
-    const body = message(page, "assistant", `Fixture answer for ${sessions.mobile}`).locator(".message-body");
+    await openQuoteSession(page, sessions.quoteMobileHistory);
+    const body = message(page, "assistant", `Fixture answer for ${sessions.quoteMobileHistory}`).locator(".message-body");
     const composer = page.getByLabel("Message to Pi");
     const draft = "Keep this draft after cancellation";
     await composer.fill(draft);
@@ -462,10 +468,10 @@ test.describe("mobile Quote selection", () => {
     await expect(userMessages).toHaveCount(initialCount);
     expect(promptRequests).toHaveLength(0);
 
-    await selectMobileMessageText(body, sessions.mobile);
+    await selectMobileMessageText(body, sessions.quoteMobileHistory);
     await expect(quote).toBeVisible();
     await quote.tap();
-    await expect(composer).toHaveValue(`${draft}\n\n> ${sessions.mobile}\n\n`);
+    await expect(composer).toHaveValue(`${draft}\n\n> ${sessions.quoteMobileHistory}\n\n`);
     await expect(composer).toBeFocused();
     await expect(userMessages).toHaveCount(initialCount);
     expect(promptRequests).toHaveLength(0);
@@ -475,7 +481,9 @@ test.describe("mobile Quote selection", () => {
 async function selectMobileMessageText(body, text) {
   await body.scrollIntoViewIfNeeded();
   // Native long-press selection is unreliable in Playwright; only selection setup is programmatic.
-  await body.evaluate((element, selectedText) => {
+  await body.evaluate(async (element, selectedText) => {
+    // Let pending scroll events dismiss any old Quote before creating the selection.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {

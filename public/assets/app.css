@@ -390,7 +390,6 @@
     .message-body--markdown code.highlight .syntax-number, .message-body--markdown code.highlight .syntax-symbol, .message-body--markdown code.highlight .syntax-literal { color: #b5cea8; }
     .message-body--markdown code.highlight .syntax-function, .message-body--markdown code.highlight .syntax-key, .message-body--markdown code.highlight .syntax-variable { color: #9cdcfe; }
     .quote-selection-button { position: fixed; z-index: 20; min-width: 44px; min-height: 44px; padding: 0.4rem 0.7rem; font-size: 0.75rem; box-shadow: var(--shadow-soft); touch-action: manipulation; }
-    .quote-selection-button:hover { transform: none; }
     .code-block-copy-button { user-select: none; position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; background: #18181ee0; }
     .message-body--markdown a, .message--user > .message-body a { color: var(--link); }
     .message-images { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.65rem; }

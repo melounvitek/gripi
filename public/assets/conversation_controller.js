@@ -218,7 +218,7 @@ export class ConversationController {
     const rect = range.getBoundingClientRect();
     const scrollRect = this.element.getBoundingClientRect();
     if (!rect.width || !rect.height || rect.bottom <= scrollRect.top || rect.top >= scrollRect.bottom) return;
-    this.quoteSelection = { body, range: range.cloneRange(), sourceText: range.toString(), text };
+    this.quoteSelection = { body, text };
     this.quoteObserver = new this.window.MutationObserver(() => this.dismissQuoteSelection());
     this.quoteObserver.observe(body, { childList: true, characterData: true, subtree: true });
     this.quoteButton.hidden = false;
@@ -241,7 +241,7 @@ export class ConversationController {
     const textarea = this.promptTextarea;
     this.dismissQuoteSelection();
     if (!quote || !textarea?.isConnected || textarea.disabled || textarea.readOnly || this.document.body.classList.contains("session-switching")) return;
-    if (!this.element?.contains(quote.body) || !quote.body.contains(quote.range.commonAncestorContainer) || quote.range.toString() !== quote.sourceText) return;
+    if (!this.element?.contains(quote.body)) return;
     textarea.value = appendQuote(textarea.value, quote.text);
     this.window.getSelection()?.removeAllRanges();
     textarea.focus();

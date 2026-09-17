@@ -4,7 +4,9 @@ import { expectRunFinished, message, selectSession, sendPrompt } from "../suppor
 
 async function selectText(body) {
   await body.scrollIntoViewIfNeeded();
-  return body.evaluate((element) => {
+  return body.evaluate(async (element) => {
+    // Let pending scroll events dismiss any old Quote before creating the selection.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const range = document.createRange();
     range.selectNodeContents(element);
     const selection = window.getSelection();
@@ -14,12 +16,13 @@ async function selectText(body) {
   });
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.goto("/");
-  await selectSession(page, sessions.prompt);
-});
+async function openQuoteSession(page, title) {
+  await page.goto(`/?${new URLSearchParams({ session_search: title })}`);
+  await selectSession(page, title);
+}
 
 test("quotes history without replacing drafts or attachments, sending, or losing the saved draft", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteHistory);
   const composer = page.getByLabel("Message to Pi");
   await composer.fill("My existing question  ");
   await page.locator("#image-input").setInputFiles({ name: "quote.png", mimeType: "image/png", buffer: await page.screenshot() });
@@ -29,7 +32,7 @@ test("quotes history without replacing drafts or attachments, sending, or losing
   page.on("request", (request) => {
     if (["/prompt", "/bash"].includes(new URL(request.url()).pathname)) requests.push(request);
   });
-  const body = message(page, "assistant", `Fixture answer for ${sessions.prompt}`).locator(".message-body");
+  const body = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body");
   const text = await selectText(body);
   const quote = page.getByRole("button", { name: "Quote selection", exact: true });
   await expect(quote).toBeVisible();
@@ -46,13 +49,36 @@ test("quotes history without replacing drafts or attachments, sending, or losing
   await expect(composer).toHaveValue(expected);
 });
 
+test("preserves native Ctrl+C copying without changing the draft", async ({ page, context }) => {
+  await openQuoteSession(page, sessions.quoteHistory);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate(() => navigator.clipboard.writeText(""));
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("Keep this draft while copying");
+  await page.locator("#conversation-scroll").focus();
+  const body = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body");
+  const text = await selectText(body);
+  await expect(page.getByRole("button", { name: "Quote selection", exact: true })).toBeVisible();
+  await page.keyboard.press("Control+c");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(text);
+  expect(await page.evaluate(() => getSelection().toString())).toBe(text);
+  await expect(composer).toHaveValue("Keep this draft while copying");
+});
+
 test("quotes live messages and their reloaded history, with keyboard activation", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteLive);
+  const responses = message(page, "assistant", replies.standard);
+  const previousCount = await responses.count();
   await sendPrompt(page, prompts.standard);
   await expectRunFinished(page);
-  const body = message(page, "assistant", replies.standard).last().locator(".message-body");
+  await expect(responses).toHaveCount(previousCount + 1);
+  const body = responses.last().locator(".message-body");
   const quote = page.getByRole("button", { name: "Quote selection", exact: true });
   for (const reload of [false, true]) {
-    if (reload) await page.reload();
+    if (reload) {
+      await page.reload();
+      await expect(page.getByLabel("Message to Pi")).toHaveValue(`> ${replies.standard}\n\n`);
+    }
     await page.getByLabel("Message to Pi").fill("");
     await selectText(body);
     await expect(quote).toBeVisible();
@@ -64,9 +90,13 @@ test("quotes live messages and their reloaded history, with keyboard activation"
 });
 
 test("quotes multiline code without Copy labels", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteLive);
+  const responses = message(page, "assistant", "Modal fence stays in conversation");
+  const previousCount = await responses.count();
   await sendPrompt(page, prompts.markdownFence);
   await expectRunFinished(page);
-  const body = message(page, "assistant", "Modal fence stays in conversation").last().locator(".message-body");
+  await expect(responses).toHaveCount(previousCount + 1);
+  const body = responses.last().locator(".message-body");
   const text = await selectText(body);
   const quote = page.getByRole("button", { name: "Quote selection", exact: true });
   await expect(quote).toBeVisible();
@@ -77,7 +107,8 @@ test("quotes multiline code without Copy labels", async ({ page }) => {
 });
 
 test("quotes a mouse-drag selection", async ({ page }) => {
-  const body = message(page, "assistant", `Fixture answer for ${sessions.prompt}`).locator(".message-body");
+  await openQuoteSession(page, sessions.quoteHistory);
+  const body = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body");
   await body.scrollIntoViewIfNeeded();
   const bounds = await body.evaluate((element) => {
     const text = element.querySelector("p").firstChild;
@@ -97,6 +128,7 @@ test("quotes a mouse-drag selection", async ({ page }) => {
 });
 
 test("dismisses a selected streaming passage when its source is replaced", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteLive);
   await sendPrompt(page, prompts.deltaStreaming);
   const body = message(page, "assistant", replies.deltaTextStart).last().locator(".message-body");
   await expect(body).toHaveText(replies.deltaTextStart);
@@ -113,6 +145,7 @@ test("dismisses a selected streaming passage when its source is replaced", async
 });
 
 test("cleans up selections across session switches and does not duplicate handlers", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteHistory);
   const url = new URL(page.url());
   url.searchParams.delete("session_search");
   url.searchParams.set("sidebar_sessions_limit", "100");
@@ -120,14 +153,14 @@ test("cleans up selections across session switches and does not duplicate handle
   await page.evaluate(() => { window.quoteNavigationSentinel = true; });
   const composer = page.getByLabel("Message to Pi");
   await composer.fill("Saved draft");
-  const body = message(page, "assistant", `Fixture answer for ${sessions.prompt}`).locator(".message-body");
+  const body = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body");
   const quote = page.getByRole("button", { name: "Quote selection", exact: true });
   await selectText(body);
   await expect(quote).toBeVisible();
   await selectSession(page, sessions.history);
   await expect(quote).toBeHidden();
   await expect(composer).toHaveValue("");
-  await selectSession(page, sessions.prompt);
+  await selectSession(page, sessions.quoteHistory);
   await expect(composer).toHaveValue("Saved draft");
   await expect(quote).toBeHidden();
   const text = await selectText(body);
@@ -137,9 +170,10 @@ test("cleans up selections across session switches and does not duplicate handle
 });
 
 test("does not insert into a composer that becomes disabled", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteHistory);
   const composer = page.getByLabel("Message to Pi");
   await composer.fill("Keep this");
-  const body = message(page, "assistant", `Fixture answer for ${sessions.prompt}`).locator(".message-body");
+  const body = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body");
   const quote = page.getByRole("button", { name: "Quote selection", exact: true });
   await selectText(body);
   await expect(quote).toBeVisible();
@@ -151,9 +185,10 @@ test("does not insert into a composer that becomes disabled", async ({ page }) =
 });
 
 test("dismisses invalid selections and Escape without changing the draft", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteHistory);
   const composer = page.getByLabel("Message to Pi");
   await composer.fill("Keep this");
-  const body = message(page, "assistant", `Fixture answer for ${sessions.prompt}`).locator(".message-body");
+  const body = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body");
   const quote = page.getByRole("button", { name: "Quote selection", exact: true });
   await selectText(body);
   await expect(quote).toBeVisible();
@@ -164,6 +199,24 @@ test("dismisses invalid selections and Escape without changing the draft", async
   await page.evaluate(() => getSelection().removeAllRanges());
   await expect(quote).toBeHidden();
   await selectText(body.locator(".."));
+  await expect(quote).toBeHidden();
+
+  // Both endpoints are valid message text, but the range spans two messages.
+  await selectText(body);
+  await expect(quote).toBeVisible();
+  const selected = await body.evaluate((element) => {
+    const userText = document.querySelector('article[data-role="user"] .message-body').firstChild;
+    const assistantText = element.querySelector("p").firstChild;
+    const range = document.createRange();
+    range.setStart(userText, 0);
+    range.setEnd(assistantText, assistantText.length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return selection.toString();
+  });
+  expect(selected).toContain(`Fixture question for ${sessions.quoteHistory}`);
+  expect(selected).toContain(`Fixture answer for ${sessions.quoteHistory}`);
   await expect(quote).toBeHidden();
   await expect(composer).toHaveValue("Keep this");
 });

@@ -189,6 +189,11 @@ export async function seedFixtures(root) {
   await writeSession(root, projects["prompt-project"], "markdown-fence-desktop", sessions.markdownFenceDesktop, 0);
   await writeSession(root, projects["mobile-project"], "markdown-fence-mobile", sessions.markdownFenceMobile, 0);
 
+  await writeSession(root, projects["prompt-project"], "quote-history", sessions.quoteHistory, 0);
+  await writeSession(root, projects["prompt-project"], "quote-live", sessions.quoteLive, 0);
+  await writeSession(root, projects["mobile-project"], "quote-mobile-history", sessions.quoteMobileHistory, 0);
+  await writeSession(root, projects["mobile-project"], "quote-mobile-live", sessions.quoteMobileLive, 0);
+
   const configuredCwdsPath = path.join(state, "configured-cwds");
   await writeFile(configuredCwdsPath, `${projects["new-session-desktop"]}\n${projects["new-session-mobile"]}\n`);
   const manifestPath = path.join(root, "fixture.json");
