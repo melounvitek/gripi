@@ -194,7 +194,7 @@ export class ConversationController {
     });
     const reposition = () => {
       if (!this.quoteSelection || this.quotePointerActive) return;
-      if (this.window.matchMedia("(pointer: coarse)").matches) this.scheduleQuoteSelectionUpdate();
+      if (this.window.matchMedia("(pointer: coarse)").matches || this.quoteButton.hasAttribute("data-quote-docked")) this.scheduleQuoteSelectionUpdate();
       else this.dismissQuoteSelection();
     };
     this.listen(this.element, "scroll", reposition, { passive: true });
@@ -214,7 +214,10 @@ export class ConversationController {
   dismissQuoteSelection() {
     if (this.quoteUpdateFrame) this.window.cancelAnimationFrame(this.quoteUpdateFrame);
     this.quoteUpdateFrame = null;
-    if (this.quoteButton) this.quoteButton.hidden = true;
+    if (this.quoteButton) {
+      this.quoteButton.hidden = true;
+      this.quoteButton.removeAttribute("data-quote-docked");
+    }
     this.quoteSelection = null;
     this.quotePointerActive = false;
     this.quoteObserver?.disconnect();
@@ -249,11 +252,24 @@ export class ConversationController {
     const top = viewport?.offsetTop || 0;
     const viewportWidth = viewport?.width || this.window.innerWidth;
     const viewportHeight = viewport?.height || this.window.innerHeight;
-    const x = touch ? left + viewportWidth - width - 8 : rect.left;
-    const y = touch ? this.document.querySelector(".composer").getBoundingClientRect().top - height - 8
-      : rect.top - height - 8 >= Math.max(top, scrollRect.top) ? rect.top - height - 8 : rect.bottom + 8;
-    this.quoteButton.style.left = `${Math.max(left + 8, Math.min(x, left + viewportWidth - width - 8))}px`;
-    this.quoteButton.style.top = `${Math.max(top + 8, Math.min(y, top + viewportHeight - height - 8))}px`;
+    const composerTop = this.document.querySelector(".composer").getBoundingClientRect().top;
+    if (touch) {
+      this.quoteButton.style.left = `${Math.max(left + 8, left + viewportWidth - width - 12)}px`;
+      this.quoteButton.style.top = `${Math.max(top + 8, Math.min(composerTop, top + viewportHeight) - height - 10)}px`;
+      return;
+    }
+    if (this.quoteButton.hasAttribute("data-quote-docked")) return;
+    const minY = Math.max(top, scrollRect.top) + 8;
+    const maxY = Math.min(top + viewportHeight, scrollRect.bottom, composerTop) - height - 8;
+    const y = [rect.bottom + 8, rect.top - height - 8].find((candidate) => candidate >= minY && candidate <= maxY);
+    if (y === undefined) {
+      // Reserve a row above the composer rather than cover a viewport-filling selection.
+      this.quoteButton.setAttribute("data-quote-docked", "");
+      return;
+    }
+    const lastRect = [...range.getClientRects()].filter((part) => part.width && part.height).at(-1) || rect;
+    this.quoteButton.style.left = `${Math.max(left + 8, scrollRect.left + 8, Math.min(lastRect.right - width, scrollRect.right - width - 8, left + viewportWidth - width - 8))}px`;
+    this.quoteButton.style.top = `${y}px`;
   }
 
   insertQuoteSelection() {

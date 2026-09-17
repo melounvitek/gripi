@@ -106,6 +106,51 @@ test("quotes multiline code without Copy labels", async ({ page }) => {
   await expect(page.getByLabel("Message to Pi")).toHaveValue(text.split("\n").map((line) => `> ${line}`).join("\n") + "\n\n");
 });
 
+for (const layout of ["short", "multiline", "viewport-filling"]) {
+  test(`keeps the compact desktop Quote outside a ${layout} selection`, async ({ page }, testInfo) => {
+    await openQuoteSession(page, sessions.quoteHistory);
+    const body = page.locator('article[data-role="assistant"] .message-body').last();
+    if (layout !== "short") {
+      await body.evaluate((element, lines) => {
+        element.style.whiteSpace = "pre-wrap";
+        element.textContent = Array.from({ length: lines }, (_, i) => `Selected line ${i + 1}: leave this text readable.`).join("\n");
+      }, layout === "multiline" ? 4 : 60);
+    }
+    await selectText(body);
+    const quote = page.getByRole("button", { name: "Quote selection", exact: true });
+    await expect(quote).toBeVisible();
+    await expect(quote).toHaveCSS("text-transform", "none");
+    await expect(quote).toHaveCSS("height", "30px");
+    expect(await quote.innerText()).toBe("Quote");
+    const bounds = await quote.boundingBox();
+    const selected = await page.evaluate(() => {
+      const rect = getSelection().getRangeAt(0).getBoundingClientRect();
+      const scroll = document.querySelector("#conversation-scroll").getBoundingClientRect();
+      return { left: Math.max(rect.left, scroll.left), right: Math.min(rect.right, scroll.right), top: Math.max(rect.top, scroll.top), bottom: Math.min(rect.bottom, scroll.bottom) };
+    });
+    expect(bounds.width).toBeLessThan(100);
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(page.viewportSize().width);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual((await page.locator(".composer").boundingBox()).y);
+    const overlaps = bounds.x < selected.right && bounds.x + bounds.width > selected.left && bounds.y < selected.bottom && bounds.y + bounds.height > selected.top;
+    expect(overlaps).toBe(false);
+    if (layout === "short") {
+      expect(bounds.y).toBeGreaterThanOrEqual(selected.bottom);
+      const lastRectRight = await page.evaluate(() => [...getSelection().getRangeAt(0).getClientRects()].filter((rect) => rect.width && rect.height).at(-1).right);
+      expect(bounds.x + bounds.width).toBeCloseTo(lastRectRight, 0);
+    }
+    for (const hover of [false, true]) {
+      if (hover) await quote.hover();
+      const rgb = await quote.evaluate((element) => getComputedStyle(element).backgroundColor.match(/\d+/g).slice(0, 3).map(Number));
+      expect(Math.max(...rgb)).toBeLessThan(90);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`quote-${layout}.png`) });
+    await quote.click();
+    await expect(page.getByLabel("Message to Pi")).toHaveValue(/^> /);
+  });
+}
+
 test("quotes a mouse-drag selection", async ({ page }) => {
   await openQuoteSession(page, sessions.quoteHistory);
   const body = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body");

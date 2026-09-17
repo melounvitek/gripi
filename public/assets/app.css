@@ -392,6 +392,8 @@
     .quote-selection-button, .quote-selection-button:hover { position: fixed; z-index: 20; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 30px; padding: 0 10px; border: 1px solid #60606d; border-radius: 6px; background: var(--panel-soft); color: var(--text); font: 500 12px var(--sans); letter-spacing: normal; text-transform: none; box-shadow: 0 3px 12px #0004; touch-action: manipulation; }
     .quote-selection-button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; }
     .quote-selection-touch-label { display: none; }
+    .conversation-panel:has(> .quote-selection-button[data-quote-docked]:not([hidden])) { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+    .quote-selection-button[data-quote-docked] { position: static; margin: 8px 1.5rem; }
     @media (hover: hover) and (pointer: fine) { .quote-selection-button:hover { background: var(--panel-softer); border-color: var(--muted); } }
     @media (pointer: coarse) {
       .quote-selection-button, .quote-selection-button:hover { min-width: 44px; height: 44px; padding: 0 14px; font-size: 13px; }
