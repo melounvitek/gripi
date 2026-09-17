@@ -229,6 +229,23 @@ test("does not insert into a composer that becomes disabled", async ({ page }) =
   await expect(quote).toBeHidden();
 });
 
+test("Escape cancels a Quote that has not appeared yet", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteHistory);
+  const body = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body");
+  await body.evaluate(async (element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    await new Promise((resolve) => document.addEventListener("selectionchange", () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      resolve();
+    }, { once: true }));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  await expect(page.getByRole("button", { name: "Quote selection", exact: true })).toBeHidden();
+});
+
 test("dismisses invalid selections and Escape without changing the draft", async ({ page }) => {
   await openQuoteSession(page, sessions.quoteHistory);
   const composer = page.getByLabel("Message to Pi");

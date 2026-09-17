@@ -162,6 +162,7 @@ export class ConversationController {
     this.listen(this.document, "selectionchange", () => this.scheduleQuoteSelectionUpdate());
     this.listen(this.document, "pointerdown", (event) => {
       if (this.quoteButton.contains(event.target)) {
+        if (this.quoteUpdateFrame) this.updateQuoteSelection();
         this.quotePointerActive = true;
         // Keep mouse activation from collapsing the selection before click.
         if (event.pointerType === "mouse") event.preventDefault();
@@ -185,8 +186,9 @@ export class ConversationController {
       if (!this.quotePointerActive) this.dismissQuoteSelection();
     });
     this.listen(this.document, "keydown", (event) => {
+      if (event.key === "Escape") return this.dismissQuoteSelection();
+      if (event.key === "Tab" && this.quoteUpdateFrame) this.updateQuoteSelection();
       if (!this.quoteSelection) return;
-      if (event.key === "Escape") this.dismissQuoteSelection();
       if (event.key === "Tab" && !event.shiftKey && this.document.activeElement !== this.quoteButton) {
         event.preventDefault();
         this.quoteButton.focus({ preventScroll: true });
@@ -225,6 +227,8 @@ export class ConversationController {
   }
 
   updateQuoteSelection() {
+    if (this.quoteUpdateFrame) this.window.cancelAnimationFrame(this.quoteUpdateFrame);
+    this.quoteUpdateFrame = null;
     if (!this.quoteButton || !this.promptTextarea || this.promptTextarea.disabled || this.promptTextarea.readOnly || this.document.body.classList.contains("session-switching")) return this.dismissQuoteSelection();
     const selection = this.window.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return this.dismissQuoteSelection();
@@ -246,6 +250,7 @@ export class ConversationController {
     }
     this.quoteSelection = { body, text };
     this.quoteButton.hidden = false;
+    if (!touch && this.quoteButton.hasAttribute("data-quote-docked")) return;
     const { width, height } = this.quoteButton.getBoundingClientRect();
     const viewport = this.window.visualViewport;
     const left = viewport?.offsetLeft || 0;
@@ -258,7 +263,6 @@ export class ConversationController {
       this.quoteButton.style.top = `${Math.max(top + 8, Math.min(composerTop, top + viewportHeight) - height - 10)}px`;
       return;
     }
-    if (this.quoteButton.hasAttribute("data-quote-docked")) return;
     const minY = Math.max(top, scrollRect.top) + 8;
     const maxY = Math.min(top + viewportHeight, scrollRect.bottom, composerTop) - height - 8;
     const y = [rect.bottom + 8, rect.top - height - 8].find((candidate) => candidate >= minY && candidate <= maxY);

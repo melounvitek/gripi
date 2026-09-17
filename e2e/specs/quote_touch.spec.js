@@ -68,6 +68,34 @@ test.describe("touch Quote selection", () => {
     });
   }
 
+  for (const activation of ["pointer", "keyboard"]) {
+    test(`use the latest selection when ${activation} activation beats the next animation frame`, async ({ page }, testInfo) => {
+      const title = titles[testInfo.project.name].persisted;
+      await openQuoteSession(page, title);
+      const composer = page.getByLabel("Message to Pi");
+      await composer.fill("Keep this draft");
+      const body = message(page, "assistant", `Fixture answer for ${title}`).locator(".message-body");
+      await selectMobileMessageText(body, "Fixture answer");
+      const quote = page.getByRole("button", { name: "Quote selection", exact: true });
+      await expect(quote).toBeVisible();
+      await quote.evaluate((button, method) => {
+        const selection = getSelection();
+        const range = selection.getRangeAt(0).cloneRange();
+        range.setStart(range.startContainer, range.startOffset + "Fixture ".length);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        // Force the ordering: a changed selection is pending when activation begins.
+        document.dispatchEvent(new Event("selectionchange"));
+        if (method === "pointer") button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }));
+        else document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }));
+        selection.removeAllRanges();
+        document.dispatchEvent(new Event("selectionchange"));
+        button.click();
+      }, activation);
+      await expect(composer).toHaveValue("Keep this draft\n\n> answer\n\n");
+    });
+  }
+
   for (const event of ["message pointercancel", "visualViewport resize", "visualViewport scroll", "conversation scroll"]) {
     test(`retain a valid touch selection after simulated ${event}`, async ({ page }, testInfo) => {
       const title = titles[testInfo.project.name].persisted;
@@ -239,6 +267,7 @@ test.describe("touch Quote selection", () => {
     });
     expect(background[3]).toBe(255);
     expect(Math.max(...background.slice(0, 3))).toBeLessThan(100);
+    await page.screenshot({ path: testInfo.outputPath("quote-touch.png") });
   });
 });
 
