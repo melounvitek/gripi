@@ -2,6 +2,12 @@ import { enhanceMarkdownCodeBlocks, enhanceMessageLinks } from "./dom.js";
 
 const FOCUSED_ACTIVITY_ITEM_LIMIT = 10;
 
+export function appendQuote(draft, text) {
+  const separator = !draft || draft.endsWith("\n\n") ? "" : draft.endsWith("\n") ? "\n" : "\n\n";
+  const quote = text.replace(/\r\n?/g, "\n").split("\n").map((line) => `> ${line}`).join("\n");
+  return `${draft}${separator}${quote}\n\n`;
+}
+
 export class ConversationController {
   constructor(document, window) {
     this.document = document;
