@@ -2558,6 +2558,7 @@ function replaceForkSessionModalHtml(html) {
 }
 
 function showSessionSwitching() {
+  conversationController.dismissQuoteSelection();
   document.body.classList.add("session-switching");
 }
 

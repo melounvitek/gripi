@@ -54,6 +54,8 @@ export class ConversationController {
     this.liveOutput = this.document.getElementById("live-output");
     this.agentRunning = this.liveOutput?.dataset.agentRunning === "true";
     this.promptTextarea = promptTextarea;
+    this.quoteButton = this.document.querySelector("[data-quote-selection]");
+    this.bindQuoteSelection();
     this.topJumpControls = this.document.querySelector(".jump-controls--top");
     this.bottomJumpControls = this.document.querySelector(".jump-controls--bottom");
     this.jumpToFirstButton = this.document.querySelector(".jump-to-first");
@@ -115,6 +117,7 @@ export class ConversationController {
   }
 
   detach() {
+    this.dismissQuoteSelection();
     this.listeners.forEach(([target, type, listener, options]) => target.removeEventListener?.(type, listener, options));
     this.listeners = [];
     this.timers.forEach((timer) => clearTimeout(timer));
@@ -152,6 +155,98 @@ export class ConversationController {
     this.agentRunning = false;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
+  }
+
+  bindQuoteSelection() {
+    if (!this.quoteButton || !this.promptTextarea) return;
+    this.listen(this.document, "selectionchange", () => {
+      if (!this.quotePointerActive && this.document.activeElement !== this.quoteButton) this.updateQuoteSelection();
+    });
+    this.listen(this.document, "pointerdown", (event) => {
+      if (this.quoteButton.contains(event.target)) {
+        this.quotePointerActive = true;
+        // Keep mouse activation from collapsing the selection before click.
+        if (event.pointerType === "mouse") event.preventDefault();
+      } else {
+        this.dismissQuoteSelection();
+      }
+    });
+    this.listen(this.document, "pointerup", (event) => {
+      if (!this.quoteButton.contains(event.target)) {
+        this.quotePointerActive = false;
+        this.updateQuoteSelection();
+      }
+    });
+    this.listen(this.document, "pointercancel", () => this.dismissQuoteSelection());
+    this.listen(this.quoteButton, "click", () => this.insertQuoteSelection());
+    this.listen(this.quoteButton, "blur", () => {
+      if (!this.quotePointerActive) this.dismissQuoteSelection();
+    });
+    this.listen(this.document, "keydown", (event) => {
+      if (!this.quoteSelection) return;
+      if (event.key === "Escape") this.dismissQuoteSelection();
+      if (event.key === "Tab" && !event.shiftKey && this.document.activeElement !== this.quoteButton) {
+        event.preventDefault();
+        this.quoteButton.focus({ preventScroll: true });
+      }
+    });
+    this.listen(this.element, "scroll", () => this.dismissQuoteSelection(), { passive: true });
+    this.listen(this.window, "resize", () => this.dismissQuoteSelection());
+    this.listen(this.window.visualViewport, "resize", () => this.dismissQuoteSelection());
+    this.listen(this.window.visualViewport, "scroll", () => this.dismissQuoteSelection());
+  }
+
+  dismissQuoteSelection() {
+    if (this.quoteButton) this.quoteButton.hidden = true;
+    this.quoteSelection = null;
+    this.quotePointerActive = false;
+    this.quoteObserver?.disconnect();
+    this.quoteObserver = null;
+  }
+
+  updateQuoteSelection() {
+    this.dismissQuoteSelection();
+    if (!this.quoteButton || !this.promptTextarea || this.promptTextarea.disabled || this.promptTextarea.readOnly || this.document.body.classList.contains("session-switching")) return;
+    const selection = this.window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return;
+    const range = selection.getRangeAt(0);
+    const container = range.commonAncestorContainer;
+    const body = (container.nodeType === 1 ? container : container.parentElement)?.closest(".message-body");
+    if (!body || !this.element?.contains(body)) return;
+    const text = selection.toString();
+    if (!text.trim()) return;
+    const rect = range.getBoundingClientRect();
+    const scrollRect = this.element.getBoundingClientRect();
+    if (!rect.width || !rect.height || rect.bottom <= scrollRect.top || rect.top >= scrollRect.bottom) return;
+    this.quoteSelection = { body, range: range.cloneRange(), sourceText: range.toString(), text };
+    this.quoteObserver = new this.window.MutationObserver(() => this.dismissQuoteSelection());
+    this.quoteObserver.observe(body, { childList: true, characterData: true, subtree: true });
+    this.quoteButton.hidden = false;
+    const { width, height } = this.quoteButton.getBoundingClientRect();
+    const viewport = this.window.visualViewport;
+    const left = viewport?.offsetLeft || 0;
+    const top = viewport?.offsetTop || 0;
+    const viewportWidth = viewport?.width || this.window.innerWidth;
+    const viewportHeight = viewport?.height || this.window.innerHeight;
+    const touch = this.window.matchMedia("(pointer: coarse)").matches;
+    const x = touch ? left + viewportWidth - width - 8 : rect.left;
+    const y = touch ? this.document.querySelector(".composer").getBoundingClientRect().top - height - 8
+      : rect.top - height - 8 >= Math.max(top, scrollRect.top) ? rect.top - height - 8 : rect.bottom + 8;
+    this.quoteButton.style.left = `${Math.max(left + 8, Math.min(x, left + viewportWidth - width - 8))}px`;
+    this.quoteButton.style.top = `${Math.max(top + 8, Math.min(y, top + viewportHeight - height - 8))}px`;
+  }
+
+  insertQuoteSelection() {
+    const quote = this.quoteSelection;
+    const textarea = this.promptTextarea;
+    this.dismissQuoteSelection();
+    if (!quote || !textarea?.isConnected || textarea.disabled || textarea.readOnly || this.document.body.classList.contains("session-switching")) return;
+    if (!this.element?.contains(quote.body) || !quote.body.contains(quote.range.commonAncestorContainer) || quote.range.toString() !== quote.sourceText) return;
+    textarea.value = appendQuote(textarea.value, quote.text);
+    this.window.getSelection()?.removeAllRanges();
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    textarea.dispatchEvent(new this.window.Event("input", { bubbles: true }));
   }
 
   applyFocusedView(preserveScroll = false) {
@@ -763,7 +858,7 @@ export class ConversationController {
   }
 
   applyAutoScroll(behavior = "auto") {
-    if (!this.element || !this.autoScrollEnabled || this.focusedActivityTouchActive) return;
+    if (!this.element || !this.autoScrollEnabled || this.focusedActivityTouchActive || this.quoteSelection) return;
     this.withProgrammaticScroll(() => {
       const latestAssistant = this.latestReadableAssistantMessage();
       if (!this.forceBottomAutoScroll && !this.followOversizedMessageBottom && latestAssistant && latestAssistant === this.latestMessageElement() && latestAssistant.offsetHeight > this.element.clientHeight) {
