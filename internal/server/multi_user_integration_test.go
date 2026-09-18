@@ -144,7 +144,7 @@ func TestMultiUserFiltersListingsReadsActionsAndAttachments(t *testing.T) {
 		}
 	}
 	for _, target := range []string{
-		"/prompt", "/abort", "/compact", "/sessions/new", "/sessions/model_settings",
+		"/prompt", "/abort", "/clear_queue", "/compact", "/sessions/new", "/sessions/model_settings",
 		"/sessions/cycle_thinking", "/sessions/tree", "/sessions/tree/label", "/sessions/fork",
 		"/sessions/clone", "/extension_ui_response", "/sessions/takeover", "/sessions/mark_read",
 		"/composer/path_suggestions",

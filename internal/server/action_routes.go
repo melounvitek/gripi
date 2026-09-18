@@ -49,6 +49,7 @@ var treeFilters = map[string]bool{"default": true, "no-tools": true, "user-only"
 func (app *application) registerActionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /prompt", app.prompt)
 	mux.HandleFunc("POST /abort", app.abortSession)
+	mux.HandleFunc("POST /clear_queue", app.clearQueue)
 	mux.HandleFunc("POST /compact", app.compactSession)
 	mux.HandleFunc("GET /sessions/validate_cwd", app.validateSessionCWD)
 	mux.HandleFunc("GET /sessions/browse_cwd", app.browseSessionCWD)
