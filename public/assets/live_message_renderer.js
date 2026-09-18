@@ -17,6 +17,7 @@ export class LiveMessageRenderer {
     this.conversationScroll = null;
     this.hideThinkingBlock = false;
     this.pendingMessages = null;
+    this.pendingQueue = null;
     this.lastLiveCompaction = null;
     this.terminalRenderStates = new WeakMap();
     this.terminalBindingGeneration = 0;
@@ -34,6 +35,7 @@ export class LiveMessageRenderer {
     this.conversationScroll = this.conversationController.element;
     this.hideThinkingBlock = this.liveOutput?.dataset.hideThinkingBlock === "true";
     this.pendingMessages = this.document.querySelector("[data-pending-messages]");
+    this.pendingQueue = this.document.querySelector("[data-pending-queue]");
     this.lastLiveCompaction = null;
     this.liveBashExecutions = new Map();
     this.completedBashExecutionIds = new Set();
@@ -65,6 +67,7 @@ export class LiveMessageRenderer {
     appendRows(queues.followUp, "Follow-up", "follow-up");
     this.pendingMessages.replaceChildren(...rows);
     this.pendingMessages.hidden = rows.length === 0;
+    if (this.pendingQueue) this.pendingQueue.hidden = rows.length === 0;
   }
 
   liveMessageAlreadyRendered(roleName, text, timestampKey) {

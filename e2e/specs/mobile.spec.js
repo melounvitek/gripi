@@ -1,6 +1,44 @@
 import { expect, test } from "@playwright/test";
 import { mobileSubagents, nativeBash, prompts, replies, sessions, tool } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
+import {
+  activateClearQueue, attachClearQueueDraft, expectClearedQueue, expectClearQueueDraft,
+  expectClearQueueRunning, expectPendingQueue, prepareClearQueue, stopClearQueueRun
+} from "../support/clear_queue.mjs";
+
+test("Clear queue confirms on the first mobile tap with a 44px target", async ({ page }) => {
+  try {
+    await prepareClearQueue(page, sessions.clearQueueMobile, true);
+    await attachClearQueueDraft(page);
+    const clear = page.getByRole("button", { name: "Clear queue", exact: true });
+    const bounds = await clear.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds.width).toBeGreaterThanOrEqual(44);
+    expect(bounds.height).toBeGreaterThanOrEqual(44);
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(page.viewportSize().width);
+    await test.info().attach("clear-queue-mobile", { body: await page.screenshot(), contentType: "image/png" });
+    const requests = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/clear_queue") requests.push(request);
+    });
+
+    await activateClearQueue(page, { accept: false, mobile: true });
+    await expectPendingQueue(page);
+    await expectClearQueueDraft(page);
+    await expectClearQueueRunning(page);
+    expect(requests).toHaveLength(0);
+
+    const responsePromise = page.waitForResponse("**/clear_queue");
+    await activateClearQueue(page, { mobile: true });
+    expect((await responsePromise).status()).toBe(200);
+    expect(requests).toHaveLength(1);
+    await expectClearedQueue(page);
+    await expectClearQueueDraft(page);
+  } finally {
+    await stopClearQueueRun(page);
+  }
+});
 
 test("open and zoom live and persisted images on the first mobile tap", async ({ page }) => {
   await page.goto("/");

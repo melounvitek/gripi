@@ -20,6 +20,7 @@ let busy = false;
 let compacting = false;
 let activeScenario = null;
 let queuedAbortSteer = null;
+const pendingMessages = [];
 let pendingExtensionRequest = null;
 let activeBash = null;
 let resourcesReloaded = false;
@@ -201,11 +202,17 @@ function handleCommand(command) {
       acceptPrompt(command);
       break;
     case "steer":
-      acceptSteer(command);
+      acceptQueuedMessage(command, "steering", replies.steer);
       break;
     case "follow_up":
-      acceptFollowUp(command);
+      acceptQueuedMessage(command, "followUp", replies.followUp);
       break;
+    case "clear_queue": {
+      const data = queuedMessages();
+      clearPendingMessages();
+      respond(command, true, { data });
+      break;
+    }
     case "abort":
       acceptAbort(command);
       break;
@@ -236,7 +243,7 @@ function state() {
     ...(sessionName ? { sessionName } : {}),
     autoCompactionEnabled: true,
     messageCount: entries.filter((entry) => entry.type === "message").length,
-    pendingMessageCount: 0
+    pendingMessageCount: pendingMessages.length
   };
 }
 
@@ -287,11 +294,11 @@ function acceptPrompt(command) {
     return;
   }
   if (busy && command.streamingBehavior === "steer") {
-    acceptSteer(command);
+    acceptQueuedMessage(command, "steering", replies.steer);
     return;
   }
   if (busy && command.streamingBehavior === "followUp") {
-    acceptFollowUp(command);
+    acceptQueuedMessage(command, "followUp", replies.followUp);
     return;
   }
   if (busy) {
@@ -349,7 +356,7 @@ function acceptPrompt(command) {
     });
     return;
   }
-  if ([prompts.steerStart, prompts.followUpStart, prompts.abortStart].includes(command.message)) return;
+  if ([prompts.steerStart, prompts.followUpStart, prompts.abortStart, prompts.clearQueueStart].includes(command.message)) return;
   if (command.message === prompts.deltaStreaming) {
     schedule(120, completeDeltaAssistant);
     return;
@@ -494,40 +501,45 @@ function branchSession(command, targetId) {
   respond(command, true, { data: { text: targetId ? textContent(entries.at(-1)?.message?.content) : "" } });
 }
 
-function acceptSteer(command) {
-  if (!busy || activeScenario !== prompts.steerStart) {
-    respond(command, false, { error: "No steer scenario is active" });
+function queuedMessages() {
+  return {
+    steering: pendingMessages.filter((pending) => pending.kind === "steering").map((pending) => pending.message),
+    followUp: pendingMessages.filter((pending) => pending.kind === "followUp").map((pending) => pending.message)
+  };
+}
+
+function clearPendingMessages() {
+  for (const pending of pendingMessages) {
+    clearTimeout(pending.timer);
+    timers.delete(pending.timer);
+  }
+  pendingMessages.length = 0;
+  queuedAbortSteer = null;
+  emit({ type: "queue_update", ...queuedMessages() });
+}
+
+function acceptQueuedMessage(command, kind, reply) {
+  if (!busy) {
+    respond(command, false, { error: "No active run to queue a message for" });
     return;
   }
+  const pending = { kind, message: command.message, timer: null };
+  pendingMessages.push(pending);
   respond(command, true);
-  emit({ type: "queue_update", steering: [command.message], followUp: [] });
-  if (command.message === prompts.queuedAbortSteer) {
+  emit({ type: "queue_update", ...queuedMessages() });
+  if (kind === "steering" && command.message === prompts.queuedAbortSteer) {
     queuedAbortSteer = command.message;
     return;
   }
-  schedule(350, () => {
-    emit({ type: "queue_update", steering: [], followUp: [] });
+  // Keep browser queues stable through confirmation, reload, and second-tab checks.
+  const delay = activeScenario === prompts.clearQueueStart ? 30_000 : command.message === "Restore this queued message" ? 10_000 : 350;
+  pending.timer = schedule(delay, () => {
+    pendingMessages.splice(pendingMessages.indexOf(pending), 1);
+    emit({ type: "queue_update", ...queuedMessages() });
     const user = userMessage(command.message);
     appendMessage(user);
     emitMessage(user);
-    completeAssistant(replies.steer);
-  });
-}
-
-function acceptFollowUp(command) {
-  if (!busy || activeScenario !== prompts.followUpStart) {
-    respond(command, false, { error: "No follow-up scenario is active" });
-    return;
-  }
-  respond(command, true);
-  emit({ type: "queue_update", steering: [], followUp: [command.message] });
-  const delay = command.message === "Restore this queued message" ? 10_000 : 350;
-  schedule(delay, () => {
-    emit({ type: "queue_update", steering: [], followUp: [] });
-    const user = userMessage(command.message);
-    appendMessage(user);
-    emitMessage(user);
-    completeAssistant(replies.followUp);
+    completeAssistant(reply);
   });
 }
 
@@ -541,12 +553,12 @@ function acceptAbort(command) {
     return;
   }
   clearTimers();
-  if (queuedAbortSteer) {
-    emit({ type: "queue_update", steering: [], followUp: [] });
-    const user = userMessage(queuedAbortSteer);
+  const abortSteer = queuedAbortSteer;
+  if (pendingMessages.length) clearPendingMessages();
+  if (abortSteer) {
+    const user = userMessage(abortSteer);
     appendMessage(user);
     emitMessage(user);
-    queuedAbortSteer = null;
     return;
   }
   if ([prompts.parallelSubagents, prompts.parallelSubagentsMobile].includes(activeScenario)) {
@@ -867,6 +879,7 @@ function finishAssistant(completed, priorMessages = []) {
 
 function replaceWithNewSession(command) {
   clearTimers();
+  if (pendingMessages.length) clearPendingMessages();
   if (busy) {
     busy = false;
     activeScenario = null;
@@ -971,6 +984,7 @@ function schedule(delay, callback) {
     callback();
   }, delay);
   timers.add(timer);
+  return timer;
 }
 
 function clearTimers() {

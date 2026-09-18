@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { seedFixtures } from "../fixtures/seed.mjs";
-import { nativeBash, prompts } from "./contract.mjs";
+import { nativeBash, prompts, replies } from "./contract.mjs";
 
 const fakePiPath = path.resolve("e2e/support/fake_pi.mjs");
 
@@ -268,6 +268,123 @@ test("fake Pi uses LF framing rather than Unicode line separators", { timeout: 5
   assert.equal(response.command, "unknown\u2028command");
   assert.equal(response.success, false);
 });
+
+for (const type of ["steer", "follow_up"]) {
+  test(`fake Pi clear_queue cancels ${type} deliveries without aborting the run`, { timeout: 5_000 }, async (context) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-clear-"));
+    const fixture = await seedFixtures(root);
+    const sessionPath = path.join(fixture.sessionsRoot, "e2e", "prompt.jsonl");
+    const child = spawnFake(fixture, ["--mode", "rpc", "--session", sessionPath]);
+    context.after(() => cleanup(child, root));
+    const records = recordsFrom(child.stdout);
+    const start = type === "steer" ? prompts.steerStart : prompts.followUpStart;
+    const key = type === "steer" ? "steering" : "followUp";
+    const removed = ["Discard queued delivery one", "Discard queued delivery two"];
+
+    child.stdin.write(`${JSON.stringify({ id: "start", type: "prompt", message: start })}\n`);
+    assert.equal((await nextRecord(records)).id, "start");
+    await readRecords(records, 4);
+    for (const message of removed) {
+      child.stdin.write(`${JSON.stringify({ id: message, type, message })}\n`);
+      assert.equal((await nextRecord(records)).success, true);
+      assert.equal((await nextRecord(records)).type, "queue_update");
+    }
+
+    child.stdin.write(`${JSON.stringify({ id: "clear", type: "clear_queue" })}\n`);
+    const cleared = await nextRecord(records);
+    assert.equal(cleared.type, "queue_update");
+    assert.deepEqual([cleared.steering, cleared.followUp], [[], []]);
+    const response = await nextRecord(records);
+    assert.deepEqual(response, {
+      id: "clear", type: "response", command: "clear_queue", success: true,
+      data: { steering: [], followUp: [], [key]: removed }
+    });
+
+    // Wait past the original delivery deadline, then use the RPC response as a barrier.
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    child.stdin.write(`${JSON.stringify({ id: "still-running", type: "get_state" })}\n`);
+    const state = await nextRecord(records);
+    assert.equal(state.id, "still-running", "Cleared callbacks must not emit messages or agent_end");
+    assert.equal(state.data.isStreaming, true);
+    assert.equal(state.data.pendingMessageCount, 0);
+    child.stdin.write(`${JSON.stringify({ id: "entries", type: "get_entries" })}\n`);
+    const entries = (await nextRecord(records)).data.entries;
+    assert.equal(entries.some((entry) => removed.some((text) => textContent(entry.message) === text)), false);
+
+    // Clearing twice is harmless, and does not disable future queue delivery.
+    child.stdin.write(`${JSON.stringify({ id: "clear-empty", type: "clear_queue" })}\n`);
+    assert.equal((await nextRecord(records)).type, "queue_update");
+    assert.deepEqual((await nextRecord(records)).data, { steering: [], followUp: [] });
+    child.stdin.write(`${JSON.stringify({ id: "fresh", type, message: "Deliver after clearing" })}\n`);
+    assert.equal((await nextRecord(records)).success, true);
+    const events = [];
+    while (events.at(-1)?.type !== "agent_settled") events.push(await nextRecord(records));
+    assert.ok(events.some((event) => event.type === "message_end" && textContent(event.message) === "Deliver after clearing"));
+  });
+}
+
+test("fake Pi clear_queue clears both queues but preserves ongoing tool and assistant callbacks", { timeout: 7_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-clear-active-"));
+  const fixture = await seedFixtures(root);
+  const child = spawnFake(fixture, ["--mode", "rpc"]);
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+  child.stdin.write(`${JSON.stringify({ id: "start", type: "prompt", message: prompts.longCommand })}\n`);
+  assert.equal((await nextRecord(records)).id, "start");
+  while ((await nextRecord(records)).type !== "tool_execution_update") { /* Wait for the ongoing tool. */ }
+
+  for (const [type, message] of [["steer", "Discard steering"], ["follow_up", "Discard follow-up"]]) {
+    child.stdin.write(`${JSON.stringify({ id: type, type, message })}\n`);
+    assert.equal((await nextRecord(records)).success, true);
+    const queue = await nextRecord(records);
+    assert.equal(queue.type, "queue_update");
+    assert.deepEqual(queue.steering, ["Discard steering"]);
+    assert.deepEqual(queue.followUp, type === "follow_up" ? ["Discard follow-up"] : []);
+  }
+  child.stdin.write(`${JSON.stringify({ id: "pending", type: "get_state" })}\n`);
+  assert.equal((await nextRecord(records)).data.pendingMessageCount, 2);
+  child.stdin.write(`${JSON.stringify({ id: "clear", type: "clear_queue" })}\n`);
+  assert.equal((await nextRecord(records)).type, "queue_update");
+  assert.deepEqual((await nextRecord(records)).data, { steering: ["Discard steering"], followUp: ["Discard follow-up"] });
+
+  const events = [];
+  while (events.at(-1)?.type !== "agent_settled") events.push(await nextRecord(records));
+  assert.ok(events.some((event) => event.type === "tool_execution_end"));
+  assert.ok(events.some((event) => event.type === "message_end" && textContent(event.message) === replies.standard));
+  assert.equal(events.some((event) => event.message?.role === "user"), false);
+  assert.equal(events.filter((event) => event.type === "agent_end").length, 1);
+});
+
+test("fake Pi clear_queue forgets held steering so a later abort cannot deliver it", { timeout: 5_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-clear-held-"));
+  const fixture = await seedFixtures(root);
+  const child = spawnFake(fixture, ["--mode", "rpc"]);
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+
+  child.stdin.write(`${JSON.stringify({ id: "idle-clear", type: "clear_queue" })}\n`);
+  assert.equal((await nextRecord(records)).type, "queue_update");
+  assert.deepEqual((await nextRecord(records)).data, { steering: [], followUp: [] });
+  child.stdin.write(`${JSON.stringify({ id: "idle", type: "get_state" })}\n`);
+  assert.equal((await nextRecord(records)).data.isStreaming, false);
+  child.stdin.write(`${JSON.stringify({ id: "start", type: "prompt", message: prompts.steerStart })}\n`);
+  assert.equal((await nextRecord(records)).id, "start");
+  await readRecords(records, 4);
+  child.stdin.write(`${JSON.stringify({ id: "held", type: "steer", message: prompts.queuedAbortSteer })}\n`);
+  assert.equal((await nextRecord(records)).success, true);
+  assert.deepEqual((await nextRecord(records)).steering, [prompts.queuedAbortSteer]);
+  child.stdin.write(`${JSON.stringify({ id: "clear", type: "clear_queue" })}\n`);
+  assert.equal((await nextRecord(records)).type, "queue_update");
+  assert.deepEqual((await nextRecord(records)).data, { steering: [prompts.queuedAbortSteer], followUp: [] });
+
+  child.stdin.write(`${JSON.stringify({ id: "abort", type: "abort" })}\n`);
+  assert.deepEqual((await readRecords(records, 2)).map((record) => record.type), ["agent_end", "agent_settled"]);
+  assert.equal((await nextRecord(records)).id, "abort");
+});
+
+function textContent(message) {
+  return message?.content?.filter((part) => part.type === "text").map((part) => part.text).join("");
+}
 
 function spawnFake(fixture, args, cwd, env = {}) {
   return spawn(process.execPath, [fakePiPath, ...args], {

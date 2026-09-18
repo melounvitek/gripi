@@ -2141,6 +2141,33 @@ async function submitPrompt(event) {
   conversationController.scrollToBottom();
 }
 
+async function clearQueuedMessages(event) {
+  const button = event.currentTarget;
+  if (button.disabled || sessionSyncBlocked()) return;
+  if (!window.confirm("Remove all queued messages? Pi will keep running.")) return;
+
+  const generation = sessionViewGeneration;
+  const session = currentSessionPath();
+  const errorMessage = document.querySelector("[data-clear-queue-error]");
+  errorMessage.hidden = true;
+  button.disabled = true;
+  try {
+    const response = await fetch("/clear_queue", {
+      method: "POST",
+      body: new URLSearchParams({ session }),
+      headers: { "Accept": "application/json" }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not clear the queue. Please try again.");
+  } catch (error) {
+    if (generation !== sessionViewGeneration || session !== currentSessionPath()) return;
+    errorMessage.textContent = error.message || "Could not clear the queue. Please try again.";
+    errorMessage.hidden = false;
+  } finally {
+    if (generation === sessionViewGeneration && session === currentSessionPath()) button.disabled = sessionSyncBlocked();
+  }
+}
+
 async function submitAbort(event) {
   event.preventDefault();
   if (!abortForm || abortForm.dataset.submitting === "true") return;
@@ -2446,6 +2473,7 @@ function bindSessionControls() {
 
   promptForm?.addEventListener("submit", submitPrompt);
   abortForm?.addEventListener("submit", submitAbort);
+  document.querySelector("[data-clear-queue]")?.addEventListener("click", clearQueuedMessages);
 }
 
 function copyTargetText(button) {

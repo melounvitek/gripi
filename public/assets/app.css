@@ -113,7 +113,10 @@
     .conversation-history-status { display: block; justify-self: stretch; width: 100%; min-height: 0; margin: 0 0 0.85rem; padding: 0; border: 0; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.76rem; font-weight: 400; letter-spacing: normal; text-align: center; text-transform: none; }
     .conversation-history-status:disabled { cursor: default; opacity: 1; }
     .composer { position: sticky; bottom: 0; padding: 0.75rem 1.5rem 1rem; border-top: 1px solid var(--border); background: #1e1e24f0; backdrop-filter: blur(8px); }
-    .pending-messages { display: grid; gap: 0.25rem; max-height: 7rem; margin-bottom: 0.6rem; overflow-y: auto; }
+    .pending-queue { display: flex; align-items: flex-start; gap: 0.6rem; margin-bottom: 0.6rem; }
+    .pending-messages { display: grid; flex: 1; min-width: 0; gap: 0.25rem; max-height: 7rem; overflow-y: auto; }
+    .clear-queue-button { flex-shrink: 0; min-height: 44px; min-width: 44px; font-size: 0.75rem; }
+    .clear-queue-error { color: var(--danger); font-size: 0.8rem; margin: 0 0 0.6rem; }
     .pending-message { color: var(--muted); font-family: var(--mono); font-size: 0.72rem; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
     .pending-message--steering::before { content: "↳ "; color: var(--accent); }
     .pending-message--follow-up::before { content: "↳ "; color: var(--muted-soft); }

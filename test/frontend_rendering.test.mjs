@@ -7,6 +7,30 @@ import { LiveMessageRenderer } from "../public/assets/live_message_renderer.js";
 import { ServerMarkdownRenderer } from "../public/assets/server_markdown_renderer.js";
 import { FakeDocument, FakeElement, deferred, settle } from "./helpers/fake_dom.mjs";
 
+test("queue controls follow the initial snapshot and live queue updates", () => {
+  const document = new FakeDocument();
+  const queue = new FakeElement("div", ["[data-pending-queue]"]);
+  const messages = new FakeElement("div", ["[data-pending-messages]"]);
+  queue.append(messages);
+  document.body.append(queue);
+  const liveOutput = new FakeElement("section");
+  liveOutput.dataset.queuedMessages = JSON.stringify({ steering: ["Adjust this"], followUp: ["Then check"] });
+  document.getElementById = (id) => id === "live-output" ? liveOutput : null;
+  const renderer = new LiveMessageRenderer(document, { element: new FakeElement("section") }, {}, { bind() {} });
+
+  renderer.bind();
+  assert.equal(queue.hidden, false);
+  assert.deepEqual(messages.children.map((row) => row.textContent), ["Steering: Adjust this", "Follow-up: Then check"]);
+
+  renderer.renderQueuedMessages({ steering: [], followUp: [] });
+  assert.equal(queue.hidden, true);
+  assert.equal(messages.children.length, 0);
+
+  renderer.renderQueuedMessages({ followUp: ["New message"] });
+  assert.equal(queue.hidden, false);
+  assert.equal(messages.children[0].textContent, "Follow-up: New message");
+});
+
 test("live user messages render and update plain URLs as links", () => {
   const document = new FakeDocument();
   const conversation = {
