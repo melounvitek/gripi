@@ -226,6 +226,66 @@ func TestClearQueueRejectsNavigationAndWaitsForRetirementWithoutStartingClient(t
 	})
 }
 
+func TestActionValidationPreservesErrorResponses(t *testing.T) {
+	for _, route := range []string{"/abort", "/clear_queue"} {
+		for _, kind := range []string{"malformed", "malformed_multipart_type", "missing_boundary", "too_large", "multipart_too_large", "empty", "relative", "unclean", "null", "long", "unowned"} {
+			t.Run(route+"/"+kind, func(t *testing.T) {
+				f := newClearQueueFixture(t)
+				path := f.path
+				switch kind {
+				case "empty":
+					path = ""
+				case "relative":
+					path = "session.jsonl"
+				case "unclean":
+					path += "/../session.jsonl"
+				case "null":
+					path += "\x00"
+				case "long":
+					path = "/" + strings.Repeat("x", maximumSessionPathBytes)
+				case "unowned":
+					f.app.ownsSession = func(*http.Request, string) bool { return false }
+				}
+				request := clearQueueRequest(context.Background(), path)
+				request.URL.Path = route
+				status, message, contentType := http.StatusNotFound, "404 page not found\n", "text/plain; charset=utf-8"
+				switch kind {
+				case "malformed", "malformed_multipart_type", "missing_boundary", "too_large", "multipart_too_large":
+					status, message, contentType = http.StatusBadRequest, "Invalid request body", "text/html; charset=utf-8"
+					switch kind {
+					case "malformed":
+						request.Body = io.NopCloser(strings.NewReader("session=%zz"))
+					case "malformed_multipart_type":
+						request.Header.Set("Content-Type", "multipart/form-data; invalid")
+					case "missing_boundary":
+						request.Header.Set("Content-Type", "multipart/form-data")
+					case "too_large", "multipart_too_large":
+						if kind == "multipart_too_large" {
+							request.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+						}
+						request.Body = http.MaxBytesReader(httptest.NewRecorder(), request.Body, 1)
+						status, message = http.StatusRequestEntityTooLarge, "Request body too large"
+					}
+				}
+				if route == "/clear_queue" {
+					message = "Invalid request body"
+					if status == http.StatusNotFound {
+						message = "Session not found"
+					}
+					message = `{"error":"` + message + `"}`
+					contentType = "application/json"
+				}
+				response := httptest.NewRecorder()
+				f.handler.ServeHTTP(response, request)
+				if response.Code != status || response.Body.String() != message || response.Header().Get("Content-Type") != contentType {
+					t.Fatalf("response = %d %q %q, want %d %q %q", response.Code, response.Body.String(), response.Header().Get("Content-Type"), status, message, contentType)
+				}
+				f.assertUntouched(t, 0)
+			})
+		}
+	}
+}
+
 func TestClearQueueFormAndCancellationErrorsAreJSON(t *testing.T) {
 	for _, kind := range []string{"multipart", "malformed", "too_large", "canceled"} {
 		t.Run(kind, func(t *testing.T) {

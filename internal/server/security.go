@@ -391,14 +391,16 @@ func (app *application) writeSecurityError(response http.ResponseWriter, status 
 	}
 }
 
-func parseForm(response http.ResponseWriter, request *http.Request) bool {
-	var err error
-	mediaType, _, mediaTypeErr := mime.ParseMediaType(request.Header.Get("Content-Type"))
-	if mediaTypeErr == nil && mediaType == "multipart/form-data" {
-		err = request.ParseMultipartForm(0)
-	} else {
-		err = request.ParseForm()
+func parseRequestForm(request *http.Request) error {
+	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+	if err == nil && mediaType == "multipart/form-data" {
+		return request.ParseMultipartForm(0)
 	}
+	return request.ParseForm()
+}
+
+func parseForm(response http.ResponseWriter, request *http.Request) bool {
+	err := parseRequestForm(request)
 	if err == nil {
 		return true
 	}

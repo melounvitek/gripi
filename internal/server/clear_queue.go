@@ -3,10 +3,7 @@ package server
 import (
 	"context"
 	"errors"
-	"mime"
 	"net/http"
-	"path/filepath"
-	"strings"
 
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -16,13 +13,7 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 	fail := func(status int, message string) {
 		writeJSONStatus(response, status, map[string]any{"error": message})
 	}
-	var err error
-	mediaType, _, _ := mime.ParseMediaType(request.Header.Get("Content-Type"))
-	if mediaType == "multipart/form-data" {
-		err = request.ParseMultipartForm(0)
-	} else {
-		err = request.ParseForm()
-	}
+	err := parseRequestForm(request)
 	if request.MultipartForm != nil {
 		defer request.MultipartForm.RemoveAll()
 	}
@@ -36,7 +27,7 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		return
 	}
 	path := request.FormValue("session")
-	if path == "" || len(path) > maximumSessionPathBytes || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsRune(path, 0) || (app.ownsSession != nil && !app.ownsSession(request, path)) {
+	if !app.validOwnedSessionPath(request, path) {
 		fail(http.StatusNotFound, "Session not found")
 		return
 	}

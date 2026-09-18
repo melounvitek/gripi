@@ -1612,12 +1612,15 @@ func (app *application) actionSessionPath(response http.ResponseWriter, request 
 	return canonical, true
 }
 
-func (app *application) requireOwnedSession(response http.ResponseWriter, request *http.Request, path string) (string, bool) {
+func (app *application) validOwnedSessionPath(request *http.Request, path string) bool {
 	if path == "" || len(path) > maximumSessionPathBytes || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsRune(path, 0) {
-		http.NotFound(response, request)
-		return "", false
+		return false
 	}
-	if app.ownsSession != nil && !app.ownsSession(request, path) {
+	return app.ownsSession == nil || app.ownsSession(request, path)
+}
+
+func (app *application) requireOwnedSession(response http.ResponseWriter, request *http.Request, path string) (string, bool) {
+	if !app.validOwnedSessionPath(request, path) {
 		http.NotFound(response, request)
 		return "", false
 	}
