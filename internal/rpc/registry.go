@@ -129,6 +129,15 @@ func (registry *Registry) PathForClient(client RPCClient) string {
 	return ""
 }
 func (registry *Registry) Active(path string) bool { return registry.Client(path) != nil }
+
+// Registered includes clients temporarily unavailable while retiring or moving.
+func (registry *Registry) Registered(path string) bool {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	entry := registry.clients[path]
+	return entry != nil && entry.client != nil
+}
+
 func (registry *Registry) Touch(path string) bool {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()

@@ -32,6 +32,34 @@ for (const touch of [false, true]) {
     // Keep the mobile regression self-contained despite the mobile project's restricted testMatch.
     test.use(touch ? { viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true } : {});
 
+    test("unopened CLI sessions are marked and stay quiet on sidebar refresh", async ({ page, context, copiedSession }, testInfo) => {
+      await context.addInitScript(() => {
+        window.replyNotifications = [];
+        document.hasFocus = () => false;
+        localStorage.removeItem("gripi:notifications-disabled");
+        window.gripiElectron = { showNotification: async (notification) => window.replyNotifications.push(notification) };
+      });
+      // Keep a different conversation selected for the entire test.
+      await page.goto(copiedSession.backgroundURL);
+      await openSidebar(page, touch);
+      const link = sessionLink(page, copiedSession.file);
+      await expect(link).toBeVisible();
+      const responseCount = Number(await link.getAttribute("data-assistant-response-count"));
+      await appendCLIReply(copiedSession.file, "Unopened CLI reply");
+      await expect(link).toHaveAttribute("data-assistant-response-count", String(responseCount + 1), { timeout: 15_000 });
+      await expectExternalIcon(link);
+      await expect(link).not.toHaveClass(/\bunread\b/);
+      await expect(link).toHaveAttribute("data-external-response-count", String(responseCount + 1));
+      expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
+      await page.screenshot({ path: testInfo.outputPath("unopened-external-session.png") });
+
+      await page.reload();
+      await openSidebar(page, touch);
+      await expectExternalIcon(link);
+      await expect(link).not.toHaveClass(/\bunread\b/);
+      expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
+    });
+
     test("external CLI activity stays quiet in live and reloaded sidebars until takeover", async ({ page, context, copiedSession }, testInfo) => {
       test.setTimeout(60_000);
       await context.addInitScript(() => {

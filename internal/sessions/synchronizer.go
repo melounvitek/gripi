@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/melounvitek/gripi/internal/keyedlock"
@@ -286,11 +287,22 @@ func (synchronizer *Synchronizer) inspectRecoveringAvailable(ctx context.Context
 }
 
 func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string, includePosition bool) (SyncResult, error) {
-	snapshot, err := synchronizer.store.FileSnapshot(path)
+	state := synchronizer.state(path)
+	info, err := os.Stat(path)
 	if err != nil {
 		return SyncResult{}, err
 	}
-	state := synchronizer.state(path)
+	device, inode := fileIdentity(info)
+	var snapshot FileSnapshot
+	if previous := state.Snapshot; previous != nil && previous.Device == device && previous.Inode == inode && previous.Size == info.Size() && previous.MTimeNS == info.ModTime().UnixNano() {
+		// Sidebar polling must not reparse large, unchanged tool-result tails.
+		snapshot = *previous
+	} else {
+		snapshot, err = synchronizer.store.FileSnapshot(path)
+		if err != nil {
+			return SyncResult{}, err
+		}
+	}
 	if !snapshot.Complete {
 		synchronizer.update(path, snapshot, SyncConflict, "", "Session file has an incomplete JSONL entry.")
 		_, err = synchronizer.clients.CloseClientIfIdle(path)

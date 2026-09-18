@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/url"
 	"os"
@@ -51,33 +52,54 @@ func TestCompletedAssistantReplyAcceptsOnlyFinalTextFromCompletedAssistantMessag
 	}
 }
 
-func TestRPCMessageEndFlowsThroughTheCompletionQueueToPushDelivery(t *testing.T) {
+func TestRPCMessageEndFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) {
 	root := t.TempDir()
-	sessionPath := writeNotificationSession(t, root, "Queued session")
+	path := writeNotificationSession(t, root, "RPC session")
 	delivered := make(chan string, 1)
-	fake := pushNotifierFunc(func(_ context.Context, owner string, _ []byte) error {
+	app := notificationTestApplication(t, root, false, true, pushNotifierFunc(func(_ context.Context, owner string, _ []byte) error {
 		delivered <- owner
 		return nil
-	})
-	app := notificationTestApplication(t, root, false, true, fake)
-	completion := newCompletionNotifier(app)
-	completion.gracePeriod = 0
+	}))
+	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+	notifier := newCompletionNotifier(app)
+	notifier.gracePeriod = 0
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		_ = completion.Close(ctx)
+		_ = notifier.Close(ctx)
 	})
 	stdinReader, stdinWriter := io.Pipe()
 	t.Cleanup(func() { _ = stdinReader.Close() })
 	stdoutReader, stdoutWriter := io.Pipe()
-	client := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: completion.Observe})
+	t.Cleanup(func() { _ = stdoutWriter.Close() })
+	client := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: notifier.Observe})
 	t.Cleanup(func() { _ = client.Close() })
-	if err := app.rpcClients.Register(sessionPath, client); err != nil {
+	if err := app.rpcClients.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-
-	if _, err := io.WriteString(stdoutWriter, `{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"done"}]}}`+"\n"); err != nil {
+	inspected := make(chan struct{}, 1)
+	go func() {
+		var request map[string]any
+		if err := json.NewDecoder(stdinReader).Decode(&request); err != nil {
+			return
+		}
+		if request["type"] != "get_entries" {
+			return
+		}
+		if err := json.NewEncoder(stdoutWriter).Encode(map[string]any{
+			"type": "response", "id": request["id"], "command": "get_entries", "success": true,
+			"data": map[string]any{"entries": []any{}, "leafId": ""},
+		}); err == nil {
+			inspected <- struct{}{}
+		}
+	}()
+	if _, err := io.WriteString(stdoutWriter, `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`+"\n"); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case <-inspected:
+	case <-time.After(time.Second):
+		t.Fatal("sync inspection was skipped or blocked the RPC event callback")
 	}
 	select {
 	case owner := <-delivered:
@@ -85,7 +107,172 @@ func TestRPCMessageEndFlowsThroughTheCompletionQueueToPushDelivery(t *testing.T)
 			t.Fatalf("delivery owner = %q", owner)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("completed RPC reply did not reach push delivery")
+		t.Fatal("normal RPC reply was not delivered after inspection")
+	}
+}
+
+func TestCompletionNotifierRefreshesSyncBeforeDelivery(t *testing.T) {
+	for _, external := range []bool{false, true} {
+		name := "gateway append"
+		if external {
+			name = "unopened CLI append"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeNotificationSession(t, root, name)
+			fake := &recordingPushNotifier{}
+			app := notificationTestApplication(t, root, false, true, fake)
+			client := &remapClient{}
+			if err := app.rpcClients.Register(path, client); err != nil {
+				t.Fatal(err)
+			}
+			app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+			if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+				t.Fatal(err)
+			}
+			file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = io.WriteString(file, `{"type":"message","id":"reply","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`+"\n")
+			_ = file.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !external {
+				client.position = rpc.SessionEntries{Known: true, LeafID: "reply", Entries: []map[string]any{{"id": "reply"}}}
+			}
+			notifier := newCompletionNotifier(app)
+			if err := notifier.deliver(context.Background(), completedReply{client: client, path: path, text: "done", id: "reply"}); err != nil {
+				t.Fatal(err)
+			}
+			want := 1
+			if external {
+				want = 0
+			}
+			if len(fake.owners) != want {
+				t.Fatalf("deliveries = %d, want %d", len(fake.owners), want)
+			}
+		})
+	}
+}
+
+func TestCompletionNotifierWorkerRetriesUnavailableInspection(t *testing.T) {
+	for _, lock := range []string{"sync operation", "RPC operation"} {
+		for _, cancelDelivery := range []bool{false, true} {
+			name := lock + "/release"
+			if cancelDelivery {
+				name = lock + "/cancel"
+			}
+			t.Run(name, func(t *testing.T) {
+				root := t.TempDir()
+				path := writeNotificationSession(t, root, "Busy session")
+				delivered := make(chan struct{}, 4)
+				app := notificationTestApplication(t, root, false, true, pushNotifierFunc(func(context.Context, string, []byte) error {
+					delivered <- struct{}{}
+					return nil
+				}))
+				client := &remapClient{}
+				if err := app.rpcClients.Register(path, client); err != nil {
+					t.Fatal(err)
+				}
+				app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+				notifier := newCompletionNotifier(app)
+				started := make(chan struct{})
+				notifier.waitUntil = func(context.Context, time.Time) bool {
+					close(started)
+					return true
+				}
+				closeNotifier := func() {
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					if err := notifier.Close(ctx); err != nil {
+						t.Error(err)
+					}
+				}
+				t.Cleanup(closeNotifier)
+				whileLocked := func() error {
+					notifier.schedule(completedReply{client: client, path: path, text: "done", id: "reply"})
+					select {
+					case <-started:
+					case <-time.After(time.Second):
+						t.Fatal("delivery worker did not start")
+					}
+					select {
+					case <-delivered:
+						t.Fatal("notification delivered without an available sync inspection")
+					case <-time.After(100 * time.Millisecond):
+					}
+					if cancelDelivery {
+						closeNotifier()
+					}
+					return nil
+				}
+				var err error
+				if lock == "sync operation" {
+					err = app.synchronizer.WithExclusiveOperation(path, whileLocked)
+				} else {
+					err = app.rpcClients.WithExistingClient(context.Background(), path, false, func(rpc.RPCClient) error { return whileLocked() })
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !cancelDelivery {
+					select {
+					case <-delivered:
+					case <-time.After(time.Second):
+						t.Fatal("queued reply was lost after the temporary lock was released")
+					}
+					closeNotifier()
+				}
+				select {
+				case <-delivered:
+					t.Fatal("unexpected duplicate or canceled delivery")
+				default:
+				}
+			})
+		}
+	}
+}
+
+func TestCompletionNotifierInspectionRetryHonorsDeliveryDeadline(t *testing.T) {
+	for _, lock := range []string{"sync operation", "RPC operation"} {
+		t.Run(lock, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeNotificationSession(t, root, "Busy session")
+			fake := &recordingPushNotifier{}
+			app := notificationTestApplication(t, root, false, true, fake)
+			client := &remapClient{}
+			if err := app.rpcClients.Register(path, client); err != nil {
+				t.Fatal(err)
+			}
+			app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+			notifier := newCompletionNotifier(app)
+			reply := completedReply{client: client, path: path, text: "done", id: "reply"}
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			deliver := func() error { return notifier.deliver(ctx, reply) }
+			var err error
+			if lock == "sync operation" {
+				err = app.synchronizer.WithExclusiveOperation(path, deliver)
+			} else {
+				err = app.rpcClients.WithExistingClient(ctx, path, false, func(rpc.RPCClient) error { return deliver() })
+			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("delivery error = %v, want deadline exceeded", err)
+			}
+			if len(fake.owners) != 0 {
+				t.Fatal("notification delivered without an available sync inspection")
+			}
+			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := deliver(); err != nil {
+				t.Fatal(err)
+			}
+			if len(fake.owners) != 1 {
+				t.Fatal("normal reply was suppressed after inspection became available")
+			}
+		})
 	}
 }
 
@@ -240,7 +427,13 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 		t.Error("notification delivered during external follow")
 	}
 
-	if _, err := app.synchronizer.TakeOver(context.Background(), path, nil); err != nil {
+	if _, err := app.synchronizer.TakeOver(context.Background(), path, func() error {
+		notifier.schedule(reply)
+		if len(notifier.queue) != 0 {
+			t.Error("external reply was queued while takeover held the sync lock")
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	notifier.schedule(completedReply{client: client, path: path, text: "Gateway reply", id: "managed"})

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -116,21 +117,24 @@ type pageView struct {
 }
 
 func (app *application) preparePage(request *http.Request, includeConversation bool) (*pageView, error) {
+	// A managed session may still be registered under its synthetic pending path.
+	for _, pending := range app.pendingSessions.Entries() {
+		if !app.rpcClients.Active(pending.Path) || (app.ownsSession != nil && !app.ownsSession(request, pending.Path)) {
+			continue
+		}
+		if _, err := app.canonicalRPCSessionPath(request, pending.Path); err != nil &&
+			!errors.Is(err, rpc.ErrOperationPending) && !errors.Is(err, rpc.ErrClientRetiring) &&
+			!errors.Is(err, rpc.ErrClientStarting) && !errors.Is(err, errSessionNavigating) {
+			return nil, err
+		}
+	}
 	params := request.URL.Query()
 	selectedPath := params.Get("session")
 	selectedOwned := app.ownsSession == nil || app.ownsSession(request, selectedPath)
 	if selectedOwned && selectedPath != "" {
-		resolved, remapped, err := app.resolveOwnedPendingPath(request, selectedPath)
+		resolved, _, err := app.resolveOwnedPendingPath(request, selectedPath)
 		if err != nil {
 			return nil, err
-		}
-		if !remapped {
-			if _, pending := app.pendingSessions.CWD(selectedPath); pending {
-				resolved, err = app.canonicalRPCSessionPath(request, selectedPath)
-				if err != nil {
-					return nil, err
-				}
-			}
 		}
 		if resolved != selectedPath {
 			params.Set("session", resolved)
@@ -152,7 +156,11 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	for _, session := range all {
 		knownPaths[session.Path] = true
 	}
+	unresolvedPendingCWDs := make(map[string]bool)
 	for _, pending := range app.pendingSessions.Entries() {
+		if app.rpcClients.Registered(pending.Path) && (app.ownsSession == nil || app.ownsSession(request, pending.Path)) {
+			unresolvedPendingCWDs[pending.CWD] = true
+		}
 		if knownPaths[pending.Path] {
 			continue
 		}
@@ -213,14 +221,17 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		}
 	}
 	var selectedSync *sessions.SyncResult
-	if includeConversation && selected != nil {
-		if _, err := os.Stat(selected.Path); err == nil {
-			selectedSync = app.synchronizer.InspectIfAvailable(request.Context(), selected.Path, true)
-		}
-	}
 	externalFollow := make(map[string]bool)
 	if app.synchronizer != nil {
 		for _, session := range all {
+			// Do not attribute appends while an owned pending client could manage this file.
+			if knownPaths[session.Path] && (app.rpcClients.Active(session.Path) || !unresolvedPendingCWDs[session.CWD]) {
+				includePosition := includeConversation && session == selected
+				state := app.synchronizer.InspectIfAvailable(request.Context(), session.Path, includePosition)
+				if includePosition {
+					selectedSync = state
+				}
+			}
 			if state := app.synchronizer.KnownBlocked(session.Path); state != nil && state.Mode == sessions.SyncExternalFollow {
 				externalFollow[session.Path] = true
 			}

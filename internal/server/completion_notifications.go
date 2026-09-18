@@ -163,8 +163,24 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 		return err
 	}
 	if notifier.app.synchronizer != nil {
-		if state := notifier.app.synchronizer.KnownBlocked(path); state != nil && state.Mode == sessions.SyncExternalFollow {
-			return nil
+		for {
+			if state := notifier.app.synchronizer.KnownBlocked(path); state != nil && state.Mode == sessions.SyncExternalFollow {
+				return nil
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			// Inspect only in the delivery worker: RPC callbacks must not wait for RPC responses.
+			state := notifier.app.synchronizer.InspectIfAvailable(ctx, path, false)
+			if state != nil {
+				if state.Mode == sessions.SyncExternalFollow {
+					return nil
+				}
+				break
+			}
+			if !waitUntilNotificationDeadline(ctx, time.Now().Add(50*time.Millisecond)) {
+				return ctx.Err()
+			}
 		}
 	}
 	if reply.readCountKnown && notifier.app.gatewayState != nil {

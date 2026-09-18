@@ -126,6 +126,72 @@ func TestFileSnapshotStreamsLargeFinalEntryMetadata(t *testing.T) {
 	}
 }
 
+func BenchmarkSynchronizerInspectUnchangedLargeTail(b *testing.B) {
+	root := b.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	contents := `{"type":"session","id":"session"}` + "\n" +
+		`{"type":"message","id":"large","message":{"role":"toolResult","content":[{"type":"text","text":"` + strings.Repeat("x", 1<<20) + `"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		b.Fatal(err)
+	}
+	synchronizer := NewSynchronizer(root, "", NewCache(), rpc.NewRegistry(nil, nil))
+	if _, err := synchronizer.Inspect(context.Background(), path, false); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if result := synchronizer.InspectIfAvailable(context.Background(), path, false); result == nil || result.Mode != SyncAvailable {
+			b.Fatalf("inspection = %#v", result)
+		}
+	}
+}
+
+func TestSynchronizerChecksRPCPositionWhenFileIsUnchanged(t *testing.T) {
+	root, path := synchronizerSession(t)
+	client := newSyncClient()
+	client.positions[""] = rpc.SessionEntries{Known: true, LeafID: "first"}
+	registry := rpc.NewRegistry(nil, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+	if result := inspectSync(t, synchronizer, path, true); result.RPCLeafID != "first" {
+		t.Fatalf("initial position = %#v", result)
+	}
+	client.positions[""] = rpc.SessionEntries{Known: true, LeafID: "second"}
+	if result := inspectSync(t, synchronizer, path, true); result.RPCLeafID != "second" {
+		t.Fatalf("unchanged file hid RPC position change: %#v", result)
+	}
+}
+
+func TestSynchronizerRejectsReplacementWithMatchingSizeAndMtime(t *testing.T) {
+	root, path := synchronizerSession(t)
+	synchronizer := NewSynchronizer(root, "", NewCache(), rpc.NewRegistry(nil, nil))
+	_ = inspectSync(t, synchronizer, path, false)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := path + ".replacement"
+	if err := os.WriteFile(replacement, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(replacement, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncConflict {
+		t.Fatalf("replacement was not detected: %#v", result)
+	}
+}
+
 func TestSynchronizerRejectsSameSizeInPlaceRewrite(t *testing.T) {
 	root, path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})

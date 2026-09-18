@@ -11,22 +11,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
-func TestExternalFollowIsReadAcrossPageAndSidebarViews(t *testing.T) {
+func TestUnopenedExternalSessionIsReadAcrossPageAndSidebarViews(t *testing.T) {
 	for _, target := range []string{"/?session=", "/sidebar?no_session=1", "/?no_session=1&session_search=hidden"} {
 		t.Run(target, func(t *testing.T) {
 			app, path, _ := externalSessionTestApplication(t)
 			appendExternalSessionReply(t, path, "external", "")
-			if target != "/?session=" {
-				if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
-					t.Fatal(err)
-				}
-			} else {
+			if target == "/?session=" {
 				target += url.QueryEscape(path)
 			}
 			view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test"+target, nil), !strings.HasPrefix(target, "/sidebar"))
@@ -51,6 +48,201 @@ func TestExternalFollowIsReadAcrossPageAndSidebarViews(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSidebarKeepsExternalSessionQuietDuringAnExclusiveOperation(t *testing.T) {
+	app, path, _ := externalSessionTestApplication(t)
+	appendExternalSessionReply(t, path, "external", "")
+	refresh := func() error {
+		view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/sidebar?no_session=1", nil), false)
+		if err != nil {
+			return err
+		}
+		if !view.ExternalFollow[path] || view.Unread[path] {
+			t.Fatalf("external state lost: external=%v, unread=%v", view.ExternalFollow, view.Unread)
+		}
+		return nil
+	}
+	if err := refresh(); err != nil {
+		t.Fatal(err)
+	}
+	appendExternalSessionReply(t, path, "external-latest", "external")
+	if err := app.synchronizer.WithExclusiveOperation(path, refresh); err != nil {
+		t.Fatal(err)
+	}
+	if count := app.gatewayState.ExternalResponseCounts()[path]; count != 2 {
+		t.Fatalf("external response boundary = %d, want 2", count)
+	}
+}
+
+func TestSidebarObservationDoesNotBlockPendingSessions(t *testing.T) {
+	app, actual, _ := externalSessionTestApplication(t)
+	path := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
+	app.pendingSessions.Remember(path, app.config.SessionsRoot)
+	appendExternalSessionReply(t, actual, "external", "")
+	view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Selected == nil || view.Selected.Path != path || view.SessionSyncBlocked {
+		t.Fatalf("pending session selection = %#v, blocked = %t", view.Selected, view.SessionSyncBlocked)
+	}
+	if state := app.synchronizer.KnownBlocked(path); state != nil {
+		t.Fatalf("pending session was inspected before its file existed: %#v", state)
+	}
+	if !view.ExternalFollow[actual] {
+		t.Fatal("pending alias without a client deferred observation of disk session")
+	}
+}
+
+func TestSidebarResolvesOwnedPendingAliasesBeforeObservingDiskSessions(t *testing.T) {
+	for _, unavailable := range []string{"unreported", "rpc lane busy", "remap busy", "resolved"} {
+		t.Run(unavailable, func(t *testing.T) {
+			app, path, client := externalSessionTestApplication(t)
+			pending := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
+			now := time.Now()
+			app.rpcClients = rpc.NewRegistry(nil, func() time.Time { return now })
+			app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, app.sessionCache, app.rpcClients)
+			app.pendingSessions.Remember(pending, app.config.SessionsRoot)
+			if err := app.rpcClients.Register(pending, client); err != nil {
+				t.Fatal(err)
+			}
+			now = now.Add(time.Hour)
+			reported := map[string]any{"data": map[string]any{"sessionFile": path}}
+			if unavailable != "unreported" {
+				client.state = reported
+			}
+			target := "http://app.test/sidebar?no_session=1"
+			poll := func() error {
+				view, err := app.preparePage(httptest.NewRequest(http.MethodGet, target, nil), false)
+				if err != nil {
+					return err
+				}
+				if view.ExternalFollow[path] || app.synchronizer.KnownBlocked(path) != nil {
+					t.Fatalf("managed append classified as external: %v", view.ExternalFollow)
+				}
+				if _, recorded := app.gatewayState.ExternalResponseCounts()[path]; recorded {
+					t.Fatal("managed reply recorded as an external response")
+				}
+				return nil
+			}
+			parent := ""
+			for _, id := range []string{"managed-first", "managed-second"} {
+				appendExternalSessionReply(t, path, id, parent)
+				parent = id
+				client.position = rpc.SessionEntries{Known: true, LeafID: id, Entries: []map[string]any{{"id": id}}}
+				var err error
+				switch unavailable {
+				case "rpc lane busy":
+					err = app.rpcClients.WithExistingClient(context.Background(), pending, false, func(rpc.RPCClient) error { return poll() })
+				case "remap busy":
+					err = app.rpcClients.WithActiveClient(context.Background(), pending, false, func(rpc.RPCClient) error { return poll() })
+				default:
+					err = poll()
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Selecting the alias on the next poll must not identify it twice.
+				target = "http://app.test/sidebar?no_session=1&session=" + url.QueryEscape(pending)
+			}
+			wantCalls := int32(2)
+			if unavailable == "rpc lane busy" {
+				wantCalls = 0
+			} else if unavailable == "resolved" {
+				wantCalls = 1
+			}
+			if calls := client.getStateCalls.Load(); calls != wantCalls {
+				t.Fatalf("identification calls = %d, want %d", calls, wantCalls)
+			}
+			if unavailable != "resolved" {
+				if !app.rpcClients.Active(pending) || app.rpcClients.Active(path) {
+					t.Fatal("unresolved client was identified by CWD alone")
+				}
+				if idle := app.rpcClients.IdleClientPaths(time.Minute, now, nil); len(idle) != 1 || idle[0] != pending {
+					t.Fatalf("background identification refreshed idle timestamp: %v", idle)
+				}
+			}
+			client.state = reported
+			if err := poll(); err != nil {
+				t.Fatal(err)
+			}
+			if app.rpcClients.Active(pending) || !app.rpcClients.Active(path) {
+				t.Fatal("reported session was not remapped after contention cleared")
+			}
+		})
+	}
+}
+
+func TestSidebarKeepsPendingSessionManagedDuringRemapPreparation(t *testing.T) {
+	app, path, client := externalSessionTestApplication(t)
+	pending := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
+	app.pendingSessions.Remember(pending, app.config.SessionsRoot)
+	if err := app.rpcClients.Register(pending, client); err != nil {
+		t.Fatal(err)
+	}
+	entered, release, block := idleRetirementBarrier()
+	defer release()
+	var moveErr error
+	done := idleRetirementRun(t, func() {
+		moveErr = app.remapPendingRPCClient(pending, path, func() (func() error, error) {
+			block()
+			return nil, nil
+		})
+	})
+	idleRetirementWait(t, entered, "remap preparation")
+	if app.rpcClients.Active(pending) {
+		t.Fatal("pending client remained active during remap preparation")
+	}
+	refresh := func() {
+		t.Helper()
+		view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/sidebar?no_session=1", nil), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.ExternalFollow[path] || app.synchronizer.KnownBlocked(path) != nil {
+			t.Errorf("managed append classified as external: %v", view.ExternalFollow)
+		}
+		if _, recorded := app.gatewayState.ExternalResponseCounts()[path]; recorded {
+			t.Error("managed reply recorded as an external response")
+		}
+	}
+	refresh()
+	appendExternalSessionReply(t, path, "managed", "")
+	client.position = rpc.SessionEntries{Known: true, LeafID: "managed", Entries: []map[string]any{{"id": "managed"}}}
+	refresh()
+	release()
+	idleRetirementWait(t, done, "remap completion")
+	if moveErr != nil {
+		t.Fatal(moveErr)
+	}
+	refresh()
+	if app.rpcClients.Client(path) != client || app.rpcClients.Active(pending) {
+		t.Fatal("background refresh closed or lost the remapped client")
+	}
+}
+
+func TestSidebarDoesNotQueryUnownedPendingAliases(t *testing.T) {
+	app, path, client := externalSessionTestApplication(t)
+	pending := filepath.Join(app.config.SessionsRoot, "unowned.jsonl")
+	client.state = map[string]any{"data": map[string]any{"sessionFile": path}}
+	app.pendingSessions.Remember(pending, app.config.SessionsRoot)
+	if err := app.rpcClients.Register(pending, client); err != nil {
+		t.Fatal(err)
+	}
+	app.ownershipStore = nil
+	app.ownsSession = func(_ *http.Request, candidate string) bool { return candidate == path }
+	appendExternalSessionReply(t, path, "external", "")
+	view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/sidebar?no_session=1", nil), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := client.getStateCalls.Load(); calls != 0 {
+		t.Fatalf("queried unowned pending client %d times", calls)
+	}
+	if !view.ExternalFollow[path] {
+		t.Fatal("unowned pending alias deferred observation of owned disk session")
 	}
 }
 
@@ -100,6 +292,7 @@ func TestTakeoverClearsUnobservedExternalRepliesButNewRepliesBecomeUnread(t *tes
 	}
 
 	appendExternalSessionReply(t, path, "managed", "external-latest")
+	client.position = rpc.SessionEntries{Known: true, LeafID: "managed", Entries: []map[string]any{{"id": "managed"}}}
 	view, err = app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/sidebar?no_session=1", nil), false)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +368,8 @@ func externalSessionTestApplication(t *testing.T) (*application, string, *remapC
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true); err != nil {
+	// Seed observation through the sidebar only; never open the conversation.
+	if _, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/sidebar?no_session=1", nil), false); err != nil {
 		t.Fatal(err)
 	}
 	return app, path, client

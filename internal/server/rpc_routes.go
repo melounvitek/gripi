@@ -294,7 +294,7 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 	}
 	if cwd, ok := app.pendingSessions.CWD(path); ok && app.rpcClients.Active(path) {
 		var state map[string]any
-		if app.rpcClients.WithExistingClient(ctx, path, true, func(client rpc.RPCClient) error { var err error; state, err = client.GetState(ctx); return err }) == nil {
+		if app.rpcClients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error { var err error; state, err = client.GetState(ctx); return err }) == nil {
 			reported := sessionFileFrom(state)
 			if reported != "" {
 				if session, ok := store.Session(reported); ok && session.CWD == cwd {
@@ -322,7 +322,7 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 			continue
 		}
 		var state map[string]any
-		err := app.rpcClients.WithExistingClient(ctx, pending.Path, true, func(client rpc.RPCClient) error {
+		err := app.rpcClients.WithExistingClient(ctx, pending.Path, false, func(client rpc.RPCClient) error {
 			var requestErr error
 			state, requestErr = client.GetState(ctx)
 			return requestErr
