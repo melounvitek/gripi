@@ -134,7 +134,7 @@
     .composer { position: sticky; bottom: 0; padding: 0.75rem 1.5rem 1rem; border-top: 1px solid var(--border); background: #1e1e24f0; backdrop-filter: blur(8px); }
     .pending-queue { display: flex; align-items: flex-start; gap: 0.6rem; margin-bottom: 0.6rem; }
     .pending-messages { display: grid; flex: 1; min-width: 0; gap: 0.25rem; max-height: 7rem; overflow-y: auto; }
-    .clear-queue-button { flex-shrink: 0; min-height: 44px; min-width: 44px; font-size: 0.75rem; }
+    button.clear-queue-button { flex-shrink: 0; width: 44px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 1.2rem; line-height: 1; letter-spacing: 0; }
     .clear-queue-error { color: var(--danger); font-size: 0.8rem; margin: 0 0 0.6rem; }
     .pending-message { color: var(--muted); font-family: var(--mono); font-size: 0.72rem; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
     .pending-message--steering::before { content: "↳ "; color: var(--accent); }

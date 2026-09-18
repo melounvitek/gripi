@@ -11,13 +11,18 @@ test("Clear queue confirms on the first mobile tap with a 44px target", async ({
     await prepareClearQueue(page, sessions.clearQueueMobile, true);
     await attachClearQueueDraft(page);
     const clear = page.getByRole("button", { name: "Clear queue", exact: true });
+    await expect(clear).toHaveText("×");
+    await expect(clear).toHaveCSS("border-top-width", "0px");
+    await expect(clear).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     const bounds = await clear.boundingBox();
     expect(bounds).not.toBeNull();
-    expect(bounds.width).toBeGreaterThanOrEqual(44);
+    expect(bounds.width).toBe(44);
     expect(bounds.height).toBeGreaterThanOrEqual(44);
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(page.viewportSize().width);
-    await test.info().attach("clear-queue-mobile", { body: await page.screenshot(), contentType: "image/png" });
+    const screenshot = test.info().outputPath("clear-queue-mobile.png");
+    await page.screenshot({ path: screenshot });
+    await test.info().attach("clear-queue-mobile", { path: screenshot, contentType: "image/png" });
     const requests = [];
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === "/clear_queue") requests.push(request);
