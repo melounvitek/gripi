@@ -7,6 +7,7 @@ import (
 	"io"
 	"reflect"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -166,6 +167,139 @@ func TestClearQueueSerializesWithInFlightCompactionHandoff(t *testing.T) {
 			if count != 0 || bytes != 0 {
 				t.Fatalf("queue accounting after clear = %d, %d", count, bytes)
 			}
+		})
+	}
+}
+
+func TestClearQueueRefreshesExpiredCompactionFlush(t *testing.T) {
+	for _, scenario := range []struct {
+		name         string
+		willRetry    bool
+		timeout      bool
+		startup      bool
+		clearOutcome string
+	}{
+		{name: "completed"},
+		{name: "auto_retry", willRetry: true},
+		{name: "completed_timeout", timeout: true},
+		{name: "auto_retry_timeout", willRetry: true, timeout: true},
+		{name: "completed_startup", startup: true},
+		{name: "auto_retry_startup", willRetry: true, startup: true},
+		{name: "clear_rejected", willRetry: true, clearOutcome: "rejected"},
+		{name: "clear_timeout", willRetry: true, clearOutcome: "timeout"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				willRetry := scenario.willRetry
+				client, stdout, commands := queueTestClient(t, 10*time.Second)
+				workerReady, startWorker := make(chan struct{}), make(chan struct{})
+				if scenario.startup {
+					client.eventObserver = func(_ *Client, event map[string]any) {
+						if event["type"] == "compaction_end" {
+							close(workerReady)
+							<-startWorker
+						}
+					}
+				}
+				writeRecord(t, stdout, map[string]any{"type": "compaction_start"})
+				synctest.Wait()
+				queueDeferred(t, client, "in flight", "steer")
+				queueDeferred(t, client, "discard me", "followUp")
+				writeRecord(t, stdout, map[string]any{"type": "compaction_end", "willRetry": willRetry})
+				firstKind := "prompt"
+				if willRetry {
+					firstKind = "steer"
+				}
+				var first map[string]any
+				if scenario.startup {
+					<-workerReady // The active flag is published, but the worker has not started.
+				} else {
+					first = nextQueueCommand(t, commands, firstKind)
+				}
+				synctest.Wait()
+				time.Sleep(time.Second)
+				result := startClearQueue(t, client, context.Background())
+				synctest.Wait() // Clear is waiting behind any in-flight handoff.
+				if first != nil {
+					writeRecord(t, stdout, map[string]any{"type": "response", "id": first["id"], "success": true})
+				}
+				clear := nextQueueCommand(t, commands, "clear_queue")
+				queueDeferred(t, client, "new steer", "steer")
+				queueDeferred(t, client, "new follow-up", "followUp")
+				if scenario.startup {
+					close(startWorker)
+				}
+				synctest.Wait()
+				time.Sleep(9 * time.Second) // The original flush deadline, but not clear's.
+				synctest.Wait()
+
+				cursor := client.EventSequence()
+				writeRecord(t, stdout, map[string]any{"type": "queue_update", "steering": []any{}, "followUp": []any{}})
+				synctest.Wait()
+				if client.EventSequence() != cursor+1 {
+					t.Fatal("stdout stalled behind clear")
+				}
+				if got := client.LiveSnapshot().QueuedMessages; !reflect.DeepEqual(got, map[string][]string{"steering": {"new steer"}, "followUp": {"new follow-up"}}) {
+					t.Fatalf("queue during clear = %#v", got)
+				}
+				if scenario.clearOutcome == "timeout" {
+					time.Sleep(time.Second)
+					synctest.Wait()
+					var timeout *RequestTimeoutError
+					if got := awaitClearQueue(t, result); !errors.As(got.err, &timeout) || !timeout.Accepted {
+						t.Fatalf("clear timeout = %#v, %v", got.response, got.err)
+					}
+					writeRecord(t, stdout, map[string]any{"type": "response", "id": clear["id"], "success": false})
+				} else {
+					success := scenario.clearOutcome != "rejected"
+					writeRecord(t, stdout, map[string]any{"type": "response", "id": clear["id"], "success": success})
+					if got := awaitClearQueue(t, result); got.err != nil || got.response["success"] != success {
+						t.Fatalf("clear result = %#v, %v", got.response, got.err)
+					}
+				}
+				for _, expected := range []struct{ message, behavior, retryCommand string }{
+					{"new steer", "steer", "steer"},
+					{"new follow-up", "followUp", "follow_up"},
+				} {
+					kind := "prompt"
+					var behavior any = expected.behavior
+					if willRetry {
+						kind, behavior = expected.retryCommand, nil
+					}
+					command := nextQueueCommand(t, commands, kind)
+					if command["message"] != expected.message || command["streamingBehavior"] != behavior {
+						t.Fatalf("handoff = %#v, want %q (%v)", command, expected.message, behavior)
+					}
+					if scenario.startup && expected.behavior == "steer" {
+						// Starting the worker must not overwrite clear's extension.
+						time.Sleep(2 * time.Second)
+					}
+					if scenario.timeout && expected.behavior == "followUp" {
+						synctest.Wait()
+						time.Sleep(11 * time.Second) // Clear's deadline plus one fresh flush budget.
+						synctest.Wait()
+						if client.DeferringCompactionPrompts() {
+							t.Fatal("refreshed flush exceeded its bounded budget")
+						}
+						// A late rejection must not resurrect an accepted, timed-out handoff.
+						writeRecord(t, stdout, map[string]any{"type": "response", "id": command["id"], "success": false})
+					} else {
+						writeRecord(t, stdout, map[string]any{"type": "response", "id": command["id"], "success": true})
+					}
+				}
+				synctest.Wait()
+				select {
+				case command := <-commands:
+					t.Fatalf("unexpected extra handoff: %#v", command)
+				default:
+				}
+				client.mu.Lock()
+				count, bytes, flushing := client.compactionFollowUpCount, client.compactionFollowUpBytes, client.flushingCompactionFollowUps
+				client.mu.Unlock()
+				if count != 0 || bytes != 0 || flushing || len(client.LiveSnapshot().QueuedMessages) != 0 {
+					t.Fatalf("queue after delivery: count=%d, bytes=%d, flushing=%v", count, bytes, flushing)
+				}
+			})
 		})
 	}
 }

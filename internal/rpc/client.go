@@ -216,6 +216,7 @@ type Client struct {
 	compactionFollowUpCount     int
 	compactionFollowUpBytes     int
 	flushingCompactionFollowUps bool
+	compactionFlushDeadline     time.Time
 	reloading                   bool
 
 	sampledToolUpdates map[string]time.Time
@@ -503,6 +504,11 @@ func (client *Client) ClearQueue(ctx context.Context) (map[string]any, error) {
 	}
 	defer func() { client.queueLane <- struct{}{} }()
 	client.mu.Lock()
+	if client.flushingCompactionFollowUps {
+		// Keep the existing worker (and its auto-retry mode) alive through
+		// clear, with a fresh bounded budget for messages enqueued after it.
+		client.compactionFlushDeadline = deadline.Add(client.requestTimeout)
+	}
 	client.compactionFollowUps = nil
 	client.compactionFollowUpCount = 0
 	client.compactionFollowUpBytes = 0
@@ -1136,6 +1142,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		if (typeName == "compaction" || typeName == "compaction_end") && !client.flushingCompactionFollowUps && len(client.compactionFollowUps) > 0 {
 			flushQueuedPrompts = true
 			client.flushingCompactionFollowUps = true
+			client.compactionFlushDeadline = client.now().Add(client.requestTimeout)
 			compactionWillRetry = typeName == "compaction_end" && response["willRetry"] == true
 		}
 		client.updateActiveToolsLocked(response, serializedBytes)
@@ -2208,6 +2215,7 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		if !client.compacting && !client.flushingCompactionFollowUps && len(client.compactionFollowUps) > 0 {
 			retry = true
 			client.flushingCompactionFollowUps = true
+			client.compactionFlushDeadline = client.now().Add(client.requestTimeout)
 		}
 		waiting := client.flushingCompactionFollowUps || (client.compacting && len(client.compactionFollowUps) > 0)
 		client.mu.Unlock()
@@ -2237,15 +2245,22 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 	}
 }
 func (client *Client) flushCompactionPrompts(compactionWillRetry bool) {
-	deadline := client.now().Add(client.requestTimeout)
 	for {
+		client.mu.Lock()
+		deadline := client.compactionFlushDeadline
+		client.mu.Unlock()
 		if err := client.acquireQueueLane(context.Background(), deadline, "prompt"); err != nil {
 			client.mu.Lock()
+			if isTimeout(err) && client.compactionFlushDeadline.After(deadline) {
+				client.mu.Unlock()
+				continue
+			}
 			client.flushingCompactionFollowUps = false
 			client.mu.Unlock()
 			return
 		}
 		client.mu.Lock()
+		deadline = client.compactionFlushDeadline
 		if len(client.compactionFollowUps) == 0 {
 			client.flushingCompactionFollowUps = false
 			client.mu.Unlock()
