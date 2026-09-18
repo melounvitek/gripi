@@ -14,57 +14,72 @@ test.describe("touch Quote selection", () => {
     test(`quote ${rendering} text exactly once on the first tap and allow another selection`, async ({ page }, testInfo) => {
       const title = titles[testInfo.project.name][rendering];
       await openQuoteSession(page, title);
-      if (rendering === "live") {
-        const responses = message(page, "assistant", replies.standard);
-        const previousCount = await responses.count();
-        await sendPrompt(page, prompts.standard);
-        await expectRunFinished(page);
-        await expect(responses).toHaveCount(previousCount + 1);
+      const session = await page.locator('.prompt-form [name="session"]').inputValue();
+      try {
+        if (rendering === "live") {
+          const responses = message(page, "assistant", replies.standard);
+          const previousCount = await responses.count();
+          await sendPrompt(page, prompts.standard);
+          await expectRunFinished(page);
+          await expect(responses).toHaveCount(previousCount + 1);
+          // Prevent idle retirement from replacing the live DOM during selection.
+          await page.getByLabel("Message to Pi").fill(prompts.abortStart);
+          await page.locator(".send-button").tap();
+          await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+          await expect(responses.last()).toHaveClass(/message--live/);
+        }
+        const text = rendering === "live" ? replies.standard : `Fixture answer for ${title}`;
+        const source = message(page, "assistant", text).last();
+        const body = source.locator(".message-body");
+        const selectedText = rendering === "live" ? "browser response" : "Fixture answer";
+        const secondText = rendering === "live" ? "complete." : title;
+        const composer = page.getByLabel("Message to Pi");
+        const draft = "Keep this mobile draft  ";
+        await composer.fill(draft);
+        await page.locator("#image-input").setInputFiles({ name: "touch-quote.png", mimeType: "image/png", buffer: await page.screenshot() });
+        const attachment = page.locator(".attachment-tray");
+        await expect(attachment).toContainText("touch-quote.png");
+        const userMessages = page.locator('article[data-role="user"]');
+        const initialCount = await userMessages.count();
+        const requests = recordSendRequests(page);
+
+        await selectMobileMessageText(body, selectedText);
+        const quote = page.getByRole("button", { name: "Quote selection", exact: true });
+        await expect(quote).toBeVisible();
+        await expect(quote).toHaveAttribute("data-quote-selection");
+        expect(await page.evaluate(() => window.getSelection().toString())).toBe(selectedText);
+        await expect(composer).toHaveValue(draft);
+        await expectTouchQuoteBounds(page, quote);
+
+        // Simulate successive selection-handle adjustments, without lifting a DOM pointer.
+        await selectMobileMessageText(body, secondText);
+        await selectMobileMessageText(body, text);
+        await expect(quote).toBeVisible();
+        expect(await page.evaluate(() => window.getSelection().toString())).toBe(text);
+        await quote.tap();
+        const firstDraft = `${draft}\n\n> ${text}\n\n`;
+        await expect(composer).toHaveValue(firstDraft);
+        await expect(composer).toBeFocused();
+        await expect(attachment).toContainText("touch-quote.png");
+        await expect(userMessages).toHaveCount(initialCount);
+        expect(requests).toHaveLength(0);
+
+        await selectMobileMessageText(body, secondText);
+        await expect(quote).toBeVisible();
+        expect(await page.evaluate(() => window.getSelection().toString())).toBe(secondText);
+        await quote.tap();
+        await expect(composer).toHaveValue(`${firstDraft}> ${secondText}\n\n`);
+        await expect(composer).toBeFocused();
+        await expect(attachment).toContainText("touch-quote.png");
+        await expect(userMessages).toHaveCount(initialCount);
+        expect(requests).toHaveLength(0);
+        if (rendering === "live") await expect(source).toHaveClass(/message--live/);
+      } finally {
+        if (rendering === "live") {
+          const response = await page.request.post("/abort", { form: { session }, headers: { Accept: "application/json" } });
+          expect(response.ok()).toBe(true);
+        }
       }
-      const text = rendering === "live" ? replies.standard : `Fixture answer for ${title}`;
-      const body = message(page, "assistant", text).last().locator(".message-body");
-      const selectedText = rendering === "live" ? "browser response" : "Fixture answer";
-      const secondText = rendering === "live" ? "complete." : title;
-      const composer = page.getByLabel("Message to Pi");
-      const draft = "Keep this mobile draft  ";
-      await composer.fill(draft);
-      await page.locator("#image-input").setInputFiles({ name: "touch-quote.png", mimeType: "image/png", buffer: await page.screenshot() });
-      const attachment = page.locator(".attachment-tray");
-      await expect(attachment).toContainText("touch-quote.png");
-      const userMessages = page.locator('article[data-role="user"]');
-      const initialCount = await userMessages.count();
-      const requests = recordSendRequests(page);
-
-      await selectMobileMessageText(body, selectedText);
-      const quote = page.getByRole("button", { name: "Quote selection", exact: true });
-      await expect(quote).toBeVisible();
-      await expect(quote).toHaveAttribute("data-quote-selection");
-      expect(await page.evaluate(() => window.getSelection().toString())).toBe(selectedText);
-      await expect(composer).toHaveValue(draft);
-      await expectTouchQuoteBounds(page, quote);
-
-      // Simulate successive selection-handle adjustments, without lifting a DOM pointer.
-      await selectMobileMessageText(body, secondText);
-      await selectMobileMessageText(body, text);
-      await expect(quote).toBeVisible();
-      expect(await page.evaluate(() => window.getSelection().toString())).toBe(text);
-      await quote.tap();
-      const firstDraft = `${draft}\n\n> ${text}\n\n`;
-      await expect(composer).toHaveValue(firstDraft);
-      await expect(composer).toBeFocused();
-      await expect(attachment).toContainText("touch-quote.png");
-      await expect(userMessages).toHaveCount(initialCount);
-      expect(requests).toHaveLength(0);
-
-      await selectMobileMessageText(body, secondText);
-      await expect(quote).toBeVisible();
-      expect(await page.evaluate(() => window.getSelection().toString())).toBe(secondText);
-      await quote.tap();
-      await expect(composer).toHaveValue(`${firstDraft}> ${secondText}\n\n`);
-      await expect(composer).toBeFocused();
-      await expect(attachment).toContainText("touch-quote.png");
-      await expect(userMessages).toHaveCount(initialCount);
-      expect(requests).toHaveLength(0);
     });
   }
 
