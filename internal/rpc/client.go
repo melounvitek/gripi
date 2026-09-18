@@ -167,6 +167,7 @@ type Client struct {
 	eventObserver        func(*Client, map[string]any)
 
 	writeLane  chan struct{}
+	queueLane  chan struct{}
 	closeMu    sync.Mutex
 	closed     bool
 	readerDone chan struct{}
@@ -330,7 +331,7 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser,
 		processTermTimeout: options.ProcessTermTimeout, processKillTimeout: options.ProcessKillTimeout,
 		requestTimeout: options.RequestTimeout, abortTimeout: options.AbortTimeout, fallbackRPCLineBytes: options.FallbackRPCLineBytes, treeBridgeTimeout: options.TreeBridgeTimeout,
 		clock: options.Clock, now: options.Now, diagnostics: options.Diagnostics, eventObserver: options.EventObserver,
-		writeLane: make(chan struct{}, 1), readerDone: make(chan struct{}), stderrDone: make(chan struct{}),
+		writeLane: make(chan struct{}, 1), queueLane: make(chan struct{}, 1), readerDone: make(chan struct{}), stderrDone: make(chan struct{}),
 		pending: make(map[string]chan responseResult), bridgePending: make(map[string]chan string),
 		eventBufferLimit: options.EventBufferLimit, eventBufferBytes: options.EventBufferBytes, coalesced: make(map[string]*replayEntry),
 		activeToolEvents: make(map[string]map[string]any), queuedMessages: map[string][]string{"steering": {}, "followUp": {}},
@@ -338,6 +339,7 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser,
 		completedBashEvents: make(map[string]map[string]any), sampledToolUpdates: make(map[string]time.Time), sampleInterval: options.OversizedToolUpdateSampleInterval,
 	}
 	client.writeLane <- struct{}{}
+	client.queueLane <- struct{}{}
 	go client.readStdout()
 	if stderr != nil {
 		go client.readStderr()
@@ -491,6 +493,55 @@ func promptPayload(message string, images []PromptImage) map[string]any {
 	}
 	return payload
 }
+
+// ClearQueue discards gateway-deferred messages even if native clearing fails.
+// Messages enqueued after the local discard are not part of this clear.
+func (client *Client) ClearQueue(ctx context.Context) (map[string]any, error) {
+	deadline := client.now().Add(client.requestTimeout)
+	if err := client.acquireQueueLane(ctx, deadline, "clear_queue"); err != nil {
+		return nil, err
+	}
+	defer func() { client.queueLane <- struct{}{} }()
+	client.mu.Lock()
+	client.compactionFollowUps = nil
+	client.compactionFollowUpCount = 0
+	client.compactionFollowUpBytes = 0
+	client.appendQueuedMessagesEventLocked()
+	client.mu.Unlock()
+	remaining := deadline.Sub(client.now())
+	if remaining <= 0 {
+		return nil, &RequestTimeoutError{Command: "clear_queue"}
+	}
+	return client.request(ctx, "clear_queue", client.nextID("clear_queue"), nil, remaining, nil)
+}
+
+// The queue lane serializes clear with each deferred RPC, including rejection
+// handling, without blocking the stdout reader or new deferred enqueues.
+func (client *Client) acquireQueueLane(ctx context.Context, deadline time.Time, command string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	remaining := deadline.Sub(client.now())
+	if remaining <= 0 {
+		return &RequestTimeoutError{Command: command}
+	}
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-client.queueLane:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return &RequestTimeoutError{Command: command}
+	case <-client.readerDone:
+		return client.readerFailure("before accepting command")
+	}
+}
+
 func (client *Client) Abort(ctx context.Context) (map[string]any, error) {
 	return client.request(ctx, "abort", client.nextID("abort"), nil, client.abortTimeout, nil)
 }
@@ -1030,10 +1081,9 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		delete(client.sampledToolUpdates, stringValue(response["toolCallId"]))
 	}
 
-	var queuedPrompts []map[string]any
+	var flushQueuedPrompts bool
 	var compactionWillRetry bool
 	var observed map[string]any
-	compactionQueueChanged := false
 	client.mu.Lock()
 	storeAsEvent := false
 	if key := internalBridgeStatusKey(response); key != "" {
@@ -1084,11 +1134,9 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		}
 		client.updateExtensionUILocked(response)
 		if (typeName == "compaction" || typeName == "compaction_end") && !client.flushingCompactionFollowUps && len(client.compactionFollowUps) > 0 {
-			queuedPrompts = client.compactionFollowUps
-			client.compactionFollowUps = nil
+			flushQueuedPrompts = true
 			client.flushingCompactionFollowUps = true
 			compactionWillRetry = typeName == "compaction_end" && response["willRetry"] == true
-			compactionQueueChanged = true
 		}
 		client.updateActiveToolsLocked(response, serializedBytes)
 		client.discardSupersededLocked(response)
@@ -1099,9 +1147,6 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 		} else {
 			client.discardReplayLocked()
 		}
-		if compactionQueueChanged {
-			client.appendQueuedMessagesEventLocked()
-		}
 		if client.eventObserver != nil {
 			observed = response
 		}
@@ -1110,8 +1155,8 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 	if observed != nil {
 		client.eventObserver(client, observed)
 	}
-	if len(queuedPrompts) > 0 {
-		go client.flushCompactionPrompts(queuedPrompts, compactionWillRetry)
+	if flushQueuedPrompts {
+		go client.flushCompactionPrompts(compactionWillRetry)
 	}
 }
 
@@ -2158,17 +2203,16 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		var retry []map[string]any
+		retry := false
 		client.mu.Lock()
 		if !client.compacting && !client.flushingCompactionFollowUps && len(client.compactionFollowUps) > 0 {
-			retry, client.compactionFollowUps = client.compactionFollowUps, nil
+			retry = true
 			client.flushingCompactionFollowUps = true
-			client.appendQueuedMessagesEventLocked()
 		}
 		waiting := client.flushingCompactionFollowUps || (client.compacting && len(client.compactionFollowUps) > 0)
 		client.mu.Unlock()
-		if len(retry) > 0 {
-			go client.flushCompactionPrompts(retry, false)
+		if retry {
+			go client.flushCompactionPrompts(false)
 		}
 		if !waiting {
 			return nil
@@ -2192,76 +2236,70 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		}
 	}
 }
-func (client *Client) flushCompactionPrompts(items []map[string]any, compactionWillRetry bool) {
+func (client *Client) flushCompactionPrompts(compactionWillRetry bool) {
 	deadline := client.now().Add(client.requestTimeout)
 	for {
-		for index, payload := range items {
-			remaining := deadline.Sub(client.now())
-			if remaining <= 0 {
-				client.finishFailedCompactionFlush(items[index:])
-				return
-			}
-			command := "prompt"
-			value := payload
-			if compactionWillRetry {
-				command = "steer"
-				if payload["streamingBehavior"] == "followUp" {
-					command = "follow_up"
-				}
-				value = cloneMap(payload)
-				delete(value, "streamingBehavior")
-			}
-			response, err := client.request(context.Background(), command, client.nextID(command), value, remaining, nil)
-			if err != nil {
-				var timeout *RequestTimeoutError
-				if errors.As(err, &timeout) && timeout.Accepted {
-					client.dropUncertainCompactionPrompt(payload, items[index+1:])
-				} else {
-					client.finishFailedCompactionFlush(items[index:])
-				}
-				return
-			}
-			if response["success"] != true {
-				client.finishFailedCompactionFlush(items[index:])
-				return
-			}
+		if err := client.acquireQueueLane(context.Background(), deadline, "prompt"); err != nil {
 			client.mu.Lock()
-			client.compactionFollowUpCount--
-			client.compactionFollowUpBytes -= promptPayloadSize(payload)
+			client.flushingCompactionFollowUps = false
 			client.mu.Unlock()
+			return
 		}
 		client.mu.Lock()
 		if len(client.compactionFollowUps) == 0 {
 			client.flushingCompactionFollowUps = false
 			client.mu.Unlock()
+			client.queueLane <- struct{}{}
 			return
 		}
-		items, client.compactionFollowUps = client.compactionFollowUps, nil
+		// Only detach the handoff protected by queueLane. ClearQueue can
+		// discard every remaining message between handoffs.
+		payload := client.compactionFollowUps[0]
+		client.compactionFollowUps[0] = nil
+		client.compactionFollowUps = client.compactionFollowUps[1:]
 		client.appendQueuedMessagesEventLocked()
 		client.mu.Unlock()
-	}
-}
 
-func (client *Client) finishFailedCompactionFlush(items []map[string]any) {
-	client.mu.Lock()
-	client.compactionFollowUps = append(items, client.compactionFollowUps...)
-	client.flushingCompactionFollowUps = false
-	if len(client.compactionFollowUps) > 0 {
-		client.appendQueuedMessagesEventLocked()
+		command := "prompt"
+		value := payload
+		if compactionWillRetry {
+			command = "steer"
+			if payload["streamingBehavior"] == "followUp" {
+				command = "follow_up"
+			}
+			value = cloneMap(payload)
+			delete(value, "streamingBehavior")
+		}
+		var response map[string]any
+		var err error
+		if remaining := deadline.Sub(client.now()); remaining > 0 {
+			response, err = client.request(context.Background(), command, client.nextID(command), value, remaining, nil)
+		} else {
+			err = &RequestTimeoutError{Command: command}
+		}
+		var timeout *RequestTimeoutError
+		drop := (err == nil && response["success"] == true) || (errors.As(err, &timeout) && timeout.Accepted)
+		client.mu.Lock()
+		// readerStopped may already have discarded the queue and its counters.
+		if client.compactionFollowUpCount > 0 {
+			if drop {
+				client.compactionFollowUpCount--
+				client.compactionFollowUpBytes -= promptPayloadSize(payload)
+			} else {
+				client.compactionFollowUps = append([]map[string]any{payload}, client.compactionFollowUps...)
+				client.appendQueuedMessagesEventLocked()
+			}
+		}
+		stop := err != nil || response["success"] != true || len(client.compactionFollowUps) == 0
+		if stop {
+			client.flushingCompactionFollowUps = false
+		}
+		client.mu.Unlock()
+		client.queueLane <- struct{}{}
+		if stop {
+			return
+		}
 	}
-	client.mu.Unlock()
-}
-
-func (client *Client) dropUncertainCompactionPrompt(payload map[string]any, remaining []map[string]any) {
-	client.mu.Lock()
-	client.compactionFollowUpCount--
-	client.compactionFollowUpBytes -= promptPayloadSize(payload)
-	client.compactionFollowUps = append(remaining, client.compactionFollowUps...)
-	client.flushingCompactionFollowUps = false
-	if len(client.compactionFollowUps) > 0 {
-		client.appendQueuedMessagesEventLocked()
-	}
-	client.mu.Unlock()
 }
 
 func (client *Client) ExtensionUIResponse(ctx context.Context, id string, value *string, confirmed *bool, cancelled bool) (map[string]any, error) {
