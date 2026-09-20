@@ -215,11 +215,11 @@ async function expectCompactRow(link, touch) {
   const age = row.locator(".session-meta");
   await expect(age).toHaveText(/^(now|\d+[mhd])$/);
   await expect(link).toHaveAttribute("title", / · .+ · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
-  const rowBox = await row.boundingBox();
-  const linkBox = await link.boundingBox();
-  const titleBox = await title.boundingBox();
-  const ageBox = await age.boundingBox();
-  const actionsBox = await actions.boundingBox();
+  // Measure in one frame so the mobile drawer transition cannot skew relative positions.
+  const [rowBox, linkBox, titleBox, ageBox, actionsBox] = await row.evaluate((element) =>
+    [element, ...["a.session", ".session-title", ".session-meta", "[data-session-actions-toggle]"]
+      .map((selector) => element.querySelector(selector))]
+      .map((control) => control.getBoundingClientRect().toJSON()));
   expect(rowBox.height).toBeLessThanOrEqual(touch ? 46 : 36);
   expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(ageBox.x);
   expect(ageBox.x + ageBox.width).toBeLessThanOrEqual(actionsBox.x);
