@@ -100,6 +100,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	defer releasePrompt()
+	// Deletion may have completed after actionSessionPath validated the request.
+	if !app.commandSessionAvailable(path) {
+		http.NotFound(response, request)
+		return
+	}
 	if command, bash := prompts.ParseBashCommand(message, request.FormValue("bash_mode")); bash {
 		if len(imageFiles) > 0 {
 			app.writeRequestError(response, request, http.StatusBadRequest, "Images cannot be attached to bash commands")
@@ -750,20 +755,36 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 	if !parseForm(response, request) {
 		return
 	}
-	session, ok := app.persistedActionSession(response, request, request.FormValue("session"))
+	path, ok := app.actionSessionPath(response, request, request.FormValue("session"), false)
 	if !ok {
 		return
 	}
 	app.pendingRemapMu.Lock()
 	defer app.pendingRemapMu.Unlock()
-	unlock := app.sessionMutationLocks.Lock(session.Path)
+	path, ok = app.resolveActionPendingPath(response, request, path)
+	if !ok {
+		return
+	}
+	unlock := app.sessionMutationLocks.Lock(path)
 	defer unlock()
-
-	if reason := app.deleteSessionBlockReason(request.FormValue("current_session"), session.Path); reason != "" {
+	_, releaseDeletion, err := app.promptAdmissions.navigate(func() (string, error) { return path, nil })
+	if app.writeRPCError(response, err) {
+		return
+	}
+	defer releaseDeletion()
+	if !app.knownOrPendingSession(request, path) {
+		http.NotFound(response, request)
+		return
+	}
+	currentPath, ok := app.resolveActionPendingPath(response, request, request.FormValue("current_session"))
+	if !ok {
+		return
+	}
+	if reason := app.deleteSessionBlockReason(currentPath, path); reason != "" {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": reason})
 		return
 	}
-	method, err := app.deletePersistedSession(request, session.Path)
+	method, err := app.deleteSessionData(request, path)
 	if errors.Is(err, errDeleteRunning) || errors.Is(err, sessions.ErrSyncBusy) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Cannot delete a running session"})
 		return
@@ -772,7 +793,7 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 		writeInternalError(response, "delete session", err)
 		return
 	}
-	writeJSON(response, map[string]any{"session": session.Path, "deleted": true, "method": method})
+	writeJSON(response, map[string]any{"session": path, "deleted": true, "method": method})
 }
 
 func (app *application) persistedActionSession(response http.ResponseWriter, request *http.Request, raw string) (*sessions.Session, bool) {
@@ -807,8 +828,8 @@ func (app *application) closeDeleteSessionClient(ctx context.Context, path strin
 	if !app.rpcClients.Active(path) {
 		return nil
 	}
-	// Prompt acceptance can precede agent_start delivery. The caller holds the
-	// session's exclusive operation lock through this check, close, and deletion.
+	// Prompt acceptance can precede agent_start delivery. The caller holds both
+	// admission exclusion and the operation lock through check, close, and deletion.
 	err := app.rpcClients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error {
 		state, err := client.GetState(ctx)
 		if err != nil {
@@ -836,7 +857,7 @@ func (app *application) closeDeleteSessionClient(ctx context.Context, path strin
 	return nil
 }
 
-func (app *application) deletePersistedSession(request *http.Request, path string) (string, error) {
+func (app *application) deleteSessionData(request *http.Request, path string) (string, error) {
 	method := ""
 	err := app.synchronizer.WithExclusiveOperation(path, func() error {
 		if app.rpcClients.Busy(path) || app.rpcClients.Compacting(path) {
@@ -845,12 +866,19 @@ func (app *application) deletePersistedSession(request *http.Request, path strin
 		if err := app.closeDeleteSessionClient(request.Context(), path); err != nil {
 			return err
 		}
-		var err error
-		method, err = sessions.DeleteSessionFile(path)
-		if err == nil {
-			app.cleanupDeletedSession(request, path)
+		// Pi may not create a file until the first assistant response. Check
+		// after closing the client so any file it did persist is still deleted.
+		_, pending := app.pendingSessions.CWD(path)
+		if _, err := os.Stat(path); pending && errors.Is(err, os.ErrNotExist) {
+			method = "pending"
+		} else {
+			method, err = sessions.DeleteSessionFile(path)
+			if err != nil {
+				return err
+			}
 		}
-		return err
+		app.cleanupDeletedSession(request, path)
+		return nil
 	})
 	return method, err
 }
