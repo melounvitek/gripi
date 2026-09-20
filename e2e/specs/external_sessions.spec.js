@@ -97,6 +97,71 @@ for (const touch of [false, true]) {
       await page.screenshot({ path: testInfo.outputPath("compact-selected-session.png") });
     });
 
+    test("CLI updates leave controls, drafts, and the open sidebar intact", async ({ page, copiedSession }) => {
+      await page.goto(copiedSession.url);
+      const editor = page.getByLabel("Message to Pi");
+      await editor.fill("Unsent draft");
+      await page.evaluate(() => {
+        window.originalEditor = document.querySelector('.prompt-form textarea');
+        window.originalMessage = document.querySelector('.message');
+        window.blockingRefreshes = 0;
+        new MutationObserver((records) => {
+          if (records.some((record) => record.oldValue?.includes('session-switching')) || document.body.classList.contains('session-switching')) window.blockingRefreshes++;
+        }).observe(document.body, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+      });
+      const pending = await holdNextFragment(page);
+      await appendCLIReply(copiedSession.file, "Nonblocking CLI reply");
+      await pending.requested;
+      await expect(page.locator("body")).not.toHaveClass(/session-switching/);
+      await editor.fill("Draft edited while refreshing");
+      await openSidebar(page, touch);
+      pending.release();
+      await expect(message(page, "assistant", "Nonblocking CLI reply")).toBeAttached();
+      await expect(editor).toHaveValue("Draft edited while refreshing");
+      await expect(editor).toBeDisabled();
+      if (touch) await expect(page.locator("#mobile-session-toggle")).toBeChecked();
+      expect(await page.evaluate(() => ({
+        editor: window.originalEditor === document.querySelector('.prompt-form textarea'),
+        message: window.originalMessage === document.querySelector('.message'),
+        blockingRefreshes: window.blockingRefreshes,
+      }))).toEqual({ editor: true, message: true, blockingRefreshes: 0 });
+
+      await appendCLIReply(copiedSession.file, "Another nonblocking reply");
+      await expect(message(page, "assistant", "Another nonblocking reply")).toBeAttached();
+      if (touch) await expect(page.locator("#mobile-session-toggle")).toBeChecked();
+      expect(await page.evaluate(() => window.blockingRefreshes)).toBe(0);
+    });
+
+    test("navigation wins over a pending CLI refresh on the first activation", async ({ page, copiedSession }) => {
+      await page.goto(copiedSession.url);
+      const pending = await holdNextFragment(page);
+      await appendCLIReply(copiedSession.file, "Stale CLI reply");
+      await pending.requested;
+      await openSidebar(page, touch);
+      const link = page.getByRole("link", { name: new RegExp(sessions.marker) });
+      if (touch) await link.tap();
+      else await link.click();
+      await expect(page.getByRole("heading", { level: 1, name: sessions.marker })).toBeVisible();
+      pending.release();
+      await pending.finished;
+      await expect(page.getByRole("heading", { level: 1, name: sessions.marker })).toBeVisible();
+      await expect(message(page, "assistant", "Stale CLI reply")).toHaveCount(0);
+    });
+
+    test("failed CLI refresh keeps the page and recovers without navigation", async ({ page, copiedSession }) => {
+      await page.goto(copiedSession.url);
+      await page.evaluate(() => { window.retainedPage = true; });
+      let fail = true;
+      await page.route(/\/session_fragment(?:\?|$)/, (route) => fail ? route.fulfill({ status: 503, body: "Retry later" }) : route.continue());
+      await appendCLIReply(copiedSession.file, "Recovered CLI reply");
+      await expect(page.locator(".session-reconnect")).toHaveClass(/is-visible/);
+      await expect(page.locator("body")).not.toHaveClass(/session-switching/);
+      expect(await page.evaluate(() => window.retainedPage)).toBe(true);
+      fail = false;
+      await expect(message(page, "assistant", "Recovered CLI reply")).toBeVisible({ timeout: 15_000 });
+      expect(await page.evaluate(() => window.retainedPage)).toBe(true);
+    });
+
     test("external CLI activity stays quiet in live and reloaded sidebars until takeover", async ({ page, context, copiedSession }, testInfo) => {
       test.setTimeout(60_000);
       await context.addInitScript(() => {
@@ -229,6 +294,21 @@ async function expectCompactRow(link, touch) {
     expect(actionsBox.height).toBeGreaterThanOrEqual(44);
     expect(actionsBox.width).toBeGreaterThanOrEqual(44);
   }
+}
+
+async function holdNextFragment(page) {
+  let requested, release, finished;
+  const requestedPromise = new Promise((resolve) => { requested = resolve; });
+  const released = new Promise((resolve) => { release = resolve; });
+  const finishedPromise = new Promise((resolve) => { finished = resolve; });
+  await page.route(/\/session_fragment(?:\?|$)/, async (route) => {
+    const response = await route.fetch();
+    requested();
+    await released;
+    await route.fulfill({ response }).catch(() => {});
+    finished();
+  }, { times: 1 });
+  return { requested: requestedPromise, release, finished: finishedPromise };
 }
 
 async function appendCLIReply(file, text) {

@@ -44,6 +44,7 @@ export class ConversationController {
     this.focusedActivityTouchActive = false;
     this.focusedActivityMessageIds = new WeakMap();
     this.focusedActivityMessageSequence = 0;
+    this.messageSources = new WeakMap();
     this.focusedActivitySignature = null;
   }
 
@@ -52,6 +53,7 @@ export class ConversationController {
     this.bindingEpoch += 1;
     this.element = this.document.getElementById("conversation-scroll");
     this.liveOutput = this.document.getElementById("live-output");
+    this.rememberMessageSources(this.element);
     this.agentRunning = this.liveOutput?.dataset.agentRunning === "true";
     this.promptTextarea = promptTextarea;
     this.quoteButton = this.document.querySelector("[data-quote-selection]");
@@ -114,6 +116,48 @@ export class ConversationController {
       if (this.jumpToLatestButton.dataset.jumpTarget === "message") this.scrollToMessageBottom();
       else this.scrollToBottom("auto", { force: true });
     });
+  }
+
+  rememberMessageSources(root) {
+    root?.querySelectorAll(".message").forEach((message) => this.messageSources.set(message, message.outerHTML));
+  }
+
+  reconcileSnapshot(snapshot) {
+    this.cancelOlderHistory();
+    const previous = [...this.element.querySelectorAll(".message")];
+    const incoming = [...snapshot.querySelectorAll(".message")];
+    const bySource = new Map();
+    previous.forEach((message) => {
+      const source = this.messageSources.get(message);
+      if (!source) return;
+      if (!bySource.has(source)) bySource.set(source, []);
+      bySource.get(source).push(message);
+    });
+    const messages = incoming.map((message) => bySource.get(this.messageSources.get(message))?.shift() || message);
+    const retained = new Set(messages);
+    const removed = previous.filter((message) => !retained.has(message));
+    removed.forEach((message) => message.remove());
+    let anchor = this.liveOutput;
+    for (const message of messages.toReversed()) {
+      if (message.parentElement !== this.element || message.nextElementSibling !== anchor) this.element.insertBefore(message, anchor);
+      anchor = message;
+    }
+    this.element.querySelector(":scope > .empty")?.remove();
+    const empty = snapshot.querySelector(":scope > .empty");
+    if (empty) this.liveOutput.before(empty);
+    Object.assign(this.element.dataset, snapshot.dataset);
+    delete this.element.dataset.oldestMessageEndCursor;
+    if (!this.historyStatus() && snapshot.querySelector("[data-conversation-history-status]")) {
+      const status = snapshot.querySelector("[data-conversation-history-status]");
+      (messages[0] || this.liveOutput).before(status);
+      this.listen(status, "click", () => this.loadOlderWindow().catch(() => {}));
+    }
+    if (this.element.dataset.hasOlderMessages === "true") this.availableHistoryStatus();
+    else this.finishHistoryStatus();
+    this.historyIntersectionObserver?.disconnect();
+    this.observeHistoryStatus();
+    this.refreshFocusedActivity();
+    return removed;
   }
 
   detach() {
@@ -759,6 +803,7 @@ export class ConversationController {
     if (!this.element || !html) return;
     const template = this.document.createElement("template");
     template.innerHTML = html;
+    this.rememberMessageSources(template.content);
     enhanceMarkdownCodeBlocks(template.content, this.document);
     enhanceMessageLinks(template.content, this.document);
     const element = this.element;

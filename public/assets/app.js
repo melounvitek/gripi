@@ -1648,6 +1648,56 @@ function sessionSyncRefreshRequired(sync) {
     (renderedMode === "managed" && sync.mode === "available");
 }
 
+async function refreshExternalSession(controller, generation) {
+  const session = currentSessionPath();
+  const switchGeneration = sessionSwitchGeneration.capture();
+  const current = () => !controller.signal.aborted && generation === sessionViewGeneration &&
+    sessionSwitchGeneration.current(switchGeneration) && session === currentSessionPath();
+  const response = await fetch(sessionFragmentUrl(window.location.href), {
+    headers: { "Accept": "application/json" }, signal: controller.signal
+  });
+  if (!response.ok) throw new Error("Session refresh failed");
+  const payload = await response.json();
+  if (!current()) return;
+  if (payload.session !== session) throw new Error("Session changed during refresh");
+  const template = document.createElement("template");
+  template.innerHTML = payload.conversation_html;
+  const snapshot = template.content.querySelector("#conversation-scroll");
+  const incomingOutput = snapshot?.querySelector("#live-output");
+  if (!incomingOutput) throw new Error("Missing conversation snapshot");
+  conversationController.rememberMessageSources(snapshot);
+  enhanceMarkdownCodeBlocks(snapshot);
+  enhanceMessageLinks(snapshot);
+  await liveMessageRenderer.hydrateTerminalOutputs(snapshot, { notify: false });
+  if (!current()) return;
+
+  // Capture interaction at apply time, not when the background request started.
+  const scrollSnapshot = conversationScrollSnapshot();
+  const removed = conversationController.reconcileSnapshot(snapshot);
+  removed.forEach((message) => liveMessageRenderer.releaseMessageImageObjectURLs(message));
+  liveOutput.replaceChildren();
+  Object.assign(liveOutput.dataset, incomingOutput.dataset);
+  const banner = template.content.querySelector("[data-session-sync-banner]");
+  const previousBanner = promptForm.querySelector("[data-session-sync-banner]");
+  if (previousBanner) previousBanner.remove();
+  if (banner) promptForm.prepend(banner);
+  commandList?.classList.toggle("is-disabled", sessionSyncBlocked());
+  if (commandList) {
+    if (sessionSyncBlocked()) commandList.dataset.sessionSyncBlocked = "true";
+    else delete commandList.dataset.sessionSyncBlocked;
+  }
+  const clearQueue = document.querySelector("[data-clear-queue]");
+  if (clearQueue) clearQueue.disabled = sessionSyncBlocked();
+  liveMessageRenderer.bind();
+  restoreSessionLiveState({ resetIdleState: true });
+  resetEventCursor();
+  updateSessionHeaderName(payload.title);
+  refreshSessionStatus(generation).catch(() => {});
+  if (!restorePreservedConversationScroll(scrollSnapshot)) conversationController.scrollToBottom("auto", { force: true });
+  conversationController.updateJumpControls();
+  sidebarController.requestRefresh();
+}
+
 async function pollEvents() {
   if (!liveOutput) return;
   if (sessionSwitching()) {
@@ -1680,7 +1730,11 @@ async function pollEvents() {
     pollSucceeded = true;
     hideReconnectBanner();
     if (sessionSyncRefreshRequired(payload.session_sync)) {
-      await refreshCurrentSessionPreservingComposer();
+      if (sessionSyncBlocked() || ["external_follow", "conflict"].includes(payload.session_sync.mode)) {
+        await refreshExternalSession(controller, generation);
+      } else {
+        await refreshCurrentSessionPreservingComposer();
+      }
       return;
     }
     if (payload.missed) {
@@ -1698,6 +1752,7 @@ async function pollEvents() {
       renderEvent(event);
     });
   } catch (_error) {
+    pollSucceeded = false;
     if (!controller.piSuppressedAbort && eventPollCurrent(generation, sessionViewGeneration) && !document.hidden) showReconnectBanner();
   } finally {
     clearTimeout(pollTimeout);
@@ -2969,6 +3024,10 @@ document.addEventListener("click", (event) => {
   const takeoverButton = event.target.closest("[data-session-takeover]");
   if (takeoverButton) {
     event.preventDefault();
+    abortEventPoll();
+    const takeoverSession = currentSessionPath();
+    const takeoverGeneration = sessionSwitchGeneration.capture();
+    const takeoverCurrent = () => takeoverSession === currentSessionPath() && sessionSwitchGeneration.current(takeoverGeneration);
     const originalText = takeoverButton.textContent;
     const banner = takeoverButton.closest("[data-session-sync-banner]");
     const errorOutput = banner?.querySelector("[data-session-sync-error]");
@@ -2980,11 +3039,14 @@ document.addEventListener("click", (event) => {
     fetch("/sessions/takeover", { method: "POST", body: formData, headers: { "Accept": "application/json" } })
       .then(async (response) => {
         const payload = await response.json().catch(() => null);
+        if (!takeoverCurrent()) return;
         if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Could not take over session");
         await refreshCurrentSessionPreservingComposer();
         scheduleNextEventPoll(0);
       })
       .catch((error) => {
+        if (!takeoverCurrent()) return;
+        scheduleNextEventPoll(0);
         takeoverButton.disabled = false;
         takeoverButton.textContent = originalText;
         if (errorOutput) {
@@ -3321,6 +3383,36 @@ function restorePreservedConversationScroll(scrollSnapshot) {
   return true;
 }
 
+function restoreSessionLiveState({ resetIdleState = false } = {}) {
+  const initialComposerState = liveOutput.dataset.composerState;
+  const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);
+  const initialComposerCompacting = liveOutput.dataset.composerCompacting === "true";
+  liveBusySince = Number(liveOutput.dataset.composerBusySince || 0) || null;
+  const initialComposerLabel = initialComposerCompacting ? "Compacting…" : "Pi is running…";
+  liveAgentRunning = liveOutput.dataset.agentRunning === "true";
+  conversationController.setAgentRunning(liveAgentRunning);
+  liveMessageRenderer.restorePersistedBashExecutions();
+  liveMessageRenderer.restoreCompletedBashExecutions();
+  const activeBashEvent = liveMessageRenderer.restoreActiveBash();
+  liveBash = activeBashEvent ? {
+    id: activeBashEvent.bashId,
+    command: activeBashEvent.command,
+    excludeFromContext: activeBashEvent.excludeFromContext,
+    startedAt: eventTimeMilliseconds(activeBashEvent)
+  } : null;
+  if (["running", "bash"].includes(initialComposerState)) {
+    if (stoppingSessionPaths.has(currentSessionPath())) setComposerState("stopping", "Stopping current task…", { focus: false });
+    else if (initialComposerState === "bash") setComposerState("bash", "Shell command running…", { focus: false });
+    else setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });
+  } else {
+    stoppingSessionPaths.delete(currentSessionPath());
+    if (resetIdleState) setComposerState(initialComposerState || "idle", "", { focus: false });
+  }
+  if (initialComposerCompacting) liveMessageRenderer.appendPendingCompactionMessage(new Date(initialComposerStateSince || Date.now()));
+  liveMessageRenderer.restoreActiveToolExecutions();
+  hydrateExtensionUiState();
+}
+
 function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery = null } = {}) {
   const generation = sessionViewGeneration;
   notificationPresenceController.sessionChanged();
@@ -3335,31 +3427,7 @@ function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery 
     enhanceMessageLinks(conversationScroll);
     resetEventCursor();
     refreshSessionStatus(generation).catch(() => {});
-    const initialComposerState = liveOutput.dataset.composerState;
-    const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);
-    const initialComposerCompacting = liveOutput.dataset.composerCompacting === "true";
-    liveBusySince = Number(liveOutput.dataset.composerBusySince || 0) || null;
-    const initialComposerLabel = initialComposerCompacting ? "Compacting…" : "Pi is running…";
-    liveAgentRunning = liveOutput.dataset.agentRunning === "true";
-    liveMessageRenderer.restorePersistedBashExecutions();
-    liveMessageRenderer.restoreCompletedBashExecutions();
-    const activeBashEvent = liveMessageRenderer.restoreActiveBash();
-    liveBash = activeBashEvent ? {
-      id: activeBashEvent.bashId,
-      command: activeBashEvent.command,
-      excludeFromContext: activeBashEvent.excludeFromContext,
-      startedAt: eventTimeMilliseconds(activeBashEvent)
-    } : null;
-    if (["running", "bash"].includes(initialComposerState)) {
-      if (stoppingSessionPaths.has(currentSessionPath())) setComposerState("stopping", "Stopping current task…", { focus: false });
-      else if (initialComposerState === "bash") setComposerState("bash", "Shell command running…", { focus: false });
-      else setComposerState(initialComposerState, initialComposerLabel, { since: initialComposerStateSince, focus: false });
-    } else {
-      stoppingSessionPaths.delete(currentSessionPath());
-    }
-    if (initialComposerCompacting) liveMessageRenderer.appendPendingCompactionMessage(new Date(initialComposerStateSince || Date.now()));
-    liveMessageRenderer.restoreActiveToolExecutions();
-    hydrateExtensionUiState();
+    restoreSessionLiveState();
     scheduleNextEventPoll(0);
     if (!scrollSnapshot || scrollSnapshot.nearBottom) conversationController.positionInitialAtBottom();
     const focusedElement = document.activeElement;
