@@ -4,10 +4,37 @@ import (
 	"html/template"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
+
+func TestCompactRelativeTime(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		age  time.Duration
+		want string
+	}{
+		{"future", -time.Minute, "now"},
+		{"recent", 30 * time.Second, "now"},
+		{"minute", time.Minute, "1m"},
+		{"minutes", 59*time.Minute + 30*time.Second, "59m"},
+		{"hour", time.Hour, "1h"},
+		{"hours", 23*time.Hour + 30*time.Minute, "23h"},
+		{"day", 24 * time.Hour, "1d"},
+		{"days", 10 * 24 * time.Hour, "10d"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := compactRelativeTime(time.Now().Add(-test.age)); got != test.want {
+				t.Errorf("compactRelativeTime = %q, want %q", got, test.want)
+			}
+		})
+	}
+	if got := compactRelativeTime(time.Time{}); got != "—" {
+		t.Errorf("unknown time = %q, want —", got)
+	}
+}
 
 func TestMessageTemplateCollapsesLongSingleLineToolOutput(t *testing.T) {
 	message := &sessions.Message{

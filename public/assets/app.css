@@ -231,6 +231,24 @@
     .session-title-line { display: flex; align-items: flex-start; gap: 7px; }
     .session-external-indicator { display: inline-flex; flex: 0 0 18px; margin-top: 2px; color: #c3a361; }
     .session-title { display: -webkit-box; overflow: hidden; font-weight: 500; line-height: 1.3; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+    .session-row.is-external { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 36px; margin: 2px 0; padding: 0 4px 0 12px; color: #a2a2ad; }
+    .session-row.is-external a.session { display: flex; min-width: 0; min-height: 34px; }
+    .session-row.is-external .session-content { flex: 1; }
+    .session-row.is-external .session-title-line { align-items: center; gap: 8px; }
+    .session-row.is-external .session-title { display: block; min-width: 0; font-size: 13px; font-weight: 400; white-space: nowrap; text-overflow: ellipsis; }
+    .session-row.is-external .session-external-indicator { flex-basis: 15px; margin-top: 0; color: #92929d; }
+    .session-row.is-external .session-external-indicator svg { width: 15px; height: 15px; }
+    .session-row.is-external .session-indicators { align-self: center; }
+    .session-row.is-external .session-indicators:empty, .session-row.is-external .session-details, .session-row.is-external .session-pin-toggle { display: none; }
+    .session-row.is-external .session-meta { max-width: none; min-height: 0; margin: 0; color: #92929d; font-size: 11px; pointer-events: none; }
+    .session-row.is-external .session-actions-toggle { position: relative; right: auto; bottom: auto; width: 28px; height: 34px; color: #92929d; opacity: 1; }
+    .session-row.is-external:has(a.session.selected) { color: var(--text); }
+    @media (max-width: 760px), (pointer: coarse) {
+      .session-row.is-external { min-height: 46px; padding-left: 10px; padding-right: 0; gap: 3px; }
+      .session-row.is-external a.session { min-height: 44px; }
+      .session-row.is-external .session-actions-toggle { width: 44px; height: 44px; }
+      .session-actions-menu button { min-height: 44px; }
+    }
     .sidebar-resource-usage { display: grid; gap: 0.2rem; margin-top: 1.25rem; padding-top: 0.75rem; border-top: 1px solid var(--border); color: var(--copy); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
     .sidebar-resource-usage[hidden] { display: none; }
     .sidebar-resource-usage-breakdown { color: var(--muted); }

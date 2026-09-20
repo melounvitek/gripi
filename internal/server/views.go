@@ -624,7 +624,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return b
 		},
 		"base": filepath.Base, "urlquery": url.QueryEscape, "json": func(value any) string { data, _ := json.Marshal(value); return string(data) },
-		"projectIdentity": identityFor, "tagStyle": tagStyle, "relativeTime": relativeTime, "formatTime": func(value time.Time) string {
+		"projectIdentity": identityFor, "tagStyle": tagStyle, "relativeTime": relativeTime, "compactRelativeTime": compactRelativeTime, "formatTime": func(value time.Time) string {
 			if value.IsZero() {
 				return "unknown"
 			}
@@ -700,6 +700,23 @@ func relativeTime(value time.Time) string {
 	}
 	return local.Format("2006-01-02")
 }
+func compactRelativeTime(value time.Time) string {
+	if value.IsZero() {
+		return "—"
+	}
+	age := time.Since(value)
+	switch {
+	case age < time.Minute:
+		return "now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm", int(age/time.Minute))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(age/time.Hour))
+	default:
+		return fmt.Sprintf("%dd", int(age/(24*time.Hour)))
+	}
+}
+
 func plural(value int) string {
 	if value == 1 {
 		return ""

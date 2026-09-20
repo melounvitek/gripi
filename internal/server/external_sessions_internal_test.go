@@ -37,11 +37,12 @@ func TestUnopenedExternalSessionIsReadAcrossPageAndSidebarViews(t *testing.T) {
 				t.Fatalf("external read baseline = %d, %v", count, err)
 			}
 			if !strings.Contains(target, "session_search") {
+				view.Sessions[0].ConversationActivityAt = time.Now().Add(-2 * time.Minute)
 				var html strings.Builder
 				if err := app.templates.ExecuteTemplate(&html, "sidebar", view); err != nil {
 					t.Fatal(err)
 				}
-				for _, expected := range []string{`data-session-sync-mode="external_follow"`, `class="session-external-indicator"`, `title="Active outside Gripi · notifications and unread indicators paused"`, `data-unread-session-count="0"`, `data-external-response-count="1"`} {
+				for _, expected := range []string{`class="session-row is-external`, `>2m</div>`, `data-session-actions-toggle`, `data-session-sync-mode="external_follow"`, `class="session-external-indicator"`, `title="Active outside Gripi · notifications and unread indicators paused"`, `data-unread-session-count="0"`, `data-external-response-count="1"`} {
 					if !strings.Contains(html.String(), expected) {
 						t.Errorf("sidebar missing %s", expected)
 					}

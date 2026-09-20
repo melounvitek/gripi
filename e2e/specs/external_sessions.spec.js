@@ -15,7 +15,7 @@ const test = base.extend({
     const entries = (await readFile(seedPath, "utf8")).trim().split("\n").map(JSON.parse);
     const id = randomUUID();
     const file = path.join(path.dirname(seedPath), `external-${id}.jsonl`);
-    const title = `E2E External ${id.slice(0, 8)}`;
+    const title = `E2E External ${id.slice(0, 8)} — frontend release hardening and installer readiness`;
     entries[0].id = id;
     entries.find((entry) => entry.type === "session_info").name = title;
     await writeFile(file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
@@ -32,14 +32,15 @@ for (const touch of [false, true]) {
     // Keep the mobile regression self-contained despite the mobile project's restricted testMatch.
     test.use(touch ? { viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true } : {});
 
-    test("unopened CLI sessions are marked and stay quiet on sidebar refresh", async ({ page, context, copiedSession }, testInfo) => {
+    test("unopened CLI sessions stay compact and quiet, with first-tap navigation and actions", async ({ page, context, copiedSession }, testInfo) => {
+      test.setTimeout(45_000);
       await context.addInitScript(() => {
         window.replyNotifications = [];
         document.hasFocus = () => false;
         localStorage.removeItem("gripi:notifications-disabled");
         window.gripiElectron = { showNotification: async (notification) => window.replyNotifications.push(notification) };
       });
-      // Keep a different conversation selected for the entire test.
+      // Observe the CLI activity while a different conversation is selected.
       await page.goto(copiedSession.backgroundURL);
       await openSidebar(page, touch);
       const link = sessionLink(page, copiedSession.file);
@@ -50,6 +51,7 @@ for (const touch of [false, true]) {
       await expectExternalIcon(link);
       await expect(link).not.toHaveClass(/\bunread\b/);
       await expect(link).toHaveAttribute("data-external-response-count", String(responseCount + 1));
+      await expectCompactRow(link, touch);
       expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
       await page.screenshot({ path: testInfo.outputPath("unopened-external-session.png") });
 
@@ -57,7 +59,42 @@ for (const touch of [false, true]) {
       await openSidebar(page, touch);
       await expectExternalIcon(link);
       await expect(link).not.toHaveClass(/\bunread\b/);
+      await expectCompactRow(link, touch);
       expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
+
+      const row = link.locator("..");
+      const actions = row.locator("[data-session-actions-toggle]");
+      const activate = (control) => touch ? control.tap() : control.click();
+      for (const pinned of [true, false]) {
+        await activate(actions);
+        const pin = page.locator("[data-session-action-pin]");
+        await expect(pin).toBeVisible();
+        await expect(pin).toHaveText(pinned ? "Pin" : "Unpin");
+        if (touch) expect((await pin.boundingBox()).height).toBeGreaterThanOrEqual(44);
+        await activate(pin);
+        await expect(row).toHaveAttribute("data-pinned", String(pinned));
+        await expectCompactRow(link, touch);
+      }
+
+      await activate(actions);
+      await activate(page.locator('[data-session-action="tags"]'));
+      const tags = page.getByRole("dialog", { name: "Session tags", exact: true });
+      const tag = `external-${touch ? "touch" : "desktop"}`;
+      await tags.getByRole("searchbox", { name: "Find or create a tag" }).fill(tag);
+      await activate(tags.getByRole("button", { name: `Create “${tag}”`, exact: true }));
+      await expect(tags.getByRole("checkbox", { name: tag, exact: true })).toBeChecked();
+      await activate(tags.getByRole("button", { name: "Close tag picker", exact: true }));
+      await expect(row).toHaveAttribute("data-session-tags", JSON.stringify([tag]));
+      await expectCompactRow(link, touch);
+
+      await activate(link);
+      await expect(page.getByRole("heading", { level: 1, name: copiedSession.title })).toBeVisible();
+      if (touch) await expect(page.locator("#mobile-session-toggle")).not.toBeChecked();
+      await openSidebar(page, touch);
+      await expect(link).toHaveAttribute("aria-current", "page");
+      await expectCompactRow(link, touch);
+      await expect(row).toHaveCSS("background-color", "rgb(58, 58, 74)");
+      await page.screenshot({ path: testInfo.outputPath("compact-selected-session.png") });
     });
 
     test("external CLI activity stays quiet in live and reloaded sidebars until takeover", async ({ page, context, copiedSession }, testInfo) => {
@@ -79,6 +116,7 @@ for (const touch of [false, true]) {
       await openSidebar(page, touch);
       const selectedLink = sessionLink(page, copiedSession.file);
       await expectExternalIcon(selectedLink);
+      await expectCompactRow(selectedLink, touch);
       await page.screenshot({ path: testInfo.outputPath("external-session-icon.png") });
 
       const background = await context.newPage();
@@ -120,6 +158,10 @@ for (const touch of [false, true]) {
       await expect(page.getByLabel("Message to Pi")).toBeEnabled();
       await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "managed");
       await expect(selectedLink.locator(".session-external-indicator")).toHaveCount(0);
+      await openSidebar(page, touch);
+      await expect(selectedLink.locator("..").locator(".session-project")).toBeVisible();
+      await expect(selectedLink.locator("..")).not.toHaveClass(/\bis-external\b/);
+      if (touch) await page.locator('label[aria-label="Close sessions"]').tap();
       expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
       expect(await background.evaluate(() => window.replyNotifications)).toEqual([]);
 
@@ -158,6 +200,35 @@ async function expectExternalIcon(link) {
   await expect(icon).toHaveAttribute("title", externalTitle);
   await expect(icon.locator("svg")).toBeVisible();
   await expect(icon).not.toHaveCSS("opacity", "0");
+}
+
+async function expectCompactRow(link, touch) {
+  const row = link.locator("..");
+  await expect(row).toHaveClass(/\bis-external\b/);
+  const title = link.locator(".session-title");
+  await expect(title).toHaveCSS("white-space", "nowrap");
+  await expect(title).toHaveCSS("text-overflow", "ellipsis");
+  expect(await title.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  const actions = row.locator("[data-session-actions-toggle]");
+  await expect(actions).toBeVisible();
+  await expect(actions).toHaveCSS("opacity", "1");
+  const age = row.locator(".session-meta");
+  await expect(age).toHaveText(/^(now|\d+[mhd])$/);
+  await expect(link).toHaveAttribute("title", / · .+ · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  const rowBox = await row.boundingBox();
+  const linkBox = await link.boundingBox();
+  const titleBox = await title.boundingBox();
+  const ageBox = await age.boundingBox();
+  const actionsBox = await actions.boundingBox();
+  expect(rowBox.height).toBeLessThanOrEqual(touch ? 46 : 36);
+  expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(ageBox.x);
+  expect(ageBox.x + ageBox.width).toBeLessThanOrEqual(actionsBox.x);
+  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
+  if (touch) {
+    expect(linkBox.height).toBeGreaterThanOrEqual(44);
+    expect(actionsBox.height).toBeGreaterThanOrEqual(44);
+    expect(actionsBox.width).toBeGreaterThanOrEqual(44);
+  }
 }
 
 async function appendCLIReply(file, text) {
