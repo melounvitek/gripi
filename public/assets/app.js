@@ -143,6 +143,8 @@ let markReadAfterVisible = null;
 let hiddenAt = null;
 let lastSessionSyncAt = Date.now();
 let lastEventSeq = 0;
+let lastQueueSeq = 0;
+let queueViewGeneration = 0;
 let waitingForOutputSince = null;
 let waitingForOutputTimer = null;
 let waitingForOutputLabel = "Pi is running…";
@@ -1426,12 +1428,6 @@ function renderEvent(event) {
     }
   }
 
-  if (event.type === "queue_update") {
-    liveMessageRenderer.renderQueuedMessages(event);
-    showStatus(eventStatusText(event));
-    return;
-  }
-
   if (["custom", "custom_message", "session_info", "session_info_changed", "compaction_start", "compaction_end"].includes(event.type)) {
     updateSessionHeaderName(sessionNameFromEvent(event));
     if (event.type === "custom_message") liveMessageRenderer.renderCustomMessageEvent(event);
@@ -1510,6 +1506,15 @@ function resetEventPollBackoff() {
 
 function resetEventCursor() {
   lastEventSeq = Number(liveOutput?.dataset.eventsAfter || 0);
+  lastQueueSeq = lastEventSeq;
+  queueViewGeneration += 1;
+}
+
+function reconcileQueuedMessages(queues, sequence) {
+  if (!queues || !Number.isInteger(sequence) || sequence < lastQueueSeq) return false;
+  liveMessageRenderer.renderQueuedMessages(queues);
+  lastQueueSeq = sequence;
+  return true;
 }
 
 function scheduleNextEventPoll(delay = nextEventPollDelay()) {
@@ -1754,7 +1759,12 @@ async function pollEvents() {
     emptyEventPollCount = payload.events.length > 0 ? 0 : emptyEventPollCount + 1;
     if (payload.events.length > 0 && composerState?.dataset.state === "running" && !waitingForOutputSince) startWaitingForOutput();
     updateWaitingForOutputStatus();
+    // Reconcile the final queue independently: a tool renderer can throw before
+    // reaching queue_update, after this batch's global cursor has advanced.
+    const queueEvent = payload.events.findLast((event) => event.type === "queue_update");
+    if (queueEvent && reconcileQueuedMessages(queueEvent, payload.last_seq)) showStatus(eventStatusText(queueEvent));
     payload.events.forEach((event) => {
+      if (event.type === "queue_update") return;
       updateStatusFromEvent(event);
       renderEvent(event);
     });
@@ -2209,7 +2219,9 @@ async function clearQueuedMessages(event) {
   if (!window.confirm("Remove all queued messages? Pi will keep running.")) return;
 
   const generation = sessionViewGeneration;
+  const queueGeneration = queueViewGeneration;
   const session = currentSessionPath();
+  const current = () => generation === sessionViewGeneration && queueGeneration === queueViewGeneration && session === currentSessionPath();
   const errorMessage = document.querySelector("[data-clear-queue-error]");
   errorMessage.hidden = true;
   button.disabled = true;
@@ -2221,12 +2233,15 @@ async function clearQueuedMessages(event) {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not clear the queue. Please try again.");
+    if (!current()) return;
+    // Do not advance lastEventSeq: tools and messages still need their poll replay.
+    reconcileQueuedMessages(payload.queued_messages, payload.event_sequence);
   } catch (error) {
-    if (generation !== sessionViewGeneration || session !== currentSessionPath()) return;
+    if (!current()) return;
     errorMessage.textContent = error.message || "Could not clear the queue. Please try again.";
     errorMessage.hidden = false;
   } finally {
-    if (generation === sessionViewGeneration && session === currentSessionPath()) button.disabled = sessionSyncBlocked();
+    if (current()) button.disabled = sessionSyncBlocked();
   }
 }
 
@@ -2614,6 +2629,7 @@ function resetSessionViewState() {
   escapeStopConfirmationExpiresAt = 0;
   stopWaitingForOutput();
   lastEventSeq = 0;
+  lastQueueSeq = 0;
   hideReconnectBanner();
   clearAttachments();
   const modelModal = document.querySelector('[data-modal="model-settings-modal"]');

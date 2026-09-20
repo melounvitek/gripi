@@ -46,10 +46,34 @@ func TestClearQueueUsesOnlyExistingClientAndRecordedAliases(t *testing.T) {
 			}
 			response := f.serve(context.Background(), requested)
 			payload := clearQueuePayload(t, response, http.StatusOK)
-			if !reflect.DeepEqual(payload, map[string]any{"ok": true, "session": f.path}) {
+			if !reflect.DeepEqual(payload, map[string]any{
+				"ok": true, "session": f.path, "event_sequence": float64(23),
+				"queued_messages": map[string]any{"steering": []any{"steer"}, "followUp": []any{"follow"}},
+			}) {
 				t.Fatalf("success payload = %#v", payload)
 			}
 			f.assertUntouched(t, 1)
+		})
+	}
+}
+
+func TestClearQueueReturnsAuthoritativeSnapshotAfterClearing(t *testing.T) {
+	for _, name := range []string{"empty", "concurrent_message"} {
+		t.Run(name, func(t *testing.T) {
+			f := newClearQueueFixture(t)
+			queues := map[string][]string(nil)
+			want := map[string]any{}
+			if name == "concurrent_message" {
+				queues = map[string][]string{"followUp": {"queued after clear"}}
+				want["followUp"] = []any{"queued after clear"}
+			}
+			f.client.onClear = func() {
+				f.client.live = rpc.LiveSnapshot{EventSequence: 27, QueuedMessages: queues}
+			}
+			payload := clearQueuePayload(t, f.serve(context.Background(), f.path), http.StatusOK)
+			if payload["event_sequence"] != float64(27) || !reflect.DeepEqual(payload["queued_messages"], want) {
+				t.Fatalf("snapshot after clear = %#v", payload)
+			}
 		})
 	}
 }
@@ -418,7 +442,7 @@ type clearQueueFixture struct {
 func newClearQueueFixture(t *testing.T) *clearQueueFixture {
 	t.Helper()
 	f := &clearQueueFixture{idleRetirementFixture: newIdleRetirementFixture(t), client: &clearQueueClient{result: map[string]any{"success": true, "data": map[string]any{"editorText": "must not restore"}}}}
-	f.client.live = rpc.LiveSnapshot{QueuedMessages: map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}}
+	f.client.live = rpc.LiveSnapshot{EventSequence: 23, QueuedMessages: map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}}
 	if err := f.app.rpcClients.Register(f.path, f.client); err != nil {
 		t.Fatal(err)
 	}

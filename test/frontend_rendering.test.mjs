@@ -31,6 +31,17 @@ test("queue controls follow the initial snapshot and live queue updates", () => 
   assert.equal(messages.children[0].textContent, "Follow-up: New message");
 });
 
+test("subagent results can render before any messages exist", () => {
+  const parser = new LiveMessageParser();
+  for (const messages of [undefined, null, []]) {
+    const details = { mode: "single", results: [{ agent: "worker", exitCode: -1, messages }] };
+    assert.match(parser.subagentDisplayText(details, "", true), /worker.*\n\(running…\)/);
+    details.results[0].exitCode = 1;
+    details.results[0].errorMessage = "Worker failed before responding";
+    assert.match(parser.subagentDisplayText(details, "", false), /Worker failed before responding/);
+  }
+});
+
 test("live user messages render and update plain URLs as links", () => {
   const document = new FakeDocument();
   const conversation = {

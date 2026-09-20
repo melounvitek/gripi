@@ -389,11 +389,12 @@ export class LiveMessageParser {
         if (index > 0) lines.push("");
         const resultRunning = subagentResultRunning(details, result, index, running);
         lines.push(`${subagentResultIcon(result, resultRunning)} ${result.agent} (${result.agentSource || "unknown"})`);
-        const items = subagentDisplayItems(result.messages).slice(-10);
+        const messages = result.messages ?? [];
+        const items = subagentDisplayItems(messages).slice(-10);
         if (items.length > 0) {
           lines.push(...items);
         } else {
-          lines.push(subagentFinalOutput(result.messages) || result.errorMessage || result.stderr || "(running…)");
+          lines.push(subagentFinalOutput(messages) || result.errorMessage || result.stderr || "(running…)");
         }
         const usage = subagentUsageText(result.usage, result.model);
         if (usage) lines.push(usage);

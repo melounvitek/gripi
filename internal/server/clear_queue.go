@@ -73,6 +73,7 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		}
 	}
 	var result map[string]any
+	var snapshot rpc.LiveSnapshot
 	var clearErr error
 	found, supported := false, false
 	err = app.rpcClients.WithExistingInterruptClient(request.Context(), path, func(client rpc.RPCClient) error {
@@ -83,6 +84,9 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		supported = ok
 		if ok {
 			result, clearErr = clearer.ClearQueue(request.Context())
+			if clearErr == nil && successfulRPCResponse(result) {
+				snapshot = client.LiveSnapshot()
+			}
 		}
 		// Clear must never close the client, even on a native timeout. Keep
 		// only this operation's errors out of registry terminal-error handling.
@@ -100,6 +104,12 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 	case !successfulRPCResponse(result):
 		fail(http.StatusUnprocessableEntity, rpcErrorMessage(result, "Could not clear the queue"))
 	default:
-		writeJSON(response, map[string]any{"ok": true, "session": path})
+		if snapshot.QueuedMessages == nil {
+			snapshot.QueuedMessages = map[string][]string{}
+		}
+		writeJSON(response, map[string]any{
+			"ok": true, "session": path,
+			"queued_messages": snapshot.QueuedMessages, "event_sequence": snapshot.EventSequence,
+		})
 	}
 }
