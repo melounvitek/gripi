@@ -1738,7 +1738,8 @@ async function pollEvents() {
       return;
     }
     if (payload.missed) {
-      await refreshCurrentSessionPreservingComposer();
+      if (sessionSyncBlocked()) await refreshExternalSession(controller, generation);
+      else await refreshCurrentSessionPreservingComposer();
       return;
     }
     if (Number.isInteger(payload.last_seq)) {
@@ -1756,10 +1757,10 @@ async function pollEvents() {
     if (!controller.piSuppressedAbort && eventPollCurrent(generation, sessionViewGeneration) && !document.hidden) showReconnectBanner();
   } finally {
     clearTimeout(pollTimeout);
-    if (eventPollAbortController === controller) eventPollAbortController = null;
-    if (eventPollCurrent(generation, sessionViewGeneration)) {
+    if (eventPollAbortController === controller) {
+      eventPollAbortController = null;
       eventPollInFlight = false;
-      if (!controller.piSuppressedAbort) scheduleNextEventPoll(nextEventPollDelay(!pollSucceeded));
+      if (eventPollCurrent(generation, sessionViewGeneration) && !controller.piSuppressedAbort) scheduleNextEventPoll(nextEventPollDelay(!pollSucceeded));
     }
   }
 }
@@ -3024,6 +3025,8 @@ document.addEventListener("click", (event) => {
   const takeoverButton = event.target.closest("[data-session-takeover]");
   if (takeoverButton) {
     event.preventDefault();
+    clearTimeout(eventPollTimer);
+    eventPollTimer = null;
     abortEventPoll();
     const takeoverSession = currentSessionPath();
     const takeoverGeneration = sessionSwitchGeneration.capture();

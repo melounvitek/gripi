@@ -12,6 +12,7 @@ const test = base.extend({
     const seedLink = page.getByRole("link", { name: new RegExp(sessions.marker) });
     const seedURL = new URL(await seedLink.getAttribute("href"), page.url());
     const seedPath = seedURL.searchParams.get("session");
+    seedURL.searchParams.set("show_all_sessions", "1");
     const entries = (await readFile(seedPath, "utf8")).trim().split("\n").map(JSON.parse);
     const id = randomUUID();
     const file = path.join(path.dirname(seedPath), `external-${id}.jsonl`);
@@ -101,6 +102,7 @@ for (const touch of [false, true]) {
       await page.goto(copiedSession.url);
       const editor = page.getByLabel("Message to Pi");
       await editor.fill("Unsent draft");
+      await page.locator("#image-input").setInputFiles("public/apple-touch-icon.png");
       await page.evaluate(() => {
         window.originalEditor = document.querySelector('.prompt-form textarea');
         window.originalMessage = document.querySelector('.message');
@@ -119,6 +121,7 @@ for (const touch of [false, true]) {
       await expect(message(page, "assistant", "Nonblocking CLI reply")).toBeAttached();
       await expect(editor).toHaveValue("Draft edited while refreshing");
       await expect(editor).toBeDisabled();
+      await expect(page.locator(".attachment-tray img")).toHaveCount(1);
       if (touch) await expect(page.locator("#mobile-session-toggle")).toBeChecked();
       expect(await page.evaluate(() => ({
         editor: window.originalEditor === document.querySelector('.prompt-form textarea'),
@@ -160,6 +163,97 @@ for (const touch of [false, true]) {
       fail = false;
       await expect(message(page, "assistant", "Recovered CLI reply")).toBeVisible({ timeout: 15_000 });
       expect(await page.evaluate(() => window.retainedPage)).toBe(true);
+    });
+
+    test("CLI updates preserve loaded history and scrolling during the request", async ({ page, copiedSession }, testInfo) => {
+      test.setTimeout(45_000);
+      const originalEntries = (await readFile(copiedSession.file, "utf8")).trim().split("\n").map(JSON.parse);
+      for (let index = 0; index < 90; index++) await appendCLIReply(copiedSession.file, `History reply ${index}`);
+      await page.goto(copiedSession.url);
+      await expect(message(page, "assistant", "History reply 89")).toBeVisible();
+      const pending = await holdNextFragment(page);
+      await appendCLIReply(copiedSession.file, "Update while reading history");
+      await pending.requested;
+      await page.locator("#conversation-scroll").evaluate((element) => {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -1000 }));
+        element.scrollTop = 0;
+      });
+      await expect(message(page, "assistant", "History reply 0")).toBeAttached();
+      await expect(page.locator("#conversation-scroll")).toHaveAttribute("data-has-older-messages", "false");
+      await page.locator("#conversation-scroll").evaluate((element) => { element.scrollTop = 120; });
+      const anchor = message(page, "assistant", "History reply 0");
+      const before = await anchor.evaluate((element) => {
+        window.historyAnchor = element;
+        return element.getBoundingClientRect().top;
+      });
+      pending.release();
+      await expect(message(page, "assistant", "Update while reading history")).toBeAttached();
+      await expect(anchor).toBeAttached();
+      expect(await anchor.evaluate((element) => element === window.historyAnchor)).toBe(true);
+      await expect.poll(() => anchor.evaluate((element) => element.getBoundingClientRect().top)).toBeCloseTo(before, 0);
+      await page.screenshot({ path: testInfo.outputPath("cli-background-reading.png") });
+
+      await page.locator("#conversation-scroll").evaluate((element) => {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: 1000 }));
+        element.scrollTop = element.scrollHeight;
+      });
+      await appendCLIReply(copiedSession.file, "Follow the latest CLI reply");
+      await expect(message(page, "assistant", "Follow the latest CLI reply")).toBeVisible();
+      await expect.poll(() => page.locator("#conversation-scroll").evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(5);
+
+      // A native tree branch must replace the old branch, not append to it.
+      await appendCLIReply(copiedSession.file, "Reply on another branch", originalEntries.at(-1).id);
+      await expect(message(page, "assistant", "Reply on another branch")).toBeVisible();
+      await expect(message(page, "assistant", "History reply 0")).toHaveCount(0);
+      await expect(message(page, "assistant", "Follow the latest CLI reply")).toHaveCount(0);
+      await page.reload();
+      await expect(message(page, "assistant", "Reply on another branch")).toBeVisible();
+      await expect(message(page, "assistant", "History reply 0")).toHaveCount(0);
+    });
+
+    test("CLI refresh preserves expanded output and conversation find", async ({ page, copiedSession }) => {
+      const entries = (await readFile(copiedSession.file, "utf8")).trim().split("\n").map(JSON.parse);
+      const callID = randomUUID().slice(0, 8);
+      const timestamp = new Date().toISOString();
+      await appendFile(copiedSession.file, [
+        { type: "message", id: callID, parentId: entries.at(-1).id, timestamp,
+          message: { role: "assistant", content: [{ type: "toolCall", id: callID, name: "example", arguments: { path: "output.txt" } }] } },
+        { type: "message", id: randomUUID().slice(0, 8), parentId: callID, timestamp,
+          message: { role: "toolResult", toolCallId: callID, toolName: "example", content: [{ type: "text", text: Array.from({ length: 80 }, (_, index) => `Output line ${index}`).join("\n") }], isError: false } },
+      ].map(JSON.stringify).join("\n") + "\n");
+      await page.goto(copiedSession.url);
+      const expand = page.getByRole("button", { name: "Expand", exact: true });
+      if (touch) await expand.tap();
+      else await expand.click();
+      await expect(page.locator("[data-tool-output-collapse]")).toHaveAttribute("data-expanded", "true");
+      await page.keyboard.press("Control+f");
+      const find = page.getByRole("searchbox", { name: "Find in conversation" });
+      await find.fill("Output line 79");
+      await appendCLIReply(copiedSession.file, "Reply while finding");
+      await expect(message(page, "assistant", "Reply while finding")).toBeAttached();
+      await expect(find).toHaveValue("Output line 79");
+      await expect(find).toBeFocused();
+      await expect(page.locator("[data-tool-output-collapse]")).toHaveAttribute("data-expanded", "true");
+    });
+
+    test("takeover wins over a pending CLI refresh", async ({ page, copiedSession }) => {
+      await page.goto(copiedSession.url);
+      await page.getByLabel("Message to Pi").fill("Draft retained through takeover");
+      await appendCLIReply(copiedSession.file, "Before takeover");
+      await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "external_follow");
+      const pending = await holdNextFragment(page);
+      await appendCLIReply(copiedSession.file, "Pending at takeover");
+      await pending.requested;
+      const takeover = page.getByRole("button", { name: "Take over in gateway", exact: true });
+      if (touch) await takeover.tap();
+      else await takeover.click();
+      await expect(page.getByLabel("Message to Pi")).toBeEnabled();
+      await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "managed");
+      pending.release();
+      await pending.finished;
+      await expect(page.getByLabel("Message to Pi")).toBeEnabled();
+      await expect(page.getByLabel("Message to Pi")).toHaveValue("Draft retained through takeover");
+      await expect(message(page, "assistant", "Pending at takeover")).toBeAttached();
     });
 
     test("external CLI activity stays quiet in live and reloaded sidebars until takeover", async ({ page, context, copiedSession }, testInfo) => {
@@ -311,13 +405,13 @@ async function holdNextFragment(page) {
   return { requested: requestedPromise, release, finished: finishedPromise };
 }
 
-async function appendCLIReply(file, text) {
+async function appendCLIReply(file, text, parentId = null) {
   const entries = (await readFile(file, "utf8")).trim().split("\n").map(JSON.parse);
   const previous = entries.at(-1);
   const timestamp = Math.max(Date.now(), Date.parse(previous.timestamp) + 1000);
   const assistant = entries.find((entry) => entry.message?.role === "assistant").message;
   const user = {
-    type: "message", id: randomUUID().slice(0, 8), parentId: previous.id,
+    type: "message", id: randomUUID().slice(0, 8), parentId: parentId || previous.id,
     timestamp: new Date(timestamp).toISOString(),
     message: { role: "user", content: [{ type: "text", text: `CLI request: ${text}` }], timestamp },
   };

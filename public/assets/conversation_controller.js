@@ -134,19 +134,31 @@ export class ConversationController {
       bySource.get(source).push(message);
     });
     const messages = incoming.map((message) => bySource.get(this.messageSources.get(message))?.shift() || message);
+    // A sliding tail window may omit history the reader already loaded. Keep it
+    // only when the entire overlapping tail is unchanged; branches use the snapshot.
+    const overlap = incoming.length ? previous.findIndex((message) => this.messageSources.get(message) === this.messageSources.get(incoming[0])) : -1;
+    const preserveEarlier = overlap > 0 && previous.slice(overlap).every((message, index) =>
+      incoming[index] && this.messageSources.get(message) === this.messageSources.get(incoming[index]));
+    if (preserveEarlier) messages.unshift(...previous.slice(0, overlap));
     const retained = new Set(messages);
     const removed = previous.filter((message) => !retained.has(message));
     removed.forEach((message) => message.remove());
     let anchor = this.liveOutput;
     for (const message of messages.toReversed()) {
-      if (message.parentElement !== this.element || message.nextElementSibling !== anchor) this.element.insertBefore(message, anchor);
+      let next = message.nextElementSibling;
+      while (next && next !== this.liveOutput && !next.matches(".message")) next = next.nextElementSibling;
+      if (message.parentElement !== this.element || next !== anchor) this.element.insertBefore(message, anchor);
       anchor = message;
     }
     this.element.querySelector(":scope > .empty")?.remove();
     const empty = snapshot.querySelector(":scope > .empty");
     if (empty) this.liveOutput.before(empty);
-    Object.assign(this.element.dataset, snapshot.dataset);
-    delete this.element.dataset.oldestMessageEndCursor;
+    if (preserveEarlier) {
+      this.element.dataset.olderMessagesUrl = snapshot.dataset.olderMessagesUrl;
+    } else {
+      Object.assign(this.element.dataset, snapshot.dataset);
+      delete this.element.dataset.oldestMessageEndCursor;
+    }
     if (!this.historyStatus() && snapshot.querySelector("[data-conversation-history-status]")) {
       const status = snapshot.querySelector("[data-conversation-history-status]");
       (messages[0] || this.liveOutput).before(status);
