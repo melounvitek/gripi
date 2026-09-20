@@ -270,7 +270,7 @@ test("history pagination and find callers share in-flight work and use the lates
     complete.resolve("complete");
     await Promise.all([firstSearch, secondSearch]);
     assert.equal(historyLoads, 1);
-    assert.deepEqual(refreshed, [{ query: "latest", options: { resetIndex: true } }]);
+    assert.deepEqual(refreshed, [{ query: "latest", options: { resetIndex: true, scroll: true } }]);
   } finally {
     globalThis.fetch = originalFetch;
   }

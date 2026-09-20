@@ -1259,6 +1259,8 @@ function hydrateExtensionUiState() {
   }
   (Array.isArray(state.statuses) ? state.statuses : []).forEach(updateExtensionStatus);
   (Array.isArray(state.widgets) ? state.widgets : []).forEach(updateExtensionWidget);
+  renderExtensionStatuses();
+  renderExtensionWidgets();
   extensionDocumentTitle = state.title?.title == null ? null : state.title.title;
   renderDocumentTitle();
   (Array.isArray(state.pending_dialogs) ? state.pending_dialogs : []).forEach(enqueueExtensionUiDialog);
@@ -1679,8 +1681,16 @@ async function refreshExternalSession(controller, generation) {
   Object.assign(liveOutput.dataset, incomingOutput.dataset);
   const banner = template.content.querySelector("[data-session-sync-banner]");
   const previousBanner = promptForm.querySelector("[data-session-sync-banner]");
-  if (previousBanner) previousBanner.remove();
-  if (banner) promptForm.prepend(banner);
+  const comparableBanner = previousBanner?.cloneNode(true);
+  const localError = comparableBanner?.querySelector("[data-session-sync-error]");
+  if (localError) {
+    localError.textContent = "";
+    localError.hidden = true;
+  }
+  if (comparableBanner?.outerHTML !== banner?.outerHTML) {
+    previousBanner?.remove();
+    if (banner) promptForm.prepend(banner);
+  }
   commandList?.classList.toggle("is-disabled", sessionSyncBlocked());
   if (commandList) {
     if (sessionSyncBlocked()) commandList.dataset.sessionSyncBlocked = "true";
@@ -1695,6 +1705,7 @@ async function refreshExternalSession(controller, generation) {
   refreshSessionStatus(generation).catch(() => {});
   if (!restorePreservedConversationScroll(scrollSnapshot)) conversationController.scrollToBottom("auto", { force: true });
   conversationController.updateJumpControls();
+  currentSessionFindController.historyChanged();
   sidebarController.requestRefresh();
 }
 
@@ -1729,17 +1740,12 @@ async function pollEvents() {
     lastSessionSyncAt = Date.now();
     pollSucceeded = true;
     hideReconnectBanner();
-    if (sessionSyncRefreshRequired(payload.session_sync)) {
-      if (sessionSyncBlocked() || ["external_follow", "conflict"].includes(payload.session_sync.mode)) {
+    if (sessionSyncRefreshRequired(payload.session_sync) || payload.missed) {
+      if (sessionSyncBlocked() || ["external_follow", "conflict"].includes(payload.session_sync?.mode)) {
         await refreshExternalSession(controller, generation);
       } else {
         await refreshCurrentSessionPreservingComposer();
       }
-      return;
-    }
-    if (payload.missed) {
-      if (sessionSyncBlocked()) await refreshExternalSession(controller, generation);
-      else await refreshCurrentSessionPreservingComposer();
       return;
     }
     if (Number.isInteger(payload.last_seq)) {

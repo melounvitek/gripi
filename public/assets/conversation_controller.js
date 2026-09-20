@@ -126,20 +126,19 @@ export class ConversationController {
     this.cancelOlderHistory();
     const previous = [...this.element.querySelectorAll(".message")];
     const incoming = [...snapshot.querySelectorAll(".message")];
-    const bySource = new Map();
-    previous.forEach((message) => {
-      const source = this.messageSources.get(message);
-      if (!source) return;
-      if (!bySource.has(source)) bySource.set(source, []);
-      bySource.get(source).push(message);
+    const history = previous.filter((message) => message.dataset.messageKey);
+    const byKey = new Map(history.map((message) => [message.dataset.messageKey, message]));
+    const messages = incoming.map((message) => {
+      const existing = byKey.get(message.dataset.messageKey);
+      return existing && this.messageSources.get(existing) === this.messageSources.get(message) ? existing : message;
     });
-    const messages = incoming.map((message) => bySource.get(this.messageSources.get(message))?.shift() || message);
-    // A sliding tail window may omit history the reader already loaded. Keep it
-    // only when the entire overlapping tail is unchanged; branches use the snapshot.
-    const overlap = incoming.length ? previous.findIndex((message) => this.messageSources.get(message) === this.messageSources.get(incoming[0])) : -1;
-    const preserveEarlier = overlap > 0 && previous.slice(overlap).every((message, index) =>
-      incoming[index] && this.messageSources.get(message) === this.messageSources.get(incoming[index]));
-    if (preserveEarlier) messages.unshift(...previous.slice(0, overlap));
+    // Native entry/segment keys stay stable when a tool result updates its call.
+    // Keep loaded history only when the snapshot extends the same persisted tail.
+    const overlap = incoming.length ? history.findIndex((message) => message.dataset.messageKey === incoming[0].dataset.messageKey) : -1;
+    const sameFile = this.liveOutput.dataset.sessionGeneration === snapshot.querySelector("#live-output").dataset.sessionGeneration;
+    const preserveEarlier = sameFile && overlap > 0 && history.slice(overlap).every((message, index) =>
+      message.dataset.messageKey === incoming[index]?.dataset.messageKey);
+    if (preserveEarlier) messages.unshift(...history.slice(0, overlap));
     const retained = new Set(messages);
     const removed = previous.filter((message) => !retained.has(message));
     removed.forEach((message) => message.remove());

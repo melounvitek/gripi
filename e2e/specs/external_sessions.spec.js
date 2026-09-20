@@ -211,6 +211,91 @@ for (const touch of [false, true]) {
       await expect(message(page, "assistant", "History reply 0")).toHaveCount(0);
     });
 
+    test("CLI tool completion preserves already-loaded history when the paired article changes", async ({ page, copiedSession }) => {
+      for (let index = 0; index < 90; index++) await appendCLIReply(copiedSession.file, `Tool history reply ${index}`);
+      const entries = (await readFile(copiedSession.file, "utf8")).trim().split("\n").map(JSON.parse);
+      const callID = randomUUID().slice(0, 8);
+      const timestamp = Date.parse(entries.at(-1).timestamp) + 1000;
+      await appendFile(copiedSession.file, JSON.stringify({
+        type: "message", id: callID, parentId: entries.at(-1).id, timestamp: new Date(timestamp).toISOString(),
+        message: { role: "assistant", content: [{ type: "toolCall", id: callID, name: "bash", arguments: { command: "printf paired-completion" } }] },
+      }) + "\n");
+      await page.goto(copiedSession.url);
+      const history = message(page, "assistant", "Tool history reply 0");
+      const conversation = page.locator("#conversation-scroll");
+      await expect(history).toHaveCount(0);
+      await conversation.evaluate((element) => { element.scrollTop = 0; });
+      await expect(history).toBeAttached();
+      await expect(conversation).toHaveAttribute("data-has-older-messages", "false");
+      await history.evaluate((element) => { window.loadedToolHistory = element; });
+      // Stay at the tail so a discarded prefix cannot silently reload via the history sentinel.
+      await conversation.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      const tool = page.locator(`article[data-tool-call-id="${callID}"]`);
+      await expect(tool).toBeVisible();
+      await expect(tool).not.toHaveAttribute("data-tool-result-persisted", "true");
+
+      await appendFile(copiedSession.file, JSON.stringify({
+        type: "message", id: randomUUID().slice(0, 8), parentId: callID, timestamp: new Date(timestamp + 1000).toISOString(),
+        message: { role: "toolResult", toolCallId: callID, toolName: "bash", content: [{ type: "text", text: "Paired CLI tool completed" }], isError: false },
+      }) + "\n");
+      await expect(tool).toHaveCount(1);
+      await expect(tool).toHaveAttribute("data-tool-result-persisted", "true");
+      await expect(tool).toContainText("Paired CLI tool completed");
+      await expect(history).toBeAttached();
+      expect(await history.evaluate((element) => element === window.loadedToolHistory)).toBe(true);
+      await expect(conversation).toHaveAttribute("data-has-older-messages", "false");
+    });
+
+    test("conversation find searches older history after CLI switches to a longer native branch", async ({ page, copiedSession }) => {
+      const entries = (await readFile(copiedSession.file, "utf8")).trim().split("\n").map(JSON.parse);
+      await appendCLIReply(copiedSession.file, "Older branch needle");
+      for (let index = 0; index < 90; index++) await appendCLIReply(copiedSession.file, `Long branch reply ${index}`);
+      const longBranch = (await readFile(copiedSession.file, "utf8")).trim().split("\n").map(JSON.parse).at(-1).id;
+      await appendCLIReply(copiedSession.file, "Short branch reply", entries.at(-1).id);
+      await page.goto(copiedSession.url);
+      await expect(message(page, "assistant", "Short branch reply")).toBeVisible();
+      await expect(page.locator("#conversation-scroll")).toHaveAttribute("data-has-older-messages", "false");
+      await page.keyboard.press("Control+f");
+      const find = page.getByRole("searchbox", { name: "Find in conversation" });
+      const count = page.locator("[data-current-session-find-count]");
+      await find.fill("Missing on short branch");
+      await expect(count).toHaveText("0 / 0");
+
+      await appendCLIReply(copiedSession.file, "Long branch resumed", longBranch);
+      await expect(message(page, "assistant", "Long branch resumed")).toBeAttached();
+      await expect(message(page, "assistant", "Short branch reply")).toHaveCount(0);
+      await find.fill("Older branch needle");
+      // The target occurs in both the CLI request and its assistant reply, outside the tail window.
+      await expect(count).toHaveText("1 / 2");
+      await expect(message(page, "assistant", "Older branch needle")).toBeAttached();
+      await expect(page.locator("#conversation-scroll")).toHaveAttribute("data-has-older-messages", "false");
+    });
+
+    test("empty CLI snapshots clear previous extension status and widgets", async ({ page, copiedSession }) => {
+      let state = {
+        statuses: [{ statusKey: "cli", statusText: "CLI extension active" }],
+        widgets: [{ widgetKey: "cli", widgetLines: ["CLI extension widget"], widgetPlacement: "aboveEditor" }],
+      };
+      await page.route(/\/session_fragment(?:\?|$)/, async (route) => {
+        const payload = await (await route.fetch()).json();
+        payload.conversation_html = payload.conversation_html.replace(/data-extension-ui-state="[^"]*"/,
+          `data-extension-ui-state="${JSON.stringify(state).replaceAll('"', '&quot;')}"`);
+        await route.fulfill({ json: payload });
+      });
+      await page.goto(copiedSession.url);
+      await appendCLIReply(copiedSession.file, "CLI snapshot with extension state");
+      const status = page.locator('[data-status-key="extension:cli"]');
+      const widget = page.locator('[data-extension-widget-key="cli"]');
+      await expect(status).toContainText("CLI extension active");
+      await expect(widget).toContainText("CLI extension widget");
+
+      state = {};
+      await appendCLIReply(copiedSession.file, "CLI snapshot without extension state");
+      await expect(message(page, "assistant", "CLI snapshot without extension state")).toBeAttached();
+      await expect.soft(status).toHaveCount(0);
+      await expect.soft(widget).toHaveCount(0);
+    });
+
     test("CLI refresh preserves expanded output and conversation find", async ({ page, copiedSession }) => {
       const entries = (await readFile(copiedSession.file, "utf8")).trim().split("\n").map(JSON.parse);
       const callID = randomUUID().slice(0, 8);
@@ -254,6 +339,41 @@ for (const touch of [false, true]) {
       await expect(page.getByLabel("Message to Pi")).toBeEnabled();
       await expect(page.getByLabel("Message to Pi")).toHaveValue("Draft retained through takeover");
       await expect(message(page, "assistant", "Pending at takeover")).toBeAttached();
+    });
+
+    for (const retry of [false, true]) test(`takeover ${retry ? "retry" : "activation"} works on the first press when a CLI snapshot lands before release`, async ({ page, context, copiedSession }) => {
+      await page.goto(copiedSession.url);
+      await appendCLIReply(copiedSession.file, "Before takeover press");
+      const takeover = page.getByRole("button", { name: "Take over in gateway", exact: true });
+      await expect(takeover).toBeVisible();
+      if (retry) {
+        await page.route("/sessions/takeover", (route) => route.fulfill({ status: 503, json: { error: "Please retry takeover" } }), { times: 1 });
+        if (touch) await takeover.tap();
+        else await takeover.click();
+        await expect(page.locator("[data-session-sync-error]")).toHaveText("Please retry takeover");
+      }
+      const pending = await holdNextFragment(page);
+      await appendCLIReply(copiedSession.file, "Snapshot during takeover press");
+      await pending.requested;
+      if (touch) await takeover.tap({ trial: true });
+      else await takeover.click({ trial: true });
+      const box = await takeover.boundingBox();
+      const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      const cdp = touch ? await context.newCDPSession(page) : null;
+      if (touch) await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+      else {
+        await page.mouse.move(point.x, point.y);
+        await page.mouse.down();
+      }
+      pending.release();
+      await expect(message(page, "assistant", "Snapshot during takeover press")).toBeAttached();
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      if (touch) {
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await cdp.detach();
+      } else await page.mouse.up();
+      await expect(page.getByLabel("Message to Pi")).toBeEnabled();
+      await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "managed");
     });
 
     test("external CLI activity stays quiet in live and reloaded sidebars until takeover", async ({ page, context, copiedSession }, testInfo) => {

@@ -294,7 +294,15 @@ export class CurrentSessionFindController {
     else this.updateCount();
   }
 
-  async search({ resetIndex = false } = {}) {
+  historyChanged() {
+    this.preparationEpoch += 1;
+    this.preparationPromise = null;
+    this.ownsHistoryLoad = false;
+    this.historyStatus = this.conversation.element?.dataset.hasOlderMessages === "true" ? "pending" : "complete";
+    this.search({ scroll: false }).catch(() => {});
+  }
+
+  async search({ resetIndex = false, scroll = true } = {}) {
     if (!this.open) return;
     if (!this.queryReady()) {
       if (this.preparationPromise && this.ownsHistoryLoad) this.conversation.cancelOlderHistory?.();
@@ -306,7 +314,7 @@ export class CurrentSessionFindController {
       return;
     }
     if (this.historyStatus === "complete") {
-      this.refresh({ resetIndex });
+      this.refresh({ resetIndex, scroll });
       return;
     }
     if (this.preparationPromise) return this.preparationPromise;
@@ -316,19 +324,19 @@ export class CurrentSessionFindController {
     const epoch = this.bindingEpoch;
     const preparationEpoch = ++this.preparationEpoch;
     const bar = this.bar;
-    const scroll = this.conversation.element;
+    const scrollElement = this.conversation.element;
     const conversationEpoch = this.conversation.bindingEpoch;
     this.ownsHistoryLoad = !this.conversation.olderHistoryLoading;
     const preparation = (async () => {
       const historyStatus = await this.conversation.loadOlderHistory();
-      if (!this.open || epoch !== this.bindingEpoch || preparationEpoch !== this.preparationEpoch || conversationEpoch !== this.conversation.bindingEpoch || bar !== this.bar || scroll !== this.conversation.element) return;
+      if (!this.open || epoch !== this.bindingEpoch || preparationEpoch !== this.preparationEpoch || conversationEpoch !== this.conversation.bindingEpoch || bar !== this.bar || scrollElement !== this.conversation.element) return;
       this.historyStatus = historyStatus;
       if (historyStatus === "failed" || historyStatus === "cancelled") {
         this.historyStatus = "pending";
         this.clearMatches("History incomplete");
         return;
       }
-      if (historyStatus === "complete" && this.queryReady()) this.refresh({ resetIndex });
+      if (historyStatus === "complete" && this.queryReady()) this.refresh({ resetIndex, scroll });
     })();
     this.preparationPromise = preparation;
     try {
