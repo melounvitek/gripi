@@ -117,6 +117,7 @@ let sessionStatusBar = null;
 let reconnectBanner = null;
 let reconnectButton = null;
 let liveAgentRunning = false;
+let preparingToolCall = false;
 let liveBash = null;
 let liveBusySince = null;
 let liveErrorText = "";
@@ -827,7 +828,7 @@ function sessionSyncBlocked() {
 function showCurrentActiveTask(idleState = "done", idleLabel = "Done") {
   const compacting = liveOutput?.dataset.composerCompacting === "true";
   if (liveAgentRunning || compacting) {
-    setComposerState("running", compacting ? "Compacting…" : "Pi is running…", { since: liveBusySince });
+    setComposerState("running", compacting ? "Compacting…" : preparingToolCall ? "Preparing tool call…" : "Pi is running…", { since: liveBusySince });
   } else if (liveBash) {
     setComposerState("bash", "Shell command running…");
   } else {
@@ -1332,6 +1333,14 @@ function finishLiveBash(event) {
 }
 
 function renderEvent(event) {
+  if (["agent_start", "turn_start", "message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end", "turn_end", "agent_end", "agent_settled", "compaction_start"].includes(event.type) || eventErrorText(event)) {
+    const preparing = event.type === "message_update" && ["toolcall_start", "toolcall_delta"].includes(event.assistantMessageEvent?.type);
+    if (preparingToolCall !== preparing) {
+      preparingToolCall = preparing;
+      if (liveAgentRunning) showCurrentActiveTask();
+    }
+  }
+
   if (event.type === "bash_start") {
     startLiveBash(event);
     return;
@@ -1363,6 +1372,10 @@ function renderEvent(event) {
 
   if (["message_start", "message_update", "message_end"].includes(event.type)) {
     const outcome = liveMessageRenderer.renderMessageEvent(event);
+    // Render first: a coalesced tool delta can also carry previously unseen text.
+    if (["toolcall_start", "toolcall_delta", "toolcall_end"].includes(event.assistantMessageEvent?.type)) {
+      liveMessageRenderer.clearLiveAssistantStreaming();
+    }
     if (outcome.finalAssistantEnded) {
       conversationController.setAgentRunning(false);
       liveOutput.dataset.assistantResponseCount = String(Number(liveOutput.dataset.assistantResponseCount) + 1);
@@ -2265,6 +2278,7 @@ async function submitAbort(event) {
     const payload = await response.json();
     if (submittedSession === currentSessionPath() && payload.forced && payload.editorText !== undefined) {
       liveAgentRunning = false;
+      preparingToolCall = false;
       conversationController.setAgentRunning(false);
       liveBusySince = null;
       if (liveOutput) liveOutput.dataset.composerCompacting = "false";
@@ -2620,6 +2634,7 @@ function resetSessionViewState() {
   liveMessageRenderer.resetLiveAssistantTracking();
   liveMessageRenderer.resetLiveCompactionTracking();
   liveAgentRunning = false;
+  preparingToolCall = false;
   liveBash = null;
   liveBusySince = null;
   liveErrorText = "";
