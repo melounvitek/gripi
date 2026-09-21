@@ -504,9 +504,10 @@ async function expectCompactRow(link, touch) {
   expect(ageBox.x + ageBox.width).toBeLessThanOrEqual(actionsBox.x);
   expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
   if (touch) {
-    expect(linkBox.height).toBeGreaterThanOrEqual(44);
-    expect(actionsBox.height).toBeGreaterThanOrEqual(44);
-    expect(actionsBox.width).toBeGreaterThanOrEqual(44);
+    // Transformed drawer bounds can round a 44px target slightly below 44.
+    expect(linkBox.height).toBeGreaterThanOrEqual(44 - 0.01);
+    expect(actionsBox.height).toBeGreaterThanOrEqual(44 - 0.01);
+    expect(actionsBox.width).toBeGreaterThanOrEqual(44 - 0.01);
   }
 }
 
