@@ -193,6 +193,37 @@ test("live thinking follows the bound Pi display setting through streaming updat
   assert.equal(visible.body.textContent, "Visible reasoning");
 });
 
+test("tool preparation is visible with hidden thinking and is removed on reset or rebind", () => {
+  const document = new FakeDocument();
+  const output = new FakeElement("section");
+  output.dataset.hideThinkingBlock = "true";
+  document.getElementById = () => output;
+  const conversation = {
+    element: output,
+    followLiveOutput: () => false,
+    afterLiveOutputChange() {},
+  };
+  const renderer = new LiveMessageRenderer(document, conversation, {}, {
+    bind() {},
+    render() { assert.fail("Static preparation feedback does not need Markdown rendering"); },
+  });
+  renderer.bind();
+  renderer.setToolPreparation(true);
+  const card = output.querySelector(".message--tool-preparation");
+  assert.equal(card.querySelector(".message-body").textContent, "Preparing tool call…");
+  assert.equal(card.querySelector(".copy-button"), null);
+  assert.equal(card.dataset.messageFingerprint, undefined);
+  renderer.setToolPreparation(true);
+  assert.deepEqual(output.children, [card]);
+
+  renderer.resetLiveAssistantTracking();
+  assert.equal(output.children.length, 0);
+  renderer.setToolPreparation(true);
+  assert.equal(output.children.length, 1);
+  renderer.bind();
+  assert.equal(output.children.length, 0);
+});
+
 test("Markdown binding aborts stale work and superseded failures cannot replace current output", async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];

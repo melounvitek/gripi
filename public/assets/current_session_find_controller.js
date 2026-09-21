@@ -62,7 +62,7 @@ export class CurrentSessionFindController {
   }
 
   conversationMessage(message) {
-    return message.matches('[data-role="user"].message--user:not(.message--compact):not(.message--thinking):not(.message--error):not(.message--tool-error), [data-role="assistant"].message--assistant:not(.message--compact):not(.message--thinking):not(.message--status):not(.message--tool):not(.message--tool-call):not(.message--tool-transcript):not(.message--error):not(.message--tool-error)');
+    return message.matches('[data-role="user"].message--user:not(.message--compact):not(.message--thinking):not(.message--error):not(.message--tool-error), [data-role="assistant"].message--assistant:not(.message--compact):not(.message--thinking):not(.message--tool-preparation):not(.message--status):not(.message--tool):not(.message--tool-call):not(.message--tool-transcript):not(.message--error):not(.message--tool-error)');
   }
 
   focusedViewMessage(message) {

@@ -1335,6 +1335,7 @@ function finishLiveBash(event) {
 function renderEvent(event) {
   if (["agent_start", "turn_start", "message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end", "turn_end", "agent_end", "agent_settled", "compaction_start"].includes(event.type) || eventErrorText(event)) {
     const preparing = event.type === "message_update" && ["toolcall_start", "toolcall_delta"].includes(event.assistantMessageEvent?.type);
+    if (!preparing) liveMessageRenderer.setToolPreparation(false);
     if (preparingToolCall !== preparing) {
       preparingToolCall = preparing;
       if (liveAgentRunning) showCurrentActiveTask();
@@ -1375,6 +1376,12 @@ function renderEvent(event) {
     // Render first: a coalesced tool delta can also carry previously unseen text.
     if (["toolcall_start", "toolcall_delta", "toolcall_end"].includes(event.assistantMessageEvent?.type)) {
       liveMessageRenderer.clearLiveAssistantStreaming();
+    }
+    if (preparingToolCall) {
+      const currentPart = liveMessageParser.eventMessage(event)?.content?.[event.assistantMessageEvent?.contentIndex];
+      // Subagent calls are hidden by the parser until tool execution starts.
+      const toolCardVisible = currentPart?.type === "toolCall" && currentPart.name !== "subagent";
+      liveMessageRenderer.setToolPreparation(!toolCardVisible, eventTimestamp(event));
     }
     if (outcome.finalAssistantEnded) {
       conversationController.setAgentRunning(false);
@@ -3424,6 +3431,7 @@ function restorePreservedConversationScroll(scrollSnapshot) {
 }
 
 function restoreSessionLiveState({ resetIdleState = false } = {}) {
+  preparingToolCall = false;
   const initialComposerState = liveOutput.dataset.composerState;
   const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);
   const initialComposerCompacting = liveOutput.dataset.composerCompacting === "true";

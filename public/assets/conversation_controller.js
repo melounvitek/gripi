@@ -382,7 +382,7 @@ export class ConversationController {
 
   focusedViewMessage(message) {
     if (message.classList.contains("message--compaction")) return true;
-    if (["message--thinking", "message--tool", "message--tool-call", "message--tool-transcript", "message--error", "message--tool-error"].some((name) => message.classList.contains(name))) return false;
+    if (["message--thinking", "message--tool-preparation", "message--tool", "message--tool-call", "message--tool-transcript", "message--error", "message--tool-error"].some((name) => message.classList.contains(name))) return false;
     return !["system", "status", "tool", "toolResult", "error"].includes(message.dataset.role);
   }
 
@@ -629,7 +629,7 @@ export class ConversationController {
   }
 
   latestReadableAssistantMessage() {
-    const messages = this.element?.querySelectorAll('[data-role="assistant"].message--assistant:not(.message--thinking):not(.message--compact)');
+    const messages = this.element?.querySelectorAll('[data-role="assistant"].message--assistant:not(.message--thinking):not(.message--tool-preparation):not(.message--compact)');
     return messages?.[messages.length - 1] || null;
   }
 

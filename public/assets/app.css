@@ -94,6 +94,7 @@
     .focus-activity-item-text { min-width: 0; overflow-wrap: anywhere; }
     .focus-activity-item--error, .focus-activity-item--error .focus-activity-item-marker { color: var(--danger); }
     .conversation-panel.is-conversation-focused .conversation-scroll .message--thinking,
+    .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-preparation,
     .conversation-panel.is-conversation-focused .conversation-scroll .message--tool,
     .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-call,
     .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-transcript,
@@ -305,7 +306,7 @@
     .message { position: relative; min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 0.4rem; padding: 0.9rem; margin-bottom: 0.85rem; background: var(--panel); scroll-margin-top: 3.5rem; }
     .message--user { margin-left: 10%; background: var(--user-msg); border-color: #ffffff14; color: var(--text); }
     .message--assistant { margin-right: 10%; background: var(--panel); border-color: var(--border); color: var(--copy); }
-    .message--thinking { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }
+    .message--thinking, .message--tool-preparation { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }
     .message--status { background: transparent; color: var(--muted); }
     .message--tool, .message--tool-call, .message--tool-transcript { background: var(--tool-ok); border-color: #ffffff0a; color: var(--tool-copy); }
     .message--tool-transcript { font-family: var(--mono); }

@@ -198,16 +198,17 @@ export class LiveMessageRenderer {
   appendMessage(roleName, text, live = true, forceScroll = false, timestamp = null, options = {}) {
     const timestampKey = messageTimestampKey(timestamp);
     if (live && roleName === "user" && !options.optimistic && this.optimisticUserMessageAlreadyRendered(text)) return null;
-    if (live && this.liveMessageAlreadyRendered(roleName, text, timestampKey)) return null;
+    if (live && !options.toolPreparation && this.liveMessageAlreadyRendered(roleName, text, timestampKey)) return null;
 
     const shouldScroll = this.conversationController.followLiveOutput(forceScroll);
     const roleKey = messageRoleKey(roleName);
+    const activity = options.thinking || options.toolPreparation;
 
     const article = this.document.createElement("article");
-    article.className = `message message--${roleKey}${options.thinking ? " message--thinking" : ""}${options.error ? " message--error" : ""}${live ? " message--live" : ""}`;
+    article.className = `message message--${roleKey}${options.thinking ? " message--thinking" : ""}${options.toolPreparation ? " message--tool-preparation" : ""}${options.error ? " message--error" : ""}${live ? " message--live" : ""}`;
     article.dataset.role = roleName;
     article.dataset.messageTimestamp = timestampKey;
-    article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
+    if (!options.toolPreparation) article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
     if (options.finalAssistantResponse) article.dataset.finalAssistantResponse = "true";
     if (options.optimistic) {
       article.dataset.optimistic = "true";
@@ -225,8 +226,10 @@ export class LiveMessageRenderer {
     const markdownMessage = ["assistant", "custom"].includes(roleName) || options.markdown;
     const displayText = options.thinking && this.hideThinkingBlock ? "Thinking..." : text;
     const body = this.document.createElement(markdownMessage ? "div" : "pre");
-    body.className = options.thinking ? "message-body message-body--thinking message-body--markdown" : (markdownMessage ? "message-body message-body--markdown" : "message-body");
-    if (markdownMessage) {
+    body.className = activity ? "message-body message-body--thinking message-body--markdown" : (markdownMessage ? "message-body message-body--markdown" : "message-body");
+    if (options.toolPreparation) {
+      body.textContent = text;
+    } else if (markdownMessage) {
       this.markdownRenderer.render(body, displayText);
     } else if (roleName === "user") {
       renderTextWithLinks(body, displayText, this.document);
@@ -240,7 +243,7 @@ export class LiveMessageRenderer {
 
     header.append(role);
     if (meta.textContent) header.append(meta);
-    if (roleName === "assistant" && !options.thinking) header.append(this.makeCopyButton());
+    if (roleName === "assistant" && !activity) header.append(this.makeCopyButton());
     article.append(header);
     article.append(body);
     this.renderMessageImages(article, options.images);
@@ -776,7 +779,21 @@ export class LiveMessageRenderer {
   }
 
 
+  setToolPreparation(preparing, timestamp = null) {
+    if (preparing) {
+      if (this.toolPreparationMessage || !this.liveOutput) return;
+      const entry = this.appendMessage("assistant", "Preparing tool call…", true, false, timestamp, { toolPreparation: true });
+      this.toolPreparationMessage = entry.article;
+    } else if (this.toolPreparationMessage) {
+      const shouldScroll = this.conversationController.followLiveOutput();
+      this.toolPreparationMessage.remove();
+      this.toolPreparationMessage = null;
+      this.conversationController.afterLiveOutputChange(shouldScroll, true, true);
+    }
+  }
+
   resetLiveAssistantTracking() {
+    this.setToolPreparation(false);
     this.liveAssistantSegments = new Map();
     this.livePairedToolCalls = new Map();
     this.liveToolExecutions = new Map();
