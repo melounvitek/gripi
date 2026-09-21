@@ -222,6 +222,11 @@ test("Markdown binding aborts stale work and superseded failures cannot replace 
     requests[2].resolve({ ok: false });
     await settle(() => body.dataset.rendering === undefined);
     assert.equal(body.textContent, "second");
+
+    renderer.render(body, "second", 0);
+    await settle(() => requests.length === 4);
+    requests[3].resolve({ ok: true, json: async () => ({ html: "<p>second</p>" }) });
+    await settle(() => body.innerHTML === "<p>second</p>");
   } finally {
     globalThis.fetch = originalFetch;
   }

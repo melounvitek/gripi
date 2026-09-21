@@ -54,6 +54,7 @@ export class ServerMarkdownRenderer {
   fail(job) {
     if (!this.current(job)) return;
     job.body.textContent = job.text;
+    delete job.body.dataset.plainText;
     delete job.body.dataset.rendering;
     this.jobs.delete(job.body);
   }
