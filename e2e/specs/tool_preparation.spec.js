@@ -3,17 +3,19 @@ import { expect, test } from "@playwright/test";
 test.use({ hasTouch: true });
 
 async function eventDelivery(page) {
-  const pending = [];
-  let sequence = 0;
+  const history = [];
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) history.length = 0;
+  });
   await page.route(/\/events(?:\?|$)/, async (route) => {
-    const events = pending.splice(0);
-    sequence += events.length;
-    await route.fulfill({ json: { events, last_seq: sequence, missed: false } });
+    // Like the gateway, replay unacknowledged events after an interrupted poll.
+    const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
+    await route.fulfill({ json: { events: history.slice(after), last_seq: history.length, missed: false } });
   });
   await page.goto("/");
   await expect(page.locator("#live-output")).toBeAttached();
   return async (...events) => {
-    pending.push(...events);
+    history.push(...events);
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
   };
 }
@@ -168,6 +170,33 @@ test("tool-only preparation feedback clears at lifecycle boundaries", async ({ p
     await deliver({ type: "agent_start" }, { type: "agent_settled" });
     await expect(status).toHaveAttribute("data-state", "done");
   }
+});
+
+test("preparation completes after its completion poll is interrupted", async ({ page }) => {
+  await page.addInitScript(() => {
+    const fetch = window.fetch.bind(window);
+    let interrupted = false;
+    window.fetch = async (...args) => {
+      const response = await fetch(...args);
+      if (!interrupted && new URL(response.url).pathname === "/events") {
+        const payload = await response.clone().json();
+        if (payload.events.some((event) => event.type === "agent_settled")) {
+          interrupted = true;
+          throw new DOMException("Simulated interrupted poll", "AbortError");
+        }
+      }
+      return response;
+    };
+  });
+  const deliver = await eventDelivery(page);
+  await deliver(
+    { type: "agent_start" },
+    { type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0 }, gatewayPartialMessage: { role: "assistant", content: [] } },
+  );
+  await expect(page.locator(".message--tool-preparation")).toBeVisible();
+  await deliver({ type: "agent_settled" });
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
+  await expect(page.locator(".message--tool-preparation")).toHaveCount(0);
 });
 
 for (const boundary of ["reload", "abort", "forced abort"]) {
