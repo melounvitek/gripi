@@ -39,12 +39,14 @@ for (const width of [1440, 700]) {
   test(`stop with double Escape in a separate session window at ${width}px`, async ({ page }) => {
     await page.goto("/");
     await selectSession(page, sessions.controlsAbort);
+    await sendPrompt(page, prompts.abortStart);
+    await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
     const popupPromise = page.waitForEvent("popup");
     await page.getByRole("link", { name: "Open session in new window" }).click();
     const sessionWindow = await popupPromise;
     await sessionWindow.setViewportSize({ width, height: 900 });
     await expect(sessionWindow).toHaveURL(/session_only=1/);
-    await sendPrompt(sessionWindow, prompts.abortStart);
+    await sessionWindow.waitForLoadState("domcontentloaded");
     const abort = sessionWindow.getByRole("button", { name: "Abort running Pi" });
     await expect(abort).toBeVisible();
     await expect(sessionWindow.locator(".composer-state")).toHaveAttribute("data-state", "running");
