@@ -15,6 +15,7 @@ export class ServerMarkdownRenderer {
   }
 
   render(body, text, delay = 120) {
+    if (body.dataset.plainText === text && (this.jobs.has(body) || body.dataset.rendering !== "pending")) return;
     this.cancel(this.jobs.get(body));
     body.dataset.plainText = text;
     body.dataset.rendering = "pending";

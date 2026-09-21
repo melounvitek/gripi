@@ -227,6 +227,67 @@ test("Markdown binding aborts stale work and superseded failures cannot replace 
   }
 });
 
+test("unchanged Markdown keeps pending work and completed DOM intact", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = deferred();
+  const requests = [];
+  globalThis.fetch = (_url, options) => {
+    requests.push(options);
+    return response.promise;
+  };
+  const renderer = new ServerMarkdownRenderer({}, { autoScrollEnabled: false });
+  try {
+    const body = markdownBody();
+    let replacements = 0;
+    Object.defineProperty(body, "innerHTML", { set() { replacements += 1; } });
+
+    renderer.render(body, "Finished text", 0);
+    // An identical update must not postpone the queued render.
+    renderer.render(body, "Finished text", 60_000);
+    await settle(() => requests.length === 1);
+    renderer.render(body, "Finished text", 0);
+    assert.equal(requests[0].signal.aborted, false);
+    response.resolve({ ok: true, json: async () => ({ html: "<p>Finished text</p>" }) });
+    await settle(() => body.dataset.rendering === undefined);
+    assert.equal(replacements, 1);
+
+    renderer.render(body, "Finished text", 0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(requests.length, 1);
+    assert.equal(replacements, 1);
+  } finally {
+    renderer.bind();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Markdown binding allows canceled identical text to restart", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = (_url, options) => {
+    const response = deferred();
+    requests.push({ ...response, signal: options.signal });
+    return response.promise;
+  };
+  try {
+    const renderer = new ServerMarkdownRenderer({}, { autoScrollEnabled: false });
+    const body = markdownBody();
+    renderer.render(body, "Same text", 0);
+    await settle(() => requests.length === 1);
+    renderer.bind();
+    assert.equal(requests[0].signal.aborted, true);
+    renderer.render(body, "Same text", 0);
+    await settle(() => requests.length === 2);
+    requests[1].resolve({ ok: true, json: async () => ({ html: "<p>Same text</p>" }) });
+    await settle(() => body.innerHTML === "<p>Same text</p>");
+    requests[0].resolve({ ok: true, json: async () => ({ html: "stale" }) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(body.innerHTML, "<p>Same text</p>");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("live parser preserves representative SSR shapes and renderer deduplicates persisted messages", () => {
   const parser = new LiveMessageParser("/home/tester");
   const assistant = parser.contentSegments([{ type: "text", text: "Answer" }], { role: "assistant" });
