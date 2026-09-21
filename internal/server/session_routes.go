@@ -295,10 +295,15 @@ func (app *application) composerPathSuggestions(response http.ResponseWriter, re
 		return
 	}
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, ok := store.Session(raw)
-	if !ok {
-		http.NotFound(response, request)
-		return
+	var cwd string
+	if session, ok := store.Session(raw); ok {
+		cwd = session.CWD
+	} else {
+		cwd, ok = app.pendingSessions.CWD(raw)
+		if !ok {
+			http.NotFound(response, request)
+			return
+		}
 	}
 	if mode == "fuzzy" {
 		if !acquireRequestSlot(response, request, app.fdRequests) {
@@ -307,7 +312,7 @@ func (app *application) composerPathSuggestions(response http.ResponseWriter, re
 		defer releaseRequestSlot(app.fdRequests)
 	}
 	response.Header().Set("Cache-Control", "no-store")
-	writeJSON(response, map[string]any{"suggestions": sessions.SuggestPaths(session.CWD, app.config.Home, mode, query)})
+	writeJSON(response, map[string]any{"suggestions": sessions.SuggestPaths(cwd, app.config.Home, mode, query)})
 }
 
 func (app *application) pinSession(response http.ResponseWriter, request *http.Request) {

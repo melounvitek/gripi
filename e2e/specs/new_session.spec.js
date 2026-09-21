@@ -52,6 +52,13 @@ test("start a session in a configured directory and persist its first response",
   await expect(row).toHaveAttribute("data-pinned", "true");
   await expect(page.getByRole("heading", { level: 2, name: "Pinned" })).toBeVisible();
 
+  const composer = page.getByLabel("Message to Pi");
+  await composer.fill("Follow the AGENTS file from ../");
+  const sibling = page.getByRole("option", { name: "../new-session-mobile/", exact: true });
+  await expect(sibling).toBeVisible();
+  await sibling.click();
+  await expect(composer).toHaveValue("Follow the AGENTS file from ../new-session-mobile/");
+
   await sendPrompt(page, prompts.newSession);
   await expect(message(page, "assistant", replies.newSession)).toBeVisible();
   await expectRunFinished(page);
