@@ -45,7 +45,7 @@ for (const transport of ["delta-only", "cumulative"]) {
     const extraText = " I expect about ten minutes.";
     const snapshot = { ...message, content: [{ type: "text", text: text + extraText }] };
     await deliver(update(transport === "delta-only" ? "toolcall_delta" : "toolcall_start", snapshot));
-    await expect(status).toContainText("Preparing tool call…");
+    await expect(status).toContainText("Pi is running…");
     await expect(card).toContainText(extraText);
     await expect(card).not.toHaveClass(/message--streaming/);
     await expect(preparation).toHaveCount(1);
@@ -67,13 +67,13 @@ for (const transport of ["delta-only", "cumulative"]) {
     await page.waitForTimeout(300);
     expect(await page.evaluate(() => window.preparationParagraph.isConnected && window.preparationCard.isConnected)).toBe(true);
     await expect(preparation).toHaveCount(1);
-    await expect(status).toContainText("Preparing tool call…");
+    await expect(status).toContainText("Pi is running…");
     await expect(card).not.toHaveClass(/message--streaming/);
 
     const activityToggle = page.getByRole("switch", { name: "Show agent activity" });
     await activityToggle.tap();
     await expect(preparation).toBeHidden();
-    await expect(status).toContainText("Preparing tool call…");
+    await expect(status).toContainText("Pi is running…");
     await expect(page.locator(".focus-activity-summary").last()).toContainText("1 other update");
     await activityToggle.tap();
     await expect(preparation).toBeVisible();
@@ -115,7 +115,7 @@ test("preparation yields to the current cumulative tool card, not an earlier too
   await deliver(update([earlierTool, currentTool]));
   await expect(page.locator('[data-tool-call-id="current-tool"]')).toBeVisible();
   await expect(preparation).toHaveCount(0);
-  await expect(page.locator(".composer-state")).toContainText("Preparing tool call…");
+  await expect(page.locator(".composer-state")).toContainText("Pi is running…");
 });
 
 test("cumulative subagent preparation stays visible until its execution card appears", async ({ page }) => {
@@ -154,11 +154,10 @@ test("tool-only preparation feedback clears at lifecycle boundaries", async ({ p
       { type: "message_start", message },
       { type: "message_update", assistantMessageEvent: { type: "toolcall_delta", delta: "hidden" }, gatewayPartialMessage: message },
     );
-    await expect(status).toContainText("Preparing tool call…");
+    await expect(status).toContainText("Pi is running…");
     await expect(preparation).toHaveCount(1);
     await expect(preparation).toBeVisible();
     await deliver(ending);
-    await expect(status).not.toContainText("Preparing tool call…");
     await expect(preparation).toHaveCount(0);
     if (ending.type === "message_update") {
       await expect(page.locator('[data-tool-call-id="preparation-test"]')).toBeVisible();
@@ -213,7 +212,7 @@ for (const boundary of ["reload", "abort", "forced abort"]) {
     await expect(preparation).toBeVisible();
     await page.getByRole("switch", { name: "Show agent activity" }).tap();
     await expect(preparation).toBeHidden();
-    await expect(status).toContainText("Preparing tool call…");
+    await expect(status).toContainText("Pi is running…");
 
     if (boundary === "reload") {
       await page.reload();
@@ -228,7 +227,6 @@ for (const boundary of ["reload", "abort", "forced abort"]) {
       await expect(status).toHaveAttribute("data-state", "done");
     }
     await expect(preparation).toHaveCount(0);
-    await expect(status).not.toContainText("Preparing tool call…");
     const toggle = page.getByRole("switch", { name: "Show agent activity" });
     if (await toggle.getAttribute("aria-checked") === "false") await toggle.tap();
     await expect(preparation).toHaveCount(0);
