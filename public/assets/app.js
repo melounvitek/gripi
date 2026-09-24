@@ -2355,7 +2355,7 @@ function filterCommandsFromPrompt() {
   commandList.querySelectorAll(".command-list h3").forEach((heading) => { heading.hidden = false; });
   const query = promptTextarea.value.startsWith("/") ? promptTextarea.value.slice(1).trim().toLowerCase() : "";
   commandList.querySelectorAll(".command").forEach((command) => {
-    command.hidden = query && !command.dataset.commandText.toLowerCase().includes(query);
+    command.hidden = query && !command.dataset.commandName.toLowerCase().includes(query);
   });
   highlightedCommandIndex = 0;
   updateHighlightedCommand();
