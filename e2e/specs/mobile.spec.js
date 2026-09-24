@@ -6,6 +6,26 @@ import {
   expectClearQueueRunning, expectPendingQueue, prepareClearQueue, stopClearQueueRun
 } from "../support/clear_queue.mjs";
 
+test("slash commands complete on the first mobile tap without submitting", async ({ page }) => {
+  await page.goto(`/?${new URLSearchParams({ session_search: sessions.mobile })}`);
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  await page.getByRole("link", { name: new RegExp(sessions.mobile) }).tap();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.mobile })).toBeVisible();
+  const composer = page.getByLabel("Message to Pi");
+  const modelCommand = page.locator('.command[data-command-name="model"]');
+  await composer.fill("/mod");
+  await expect(modelCommand).toBeVisible();
+  await modelCommand.tap();
+  await expect(composer).toHaveValue("/model ");
+  await expect(page.getByRole("dialog", { name: "Model & thinking" })).toBeHidden();
+
+  await composer.fill("/mod");
+  await expect(modelCommand).toBeVisible();
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("/model ");
+  await expect(page.getByRole("dialog", { name: "Model & thinking" })).toBeHidden();
+});
+
 test("Clear queue confirms on the first mobile tap with a 44px target", async ({ page }) => {
   try {
     await prepareClearQueue(page, sessions.clearQueueMobile, true);

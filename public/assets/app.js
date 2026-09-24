@@ -2472,6 +2472,10 @@ function bindSessionControls() {
       if (((event.key === "Enter" && !event.shiftKey) || (event.key === "Tab" && !event.shiftKey)) && commands.length > 0) {
         event.preventDefault();
         selectHighlightedCommand();
+        if (event.key === "Enter" && automaticComposerFocusEnabled()) {
+          keyboardStreamingBehaviorOverride = event.altKey ? "follow_up" : null;
+          promptForm.requestSubmit();
+        }
         return;
       }
     }
