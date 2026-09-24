@@ -324,7 +324,8 @@
     .sidebar-empty-action { width: 100%; justify-self: stretch; }
     .message { position: relative; min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 0.4rem; padding: 0.9rem; margin-bottom: 0.85rem; background: var(--panel); scroll-margin-top: 3.5rem; }
     .message--user { margin-left: 10%; background: var(--user-msg); border-color: #ffffff14; color: var(--text); }
-    .message--assistant { margin-right: 10%; background: var(--panel); border-color: var(--border); color: var(--copy); }
+    .message--assistant, .message--status, .message--tool { margin-right: 10%; }
+    .message--assistant { background: var(--panel); border-color: var(--border); color: var(--copy); }
     .message--thinking, .message--tool-preparation { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }
     .message--status { background: transparent; color: var(--muted); }
     .message--tool, .message--tool-call, .message--tool-transcript { background: var(--tool-ok); border-color: #ffffff0a; color: var(--tool-copy); }
@@ -362,14 +363,13 @@
     .message-details { min-width: 0; max-width: 100%; }
     .message-details-summary { margin-bottom: 0.5rem; font-weight: 550; color: var(--muted); }
     .message--tool .message-details-summary, .message--tool-call .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-family: var(--mono); font-size: 0.84rem; line-height: 1.4; }
-    .message--compact .message-details-summary:last-child { margin-bottom: 0; }
+    .message--compact .message-details-summary:nth-last-child(1 of :not([hidden])) { margin-bottom: 0; }
     .message--tool .message-body, .message--tool-call .message-body, .message--tool-transcript .message-body { max-width: 100%; overflow-x: auto; }
-    .compact-summary { margin-left: 0.25rem; }
-    .bash-execution-status { display: flex; flex-wrap: wrap; gap: 0.35rem 0.7rem; margin: -0.1rem 0 0.5rem 0.25rem; color: var(--muted); font: 0.76rem var(--mono); }
-    .compaction-details-summary { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0; cursor: pointer; list-style: none; }
+    .bash-execution-status { display: flex; flex-wrap: wrap; gap: 0.35rem 0.7rem; margin: -0.1rem 0 0.5rem; color: var(--muted); font: 0.76rem var(--mono); }
+    .compaction-details-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0; cursor: pointer; list-style: none; }
     .compaction-details-summary::-webkit-details-marker { display: none; }
     .message-details--compaction[open] .compaction-details-summary { margin-bottom: 0.5rem; }
-    .compaction-details-action { color: var(--accent); font-family: var(--mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+    .compaction-details-action { white-space: nowrap; color: var(--accent); font-family: var(--mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
     .compaction-details-action::before { content: "Show summary"; }
     .message-details--compaction[open] .compaction-details-action::before { content: "Hide summary"; }
     .subagent-prompt { margin: 0 0 0.65rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 0.3rem; background: var(--panel); font-family: var(--sans); }
@@ -735,7 +735,7 @@
       body:not(.is-conversation-scrolling) .jump-controls.is-visible { visibility: hidden; opacity: 0; pointer-events: none; }
       body:not(.is-conversation-scrolling) .jump-controls.is-loading { visibility: visible; opacity: 1; pointer-events: auto; }
       .message { margin-bottom: 0.65rem; padding: 0.75rem; border-radius: 0.35rem; }
-      .message--user, .message--assistant { margin-left: 0; margin-right: 0; }
+      .message--user, .message--assistant, .message--status, .message--tool { margin-left: 0; margin-right: 0; }
       .message-header { flex-wrap: wrap; }
       .copy-button { min-height: 2rem; padding: 0.3rem 0.65rem; }
       .message-body--markdown { line-height: 1.5; }

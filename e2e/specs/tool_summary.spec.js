@@ -22,6 +22,13 @@ test("show the full wrapped tool command live and after reload", async ({ page }
   await expect(card).toHaveCount(0);
   delivery.phase = "command";
   await expectFullCommand(card);
+  const emptyOutputSpacing = await card.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const title = element.querySelector(".message-details-summary").getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return bounds.bottom - title.bottom - parseFloat(style.paddingBottom) - parseFloat(style.borderBottomWidth);
+  });
+  expect(Math.abs(emptyOutputSpacing)).toBeLessThanOrEqual(1);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expectFullCommand(card, { wrapped: true });
