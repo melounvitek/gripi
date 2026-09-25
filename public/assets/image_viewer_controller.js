@@ -23,7 +23,10 @@ function imageExtension(source) {
 }
 
 function imageDownloadFilename(source) {
-  const label = String(source.alt || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").trim().replace(/[. ]+$/, "");
+  const summary = source.closest("article")?.querySelector(".compact-summary");
+  const path = summary?.querySelector(".tool-command")?.textContent === "read" ? summary.querySelector(".tool-path")?.textContent : "";
+  const filename = path?.split(/[\\/]/).pop() || source.alt || "";
+  const label = String(filename).replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").trim().replace(/[. ]+$/, "");
   const extension = imageExtension(source.currentSrc || source.src);
   const labelledExtension = label.match(/\.(png|jpe?g|gif|webp)$/i)?.[1];
   if (labelledExtension) return extension ? `${label.slice(0, -labelledExtension.length)}${extension}` : label;

@@ -482,6 +482,18 @@ test("render a large image read without blocking the conversation", async ({ pag
 
   expect(sessionFragmentRequests).toBe(0);
   expect(await page.evaluate(() => window.sessionSwitchingObserved)).toBe(false);
+
+  for (const reload of [false, true]) {
+    if (reload) await page.reload();
+    await page.getByRole("button", { name: "View attached image full size" }).click();
+    const viewer = page.getByRole("dialog", { name: "Full-size image viewer" });
+    const downloadPromise = page.waitForEvent("download");
+    await viewer.getByRole("link", { name: "Download image" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("e2e-large-image.png");
+    await download.delete();
+    await viewer.getByRole("button", { name: "Close image viewer" }).click();
+  }
 });
 
 test("stream a tool-backed answer and render the persisted result after reload", async ({ page }) => {

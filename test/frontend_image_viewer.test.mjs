@@ -118,6 +118,51 @@ test("image viewer uses the displayed image format for its download filename", (
   assert.equal(download.getAttribute("download"), "preview.png");
 });
 
+test("image viewer downloads read results using the tool path basename", () => {
+  for (const [path, expected] of [
+    ["/tmp/screenshot.png", "screenshot.png"],
+    ["/tmp/my screenshot.png", "my screenshot.png"],
+    ["C:\\images\\screenshot.png", "screenshot.png"],
+    ["relative/preview.jpg", "preview.png"],
+    ["/tmp/preview?.png", "preview-.png"],
+    ["", "image.png"],
+  ]) {
+    const { controller, download } = viewerFixture();
+    const { article, button, image } = sourceImage("data:image/png;base64,cG5n");
+    const summary = new FakeElement("span", [".compact-summary"]);
+    const command = new FakeElement("span", [".tool-command"]);
+    command.textContent = "read";
+    const toolPath = new FakeElement("span", [".tool-path"]);
+    toolPath.textContent = path;
+    summary.append(command, toolPath);
+    article.append(summary);
+
+    controller.open(image, button);
+
+    assert.equal(download.getAttribute("download"), expected, path);
+  }
+});
+
+test("image viewer ignores paths outside its own read tool summary", () => {
+  for (const toolName of ["read", "write"]) {
+    const { controller, download } = viewerFixture();
+    const { article, button, image } = sourceImage();
+    const summary = new FakeElement("span", [".compact-summary"]);
+    const command = new FakeElement("span", [".tool-command"]);
+    command.textContent = toolName;
+    const toolPath = new FakeElement("span", [".tool-path"]);
+    toolPath.textContent = "/tmp/unrelated.png";
+    summary.append(command);
+    if (toolName === "write") summary.append(toolPath);
+    else article.append(toolPath);
+    article.append(summary);
+
+    controller.open(image, button);
+
+    assert.equal(download.getAttribute("download"), "image.png");
+  }
+});
+
 test("image viewer retains its live object URL until close", () => {
   const { controller, window } = viewerFixture();
   const { button, image } = sourceImage("blob:image-preview", "preview.png");
