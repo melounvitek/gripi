@@ -141,9 +141,23 @@ test("snapshot reconciliation retains expanded running cards and their original 
   refresh = true;
   await page.waitForResponse(/\/session_fragment(?:\?|$)/);
   await expect(write).not.toHaveAttribute("data-activity-active", "");
-  await expect(group).toHaveCount(0);
+  await expect(group).toContainText("Pi is working…");
+  await expect(group.locator(".message")).toHaveCount(0);
+  await expect(group).not.toContainText("Done");
   await expect(write).toHaveCount(1);
   await expect(write).toBeHidden();
+  // An idle snapshot must retire the shell, not leave a permanent waiting state.
+  await page.route(/\/session_fragment(?:\?|$)/, async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.conversation_html = payload.conversation_html
+      .replace(/data-active-tool-events="[^"]*"/, 'data-active-tool-events="[]"')
+      .replace(/data-agent-running="[^"]*"/, 'data-agent-running="false"');
+    await route.fulfill({ response, json: payload });
+  });
+  refresh = true;
+  await page.waitForResponse(/\/session_fragment(?:\?|$)/);
+  await expect(group).toHaveCount(0);
 });
 
 test("normal tool completion removes Active now and stays collapsed after reload", async ({ page }) => {

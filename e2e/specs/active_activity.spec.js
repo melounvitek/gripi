@@ -25,6 +25,123 @@ const start = (id, name, args) => ({ type: "tool_execution_start", toolCallId: i
 const end = (id, name, text = "Finished", isError = false) => ({ type: "tool_execution_end", toolCallId: id, toolName: name, result: { content: [{ type: "text", text }] }, isError });
 const activeGroup = (page) => page.getByRole("region", { name: "Active now", exact: true });
 
+test("bridges activity gaps without removing the group or keeping a stale running count", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const group = activeGroup(page);
+  await deliver({ type: "agent_start" });
+  await expect(group).toHaveCount(0);
+  await deliver(start("gap-a", "bash", { command: "inspect database" }));
+  await expect(group).toContainText("1 running");
+  await group.evaluate((element) => { window.activityShell = element; });
+  await deliver(end("gap-a", "bash", "Database inspected"), { type: "turn_end" });
+  await expect(group.locator(".active-activity-count")).toHaveText("Done");
+  await expect(group).toContainText("Database inspected");
+  await expect(group.locator("[data-activity-active]")).toHaveCount(0);
+  await deliver({ type: "turn_start" }, start("gap-b", "read", { path: "schema.sql" }));
+  await expect(group).toContainText("1 running");
+  await expect(group.locator('[data-tool-call-id="gap-b"]')).toBeVisible();
+  await expect(page.locator('[data-tool-call-id="gap-a"]')).toBeHidden();
+  // The previous completion timer must not retire the new activity.
+  await page.waitForTimeout(1600);
+  await expect(group).toContainText("1 running");
+  await deliver(end("gap-b", "read"));
+  await expect(group.locator(".active-activity-count")).toHaveText("Done");
+  await expect(group).toContainText("Pi is working…");
+  await expect(group.locator(".message")).toHaveCount(0);
+  expect(await group.evaluate((element) => element === window.activityShell)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("activity-gap.png") });
+  await deliver(start("gap-c", "bash", { command: "verify schema" }));
+  await expect(group).toContainText("1 running");
+  await deliver({ type: "agent_end" });
+  await expect(group).toHaveCount(0);
+});
+
+test("activity height settles after a shorter replacement and timers cannot recreate a hidden group", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const group = activeGroup(page);
+  const output = Array.from({ length: 10 }, () => "Long output line").join("\n");
+  await deliver({ type: "agent_start" }, start("tall", "bash", { command: "inspect" }), { type: "tool_execution_update", toolCallId: "tall", toolName: "bash", partialResult: { content: [{ type: "text", text: output }] } });
+  await expect(group).toContainText("Long output line");
+  const tallHeight = (await group.boundingBox()).height;
+  await group.evaluate((element) => {
+    const observer = new MutationObserver(() => {
+      if (!element.querySelector('[data-tool-call-id="short"]')) return;
+      window.activityReplacementHeight = element.getBoundingClientRect().height;
+      observer.disconnect();
+    });
+    observer.observe(element, { childList: true });
+    window.activityShrinkHeights = [];
+    element.addEventListener("transitionrun", (event) => {
+      if (event.propertyName !== "min-height") return;
+      const start = performance.now();
+      const sample = () => {
+        window.activityShrinkHeights.push(element.getBoundingClientRect().height);
+        if (performance.now() - start < 250) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+  });
+  await deliver(end("tall", "bash", output), start("short", "read", { path: "schema.sql" }));
+  await expect(group).toContainText("schema.sql");
+  expect(await page.evaluate(() => window.activityReplacementHeight)).toBeGreaterThanOrEqual(tallHeight - 1);
+  await expect.poll(async () => (await group.boundingBox()).height).toBeLessThan(tallHeight - 20);
+  await expect(group).toHaveCSS("min-height", "0px");
+  const shortHeight = (await group.boundingBox()).height;
+  await expect.poll(() => page.evaluate(({ tallHeight, shortHeight }) => window.activityShrinkHeights.some((height) => height > shortHeight + 1 && height < tallHeight - 1), { tallHeight, shortHeight })).toBe(true);
+  await deliver(end("short", "read"));
+  await expect(group.locator(".active-activity-count")).toHaveText("Done");
+  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await page.waitForTimeout(1600);
+  await expect(group).toHaveCount(0);
+  await expect(page.locator('[data-tool-call-id="short"]')).toBeVisible();
+  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await expect(group).toHaveCount(0);
+});
+
+test("a completion timer cannot move a card during its first Expand tap", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const group = activeGroup(page);
+  const output = Array.from({ length: 40 }, (_, index) => `Completed line ${index + 1}`).join("\n");
+  await deliver({ type: "agent_start" }, start("completed-touch", "bash", { command: "inspect" }));
+  await expect(group).toContainText("1 running");
+  await deliver(end("completed-touch", "bash", output));
+  await expect(group.locator(".active-activity-count")).toHaveText("Done");
+  const expand = group.getByRole("button", { name: "Expand", exact: true });
+  await expand.scrollIntoViewIfNeeded();
+  const box = await expand.boundingBox();
+  const touch = await page.context().newCDPSession(page);
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
+  await page.waitForTimeout(1500);
+  await expect(expand).toBeVisible();
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touch.detach();
+  await expect(group).toContainText("Pi is working…");
+  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await expect(page.locator('[data-tool-call-id="completed-touch"] [data-tool-output-collapse]')).toHaveAttribute("data-expanded", "true");
+});
+
+test("discarded thinking is not resurrected by its completion timer", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const thinking = { type: "thinking", thinking: "Tentative reasoning that was removed." };
+  await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([thinking]), assistantMessageEvent: { type: "thinking_delta", contentIndex: 0 } });
+  const group = activeGroup(page);
+  await expect(group).toContainText(thinking.thinking);
+  await deliver({ type: "message_update", message: assistant([thinking]), assistantMessageEvent: { type: "thinking_end", contentIndex: 0 } });
+  await expect(group.locator(".active-activity-count")).toHaveText("Done");
+  await deliver({ type: "message_end", message: assistant([{ type: "text", text: "Final answer without the tentative reasoning." }]) });
+  await expect(group).toContainText("Pi is working…");
+  await expect(page.locator(".message--thinking").filter({ hasText: thinking.thinking })).toHaveCount(0);
+  await deliver({ type: "agent_settled" });
+  await expect(group).toHaveCount(0);
+});
+
+test("text-only runs do not create an activity group", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([{ type: "text", text: "Answer without tools." }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  await expect(page.locator(".message").filter({ hasText: "Answer without tools." })).toBeVisible();
+  await expect(activeGroup(page)).toHaveCount(0);
+});
+
 test("groups parallel cards, summarizes each completion and restores original order", async ({ page }) => {
   const deliver = await liveEvents(page);
   const tools = [call("active-bash", "bash", { command: "npm test" }), call("active-read", "read", { path: "app.js" })];
@@ -54,7 +171,8 @@ test("groups parallel cards, summarizes each completion and restores original or
   await expect(group).toContainText("1 running");
   await expect(page.locator(".focus-activity-summary").last()).toContainText("1 tool update");
   await deliver(end("active-bash", "bash", "Test failed", true));
-  await expect(group).toHaveCount(0);
+  await expect(group.locator(".active-activity-count")).toHaveText("Failed");
+  await expect(group).toContainText("Pi is working…");
   await expect(bash).toBeHidden();
   await expect(page.locator(".focus-activity-summary").last()).toContainText("2 tool updates");
   await expect(page.locator(".focus-activity-summary").last()).toContainText("1 error");
@@ -79,6 +197,7 @@ for (const transport of ["message", "gatewayPartialMessage"]) {
     await deliver({ type: "agent_start" }, update("thinking_delta", [thinking]));
     const group = activeGroup(page);
     await expect(group.locator(".message--thinking")).toContainText(thinking.thinking);
+    if (transport === "message") await group.screenshot({ path: test.info().outputPath("thinking-active-now.png") });
     await page.keyboard.press("Control+f");
     await page.getByRole("searchbox", { name: "Find in conversation" }).fill("visibility rules");
     await expect(page.locator("[data-current-session-find-count]")).toHaveText("1 / 1");
@@ -86,8 +205,7 @@ for (const transport of ["message", "gatewayPartialMessage"]) {
     await expect(page.locator("[data-current-session-find-count]")).toHaveText("0 / 0");
     await page.getByRole("button", { name: "Close find" }).click();
     await deliver(update("thinking_end", [thinking]));
-    await expect(group).toHaveCount(0);
-    await expect(page.locator(".message--thinking").filter({ hasText: thinking.thinking })).toBeHidden();
+    await expect(group.locator(".active-activity-count")).toHaveText("Done");
     await deliver(update("toolcall_delta", [thinking], 1));
     await expect(group.locator(".message--tool-preparation")).toBeVisible();
     await expect(group.locator(".message--thinking")).toHaveCount(0);
@@ -102,8 +220,12 @@ for (const transport of ["message", "gatewayPartialMessage"]) {
 
 test("focused activity does not scroll past the beginning of an oversized answer", async ({ page }) => {
   const deliver = await liveEvents(page);
+  await deliver({ type: "agent_start" }, start("before-answer", "bash", { command: "inspect" }));
+  await expect(activeGroup(page)).toBeVisible();
+  await deliver(end("before-answer", "bash"));
+  await expect(activeGroup(page).locator(".active-activity-count")).toHaveText("Done");
   const short = "Here are the findings.";
-  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "text", text: short }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  await deliver({ type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "text", text: short }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   const card = page.locator('.message--assistant').filter({ hasText: short });
   await expect(card).toBeVisible();
   // Let the short answer's initial auto-follow settle before it grows.

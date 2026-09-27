@@ -1332,6 +1332,8 @@ function finishLiveBash(event) {
 }
 
 function renderEvent(event) {
+  if (["agent_start", "turn_start"].includes(event.type)) conversationController.setActivityRunning(true);
+  if (["agent_end", "agent_settled"].includes(event.type)) conversationController.setActivityRunning(false);
   if (["agent_start", "agent_end", "agent_settled", "turn_end", "compaction_start"].includes(event.type)) liveMessageRenderer.clearActiveActivity();
   const preparingToolCall = event.type === "message_update" && ["toolcall_start", "toolcall_delta"].includes(event.assistantMessageEvent?.type);
   if (["agent_start", "turn_start", "message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end", "turn_end", "agent_end", "agent_settled", "compaction_start"].includes(event.type) || eventErrorText(event)) {
@@ -2274,6 +2276,7 @@ async function submitAbort(event) {
     const payload = await response.json();
     if (submittedSession === currentSessionPath() && payload.forced && payload.editorText !== undefined) {
       liveAgentRunning = false;
+      conversationController.setActivityRunning(false);
       liveBusySince = null;
       if (liveOutput) liveOutput.dataset.composerCompacting = "false";
       liveMessageRenderer.clearActiveActivity();
@@ -3429,6 +3432,7 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
   liveBusySince = Number(liveOutput.dataset.composerBusySince || 0) || null;
   const initialComposerLabel = initialComposerCompacting ? "Compacting…" : "Pi is running…";
   liveAgentRunning = liveOutput.dataset.agentRunning === "true";
+  conversationController.setActivityRunning(liveAgentRunning);
   liveMessageRenderer.restorePersistedBashExecutions();
   liveMessageRenderer.restoreCompletedBashExecutions();
   const activeBashEvent = liveMessageRenderer.restoreActiveBash();

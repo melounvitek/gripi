@@ -826,7 +826,9 @@ export class LiveMessageRenderer {
 
   setToolActivity(toolCallId, active) {
     this.conversationScroll?.querySelectorAll(".message[data-tool-call-id]").forEach((article) => {
-      if (article.dataset.toolCallId === toolCallId) article.toggleAttribute("data-activity-active", active);
+      if (article.dataset.toolCallId !== toolCallId) return;
+      article.toggleAttribute("data-activity-active", active);
+      article.toggleAttribute("data-activity-completed", !active);
     });
     this.conversationController.scheduleFocusedActivityRefresh?.();
   }
@@ -1162,7 +1164,10 @@ export class LiveMessageRenderer {
     }
     if (roleName === "assistant") {
       this.liveAssistantSegments.forEach((entry) => {
-        if (entry.article.classList.contains("message--thinking")) entry.article.removeAttribute("data-activity-active");
+        if (!entry.article.classList.contains("message--thinking")) return;
+        const ended = (update.type === "thinking_end" && (update.contentIndex ?? 0) === Number(entry.article.dataset.thinkingIndex)) || (event.type === "message_end" && !["error", "aborted"].includes(message?.stopReason));
+        if (ended && entry.article.hasAttribute("data-activity-active")) entry.article.setAttribute("data-activity-completed", "");
+        entry.article.removeAttribute("data-activity-active");
       });
       this.conversationController.scheduleFocusedActivityRefresh?.();
     }
@@ -1234,7 +1239,9 @@ export class LiveMessageRenderer {
       const entry = this.upsertLiveAssistantSegment(event, roleName, segment, index, shouldScroll, timestamp);
       if (entry && segment.thinking) {
         const current = thinking && segment.startIndex === (update.contentIndex ?? segments.at(-1).startIndex);
+        entry.article.dataset.thinkingIndex = String(segment.startIndex);
         entry.article.toggleAttribute("data-activity-active", current);
+        if (current) entry.article.removeAttribute("data-activity-completed");
       }
     });
     return outcome;

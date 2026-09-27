@@ -43,6 +43,11 @@ export class ConversationController {
     this.focusedActivityTouchActive = false;
     this.activeActivityPositions = new Map();
     this.activeActivityGroup = null;
+    this.activityRunning = false;
+    this.activityGroupShown = false;
+    this.completedActivity = null;
+    this.activityCompletionTimer = null;
+    this.activityHeightTimer = null;
     this.focusedActivityMessageIds = new WeakMap();
     this.focusedActivityMessageSequence = 0;
     this.messageSources = new WeakMap();
@@ -123,7 +128,7 @@ export class ConversationController {
   }
 
   reconcileSnapshot(snapshot) {
-    this.restoreActivityPositions();
+    this.restoreActivityPositions(true);
     this.cancelOlderHistory();
     const previous = [...this.element.querySelectorAll(".message")];
     const incoming = [...snapshot.querySelectorAll(".message")];
@@ -174,6 +179,7 @@ export class ConversationController {
 
   detach() {
     this.restoreActivityPositions();
+    this.activityRunning = false;
     this.dismissQuoteSelection();
     this.listeners.forEach(([target, type, listener, options]) => target.removeEventListener?.(type, listener, options));
     this.listeners = [];
@@ -392,7 +398,7 @@ export class ConversationController {
         groups.push(group);
         group = [];
       }
-      if (message.hasAttribute("data-activity-active")) return;
+      if (message.hasAttribute("data-activity-active") || message === this.completedActivity) return;
       if (this.focusedViewMessage(message)) {
         if (group.length > 0) groups.push(group);
         group = [];
@@ -457,7 +463,21 @@ export class ConversationController {
     return items;
   }
 
-  restoreActivityPositions() {
+  setActivityRunning(running) {
+    if (this.activityRunning === running) return;
+    this.activityRunning = running;
+    if (!running) this.activityGroupShown = false;
+    this.focusedActivitySignature = null;
+    this.scheduleFocusedActivityRefresh();
+  }
+
+  restoreActivityPositions(preserveGroup = false) {
+    this.clearTimer(this.activityCompletionTimer);
+    this.clearTimer(this.activityHeightTimer);
+    this.activityCompletionTimer = null;
+    this.activityHeightTimer = null;
+    this.completedActivity = null;
+    if (!preserveGroup) this.activityGroupShown = false;
     this.activeActivityPositions.forEach((message, position) => {
       if (message.isConnected && position.isConnected) position.replaceWith(message);
       else position.remove();
@@ -477,17 +497,42 @@ export class ConversationController {
 
   refreshActiveActivity(messages) {
     const active = new Set(this.focusedView ? messages.filter((message) => message.hasAttribute("data-activity-active")) : []);
+    const keepGroup = this.focusedView && this.activityRunning;
+    if (!active.size && !(keepGroup && this.activityGroupShown)) {
+      this.restoreActivityPositions();
+      return;
+    }
+    if (active.size || (this.completedActivity && !this.completedActivity.isConnected)) {
+      this.clearTimer(this.activityCompletionTimer);
+      this.activityCompletionTimer = null;
+      this.completedActivity = null;
+    } else if (!this.completedActivity) {
+      this.completedActivity = [...this.activeActivityPositions.values()].findLast((message) => message.isConnected && message.hasAttribute("data-activity-completed")) || null;
+      if (this.completedActivity) {
+        this.completedActivity.removeAttribute("data-activity-completed");
+        this.activityCompletionTimer = this.timeout(() => {
+          this.completedActivity?.removeAttribute("data-activity-completed");
+          this.completedActivity = null;
+          this.activityCompletionTimer = null;
+          this.focusedActivitySignature = null;
+          this.scheduleFocusedActivityRefresh();
+        }, 1200);
+      }
+    }
+    const displayed = new Set(this.completedActivity ? [this.completedActivity] : active);
+    const previous = [...(this.activeActivityGroup?.querySelectorAll(":scope > .message") || [])];
+    const changed = previous.length !== displayed.size || previous.some((message) => !displayed.has(message));
+    const height = changed ? this.activeActivityGroup?.getBoundingClientRect().height : 0;
+    if (height) {
+      this.activeActivityGroup.style.transition = "none";
+      this.activeActivityGroup.style.minHeight = `${height}px`;
+    }
     this.activeActivityPositions.forEach((message, position) => {
-      if (active.has(message)) return;
+      if (displayed.has(message)) return;
       if (message.isConnected && position.isConnected) position.replaceWith(message);
       else position.remove();
       this.activeActivityPositions.delete(position);
     });
-    if (active.size === 0) {
-      this.activeActivityGroup?.remove();
-      this.activeActivityGroup = null;
-      return;
-    }
     if (!this.activeActivityGroup?.isConnected) {
       const group = this.document.createElement("section");
       group.className = "active-activity";
@@ -502,11 +547,15 @@ export class ConversationController {
       const count = this.document.createElement("span");
       count.className = "active-activity-count";
       header.append(label, count);
-      group.append(header);
+      const waiting = this.document.createElement("p");
+      waiting.className = "active-activity-waiting";
+      waiting.textContent = "Pi is working…";
+      group.append(header, waiting);
       this.activeActivityGroup = group;
     }
+    this.activityGroupShown = true;
     const group = this.activeActivityGroup;
-    active.forEach((message) => {
+    displayed.forEach((message) => {
       if (group.contains(message)) return;
       // Keep the original slot so full view and history retain chronological order.
       const position = this.document.createElement("span");
@@ -516,7 +565,19 @@ export class ConversationController {
       this.activeActivityPositions.set(position, message);
       group.append(message);
     });
-    group.querySelector(".active-activity-count").textContent = `${active.size} running`;
+    group.querySelector(".active-activity-count").textContent = active.size ? `${active.size} running` : this.completedActivity ? (this.completedActivity.classList.contains("message--tool-error") ? "Failed" : "Done") : "";
+    group.querySelector(".active-activity-waiting").hidden = displayed.size > 0;
+    if (height) {
+      this.clearTimer(this.activityHeightTimer);
+      this.activityHeightTimer = this.timeout(() => {
+        this.activityHeightTimer = null;
+        this.focusedActivitySignature = null;
+        this.scheduleFocusedActivityRefresh();
+      }, 250);
+    } else if (!this.activityHeightTimer) {
+      group.style.transition = "";
+      group.style.minHeight = "";
+    }
     if (this.liveOutput.lastElementChild !== group) this.liveOutput.append(group);
   }
 
@@ -527,7 +588,7 @@ export class ConversationController {
       return;
     }
     const messages = this.activityMessages();
-    const signature = `${this.historyStatus()?.hidden !== false}|${messages.map((message) => {
+    const signature = `${this.activityRunning}|${this.historyStatus()?.hidden !== false}|${messages.map((message) => {
       if (!this.focusedActivityMessageIds.has(message)) this.focusedActivityMessageIds.set(message, ++this.focusedActivityMessageSequence);
       const toolCall = message.classList.contains("message--tool-call");
       const error = message.classList.contains("message--error") || message.classList.contains("message--tool-error");
@@ -536,6 +597,7 @@ export class ConversationController {
         this.focusedActivityMessageIds.get(message),
         this.focusedViewMessage(message),
         message.hasAttribute("data-activity-active"),
+        message.hasAttribute("data-activity-completed"),
         message.classList.contains("message--thinking"),
         ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name)),
         error,
@@ -697,7 +759,7 @@ export class ConversationController {
 
   latestMessageElement() {
     const messages = this.element?.querySelectorAll(".message");
-    return messages?.[messages.length - 1] || null;
+    return [...(messages || [])].findLast((message) => message !== this.completedActivity) || null;
   }
 
   latestReadableAssistantMessageIsVisible() {
