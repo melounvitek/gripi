@@ -58,6 +58,7 @@ type relationData struct {
 type liveOutputData struct {
 	EventAfter               int64
 	ActiveToolEventsJSON     string
+	ActiveAssistantEventJSON string
 	ActiveToolTimestampsJSON string
 	ActiveToolPromptsJSON    string
 	ActiveBashJSON           string
@@ -408,8 +409,9 @@ func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, hom
 		stateSince = snapshot.CompactingSince
 	}
 	return liveOutputData{
-		EventAfter:           snapshot.EventSequence,
-		ActiveToolEventsJSON: jsonData(activeTools), ActiveToolTimestampsJSON: jsonData(toolTimestamps), ActiveToolPromptsJSON: jsonData(toolPrompts),
+		EventAfter:               snapshot.EventSequence,
+		ActiveAssistantEventJSON: jsonData(snapshot.ActiveAssistantEvent),
+		ActiveToolEventsJSON:     jsonData(activeTools), ActiveToolTimestampsJSON: jsonData(toolTimestamps), ActiveToolPromptsJSON: jsonData(toolPrompts),
 		ActiveBashJSON: jsonData(activeBash), CompletedBashEventsJSON: jsonData(completedBash), PersistedBashJSON: jsonData(persistedBash),
 		QueuedMessagesJSON: jsonData(queued), ExtensionUIJSON: jsonData(extensionUI), ComposerState: composerState,
 		ComposerStateSince: millisecondsString(stateSince), ComposerBusySince: millisecondsString(agentBusySince),
