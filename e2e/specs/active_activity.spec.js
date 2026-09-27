@@ -156,4 +156,7 @@ test("reload restores only the still-running parallel subagent", async ({ page }
   await page.getByRole("button", { name: "Abort running Pi" }).tap();
   await expectRunFinished(page);
   await expect(group).toHaveCount(0);
+  const session = new URL(page.url()).searchParams.get("session");
+  const deleted = await page.request.post("/sessions/delete", { form: { session } });
+  expect(deleted.ok()).toBe(true);
 });

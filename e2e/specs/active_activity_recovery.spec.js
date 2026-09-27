@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test as base } from "@playwright/test";
 import { activeRecovery, prompts, replies } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
@@ -12,23 +12,32 @@ async function focusActivity(page) {
   await expect(toggle).toHaveAttribute("aria-checked", "false");
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "New session", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "New session" });
-  await dialog.getByRole("combobox", { name: "Project" }).click();
-  await page.getByRole("option", { name: new RegExp(activeRecovery.project) }).click();
-  await dialog.getByRole("button", { name: "Start session" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
-  // Persist the isolated session and seed completed activity that must stay out of Active now.
-  await sendPrompt(page, prompts.newSession);
-  await expect(message(page, "assistant", replies.newSession)).toBeVisible();
-  await expectRunFinished(page);
-});
-
-test.afterEach(async ({ page }) => {
-  const abort = page.getByRole("button", { name: "Abort running Pi" });
-  if (await abort.isVisible()) await abort.click();
+const test = base.extend({
+  recoverySession: [async ({ page }, use) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "New session", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "New session" });
+    await dialog.getByRole("combobox", { name: "Project" }).click();
+    await page.getByRole("option", { name: new RegExp(activeRecovery.project) }).click();
+    await dialog.getByRole("button", { name: "Start session" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
+    // Persist the isolated session and seed completed activity that must stay out of Active now.
+    await sendPrompt(page, prompts.newSession);
+    await expect(message(page, "assistant", replies.newSession)).toBeVisible();
+    await expectRunFinished(page);
+    const session = new URL(page.url()).searchParams.get("session");
+    try {
+      await use(session);
+    } finally {
+      const abort = page.getByRole("button", { name: "Abort running Pi" });
+      if (await abort.isVisible()) {
+        await abort.click();
+        await expectRunFinished(page);
+      }
+      const deleted = await page.request.post("/sessions/delete", { form: { session } });
+      expect(deleted.ok()).toBe(true);
+    }
+  }, { auto: true }],
 });
 
 test("reload recovers ordinary tool cards without duplicating completed history", async ({ page }) => {
