@@ -1050,11 +1050,16 @@ export class LiveMessageRenderer {
       let entry;
       if (article) {
         entry = { article, compact: true, toolName: event.toolName, details: article.querySelector(".message-details"), output: article.querySelector(".tool-output-collapse"), body: article.querySelector(".message-body"), summaryText: article.querySelector(".compact-summary"), meta: article.querySelector(".message-meta") };
+        entry.body ||= this.document.createElement("pre");
+        if (entry.body.dataset.rawText === undefined) {
+          const source = entry.output?.querySelector("[data-tool-output-full]")?.content || entry.body;
+          const lines = [...source.querySelectorAll(".tool-diff-line, .tool-output-line")];
+          entry.body.dataset.rawText = lines.length ? lines.map((line) => line.textContent).join("\n") : source.textContent;
+        }
         if (!entry.output) {
-          entry.body ||= this.document.createElement("pre");
           entry.output = this.createToolOutput(entry.body, article.dataset.role, article.classList.contains("message--tool-transcript"));
           entry.details.append(entry.output);
-          this.renderToolTranscriptBody(entry.body, entry.body.textContent, event.toolName, { preview: entry.body.classList.contains("message-body--edit-preview") });
+          this.renderToolTranscriptBody(entry.body, entry.body.dataset.rawText, event.toolName, { preview: entry.body.classList.contains("message-body--edit-preview") });
         }
         entry.subagentPromptElement = article.querySelector(".subagent-prompt");
       } else if (PAIRED_TOOL_NAMES.has(event.toolName)) {

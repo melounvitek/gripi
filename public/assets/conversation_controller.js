@@ -39,7 +39,6 @@ export class ConversationController {
     this.messageJumpSuppressionScrollEndListener = null;
     this.messageJumpSuppressionGeneration = 0;
     this.focusedView = false;
-    this.agentRunning = false;
     this.focusedActivityRefreshFrame = null;
     this.focusedActivityTouchActive = false;
     this.activeActivityPositions = new Map();
@@ -56,7 +55,6 @@ export class ConversationController {
     this.element = this.document.getElementById("conversation-scroll");
     this.liveOutput = this.document.getElementById("live-output");
     this.rememberMessageSources(this.element);
-    this.agentRunning = this.liveOutput?.dataset.agentRunning === "true";
     this.promptTextarea = promptTextarea;
     this.quoteButton = this.document.querySelector("[data-quote-selection]");
     this.bindQuoteSelection();
@@ -170,7 +168,7 @@ export class ConversationController {
     else this.finishHistoryStatus();
     this.historyIntersectionObserver?.disconnect();
     this.observeHistoryStatus();
-    this.refreshFocusedActivity();
+    this.scheduleFocusedActivityRefresh();
     return removed;
   }
 
@@ -211,7 +209,6 @@ export class ConversationController {
     this.liveOutput = null;
     this.conversationPanel = null;
     this.viewToggle = null;
-    this.agentRunning = false;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
   }
@@ -380,12 +377,6 @@ export class ConversationController {
     this.updateJumpControls();
   }
 
-  setAgentRunning(running) {
-    if (this.agentRunning === running) return;
-    this.agentRunning = running;
-    this.scheduleFocusedActivityRefresh();
-  }
-
   focusedViewMessage(message) {
     if (message.classList.contains("message--compaction")) return true;
     if (["message--thinking", "message--tool-preparation", "message--tool", "message--tool-call", "message--tool-transcript", "message--error", "message--tool-error"].some((name) => message.classList.contains(name))) return false;
@@ -536,7 +527,7 @@ export class ConversationController {
       return;
     }
     const messages = this.activityMessages();
-    const signature = `${this.agentRunning}|${this.historyStatus()?.hidden !== false}|${messages.map((message) => {
+    const signature = `${this.historyStatus()?.hidden !== false}|${messages.map((message) => {
       if (!this.focusedActivityMessageIds.has(message)) this.focusedActivityMessageIds.set(message, ++this.focusedActivityMessageSequence);
       const toolCall = message.classList.contains("message--tool-call");
       const error = message.classList.contains("message--error") || message.classList.contains("message--tool-error");
@@ -634,7 +625,7 @@ export class ConversationController {
     });
     if (activeToggle && !replacementFocus) replacementFocus = this.viewToggle;
     replacementFocus?.focus({ preventScroll: true });
-    if (this.focusedView && shouldScroll) this.scrollToBottom();
+    if (this.focusedView && shouldScroll) this.scheduleAutoScroll();
   }
 
   scheduleFocusedActivityRefresh() {

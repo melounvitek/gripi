@@ -1297,7 +1297,6 @@ function eventTimeMilliseconds(event) {
 function renderErrorEvent(event) {
   const errorText = eventErrorText(event);
   if (!errorText) return false;
-  conversationController.setAgentRunning(false);
   liveMessageRenderer.clearActiveActivity();
   liveErrorText = errorText;
   liveMessageRenderer.appendMessage("error", errorText, true, true, eventTimestamp(event));
@@ -1351,7 +1350,6 @@ function renderEvent(event) {
 
   if (event.type === "agent_start") {
     liveAgentRunning = true;
-    conversationController.setAgentRunning(true);
     liveBusySince = eventTimeMilliseconds(event);
     liveErrorText = "";
     setComposerState("running", "Pi is running…", { since: liveBusySince });
@@ -1360,7 +1358,6 @@ function renderEvent(event) {
   }
 
   if (event.type === "turn_start") {
-    conversationController.setAgentRunning(true);
     liveBusySince ||= eventTimeMilliseconds(event);
     liveErrorText = "";
     setComposerState("running", "Pi is running…", { since: liveBusySince });
@@ -1381,7 +1378,6 @@ function renderEvent(event) {
       liveMessageRenderer.setToolPreparation(!toolCardVisible, eventTimestamp(event));
     }
     if (outcome.finalAssistantEnded) {
-      conversationController.setAgentRunning(false);
       liveOutput.dataset.assistantResponseCount = String(Number(liveOutput.dataset.assistantResponseCount) + 1);
       markCurrentSessionRead();
     }
@@ -1474,10 +1470,7 @@ function renderEvent(event) {
   }
 
   if (event.type === "turn_end") {
-    if (!liveAgentRunning) {
-      conversationController.setAgentRunning(false);
-      liveBusySince = null;
-    }
+    if (!liveAgentRunning) liveBusySince = null;
     if (!liveErrorText) {
       if (liveMessageRenderer.liveAssistantSeen) showStatus("Done");
       if (!liveAgentRunning) showCurrentActiveTask();
@@ -1491,7 +1484,6 @@ function renderEvent(event) {
 
   if (event.type === "agent_settled") {
     liveAgentRunning = false;
-    conversationController.setAgentRunning(false);
     liveBusySince = null;
     if (renderErrorEvent(event)) {
       liveMessageRenderer.clearLiveAssistantStreaming();
@@ -2282,7 +2274,6 @@ async function submitAbort(event) {
     const payload = await response.json();
     if (submittedSession === currentSessionPath() && payload.forced && payload.editorText !== undefined) {
       liveAgentRunning = false;
-      conversationController.setAgentRunning(false);
       liveBusySince = null;
       if (liveOutput) liveOutput.dataset.composerCompacting = "false";
       liveMessageRenderer.clearActiveActivity();
@@ -3431,13 +3422,13 @@ function restorePreservedConversationScroll(scrollSnapshot) {
 }
 
 function restoreSessionLiveState({ resetIdleState = false } = {}) {
+  liveMessageRenderer.clearActiveActivity();
   const initialComposerState = liveOutput.dataset.composerState;
   const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);
   const initialComposerCompacting = liveOutput.dataset.composerCompacting === "true";
   liveBusySince = Number(liveOutput.dataset.composerBusySince || 0) || null;
   const initialComposerLabel = initialComposerCompacting ? "Compacting…" : "Pi is running…";
   liveAgentRunning = liveOutput.dataset.agentRunning === "true";
-  conversationController.setAgentRunning(liveAgentRunning);
   liveMessageRenderer.restorePersistedBashExecutions();
   liveMessageRenderer.restoreCompletedBashExecutions();
   const activeBashEvent = liveMessageRenderer.restoreActiveBash();

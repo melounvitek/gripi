@@ -36,6 +36,8 @@ export const sessions = {
   controlsAbort: "E2E Abort Desktop",
   parallelSubagents: "E2E Parallel Subagents Desktop",
   parallelSubagentsMobile: "E2E Parallel Subagents Mobile",
+  activeSubagents: "E2E Active Subagents Desktop",
+  activeSubagentsMobile: "E2E Active Subagents Mobile",
   paginatedSubagent: "E2E Paginated Subagent Desktop",
   terminal: "E2E Terminal Desktop",
   settings: "E2E Settings Desktop",
@@ -111,8 +113,9 @@ export const activeRecovery = {
   tools: [
     { id: "recovery-bash", name: "bash", arguments: { command: "sleep 300 # recovery" } },
     { id: "recovery-read", name: "read", arguments: { path: "recovery-input.txt" } },
-    { id: "recovery-edit", name: "edit", arguments: { path: "recovery-edit.txt", oldText: "before", newText: "after" } },
-    { id: "recovery-write", name: "write", arguments: { path: "recovery-write.txt", content: "Recovery content" } }
+    { id: "recovery-edit", name: "edit", arguments: { path: "recovery-edit.txt", edits: [{ oldText: "before\nsecond line", newText: "after\nreplacement line" }] } },
+    { id: "recovery-write", name: "write", arguments: { path: "recovery-write.txt", content: "Recovery content\nSecond line" } },
+    { id: "recovery-write-long", name: "write", arguments: { path: "recovery-long.txt", content: Array.from({ length: 40 }, (_, index) => `Recovery line ${index + 1}`).join("\n") } }
   ]
 };
 

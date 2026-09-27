@@ -33,6 +33,7 @@ test("groups parallel cards, summarizes each completion and restores original or
   await expect(group).toBeVisible();
   await expect(group.locator(".message")).toHaveCount(2);
   await expect(group).toContainText("2 running");
+  await group.screenshot({ path: test.info().outputPath("parallel-active-now.png") });
   const bash = page.locator('[data-tool-call-id="active-bash"]');
   const read = page.locator('[data-tool-call-id="active-read"]');
   await bash.evaluate((card) => { window.originalActivityCard = card; });
@@ -99,6 +100,20 @@ for (const transport of ["message", "gatewayPartialMessage"]) {
   });
 }
 
+test("focused activity does not scroll past the beginning of an oversized answer", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const short = "Here are the findings.";
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "text", text: short }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  const card = page.locator('.message--assistant').filter({ hasText: short });
+  await expect(card).toBeVisible();
+  // Let the short answer's initial auto-follow settle before it grows.
+  await page.waitForTimeout(350);
+  const text = short + "\n\n" + Array.from({ length: 80 }, (_, index) => `Finding ${index + 1}: keep the start of this answer visible.`).join("\n\n");
+  await deliver({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  await expect(card).toContainText("Finding 80:");
+  await expect.poll(() => card.evaluate((element) => Math.abs(element.getBoundingClientRect().top - document.querySelector('#conversation-scroll').getBoundingClientRect().top))).toBeLessThan(40);
+});
+
 test("active output and subagent prompts open on the first tap during updates", async ({ page }) => {
   const deliver = await liveEvents(page);
   const tool = call("touch-bash", "bash", { command: "npm test" });
@@ -126,7 +141,7 @@ test("active output and subagent prompts open on the first tap during updates", 
 test("reload restores only the still-running parallel subagent", async ({ page }) => {
   const mobile = page.viewportSize().width < 768;
   const scenario = mobile ? mobileSubagents : subagents;
-  const title = mobile ? sessions.parallelSubagentsMobile : sessions.parallelSubagents;
+  const title = mobile ? sessions.activeSubagentsMobile : sessions.activeSubagents;
   await page.goto(`/?session_search=${encodeURIComponent(title)}`);
   await page.goto(await page.getByRole("link", { name: new RegExp(title) }).getAttribute("href"));
   await sendPrompt(page, mobile ? prompts.parallelSubagentsMobile : prompts.parallelSubagents);
