@@ -26,6 +26,39 @@ test("center desktop session activity indicators for short and multiline titles"
   }
 });
 
+for (const busy of [false, true]) {
+  test(`Ctrl shortcut badges leave session layout unchanged (${busy ? "busy" : "idle"})`, async ({ page }, testInfo) => {
+    await page.goto("/");
+    // Keep sidebar polling from replacing the synthetic title and activity state.
+    await page.clock.install();
+    await page.clock.pauseAt(new Date(Date.now() + 1000));
+    const row = page.locator('.session-row[data-current="true"]');
+    await row.locator(".session-title").evaluate((element) => {
+      element.textContent = "Fix sidebar session deletion and native rename behavior";
+    });
+    if (busy) {
+      await row.locator(".session-indicators").evaluate((element) => {
+        const dot = document.createElement("span");
+        dot.className = "session-running-indicator";
+        element.append(dot);
+      });
+    }
+
+    const layout = () => page.locator(".session-row, .session-title, .session-running-indicator").evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().toJSON()));
+    const before = await layout();
+    const badge = row.locator(".session-shortcut");
+    await expect(badge).toBeHidden();
+    await page.keyboard.down("Control");
+    await expect(badge).toBeVisible();
+    expect(await layout()).toEqual(before);
+    await page.screenshot({ path: testInfo.outputPath("shortcut-overlay.png") });
+    await page.keyboard.up("Control");
+    await expect(badge).toBeHidden();
+    expect(await layout()).toEqual(before);
+  });
+}
+
 test("hide the desktop sidebar and remember the preference", async ({ page }) => {
   await page.goto("/");
 

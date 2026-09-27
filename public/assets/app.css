@@ -227,7 +227,7 @@
       .session-indicators { align-self: start; }
     }
     .session-fork-indicator { display: inline-flex; align-items: center; justify-content: center; min-width: 1.15rem; height: 1.15rem; border: 1px solid #f0c67447; border-radius: 0.2rem; background: #f0c67414; color: var(--gold); font-size: 0.86rem; font-weight: 700; line-height: 1; }
-    .session-shortcut { display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; background: var(--accent-tint-08); color: var(--accent); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+    .session-shortcut { position: absolute; right: calc(100% + 0.35rem); top: 50%; transform: translateY(-50%); pointer-events: none; display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; background: var(--panel); color: var(--accent); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
     body.session-shortcuts-visible .recent-session .session-shortcut { display: inline-flex; }
     .session-title-line { display: flex; align-items: flex-start; gap: 7px; }
     .session-external-indicator { display: inline-flex; flex: 0 0 18px; margin-top: 2px; color: #c3a361; }
