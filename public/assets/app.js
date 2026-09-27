@@ -1298,6 +1298,7 @@ function renderErrorEvent(event) {
   const errorText = eventErrorText(event);
   if (!errorText) return false;
   conversationController.setAgentRunning(false);
+  liveMessageRenderer.clearActiveActivity();
   liveErrorText = errorText;
   liveMessageRenderer.appendMessage("error", errorText, true, true, eventTimestamp(event));
   showStatus(errorText, true);
@@ -1332,6 +1333,7 @@ function finishLiveBash(event) {
 }
 
 function renderEvent(event) {
+  if (["agent_start", "agent_end", "agent_settled", "turn_end", "compaction_start"].includes(event.type)) liveMessageRenderer.clearActiveActivity();
   const preparingToolCall = event.type === "message_update" && ["toolcall_start", "toolcall_delta"].includes(event.assistantMessageEvent?.type);
   if (["agent_start", "turn_start", "message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end", "turn_end", "agent_end", "agent_settled", "compaction_start"].includes(event.type) || eventErrorText(event)) {
     if (!preparingToolCall) liveMessageRenderer.setToolPreparation(false);
@@ -2283,6 +2285,7 @@ async function submitAbort(event) {
       conversationController.setAgentRunning(false);
       liveBusySince = null;
       if (liveOutput) liveOutput.dataset.composerCompacting = "false";
+      liveMessageRenderer.clearActiveActivity();
       liveMessageRenderer.clearLiveAssistantStreaming();
       liveMessageRenderer.resetLiveAssistantTracking();
       liveMessageRenderer.renderQueuedMessages({ steering: [], followUp: [] });
@@ -3453,6 +3456,13 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
     if (resetIdleState) setComposerState(initialComposerState || "idle", "", { focus: false });
   }
   if (initialComposerCompacting) liveMessageRenderer.appendPendingCompactionMessage(new Date(initialComposerStateSince || Date.now()));
+  const activeAssistantEvent = liveOutput.dataset.activeAssistantEvent;
+  delete liveOutput.dataset.activeAssistantEvent;
+  try {
+    const event = JSON.parse(activeAssistantEvent || "null");
+    if (event) renderEvent(event);
+  } catch (_error) {
+  }
   liveMessageRenderer.restoreActiveToolExecutions();
   hydrateExtensionUiState();
 }

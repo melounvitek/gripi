@@ -33,32 +33,15 @@ test("show the full wrapped tool command live and after reload", async ({ page }
   await page.setViewportSize({ width: 390, height: 844 });
   await expectFullCommand(card, { wrapped: true });
   await showMessagesOnly(page);
-  const activity = await activityFor(page, card);
-  await expectCollapsedActivity(activity);
-  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
-  const toggle = activity.locator("[data-focus-activity-toggle]");
-  await toggle.tap({ trial: true });
-  // Keep the target visible but slightly above the follow-live destination.
-  const conversation = page.locator("#conversation-scroll");
-  await conversation.evaluate((element) => {
-    element.scrollTop = element.scrollHeight - element.clientHeight - 40;
-  });
-  const box = await toggle.boundingBox();
-  const touch = await page.context().newCDPSession(page);
-  await touch.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }]
-  });
-  // Deliver real tool output between touch-down and touch-up, not after completion.
+  await expect(page.getByRole("region", { name: "Active now" })).toContainText(tool.longCommand);
+  await expectFullCommand(card, { wrapped: true });
   delivery.phase = "output";
   await expect(card).toContainText(tool.result);
-  // Let scheduled layout/scroll work run while the finger is still down.
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await touch.detach();
-  await expectExpandedActivity(activity);
   delivery.phase = "complete";
   await expectRunFinished(page);
+  const activity = await activityFor(page, card);
+  await expectCollapsedActivity(activity);
+  await activity.locator("[data-focus-activity-toggle]").tap();
   await expectExpandedActivity(activity);
 
   await page.reload();

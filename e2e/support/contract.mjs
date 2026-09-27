@@ -94,6 +94,28 @@ const terminalLatestHistory = [...terminalFirstHistory, "Terminal history 29", "
 const terminalFirstFrame = `${terminalReset}${terminalFirstHistory.join("\n")}\nTerminal stale screen`;
 const terminalLatestFrame = `${terminalReset}${terminalLatestHistory.join("\n")}\x1b[?1049h\x1b[H\x1b[32mTerminal current screen\x1b[0m`;
 
+export const activeRecovery = {
+  project: "new-session-desktop",
+  toolsPrompt: "Hold ordinary tools for activity recovery until abort",
+  thinkingPrompt: {
+    cumulative: "Hold cumulative thinking for activity recovery until abort",
+    delta: "Hold delta-only thinking for activity recovery until abort"
+  },
+  preparationPrompt: {
+    cumulative: "Hold cumulative preparation for activity recovery until abort",
+    delta: "Hold delta-only preparation for activity recovery until abort"
+  },
+  previousThinking: "Finished recovery reasoning.",
+  text: "Recovery work is underway.",
+  thinking: "Still considering the recovery result.",
+  tools: [
+    { id: "recovery-bash", name: "bash", arguments: { command: "sleep 300 # recovery" } },
+    { id: "recovery-read", name: "read", arguments: { path: "recovery-input.txt" } },
+    { id: "recovery-edit", name: "edit", arguments: { path: "recovery-edit.txt", oldText: "before", newText: "after" } },
+    { id: "recovery-write", name: "write", arguments: { path: "recovery-write.txt", content: "Recovery content" } }
+  ]
+};
+
 export const nativeBash = {
   included: {
     command: "for index in $(seq 1 25); do echo \"included native bash output $index\"; done",

@@ -72,9 +72,9 @@ for (const transport of ["delta-only", "cumulative"]) {
 
     const activityToggle = page.getByRole("switch", { name: "Show agent activity" });
     await activityToggle.tap();
-    await expect(preparation).toBeHidden();
+    await expect(preparation).toBeVisible();
     await expect(status).toContainText("Pi is running…");
-    await expect(page.locator(".focus-activity-summary").last()).toContainText("1 other update");
+    await expect(page.getByRole("region", { name: "Active now" })).toContainText("Preparing tool call…");
     await activityToggle.tap();
     await expect(preparation).toBeVisible();
     await preparation.screenshot({ path: test.info().outputPath("tool-preparation-card.png") });
@@ -199,7 +199,7 @@ test("preparation completes after its completion poll is interrupted", async ({ 
 });
 
 for (const boundary of ["reload", "abort", "forced abort"]) {
-  test(`preparation card clears on ${boundary}, including while activity is hidden`, async ({ page }) => {
+  test(`preparation card clears on ${boundary}, including while activity history is hidden`, async ({ page }) => {
     const deliver = await eventDelivery(page);
     const message = { role: "assistant", content: [] };
     const preparation = page.locator(".message--tool-preparation");
@@ -211,7 +211,8 @@ for (const boundary of ["reload", "abort", "forced abort"]) {
     );
     await expect(preparation).toBeVisible();
     await page.getByRole("switch", { name: "Show agent activity" }).tap();
-    await expect(preparation).toBeHidden();
+    await expect(preparation).toBeVisible();
+    await expect(page.getByRole("region", { name: "Active now" })).toContainText("Preparing tool call…");
     await expect(status).toContainText("Pi is running…");
 
     if (boundary === "reload") {
