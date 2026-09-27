@@ -70,10 +70,10 @@ export class LiveMessageRenderer {
     if (this.pendingQueue) this.pendingQueue.hidden = rows.length === 0;
   }
 
-  liveMessageAlreadyRendered(roleName, text, timestampKey) {
+  liveMessageAlreadyRendered(roleName, text, timestampKey, exceptArticle = null) {
     const fingerprint = messageFingerprint(roleName, text, timestampKey);
     if (!fingerprint) return false;
-    return [...(this.conversationScroll?.querySelectorAll(".message:not(.message--live)[data-message-fingerprint]") || [])].some((message) => message.dataset.messageFingerprint === fingerprint);
+    return [...(this.conversationScroll?.querySelectorAll(".message:not(.message--live)[data-message-fingerprint]") || [])].some((message) => message !== exceptArticle && message.dataset.messageFingerprint === fingerprint);
   }
 
   persistedToolResults(root) {
@@ -209,6 +209,7 @@ export class LiveMessageRenderer {
     article.dataset.role = roleName;
     article.dataset.messageTimestamp = timestampKey;
     if (!options.toolPreparation) article.dataset.messageFingerprint = messageFingerprint(roleName, text, timestampKey);
+    if (options.toolPreparation) article.setAttribute("data-activity-active", "");
     if (options.finalAssistantResponse) article.dataset.finalAssistantResponse = "true";
     if (options.optimistic) {
       article.dataset.optimistic = "true";
@@ -309,34 +310,8 @@ export class LiveMessageRenderer {
       body.textContent = text;
       details.append(summaryElement, body);
     } else {
-      output = this.document.createElement("div");
-      output.className = "tool-output-collapse";
-      output.dataset.toolOutputCollapse = "";
-      output.dataset.toolOutputCollapsible = ["assistant", "tool", "toolResult", "bashExecution"].includes(roleName) ? "true" : "false";
-      output.dataset.toolOutputWraps = options.toolTranscript === true ? "false" : "true";
-      output.dataset.collapsed = "false";
-      const control = this.document.createElement("div");
-      control.className = "tool-output-collapse-control";
-      control.dataset.toolOutputCollapseControl = "";
-      const desktopCount = this.document.createElement("span");
-      desktopCount.className = "tool-output-hidden-count tool-output-hidden-count--desktop";
-      const mobileCount = this.document.createElement("span");
-      mobileCount.className = "tool-output-hidden-count tool-output-hidden-count--mobile";
-      const toggle = this.document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "tool-output-toggle";
-      toggle.dataset.toolOutputToggle = "";
-      toggle.setAttribute("aria-expanded", "false");
-      toggle.textContent = "Expand";
-      control.append(desktopCount, mobileCount, toggle);
       body = this.document.createElement("pre");
-      body.className = "message-body";
-      body.dataset.toolOutputBody = "";
-      const fullTemplate = this.document.createElement("template");
-      fullTemplate.dataset.toolOutputFull = "";
-      const tailTemplate = this.document.createElement("template");
-      tailTemplate.dataset.toolOutputTail = "";
-      output.append(control, body, fullTemplate, tailTemplate);
+      output = this.createToolOutput(body, roleName, options.toolTranscript);
       this.renderToolTranscriptBody(body, text, options.toolName, { preview: options.toolPreview === true });
       details.append(summaryElement);
       if (status) details.append(status);
@@ -350,6 +325,37 @@ export class LiveMessageRenderer {
     this.liveOutput.append(article);
     this.conversationController.afterLiveOutputChange(shouldScroll, live, true);
     return entry;
+  }
+
+  createToolOutput(body, roleName, toolTranscript) {
+    const output = this.document.createElement("div");
+    output.className = "tool-output-collapse";
+    output.dataset.toolOutputCollapse = "";
+    output.dataset.toolOutputCollapsible = ["assistant", "tool", "toolResult", "bashExecution"].includes(roleName) ? "true" : "false";
+    output.dataset.toolOutputWraps = toolTranscript ? "false" : "true";
+    output.dataset.collapsed = "false";
+    const control = this.document.createElement("div");
+    control.className = "tool-output-collapse-control";
+    control.dataset.toolOutputCollapseControl = "";
+    const desktopCount = this.document.createElement("span");
+    desktopCount.className = "tool-output-hidden-count tool-output-hidden-count--desktop";
+    const mobileCount = this.document.createElement("span");
+    mobileCount.className = "tool-output-hidden-count tool-output-hidden-count--mobile";
+    const toggle = this.document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "tool-output-toggle";
+    toggle.dataset.toolOutputToggle = "";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.textContent = "Expand";
+    control.append(desktopCount, mobileCount, toggle);
+    body.classList.add("message-body");
+    body.dataset.toolOutputBody = "";
+    const fullTemplate = this.document.createElement("template");
+    fullTemplate.dataset.toolOutputFull = "";
+    const tailTemplate = this.document.createElement("template");
+    tailTemplate.dataset.toolOutputTail = "";
+    output.append(control, body, fullTemplate, tailTemplate);
+    return output;
   }
 
   renderBashStatus(status, items = []) {
@@ -813,7 +819,21 @@ export class LiveMessageRenderer {
     return `${contentIndex}-${segment.compact ? "compact" : "text"}`;
   }
 
+  clearActiveActivity() {
+    this.conversationScroll?.querySelectorAll("[data-activity-active]").forEach((article) => article.removeAttribute("data-activity-active"));
+    this.conversationController.scheduleFocusedActivityRefresh?.();
+  }
+
+  setToolActivity(toolCallId, active) {
+    this.conversationScroll?.querySelectorAll(".message[data-tool-call-id]").forEach((article) => {
+      if (article.dataset.toolCallId === toolCallId) article.toggleAttribute("data-activity-active", active);
+    });
+    this.conversationController.scheduleFocusedActivityRefresh?.();
+  }
+
   clearLiveAssistantStreaming() {
+    this.conversationScroll?.querySelectorAll(".message--thinking[data-activity-active]").forEach((article) => article.removeAttribute("data-activity-active"));
+    this.conversationController.scheduleFocusedActivityRefresh?.();
     this.conversationScroll?.querySelectorAll(".message--assistant.message--streaming").forEach((article) => article.classList.remove("message--streaming"));
     this.liveAssistantSegments.forEach((entry) => entry.article.classList.remove("message--streaming"));
   }
@@ -854,7 +874,7 @@ export class LiveMessageRenderer {
 
   markLiveEntryRendered(entry, roleName, text, timestamp = null) {
     const timestampKey = messageTimestampKey(timestamp) || entry.article.dataset.messageTimestamp;
-    if (this.liveMessageAlreadyRendered(roleName, text, timestampKey)) {
+    if (this.liveMessageAlreadyRendered(roleName, text, timestampKey, entry.article)) {
       this.releaseMessageImageObjectURLs(entry.article);
       entry.article.remove();
       this.forgetLiveEntry(entry);
@@ -978,6 +998,7 @@ export class LiveMessageRenderer {
     entry.article.classList.toggle("message--streaming", streamingAssistantResponse);
     if (finalAssistantResponse) entry.article.dataset.finalAssistantResponse = "true";
     this.liveAssistantSegments.set(key, entry);
+    if (segment.toolCallId && !segment.isToolResult) entry.article.setAttribute("data-activity-active", "");
     if (PAIRED_TOOL_NAMES.has(segment.toolName) && segment.toolCallId && !segment.isToolResult) this.livePairedToolCalls.set(segment.toolCallId, entry);
     if (segment.toolCallId && !segment.isToolResult && !PAIRED_TOOL_NAMES.has(segment.toolName)) this.liveToolExecutions.set(segment.toolCallId, entry);
     return entry;
@@ -1010,7 +1031,7 @@ export class LiveMessageRenderer {
     const eventTimestampKey = messageTimestampKey(timestamp);
     if (eventTimestampKey) {
       entry.article.dataset.messageTimestamp = eventTimestampKey;
-      entry.meta.textContent = formatTimestamp(timestamp);
+      if (entry.meta) entry.meta.textContent = formatTimestamp(timestamp);
     }
     const timestampKey = eventTimestampKey || entry.article.dataset.messageTimestamp;
     entry.article.dataset.messageFingerprint = messageFingerprint(entry.article.dataset.role, text, timestampKey);
@@ -1022,6 +1043,32 @@ export class LiveMessageRenderer {
 
   renderToolExecutionEvent(event, timestamp = eventTimestamp(event), timestampFallback = true, restoredPrompt = "") {
     if (!event.toolCallId || this.persistedToolResultAlreadyRendered({ isToolResult: true, toolCallId: event.toolCallId })) return;
+    // A reload can leave the persisted call outside live-output. Reuse its normal card.
+    if (!this.livePairedToolCalls.has(event.toolCallId) && !this.liveToolExecutions.has(event.toolCallId)) {
+      const article = [...this.conversationScroll.querySelectorAll(".message[data-tool-call-id]")]
+        .find((message) => message.dataset.toolCallId === event.toolCallId);
+      let entry;
+      if (article) {
+        entry = { article, compact: true, toolName: event.toolName, details: article.querySelector(".message-details"), output: article.querySelector(".tool-output-collapse"), body: article.querySelector(".message-body"), summaryText: article.querySelector(".compact-summary"), meta: article.querySelector(".message-meta") };
+        entry.body ||= this.document.createElement("pre");
+        if (entry.body.dataset.rawText === undefined) {
+          const source = entry.output?.querySelector("[data-tool-output-full]")?.content || entry.body;
+          const lines = [...source.querySelectorAll(".tool-diff-line, .tool-output-line")];
+          entry.body.dataset.rawText = lines.length ? lines.map((line) => line.textContent).join("\n") : source.textContent;
+        }
+        if (!entry.output) {
+          entry.output = this.createToolOutput(entry.body, article.dataset.role, article.classList.contains("message--tool-transcript"));
+          entry.details.append(entry.output);
+          this.renderToolTranscriptBody(entry.body, entry.body.dataset.rawText, event.toolName, { preview: entry.body.classList.contains("message-body--edit-preview") });
+        }
+        entry.subagentPromptElement = article.querySelector(".subagent-prompt");
+      } else if (PAIRED_TOOL_NAMES.has(event.toolName)) {
+        const [segment] = this.parser.contentSegments([{ type: "toolCall", id: event.toolCallId, name: event.toolName, arguments: event.args || {} }], { role: "assistant" });
+        entry = this.appendCompactMessage("assistant", segment.summary, segment.text, true, false, timestamp, { ...segment, timestampFallback });
+      }
+      if (entry) (PAIRED_TOOL_NAMES.has(event.toolName) ? this.livePairedToolCalls : this.liveToolExecutions).set(event.toolCallId, entry);
+    }
+    this.setToolActivity(event.toolCallId, event.type !== "tool_execution_end");
     if (event.toolName === "bash") {
       const entry = this.livePairedToolCalls.get(event.toolCallId);
       if (!entry) return;
@@ -1047,6 +1094,7 @@ export class LiveMessageRenderer {
     if (entry) {
       if (event.toolName === "subagent") this.retainSubagentDetails(entry, this.parser.subagentDetailsFromEvent(event));
       this.liveToolExecutions.set(event.toolCallId, entry);
+      this.setToolActivity(event.toolCallId, event.type !== "tool_execution_end");
     }
   }
 
@@ -1104,8 +1152,21 @@ export class LiveMessageRenderer {
 
   renderMessageEvent(event) {
     const message = this.parser.eventMessage(event);
-    const segments = message?.content ? this.parser.contentSegments(message.content, message) : [{ text: this.parser.messageText(message), compact: false, summary: "", startIndex: 0, endIndex: 0, finalAssistantResponse: true, images: [] }].filter((segment) => segment.text);
+    let segments = message?.content ? this.parser.contentSegments(message.content, message) : [{ text: this.parser.messageText(message), compact: false, summary: "", startIndex: 0, endIndex: 0, finalAssistantResponse: true, images: [] }].filter((segment) => segment.text);
     const roleName = this.parser.liveEventRole(event, message);
+    const update = event.assistantMessageEvent || {};
+    const thinking = roleName === "assistant" && event.type !== "message_end" && ["thinking_start", "thinking_delta"].includes(update.type);
+    if (thinking && !segments.some((segment) => segment.thinking && segment.startIndex === update.contentIndex)) {
+      const index = update.contentIndex ?? 0;
+      segments = [...segments, { text: "Thinking…", thinking: true, compact: false, startIndex: index, endIndex: index }];
+    }
+    if (roleName === "assistant") {
+      this.liveAssistantSegments.forEach((entry) => {
+        if (entry.article.classList.contains("message--thinking")) entry.article.removeAttribute("data-activity-active");
+      });
+      this.conversationController.scheduleFocusedActivityRefresh?.();
+    }
+    if (message?.role === "toolResult" && message.toolCallId) this.setToolActivity(message.toolCallId, false);
     const customMessage = message?.role === "custom";
     const assistantEnded = roleName === "assistant" && event.type === "message_end";
     const outcome = { roleName, assistantEnded, finalAssistantEnded: assistantEnded && this.parser.eventHasFinalAssistantText(event), rendered: segments.length > 0 && (!customMessage || message.display === true) };
@@ -1170,7 +1231,11 @@ export class LiveMessageRenderer {
     this.liveAssistantSeen = true;
     segments.forEach((segment, index) => {
       if (segment.compact) this.clearLiveAssistantStreaming();
-      this.upsertLiveAssistantSegment(event, roleName, segment, index, shouldScroll, timestamp);
+      const entry = this.upsertLiveAssistantSegment(event, roleName, segment, index, shouldScroll, timestamp);
+      if (entry && segment.thinking) {
+        const current = thinking && segment.startIndex === (update.contentIndex ?? segments.at(-1).startIndex);
+        entry.article.toggleAttribute("data-activity-active", current);
+      }
     });
     return outcome;
   }

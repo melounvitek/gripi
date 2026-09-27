@@ -39,9 +39,10 @@ export class ConversationController {
     this.messageJumpSuppressionScrollEndListener = null;
     this.messageJumpSuppressionGeneration = 0;
     this.focusedView = false;
-    this.agentRunning = false;
     this.focusedActivityRefreshFrame = null;
     this.focusedActivityTouchActive = false;
+    this.activeActivityPositions = new Map();
+    this.activeActivityGroup = null;
     this.focusedActivityMessageIds = new WeakMap();
     this.focusedActivityMessageSequence = 0;
     this.messageSources = new WeakMap();
@@ -54,7 +55,6 @@ export class ConversationController {
     this.element = this.document.getElementById("conversation-scroll");
     this.liveOutput = this.document.getElementById("live-output");
     this.rememberMessageSources(this.element);
-    this.agentRunning = this.liveOutput?.dataset.agentRunning === "true";
     this.promptTextarea = promptTextarea;
     this.quoteButton = this.document.querySelector("[data-quote-selection]");
     this.bindQuoteSelection();
@@ -79,7 +79,7 @@ export class ConversationController {
       if (toggle) this.toggleFocusedActivity(toggle);
     });
     this.listen(this.element, "pointerdown", (event) => {
-      if (event.pointerType === "touch" && event.target.closest?.("[data-focus-activity-toggle]")) this.focusedActivityTouchActive = true;
+      if (event.pointerType === "touch" && event.target.closest?.("[data-focus-activity-toggle], .active-activity")) this.focusedActivityTouchActive = true;
     });
     ["pointerup", "pointercancel"].forEach((type) => {
       this.listen(this.element, type, () => {
@@ -123,6 +123,7 @@ export class ConversationController {
   }
 
   reconcileSnapshot(snapshot) {
+    this.restoreActivityPositions();
     this.cancelOlderHistory();
     const previous = [...this.element.querySelectorAll(".message")];
     const incoming = [...snapshot.querySelectorAll(".message")];
@@ -167,11 +168,12 @@ export class ConversationController {
     else this.finishHistoryStatus();
     this.historyIntersectionObserver?.disconnect();
     this.observeHistoryStatus();
-    this.refreshFocusedActivity();
+    this.scheduleFocusedActivityRefresh();
     return removed;
   }
 
   detach() {
+    this.restoreActivityPositions();
     this.dismissQuoteSelection();
     this.listeners.forEach(([target, type, listener, options]) => target.removeEventListener?.(type, listener, options));
     this.listeners = [];
@@ -207,7 +209,6 @@ export class ConversationController {
     this.liveOutput = null;
     this.conversationPanel = null;
     this.viewToggle = null;
-    this.agentRunning = false;
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
   }
@@ -358,6 +359,8 @@ export class ConversationController {
 
     this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
     this.viewToggle?.setAttribute("aria-checked", String(!this.focusedView));
+    this.focusedActivitySignature = null;
+    this.refreshFocusedActivity();
 
     if (!scrollSnapshot) return;
     if (scrollSnapshot.nearBottom) {
@@ -372,12 +375,6 @@ export class ConversationController {
     this.followOversizedMessageBottom = scrollSnapshot.nearBottom;
     this.lastScrollTop = this.element.scrollTop;
     this.updateJumpControls();
-  }
-
-  setAgentRunning(running) {
-    if (this.agentRunning === running) return;
-    this.agentRunning = running;
-    this.scheduleFocusedActivityRefresh();
   }
 
   focusedViewMessage(message) {
@@ -395,6 +392,7 @@ export class ConversationController {
         groups.push(group);
         group = [];
       }
+      if (message.hasAttribute("data-activity-active")) return;
       if (this.focusedViewMessage(message)) {
         if (group.length > 0) groups.push(group);
         group = [];
@@ -410,6 +408,10 @@ export class ConversationController {
   historyGapBetween(first, second) {
     const gap = this.historyStatus();
     if (!gap || gap.hidden) return false;
+    for (const [position, message] of this.activeActivityPositions) {
+      if (message === first) first = position;
+      if (message === second) second = position;
+    }
     let sibling = first.nextElementSibling;
     while (sibling && sibling !== second) {
       if (sibling === gap) return true;
@@ -455,14 +457,77 @@ export class ConversationController {
     return items;
   }
 
+  restoreActivityPositions() {
+    this.activeActivityPositions.forEach((message, position) => {
+      if (message.isConnected && position.isConnected) position.replaceWith(message);
+      else position.remove();
+    });
+    this.activeActivityPositions.clear();
+    this.activeActivityGroup?.remove();
+    this.activeActivityGroup = null;
+    this.focusedActivitySignature = null;
+  }
+
+  activityMessages() {
+    return [...this.element.querySelectorAll(".message, [data-active-activity-position]")]
+      .filter((node) => !this.activeActivityGroup?.contains(node))
+      .map((node) => this.activeActivityPositions.get(node) || node)
+      .filter((message) => message.isConnected);
+  }
+
+  refreshActiveActivity(messages) {
+    const active = new Set(this.focusedView ? messages.filter((message) => message.hasAttribute("data-activity-active")) : []);
+    this.activeActivityPositions.forEach((message, position) => {
+      if (active.has(message)) return;
+      if (message.isConnected && position.isConnected) position.replaceWith(message);
+      else position.remove();
+      this.activeActivityPositions.delete(position);
+    });
+    if (active.size === 0) {
+      this.activeActivityGroup?.remove();
+      this.activeActivityGroup = null;
+      return;
+    }
+    if (!this.activeActivityGroup?.isConnected) {
+      const group = this.document.createElement("section");
+      group.className = "active-activity";
+      group.setAttribute("aria-label", "Active now");
+      const header = this.document.createElement("div");
+      header.className = "active-activity-header";
+      const label = this.document.createElement("span");
+      const spinner = this.document.createElement("span");
+      spinner.className = "focus-activity-spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      label.append(spinner, "Active now");
+      const count = this.document.createElement("span");
+      count.className = "active-activity-count";
+      header.append(label, count);
+      group.append(header);
+      this.activeActivityGroup = group;
+    }
+    const group = this.activeActivityGroup;
+    active.forEach((message) => {
+      if (group.contains(message)) return;
+      // Keep the original slot so full view and history retain chronological order.
+      const position = this.document.createElement("span");
+      position.hidden = true;
+      position.dataset.activeActivityPosition = "";
+      message.before(position);
+      this.activeActivityPositions.set(position, message);
+      group.append(message);
+    });
+    group.querySelector(".active-activity-count").textContent = `${active.size} running`;
+    if (this.liveOutput.lastElementChild !== group) this.liveOutput.append(group);
+  }
+
   refreshFocusedActivity() {
     if (!this.element?.querySelectorAll) return;
     if (this.focusedActivityTouchActive) {
       this.focusedActivitySignature = null;
       return;
     }
-    const messages = [...this.element.querySelectorAll(".message")];
-    const signature = `${this.agentRunning}|${this.historyStatus()?.hidden !== false}|${messages.map((message) => {
+    const messages = this.activityMessages();
+    const signature = `${this.historyStatus()?.hidden !== false}|${messages.map((message) => {
       if (!this.focusedActivityMessageIds.has(message)) this.focusedActivityMessageIds.set(message, ++this.focusedActivityMessageSequence);
       const toolCall = message.classList.contains("message--tool-call");
       const error = message.classList.contains("message--error") || message.classList.contains("message--tool-error");
@@ -470,6 +535,7 @@ export class ConversationController {
       return [
         this.focusedActivityMessageIds.get(message),
         this.focusedViewMessage(message),
+        message.hasAttribute("data-activity-active"),
         message.classList.contains("message--thinking"),
         ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name)),
         error,
@@ -478,6 +544,7 @@ export class ConversationController {
     }).join("|")}`;
     if (signature === this.focusedActivitySignature) return;
     this.focusedActivitySignature = signature;
+    const shouldScroll = this.followLiveOutput();
     const summaries = [...this.element.querySelectorAll("[data-focus-activity-summary]")];
     const activeToggle = this.document.activeElement?.closest?.("[data-focus-activity-toggle]");
     const activeGroupId = activeToggle?.closest("[data-focus-activity-summary]")?.dataset.focusActivitySummary;
@@ -491,6 +558,7 @@ export class ConversationController {
     });
     messages.forEach((message) => { delete message.dataset.focusActivityGroup; });
     let replacementFocus = null;
+    this.refreshActiveActivity(messages);
     const groups = this.focusedActivityGroups(messages);
     groups.forEach((group, index) => {
       const groupId = `${this.bindingEpoch}-${index}`;
@@ -498,9 +566,8 @@ export class ConversationController {
       group.forEach((message) => { message.dataset.focusActivityGroup = groupId; });
       const summaryData = this.focusedActivitySummary(group);
       const items = this.focusedActivityItems(group);
-      const running = this.agentRunning && index === groups.length - 1 && group.at(-1) === messages.at(-1);
       const summary = this.document.createElement("section");
-      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${expanded ? " is-expanded" : ""}${running ? " is-running" : ""}`;
+      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${expanded ? " is-expanded" : ""}`;
       summary.dataset.focusActivitySummary = groupId;
 
       const header = this.document.createElement(items.length > 0 ? "button" : "div");
@@ -509,12 +576,6 @@ export class ConversationController {
         header.type = "button";
         header.dataset.focusActivityToggle = "true";
         header.setAttribute("aria-expanded", String(expanded));
-      }
-      if (running) {
-        const spinner = this.document.createElement("span");
-        spinner.className = "focus-activity-spinner";
-        spinner.setAttribute("aria-hidden", "true");
-        header.append(spinner);
       }
       if (summaryData.text) {
         const text = this.document.createElement("span");
@@ -564,6 +625,7 @@ export class ConversationController {
     });
     if (activeToggle && !replacementFocus) replacementFocus = this.viewToggle;
     replacementFocus?.focus({ preventScroll: true });
+    if (this.focusedView && shouldScroll) this.scheduleAutoScroll();
   }
 
   scheduleFocusedActivityRefresh() {

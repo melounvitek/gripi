@@ -10,7 +10,7 @@ test("shows one tool result after reloading an active command", async ({ page })
 
   await page.reload();
 
-  await expect(message(page, "toolResult", tool.result)).toHaveCount(1);
+  await expect(page.locator("article[data-tool-call-id]").filter({ hasText: tool.result })).toHaveCount(1);
   await expectRunFinished(page);
 });
 

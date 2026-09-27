@@ -82,19 +82,20 @@ type EventBatch struct {
 }
 
 type LiveSnapshot struct {
-	EventSequence       int64               `json:"event_sequence"`
-	EventReplayCursor   int64               `json:"event_replay_cursor"`
-	ActiveToolEvents    []map[string]any    `json:"active_tool_events"`
-	Busy                bool                `json:"busy,omitempty"`
-	BusySince           *time.Time          `json:"busy_since,omitempty"`
-	AgentBusySince      *time.Time          `json:"agent_busy_since,omitempty"`
-	AgentRunning        bool                `json:"agent_running,omitempty"`
-	ActiveBash          map[string]any      `json:"active_bash,omitempty"`
-	CompletedBashEvents []map[string]any    `json:"completed_bash_events,omitempty"`
-	Compacting          bool                `json:"compacting,omitempty"`
-	CompactingSince     *time.Time          `json:"compacting_since,omitempty"`
-	QueuedMessages      map[string][]string `json:"queued_messages,omitempty"`
-	ExtensionUI         map[string]any      `json:"extension_ui,omitempty"`
+	EventSequence        int64               `json:"event_sequence"`
+	EventReplayCursor    int64               `json:"event_replay_cursor"`
+	ActiveToolEvents     []map[string]any    `json:"active_tool_events"`
+	ActiveAssistantEvent map[string]any      `json:"active_assistant_event,omitempty"`
+	Busy                 bool                `json:"busy,omitempty"`
+	BusySince            *time.Time          `json:"busy_since,omitempty"`
+	AgentBusySince       *time.Time          `json:"agent_busy_since,omitempty"`
+	AgentRunning         bool                `json:"agent_running,omitempty"`
+	ActiveBash           map[string]any      `json:"active_bash,omitempty"`
+	CompletedBashEvents  []map[string]any    `json:"completed_bash_events,omitempty"`
+	Compacting           bool                `json:"compacting,omitempty"`
+	CompactingSince      *time.Time          `json:"compacting_since,omitempty"`
+	QueuedMessages       map[string][]string `json:"queued_messages,omitempty"`
+	ExtensionUI          map[string]any      `json:"extension_ui,omitempty"`
 }
 
 type SessionEntries struct {
@@ -179,14 +180,15 @@ type Client struct {
 	pending         map[string]chan responseResult
 	bridgePending   map[string]chan string
 
-	events           []replayEntry
-	eventBufferSize  int
-	eventBufferLimit int
-	eventBufferBytes int
-	eventReplayFloor int64
-	eventSequence    int64
-	coalesced        map[string]*replayEntry
-	assistantStream  *assistantStreamState
+	events               []replayEntry
+	eventBufferSize      int
+	eventBufferLimit     int
+	eventBufferBytes     int
+	eventReplayFloor     int64
+	eventSequence        int64
+	coalesced            map[string]*replayEntry
+	assistantStream      *assistantStreamState
+	activeAssistantEvent map[string]any
 
 	activeToolEvents     map[string]map[string]any
 	activeToolOrder      []string
@@ -1073,6 +1075,7 @@ func (client *Client) readerStopped() {
 	client.extensionWidgetOrder = nil
 	client.extensionTitle = nil
 	client.assistantStream = nil
+	client.activeAssistantEvent = nil
 	client.busy = false
 	client.busySince = nil
 	client.mu.Unlock()
@@ -1115,7 +1118,7 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 			response["gatewayTimestamp"] = client.clock().UnixMilli()
 			serializedBytes = jsonSize(response)
 		}
-		if (typeName == "tool_execution_start" || typeName == "tool_execution_update" || typeName == "tool_execution_end") && response["toolName"] == snapshotToolName {
+		if typeName == "tool_execution_start" || typeName == "tool_execution_update" || typeName == "tool_execution_end" {
 			gatewayTimestamp := int64(0)
 			timestampKnown := false
 			if active := client.activeToolEvents[stringValue(response["toolCallId"])]; active != nil {
@@ -1250,6 +1253,9 @@ func (client *Client) LiveSnapshot() LiveSnapshot {
 		if event := client.activeToolEvents[id]; event != nil {
 			result.ActiveToolEvents = append(result.ActiveToolEvents, event)
 		}
+	}
+	if client.activeAssistantEvent != nil {
+		result.ActiveAssistantEvent = client.eventForDeliveryLocked(client.activeAssistantEvent)
 	}
 	result.Busy = client.busy || client.activeBashToken != nil
 	result.BusySince = copyTime(client.busySinceLocked())
@@ -1646,27 +1652,46 @@ func (client *Client) extensionUIEventForDeliveryLocked(event map[string]any) ma
 
 func (client *Client) updateAssistantStreamLocked(response map[string]any) {
 	switch response["type"] {
-	case "agent_start":
+	case "agent_start", "agent_end", "agent_settled":
 		client.assistantStream = nil
+		client.activeAssistantEvent = nil
 	case "message_start":
 		message, _ := response["message"].(map[string]any)
 		if message["role"] == "assistant" {
 			limit := min(MaxAssistantPartialMessageBytes, client.eventBufferBytes, client.fallbackRPCLineBytes)
 			client.assistantStream = newAssistantStreamState(message, limit)
+			client.activeAssistantEvent = map[string]any{"type": "message_start"}
+			if jsonSize(message) <= limit {
+				client.activeAssistantEvent["message"] = message
+			}
 		}
 	case "message_update":
-		if response["message"] != nil || client.assistantStream == nil {
+		if client.assistantStream == nil {
 			return
 		}
 		event, _ := response["assistantMessageEvent"].(map[string]any)
-		client.assistantStream.apply(event)
+		phase := map[string]any{"type": boundedText(stringValue(event["type"]), 256)}
+		if index, ok := assistantContentIndex(event["contentIndex"]); ok {
+			phase["contentIndex"] = index
+		}
+		client.activeAssistantEvent = map[string]any{"type": "message_update", "assistantMessageEvent": phase}
+		if message := response["message"]; message != nil {
+			if jsonSize(message) <= client.assistantStream.maxBytes {
+				client.activeAssistantEvent["message"] = message
+			} else {
+				// Keep the phase, but never project stale deltas for an oversized cumulative message.
+				client.assistantStream.disabled = true
+				client.assistantStream.parts = nil
+			}
+		} else {
+			client.assistantStream.apply(event)
+		}
 	case "message_end":
 		message, _ := response["message"].(map[string]any)
 		if message["role"] == "assistant" {
 			client.assistantStream = nil
+			client.activeAssistantEvent = nil
 		}
-	case "agent_end":
-		client.assistantStream = nil
 	}
 }
 
@@ -1768,7 +1793,7 @@ func (client *Client) discardReplayLocked() {
 }
 
 func (client *Client) updateActiveToolsLocked(response map[string]any, serializedBytes int) {
-	if response["type"] == "agent_end" {
+	if response["type"] == "agent_start" || response["type"] == "agent_end" || response["type"] == "agent_settled" {
 		client.activeToolEvents = make(map[string]map[string]any)
 		client.activeToolOrder = nil
 		return
@@ -1795,7 +1820,7 @@ func (client *Client) updateActiveToolsLocked(response map[string]any, serialize
 		}
 		return
 	}
-	if (response["type"] == "tool_execution_start" || response["type"] == "tool_execution_update") && response["toolName"] == snapshotToolName {
+	if response["type"] == "tool_execution_start" || response["type"] == "tool_execution_update" {
 		isNew := client.activeToolEvents[id] == nil
 		if isNew && len(client.activeToolEvents) >= MaxActiveToolSnapshots {
 			for _, completedID := range client.activeToolOrder {
@@ -1908,6 +1933,22 @@ func boundedActiveToolEvent(response map[string]any, serializedBytes int) map[st
 		return response
 	}
 	result, _ := response[toolExecutionResultKey(response)].(map[string]any)
+	if response["toolName"] != snapshotToolName {
+		snapshot := map[string]any{
+			"type": response["type"], "toolCallId": response["toolCallId"],
+			"toolName": boundedText(stringValue(response["toolName"]), 256), "gatewayTimestamp": response["gatewayTimestamp"],
+		}
+		if args, ok := response["args"].(map[string]any); ok {
+			snapshot["args"] = compactValues(args)
+		}
+		if result != nil {
+			snapshot[toolExecutionResultKey(response)] = map[string]any{"content": compactContent(result["content"])}
+		}
+		if jsonSize(snapshot) <= MaxActiveToolSnapshotBytes {
+			return snapshot
+		}
+		return nil
+	}
 	details, _ := result["details"].(map[string]any)
 	if _, tools := details["tools"].([]any); tools {
 		if _, usage := details["usage"].(map[string]any); usage {

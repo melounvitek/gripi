@@ -36,6 +36,8 @@ export const sessions = {
   controlsAbort: "E2E Abort Desktop",
   parallelSubagents: "E2E Parallel Subagents Desktop",
   parallelSubagentsMobile: "E2E Parallel Subagents Mobile",
+  activeSubagents: "E2E Active Subagents Desktop",
+  activeSubagentsMobile: "E2E Active Subagents Mobile",
   paginatedSubagent: "E2E Paginated Subagent Desktop",
   terminal: "E2E Terminal Desktop",
   settings: "E2E Settings Desktop",
@@ -93,6 +95,29 @@ const terminalFirstHistory = Array.from({ length: 28 }, (_, index) => `Terminal 
 const terminalLatestHistory = [...terminalFirstHistory, "Terminal history 29", "Terminal history 30", "Terminal history 31", "Terminal history 32"];
 const terminalFirstFrame = `${terminalReset}${terminalFirstHistory.join("\n")}\nTerminal stale screen`;
 const terminalLatestFrame = `${terminalReset}${terminalLatestHistory.join("\n")}\x1b[?1049h\x1b[H\x1b[32mTerminal current screen\x1b[0m`;
+
+export const activeRecovery = {
+  project: "new-session-desktop",
+  toolsPrompt: "Hold ordinary tools for activity recovery until abort",
+  thinkingPrompt: {
+    cumulative: "Hold cumulative thinking for activity recovery until abort",
+    delta: "Hold delta-only thinking for activity recovery until abort"
+  },
+  preparationPrompt: {
+    cumulative: "Hold cumulative preparation for activity recovery until abort",
+    delta: "Hold delta-only preparation for activity recovery until abort"
+  },
+  previousThinking: "Finished recovery reasoning.",
+  text: "Recovery work is underway.",
+  thinking: "Still considering the recovery result.",
+  tools: [
+    { id: "recovery-bash", name: "bash", arguments: { command: "sleep 300 # recovery" } },
+    { id: "recovery-read", name: "read", arguments: { path: "recovery-input.txt" } },
+    { id: "recovery-edit", name: "edit", arguments: { path: "recovery-edit.txt", edits: [{ oldText: "before\nsecond line", newText: "after\nreplacement line" }] } },
+    { id: "recovery-write", name: "write", arguments: { path: "recovery-write.txt", content: "Recovery content\nSecond line" } },
+    { id: "recovery-write-long", name: "write", arguments: { path: "recovery-long.txt", content: Array.from({ length: 40 }, (_, index) => `Recovery line ${index + 1}`).join("\n") } }
+  ]
+};
 
 export const nativeBash = {
   included: {

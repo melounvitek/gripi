@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-import { mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool, writeTool } from "./contract.mjs";
+import { activeRecovery, mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool, writeTool } from "./contract.mjs";
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
@@ -30,6 +30,7 @@ let sessionPersisted = false;
 let entrySequence = 0;
 const timers = new Set();
 let heldPromptEvents = null;
+let recoveryMessage = null;
 
 if (sessionPath) loadSession(sessionPath);
 else prepareNewSession();
@@ -315,6 +316,18 @@ function acceptPrompt(command) {
   emitMessage(user);
   emit({ type: "turn_start" });
 
+  if (command.message === activeRecovery.toolsPrompt) {
+    schedule(120, startRecoveryTools);
+    return;
+  }
+  for (const phase of ["thinking", "preparation"]) {
+    for (const transport of ["cumulative", "delta"]) {
+      if (command.message === activeRecovery[`${phase}Prompt`][transport]) {
+        schedule(120, () => startRecoveryAssistant(phase, transport));
+        return;
+      }
+    }
+  }
   if ([prompts.assistantError, prompts.assistantPartialError].includes(command.message)) {
     schedule(120, () => {
       const started = assistantMessage([], "stop");
@@ -561,6 +574,26 @@ function acceptAbort(command) {
     emitMessage(user);
     return;
   }
+  if (recoveryMessage) {
+    if (activeScenario === activeRecovery.toolsPrompt) {
+      const toolResults = activeRecovery.tools.map((call) => {
+        const result = { content: [{ type: "text", text: `${call.name} recovery aborted` }] };
+        emit({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result, isError: true });
+        const message = { role: "toolResult", toolCallId: call.id, toolName: call.name, ...result, isError: true, timestamp: Date.now() };
+        appendMessage(message);
+        emitMessage(message);
+        return message;
+      });
+      emit({ type: "turn_end", message: recoveryMessage, toolResults });
+      emit({ type: "turn_start" });
+      completeAssistant(replies.aborted, toolResults);
+    } else {
+      finishAssistant({ ...recoveryMessage, stopReason: "aborted" });
+    }
+    recoveryMessage = null;
+    respond(command, true);
+    return;
+  }
   if ([prompts.parallelSubagents, prompts.parallelSubagentsMobile].includes(activeScenario)) {
     abortParallelSubagents();
     respond(command, true);
@@ -642,6 +675,44 @@ function acceptExtensionResponse(command) {
     return;
   }
   completeAssistant(command.confirmed ? replies.extensionApproved : "Release approval was declined.");
+}
+
+function startRecoveryTools() {
+  recoveryMessage = assistantMessage(activeRecovery.tools.map((call) => ({ type: "toolCall", ...call })), "toolUse");
+  emit({ type: "message_start", message: { ...recoveryMessage, content: [] } });
+  emit({ type: "message_update", message: recoveryMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: 3, toolCall: recoveryMessage.content[3], partial: recoveryMessage } });
+  emit({ type: "message_end", message: recoveryMessage });
+  appendMessage(recoveryMessage);
+  for (const call of activeRecovery.tools) {
+    emit({ type: "tool_execution_start", toolCallId: call.id, toolName: call.name, args: call.arguments });
+    if (call.name === "bash") emit({ type: "tool_execution_update", toolCallId: call.id, toolName: call.name, args: call.arguments, partialResult: { content: [{ type: "text", text: "bash recovery still running" }] } });
+  }
+}
+
+function startRecoveryAssistant(phase, transport) {
+  recoveryMessage = assistantMessage([], "stop");
+  emit({ type: "message_start", message: recoveryMessage });
+  const update = (event) => emit({
+    type: "message_update",
+    ...(transport === "cumulative" ? { message: recoveryMessage } : {}),
+    assistantMessageEvent: { ...event, ...(transport === "cumulative" ? { partial: recoveryMessage } : {}) }
+  });
+  update({ type: "thinking_start", contentIndex: 0 });
+  recoveryMessage.content.push({ type: "thinking", thinking: activeRecovery.previousThinking });
+  update({ type: "thinking_delta", contentIndex: 0, delta: activeRecovery.previousThinking });
+  update({ type: "thinking_end", contentIndex: 0, content: activeRecovery.previousThinking });
+  update({ type: "text_start", contentIndex: 1 });
+  recoveryMessage.content.push({ type: "text", text: activeRecovery.text });
+  update({ type: "text_delta", contentIndex: 1, delta: activeRecovery.text });
+  update({ type: "text_end", contentIndex: 1, content: activeRecovery.text });
+  if (phase === "thinking") {
+    update({ type: "thinking_start", contentIndex: 2 });
+    recoveryMessage.content.push({ type: "thinking", thinking: activeRecovery.thinking });
+    update({ type: "thinking_delta", contentIndex: 2, delta: activeRecovery.thinking });
+  } else {
+    update({ type: "toolcall_start", contentIndex: 2 });
+    update({ type: "toolcall_delta", contentIndex: 2, delta: '{"path":"recovery' });
+  }
 }
 
 function startParallelSubagents() {

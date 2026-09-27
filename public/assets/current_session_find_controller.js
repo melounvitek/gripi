@@ -66,7 +66,7 @@ export class CurrentSessionFindController {
   }
 
   focusedViewMessage(message) {
-    return this.conversation.focusedViewMessage(message);
+    return message.hasAttribute("data-activity-active") || this.conversation.focusedViewMessage(message);
   }
 
   textNodes(root) {
