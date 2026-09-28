@@ -5,7 +5,7 @@
   const TOUCH_TAP_TOLERANCE = 10;
   const initialSessions = [
     {
-      id: "welcome", name: "Welcome to Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "just now", pinned: true,
+      id: "welcome", name: "Welcome to Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "now", pinned: true,
       messages: [
         { role: "user", text: "What is Gripi?" },
         { role: "thinking", text: "I’ll summarize what Gripi adds while keeping Pi’s role clear." },
@@ -13,7 +13,7 @@
       ]
     },
     {
-      id: "install", name: "Install Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "1 minute ago", pinned: false,
+      id: "install", name: "Install Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "1m", pinned: false,
       messages: [
         { role: "user", text: "How do I install Gripi and the desktop app?" },
         { role: "thinking", text: "I’ll separate gateway and desktop installation so each can be set up independently." },
@@ -22,7 +22,7 @@
       ]
     },
     {
-      id: "new-to-pi", name: "New to Pi? Start here", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "2 minutes ago", pinned: false,
+      id: "new-to-pi", name: "New to Pi? Start here", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "2m", pinned: false,
       messages: [
         { role: "user", text: "I found Gripi before Pi. Is this a good place to start?" },
         { role: "thinking", text: "I’ll distinguish Pi itself from the Gripi interface and point to the best starting place." },
@@ -30,7 +30,7 @@
       ]
     },
     {
-      id: "pi-stays-pi", name: "Does Gripi change Pi?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "5 minutes ago", pinned: false,
+      id: "pi-stays-pi", name: "Does Gripi change Pi?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "5m", pinned: false,
       messages: [
         { role: "user", text: "Does Gripi change how Pi behaves?" },
         { role: "thinking", text: "I’ll check the boundary between Gripi and the Pi runtime." },
@@ -38,7 +38,7 @@
       ]
     },
     {
-      id: "unsupported", name: "Extension support in Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "9 minutes ago", pinned: false,
+      id: "unsupported", name: "Extension support in Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "9m", pinned: false,
       messages: [
         { role: "user", text: "Which Pi extension features work in Gripi?" },
         { role: "thinking", text: "I’ll separate browser-compatible extension features from terminal-only UI behavior." },
@@ -46,7 +46,7 @@
       ]
     },
     {
-      id: "always-on", name: "Run Gripi on an always-on computer", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "14 minutes ago", pinned: false,
+      id: "always-on", name: "Run Gripi on an always-on computer", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "14m", pinned: false,
       messages: [
         { role: "user", text: "I have an office PC or spare computer that stays on. Can it be my gateway?" },
         { role: "thinking", text: "I’ll outline a reliable private-network setup." },
@@ -54,7 +54,7 @@
       ]
     },
     {
-      id: "tailscale", name: "Access Gripi remotely with Tailscale", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "22 minutes ago", pinned: false,
+      id: "tailscale", name: "Access Gripi remotely with Tailscale", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "22m", pinned: false,
       messages: [
         { role: "user", text: "What is the recommended way to connect from another device?" },
         { role: "thinking", text: "I’ll recommend a private-network setup that avoids exposing the gateway publicly." },
@@ -62,7 +62,7 @@
       ]
     },
     {
-      id: "mobile", name: "Use Gripi from a phone or tablet", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "31 minutes ago", pinned: false,
+      id: "mobile", name: "Use Gripi from a phone or tablet", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "31m", pinned: false,
       messages: [
         { role: "user", text: "Can I use Gripi from my phone?" },
         { role: "thinking", text: "I’ll cover the private connection and the mobile web-app experience." },
@@ -70,7 +70,7 @@
       ]
     },
     {
-      id: "vps", name: "Should I run Gripi on a VPS?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "45 minutes ago", pinned: false,
+      id: "vps", name: "Should I run Gripi on a VPS?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "45m", pinned: false,
       messages: [
         { role: "user", text: "Could I deploy Gripi on an internet-hosted VPS?" },
         { role: "thinking", text: "This needs a strong warning because the gateway can execute Pi tools with the server user’s access." },
@@ -80,14 +80,14 @@
       ]
     },
     {
-      id: "demo-fidelity", name: "Does this look 1:1 realistic as the real product?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "1 hour ago", pinned: false,
+      id: "demo-fidelity", name: "Does this look 1:1 realistic as the real product?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "1h", pinned: false,
       messages: [
         { role: "user", text: "Does this static demo look exactly like the real product?" },
         { role: "thinking", text: "I’ll be explicit about what this simulation simplifies." },
         { role: "assistant", text: "Not exactly. The demo uses the same overall interface, but some interactions and details are simplified, and a few parts are not as polished here as they are in the real app. A connected Gripi gateway has the full live session behavior, real tool output, and production rendering polish." }
       ]
     },
-    { id: "release-notes", name: "Draft release notes", project: "website", monogram: "WE", color: "#9fc5ff", background: "#1e334d", age: "2 hours ago", pinned: false, messages: [
+    { id: "release-notes", name: "Draft release notes", project: "website", monogram: "WE", color: "#9fc5ff", background: "#1e334d", age: "2h", pinned: false, messages: [
       { role: "user", text: "Draft concise release notes from the changes in this branch.", time: "Monday" },
       { role: "thinking", text: "I’ll inspect the branch diff, then turn the user-facing parts into short release notes.", time: "Monday" },
       { role: "tool", title: "bash git status --short && git diff --stat origin/main...HEAD", text: " M app/components/sidebar/search.tsx\n M app/components/composer/index.tsx\n M app/lib/drafts.ts\n\n app/components/sidebar/search.tsx | 42 ++++++++++++++++++++++----\n app/components/composer/index.tsx | 18 +++++++----\n app/lib/drafts.ts                 | 27 +++++++++++++++--\n 3 files changed, 73 insertions(+), 14 deletions(-)", time: "Monday" },
@@ -95,7 +95,7 @@
       { role: "tool", title: "write content/app/releases.md", text: "Wrote release note draft with three bullets and a short upgrade note.", time: "Monday" },
       { role: "assistant", text: "Drafted concise release notes in `content/app/releases.md`.\n\nWhat’s new\n\n• Find sessions faster with sidebar search.\n• Enjoy a cleaner composer on mobile screens.\n• Keep unsent drafts when reconnecting.", time: "Monday" }
     ] },
-    { id: "billing-spec", name: "Investigate flaky checkout spec", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "yesterday", pinned: false, messages: [
+    { id: "billing-spec", name: "Investigate flaky checkout spec", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "1d", pinned: false, messages: [
       { role: "user", text: "The checkout browser spec fails about one run in twenty. Can you investigate without weakening its assertions?", time: "Last week" },
       { role: "thinking", text: "I’ll reproduce it repeatedly and compare browser state on failed runs before changing the spec.", time: "Last week" },
       { role: "tool", title: "bash ./scripts/test-browser checkout --seed 18422", text: "Run seed: 18422\n\nFailure: checkout completes after payment\nExpected to find text \"Order confirmed\" in \"Redirecting…\"", time: "Last week" },
@@ -104,7 +104,7 @@
       { role: "tool", title: "bash ./scripts/test-browser checkout", text: "20 runs, 86 assertions, 0 failures, 0 errors, 0 skips", time: "Last week" },
       { role: "assistant", text: "The assertion sometimes ran before the payment redirect completed. I kept the same user-visible assertions and added an explicit wait for the order page navigation.\n\nFiles changed\n\n• `tests/browser/checkout-flow.test`", time: "Last week" }
     ] },
-    { id: "docs-navigation", name: "Simplify documentation navigation", project: "website", monogram: "WE", color: "#9fc5ff", background: "#1e334d", age: "2026-06-17", pinned: false, messages: [
+    { id: "docs-navigation", name: "Simplify documentation navigation", project: "website", monogram: "WE", color: "#9fc5ff", background: "#1e334d", age: "31d", pinned: false, messages: [
       { role: "user", text: "Can you reorganize the setup and configuration guides?", time: "Last month" },
       { role: "thinking", text: "I’ll map the current docs first so the new navigation follows existing content instead of inventing new sections.", time: "Last month" },
       { role: "tool", title: "bash find docs -maxdepth 2 -type f | sort", text: "docs/configuration.md\ndocs/deployment.md\ndocs/getting-started.md\ndocs/troubleshooting.md", time: "Last month" },
@@ -113,7 +113,7 @@
       { role: "tool", title: "edit docs/configuration.md", text: "- See deployment.md for hosting details.\n+ See setup.md for local setup and deployment.md for hosting details.", time: "Last month" },
       { role: "assistant", text: "Reorganized the guides around installation, local use, and remote access. I kept the existing content, moved setup steps into `docs/setup.md`, and added cross-links from configuration and deployment.", time: "Last month" }
     ] },
-    { id: "checkout-copy", name: "Polish checkout confirmation copy", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "2026-06-17", pinned: false, messages: [
+    { id: "checkout-copy", name: "Polish checkout confirmation copy", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "31d", pinned: false, messages: [
       { role: "user", text: "Make the confirmation screen clearer without adding more steps.", time: "Last month" },
       { role: "thinking", text: "I’ll keep the checkout flow unchanged and only adjust the confirmation page copy/layout.", time: "Last month" },
       { role: "tool", title: "read templates/checkout-confirmation.html", text: "<h1>Thank you for completing checkout</h1>\n<p>Your order is being prepared.</p>\n<p>Order {{ order_number }}</p>", time: "Last month" },
@@ -121,7 +121,7 @@
       { role: "tool", title: "bash ./scripts/test-browser checkout", text: "20 runs, 89 assertions, 0 failures, 0 errors, 0 skips", time: "Last month" },
       { role: "assistant", text: "Shortened the heading and surfaced the delivery estimate next to the order number. No checkout steps changed.\n\nFiles changed\n\n• `templates/checkout-confirmation.html`", time: "Last month" }
     ] },
-    { id: "ci-cache", name: "Speed up CI dependency caching", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "2026-05-17", pinned: false, messages: [
+    { id: "ci-cache", name: "Speed up CI dependency caching", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "62d", pinned: false, messages: [
       { role: "user", text: "The test workflow spends too long installing unchanged dependencies.", time: "2 months ago" },
       { role: "thinking", text: "I’ll check which dependency managers are used and keep the cache key tied to lockfiles, not unrelated source changes.", time: "2 months ago" },
       { role: "tool", title: "read .github/workflows/test.yml", text: "- uses: actions/cache@v4\n  with:\n    path: .cache/dependencies\n    key: dependencies-${{ github.sha }}", time: "2 months ago" },
@@ -180,7 +180,7 @@
       monogram: String(session.monogram || "PR").slice(0, 3),
       color: safeIdentityColor(session.color, "#ff9b73"),
       background: safeIdentityColor(session.background, "#4a281f"),
-      age: String(session.age || "just now"),
+      age: String(session.age || "now"),
       pinned: !!session.pinned,
       messages: ensureSessionActivity(messages)
     };
@@ -557,7 +557,7 @@
   }
 
   function touchSessionActivity(session) {
-    session.age = "just now";
+    session.age = "now";
     if (session.pinned) return;
     sessions = [session, ...sessions.filter((item) => item !== session)];
   }
@@ -567,7 +567,16 @@
     element.pinned.replaceChildren(); element.sessions.replaceChildren();
     const visible = filteredSessions();
     visible.filter((session) => session.pinned).forEach((session) => element.pinned.append(sessionRow(session)));
-    visible.filter((session) => !session.pinned).forEach((session) => element.sessions.append(sessionRow(session)));
+    let day = "";
+    visible.filter((session) => !session.pinned).forEach((session) => {
+      const sessionDay = /^(now|\d+[mh])$/.test(session.age) ? "Today" : session.age === "1d" ? "Yesterday" : "Earlier";
+      if (sessionDay !== day) {
+        day = sessionDay;
+        const heading = document.createElement("h3"); heading.className = "sessions-day"; heading.textContent = day;
+        element.sessions.append(heading);
+      }
+      element.sessions.append(sessionRow(session));
+    });
     element.empty.hidden = visible.length > 0;
     element.clearFilters.hidden = !element.project.value && !element.search.value;
     if (element.sidebarScroll) element.sidebarScroll.scrollTop = scrollTop;
@@ -975,10 +984,10 @@
     const project = cwd.split("/").filter(Boolean).pop() || "project";
     const identity = identities[project] || { monogram: project.slice(0, 2).toUpperCase(), color: "#f0c674", background: "#3c3728" };
     const id = `local-${Date.now()}`;
-    sessions.unshift(normalizeSession({ id, name: "New local demo session", project, ...identity, age: "just now", pinned: false, messages: [{ role: "assistant", text: "This representative session was created locally. Enter a prompt to try streaming.", time: timeLabel() }] }));
+    sessions.unshift(normalizeSession({ id, name: "New local demo session", project, ...identity, age: "now", pinned: false, messages: [{ role: "assistant", text: "This representative session was created locally. Enter a prompt to try streaming.", time: timeLabel() }] }));
     closeModal(event.target.closest("[data-modal]")); switchSession(id);
   });
-  document.querySelectorAll("[data-demo-fork]").forEach((button) => button.addEventListener("click", () => { const source = currentSession(); const id = `fork-${Date.now()}`; sessions.push(normalizeSession({ ...source, id, name: `${source.name} (fork)`, age: "just now", pinned: false, messages: source.messages.slice(0, 4).map((message) => ({ ...message })) })); closeModal(button.closest("[data-modal]")); switchSession(id); }));
+  document.querySelectorAll("[data-demo-fork]").forEach((button) => button.addEventListener("click", () => { const source = currentSession(); const id = `fork-${Date.now()}`; sessions.push(normalizeSession({ ...source, id, name: `${source.name} (fork)`, age: "now", pinned: false, messages: source.messages.slice(0, 4).map((message) => ({ ...message })) })); closeModal(button.closest("[data-modal]")); switchSession(id); }));
   document.querySelectorAll("[data-demo-tree]").forEach((button) => button.addEventListener("click", () => { closeModal(button.closest("[data-modal]")); if (button.dataset.demoTreeTarget) switchSession(button.dataset.demoTreeTarget); }));
   document.querySelector(".model-settings-form").addEventListener("submit", (event) => { event.preventDefault(); const model = new FormData(event.target).get("model"); const thinking = new FormData(event.target).get("thinking"); document.querySelector('[data-status-key="model"] .session-status-value').textContent = `${model} (${thinking})`; closeModal(event.target.closest("[data-modal]")); });
   document.querySelector("[data-model-search]").addEventListener("input", (event) => { const query = event.target.value.toLowerCase(); document.querySelectorAll(".model-option").forEach((option) => { option.hidden = !option.textContent.toLowerCase().includes(query); }); });
