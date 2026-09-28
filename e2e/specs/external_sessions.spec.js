@@ -33,7 +33,7 @@ for (const touch of [false, true]) {
     // Keep the mobile regression self-contained despite the mobile project's restricted testMatch.
     test.use(touch ? { viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true } : {});
 
-    test("unopened CLI sessions stay compact and quiet, with first-tap navigation and actions", async ({ page, context, copiedSession }, testInfo) => {
+    test("unopened CLI sessions keep the normal row shape and stay quiet, with first-tap navigation and actions", async ({ page, context, copiedSession }, testInfo) => {
       test.setTimeout(45_000);
       await context.addInitScript(() => {
         window.replyNotifications = [];
@@ -52,7 +52,9 @@ for (const touch of [false, true]) {
       await expectExternalIcon(link);
       await expect(link).not.toHaveClass(/\bunread\b/);
       await expect(link).toHaveAttribute("data-external-response-count", String(responseCount + 1));
-      await expectCompactRow(link, touch);
+      // No always-visible actions on desktop: they wait for hover or keyboard focus like other rows.
+      if (!touch) await expect(link.locator("..").locator("[data-session-actions-toggle]")).toHaveCSS("opacity", "0");
+      await expectNormalRowShape(link, touch);
       expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
       await page.screenshot({ path: testInfo.outputPath("unopened-external-session.png") });
 
@@ -60,7 +62,7 @@ for (const touch of [false, true]) {
       await openSidebar(page, touch);
       await expectExternalIcon(link);
       await expect(link).not.toHaveClass(/\bunread\b/);
-      await expectCompactRow(link, touch);
+      await expectNormalRowShape(link, touch);
       expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
 
       const row = link.locator("..");
@@ -74,7 +76,7 @@ for (const touch of [false, true]) {
         if (touch) expect((await pin.boundingBox()).height).toBeGreaterThanOrEqual(44);
         await activate(pin);
         await expect(row).toHaveAttribute("data-pinned", String(pinned));
-        await expectCompactRow(link, touch);
+        await expectNormalRowShape(link, touch);
       }
 
       await activate(actions);
@@ -86,14 +88,14 @@ for (const touch of [false, true]) {
       await expect(tags.getByRole("checkbox", { name: tag, exact: true })).toBeChecked();
       await activate(tags.getByRole("button", { name: "Close tag picker", exact: true }));
       await expect(row).toHaveAttribute("data-session-tags", JSON.stringify([tag]));
-      await expectCompactRow(link, touch);
+      await expectNormalRowShape(link, touch);
 
       await activate(link);
       await expect(page.getByRole("heading", { level: 1, name: copiedSession.title })).toBeVisible();
       if (touch) await expect(page.locator("#mobile-session-toggle")).not.toBeChecked();
       await openSidebar(page, touch);
       await expect(link).toHaveAttribute("aria-current", "page");
-      await expectCompactRow(link, touch);
+      await expectNormalRowShape(link, touch);
       await expect(row).toHaveCSS("background-color", "rgb(58, 58, 74)");
       await page.screenshot({ path: testInfo.outputPath("compact-selected-session.png") });
     });
@@ -395,7 +397,7 @@ for (const touch of [false, true]) {
       await openSidebar(page, touch);
       const selectedLink = sessionLink(page, copiedSession.file);
       await expectExternalIcon(selectedLink);
-      await expectCompactRow(selectedLink, touch);
+      await expectNormalRowShape(selectedLink, touch);
       await page.screenshot({ path: testInfo.outputPath("external-session-icon.png") });
 
       const background = await context.newPage();
@@ -481,7 +483,7 @@ async function expectExternalIcon(link) {
   await expect(icon).not.toHaveCSS("opacity", "0");
 }
 
-async function expectCompactRow(link, touch) {
+async function expectNormalRowShape(link, touch) {
   const row = link.locator("..");
   await expect(row).toHaveClass(/\bis-external\b/);
   const title = link.locator(".session-title");
@@ -490,26 +492,49 @@ async function expectCompactRow(link, touch) {
   expect(await title.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   const actions = row.locator("[data-session-actions-toggle]");
   await expect(actions).toBeVisible();
-  await expect(actions).toHaveCSS("opacity", "1");
+  // Row controls behave like normal rows: always shown on touch, revealed on desktop hover.
+  if (touch) await expect(actions).toHaveCSS("opacity", "0.7");
+  else {
+    await row.hover();
+    await expect(actions).toHaveCSS("opacity", "1");
+  }
+  await expect(row.locator(".session-project")).toBeHidden();
   const age = row.locator(".session-meta");
   await expect(age).toHaveText(/^(now|\d+[mhd])$/);
   await expect(link).toHaveAttribute("title", / · .+ · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
   // Measure in one frame so the mobile drawer transition cannot skew relative positions.
-  const [rowBox, linkBox, titleBox, ageBox, actionsBox] = await row.evaluate((element) =>
-    [element, ...["a.session", ".session-title", ".session-meta", "[data-session-actions-toggle]"]
-      .map((selector) => element.querySelector(selector))]
-      .map((control) => control.getBoundingClientRect().toJSON()));
-  expect(rowBox.height).toBeLessThanOrEqual(touch ? 46 : 36);
+  const { external, normal, hits } = await row.evaluate((element) => {
+    const box = (control) => control.getBoundingClientRect().toJSON();
+    const shape = (row, lead) => ({
+      row: box(row), lead: box(row.querySelector(lead)), title: box(row.querySelector(".session-title")),
+      age: box(row.querySelector(".session-meta")), actions: box(row.querySelector("[data-session-actions-toggle]")),
+      pin: box(row.querySelector("[data-session-pin-toggle]")),
+    });
+    const reference = [...document.querySelectorAll(".session-row:not(.is-external)")].find((candidate) => candidate.getClientRects().length);
+    const rowBox = element.getBoundingClientRect();
+    const link = element.querySelector("a.session");
+    // The stretched link is the tap target for the whole row, not only its title line.
+    const hits = [rowBox.top + 2, rowBox.bottom - 2].map((y) => document.elementFromPoint(rowBox.left + 2, y)?.closest("a.session") === link);
+    return { external: shape(element, ".session-external-indicator svg"), normal: shape(reference, ".session-project-monogram"), hits };
+  });
+  // External rows share the normal row shape: the terminal icon takes the project dot's slot.
   // Transformed drawer bounds can round by a few millionths of a pixel.
-  expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(ageBox.x + 0.01);
-  expect(ageBox.x + ageBox.width).toBeLessThanOrEqual(actionsBox.x + 0.01);
-  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 0.01);
+  expect(external.row.height).toBeCloseTo(normal.row.height, 1);
+  expect(external.lead.x).toBeCloseTo(normal.lead.x, 1);
+  expect(external.title.x).toBeCloseTo(normal.title.x, 1);
+  expect(external.age.x + external.age.width).toBeCloseTo(normal.age.x + normal.age.width, 1);
+  expect(external.title.x + external.title.width).toBeLessThanOrEqual(external.age.x + 0.01);
+  expect(external.actions.x + external.actions.width).toBeLessThanOrEqual(external.row.x + external.row.width + 0.01);
+  expect(hits).toEqual([true, true]);
   if (touch) {
+    expect(external.title.y + external.title.height).toBeLessThanOrEqual(external.actions.y + 0.01);
     // Transformed drawer bounds can round a 44px target slightly below 44.
-    expect(linkBox.height).toBeGreaterThanOrEqual(44 - 0.01);
-    expect(actionsBox.height).toBeGreaterThanOrEqual(44 - 0.01);
-    expect(actionsBox.width).toBeGreaterThanOrEqual(44 - 0.01);
-  }
+    expect(external.row.height).toBeGreaterThanOrEqual(44 - 0.01);
+    for (const control of [external.actions, external.pin]) {
+      expect(control.height).toBeGreaterThanOrEqual(44 - 0.01);
+      expect(control.width).toBeGreaterThanOrEqual(44 - 0.01);
+    }
+  } else expect(external.title.x + external.title.width).toBeLessThanOrEqual(Math.min(external.pin.x, external.actions.x) + 0.01);
 }
 
 async function holdNextFragment(page) {

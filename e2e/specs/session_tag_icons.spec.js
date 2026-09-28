@@ -36,8 +36,17 @@ for (const width of [320, 393, 1440]) {
         const first = await icon.boundingBox();
         const last = await overflow.boundingBox();
         const bounds = await row.boundingBox();
-        expect(first.x).toBeGreaterThanOrEqual(project.x + project.width);
-        expect(Math.abs(first.y + first.height / 2 - project.y - project.height / 2)).toBeLessThan(2);
+        if (isMobile || width <= 760) {
+          // Touch rows keep the project dot before the title; tags start the second line, glyph under the title.
+          const title = await row.locator(".session-title").boundingBox();
+          const glyph = await icon.locator("svg").boundingBox();
+          expect(project.x + project.width).toBeLessThanOrEqual(title.x);
+          expect(first.y).toBeGreaterThanOrEqual(title.y + title.height);
+          expect(Math.abs(glyph.x - title.x)).toBeLessThan(1);
+        } else {
+          expect(first.x).toBeGreaterThanOrEqual(project.x + project.width);
+          expect(Math.abs(first.y + first.height / 2 - project.y - project.height / 2)).toBeLessThan(2);
+        }
         expect(last.x + last.width).toBeLessThanOrEqual(bounds.x + bounds.width);
         const pin = await row.locator(".session-pin-toggle").boundingBox();
         const actions = await row.locator(".session-actions-toggle").boundingBox();
