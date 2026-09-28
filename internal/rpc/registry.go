@@ -41,13 +41,15 @@ type Registry struct {
 	shutdownDone     chan struct{}
 	shutdownErr      error
 	resumeOnShutdown bool
+	// Last event sequence of each client retired while idle, until a new client replaces it.
+	retiredSequences map[string]int64
 }
 
 func NewRegistry(factory func(string) (RPCClient, error), clock func() time.Time) *Registry {
 	if clock == nil {
 		clock = time.Now
 	}
-	return &Registry{factory: factory, clock: clock, clients: make(map[string]*clientEntry), creating: make(map[string]uint64)}
+	return &Registry{factory: factory, clock: clock, clients: make(map[string]*clientEntry), creating: make(map[string]uint64), retiredSequences: make(map[string]int64)}
 }
 
 func (registry *Registry) SetDiagnostics(diagnostics *Diagnostics) {
@@ -98,6 +100,7 @@ func (registry *Registry) Register(path string, client RPCClient) error {
 			old = current.client
 		}
 		registry.clients[path] = newClientEntry(client, registry.clock())
+		delete(registry.retiredSequences, path)
 	}
 	diagnostics := registry.diagnostics
 	registry.mu.Unlock()
@@ -344,6 +347,7 @@ func (registry *Registry) acquire(path string, create, touch, observer bool) (*c
 	if entry == nil {
 		entry = newClientEntry(client, registry.clock())
 		registry.clients[path] = entry
+		delete(registry.retiredSequences, path)
 	} else {
 		unused = client
 	}
@@ -524,6 +528,7 @@ func (registry *Registry) moveWithCommit(oldPath, newPath string, prepare func()
 		entry.lastUsedAt = registry.clock()
 		entry.retiring = false
 		registry.clients[newPath] = entry
+		delete(registry.retiredSequences, newPath)
 	} else {
 		if err == nil {
 			if registry.closed {
@@ -557,9 +562,20 @@ func (registry *Registry) moveWithCommit(oldPath, newPath string, prepare func()
 }
 
 func (registry *Registry) EventsAfter(path string, after int64) EventBatch {
-	result := EventBatch{Events: []map[string]any{}, Missed: after > 0}
-	_ = registry.WithActiveClient(context.Background(), path, false, func(client RPCClient) error { result = client.EventsAfter(after); return nil })
-	return result
+	var result EventBatch
+	active := false
+	_ = registry.WithActiveClient(context.Background(), path, false, func(client RPCClient) error {
+		result, active = client.EventsAfter(after), true
+		return nil
+	})
+	if active {
+		return result
+	}
+	registry.mu.Lock()
+	retired, ok := registry.retiredSequences[path]
+	registry.mu.Unlock()
+	// A cursor at the last event of an idle-retired client has nothing left to replay.
+	return EventBatch{Events: []map[string]any{}, Missed: after > 0 && !(ok && after == retired)}
 }
 
 func (registry *Registry) RetireQueuedClient(path string, client RPCClient) (bool, map[string][]string, error) {
@@ -586,9 +602,19 @@ func (registry *Registry) CloseClientWithoutOperations(path string) (bool, error
 	return registry.closeWhen(path, func(entry *clientEntry) bool { return entry.activeRequests <= entry.observers && !entry.client.Busy() }, nil)
 }
 func (registry *Registry) CloseClientIfExpired(path string, idle time.Duration, now time.Time, onClose func(string)) (bool, error) {
-	return registry.closeWhen(path, func(entry *clientEntry) bool {
-		return entry.activeRequests == 0 && !entry.client.Busy() && !activityAt(entry).Add(idle).After(now)
+	closed, err := registry.closeWhen(path, func(entry *clientEntry) bool {
+		if entry.activeRequests != 0 || entry.client.Busy() || activityAt(entry).Add(idle).After(now) {
+			return false
+		}
+		registry.retiredSequences[path] = entry.client.EventSequence()
+		return true
 	}, onClose)
+	if err != nil {
+		registry.mu.Lock()
+		delete(registry.retiredSequences, path)
+		registry.mu.Unlock()
+	}
+	return closed, err
 }
 func (registry *Registry) IdleClientPaths(idle time.Duration, now time.Time, except map[string]bool) []string {
 	registry.mu.Lock()

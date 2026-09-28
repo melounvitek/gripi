@@ -404,6 +404,35 @@ func TestRegistryUsesSettlementAndFiveMinuteIdleBoundary(t *testing.T) {
 	}
 }
 
+func TestRegistryDoesNotReportMissedEventsAtAnIdleRetiredClientsLastEvent(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	client := newRegistryClient()
+	client.sequence = 20
+	registry := NewRegistry(nil, func() time.Time { return now })
+	if err := registry.Register("/session", client); err != nil {
+		t.Fatal(err)
+	}
+	if closed, err := registry.CloseClientIfExpired("/session", time.Second, now.Add(time.Second), nil); err != nil || !closed {
+		t.Fatalf("idle retirement = %v, %v", closed, err)
+	}
+	for after, missed := range map[int64]bool{0: false, 19: true, 20: false, 21: true} {
+		if batch := registry.EventsAfter("/session", after); batch.Missed != missed || batch.LastSeq != 0 || batch.Events == nil || len(batch.Events) != 0 {
+			t.Errorf("after=%d: %#v; want missed=%v", after, batch, missed)
+		}
+	}
+
+	replacement := newRegistryClient()
+	if err := registry.Register("/session", replacement); err != nil {
+		t.Fatal(err)
+	}
+	if closed, err := registry.CloseClientIfIdle("/session"); err != nil || !closed {
+		t.Fatalf("replacement close = %v, %v", closed, err)
+	}
+	if batch := registry.EventsAfter("/session", 20); !batch.Missed {
+		t.Errorf("cursor from an earlier client after replacement: %#v; want missed", batch)
+	}
+}
+
 func TestRegistryFindsAClientAtItsCurrentPathAfterMove(t *testing.T) {
 	registry := NewRegistry(nil, nil)
 	client := newRegistryClient()
@@ -510,6 +539,7 @@ type registryClient struct {
 	closeStarted chan struct{}
 	releaseClose chan struct{}
 	queued       map[string][]string
+	sequence     int64
 }
 
 func newRegistryClient() *registryClient { return &registryClient{} }
@@ -553,7 +583,7 @@ func (client *registryClient) SettledAt() *time.Time {
 }
 func (client *registryClient) AgentRunning() bool       { return false }
 func (client *registryClient) Compacting() bool         { return false }
-func (client *registryClient) EventSequence() int64     { return 0 }
+func (client *registryClient) EventSequence() int64     { return client.sequence }
 func (client *registryClient) EventReplayCursor() int64 { return 0 }
 func (client *registryClient) EventsAfter(int64) EventBatch {
 	return EventBatch{Events: []map[string]any{}}
