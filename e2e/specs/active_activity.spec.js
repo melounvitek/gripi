@@ -155,6 +155,18 @@ test("joins the latest activity summary into the active group", async ({ page })
   await expect(page.locator(".focus-activity-details")).toContainText("npm test");
 });
 
+test("keeps a summary separate when text follows it", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const group = activeGroup(page);
+  const read = call("separate-read", "read", { path: "schema.sql" });
+  const bash = call("separate-bash", "bash", { command: "npm test" });
+  const text = assistant([{ type: "text", text: "Schema looks fine, running tests." }]);
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([read]) }, { type: "message_end", message: assistant([read]) }, start(read.id, read.name, read.arguments), end(read.id, read.name), { type: "message_start", message: text }, { type: "message_end", message: text }, { type: "message_start", message: assistant([bash]) }, { type: "message_end", message: assistant([bash]) }, start(bash.id, bash.name, bash.arguments));
+  await expect(group).toContainText("1 running");
+  await expect(page.locator(".focus-activity-summary")).toContainText("1 tool update");
+  await expect(group.locator(".focus-activity-summary")).toHaveCount(0);
+});
+
 test("text-only runs do not create an activity group", async ({ page }) => {
   const deliver = await liveEvents(page);
   await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([{ type: "text", text: "Answer without tools." }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
