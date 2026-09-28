@@ -34,6 +34,33 @@ func TestWindowIndexesLargeNativeEntriesWithoutMaterializingThemIntoTheConversat
 	}
 }
 
+func TestWindowKeepsTextAndImageIndexesAroundInlineImageData(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	user := `{"type":"message","id":"user","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":[` +
+		`{"type":"text","text":"literal {\"type\":\"image\",\"data\":\"kept\"} stays"},` +
+		`{"type":"image","data":"cG5n","mimeType":"image/png"},{"type":"image","data":"","mimeType":"image/png"},` +
+		`{"type":"image","data":"a\"b","mimeType":"image/png"},{"type":"image","data":"cG5nMg==","mimeType":"image/jpeg"}]}}`
+	writeSessionLines(t, path, []string{sessionLine(project), user})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	window, err := store.Window(path, "", false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window.Messages) != 1 || window.Messages[0].Text != `literal {"type":"image","data":"kept"} stays` {
+		t.Fatalf("messages = %#v", window.Messages)
+	}
+	images := window.Messages[0].Images
+	if len(images) != 3 || images[2].Index != 2 || images[2].MIMEType != "image/jpeg" {
+		t.Fatalf("images = %#v", images)
+	}
+	for index, want := range map[int]string{0: "png", 2: "png2"} {
+		if decoded, _, err := store.Image(path, "user", index); err != nil || string(decoded) != want {
+			t.Fatalf("image %d = %q, %v", index, decoded, err)
+		}
+	}
+}
+
 func TestInlineImagesDoNotShrinkTheWindowAndAreServedByEntry(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	data := strings.Repeat("AAAA", MaxIndexedEntryBytes/4+1024)

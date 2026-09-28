@@ -1402,7 +1402,7 @@ func renderUnits(path string, indexed *index, selected []unit, home string) ([]*
 			return nil, err
 		}
 		var raw map[string]any
-		if err := json.Unmarshal(bytes.TrimSpace(data), &raw); err != nil {
+		if err := json.Unmarshal(bytes.TrimSpace(withoutImageData(data)), &raw); err != nil {
 			return nil, err
 		}
 		if message := asMap(raw["message"]); stringValue(message["role"]) == "assistant" {
@@ -1442,6 +1442,40 @@ func renderUnits(path string, indexed *index, selected []unit, home string) ([]*
 		}
 	}
 	return result, nil
+}
+
+// Pi writes image parts with this prefix. It cannot occur inside a JSON string,
+// because its quotes are unescaped.
+var imageDataPrefix = []byte(`{"type":"image","data":"`)
+
+// withoutImageData replaces inline image payloads with a placeholder so rendering
+// does not decode megabytes of base64 it never uses. The placeholder is non-empty
+// so image numbering still matches Store.Image. Image-shaped objects elsewhere,
+// such as tool arguments, get the placeholder too.
+func withoutImageData(data []byte) []byte {
+	var result []byte
+	for {
+		start := bytes.Index(data, imageDataPrefix)
+		if start < 0 {
+			break
+		}
+		start += len(imageDataPrefix)
+		end := bytes.IndexByte(data[start:], '"')
+		if end < 0 {
+			break
+		}
+		// Escaped payloads are kept because the quote found may itself be escaped.
+		payload := data[start : start+end]
+		if len(payload) > 0 && bytes.IndexByte(payload, '\\') < 0 {
+			payload = []byte{'-'}
+		}
+		result = append(append(result, data[:start]...), payload...)
+		data = data[start+end:]
+	}
+	if result == nil {
+		return data
+	}
+	return append(result, data...)
 }
 
 func retainedSubagentPrompts(item entry) bool {
