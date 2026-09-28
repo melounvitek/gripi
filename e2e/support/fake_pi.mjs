@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-import { activeRecovery, mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool, writeTool } from "./contract.mjs";
+import { activeRecovery, footerModel, footerStatus, mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool, writeTool } from "./contract.mjs";
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
@@ -48,7 +48,7 @@ function valueAfter(flag) {
 }
 
 function fakeModels() {
-  return [
+  const models = [
     {
       id: "fixture-model",
       name: "Fixture Model",
@@ -74,6 +74,7 @@ function fakeModels() {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
     }
   ];
+  return [...models, { ...models[0], ...footerModel }];
 }
 
 function loadSession(filePath) {
@@ -138,7 +139,6 @@ function handleCommand(command) {
       respond(command, true, { data: { models: fakeModels() } });
       break;
     case "get_commands": {
-      if (!resourcesReloaded) emit({ type: "extension_ui_request", method: "setStatus", statusKey: "stale-resource", statusText: "loaded" });
       const commands = [
         { name: "immediate-command", description: "Execute immediately", source: "extension" },
         { name: "steer-template", description: "Steer from a prompt template", source: "prompt" }
@@ -350,6 +350,7 @@ function acceptPrompt(command) {
   if (command.message === prompts.extension) {
     schedule(150, () => {
       pendingExtensionRequest = "e2e-release-approval";
+      emit({ type: "extension_ui_request", method: "setStatus", ...footerStatus });
       emit({
         type: "extension_ui_request",
         id: pendingExtensionRequest,

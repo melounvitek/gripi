@@ -41,6 +41,8 @@ export const sessions = {
   paginatedSubagent: "E2E Paginated Subagent Desktop",
   terminal: "E2E Terminal Desktop",
   settings: "E2E Settings Desktop",
+  footer: "E2E Footer Desktop",
+  footerMobile: "E2E Footer Mobile",
   extension: "E2E Extension Desktop",
   extensionRace: "E2E Extension Race Desktop",
   mobile: "E2E Prompt Mobile",
@@ -55,6 +57,17 @@ export const sessions = {
   bashMobile: "E2E Bash Cancel Mobile",
   wrappedToolOutput: "E2E Wrapped Tool Output Mobile",
   writeOutput: "E2E Write Output Desktop"
+};
+
+export const footerModel = {
+  id: `claude-opus-${"long-model-name-".repeat(15)}`,
+  name: "Long Provider Model",
+  provider: "pi-claude-cli"
+};
+
+export const footerStatus = {
+  statusKey: "claude-rate-limit",
+  statusText: JSON.stringify({ status: "allowed", resetsAt: 1790605800, rateLimitType: "five_hour", detail: "rate-limit-data".repeat(50) })
 };
 
 export const prompts = {

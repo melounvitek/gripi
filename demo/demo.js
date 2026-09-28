@@ -42,7 +42,7 @@
       messages: [
         { role: "user", text: "Which Pi extension features work in Gripi?" },
         { role: "thinking", text: "I’ll separate browser-compatible extension features from terminal-only UI behavior." },
-        { role: "assistant", text: "Gripi supports standard tools, compatible custom tools, subagents, RPC extension commands, session data, images, compaction, tree navigation, and common extension prompts such as select, confirm, input, editor, notify, status, title, and editor prefill.\n\nGripi preserves the underlying Pi workflow, but it does not reproduce arbitrary terminal interfaces in the browser. Use Pi CLI for extensions that depend on custom TUI components, overlays, terminal-rendered widgets, terminal-only editors, terminal keybindings, custom TUI rendering, or `ctx.mode === \"tui\"`." }
+        { role: "assistant", text: "Gripi supports standard tools, compatible custom tools, subagents, RPC extension commands, session data, images, compaction, tree navigation, and common extension prompts such as select, confirm, input, editor, notify, title, and editor prefill. The footer shows only the model, thinking level, and context usage; extension status text is not displayed.\n\nGripi preserves the underlying Pi workflow, but it does not reproduce arbitrary terminal interfaces in the browser. Use Pi CLI for extensions that depend on custom TUI components, overlays, terminal-rendered widgets, terminal-only editors, terminal keybindings, custom TUI rendering, or `ctx.mode === \"tui\"`." }
       ]
     },
     {

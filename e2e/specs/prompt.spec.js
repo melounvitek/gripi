@@ -71,7 +71,6 @@ test("reload Pi resources and refresh the slash command catalog", async ({ page 
   await composer.fill("/");
   await expect(page.locator('.command[data-command-name="reload"]')).toBeVisible();
   await expect(page.locator('.command[data-command-name="fresh-resource"]')).toHaveCount(0);
-  await expect(page.locator('[data-status-key="extension:stale-resource"]')).toBeVisible();
   await composer.evaluate((element) => {
     document.getElementById("command-list").dataset.loaded = "false";
     element.dispatchEvent(new Event("input", { bubbles: true }));
@@ -84,7 +83,6 @@ test("reload Pi resources and refresh the slash command catalog", async ({ page 
   await expect(page.locator(".composer-state")).toHaveText("Reloaded");
   await expect(page.locator(".composer-state")).toBeVisible();
   await expect(message(page, "user", "/reload")).toHaveCount(0);
-  await expect(page.locator('[data-status-key="extension:stale-resource"]')).toHaveCount(0);
   releaseStaleCatalog();
 
   await composer.fill("/fresh");

@@ -166,7 +166,6 @@ let extensionUiRequestQueue = [];
 let extensionUiTimeoutTimer = null;
 let extensionUiDeliveryPending = false;
 let extensionUiControlsBound = false;
-let extensionStatuses = new Map();
 let extensionWidgets = new Map();
 let baseDocumentTitle = document.title;
 let extensionDocumentTitle = null;
@@ -265,12 +264,10 @@ function bindSessionDom() {
   const boundSessionPath = currentSessionPath();
   if (boundSessionPath !== lastBoundSessionPath) {
     lastBoundSessionPath = boundSessionPath;
-    extensionStatuses.clear();
     extensionWidgets.clear();
     baseDocumentTitle = document.title;
     extensionDocumentTitle = null;
   }
-  renderExtensionStatuses();
   renderExtensionWidgets();
   const existingModelStatus = sessionStatusBar?.querySelector('[data-status-key="model"] .session-status-value')?.textContent || "";
   const existingModelMatch = existingModelStatus.match(/^(.*?)(?:\s+\(([^)]*)\))?$/);
@@ -1199,31 +1196,6 @@ function handleExtensionEditorText(event) {
   }
 }
 
-function updateExtensionStatus(event) {
-  if (!event.statusKey) return;
-  if (event.statusText === undefined || event.statusText === null || event.statusText === "") extensionStatuses.delete(event.statusKey);
-  else extensionStatuses.set(event.statusKey, event.statusText);
-  renderExtensionStatuses();
-}
-
-function renderExtensionStatuses() {
-  if (!sessionStatusBar) return;
-  sessionStatusBar.querySelectorAll('[data-status-key^="extension:"]').forEach((node) => node.remove());
-  extensionStatuses.forEach((value, key) => {
-    const item = document.createElement("span");
-    item.className = "session-status-item";
-    item.dataset.statusKey = `extension:${key}`;
-    const label = document.createElement("span");
-    label.className = "session-status-label";
-    label.textContent = key;
-    const text = document.createElement("span");
-    text.className = "session-status-value";
-    text.textContent = value;
-    item.append(label, " ", text);
-    sessionStatusBar.append(item);
-  });
-}
-
 function renderDocumentTitle() {
   document.title = extensionDocumentTitle ?? baseDocumentTitle;
 }
@@ -1242,16 +1214,13 @@ function resetExtensionUiState() {
   activeExtensionUiRequest = null;
   closeModal(extensionUiModal);
   resetExtensionUiModal();
-  extensionStatuses.clear();
   extensionWidgets.clear();
   extensionDocumentTitle = null;
-  renderExtensionStatuses();
   renderExtensionWidgets();
   renderDocumentTitle();
 }
 
 function hydrateExtensionUiState() {
-  extensionStatuses.clear();
   extensionWidgets.clear();
   extensionDocumentTitle = null;
   let state = {};
@@ -1259,9 +1228,7 @@ function hydrateExtensionUiState() {
     state = JSON.parse(liveOutput?.dataset.extensionUiState || "{}");
   } catch (_error) {
   }
-  (Array.isArray(state.statuses) ? state.statuses : []).forEach(updateExtensionStatus);
   (Array.isArray(state.widgets) ? state.widgets : []).forEach(updateExtensionWidget);
-  renderExtensionStatuses();
   renderExtensionWidgets();
   extensionDocumentTitle = state.title?.title == null ? null : state.title.title;
   renderDocumentTitle();
@@ -1422,10 +1389,8 @@ function renderEvent(event) {
       handleExtensionEditorText(event);
       return;
     }
-    if (event.method === "setStatus") {
-      updateExtensionStatus(event);
-      return;
-    }
+    // Keep the footer provider-independent; extension statuses may contain raw data.
+    if (event.method === "setStatus") return;
     if (event.method === "setTitle") {
       extensionDocumentTitle = event.title == null ? null : event.title;
       renderDocumentTitle();

@@ -271,7 +271,7 @@ for (const touch of [false, true]) {
       await expect(page.locator("#conversation-scroll")).toHaveAttribute("data-has-older-messages", "false");
     });
 
-    test("empty CLI snapshots clear previous extension status and widgets", async ({ page, copiedSession }) => {
+    test("CLI snapshots update widgets without adding plugin statuses to the footer", async ({ page, copiedSession }) => {
       let state = {
         statuses: [{ statusKey: "cli", statusText: "CLI extension active" }],
         widgets: [{ widgetKey: "cli", widgetLines: ["CLI extension widget"], widgetPlacement: "aboveEditor" }],
@@ -286,8 +286,8 @@ for (const touch of [false, true]) {
       await appendCLIReply(copiedSession.file, "CLI snapshot with extension state");
       const status = page.locator('[data-status-key="extension:cli"]');
       const widget = page.locator('[data-extension-widget-key="cli"]');
-      await expect(status).toContainText("CLI extension active");
       await expect(widget).toContainText("CLI extension widget");
+      await expect(status).toHaveCount(0);
 
       state = {};
       await appendCLIReply(copiedSession.file, "CLI snapshot without extension state");
