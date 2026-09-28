@@ -565,6 +565,8 @@ function sessionLink(page, file) {
 async function openSidebar(page, touch) {
   if (touch && !await page.locator("#mobile-session-toggle").isChecked()) {
     await page.locator('label[aria-label="Open sessions"]').tap();
+    // Row hit tests need the drawer to have finished sliding in.
+    await expect(page.locator(".session-sidebar")).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
   }
 }
 
