@@ -128,8 +128,12 @@ func TestToolCallsWithoutResultsArePending(t *testing.T) {
 	call := func(id, parent, callID, name string) string {
 		return `{"type":"message","id":"` + id + `","parentId":` + parent + `,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"` + callID + `","name":"` + name + `","arguments":{"command":"true"}}]}}`
 	}
-	result := func(id, parent, callID, name string) string {
-		return `{"type":"message","id":"` + id + `","parentId":"` + parent + `","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"` + callID + `","toolName":"` + name + `","content":[{"type":"text","text":"ok"}],"isError":false}}`
+	result := func(id, parent, callID, name string, content ...string) string {
+		body := `[{"type":"text","text":"ok"}]`
+		if len(content) > 0 {
+			body = content[0]
+		}
+		return `{"type":"message","id":"` + id + `","parentId":"` + parent + `","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"` + callID + `","toolName":"` + name + `","content":` + body + `,"isError":false}}`
 	}
 	writeSessionLines(t, path, []string{
 		sessionLine(project),
@@ -139,6 +143,10 @@ func TestToolCallsWithoutResultsArePending(t *testing.T) {
 		result("custom-result", "custom-call", "custom-done", "screenshot"),
 		call("orphan-paired", `"custom-result"`, "bash-orphan", "bash"),
 		call("orphan-custom", `"orphan-paired"`, "custom-orphan", "screenshot"),
+		call("empty-paired", `"orphan-custom"`, "bash-empty", "bash"),
+		result("empty-paired-result", "empty-paired", "bash-empty", "bash", `[{"type":"text","text":""}]`),
+		call("empty-custom", `"empty-paired-result"`, "custom-empty", "screenshot"),
+		result("empty-custom-result", "empty-custom", "custom-empty", "screenshot", `[]`),
 	})
 
 	window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
@@ -151,7 +159,7 @@ func TestToolCallsWithoutResultsArePending(t *testing.T) {
 			pending[message.ToolCallID] = message.ToolPending
 		}
 	}
-	want := map[string]bool{"bash-done": false, "custom-done": false, "bash-orphan": true, "custom-orphan": true}
+	want := map[string]bool{"bash-done": false, "custom-done": false, "bash-orphan": true, "custom-orphan": true, "bash-empty": false, "custom-empty": false}
 	if !maps.Equal(pending, want) {
 		t.Fatalf("pending tool calls = %v, want %v", pending, want)
 	}

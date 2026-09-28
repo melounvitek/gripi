@@ -140,6 +140,7 @@ type entry struct {
 	Segments         []segment
 	SubagentIDs      []string
 	SubagentPrompts  map[string]string
+	ResultToolCallID string
 	Status           statusData
 	Session          indexedSessionData
 }
@@ -857,7 +858,7 @@ func estimatedEntryBytes(item entry) int64 {
 		value += 40 + len(id)
 	}
 	value += len(item.Status.Kind) + len(item.Status.Provider) + len(item.Status.ModelID) + len(item.Status.ThinkingLevel) + len(item.Status.StopReason) + len(item.Status.Usage)*64
-	value += len(item.Session.Role) + len(item.Session.Timestamp) + len(item.Session.Text) + len(item.Session.FinalText)
+	value += len(item.ResultToolCallID) + len(item.Session.Role) + len(item.Session.Timestamp) + len(item.Session.Text) + len(item.Session.FinalText)
 	return int64(value)
 }
 
@@ -865,6 +866,9 @@ func metadataFromRaw(raw map[string]any, ordinal int, offset, length int64) entr
 	result := entry{Ordinal: ordinal, Offset: offset, Length: length, Type: stringValue(raw["type"]), ID: stringValue(raw["id"]), ParentID: stringValue(raw["parentId"]), TargetID: stringValue(raw["targetId"])}
 	message, _ := raw["message"].(map[string]any)
 	result.Role = stringValue(message["role"])
+	if result.Role == "toolResult" {
+		result.ResultToolCallID = stringValue(message["toolCallId"])
+	}
 	parsed := messagesFromRaw(raw, "")
 	for _, item := range parsed {
 		result.Segments = append(result.Segments, segment{Role: item.Role, ToolCallID: item.ToolCallID, ToolName: item.ToolName})
@@ -1243,10 +1247,9 @@ func projectedUnits(entries []entry) ([]unit, bool) {
 	subagentSources := make(map[string]entry)
 	results := make(map[string]bool)
 	for _, item := range entries {
-		for _, part := range item.Segments {
-			if part.Role == "toolResult" {
-				results[part.ToolCallID] = true
-			}
+		// Results with empty content have no segment but still complete their call.
+		if item.ResultToolCallID != "" {
+			results[item.ResultToolCallID] = true
 		}
 		for _, id := range item.SubagentIDs {
 			if _, exists := subagentSources[id]; !exists {
