@@ -216,7 +216,7 @@ export class SidebarController {
     if (!html || !this.element) return null;
 
     const oldElement = this.element;
-    const previousAssistantCounts = this.assistantResponseCounts(oldElement);
+    const previousReplyIds = this.completedReplyIds(oldElement);
     const notificationToggle = oldElement.querySelector("[data-notification-toggle]");
     const resourceUsage = oldElement.querySelector("[data-resource-usage]");
     const previousSearchForm = preserveSearch ? oldElement.querySelector(".sidebar-session-search") : null;
@@ -248,7 +248,7 @@ export class SidebarController {
     } else if (visibilityToggleFocused) {
       this.element.querySelector("[data-sidebar-visibility-toggle]")?.focus({ preventScroll: true });
     }
-    if (notify) this.notifyBackgroundFinalReplies(previousAssistantCounts);
+    if (notify) this.notifyBackgroundFinalReplies(previousReplyIds);
     const refreshedScrollContainer = this.scrollContainer();
     if (refreshedScrollContainer) refreshedScrollContainer.scrollTop = scrollTop;
 
@@ -275,30 +275,28 @@ export class SidebarController {
     });
   }
 
-  assistantResponseCounts(root = this.element) {
-    const counts = new Map();
-    root?.querySelectorAll("a.session[data-session-path][data-assistant-response-count]").forEach((link) => {
-      const sessionPath = link.dataset.sessionPath;
-      const count = Number(link.dataset.assistantResponseCount || 0);
-      counts.set(sessionPath, Math.max(counts.get(sessionPath) || 0, count));
+  completedReplyIds(root = this.element) {
+    const ids = new Map();
+    root?.querySelectorAll("a.session[data-session-path][data-completed-reply-id]").forEach((link) => {
+      ids.set(link.dataset.sessionPath, link.dataset.completedReplyId);
     });
-    return counts;
+    return ids;
   }
 
-  notifyBackgroundFinalReplies(previousAssistantCounts) {
-    this.element?.querySelectorAll("a.session[data-session-path][data-assistant-response-count]").forEach((link) => {
+  notifyBackgroundFinalReplies(previousReplyIds) {
+    this.element?.querySelectorAll("a.session[data-session-path][data-completed-reply-id]").forEach((link) => {
       if (link.dataset.sessionSyncMode === "external_follow") return;
 
       const sessionPath = link.dataset.sessionPath;
-      const previousCount = previousAssistantCounts.get(sessionPath);
-      const currentCount = Number(link.dataset.assistantResponseCount || 0);
-      if (previousCount == null || currentCount <= Math.max(previousCount, Number(link.dataset.externalResponseCount || 0)) || sessionPath === this.currentSessionPath()) return;
+      const previousId = previousReplyIds.get(sessionPath);
+      const currentId = link.dataset.completedReplyId;
+      if (previousId == null || !currentId || currentId === previousId || sessionPath === this.currentSessionPath()) return;
 
-      const key = `${sessionPath}:${currentCount}`;
+      const key = `${sessionPath}:${currentId}`;
       if (this.notifiedFinalReplyKeys.has(key)) return;
       this.notifiedFinalReplyKeys.add(key);
       const name = link.querySelector(".session-title")?.textContent.trim() || "a background session";
-      this.notifyFinalReply(name, notificationReplyPreview(link.dataset.latestAssistantResponsePreview), sessionUrl(sessionPath), `gripi-final-reply:${sessionPath}`);
+      this.notifyFinalReply(name, notificationReplyPreview(link.dataset.completedReplyPreview), sessionUrl(sessionPath), `gripi-final-reply:${sessionPath}`);
     });
   }
 

@@ -433,6 +433,11 @@ func (app *application) remapPendingRPCClient(from, to string, claim func() (fun
 		return err
 	}
 	defer releaseDestination()
+	// Completion callbacks must not write the synthetic path after its state moves.
+	if app.completionNotifications != nil {
+		app.completionNotifications.mu.Lock()
+		defer app.completionNotifications.mu.Unlock()
+	}
 	return app.rpcClients.MoveWithCommit(from, to, func() (func() error, error) {
 		ownershipRollback, err := claim()
 		if err != nil {
@@ -491,7 +496,27 @@ func (app *application) migratePendingSessionState(from, to string, migrateTags 
 			return nil, err
 		}
 	}
+	var completionRollback func() error
+	if migrateTags && app.gatewayState != nil {
+		completionRollback, err = app.gatewayState.MigrateCompletion(from, to)
+		if err != nil {
+			if tagRollback != nil {
+				err = errors.Join(err, tagRollback())
+			}
+			if pinRollback != nil {
+				err = errors.Join(err, pinRollback())
+			}
+			if attachmentRollback != nil {
+				err = errors.Join(err, attachmentRollback())
+			}
+			return nil, err
+		}
+	}
 	return func() error {
+		var completionErr error
+		if completionRollback != nil {
+			completionErr = completionRollback()
+		}
 		var attachmentErr error
 		if attachmentRollback != nil {
 			attachmentErr = attachmentRollback()
@@ -504,7 +529,7 @@ func (app *application) migratePendingSessionState(from, to string, migrateTags 
 		if tagRollback != nil {
 			tagErr = tagRollback()
 		}
-		return errors.Join(attachmentErr, pinErr, tagErr)
+		return errors.Join(attachmentErr, pinErr, tagErr, completionErr)
 	}, nil
 }
 

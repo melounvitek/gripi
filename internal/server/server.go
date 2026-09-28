@@ -49,6 +49,7 @@ type application struct {
 	gatewayState            *sessions.GatewayState
 	markdown                *rendering.Markdown
 	heavyRequests           chan struct{}
+	imageRequests           chan struct{}
 	fdRequests              chan struct{}
 	unknownBodySpools       chan struct{}
 	sessionHashesMu         sync.Mutex
@@ -188,6 +189,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		gatewayState:         sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, cfg.SessionsRoot),
 		markdown:             markdown,
 		heavyRequests:        make(chan struct{}, 2),
+		imageRequests:        make(chan struct{}, 2),
 		fdRequests:           make(chan struct{}, 4),
 		unknownBodySpools:    make(chan struct{}, unknownBodySpoolLimit),
 		knownSessionHashes:   make(map[string]bool),
