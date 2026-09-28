@@ -146,8 +146,8 @@ test("joins the latest activity summary into the active group", async ({ page })
   await summary.getByRole("button").tap();
   const details = summary.locator(".focus-activity-details");
   await expect(details).toContainText("schema.sql");
-  const running = group.locator('[data-tool-call-id="joined-bash"]');
-  expect((await details.boundingBox()).y).toBeLessThan((await running.boundingBox()).y);
+  // Measure both in one frame because the summary may be rebuilt after the tap.
+  expect(await group.evaluate((element) => element.querySelector(".focus-activity-details").getBoundingClientRect().bottom <= element.querySelector('[data-tool-call-id="joined-bash"]').getBoundingClientRect().top)).toBe(true);
   await group.screenshot({ path: test.info().outputPath("joined-active-now.png") });
   await deliver({ type: "agent_end" });
   await expect(group).toHaveCount(0);
@@ -208,6 +208,8 @@ test("groups parallel cards, summarizes each completion and restores original or
   await expect(bash).toBeHidden();
   await expect(page.locator(".focus-activity-summary").last()).toContainText("2 tool updates");
   await expect(page.locator(".focus-activity-summary").last()).toContainText("1 error");
+  // Let the pending height refresh finish so only the correction below can rebuild the summary.
+  await expect(group).toHaveCSS("min-height", "0px");
   const toggleSummary = page.locator("[data-focus-activity-toggle]").last();
   await toggleSummary.scrollIntoViewIfNeeded();
   const box = await toggleSummary.boundingBox();
