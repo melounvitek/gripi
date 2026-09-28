@@ -44,3 +44,13 @@ test("live tool calls stay pending until their result arrives", async ({ page })
   await expect(page.locator('[data-tool-call-id="state-shot"]')).not.toHaveCount(0);
   await expect(pendingCustom).toHaveCount(0);
 });
+
+test("a finished turn with an interrupted tool call summarises it as pending", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const tools = [call("interrupted-ok", "bash", { command: "make check" }), call("interrupted", "bash", { command: "make deploy" })];
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant(tools) }, { type: "message_end", message: assistant(tools) });
+  await deliver(start("interrupted-ok", "bash", tools[0].arguments), end("interrupted-ok", "bash"), result("interrupted-ok", "bash"), { type: "agent_end" });
+  await expect(page.locator('[data-tool-call-id="interrupted"]')).toHaveClass(/message--tool-pending/);
+  await page.getByRole("group", { name: "Agent activity", exact: true }).getByRole("button", { name: "Brief", exact: true }).click();
+  await expect(page.locator(".focus-activity-summary").last()).toHaveClass(/has-pending/);
+});

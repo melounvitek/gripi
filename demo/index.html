@@ -123,8 +123,8 @@
     .active-activity .focus-activity-details { grid-column: 1 / -1; margin-bottom: 0.65rem; border-radius: 0.2rem; background: var(--tool-ok); }
     .focus-activity-summary { display: none; }
     .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin-bottom: 1.1rem; overflow: hidden; border-radius: 0.2rem; background: var(--tool-ok); color: var(--tool-copy); font-family: var(--mono); font-size: 0.74rem; }
+    .conversation-panel.is-conversation-focused .focus-activity-summary.has-pending { background: var(--tool-pending); }
     .conversation-panel.is-conversation-focused .focus-activity-summary.has-errors { background: var(--danger-soft); }
-    .conversation-panel.is-conversation-focused .focus-activity-summary.has-pending:not(.has-errors) { background: var(--tool-pending); }
     .focus-activity-header { width: 100%; display: flex; align-items: center; gap: 0.5rem; min-width: 0; min-height: 0; padding: 0.5rem 0.7rem; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
     button.focus-activity-header { cursor: pointer; }
     button.focus-activity-header:hover { background: #ffffff08; color: var(--text); }
@@ -307,7 +307,7 @@
     .session-row.is-external .session-indicators { align-self: center; }
     .session-row.is-external .session-indicators:empty, .session-row.is-external .session-details, .session-row.is-external .session-pin-toggle { display: none; }
     .session-row.is-external .session-meta { color: #92929d; font-size: 11px; pointer-events: none; }
-    .session-row.is-external .session-actions-toggle { position: relative; top: auto; right: auto; transform: none; width: 28px; height: 34px; color: #92929d; opacity: 1; }
+    .session-row.is-external .session-actions-toggle { position: relative; inset: auto; transform: none; width: 28px; height: 34px; color: #92929d; opacity: 1; }
     .session-row.is-external:has(a.session.selected) { color: var(--text); }
     @media (max-width: 760px), (pointer: coarse) {
       .session-row.is-external { min-height: 46px; padding-left: 10px; padding-right: 0; gap: 3px; }
@@ -379,7 +379,7 @@
     .message--assistant { color: var(--copy); }
     .message--thinking { color: var(--muted); }
     .message--tool-preparation { padding: 0.75rem 0.9rem; border-radius: 0.2rem; background: var(--tool-pending); color: var(--muted); }
-    .message--status:not([data-role="custom"], .message--compaction) { color: var(--muted); }
+    .message--status { color: var(--muted); }
     .message--status:not([data-role="custom"]) > .message-body { font-family: var(--mono); font-size: 0.76rem; }
     .message[data-role="custom"], .message--compaction { padding: 0.75rem 0.9rem; border-radius: 0.2rem; background: var(--custom-msg); color: var(--text); }
     .message[data-role="custom"] > .message-header { grid-column: 1 / -1; justify-content: space-between; margin-bottom: 0.4rem; }
@@ -523,6 +523,7 @@
     /* Pi CLI frames user shell commands with rules instead of a tinted block, even when they fail. */
     .message--bash-execution { padding-inline: 0; border-block: 1px solid var(--success); border-radius: 0; background: transparent; color: var(--tool-copy); }
     .message--bash-execution.message--bash-excluded { border-color: var(--muted-soft); }
+    .message--bash-execution.message--tool-error .bash-execution-status { color: var(--danger); }
     .message--bash-execution .message-details-summary, .message--bash-execution .tool-command { color: var(--success); font-weight: 700; }
     .message--bash-execution.message--bash-excluded .message-details-summary, .message--bash-execution.message--bash-excluded .tool-command { color: var(--muted); }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: inherit; }
