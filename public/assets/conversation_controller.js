@@ -70,8 +70,12 @@ export class ConversationController {
     this.conversationPanel = this.document.querySelector(".conversation-panel");
     this.viewToggle = this.document.querySelector("[data-conversation-view-toggle]");
     this.applyFocusedView();
-    this.listen(this.viewToggle, "click", () => {
-      this.focusedView = !this.focusedView;
+    this.listen(this.viewToggle, "click", (event) => {
+      const option = event.target.closest?.("[data-conversation-view]");
+      if (!option) return;
+      const focusedView = option.dataset.conversationView === "brief";
+      if (focusedView === this.focusedView) return;
+      this.focusedView = focusedView;
       this.applyFocusedView(true);
     });
     this.lastScrollTop = this.element?.scrollTop || 0;
@@ -364,7 +368,9 @@ export class ConversationController {
     } : null;
 
     this.conversationPanel?.classList.toggle("is-conversation-focused", this.focusedView);
-    this.viewToggle?.setAttribute("aria-checked", String(!this.focusedView));
+    this.viewToggle?.querySelectorAll("[data-conversation-view]").forEach((option) => {
+      option.setAttribute("aria-pressed", String(option.dataset.conversationView === (this.focusedView ? "brief" : "full")));
+    });
     this.focusedActivitySignature = null;
     this.refreshFocusedActivity();
 
@@ -690,7 +696,7 @@ export class ConversationController {
       else group[0].before(summary);
       if (focusAnchor && group.includes(focusAnchor)) replacementFocus = header;
     });
-    if (activeToggle && !replacementFocus) replacementFocus = this.viewToggle;
+    if (activeToggle && !replacementFocus) replacementFocus = this.viewToggle?.querySelector('[aria-pressed="true"]');
     replacementFocus?.focus({ preventScroll: true });
     if (this.focusedView && shouldScroll) this.scheduleAutoScroll();
   }

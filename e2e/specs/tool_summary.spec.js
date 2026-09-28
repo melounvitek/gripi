@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { prompts, sessions, tool } from "../support/contract.mjs";
-import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
+import { activityView, expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
 test.use({ hasTouch: true });
 
@@ -76,7 +76,7 @@ async function controlToolEvents(page) {
 }
 
 async function showMessagesOnly(page) {
-  await page.getByRole("switch", { name: "Show agent activity" }).click();
+  await activityView(page, "Brief").click();
 }
 
 async function activityFor(page, card) {

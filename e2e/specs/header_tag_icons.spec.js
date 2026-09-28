@@ -18,7 +18,9 @@ for (const width of [320, 341, 393, 768, 1440]) {
     const dialog = page.getByRole("dialog", { name: "Session tags", exact: true });
     const close = dialog.getByRole("button", { name: "Close tag picker", exact: true });
     const icon = group.getByRole("button", { name: `Filter sessions by ${tags[0]}`, exact: true });
-    const activity = header.getByRole("switch", { name: "Show agent activity", exact: true });
+    const activity = header.getByRole("group", { name: "Agent activity", exact: true });
+    const brief = activity.getByRole("button", { name: "Brief", exact: true });
+    const full = activity.getByRole("button", { name: "Full", exact: true });
     const more = group.locator(".tag-overflow");
     try {
       await page.setViewportSize({ width, height: 900 });
@@ -43,12 +45,12 @@ for (const width of [320, 341, 393, 768, 1440]) {
         expect(toggle.x + toggle.width).toBeLessThanOrEqual(bounds.x + bounds.width);
         expect(await header.locator(".session-header-project").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
         expect(Math.abs(bounds.height - emptyHeight)).toBeLessThanOrEqual(1);
-        const track = await activity.locator(".session-header-view-toggle-track").boundingBox();
-        expect(track.width).toBe(32);
-        expect(await activity.locator(".session-header-view-toggle-track").evaluate((element) => {
-          const bounds = element.getBoundingClientRect();
-          return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
-        })).toBe(true);
+        for (const segment of [brief, full]) {
+          expect(await segment.evaluate((element) => {
+            const bounds = element.getBoundingClientRect();
+            return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+          })).toBe(true);
+        }
       };
       await checkLayout();
       await header.screenshot({ path: testInfo.outputPath("header-one-tag.png"), animations: "disabled" });
@@ -71,10 +73,10 @@ for (const width of [320, 341, 393, 768, 1440]) {
       await expect(more).toHaveText("+1");
       await expect(more).toHaveAccessibleName("Edit all 3 tags");
       await checkLayout();
-      await activate(activity);
-      await expect(activity).toHaveAttribute("aria-checked", "false");
-      await activate(activity);
-      await expect(activity).toHaveAttribute("aria-checked", "true");
+      await activate(brief);
+      await expect(brief).toHaveAttribute("aria-pressed", "true");
+      await activate(full);
+      await expect(full).toHaveAttribute("aria-pressed", "true");
       await more.focus();
       const original = await more.elementHandle();
       await page.clock.runFor(10_100);

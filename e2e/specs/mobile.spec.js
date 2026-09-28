@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mobileSubagents, nativeBash, prompts, replies, sessions, tool } from "../support/contract.mjs";
-import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
+import { activityView, expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 import {
   activateClearQueue, attachClearQueueDraft, expectClearedQueue, expectClearQueueDraft,
   expectClearQueueRunning, expectPendingQueue, prepareClearQueue, stopClearQueueRun
@@ -10,17 +10,17 @@ test("read images stay visible with activity off and open on the first mobile ta
   await page.goto(`/?session_search=${encodeURIComponent(sessions.imageRead)}`);
   await page.locator('label[aria-label="Open sessions"]').tap();
   await page.getByRole("link", { name: new RegExp(sessions.imageRead) }).tap();
-  const toggle = page.getByRole("switch", { name: "Show agent activity" });
-  await toggle.tap();
+  const brief = activityView(page, "Brief");
+  await brief.tap();
   await sendPrompt(page, prompts.imageRead);
   await expectRunFinished(page);
 
   for (const reload of [false, true]) {
     if (reload) {
       await page.reload();
-      await toggle.tap();
+      await brief.tap();
     }
-    await expect(toggle).not.toBeChecked();
+    await expect(brief).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("region", { name: "Active now", exact: true })).toHaveCount(0);
     const image = page.getByRole("button", { name: "View attached image full size" }).last();
     await expect(image).toBeVisible();
@@ -294,7 +294,7 @@ test("keep parallel subagent order and timestamps stable on mobile", async ({ pa
   await expect(cards).toHaveCount(2);
 });
 
-test("show an agent activity switch that activates on the first tap", async ({ page }) => {
+test("show agent activity segments that activate on the first tap", async ({ page }) => {
   await page.goto("/");
 
   await page.locator('label[aria-label="Open sessions"]').tap();
@@ -307,26 +307,27 @@ test("show an agent activity switch that activates on the first tap", async ({ p
   const toolCall = toolCalls.nth(previousCount);
   await expect(toolCall).toBeVisible();
 
-  const toggle = page.getByRole("switch", { name: "Show agent activity" });
-  await expect(toggle).toBeChecked();
-  await expect(toggle).toHaveText("Show agent activity");
-  const tapTarget = await toggle.boundingBox();
-  expect(tapTarget).not.toBeNull();
-  expect(tapTarget.width).toBeGreaterThanOrEqual(44);
-  expect(tapTarget.height).toBeGreaterThanOrEqual(44);
-  expect(tapTarget.x).toBeGreaterThanOrEqual(0);
-  expect(tapTarget.x + tapTarget.width).toBeLessThanOrEqual(page.viewportSize().width);
+  const brief = activityView(page, "Brief");
+  const full = activityView(page, "Full");
+  await expect(full).toHaveAttribute("aria-pressed", "true");
+  for (const segment of [brief, full]) {
+    const tapTarget = await segment.boundingBox();
+    expect(tapTarget).not.toBeNull();
+    expect(tapTarget.width).toBeGreaterThanOrEqual(44);
+    expect(tapTarget.height).toBeGreaterThanOrEqual(44);
+    expect(tapTarget.x).toBeGreaterThanOrEqual(0);
+    expect(tapTarget.x + tapTarget.width).toBeLessThanOrEqual(page.viewportSize().width);
+  }
 
-  await toggle.tap();
+  await brief.tap();
 
-  await expect(toggle).not.toBeChecked();
-  await expect(toggle).toHaveText("Show agent activity");
+  await expect(brief).toHaveAttribute("aria-pressed", "true");
   await expect(toolCall).toBeHidden();
   await expect(message(page, "user", prompts.longCommand).last()).toBeVisible();
 
-  await toggle.tap();
+  await full.tap();
 
-  await expect(toggle).toBeChecked();
+  await expect(full).toHaveAttribute("aria-pressed", "true");
   await expect(toolCall).toBeVisible();
   await expectRunFinished(page);
 });

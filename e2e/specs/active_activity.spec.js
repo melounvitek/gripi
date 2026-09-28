@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mobileSubagents, prompts, sessions, subagents } from "../support/contract.mjs";
-import { expectRunFinished, sendPrompt } from "../support/ui.mjs";
+import { activityView, expectRunFinished, sendPrompt } from "../support/ui.mjs";
 
 test.use({ hasTouch: true });
 
@@ -12,7 +12,7 @@ async function liveEvents(page) {
   });
   await page.goto(`/?session_search=${encodeURIComponent(sessions.marker)}`);
   await page.goto(await page.getByRole("link", { name: new RegExp(sessions.marker) }).getAttribute("href"));
-  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await activityView(page, "Brief").tap();
   return async (...updates) => {
     events.push(...updates);
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
@@ -51,7 +51,7 @@ test("tool images survive activity retirement, including standalone custom-tool 
   await expect(standalone.locator(".message-images")).toBeVisible();
   await expect(standalone.locator(".message-details")).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("focused-tool-images.png") });
-  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await activityView(page, "Full").tap();
   await expect(card.locator(".message-details")).toBeVisible();
   await expect(standalone.locator(".message-details")).toBeVisible();
   await expect(page.locator(".message-images")).toHaveCount(2);
@@ -122,11 +122,11 @@ test("activity height settles after a shorter replacement and timers cannot recr
   await expect.poll(() => page.evaluate(({ tallHeight, shortHeight }) => window.activityShrinkHeights.some((height) => height > shortHeight + 1 && height < tallHeight - 1), { tallHeight, shortHeight })).toBe(true);
   await deliver(end("short", "read"));
   await expect(group.locator(".active-activity-count")).toHaveText("Done");
-  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await activityView(page, "Full").tap();
   await page.waitForTimeout(1600);
   await expect(group).toHaveCount(0);
   await expect(page.locator('[data-tool-call-id="short"]')).toBeVisible();
-  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await activityView(page, "Brief").tap();
   await expect(group).toHaveCount(0);
 });
 
@@ -148,7 +148,7 @@ test("a completion timer cannot move a card during its first Expand tap", async 
   await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await touch.detach();
   await expect(group).toContainText("Pi is working…");
-  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await activityView(page, "Full").tap();
   await expect(page.locator('[data-tool-call-id="completed-touch"] [data-tool-output-collapse]')).toHaveAttribute("data-expanded", "true");
 });
 
@@ -241,12 +241,11 @@ test("groups parallel cards, summarizes each completion and restores original or
   await deliver({ type: "message_update", message: assistant([...tools, { type: "text", text: "Both checks are underway." }]), assistantMessageEvent: { type: "text_delta", contentIndex: 2 } });
   await expect(page.locator(".message").filter({ hasText: "Both checks are underway." })).toBeVisible();
   await expect(group).not.toContainText("Both checks are underway.");
-  const toggle = page.getByRole("switch", { name: "Show agent activity" });
-  await toggle.tap();
+  await activityView(page, "Full").tap();
   await expect(group).toHaveCount(0);
   expect(await page.locator('#live-output > .message').evaluateAll((cards) => cards.map((card) => card.dataset.toolCallId || "text"))).toEqual(["active-bash", "active-read", "text"]);
   expect(await bash.evaluate((card) => card === window.originalActivityCard)).toBe(true);
-  await toggle.tap();
+  await activityView(page, "Brief").tap();
   await expect(group.locator(".message")).toHaveCount(2);
   await deliver(end("active-read", "read"));
   await expect(read).toBeHidden();
@@ -355,7 +354,7 @@ test("reload restores only the still-running parallel subagent", async ({ page }
   await expect(page.locator(`article[data-tool-call-id="${scenario.firstCallId}"]`)).toContainText(scenario.firstResult);
   await expect(page.locator(`article[data-tool-call-id="${scenario.secondCallId}"]`)).toContainText(scenario.secondProgress);
   await page.reload();
-  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await activityView(page, "Brief").tap();
   const group = activeGroup(page);
   await expect(group.locator(".message")).toHaveCount(1);
   await expect(group).toContainText(scenario.secondProgress);

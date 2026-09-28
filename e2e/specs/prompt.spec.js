@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { prompts, replies, sessions, tool } from "../support/contract.mjs";
-import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
+import { activityView, expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
 const loginGuidance = "/login isn’t available in Gripi. Run /login in the Pi CLI, then restart the Gripi gateway to load the new credentials.";
 const logoutGuidance = "/logout isn’t available in Gripi. Run /logout in the Pi CLI, then restart the Gripi gateway to reload credentials.";
@@ -113,7 +113,7 @@ test("shows Pi CLI guidance for login and logout commands", async ({ page }) => 
   await page.goto("/");
   await selectSession(page, sessions.prompt);
 
-  await page.getByRole("switch", { name: "Show agent activity" }).click();
+  await activityView(page, "Brief").click();
   await page.getByLabel("Message to Pi").fill("/");
   await expect(page.locator('[data-command-name="login"]')).toBeVisible();
   await expect(page.locator('[data-command-name="logout"]')).toBeVisible();
@@ -461,8 +461,8 @@ test("keep live and persisted images fitted without an orange hover background",
 test("keep a large image read visible with agent activity off without blocking the conversation", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.imageRead);
-  const toggle = page.getByRole("switch", { name: "Show agent activity" });
-  await toggle.click();
+  const brief = activityView(page, "Brief");
+  await brief.click();
 
   let sessionFragmentRequests = 0;
   page.on("request", (request) => {
@@ -487,9 +487,9 @@ test("keep a large image read visible with agent activity off without blocking t
   for (const reload of [false, true]) {
     if (reload) {
       await page.reload();
-      await toggle.click();
+      await brief.click();
     }
-    await expect(toggle).not.toBeChecked();
+    await expect(brief).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("region", { name: "Active now", exact: true })).toHaveCount(0);
     await expect(image).toHaveCount(1);
     await expect(image).toBeVisible();
@@ -497,10 +497,10 @@ test("keep a large image read visible with agent activity off without blocking t
     const card = page.locator("article").filter({ has: image });
     await expect(card.locator(".message-header")).toBeHidden();
     await expect(card.locator(".message-details")).toBeHidden();
-    await toggle.click();
+    await activityView(page, "Full").click();
     await expect(image).toBeVisible();
     await expect(card.locator(".message-details")).toBeVisible();
-    await toggle.click();
+    await brief.click();
     await expect(image).toBeVisible();
     await expect(card.locator(".message-details")).toBeHidden();
     await image.click();

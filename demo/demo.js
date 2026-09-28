@@ -410,7 +410,7 @@
       messages[0].before(summary);
       if (focusAnchor && messages.includes(focusAnchor)) replacementFocus = header;
     });
-    if (activeToggle && !replacementFocus) replacementFocus = element.viewToggle;
+    if (activeToggle && !replacementFocus) replacementFocus = element.viewToggle.querySelector('[aria-pressed="true"]');
     replacementFocus?.focus({ preventScroll: true });
   }
   function timeLabel(date = new Date()) { const pad = (value) => String(value).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`; }
@@ -882,7 +882,10 @@
   });
   element.projectList.addEventListener("click", (event) => { const option = event.target.closest("[data-project-value]"); if (option) selectProject(option.dataset.projectValue); });
   document.querySelector("[data-notification-toggle]").addEventListener("click", (event) => { const enabled = !event.currentTarget.classList.contains("is-enabled"); event.currentTarget.classList.toggle("is-enabled", enabled); event.currentTarget.classList.toggle("is-disabled", !enabled); event.currentTarget.querySelector("[data-notification-toggle-state]").textContent = enabled ? "Demo on" : "Demo off"; });
-  element.viewToggle.addEventListener("click", () => {
+  element.viewToggle.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-conversation-view]");
+    const nextFocusedView = option?.dataset.conversationView === "brief";
+    if (!option || nextFocusedView === focusedView) return;
     const scrollRect = element.scroll.getBoundingClientRect();
     const anchor = [...element.scroll.querySelectorAll(".message")]
       .filter((message) => focusedConversationMessage(message))
@@ -890,9 +893,9 @@
     const scrollTop = element.scroll.scrollTop;
     const nearBottom = element.scroll.scrollHeight - scrollTop - element.scroll.clientHeight < 120;
     const anchorOffset = anchor ? anchor.getBoundingClientRect().top - scrollRect.top : null;
-    focusedView = !focusedView;
+    focusedView = nextFocusedView;
     element.panel.classList.toggle("is-conversation-focused", focusedView);
-    element.viewToggle.setAttribute("aria-checked", String(!focusedView));
+    element.viewToggle.querySelectorAll("[data-conversation-view]").forEach((view) => view.setAttribute("aria-pressed", String(view.dataset.conversationView === (focusedView ? "brief" : "full"))));
     if (nearBottom) element.scroll.scrollTop = element.scroll.scrollHeight;
     else if (anchor) element.scroll.scrollTop += anchor.getBoundingClientRect().top - scrollRect.top - anchorOffset;
     else element.scroll.scrollTop = Math.min(scrollTop, Math.max(0, element.scroll.scrollHeight - element.scroll.clientHeight));

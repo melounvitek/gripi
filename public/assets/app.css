@@ -55,18 +55,28 @@
     .session-header-project, .session-relation-tree { grid-column: 2 / -1; }
     .session-header .mobile-sessions-button, .session-header .desktop-sessions-open-button { grid-column: 1; grid-row: 1; margin-right: 0.75rem; }
     .session-header h1 { grid-column: 2; grid-row: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .session-header-project { min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.76rem; font-weight: 500; }
+    .session-header-project { container-type: inline-size; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.76rem; font-weight: 500; }
     .session-header-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-project .session-header-project-icon { width: 1.55rem; min-width: 1.55rem; height: 1.25rem; border-radius: 0.2rem; font-size: 0.56rem; }
     .session-header-project-separator { flex: 0 0 auto; color: var(--muted-soft); }
-    .session-header-view-toggle { flex: 0 1 auto; min-width: 2.5rem; display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.1rem; padding: 0.35rem 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-family: var(--sans); font-weight: 500; letter-spacing: normal; text-transform: none; }
-    .session-header-view-toggle:hover { background: transparent; transform: none; }
-    .session-header-view-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
-    .session-header-view-toggle-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .session-header-view-toggle-track { position: relative; flex: 0 0 auto; width: 2rem; height: 1.125rem; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--panel-softer); }
-    .session-header-view-toggle-track::before { content: ""; position: absolute; top: 2px; left: 2px; width: 0.75rem; height: 0.75rem; border-radius: 50%; background: var(--text); }
-    .session-header-view-toggle[aria-checked="true"] .session-header-view-toggle-track { border-color: var(--accent); background: var(--accent); }
-    .session-header-view-toggle[aria-checked="true"] .session-header-view-toggle-track::before { transform: translateX(0.875rem); background: var(--button-text); }
+    .session-header-view-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; }
+    .session-header-view-option { position: relative; display: inline-flex; align-items: center; min-height: 2.1rem; padding: 0; border: 0; background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.7rem; font-weight: 500; letter-spacing: normal; text-transform: none; }
+    .session-header-view-option + .session-header-view-option { margin-left: -1px; }
+    .session-header-view-option:hover { background: transparent; color: var(--text); }
+    .session-header-view-option:focus-visible { outline: none; }
+    .session-header-view-option-face { display: inline-flex; align-items: center; gap: 0.3rem; height: 1.6rem; padding: 0 0.5rem; border: 1px solid var(--border-strong); white-space: nowrap; }
+    .session-header-view-option:first-child .session-header-view-option-face { border-radius: 0.3rem 0 0 0.3rem; }
+    .session-header-view-option:last-child .session-header-view-option-face { border-radius: 0 0.3rem 0.3rem 0; }
+    .session-header-view-option-face svg { width: 0.85rem; height: 0.85rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+    .session-header-view-option:hover .session-header-view-option-face { background: var(--accent-tint-04); }
+    .session-header-view-option[aria-pressed="true"] { z-index: 1; color: var(--accent); }
+    .session-header-view-option[aria-pressed="true"] .session-header-view-option-face { border-color: var(--accent-line-55); background: var(--accent-tint-08); }
+    .session-header-view-option:focus-visible .session-header-view-option-face { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+    @container (max-width: 19.5rem) {
+      .session-header-project-separator { display: none; }
+      .session-header-view-option-face { padding: 0 0.6rem; }
+      .session-header-view-option-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+    }
     .session-header-actions { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 0.45rem; margin-left: 0.75rem; }
     .session-header-actions form { margin: 0; }
     .session-header-action { padding: 0.42rem 0.65rem; font-size: 0.7rem; }
@@ -683,7 +693,7 @@
       .session-pin-toggle, .session-actions-toggle { bottom: 0.35rem; width: 2.75rem; height: 2.75rem; opacity: 0.7; }
       .session-pin-toggle { right: 3.35rem; padding: 0.78rem; }
       .session-actions-toggle { right: 0.35rem; }
-      .session-header-view-toggle { min-height: 2.75rem; }
+      .session-header-view-option { min-height: 2.75rem; }
       .send-control { min-width: 2.75rem; }
       .send-button { display: inline-flex; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; align-items: center; justify-content: center; font-size: 0; }
     }
@@ -728,7 +738,7 @@
       .session-header-action { padding: 0.42rem 0.5rem; font-size: 0.66rem; }
       .session-header h1 { font-size: 1rem; }
       .session-header-project { font-size: 0.7rem; }
-      .session-header-view-toggle { min-height: 2.75rem; }
+      .session-header-view-option { min-height: 2.75rem; }
       .project-select-trigger { min-height: 2.75rem; }
       .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.4rem; }
       .project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }

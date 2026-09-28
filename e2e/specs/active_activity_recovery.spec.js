@@ -1,15 +1,15 @@
 import { expect, test as base } from "@playwright/test";
 import { activeRecovery, prompts, replies } from "../support/contract.mjs";
-import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
+import { activityView, expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
 const activeGroup = (page) => page.getByRole("region", { name: "Active now", exact: true });
 const toolCard = (page, id) => page.locator(`article[data-tool-call-id="${id}"]`);
 const toolCount = activeRecovery.tools.length;
 
 async function focusActivity(page) {
-  const toggle = page.getByRole("switch", { name: "Show agent activity" });
-  if (await toggle.getAttribute("aria-checked") !== "false") await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  const brief = activityView(page, "Brief");
+  await brief.click();
+  await expect(brief).toHaveAttribute("aria-pressed", "true");
 }
 
 const test = base.extend({
@@ -68,7 +68,7 @@ test("reload recovers ordinary tool cards without duplicating completed history"
   await expectRunFinished(page);
   await expect(group).toHaveCount(0);
   for (const call of activeRecovery.tools) await expect(toolCard(page, call.id)).toHaveCount(1);
-  await page.getByRole("switch", { name: "Show agent activity" }).click();
+  await activityView(page, "Full").click();
   await expect(toolCard(page, "recovery-bash")).toContainText("bash recovery aborted");
   await expect(shortWrite.locator(".message-body")).toContainText("+ Recovery content");
   await expect(longWrite.locator(".message-body")).toContainText("+ Recovery line 1");
@@ -127,7 +127,7 @@ test("snapshot reconciliation retains expanded running cards and their original 
   await expect(group.locator(".message")).toHaveCount(toolCount);
   await expect.poll(() => write.evaluate((card) => card === window.retainedActivityCard)).toBe(true);
   await expect(write.locator('[data-tool-output-collapse]')).toHaveAttribute("data-expanded", "true");
-  await page.getByRole("switch", { name: "Show agent activity" }).click();
+  await activityView(page, "Full").click();
   await expect(page.locator('#conversation-scroll > article[data-tool-call-id="recovery-write-long"]')).toHaveCount(1);
   await focusActivity(page);
   // An authoritative snapshot with no active tools must clear retained activity flags,

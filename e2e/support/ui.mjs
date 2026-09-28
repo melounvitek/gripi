@@ -35,6 +35,10 @@ export async function expectRunFinished(page) {
   await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
 }
 
+export function activityView(page, view) {
+  return page.getByRole("group", { name: "Agent activity", exact: true }).getByRole("button", { name: view, exact: true });
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

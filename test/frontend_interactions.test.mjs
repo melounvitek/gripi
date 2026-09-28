@@ -344,17 +344,25 @@ test("project selector opens on the first valid touch without sticky-hover behav
   }
 });
 
-test("agent activity switch is checked only in the full view", () => {
+test("agent activity segments press only the selected view", () => {
   const conversation = new ConversationController({}, {});
-  const toggle = new FakeElement("button");
-  conversation.viewToggle = toggle;
+  const group = new FakeElement("div");
+  const [brief, full] = ["brief", "full"].map((view) => {
+    const option = new FakeElement("button", ["[data-conversation-view]"]);
+    option.dataset.conversationView = view;
+    group.append(option);
+    return option;
+  });
+  conversation.viewToggle = group;
 
   conversation.applyFocusedView();
-  assert.equal(toggle.getAttribute("aria-checked"), "true");
+  assert.equal(brief.getAttribute("aria-pressed"), "false");
+  assert.equal(full.getAttribute("aria-pressed"), "true");
 
   conversation.focusedView = true;
   conversation.applyFocusedView();
-  assert.equal(toggle.getAttribute("aria-checked"), "false");
+  assert.equal(brief.getAttribute("aria-pressed"), "true");
+  assert.equal(full.getAttribute("aria-pressed"), "false");
 });
 
 test("tree model covers search, folding, navigation, labels, and exact filters", () => {

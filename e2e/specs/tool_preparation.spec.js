@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { activityView } from "../support/ui.mjs";
 
 test.use({ hasTouch: true });
 
@@ -70,12 +71,11 @@ for (const transport of ["delta-only", "cumulative"]) {
     await expect(status).toContainText("Pi is running…");
     await expect(card).not.toHaveClass(/message--streaming/);
 
-    const activityToggle = page.getByRole("switch", { name: "Show agent activity" });
-    await activityToggle.tap();
+    await activityView(page, "Brief").tap();
     await expect(preparation).toBeVisible();
     await expect(status).toContainText("Pi is running…");
     await expect(page.getByRole("region", { name: "Active now" })).toContainText("Preparing tool call…");
-    await activityToggle.tap();
+    await activityView(page, "Full").tap();
     await expect(preparation).toBeVisible();
     await preparation.screenshot({ path: test.info().outputPath("tool-preparation-card.png") });
 
@@ -210,7 +210,7 @@ for (const boundary of ["reload", "abort", "forced abort"]) {
       { type: "message_update", assistantMessageEvent: { type: "toolcall_delta", delta: "hidden" }, gatewayPartialMessage: message },
     );
     await expect(preparation).toBeVisible();
-    await page.getByRole("switch", { name: "Show agent activity" }).tap();
+    await activityView(page, "Brief").tap();
     await expect(preparation).toBeVisible();
     await expect(page.getByRole("region", { name: "Active now" })).toContainText("Preparing tool call…");
     await expect(status).toContainText("Pi is running…");
@@ -228,8 +228,7 @@ for (const boundary of ["reload", "abort", "forced abort"]) {
       await expect(status).toHaveAttribute("data-state", "done");
     }
     await expect(preparation).toHaveCount(0);
-    const toggle = page.getByRole("switch", { name: "Show agent activity" });
-    if (await toggle.getAttribute("aria-checked") === "false") await toggle.tap();
+    await activityView(page, "Full").tap();
     await expect(preparation).toHaveCount(0);
   });
 }
