@@ -500,9 +500,10 @@ async function expectCompactRow(link, touch) {
       .map((selector) => element.querySelector(selector))]
       .map((control) => control.getBoundingClientRect().toJSON()));
   expect(rowBox.height).toBeLessThanOrEqual(touch ? 46 : 36);
-  expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(ageBox.x);
-  expect(ageBox.x + ageBox.width).toBeLessThanOrEqual(actionsBox.x);
-  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
+  // Transformed drawer bounds can round by a few millionths of a pixel.
+  expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(ageBox.x + 0.01);
+  expect(ageBox.x + ageBox.width).toBeLessThanOrEqual(actionsBox.x + 0.01);
+  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 0.01);
   if (touch) {
     // Transformed drawer bounds can round a 44px target slightly below 44.
     expect(linkBox.height).toBeGreaterThanOrEqual(44 - 0.01);

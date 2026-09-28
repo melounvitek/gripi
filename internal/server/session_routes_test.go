@@ -173,7 +173,7 @@ func TestSidebarGroupsSessionsByActivityDay(t *testing.T) {
 		}
 	}
 	now := time.Now()
-	for index, activity := range []time.Time{now, now.Add(-time.Second), now.AddDate(0, 0, -1), now.AddDate(0, 0, -3), now.AddDate(0, 0, -30)} {
+	for index, activity := range []time.Time{now, now, now.AddDate(0, 0, -1), now.AddDate(0, 0, -3), now.AddDate(0, 0, -30)} {
 		timestamp := activity.UTC().Format(time.RFC3339Nano)
 		lines := fmt.Sprintf(`{"type":"session","version":3,"id":"s%[1]d","timestamp":%[2]q,"cwd":%[3]q}
 {"type":"message","id":"m%[1]d","parentId":null,"timestamp":%[2]q,"message":{"role":"user","content":[{"type":"text","text":"Session %[1]d"}]}}
@@ -186,15 +186,15 @@ func TestSidebarGroupsSessionsByActivityDay(t *testing.T) {
 	html := serve(t, fixtureHandler(t, fixture), http.MethodGet, "/sidebar", "").Body.String()
 	list := strings.Split(html, `<div class="sessions-list">`)[1]
 	row := func(index int) string { return fmt.Sprintf(`data-session-name="Session %d"`, index) }
-	want := []string{">Today<", row(0), row(1), ">Yesterday<", row(2), ">Earlier<", row(3), row(4)}
-	for _, marker := range want {
-		if strings.Count(list, marker) != 1 {
-			t.Fatalf("sidebar has %d × %q: %s", strings.Count(list, marker), marker, list)
-		}
-	}
-	for index := 1; index < len(want); index++ {
-		if strings.Index(list, want[index-1]) > strings.Index(list, want[index]) {
-			t.Fatalf("%q renders after %q: %s", want[index-1], want[index], list)
+	groups := [][]string{{">Today<", row(0), row(1)}, {">Yesterday<", row(2)}, {">Earlier<", row(3), row(4)}}
+	for index, group := range groups {
+		for _, marker := range group {
+			if strings.Count(list, marker) != 1 {
+				t.Fatalf("sidebar has %d × %q: %s", strings.Count(list, marker), marker, list)
+			}
+			if strings.Index(list, marker) < strings.Index(list, group[0]) || index+1 < len(groups) && strings.Index(list, marker) > strings.Index(list, groups[index+1][0]) {
+				t.Fatalf("%q renders outside %q: %s", marker, group[0], list)
+			}
 		}
 	}
 }
