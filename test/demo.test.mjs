@@ -47,7 +47,7 @@ test("every demo session includes activity that distinguishes the transcript vie
     messages: Array.from({ length: 4 }, (_, index) => ({ role: "user", text: `Message ${index + 1}` })),
   });
   assert.equal(restored.messages.at(-1).role, "thinking");
-  assert.match(javascript, /sessions\.push\(normalizeSession\(\{ \.\.\.source, id, name: `\$\{source\.name\} \(fork\)`[\s\S]*?messages: source\.messages\.slice\(0, 4\)/);
+  assert.match(javascript, /sessions\.unshift\(normalizeSession\(\{ \.\.\.source, id, name: `\$\{source\.name\} \(fork\)`[\s\S]*?messages: source\.messages\.slice\(0, 4\)/);
 });
 
 test("demo scripted responses finish, cancel, and include visible stages", async () => {

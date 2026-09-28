@@ -33,10 +33,13 @@ test("complete an included native bash command and restore it after reload", asy
 
   // Like Pi CLI's editor, the input's rules turn green while it holds a shell command.
   const editor = page.locator(".composer-input-row");
+  const composer = page.getByLabel("Message to Pi");
+  await composer.focus();
   const idleBorder = await editor.evaluate((element) => getComputedStyle(element).borderTopColor);
-  await page.getByLabel("Message to Pi").fill(`!${nativeBash.included.command}`);
+  await composer.fill(`!${nativeBash.included.command}`);
   await expect(editor).toHaveCSS("border-top-color", "rgb(181, 189, 104)");
   await sendPrompt(page, `!${nativeBash.included.command}`);
+  await composer.focus();
   await expect(editor).toHaveCSS("border-top-color", idleBorder);
   const card = bashCard(page, nativeBash.included.command);
   await expectLongOutputCollapsed(card);
