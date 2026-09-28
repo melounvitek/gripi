@@ -443,6 +443,7 @@ function removeStatusItem(key) {
 }
 
 function renderModelStatus() {
+  promptForm?.setAttribute("data-thinking-level", liveStatusThinking || "");
   if (!liveStatusModel) {
     removeStatusItem("thinking");
     return;
@@ -895,6 +896,8 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
 function resizePromptTextarea() {
   if (!promptTextarea) return;
 
+  // Like Pi CLI's editor, switch to bash mode as soon as the text starts with "!".
+  promptForm?.toggleAttribute("data-bash-mode", promptTextarea.value.trimStart().startsWith("!"));
   promptTextarea.style.height = "auto";
   const maxHeight = parseFloat(getComputedStyle(promptTextarea).maxHeight);
   const hasMaxHeight = Number.isFinite(maxHeight) && maxHeight > 0;
