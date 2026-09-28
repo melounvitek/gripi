@@ -7,9 +7,9 @@ import {
 } from "../support/clear_queue.mjs";
 
 test("read images stay visible with activity off and open on the first mobile tap", async ({ page }) => {
-  await page.goto(`/?session_search=${encodeURIComponent(sessions.imageReadMobile)}`);
+  await page.goto(`/?session_search=${encodeURIComponent(sessions.imageRead)}`);
   await page.locator('label[aria-label="Open sessions"]').tap();
-  await page.getByRole("link", { name: new RegExp(sessions.imageReadMobile) }).tap();
+  await page.getByRole("link", { name: new RegExp(sessions.imageRead) }).tap();
   const toggle = page.getByRole("switch", { name: "Show agent activity" });
   await toggle.tap();
   await sendPrompt(page, prompts.imageRead);
@@ -22,7 +22,7 @@ test("read images stay visible with activity off and open on the first mobile ta
     }
     await expect(toggle).not.toBeChecked();
     await expect(page.getByRole("region", { name: "Active now", exact: true })).toHaveCount(0);
-    const image = page.getByRole("button", { name: "View attached image full size" });
+    const image = page.getByRole("button", { name: "View attached image full size" }).last();
     await expect(image).toBeVisible();
     await image.tap();
     const viewer = page.getByRole("dialog", { name: "Full-size image viewer" });
