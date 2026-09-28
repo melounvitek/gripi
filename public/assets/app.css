@@ -23,7 +23,7 @@
       --link: #81a2be;
       --button-text: #18181e;
       --user-msg: #343541;
-      --tool-ok: #1d211d;
+      --tool-ok: #283228;
       --tool-copy: #d4d4d4b8;
       --tool-pending: #282832;
       --accent-tint-04: #ff5a1f0f;
@@ -32,8 +32,8 @@
       --accent-line-35: #ff5a1f59;
       --accent-line-55: #ff5a1f8c;
       --focus-ring: #ff5a1f99;
-      --grid-minor: #ffffff04;
-      --grid-major: #ffffff08;
+      --custom-msg: #2d2838;
+      --custom-label: #9575cd;
       --shadow-soft: 0 8px 26px #00000047;
       --mono: "Commit Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace;
       --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -43,7 +43,7 @@
     *, *::before, *::after { box-sizing: border-box; }
     ::selection { background: #ff5a1f3d; }
     .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-    body { margin: 0; font-family: var(--sans); color: var(--text); background-color: var(--bg); background-image: linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px), linear-gradient(var(--grid-minor) 1px, transparent 1px), linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px); background-size: 96px 96px, 96px 96px, 12px 12px, 12px 12px; overflow: hidden; }
+    body { margin: 0; font-family: var(--sans); color: var(--text); background-color: var(--bg); overflow: hidden; }
     .app-shell { display: grid; grid-template-columns: 22rem minmax(0, 1fr); height: 100vh; min-height: 0; }
     body.session-only .app-shell { grid-template-columns: minmax(0, 1fr); }
     .session-sidebar { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); padding: 1rem; overflow: hidden; background: var(--sidebar); }
@@ -85,35 +85,38 @@
     .session-header-tag-action svg, .tag-filter-toggle svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
     .session-header-tag-action:hover { background: transparent; color: var(--text); }
     .session-header-window-action:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
-    .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.5rem; }
+    .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.75rem 1.5rem 1.5rem; }
+    /* One readable column; long lines are hard to follow in a wide browser window. */
+    .conversation-scroll > :not(.jump-controls, .current-session-find) { max-width: 46rem; margin-inline: auto; }
     /* A joined summary shares the header row: label, summary toggle, count. */
-    .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: center; min-height: 0; margin-bottom: 0.85rem; padding: 0.65rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: var(--panel); transition: min-height 180ms ease; }
+    .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: center; min-height: 0; margin-bottom: 1.1rem; transition: min-height 180ms ease; }
     .active-activity > * { grid-column: 1 / -1; }
     .active-activity-header, .conversation-panel.is-conversation-focused .active-activity .focus-activity-summary { display: contents; }
-    .active-activity-header { color: var(--text); font-size: 0.75rem; font-weight: 500; }
+    .active-activity-header { color: var(--muted); font-family: var(--mono); font-size: 0.74rem; font-weight: 500; }
     .active-activity-header > span:first-child { grid-area: 1 / 1; display: flex; align-items: center; gap: 0.5rem; }
     .active-activity-count { grid-area: 1 / 3; color: var(--muted); font-weight: 400; }
     .active-activity-header > span, .active-activity .focus-activity-header { margin-bottom: 0.65rem; }
     .active-activity-waiting { margin: 0; padding: 0.65rem; color: var(--muted); font-size: 0.8rem; }
     @media (prefers-reduced-motion: reduce) { .active-activity { transition: none; } }
-    .conversation-panel.is-conversation-focused .conversation-scroll .active-activity > .message { display: block; margin-right: 0; }
+    .conversation-panel.is-conversation-focused .conversation-scroll .active-activity > .message { display: grid; }
     .active-activity > .message:last-child { margin-bottom: 0; }
-    .active-activity .message--live { box-shadow: none; }
     .active-activity .focus-activity-header { grid-area: 1 / 2; justify-self: start; width: auto; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.75rem; }
     .active-activity button.focus-activity-header::after { margin-left: 0; }
     .active-activity .focus-activity-summary-text::before { content: "· "; content: "· " / ""; color: var(--muted-soft); }
-    .active-activity .focus-activity-details { grid-column: 1 / -1; margin-bottom: 0.65rem; border: 1px solid var(--border); border-radius: 0.3rem; }
+    .active-activity .focus-activity-details { grid-column: 1 / -1; margin-bottom: 0.65rem; border-radius: 0.2rem; background: var(--tool-ok); }
     .focus-activity-summary { display: none; }
-    .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin: 0 0 0.85rem; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.78rem; }
+    .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin-bottom: 1.1rem; overflow: hidden; border-radius: 0.2rem; background: var(--tool-ok); color: var(--tool-copy); font-family: var(--mono); font-size: 0.74rem; }
+    .conversation-panel.is-conversation-focused .focus-activity-summary.has-errors { background: var(--danger-soft); }
+    .conversation-panel.is-conversation-focused .active-activity .focus-activity-summary { background: transparent; }
     .focus-activity-header { width: 100%; display: flex; align-items: center; gap: 0.5rem; min-width: 0; min-height: 0; padding: 0.5rem 0.7rem; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
     button.focus-activity-header { cursor: pointer; }
-    button.focus-activity-header:hover { background: var(--accent-tint-04); color: var(--text); }
+    button.focus-activity-header:hover { background: #ffffff08; color: var(--text); }
     button.focus-activity-header::after { content: "›"; flex: 0 0 auto; margin-left: auto; font-size: 1rem; line-height: 1; transition: transform 120ms ease; }
     .focus-activity-summary.is-expanded button.focus-activity-header::after { transform: rotate(90deg); }
     .focus-activity-spinner { flex: 0 0 auto; width: 0.72rem; height: 0.72rem; border: 1.5px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     .focus-activity-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .focus-activity-error-count { flex: 0 0 auto; padding: 0.12rem 0.35rem; border: 1px solid #cc666659; border-radius: 0.2rem; background: var(--danger-soft); color: var(--danger); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; }
-    .focus-activity-details { min-width: 0; padding: 0.38rem 0.7rem 0.48rem; border-top: 1px solid var(--border); background: var(--accent-tint-04); }
+    .focus-activity-details { min-width: 0; padding: 0.38rem 0.7rem 0.48rem; border-top: 1px solid #ffffff0d; }
     .focus-activity-list { min-width: 0; display: grid; gap: 0.08rem; margin: 0; padding: 0; list-style: none; }
     .focus-activity-hidden-count { margin: 0; padding: 0.15rem 0; color: var(--muted); font-family: var(--mono); font-size: 0.7rem; line-height: 1.35; }
     .focus-activity-item { min-width: 0; display: flex; align-items: baseline; gap: 0.42rem; padding: 0.15rem 0; color: var(--text); font-family: var(--mono); font-size: 0.7rem; line-height: 1.35; }
@@ -129,7 +132,7 @@
     .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error,
     .conversation-panel.is-conversation-focused .conversation-scroll .message[data-role="status"]:not(.message--compaction),
     .conversation-panel.is-conversation-focused .conversation-scroll .message[data-role="system"] { display: none; }
-    .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images) { display: block; }
+    .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images) { display: grid; }
     .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images):not(.active-activity > .message) > :is(.message-header, .message-details) { display: none; }
     .conversation-scroll:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-tint-14); }
     .current-session-find { position: sticky; top: 0.4rem; z-index: 5; width: min(38rem, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto repeat(3, 2rem); align-items: center; gap: 0.4rem; margin: 0 0 0.75rem auto; padding: 0.55rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: #1e1e24fa; box-shadow: var(--shadow-soft); }
@@ -333,16 +336,33 @@
     .empty-state-actions { display: flex; justify-content: center; margin-top: 1rem; }
     .sidebar-empty { display: grid; gap: 0.85rem; }
     .sidebar-empty-action { width: 100%; justify-self: stretch; }
-    .message { position: relative; min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 0.4rem; padding: 0.9rem; margin-bottom: 0.85rem; background: var(--panel); scroll-margin-top: 3.5rem; }
-    .message--user { margin-left: 10%; background: var(--user-msg); border-color: #ffffff14; color: var(--text); }
-    .message--assistant, .message--status, .message--tool { margin-right: 10%; }
-    .message--assistant { background: var(--panel); border-color: var(--border); color: var(--copy); }
-    .message--thinking, .message--tool-preparation { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }
-    .message--status { background: transparent; color: var(--muted); }
-    .message--tool, .message--tool-call, .message--tool-transcript { background: var(--tool-ok); border-color: #ffffff0a; color: var(--tool-copy); }
+    .message { position: relative; min-width: 0; max-width: 100%; margin-bottom: 1.1rem; scroll-margin-top: 3.5rem; }
+    /* Text messages put the time below; activity rows keep it on the right of their first line. */
+    .message--user, .message--assistant:not(.message--compact, .message--thinking) { display: flex; flex-direction: column; }
+    .message--user > .message-header, .message--assistant:not(.message--compact, .message--thinking) > .message-header { order: 1; margin-top: 0.4rem; }
+    .message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 0.75rem; align-items: start; }
+    :is(.message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error) > * { grid-column: 1; }
+    :is(.message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error) > .message-header { grid-column: 2; grid-row: 1; }
+    :is(.message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error) > .message-images { grid-column: 1 / -1; }
+    .message--user { padding: 0.75rem 0.95rem 0.5rem; border-radius: 0.2rem; background: var(--user-msg); color: var(--text); }
+    .message--user > .message-header { justify-content: flex-end; }
+    .message--assistant { color: var(--copy); }
+    .message--thinking { color: var(--muted); }
+    .message--tool-preparation { padding: 0.75rem 0.9rem; border-radius: 0.2rem; background: var(--tool-pending); color: var(--muted); }
+    .message--status { color: var(--muted); }
+    .message--status > .message-body { font-family: var(--mono); font-size: 0.76rem; }
+    .message[data-role="custom"], .message--compaction { padding: 0.75rem 0.9rem; border-radius: 0.2rem; background: var(--custom-msg); color: var(--text); }
+    .message[data-role="custom"] > .message-header { grid-column: 1 / -1; justify-content: space-between; margin-bottom: 0.4rem; }
+    .message[data-role="custom"] > .message-body { font-family: var(--sans); font-size: 1rem; }
+    .message--tool, .message--tool-call, .message--tool-transcript { background: var(--tool-ok); color: var(--tool-copy); }
+    .message--compact:not(.message--compaction) pre.message-body { font-family: var(--mono); font-size: 0.8rem; line-height: 1.45; }
+    /* Pi CLI frames user shell commands with rules instead of a tinted block. */
+    .message--bash-execution { padding-inline: 0; border-block: 1px solid var(--success); border-radius: 0; background: transparent; }
+    .message--bash-execution.message--bash-excluded { border-color: var(--muted-soft); }
+    .message--bash-execution .message-details-summary, .message--bash-execution .tool-command { color: var(--success); font-weight: 700; }
+    .message--bash-execution.message--bash-excluded .message-details-summary, .message--bash-execution.message--bash-excluded .tool-command { color: var(--muted); }
     .message--tool-pending { background: var(--tool-pending); }
     .message--tool-transcript { font-family: var(--mono); }
-    .message--tool .role, .message--tool-call .role, .message--tool-transcript .role { color: var(--accent); }
     .message--tool-transcript .message-details-summary { color: var(--copy); }
     .message--tool-transcript .message-body { font-size: 0.84rem; line-height: 1.4; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
     .tool-output-content { display: block; min-width: 100%; }
@@ -358,19 +378,16 @@
     .tool-command { color: var(--text); font-weight: 600; }
     .tool-path { color: var(--accent); font-weight: 500; }
     .tool-range { color: var(--warning); font-weight: 600; }
-    .message--error, .message--tool-error { background: var(--danger-soft); border-color: #cc666659; color: #e8a9a9; }
-    .message--compact { padding: 0.75rem 0.9rem; }
-    .message--live { box-shadow: 0 0 0 1px var(--accent-line-35) inset; }
-    .message--assistant.message--streaming { border-color: var(--accent-line-55); animation: streaming-bubble-pulse 1600ms ease-in-out infinite; }
+    .message--error, .message--tool-error { background: var(--danger-soft); color: #e8a9a9; }
+    .message--compact, .message--error { padding: 0.75rem 0.9rem; border-radius: 0.2rem; }
     .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after,
     .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after,
     .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after,
     .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { content: ""; display: inline-block; width: 0.55em; height: 1.05em; margin-left: 0.15rem; background: var(--accent-bright); vertical-align: -0.15em; animation: streaming-caret-blink 1000ms steps(1) infinite; }
-    .message-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
-    .message--user .message-header { margin-bottom: 0.75rem; }
-    .role { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); }
-    .message--user .role { color: var(--accent); }
-    .message--error .role { color: var(--danger); }
+    .message-header { display: flex; align-items: center; gap: 0.75rem; }
+    /* Pi CLI shows no role labels; keep them for screen readers. */
+    .role { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+    .message[data-role="custom"] .role { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; color: var(--custom-label); font-family: var(--mono); font-size: 0.72rem; font-weight: 700; }
     .message-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted-soft); }
     .message-details { min-width: 0; max-width: 100%; }
     .message-details-summary { margin-bottom: 0.5rem; font-weight: 550; color: var(--muted); }
@@ -542,8 +559,8 @@
     button.danger:hover { background: #e07a7a; }
     button.danger:disabled:hover { background: var(--danger); }
     .session-abort-button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 2.1rem; height: 2.1rem; padding: 0; border-radius: 0.3rem; font-size: 1rem; line-height: 1; }
-    .copy-button { margin-left: auto; padding: 0.2rem 0.5rem; font-size: 0.62rem; background: transparent; border: 1px solid var(--border-strong); color: var(--muted); }
-    .copy-button:hover { color: var(--text); background: var(--accent-tint-04); border-color: var(--accent-line-55); transform: none; }
+    .copy-button { min-height: 0; padding: 0; border: 0; background: transparent; color: var(--muted-soft); font-size: 0.68rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .copy-button:hover { color: var(--text); background: transparent; transform: none; }
     .jump-controls { position: sticky; z-index: 3; display: flex; justify-content: center; gap: 0.35rem; min-height: 2rem; margin: 0.25rem auto; visibility: hidden; opacity: 0; pointer-events: none; }
     .jump-controls.is-visible { visibility: visible; opacity: 1; }
     .jump-controls--top { top: 0.75rem; }
@@ -686,9 +703,8 @@
     @keyframes session-switch-spin { to { transform: rotate(360deg); } }
     @keyframes stop-button-pulse { 0% { transform: scale(0.82); opacity: 0.9; } 70%, 100% { transform: scale(1.28); opacity: 0; } }
     @keyframes progress-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
-    @keyframes streaming-bubble-pulse { 0%, 100% { box-shadow: 0 0 0 1px #ff5a1f3d inset; } 50% { box-shadow: 0 0 0 2px #ff5a1f66 inset; } }
     @keyframes streaming-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .focus-activity-spinner, .message--assistant.message--streaming, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .focus-activity-spinner, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (pointer: coarse) {
       .session-row .session-meta { max-width: calc(100% - 6.5rem); }
       .session-pin-toggle, .session-actions-toggle { bottom: 0.35rem; width: 2.75rem; height: 2.75rem; opacity: 0.7; }
@@ -751,10 +767,11 @@
       .jump-controls.is-visible { transition: opacity 140ms ease, visibility 140ms ease; }
       body:not(.is-conversation-scrolling) .jump-controls.is-visible { visibility: hidden; opacity: 0; pointer-events: none; }
       body:not(.is-conversation-scrolling) .jump-controls.is-loading { visibility: visible; opacity: 1; pointer-events: auto; }
-      .message { margin-bottom: 0.65rem; padding: 0.75rem; border-radius: 0.35rem; }
-      .message--user, .message--assistant, .message--status, .message--tool { margin-left: 0; margin-right: 0; }
+      .message { margin-bottom: 0.9rem; }
+      :is(.message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error):not([data-role="custom"]) > .message-header { order: 1; grid-column: 1 / -1; grid-row: auto; justify-content: flex-end; margin-top: 0.3rem; }
+      .message--user, .message--compact, .message--error, .message--tool-preparation, .message[data-role="custom"] { padding-inline: 0.75rem; }
       .message-header { flex-wrap: wrap; }
-      .copy-button { min-height: 2rem; padding: 0.3rem 0.65rem; }
+      .copy-button { min-height: 2rem; }
       .message-body--markdown { line-height: 1.5; }
       .message-body--markdown pre { font-size: 0.82rem; }
       .message, .message-body--markdown, .message--tool-transcript .message-body, pre { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
