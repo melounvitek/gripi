@@ -49,6 +49,7 @@ export const sessions = {
   imageViewer: "E2E Image Viewer Mobile",
   imageHover: "E2E Image Hover Desktop",
   imageRead: "E2E Image Read Desktop",
+  imageReadMobile: "E2E Image Read Mobile",
   bashIncluded: "E2E Bash Included Desktop",
   bashExcluded: "E2E Bash Excluded Desktop",
   bashCancel: "E2E Bash Cancel Desktop",

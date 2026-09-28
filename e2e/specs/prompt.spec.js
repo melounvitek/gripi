@@ -458,9 +458,11 @@ test("keep live and persisted images fitted without an orange hover background",
   await expectNeutralImageHover(persistedImage);
 });
 
-test("render a large image read without blocking the conversation", async ({ page }) => {
+test("keep a large image read visible with agent activity off without blocking the conversation", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.imageRead);
+  const toggle = page.getByRole("switch", { name: "Show agent activity" });
+  await toggle.click();
 
   let sessionFragmentRequests = 0;
   page.on("request", (request) => {
@@ -474,7 +476,8 @@ test("render a large image read without blocking the conversation", async ({ pag
   });
 
   await sendPrompt(page, prompts.imageRead);
-  await expect(page.getByRole("button", { name: "View attached image full size" })).toBeAttached();
+  const image = page.getByRole("button", { name: "View attached image full size" });
+  await expect(image).toBeVisible();
   await expectRunFinished(page);
   await expect(message(page, "assistant", replies.standard)).toBeVisible();
 
@@ -482,8 +485,25 @@ test("render a large image read without blocking the conversation", async ({ pag
   expect(await page.evaluate(() => window.sessionSwitchingObserved)).toBe(false);
 
   for (const reload of [false, true]) {
-    if (reload) await page.reload();
-    await page.getByRole("button", { name: "View attached image full size" }).click();
+    if (reload) {
+      await page.reload();
+      await toggle.click();
+    }
+    await expect(toggle).not.toBeChecked();
+    await expect(page.getByRole("region", { name: "Active now", exact: true })).toHaveCount(0);
+    await expect(image).toHaveCount(1);
+    await expect(image).toBeVisible();
+    await expect.poll(() => image.locator("img").evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
+    const card = page.locator("article").filter({ has: image });
+    await expect(card.locator(".message-header")).toBeHidden();
+    await expect(card.locator(".message-details")).toBeHidden();
+    await toggle.click();
+    await expect(image).toBeVisible();
+    await expect(card.locator(".message-details")).toBeVisible();
+    await toggle.click();
+    await expect(image).toBeVisible();
+    await expect(card.locator(".message-details")).toBeHidden();
+    await image.click();
     const viewer = page.getByRole("dialog", { name: "Full-size image viewer" });
     const downloadPromise = page.waitForEvent("download");
     await viewer.getByRole("link", { name: "Download image" }).click();

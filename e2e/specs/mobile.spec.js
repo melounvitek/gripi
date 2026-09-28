@@ -6,6 +6,33 @@ import {
   expectClearQueueRunning, expectPendingQueue, prepareClearQueue, stopClearQueueRun
 } from "../support/clear_queue.mjs";
 
+test("read images stay visible with activity off and open on the first mobile tap", async ({ page }) => {
+  await page.goto(`/?session_search=${encodeURIComponent(sessions.imageReadMobile)}`);
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  await page.getByRole("link", { name: new RegExp(sessions.imageReadMobile) }).tap();
+  const toggle = page.getByRole("switch", { name: "Show agent activity" });
+  await toggle.tap();
+  await sendPrompt(page, prompts.imageRead);
+  await expectRunFinished(page);
+
+  for (const reload of [false, true]) {
+    if (reload) {
+      await page.reload();
+      await toggle.tap();
+    }
+    await expect(toggle).not.toBeChecked();
+    await expect(page.getByRole("region", { name: "Active now", exact: true })).toHaveCount(0);
+    const image = page.getByRole("button", { name: "View attached image full size" });
+    await expect(image).toBeVisible();
+    await image.tap();
+    const viewer = page.getByRole("dialog", { name: "Full-size image viewer" });
+    await expect(viewer).toBeVisible();
+    await expect.poll(() => viewer.locator("img").evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
+    await viewer.getByRole("button", { name: "Close image viewer" }).tap();
+    await expect(viewer).toBeHidden();
+  }
+});
+
 test("slash commands complete on the first mobile tap without submitting", async ({ page }) => {
   await page.goto(`/?${new URLSearchParams({ session_search: sessions.mobile })}`);
   await page.locator('label[aria-label="Open sessions"]').tap();

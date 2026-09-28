@@ -884,7 +884,15 @@ function completeWithImageRead(reply) {
   const result = {
     content: [
       { type: "text", text: "Read image file [image/png]" },
-      { type: "image", data: "a".repeat(3 << 20), mimeType: "image/png" }
+      {
+        type: "image",
+        // A decodable PNG with padding keeps this result above the large-event threshold.
+        data: Buffer.concat([
+          Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7XkAAAAASUVORK5CYII=", "base64"),
+          Buffer.alloc(3 << 20)
+        ]).toString("base64"),
+        mimeType: "image/png"
+      }
     ],
     details: {}
   };

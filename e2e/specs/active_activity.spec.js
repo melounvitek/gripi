@@ -25,6 +25,38 @@ const start = (id, name, args) => ({ type: "tool_execution_start", toolCallId: i
 const end = (id, name, text = "Finished", isError = false) => ({ type: "tool_execution_end", toolCallId: id, toolName: name, result: { content: [{ type: "text", text }] }, isError });
 const activeGroup = (page) => page.getByRole("region", { name: "Active now", exact: true });
 
+test("tool images survive activity retirement, including standalone custom-tool results", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const content = [
+    { type: "text", text: "Screenshot captured" },
+    { type: "image", mimeType: "image/png", data: (await page.screenshot()).toString("base64") }
+  ];
+  await deliver({ type: "agent_start" }, start("image-tool", "screenshot", {}));
+  await expect(activeGroup(page)).toContainText("1 running");
+  await deliver(
+    { ...end("image-tool", "screenshot"), result: { content } },
+    { type: "message_end", message: { role: "toolResult", toolCallId: "image-tool", toolName: "screenshot", content } }
+  );
+  const card = page.locator('[data-tool-call-id="image-tool"]');
+  await expect(card.locator(".message-images")).toBeVisible();
+  await expect(activeGroup(page).locator(".message")).toHaveCount(0);
+  await expect(card.locator(".message-images")).toBeVisible();
+  await expect(card.locator(".message-details")).toBeHidden();
+  await deliver({ type: "agent_end" });
+  await expect(activeGroup(page)).toHaveCount(0);
+  await expect(card.locator(".message-images")).toBeVisible();
+
+  await deliver({ type: "message_end", message: { role: "toolResult", toolCallId: "standalone-image", toolName: "screenshot", content } });
+  const standalone = page.locator('[data-tool-call-id="standalone-image"]');
+  await expect(standalone.locator(".message-images")).toBeVisible();
+  await expect(standalone.locator(".message-details")).toBeHidden();
+  await page.screenshot({ path: test.info().outputPath("focused-tool-images.png") });
+  await page.getByRole("switch", { name: "Show agent activity" }).tap();
+  await expect(card.locator(".message-details")).toBeVisible();
+  await expect(standalone.locator(".message-details")).toBeVisible();
+  await expect(page.locator(".message-images")).toHaveCount(2);
+});
+
 test("bridges activity gaps without removing the group or keeping a stale running count", async ({ page }) => {
   const deliver = await liveEvents(page);
   const group = activeGroup(page);
