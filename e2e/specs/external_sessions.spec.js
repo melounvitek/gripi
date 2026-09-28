@@ -438,7 +438,7 @@ for (const touch of [false, true]) {
         await expectBadge(unreadCount + 1);
         await openSidebar(page, touch);
         await expect(link.locator('[aria-label="Pi is working"]')).toHaveCount(0);
-        await expect(link.locator("..")).not.toHaveCSS("box-shadow", "none");
+        await expect(link.locator(".session-title")).toHaveCSS("font-weight", "700");
         if (touch) await expect(sidebar).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
         await page.screenshot({ path: testInfo.outputPath("settled-unread.png") });
 
@@ -452,7 +452,7 @@ for (const touch of [false, true]) {
         await expectBadge(unreadCount + 1);
         await openSidebar(page, touch);
         await expect(link).toHaveClass(/\bunread\b/);
-        await expect(link.locator("..")).not.toHaveCSS("box-shadow", "none");
+        await expect(link.locator(".session-title")).toHaveCSS("font-weight", "700");
         await expect(link.locator('[aria-label="Pi is working"]')).toHaveCount(0);
         await expect(sidebar).toHaveAttribute("data-unread-session-count", String(unreadCount + 1));
         await activate(link);
