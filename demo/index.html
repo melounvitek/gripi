@@ -112,10 +112,10 @@
     .active-activity > * { grid-column: 1 / -1; }
     .active-activity-header, .conversation-panel.is-conversation-focused .active-activity .focus-activity-summary { display: contents; }
     .active-activity-header { color: var(--muted); font-family: var(--mono); font-size: 0.74rem; font-weight: 500; }
-    .active-activity-header > span:first-child { grid-area: 1 / 1; display: flex; align-items: center; gap: 0.5rem; }
-    .active-activity-count { grid-area: 1 / 3; color: var(--muted); font-weight: 400; }
+    .active-activity-header > span:first-child { grid-area: 1 / 1; display: flex; align-items: center; gap: 0.5rem; padding-left: var(--text-inset); }
+    .active-activity-count { grid-area: 1 / 3; padding-right: var(--text-inset); color: var(--muted); font-weight: 400; }
     .active-activity-header > span, .active-activity .focus-activity-header { margin-bottom: 0.65rem; }
-    .active-activity-waiting { margin: 0; padding: 0.65rem; color: var(--muted); font-size: 0.8rem; }
+    .active-activity-waiting { margin: 0; padding: 0.65rem var(--text-inset); color: var(--muted); font-size: 0.8rem; }
     @media (prefers-reduced-motion: reduce) { .active-activity { transition: none; } }
     .conversation-panel.is-conversation-focused .conversation-scroll .active-activity > .message { display: grid; }
     .active-activity > .message:last-child { margin-bottom: 0; }
@@ -127,15 +127,17 @@
     .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin-bottom: 1.1rem; overflow: hidden; border-radius: 0.2rem; background: var(--tool-ok); color: var(--tool-copy); font-family: var(--mono); font-size: 0.74rem; }
     .conversation-panel.is-conversation-focused .focus-activity-summary.has-pending { background: var(--tool-pending); }
     .conversation-panel.is-conversation-focused .focus-activity-summary.has-errors { background: var(--danger-soft); }
-    .focus-activity-header { width: 100%; display: flex; align-items: center; gap: 0.5rem; min-width: 0; min-height: 0; padding: 0.5rem 0.7rem; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
+    .focus-activity-header { width: 100%; display: flex; align-items: center; gap: 0.5rem; min-width: 0; min-height: 0; padding: 0.65rem var(--text-inset); border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
     button.focus-activity-header { cursor: pointer; }
     button.focus-activity-header:hover { background: #ffffff08; color: var(--text); }
     button.focus-activity-header::after { content: "›"; flex: 0 0 auto; margin-left: auto; font-size: 1rem; line-height: 1; transition: transform 120ms ease; }
     .focus-activity-summary.is-expanded button.focus-activity-header::after { transform: rotate(90deg); }
     .focus-activity-spinner { flex: 0 0 auto; width: 0.72rem; height: 0.72rem; border: 1.5px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     .focus-activity-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .focus-activity-error-count { flex: 0 0 auto; padding: 0.12rem 0.35rem; border: 1px solid #cc666659; border-radius: 0.2rem; background: var(--danger-soft); color: var(--danger); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; }
-    .focus-activity-details { min-width: 0; padding: 0.38rem 0.7rem 0.48rem; border-top: 1px solid #ffffff0d; }
+    .focus-activity-error-count { flex: 0 0 auto; color: var(--danger); }
+    .focus-activity-summary-text + .focus-activity-error-count { margin-left: -0.5rem; }
+    .focus-activity-summary-text + .focus-activity-error-count::before { content: " · "; content: " · " / ""; color: var(--tool-copy); white-space: pre; }
+    .focus-activity-details { min-width: 0; padding: 0.65rem var(--text-inset); border-top: 1px solid #ffffff0d; }
     .focus-activity-list { min-width: 0; display: grid; gap: 0.08rem; margin: 0; padding: 0; list-style: none; }
     .focus-activity-hidden-count { margin: 0; padding: 0.15rem 0; color: var(--muted); font-family: var(--mono); font-size: 0.7rem; line-height: 1.35; }
     .focus-activity-item { min-width: 0; display: flex; align-items: baseline; gap: 0.42rem; padding: 0.15rem 0; color: var(--text); font-family: var(--mono); font-size: 0.7rem; line-height: 1.35; }
@@ -368,23 +370,23 @@
     .empty-state-actions { display: flex; justify-content: center; margin-top: 1rem; }
     .sidebar-empty { display: grid; gap: 0.85rem; }
     .sidebar-empty-action { width: 100%; justify-self: stretch; }
-    .message { position: relative; min-width: 0; max-width: 100%; margin-bottom: 1.1rem; scroll-margin-top: 3.5rem; }
-    /* Text messages put the time below; activity rows keep it on the right of their first line. */
-    .message--user, .message--assistant:not(.message--compact, .message--thinking, .message--tool-preparation) { display: flex; flex-direction: column; }
-    .message--user > .message-header, .message--assistant:not(.message--compact, .message--thinking, .message--tool-preparation) > .message-header { order: 1; margin-top: 0.4rem; }
-    .message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 0.75rem; align-items: start; }
-    :is(.message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error) > * { grid-column: 1; }
-    :is(.message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error) > .message-header { grid-column: 2; grid-row: 1; }
-    :is(.message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error) > .message-images { grid-column: 1 / -1; }
-    .message--user { padding: 0.75rem 0.95rem 0.5rem; border-radius: 0.2rem; background: var(--user-msg); color: var(--text); }
-    .message--user > .message-header { justify-content: flex-end; }
+    /* Like Pi CLI, all message text starts at the inset; block backgrounds span the column. */
+    .message { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; min-width: 0; max-width: 100%; margin-bottom: 1.1rem; padding-inline: var(--text-inset); scroll-margin-top: 3.5rem; }
+    /* The header's time sits in the second column of the first line; only that line makes room for it. */
+    .message > *, .message-details--always-open > * { grid-column: 1 / -1; min-width: 0; }
+    .message > .message-header, .message-details--always-open { display: contents; }
+    .message-header + :not(.message-details--always-open), .message-details--always-open > .message-details-summary { grid-column: 1; }
+    .message:not([data-final-assistant-response="true"]) > .message-header > .copy-button { order: 1; grid-column: 1 / -1; justify-self: start; margin-top: 0.4rem; }
+    /* User messages and final answers show their time below the text, before Copy. */
+    :is(.message--user, .message[data-final-assistant-response="true"]) > .message-header { display: flex; order: 1; margin-top: 0.4rem; }
+    .message--user { background: var(--user-msg); color: var(--text); }
     .message--assistant { color: var(--copy); }
     .message--thinking { color: var(--muted); }
-    .message--tool-preparation { padding: 0.75rem 0.9rem; border-radius: 0.2rem; background: var(--tool-pending); color: var(--muted); }
+    .message--tool-preparation { background: var(--tool-pending); color: var(--muted); }
     .message--status { color: var(--muted); }
     .message--status:not([data-role="custom"]) > .message-body { font-family: var(--mono); font-size: 0.76rem; }
-    .message[data-role="custom"], .message--compaction { padding: 0.75rem 0.9rem; border-radius: 0.2rem; background: var(--custom-msg); color: var(--text); }
-    .message[data-role="custom"] > .message-header { grid-column: 1 / -1; justify-content: space-between; margin-bottom: 0.4rem; }
+    .message[data-role="custom"], .message--compaction { background: var(--custom-msg); color: var(--text); }
+    .message[data-role="custom"] > .message-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.4rem; }
     .message--tool, .message--tool-call, .message--tool-transcript { background: var(--tool-ok); color: var(--tool-copy); }
     /* Whole-pixel lines keep the last line of scrolled output fully reachable. */
     .message--compact:not(.message--compaction) pre.message-body { font-family: var(--mono); font-size: 0.8rem; line-height: 1.125rem; }
@@ -394,7 +396,7 @@
     .message--tool-transcript .message-body { tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
     .tool-output-content { display: block; min-width: 100%; }
     .tool-output-content--diff { width: max-content; }
-    .tool-diff-line { display: block; margin: 0 -0.25rem; padding: 0 0.25rem; border-left: 2px solid transparent; }
+    .tool-diff-line { display: block; margin: 0 -0.25rem; padding: 0 0.25rem 0 calc(0.25rem - 2px); border-left: 2px solid transparent; }
     .tool-diff-line--add { border-left-color: #b5bd68bf; background: #b5bd681f; color: #d8f0a0; }
     .tool-diff-line--remove { border-left-color: #cc6666cc; background: #cc66661f; color: #f0b0a8; }
     .tool-diff-line--meta { color: var(--accent); font-weight: 600; }
@@ -406,7 +408,8 @@
     .tool-path { color: var(--accent); font-weight: 500; }
     .tool-range { color: var(--warning); font-weight: 600; }
     .message--error, .message--tool-error { background: var(--danger-soft); color: #e8a9a9; }
-    .message--compact, .message--error { padding: 0.75rem 0.9rem; border-radius: 0.2rem; }
+    /* Every block shares one padding. */
+    .message--user, .message--compact, .message--error, .message--tool-preparation, .message[data-role="custom"] { padding-block: 0.65rem; border-radius: 0.2rem; }
     .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after,
     .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after,
     .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after,
@@ -415,6 +418,13 @@
     /* Pi CLI shows no role labels; keep them for screen readers. */
     .message[data-role="custom"] .role { color: var(--custom-label); font-family: var(--mono); font-size: 0.72rem; font-weight: 700; }
     .message-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); }
+    /* Other messages keep their time for desktop hover, at the end of the first line; touch never shows it. */
+    .message-header > .message-meta { display: none; grid-area: 1 / 2; padding-left: 0.75rem; }
+    :is(.message--user, .message[data-final-assistant-response="true"]) > .message-header > .message-meta { display: block; padding-left: 0; }
+    @media (hover: hover) and (pointer: fine) {
+      .message-header > .message-meta { display: block; visibility: hidden; }
+      .message:is(:hover, :focus-within) > .message-header > .message-meta, :is(.message--user, .message[data-final-assistant-response="true"]) > .message-header > .message-meta { visibility: visible; }
+    }
     .message-details { min-width: 0; max-width: 100%; }
     .message-details-summary { margin-bottom: 0.5rem; font-weight: 550; color: var(--muted); }
     .message--tool .message-details-summary, .message--tool-call .message-details-summary, .message--tool-transcript .message-details-summary { max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-family: var(--mono); font-size: 0.84rem; line-height: 1.4; }
@@ -424,16 +434,16 @@
     .compaction-details-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0; cursor: pointer; list-style: none; }
     .compaction-details-summary::-webkit-details-marker { display: none; }
     .message-details--compaction[open] .compaction-details-summary { margin-bottom: 0.5rem; }
-    .compaction-details-action { white-space: nowrap; color: var(--accent); font-family: var(--mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+    .compaction-details-action { white-space: nowrap; color: var(--muted); font-family: var(--mono); font-size: 0.76rem; font-weight: 400; }
     .compaction-details-action::before { content: "Show summary"; }
     .message-details--compaction[open] .compaction-details-action::before { content: "Hide summary"; }
     .subagent-prompt { margin: 0 0 0.65rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 0.3rem; background: var(--panel); font-family: var(--sans); }
-    .subagent-prompt-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0.45rem; cursor: pointer; list-style: none; }
+    .subagent-prompt-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 0.45rem; cursor: pointer; list-style: none; }
     .subagent-prompt-summary::-webkit-details-marker { display: none; }
-    .subagent-prompt-label { color: var(--accent); font-family: var(--mono); font-size: 0.64rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
+    .subagent-prompt-label { color: var(--muted); font-family: var(--mono); font-size: 0.76rem; }
     .subagent-prompt-preview { min-width: 0; display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 0.84rem; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
     .subagent-prompt[open] .subagent-prompt-preview { display: block; overflow: visible; color: var(--copy); white-space: pre-wrap; -webkit-line-clamp: unset; }
-    .subagent-prompt-action { color: var(--accent); font-family: var(--mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
+    .subagent-prompt-action { color: var(--muted); font-family: var(--mono); font-size: 0.76rem; white-space: nowrap; }
     .subagent-prompt-action::before { content: "Show"; }
     .subagent-prompt[open] .subagent-prompt-action::before { content: "Hide"; }
     .tool-output-collapse { display: grid; gap: 0.4rem; }
@@ -442,8 +452,13 @@
     .tool-output-collapse[data-expanded="true"] [data-tool-output-body] { max-height: min(50dvh, 24rem); overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
     .tool-output-collapse[data-expanded="true"] [data-tool-output-body]:focus-visible { outline: 2px solid var(--accent-line-55); outline-offset: -2px; }
     .tool-output-collapse-control { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.76rem; font-family: var(--mono); }
-    .tool-output-toggle { justify-self: start; min-height: 0; padding: 0.18rem 0.45rem; border: 1px solid var(--accent-line-35); background: transparent; color: var(--accent); font-size: 0.66rem; }
-    .tool-output-toggle:hover { background: var(--accent-tint-08); color: var(--text); transform: none; }
+    /* Reads like Pi's "… (N earlier lines) expand". */
+    .tool-output-toggle { justify-self: start; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; letter-spacing: normal; text-transform: none; }
+    .tool-output-toggle:hover { background: transparent; color: var(--text); transform: none; }
+    @media (pointer: coarse) {
+      .tool-output-toggle { position: relative; }
+      .tool-output-toggle::after { content: ""; position: absolute; inset: calc(50% - 1.375rem) -0.5rem; }
+    }
     .tool-output-hidden-count--mobile { display: none; }
     .tool-output-line { display: block; min-height: 1.4em; }
     .terminal-output-run { white-space: pre; }
@@ -523,7 +538,7 @@
     }
     .message--tool-error .message-details-summary { color: #e8a9a9; }
     /* Pi CLI frames user shell commands with rules instead of a tinted block, even when they fail. */
-    .message--bash-execution { padding-inline: 0; border-block: 1px solid var(--success); border-radius: 0; background: transparent; color: var(--tool-copy); }
+    .message--bash-execution { border-block: 1px solid var(--success); border-radius: 0; background: transparent; color: var(--tool-copy); }
     .message--bash-execution.message--bash-excluded { border-color: var(--muted-soft); }
     .message--bash-execution.message--tool-error .bash-execution-status { color: var(--danger); }
     .message--bash-execution .message-details-summary, .message--bash-execution .tool-command { color: var(--success); font-weight: 700; }
@@ -798,15 +813,13 @@
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       :root { --text-inset: 0.75rem; }
       .conversation-scroll { padding: 0.75rem; }
-      .active-activity .focus-activity-header { grid-area: 2 / 1 / 3 / -1; justify-self: stretch; }
+      .active-activity .focus-activity-header { grid-area: 2 / 1 / 3 / -1; justify-self: stretch; padding-inline: var(--text-inset); }
       .active-activity button.focus-activity-header::after { margin-left: auto; }
       .active-activity .focus-activity-summary-text::before { content: none; }
       .jump-controls.is-visible { transition: opacity 140ms ease, visibility 140ms ease; }
       body:not(.is-conversation-scrolling) .jump-controls.is-visible { visibility: hidden; opacity: 0; pointer-events: none; }
       body:not(.is-conversation-scrolling) .jump-controls.is-loading { visibility: visible; opacity: 1; pointer-events: auto; }
       .message { margin-bottom: 0.9rem; }
-      :is(.message--compact, .message--thinking, .message--tool-preparation, .message--status, .message--error):not([data-role="custom"]) > .message-header { order: 1; grid-column: 1 / -1; grid-row: auto; justify-content: flex-end; margin-top: 0.3rem; }
-      .message--user, .message--compact, .message--error, .message--tool-preparation, .message[data-role="custom"] { padding-inline: 0.75rem; }
       .message-header { flex-wrap: wrap; }
       .copy-button { min-height: 2rem; }
       .message-body--markdown { line-height: 1.5; }
