@@ -163,6 +163,42 @@ func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T
 	}
 }
 
+func TestSidebarGroupsSessionsByActivityDay(t *testing.T) {
+	root := t.TempDir()
+	fixture := nativeFixture{root: root, home: filepath.Join(root, "home"), sessionsRoot: filepath.Join(root, "sessions"), attachmentsRoot: filepath.Join(root, "attachments"), configuredCWDs: filepath.Join(root, "cwds")}
+	project := filepath.Join(root, "project")
+	for _, directory := range []string{fixture.home, filepath.Join(fixture.sessionsRoot, "project"), fixture.attachmentsRoot, project} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	for index, activity := range []time.Time{now, now.Add(-time.Second), now.AddDate(0, 0, -1), now.AddDate(0, 0, -3), now.AddDate(0, 0, -30)} {
+		timestamp := activity.UTC().Format(time.RFC3339Nano)
+		lines := fmt.Sprintf(`{"type":"session","version":3,"id":"s%[1]d","timestamp":%[2]q,"cwd":%[3]q}
+{"type":"message","id":"m%[1]d","parentId":null,"timestamp":%[2]q,"message":{"role":"user","content":[{"type":"text","text":"Session %[1]d"}]}}
+`, index, timestamp, project)
+		if err := os.WriteFile(filepath.Join(fixture.sessionsRoot, "project", fmt.Sprintf("s%d.jsonl", index)), []byte(lines), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	html := serve(t, fixtureHandler(t, fixture), http.MethodGet, "/sidebar", "").Body.String()
+	list := strings.Split(html, `<div class="sessions-list">`)[1]
+	row := func(index int) string { return fmt.Sprintf(`data-session-name="Session %d"`, index) }
+	want := []string{">Today<", row(0), row(1), ">Yesterday<", row(2), ">Earlier<", row(3), row(4)}
+	for _, marker := range want {
+		if strings.Count(list, marker) != 1 {
+			t.Fatalf("sidebar has %d × %q: %s", strings.Count(list, marker), marker, list)
+		}
+	}
+	for index := 1; index < len(want); index++ {
+		if strings.Index(list, want[index-1]) > strings.Index(list, want[index]) {
+			t.Fatalf("%q renders after %q: %s", want[index-1], want[index], list)
+		}
+	}
+}
+
 func TestRPCObservationRoutesUseFakePiAndPreserveJSONL(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	node, err := exec.LookPath("node")

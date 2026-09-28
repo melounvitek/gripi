@@ -41,7 +41,7 @@ for (const width of [320, 393, 1440]) {
         expect(last.x + last.width).toBeLessThanOrEqual(bounds.x + bounds.width);
         const pin = await row.locator(".session-pin-toggle").boundingBox();
         const actions = await row.locator(".session-actions-toggle").boundingBox();
-        expect(Math.min(pin.y, actions.y)).toBeGreaterThanOrEqual(Math.max(first.y + first.height, last.y + last.height));
+        expect(Math.min(pin.x, actions.x)).toBeGreaterThanOrEqual(last.x + last.width);
         expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
         if (isMobile) {
           expect(first.width).toBeCloseTo(44, 2);

@@ -231,9 +231,11 @@ test("open selected session actions on the first mobile tap", async ({ page }) =
   const titleMetrics = await title.evaluate((element) => ({
     height: element.getBoundingClientRect().height,
     lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+    truncated: element.scrollWidth > element.clientWidth,
   }));
-  expect(titleMetrics.height).toBeGreaterThan(titleMetrics.lineHeight * 1.5);
-  expect(titleMetrics.height).toBeLessThanOrEqual(titleMetrics.lineHeight * 2 + 1);
+  // Long titles stay on one line so each row keeps a compact, predictable height.
+  expect(titleMetrics.height).toBeLessThanOrEqual(titleMetrics.lineHeight + 1);
+  expect(titleMetrics.truncated).toBe(true);
 
   const bounds = await actions.boundingBox();
   const titleBounds = await title.boundingBox();
