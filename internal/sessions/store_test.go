@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,6 +120,40 @@ func TestSelectedOversizedToolCallsAndResultsRenderWithCorrectPairing(t *testing
 	}
 	if !window.Messages[0].Thinking || window.Messages[1].ToolName != "read" || window.Messages[1].Text != "" || !window.Messages[1].ToolResultPersisted || window.Messages[2].Text != "Between tools" || window.Messages[3].ToolName != "write" || !window.Messages[3].ToolResultPersisted || !strings.HasPrefix(window.Messages[3].Text, "+ ok\n\nsaved ") {
 		t.Fatalf("paired messages = %#v", window.Messages)
+	}
+}
+
+func TestToolCallsWithoutResultsArePending(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	call := func(id, parent, callID, name string) string {
+		return `{"type":"message","id":"` + id + `","parentId":` + parent + `,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"` + callID + `","name":"` + name + `","arguments":{"command":"true"}}]}}`
+	}
+	result := func(id, parent, callID, name string) string {
+		return `{"type":"message","id":"` + id + `","parentId":"` + parent + `","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"` + callID + `","toolName":"` + name + `","content":[{"type":"text","text":"ok"}],"isError":false}}`
+	}
+	writeSessionLines(t, path, []string{
+		sessionLine(project),
+		call("paired-call", "null", "bash-done", "bash"),
+		result("paired-result", "paired-call", "bash-done", "bash"),
+		call("custom-call", `"paired-result"`, "custom-done", "screenshot"),
+		result("custom-result", "custom-call", "custom-done", "screenshot"),
+		call("orphan-paired", `"custom-result"`, "bash-orphan", "bash"),
+		call("orphan-custom", `"orphan-paired"`, "custom-orphan", "screenshot"),
+	})
+
+	window, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := map[string]bool{}
+	for _, message := range window.Messages {
+		if message.Role == "assistant" {
+			pending[message.ToolCallID] = message.ToolPending
+		}
+	}
+	want := map[string]bool{"bash-done": false, "custom-done": false, "bash-orphan": true, "custom-orphan": true}
+	if !maps.Equal(pending, want) {
+		t.Fatalf("pending tool calls = %v, want %v", pending, want)
 	}
 }
 

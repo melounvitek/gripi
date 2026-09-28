@@ -340,6 +340,7 @@
     .message--thinking, .message--tool-preparation { margin-right: 16%; background: transparent; border-color: var(--border-strong); border-style: dashed; color: var(--muted); }
     .message--status { background: transparent; color: var(--muted); }
     .message--tool, .message--tool-call, .message--tool-transcript { background: var(--tool-ok); border-color: #ffffff0a; color: var(--tool-copy); }
+    .message--tool-pending { background: var(--tool-pending); }
     .message--tool-transcript { font-family: var(--mono); }
     .message--tool .role, .message--tool-call .role, .message--tool-transcript .role { color: var(--accent); }
     .message--tool-transcript .message-details-summary { color: var(--copy); }

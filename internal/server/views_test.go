@@ -92,6 +92,17 @@ func TestMessageTemplateIdentifiesPersistedPairedToolResults(t *testing.T) {
 	}
 }
 
+func TestMessageClassMarksToolCallsWithoutResultsPending(t *testing.T) {
+	call := &sessions.Message{Role: "assistant", Compact: true, ToolCallID: "bash-1", ToolName: "bash", ToolPending: true}
+	if got := messageClass(call); !strings.Contains(got, "message--tool-pending") {
+		t.Fatalf("pending call class = %q", got)
+	}
+	call.ToolPending, call.ToolResultPersisted = false, true
+	if got := messageClass(call); strings.Contains(got, "message--tool-pending") {
+		t.Fatalf("completed call class = %q", got)
+	}
+}
+
 func TestMessageTemplatePreservesLongDiffTail(t *testing.T) {
 	lines := make([]string, 18)
 	for index := range lines {

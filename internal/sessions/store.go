@@ -75,6 +75,7 @@ type Message struct {
 	ToolCallID              string
 	ToolName                string
 	ToolResultPersisted      bool
+	ToolPending              bool
 	Thinking                bool
 	ToolSummaryHTML         string
 	ToolTranscript          bool
@@ -1234,12 +1235,19 @@ type unit struct {
 	Entry        entry
 	Dependencies []entry
 	Estimate     int64
+	ToolPending  bool
 }
 
 func projectedUnits(entries []entry) ([]unit, bool) {
 	pending := make(map[string]int)
 	subagentSources := make(map[string]entry)
+	results := make(map[string]bool)
 	for _, item := range entries {
+		for _, part := range item.Segments {
+			if part.Role == "toolResult" {
+				results[part.ToolCallID] = true
+			}
+		}
 		for _, id := range item.SubagentIDs {
 			if _, exists := subagentSources[id]; !exists {
 				subagentSources[id] = item
@@ -1260,7 +1268,7 @@ func projectedUnits(entries []entry) ([]unit, bool) {
 					continue
 				}
 			}
-			created := unit{Key: [2]int{item.Ordinal, segmentIndex}, Entry: item, Estimate: part.Minimum}
+			created := unit{Key: [2]int{item.Ordinal, segmentIndex}, Entry: item, Estimate: part.Minimum, ToolPending: part.Role == "assistant" && part.ToolCallID != "" && !results[part.ToolCallID]}
 			if part.Role == "toolResult" && part.ToolName == "subagent" {
 				if source, ok := subagentSources[part.ToolCallID]; ok {
 					created.Dependencies = append(created.Dependencies, source)
@@ -1315,6 +1323,7 @@ func renderWindow(path string, indexed *index, units []unit, end int, after *int
 		if retainedBytes+messageRetainedBytes > MaxRetainedWindowBytes {
 			break
 		}
+		rendered[0].ToolPending = item.ToolPending
 		messages = append(messages, rendered[0])
 		bytesUsed += messageBytes
 		retainedBytes += messageRetainedBytes

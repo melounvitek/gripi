@@ -904,6 +904,9 @@ func messageClass(message *sessions.Message) string {
 	if message.Error {
 		values = append(values, "message--tool-error")
 	}
+	if message.ToolPending {
+		values = append(values, "message--tool-pending")
+	}
 	return strings.Join(values, " ")
 }
 func messageRoleLabel(message *sessions.Message) string {

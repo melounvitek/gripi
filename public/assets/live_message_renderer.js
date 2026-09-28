@@ -829,6 +829,7 @@ export class LiveMessageRenderer {
       if (article.dataset.toolCallId !== toolCallId) return;
       article.toggleAttribute("data-activity-active", active);
       article.toggleAttribute("data-activity-completed", !active);
+      article.classList.toggle("message--tool-pending", active);
     });
     this.conversationController.scheduleFocusedActivityRefresh?.();
   }
@@ -1000,7 +1001,10 @@ export class LiveMessageRenderer {
     entry.article.classList.toggle("message--streaming", streamingAssistantResponse);
     if (finalAssistantResponse) entry.article.dataset.finalAssistantResponse = "true";
     this.liveAssistantSegments.set(key, entry);
-    if (segment.toolCallId && !segment.isToolResult) entry.article.setAttribute("data-activity-active", "");
+    if (segment.toolCallId && !segment.isToolResult) {
+      entry.article.setAttribute("data-activity-active", "");
+      entry.article.classList.add("message--tool-pending");
+    }
     if (PAIRED_TOOL_NAMES.has(segment.toolName) && segment.toolCallId && !segment.isToolResult) this.livePairedToolCalls.set(segment.toolCallId, entry);
     if (segment.toolCallId && !segment.isToolResult && !PAIRED_TOOL_NAMES.has(segment.toolName)) this.liveToolExecutions.set(segment.toolCallId, entry);
     return entry;
