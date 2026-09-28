@@ -383,7 +383,8 @@
     .message[data-role="custom"] > .message-header { grid-column: 1 / -1; justify-content: space-between; margin-bottom: 0.4rem; }
     .message[data-role="custom"] > .message-body { font-family: var(--sans); font-size: 1rem; }
     .message--tool, .message--tool-call, .message--tool-transcript { background: var(--tool-ok); color: var(--tool-copy); }
-    .message--compact:not(.message--compaction) pre.message-body { font-family: var(--mono); font-size: 0.8rem; line-height: 1.45; }
+    /* Whole-pixel lines keep the last line of scrolled output fully reachable. */
+    .message--compact:not(.message--compaction) pre.message-body { font-family: var(--mono); font-size: 0.8rem; line-height: 1.125rem; }
     /* Pi CLI frames user shell commands with rules instead of a tinted block. */
     .message--bash-execution { padding-inline: 0; border-block: 1px solid var(--success); border-radius: 0; background: transparent; }
     .message--bash-execution.message--bash-excluded { border-color: var(--muted-soft); }
