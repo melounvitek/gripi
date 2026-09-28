@@ -616,11 +616,12 @@ export class ConversationController {
       if (summary.querySelector("[data-focus-activity-toggle]")?.getAttribute("aria-expanded") === "true") {
         messages.filter((message) => message.dataset.focusActivityGroup === summary.dataset.focusActivitySummary).forEach((message) => expandedMessages.add(message));
       }
-      summary.remove();
     });
     messages.forEach((message) => { delete message.dataset.focusActivityGroup; });
     let replacementFocus = null;
     this.refreshActiveActivity(messages);
+    // Remove old summaries only now so the active group's height is measured with its joined summary.
+    summaries.forEach((summary) => summary.remove());
     const groups = this.focusedActivityGroups(messages);
     groups.forEach((group, index) => {
       const groupId = `${this.bindingEpoch}-${index}`;
@@ -682,7 +683,9 @@ export class ConversationController {
         details.append(list);
         summary.append(details);
       }
-      group[0].before(summary);
+      const joinsActiveGroup = index === groups.length - 1 && this.activeActivityGroup?.isConnected && !messages.slice(messages.indexOf(group.at(-1)) + 1).some((message) => this.focusedViewMessage(message));
+      if (joinsActiveGroup) this.activeActivityGroup.querySelector(".active-activity-header").after(summary);
+      else group[0].before(summary);
       if (focusAnchor && group.includes(focusAnchor)) replacementFocus = header;
     });
     if (activeToggle && !replacementFocus) replacementFocus = this.viewToggle;

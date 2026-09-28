@@ -135,6 +135,26 @@ test("discarded thinking is not resurrected by its completion timer", async ({ p
   await expect(group).toHaveCount(0);
 });
 
+test("joins the latest activity summary into the active group", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const group = activeGroup(page);
+  const tools = [call("joined-read", "read", { path: "schema.sql" }), call("joined-bash", "bash", { command: "npm test" })];
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant(tools) }, { type: "message_end", message: assistant(tools) }, start("joined-read", "read", tools[0].arguments), end("joined-read", "read"), start("joined-bash", "bash", tools[1].arguments));
+  const summary = group.locator(".focus-activity-summary");
+  await expect(summary).toContainText("1 tool update");
+  await expect(page.locator(".focus-activity-summary")).toHaveCount(1);
+  await summary.getByRole("button").tap();
+  const details = summary.locator(".focus-activity-details");
+  await expect(details).toContainText("schema.sql");
+  const running = group.locator('[data-tool-call-id="joined-bash"]');
+  expect((await details.boundingBox()).y).toBeLessThan((await running.boundingBox()).y);
+  await group.screenshot({ path: test.info().outputPath("joined-active-now.png") });
+  await deliver({ type: "agent_end" });
+  await expect(group).toHaveCount(0);
+  await expect(page.locator(".focus-activity-summary")).toContainText("2 tool updates");
+  await expect(page.locator(".focus-activity-details")).toContainText("npm test");
+});
+
 test("text-only runs do not create an activity group", async ({ page }) => {
   const deliver = await liveEvents(page);
   await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([{ type: "text", text: "Answer without tools." }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
