@@ -53,6 +53,31 @@ test("slash commands complete on the first mobile tap without submitting", async
   await expect(page.getByRole("dialog", { name: "Model & thinking" })).toBeHidden();
 });
 
+test("attach images opens the picker on the first mobile tap from the right of the message field", async ({ page }) => {
+  await page.goto(`/?${new URLSearchParams({ session_search: sessions.mobile })}`);
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  await page.getByRole("link", { name: new RegExp(sessions.mobile) }).tap();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.mobile })).toBeVisible();
+  const attach = page.locator('label[aria-label="Attach images"]');
+  const bounds = await attach.boundingBox();
+  const field = await page.getByLabel("Message to Pi").boundingBox();
+  const send = await page.locator(".send-button").boundingBox();
+  expect(bounds.width).toBeGreaterThanOrEqual(44);
+  expect(bounds.height).toBeGreaterThanOrEqual(44);
+  expect(bounds.x).toBeGreaterThanOrEqual(field.x + field.width - 1);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(send.x + 1);
+
+  const chooserPromise = page.waitForEvent("filechooser", { timeout: 3000 });
+  await attach.tap();
+  const chooser = await chooserPromise;
+  expect(chooser.isMultiple()).toBe(true);
+  await chooser.setFiles({ name: "first-tap.png", mimeType: "image/png", buffer: await page.screenshot() });
+  const attachment = page.locator(".attachment-tray .attachment");
+  await expect(attachment).toContainText("first-tap.png");
+  await attachment.getByRole("button", { name: "Remove" }).tap();
+  await expect(attachment).toHaveCount(0);
+});
+
 test("Clear queue confirms on the first mobile tap with a 44px target", async ({ page }) => {
   try {
     await prepareClearQueue(page, sessions.clearQueueMobile, true);
@@ -348,6 +373,8 @@ test("keep native Tab order for coarse pointers", async ({ page }) => {
 
   const composer = page.locator('textarea[name="message"]');
   await composer.focus();
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#image-input")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Send" })).toBeFocused();
 });

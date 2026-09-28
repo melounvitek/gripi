@@ -846,6 +846,10 @@
     lastScrollTop = current;
   }, { passive: true });
   ["wheel", "touchstart", "pointerdown", "keydown"].forEach((type) => element.scroll.addEventListener(type, cancelProgrammaticScroll, { passive: true }));
+  // The header and composer sit outside the scroller, so they need its scrollbar gutter to line up with the column.
+  const syncScrollbarGutter = () => document.documentElement.style.setProperty("--conversation-gutter", `${element.scroll.offsetWidth - element.scroll.clientWidth}px`);
+  syncScrollbarGutter();
+  window.addEventListener("resize", syncScrollbarGutter);
 
   document.querySelector("[data-sidebar-search-toggle]").addEventListener("click", (event) => { const open = !element.searchForm.classList.contains("is-open"); element.searchForm.classList.toggle("is-open", open); event.currentTarget.classList.toggle("is-active", open); event.currentTarget.setAttribute("aria-expanded", String(open)); if (open) element.search.focus(); });
   element.search.addEventListener("input", renderSidebar);
