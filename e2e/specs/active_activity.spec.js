@@ -149,10 +149,29 @@ test("joins the latest activity summary into the active group", async ({ page })
   // Measure both in one frame because the summary may be rebuilt after the tap.
   expect(await group.evaluate((element) => element.querySelector(".focus-activity-details").getBoundingClientRect().bottom <= element.querySelector('[data-tool-call-id="joined-bash"]').getBoundingClientRect().top)).toBe(true);
   await group.screenshot({ path: test.info().outputPath("joined-active-now.png") });
+  await deliver(end("joined-bash", "bash"));
+  await expect(group).toContainText("Pi is working…");
+  await expect(summary).toContainText("2 tool updates");
   await deliver({ type: "agent_end" });
   await expect(group).toHaveCount(0);
   await expect(page.locator(".focus-activity-summary")).toContainText("2 tool updates");
   await expect(page.locator(".focus-activity-details")).toContainText("npm test");
+});
+
+test("keeps keyboard focus on the joined summary toggle when it moves", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const group = activeGroup(page);
+  const tools = [call("focus-read", "read", { path: "schema.sql" }), call("focus-test", "bash", { command: "npm test" }), call("focus-lint", "bash", { command: "npm run lint" })];
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant(tools) }, { type: "message_end", message: assistant(tools) }, start("focus-read", "read", tools[0].arguments), end("focus-read", "read"), ...tools.slice(1).map((tool) => start(tool.id, tool.name, tool.arguments)));
+  const joinedToggle = group.locator("[data-focus-activity-toggle]");
+  await expect(joinedToggle).toContainText("1 tool update");
+  await joinedToggle.focus();
+  await deliver(end("focus-lint", "bash"));
+  await expect(joinedToggle).toContainText("2 tool updates");
+  await expect(joinedToggle).toBeFocused();
+  await deliver({ type: "agent_end" });
+  await expect(group).toHaveCount(0);
+  await expect(page.locator("[data-focus-activity-toggle]")).toBeFocused();
 });
 
 test("keeps a summary separate when text follows it", async ({ page }) => {

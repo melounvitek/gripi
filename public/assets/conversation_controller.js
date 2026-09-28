@@ -623,6 +623,9 @@ export class ConversationController {
     // Remove old summaries only now so the active group's height is measured with its joined summary.
     summaries.forEach((summary) => summary.remove());
     const groups = this.focusedActivityGroups(messages);
+    const lastGroup = groups.at(-1);
+    // The latest summary joins the active group unless a visible message follows it.
+    const joinedGroup = this.activeActivityGroup && lastGroup && !messages.slice(messages.indexOf(lastGroup.at(-1)) + 1).some((message) => this.focusedViewMessage(message)) ? lastGroup : null;
     groups.forEach((group, index) => {
       const groupId = `${this.bindingEpoch}-${index}`;
       const expanded = group.some((message) => expandedMessages.has(message));
@@ -683,8 +686,7 @@ export class ConversationController {
         details.append(list);
         summary.append(details);
       }
-      const joinsActiveGroup = index === groups.length - 1 && this.activeActivityGroup?.isConnected && !messages.slice(messages.indexOf(group.at(-1)) + 1).some((message) => this.focusedViewMessage(message));
-      if (joinsActiveGroup) this.activeActivityGroup.querySelector(".active-activity-header").after(summary);
+      if (group === joinedGroup) this.activeActivityGroup.querySelector(".active-activity-header").after(summary);
       else group[0].before(summary);
       if (focusAnchor && group.includes(focusAnchor)) replacementFocus = header;
     });

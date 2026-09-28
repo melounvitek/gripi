@@ -76,24 +76,21 @@
     .session-header-tag-action:hover { background: transparent; color: var(--text); }
     .session-header-window-action:hover { border-color: var(--accent-line-55); color: var(--text); background: var(--accent-tint-04); }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.5rem; }
-    .active-activity { min-height: 0; margin-bottom: 0.85rem; padding: 0.65rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: var(--panel); transition: min-height 180ms ease; }
-    .active-activity-header, .active-activity-header > span:first-child { display: flex; align-items: center; gap: 0.5rem; }
-    .active-activity-header { justify-content: space-between; margin-bottom: 0.65rem; color: var(--text); font-size: 0.75rem; font-weight: 500; }
-    .active-activity-count { color: var(--muted); font-weight: 400; }
+    /* A joined summary shares the header row: label, summary toggle, count. */
+    .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: center; min-height: 0; margin-bottom: 0.85rem; padding: 0.65rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: var(--panel); transition: min-height 180ms ease; }
+    .active-activity > * { grid-column: 1 / -1; }
+    .active-activity-header, .conversation-panel.is-conversation-focused .active-activity .focus-activity-summary { display: contents; }
+    .active-activity-header { color: var(--text); font-size: 0.75rem; font-weight: 500; }
+    .active-activity-header > span:first-child { grid-area: 1 / 1; display: flex; align-items: center; gap: 0.5rem; }
+    .active-activity-count { grid-area: 1 / 3; color: var(--muted); font-weight: 400; }
+    .active-activity-header > span, .active-activity .focus-activity-header { margin-bottom: 0.65rem; }
     .active-activity-waiting { margin: 0; padding: 0.65rem; color: var(--muted); font-size: 0.8rem; }
     @media (prefers-reduced-motion: reduce) { .active-activity { transition: none; } }
     .conversation-panel.is-conversation-focused .conversation-scroll .active-activity > .message { display: block; margin-right: 0; }
     .active-activity > .message:last-child { margin-bottom: 0; }
     .active-activity .message--live { box-shadow: none; }
-    /* A joined summary shares the header row: label, summary toggle, count. */
-    .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: center; }
-    .active-activity > * { grid-column: 1 / -1; }
-    .active-activity-header, .conversation-panel.is-conversation-focused .active-activity .focus-activity-summary { display: contents; }
-    .active-activity-header > span:first-child { grid-area: 1 / 1; }
-    .active-activity-count { grid-area: 1 / 3; }
-    .active-activity-header > span, .active-activity .focus-activity-header { margin-bottom: 0.65rem; }
     .active-activity .focus-activity-header { grid-area: 1 / 2; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.75rem; }
-    .active-activity .focus-activity-summary-text::before { content: "· "; color: var(--muted-soft); }
+    .active-activity .focus-activity-summary-text::before { content: "· "; content: "· " / ""; color: var(--muted-soft); }
     .active-activity .focus-activity-details { grid-column: 1 / -1; margin-bottom: 0.65rem; border: 1px solid var(--border); border-radius: 0.3rem; }
     .focus-activity-summary { display: none; }
     .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin: 0 0 0.85rem; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.78rem; }
@@ -734,6 +731,8 @@
       .project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       .conversation-scroll { padding: 0.75rem; }
+      .active-activity .focus-activity-header { grid-area: 2 / 1 / 3 / -1; }
+      .active-activity .focus-activity-summary-text::before { content: none; }
       .jump-controls.is-visible { transition: opacity 140ms ease, visibility 140ms ease; }
       body:not(.is-conversation-scrolling) .jump-controls.is-visible { visibility: hidden; opacity: 0; pointer-events: none; }
       body:not(.is-conversation-scrolling) .jump-controls.is-loading { visibility: visible; opacity: 1; pointer-events: auto; }
