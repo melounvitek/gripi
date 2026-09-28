@@ -33,8 +33,8 @@ test("background reply notifications preserve literal Markdown punctuation", () 
   const controller = new SidebarController({}, window, {}, {}, (...notification) => notifications.push(notification));
   const link = {
     dataset: {
-      assistantResponseCount: "2",
-      latestAssistantResponsePreview: "Finished feat/my_branch_name",
+      completedReplyId: "completion-2",
+      completedReplyPreview: "Finished feat/my_branch_name",
       sessionPath: "background",
     },
     querySelector: () => ({ textContent: "Background task" }),
@@ -43,13 +43,55 @@ test("background reply notifications preserve literal Markdown punctuation", () 
   globalThis.window = window;
 
   try {
-    controller.notifyBackgroundFinalReplies(new Map([["background", 1]]));
+    controller.notifyBackgroundFinalReplies(new Map([["background", "completion-1"]]));
   } finally {
     if (originalWindow === undefined) delete globalThis.window;
     else globalThis.window = originalWindow;
   }
 
   assert.deepEqual(notifications, [["Background task", "Finished feat/my_branch_name", "/?session=background", "gripi-final-reply:background"]]);
+});
+
+test("background notifications follow settled completion IDs, not progress counts or previews", () => {
+  const originalWindow = globalThis.window;
+  const window = { location: { href: "https://example.test/?session=current", origin: "https://example.test", search: "?session=current" } };
+  const notifications = [];
+  const controller = new SidebarController({}, window, {}, {}, (...notification) => notifications.push(notification));
+  const link = {
+    dataset: { sessionPath: "background", completedReplyId: "", assistantResponseCount: "0" },
+    querySelector: () => ({ textContent: "Background task" }),
+  };
+  controller.element = { querySelector: () => null, querySelectorAll: () => [link, link] };
+  globalThis.window = window;
+  const refresh = (changes) => {
+    const previous = controller.completedReplyIds();
+    Object.assign(link.dataset, changes);
+    controller.notifyBackgroundFinalReplies(previous);
+  };
+
+  try {
+    refresh({ assistantResponseCount: "1", latestAssistantResponsePreview: "Progress" });
+    assert.deepEqual(notifications, []);
+    refresh({ completedReplyId: "final-1", completedReplyPreview: "**Final** answer" });
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0][1], "Final answer");
+    refresh({ assistantResponseCount: "2", latestAssistantResponsePreview: "More progress" });
+    refresh({ completedReplyPreview: "Same completion" });
+    assert.equal(notifications.length, 1);
+    refresh({ completedReplyId: "final-2", completedReplyPreview: "Last answer" });
+    assert.equal(notifications.length, 2);
+    assert.equal(notifications[1][1], "Last answer");
+    refresh({ completedReplyId: "" });
+    refresh({ sessionSyncMode: "external_follow", completedReplyId: "external", completedReplyPreview: "CLI" });
+    refresh({ sessionSyncMode: "managed" });
+    assert.equal(notifications.length, 2, "external completions must not catch up at takeover");
+    refresh({ sessionPath: "current", completedReplyId: "selected" });
+    refresh({ completedReplyId: "selected-again" });
+    assert.equal(notifications.length, 2, "the selected session notifies through live events only");
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
 });
 
 for (const initialMode of ["", "external_follow"]) {
@@ -63,6 +105,8 @@ for (const initialMode of ["", "external_follow"]) {
         sessionPath: "background",
         sessionSyncMode: initialMode,
         assistantResponseCount: "1",
+        completedReplyId: "completion-1",
+        completedReplyPreview: "Previous gateway reply",
         latestAssistantResponsePreview: "CLI reply",
       },
       querySelector: () => ({ textContent: "Background task" }),
@@ -72,7 +116,7 @@ for (const initialMode of ["", "external_follow"]) {
 
     try {
       for (const [mode, count] of [["external_follow", "2"], ["external_follow", "3"], ["managed", "5"], ["managed", "5"]]) {
-        const previousCounts = controller.assistantResponseCounts();
+        const previousCounts = controller.completedReplyIds();
         link.dataset.sessionSyncMode = mode;
         link.dataset.assistantResponseCount = count;
         link.dataset.externalResponseCount = count;
@@ -80,9 +124,10 @@ for (const initialMode of ["", "external_follow"]) {
         assert.deepEqual(notifications, [], `${mode} at count ${count} must not catch up CLI replies`);
       }
 
-      const previousCounts = controller.assistantResponseCounts();
+      const previousCounts = controller.completedReplyIds();
       link.dataset.assistantResponseCount = "6";
-      link.dataset.latestAssistantResponsePreview = "New gateway reply";
+      link.dataset.completedReplyId = "completion-6";
+      link.dataset.completedReplyPreview = "New gateway reply";
       controller.notifyBackgroundFinalReplies(previousCounts);
       controller.notifyBackgroundFinalReplies(previousCounts);
       assert.deepEqual(notifications, [["Background task", "New gateway reply", "/?session=background", "gripi-final-reply:background"]]);
@@ -104,6 +149,8 @@ for (const observedExternal of [true, false]) {
         sessionPath: "background",
         sessionSyncMode: observedExternal ? "external_follow" : "managed",
         assistantResponseCount: "2",
+        completedReplyId: "completion-2",
+        completedReplyPreview: "Previous gateway reply",
         latestAssistantResponsePreview: "CLI reply",
       },
       querySelector: () => ({ textContent: "Background task" }),
@@ -112,27 +159,29 @@ for (const observedExternal of [true, false]) {
     globalThis.window = window;
 
     try {
-      const previousCounts = controller.assistantResponseCounts();
+      const previousCounts = controller.completedReplyIds();
       link.dataset.sessionSyncMode = "managed";
       link.dataset.externalResponseCount = "5";
       link.dataset.assistantResponseCount = observedExternal ? "6" : "5";
-      link.dataset.latestAssistantResponsePreview = observedExternal ? "New gateway reply" : "CLI reply";
+      link.dataset.completedReplyId = observedExternal ? "completion-6" : "completion-2";
+      link.dataset.completedReplyPreview = observedExternal ? "New gateway reply" : "Previous gateway reply";
       controller.notifyBackgroundFinalReplies(previousCounts);
 
       if (!observedExternal) {
         assert.deepEqual(notifications, [], "missed CLI replies must not notify at takeover");
-        const takeoverCounts = controller.assistantResponseCounts();
+        const takeoverCounts = controller.completedReplyIds();
         link.dataset.assistantResponseCount = "6";
-        link.dataset.latestAssistantResponsePreview = "New gateway reply";
+        link.dataset.completedReplyId = "completion-6";
+        link.dataset.completedReplyPreview = "New gateway reply";
         controller.notifyBackgroundFinalReplies(takeoverCounts);
       }
       assert.deepEqual(notifications, [["Background task", "New gateway reply", "/?session=background", "gripi-final-reply:background"]]);
-      assert.equal(previousCounts.get("background"), 2, "external rows must retain their previous assistant count");
+      assert.equal(previousCounts.get("background"), "completion-2", "external rows must retain their previous completion ID");
       controller.notifyBackgroundFinalReplies(previousCounts);
       assert.equal(notifications.length, 1, "repeated refreshes must not notify twice");
-      link.dataset.assistantResponseCount = "7";
+      link.dataset.completedReplyId = "completion-7";
       controller.notifyBackgroundFinalReplies(new Map());
-      assert.equal(notifications.length, 1, "a new sidebar row must not notify without a previous count");
+      assert.equal(notifications.length, 1, "a new sidebar row must not notify without a previous ID");
     } finally {
       if (originalWindow === undefined) delete globalThis.window;
       else globalThis.window = originalWindow;

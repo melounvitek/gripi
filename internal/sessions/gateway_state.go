@@ -14,6 +14,7 @@ import (
 
 type GatewayState struct {
 	readPath               string
+	completionsPath        string
 	projectsPath           string
 	projectChanges         map[string]uint64
 	externalResponseCounts map[string]int
@@ -29,10 +30,17 @@ type GatewayState struct {
 }
 
 func NewGatewayState(readPath, pinnedPath, tagsPath, sessionsRoot string) *GatewayState {
-	return &GatewayState{readPath: readPath, projectsPath: filepath.Join(filepath.Dir(readPath), "projects.json"), projectChanges: make(map[string]uint64), pinnedPath: pinnedPath, tagsPath: tagsPath, sessionsRoot: sessionsRoot, externalResponseCounts: make(map[string]int)}
+	return &GatewayState{readPath: readPath, completionsPath: filepath.Join(filepath.Dir(readPath), "completions.json"), projectsPath: filepath.Join(filepath.Dir(readPath), "projects.json"), projectChanges: make(map[string]uint64), pinnedPath: pinnedPath, tagsPath: tagsPath, sessionsRoot: sessionsRoot, externalResponseCounts: make(map[string]int)}
 }
 
 func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool, externalFollow map[string]bool) (map[string]bool, map[string]bool, error) {
+	return state.ReadAndObservePending(all, selected, markSelected, externalFollow, nil)
+}
+
+// ReadAndObservePending leaves newly discovered rows unobserved until an owned
+// pending client in their CWD can be identified and its completion boundary moved.
+// Existing read state is still observed, preserving older unread replies.
+func (state *GatewayState) ReadAndObservePending(all []*Session, selected *Session, markSelected bool, externalFollow, pendingCWDs map[string]bool) (map[string]bool, map[string]bool, error) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	counts := map[string]int{}
@@ -43,6 +51,10 @@ func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, mar
 		counts = map[string]int{}
 	}
 	counts, changed := state.normalizedCounts(counts)
+	completions, err := state.readCompletions()
+	if err != nil {
+		return nil, nil, err
+	}
 	var paths []string
 	if err := readJSONIfExists(state.pinnedPath, &paths); err != nil {
 		return nil, nil, fmt.Errorf("read pinned sessions state: %w", err)
@@ -53,20 +65,32 @@ func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, mar
 			changed = true
 		}
 	}
+	deferred := make(map[string]bool)
 	for _, session := range all {
 		if state.sessionForgotten(session.Path) {
 			continue
 		}
 		value, known := counts[session.Path]
+		if _, tracked := completions[session.Path]; !known && !tracked && pendingCWDs[session.CWD] && !externalFollow[session.Path] {
+			deferred[session.Path] = true
+			continue
+		}
 		// An in-flight sidebar may still carry a pre-takeover snapshot.
 		baseline := max(session.AssistantResponseCount, state.externalResponseCounts[session.Path])
+		// Busy sidebars can carry deferred metadata older than an explicit /read.
+		if _, tracked := completions[session.Path]; tracked {
+			baseline = max(baseline, value)
+		}
 		if !known || value > baseline || (externalFollow[session.Path] && value != baseline) {
 			counts[session.Path] = baseline
 			changed = true
 		}
 	}
-	if selected != nil && markSelected && !state.sessionForgotten(selected.Path) {
+	if selected != nil && markSelected && !deferred[selected.Path] && !state.sessionForgotten(selected.Path) {
 		baseline := max(selected.AssistantResponseCount, state.externalResponseCounts[selected.Path])
+		if _, tracked := completions[selected.Path]; tracked {
+			baseline = max(baseline, counts[selected.Path])
+		}
 		if counts[selected.Path] != baseline {
 			counts[selected.Path] = baseline
 			changed = true
@@ -80,7 +104,11 @@ func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, mar
 	unread := make(map[string]bool)
 	for _, session := range all {
 		forgotten := state.sessionForgotten(session.Path)
-		unread[session.Path] = !forgotten && counts[session.Path] < session.AssistantResponseCount
+		boundary := session.AssistantResponseCount
+		if completion, known := completions[session.Path]; known {
+			boundary = min(boundary, completion.ResponseCount)
+		}
+		unread[session.Path] = !forgotten && !deferred[session.Path] && counts[session.Path] < boundary
 		if externalFollow[session.Path] && !forgotten {
 			state.externalResponseCounts[session.Path] = max(state.externalResponseCounts[session.Path], session.AssistantResponseCount)
 		}
@@ -233,6 +261,15 @@ func (state *GatewayState) Forget(path string) error {
 	}
 	state.forgotten[path] = true
 	delete(state.externalResponseCounts, path)
+
+	completions, err := state.readCompletions()
+	if err != nil {
+		return err
+	}
+	delete(completions, path)
+	if err := writeJSON(state.completionsPath, completions); err != nil {
+		return err
+	}
 
 	counts := map[string]int{}
 	if err := readJSONIfExists(state.readPath, &counts); err != nil {

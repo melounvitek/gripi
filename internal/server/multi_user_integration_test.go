@@ -117,6 +117,7 @@ func TestMultiUserFiltersListingsReadsActionsAndAttachments(t *testing.T) {
 	if _, err := owners.Claim(other, "workspace-b"); err != nil {
 		t.Fatal(err)
 	}
+	otherImageURL := appendImageEntry(t, other, "other-image", "")
 	cookie := "gripi_workspace=" + workspace
 	index := getWorkspace(handler, "/", cookie)
 	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), own) || strings.Contains(index.Body.String(), other) {
@@ -125,6 +126,9 @@ func TestMultiUserFiltersListingsReadsActionsAndAttachments(t *testing.T) {
 	older := getWorkspace(handler, "/conversation_older?session="+url.QueryEscape(other), cookie)
 	if older.Code != http.StatusNotFound {
 		t.Fatalf("other history = %d", older.Code)
+	}
+	if image := getWorkspace(handler, otherImageURL, cookie); image.Code != http.StatusNotFound {
+		t.Fatalf("other image = %d", image.Code)
 	}
 	events := getWorkspace(handler, "/events?session="+url.QueryEscape(other), cookie)
 	if events.Code != http.StatusNotFound {
@@ -196,14 +200,18 @@ func TestMultiUserListsSessionsThroughASymlinkedSessionsRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookie := "gripi_workspace=" + workspace
+	imageURL := appendImageEntry(t, path, "symlinked-image", "")
 
 	index := getWorkspace(handler, "/", cookie)
 	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), path) {
 		t.Fatalf("index = %d %s", index.Code, index.Body.String())
 	}
-	older := getWorkspace(handler, "/conversation_older?session="+url.QueryEscape(path), cookie)
-	if older.Code != http.StatusOK {
+	older := getWorkspace(handler, "/conversation_older?session="+url.QueryEscape(path)+"&cursor=1000", cookie)
+	if older.Code != http.StatusOK || !strings.Contains(older.Body.String(), imageURL) {
 		t.Fatalf("history = %d %s", older.Code, older.Body.String())
+	}
+	if image := getWorkspace(handler, imageURL, cookie); image.Code != http.StatusOK || image.Body.String() != "png" {
+		t.Fatalf("image = %d %q", image.Code, image.Body.String())
 	}
 	physicalPath, err := filepath.EvalSymlinks(path)
 	if err != nil {

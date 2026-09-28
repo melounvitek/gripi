@@ -51,7 +51,6 @@ for (const touch of [false, true]) {
       await expect(link).toHaveAttribute("data-assistant-response-count", String(responseCount + 1), { timeout: 15_000 });
       await expectExternalIcon(link);
       await expect(link).not.toHaveClass(/\bunread\b/);
-      await expect(link).toHaveAttribute("data-external-response-count", String(responseCount + 1));
       // No always-visible actions on desktop: they wait for hover or keyboard focus like other rows.
       if (!touch) await expect(link.locator("..").locator("[data-session-actions-toggle]")).toHaveCSS("opacity", "0");
       await expectNormalRowShape(link, touch);
@@ -378,6 +377,97 @@ for (const touch of [false, true]) {
       await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "managed");
     });
 
+    test("unread highlight and badge wait for settled handoff while working stays visible", async ({ page, copiedSession }, testInfo) => {
+      test.setTimeout(60_000);
+      const fakeLog = process.env.GRIPI_E2E_FAKE_PI_LOG;
+      test.skip(!fakeLog, "requires the managed fake Pi runtime");
+      await page.goto(copiedSession.backgroundURL);
+      const link = sessionLink(page, copiedSession.file);
+      const sidebar = page.locator("#session-sidebar");
+      const badge = page.locator('label[aria-label="Open sessions"] .mobile-sessions-unread-badge');
+      const responseCount = Number(await link.getAttribute("data-assistant-response-count"));
+      const unreadCount = Number(await sidebar.getAttribute("data-unread-session-count"));
+      const activate = (control) => touch ? control.tap() : control.click();
+      const expectBadge = async (count) => {
+        if (!touch) return;
+        if (count === 0) await expect(badge).toHaveCount(0);
+        else {
+          await expect(badge).toBeVisible();
+          await expect(badge).toHaveText(String(count));
+        }
+      };
+      await expect(link).not.toHaveClass(/\bunread\b/);
+      await expectBadge(unreadCount);
+
+      // Submit to the real gateway without opening (and marking read) the working session.
+      const started = await page.request.post("/prompt", { form: {
+        session: copiedSession.file, message: "Hold a progress reply until final handoff",
+      } });
+      expect(started.ok()).toBe(true);
+      try {
+        let progressBatch;
+        await expect.poll(async () => {
+          progressBatch = await (await page.request.get(`/events?${new URLSearchParams({ session: copiedSession.file })}`)).json();
+          return progressBatch.events.find((event) => event.type === "agent_end")?.messages[0]?.content[0]?.text;
+        }).toBe("Progress saved; still working before handoff.");
+        expect(progressBatch.events.some((event) => event.type === "agent_settled")).toBe(false);
+        expect(progressBatch.session_sync.gateway_busy).toBe(true);
+        for (const reload of [false, true]) {
+          if (reload) {
+            // Busy sidebar polls defer metadata; a full render hydrates the persisted progress count.
+            await page.reload();
+            await expect(link).toHaveAttribute("data-assistant-response-count", String(responseCount + 1));
+            await expect(link).toHaveAttribute("data-completed-reply-id", "");
+            await page.waitForResponse(/\/sidebar(?:\?|$)/);
+          }
+          await openSidebar(page, touch);
+          await expect(link.locator('[aria-label="Pi is working"]')).toBeVisible({ timeout: 15_000 });
+          await expect(link.locator("..")).toHaveAttribute("data-busy", "true");
+          await expect(link).not.toHaveClass(/\bunread\b/);
+          await expect(sidebar).toHaveAttribute("data-unread-session-count", String(unreadCount));
+          if (touch) await page.locator('label[aria-label="Close sessions"]').tap();
+          await expectBadge(unreadCount);
+        }
+
+        const finished = await page.request.post("/extension_ui_response", { form: {
+          session: copiedSession.file, id: "e2e-settled-handoff", confirmed: "true",
+        } });
+        expect(finished.ok()).toBe(true);
+        await expect(link).toHaveAttribute("data-completed-reply-preview", replies.extensionApproved, { timeout: 15_000 });
+        await expect(link).toHaveAttribute("data-assistant-response-count", String(responseCount + 2));
+        await expect(link).toHaveClass(/\bunread\b/);
+        await expect(sidebar).toHaveAttribute("data-unread-session-count", String(unreadCount + 1));
+        await expectBadge(unreadCount + 1);
+        await openSidebar(page, touch);
+        await expect(link.locator('[aria-label="Pi is working"]')).toHaveCount(0);
+        await expect(link.locator(".session-title")).toHaveCSS("font-weight", "700");
+        if (touch) await expect(sidebar).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+        await page.screenshot({ path: testInfo.outputPath("settled-unread.png") });
+
+        // Check persisted completion after the normal two-second idle retirement, not a long-lived RPC client.
+        await expect.poll(async () => {
+          const records = (await readFile(fakeLog, "utf8")).trim().split("\n").map(JSON.parse);
+          const pid = records.findLast((record) => record.event === "started" && record.sessionPath === copiedSession.file)?.pid;
+          return pid && records.some((record) => record.event === "stopped" && record.pid === pid);
+        }).toBe(true);
+        await page.reload();
+        await expectBadge(unreadCount + 1);
+        await openSidebar(page, touch);
+        await expect(link).toHaveClass(/\bunread\b/);
+        await expect(link.locator(".session-title")).toHaveCSS("font-weight", "700");
+        await expect(link.locator('[aria-label="Pi is working"]')).toHaveCount(0);
+        await expect(sidebar).toHaveAttribute("data-unread-session-count", String(unreadCount + 1));
+        await activate(link);
+        await expect(message(page, "assistant", replies.extensionApproved)).toBeVisible();
+        if (touch) await expect(page.locator("#mobile-session-toggle")).not.toBeChecked();
+        await expect(sidebar).toHaveAttribute("data-unread-session-count", String(unreadCount));
+        await expect(link).not.toHaveClass(/\bunread\b/);
+        await expectBadge(unreadCount);
+      } finally {
+        await page.request.post("/abort", { form: { session: copiedSession.file } });
+      }
+    });
+
     test("external CLI activity stays quiet in live and reloaded sidebars until takeover", async ({ page, context, copiedSession }, testInfo) => {
       test.setTimeout(60_000);
       await context.addInitScript(() => {
@@ -409,11 +499,13 @@ for (const touch of [false, true]) {
       await expect(backgroundLink).not.toHaveClass(/\bunread\b/);
       const unreadCount = await sidebar.getAttribute("data-unread-session-count");
       const responseCount = Number(await backgroundLink.getAttribute("data-assistant-response-count"));
+      const completedReplyId = await backgroundLink.getAttribute("data-completed-reply-id");
 
       await appendCLIReply(copiedSession.file, "Second external CLI reply");
       await expect(message(page, "assistant", "Second external CLI reply")).toBeAttached();
       // Wait for the real sidebar refresh to observe the appended JSONL, not just its old quiet row.
       await expect(backgroundLink).toHaveAttribute("data-assistant-response-count", String(responseCount + 1), { timeout: 15_000 });
+      await expect(backgroundLink).toHaveAttribute("data-completed-reply-id", completedReplyId);
       await expectExternalIcon(backgroundLink);
       await expect(backgroundLink).not.toHaveClass(/\bunread\b/);
       await expect(sidebar).toHaveAttribute("data-unread-session-count", unreadCount);
@@ -453,8 +545,10 @@ for (const touch of [false, true]) {
       expect(await background.evaluate(() => window.replyNotifications)).toEqual([]);
       await background.unroute(sidebarURL);
       await expect(backgroundLink.locator(".session-external-indicator")).toHaveCount(0, { timeout: 15_000 });
-      await expect(backgroundLink).toHaveAttribute("data-external-response-count", String(responseCount + 1));
       await expect(backgroundLink).toHaveAttribute("data-assistant-response-count", String(responseCount + 2));
+      await expect(backgroundLink).toHaveAttribute("data-completed-reply-id", /\S/);
+      await expect(backgroundLink).not.toHaveAttribute("data-completed-reply-id", completedReplyId);
+      await expect(backgroundLink).toHaveAttribute("data-completed-reply-preview", replies.standard);
       await expect.poll(() => page.evaluate(() => window.replyNotifications.map((notification) => notification.body)))
         .toEqual([replies.standard]);
       await expect.poll(() => background.evaluate(() => window.replyNotifications.map((notification) => notification.body)), { timeout: 15_000 })

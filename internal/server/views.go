@@ -91,7 +91,7 @@ type pageView struct {
 	TagColors                 map[string]string
 	Unread                    map[string]bool
 	ExternalFollow            map[string]bool
-	ExternalResponseCounts    map[string]int
+	CompletedReplies          map[string]sessions.Completion
 	Pinned                    map[string]bool
 	UnreadCount               int
 	SessionsLimit             int
@@ -239,13 +239,21 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		}
 	}
 	markRead := request.URL.Path != "/sidebar" || params.Get("session") != ""
-	unread, pinned, err := app.gatewayState.ReadAndObserve(all, selected, markRead, externalFollow)
+	unread, pinned, err := app.gatewayState.ReadAndObservePending(all, selected, markRead, externalFollow, unresolvedPendingCWDs)
 	if err != nil {
 		return nil, err
 	}
 	view := &pageView{Request: request, ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity)}
 	view.ExternalFollow = externalFollow
-	view.ExternalResponseCounts = app.gatewayState.ExternalResponseCounts()
+	if notifier := app.completionNotifications; notifier != nil {
+		notifier.mu.Lock()
+		notifier.pruneClientsLocked()
+		notifier.mu.Unlock()
+	}
+	view.CompletedReplies, err = app.gatewayState.Completions()
+	if err != nil {
+		return nil, err
+	}
 	assignments, err := app.gatewayState.SessionTags()
 	if err != nil {
 		return nil, err
@@ -1071,23 +1079,12 @@ func bashStatusItems(message *sessions.Message) []string {
 func attachmentLabel(count int) string {
 	return fmt.Sprintf("📎 %d image attachment%s", count, plural(count))
 }
-func imageSource(image sessions.Image) template.URL {
-	if strings.HasPrefix(image.Src, "/attachments/") {
-		return template.URL(image.Src)
+func imageSource(view *pageView, image sessions.Image) string {
+	if image.Src != "" {
+		return image.Src
 	}
-	if len(image.Data) == 0 || len(image.Data) > 32<<20 {
-		return ""
-	}
-	switch image.MIMEType {
-	case "image/png", "image/jpeg", "image/gif", "image/webp":
-	default:
-		return ""
-	}
-	decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(image.Data))
-	if _, err := io.Copy(io.Discard, decoder); err != nil {
-		return ""
-	}
-	return template.URL("data:" + image.MIMEType + ";base64," + image.Data)
+	// The extension keeps the image viewer's download filename meaningful.
+	return "/session_images/" + url.PathEscape(image.EntryID) + "/" + strconv.Itoa(image.Index) + "." + strings.TrimPrefix(image.MIMEType, "image/") + "?session=" + url.QueryEscape(view.Selected.Path)
 }
 func visibleImages(view *pageView, message *sessions.Message) []sessions.Image {
 	if len(message.Images) > 0 {

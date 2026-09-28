@@ -32,6 +32,14 @@ type completedReply struct {
 	readCountKnown bool
 }
 
+type clientCompletionState struct {
+	pending *completedReply
+	// Preserve read suppression between message_end and agent_settled.
+	message *completedReply
+	// Synthetic pending paths have no session file to count yet.
+	responseCount int
+}
+
 type completionNotifier struct {
 	app         *application
 	ctx         context.Context
@@ -44,6 +52,7 @@ type completionNotifier struct {
 	mu          sync.Mutex
 	started     bool
 	closed      bool
+	clients     map[*rpc.Client]*clientCompletionState
 }
 
 func newCompletionNotifier(app *application) *completionNotifier {
@@ -52,21 +61,123 @@ func newCompletionNotifier(app *application) *completionNotifier {
 		app: app, ctx: ctx, cancel: cancel,
 		queue: make(chan completedReply, completionNotificationQueueSize), done: make(chan struct{}),
 		now: time.Now, waitUntil: waitUntilNotificationDeadline, gracePeriod: completionNotificationGracePeriod,
+		clients: make(map[*rpc.Client]*clientCompletionState),
 	}
 }
 
 func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string]any) {
-	text, completed := completedAssistantReply(event)
-	if !completed {
+	switch event["type"] {
+	case "agent_start", "message_end", "agent_end", "agent_settled":
+	default:
 		return
 	}
+	notifier.mu.Lock()
+	notifier.pruneClientsLocked()
 	path := notifier.app.rpcClients.PathForClient(client)
-	if path == "" {
-		log.Print("drop completed-reply notification: session is no longer registered")
+	if notifier.closed || path == "" {
+		notifier.mu.Unlock()
 		return
 	}
-	reply := completedReply{client: client, path: path, text: text, id: completedReplyID(event)}
-	notifier.schedule(reply)
+	state := notifier.clients[client]
+	if state == nil {
+		state = &clientCompletionState{}
+		notifier.clients[client] = state
+	}
+	var ready *completedReply
+	switch event["type"] {
+	case "agent_start":
+		state.pending, state.message = nil, nil
+		state.responseCount = notifier.responseCount(path, state.responseCount)
+		if err := notifier.app.gatewayState.BeginCompletion(path, state.responseCount); err != nil {
+			log.Printf("begin session completion: %v", err)
+		}
+	case "message_end":
+		message, _ := event["message"].(map[string]any)
+		if message["role"] != "assistant" {
+			break
+		}
+		state.message = nil
+		if strings.TrimSpace(sessions.FinalAssistantText(message["content"])) != "" {
+			state.responseCount++
+		}
+		if text, eligible := completedAssistantReply(event); eligible {
+			state.message = &completedReply{client: client, path: path, text: text, id: completedReplyID(event)}
+			notifier.captureReadCount(state.message)
+		}
+	case "agent_end":
+		state.pending = nil
+		messages, _ := event["messages"].([]any)
+		for index := len(messages) - 1; index >= 0; index-- {
+			message, _ := messages[index].(map[string]any)
+			if message["role"] != "assistant" {
+				continue
+			}
+			candidate := map[string]any{"type": "message_end", "message": message}
+			if text, eligible := completedAssistantReply(candidate); eligible {
+				reply := &completedReply{client: client, path: path, text: text, id: completedReplyID(candidate)}
+				if state.message != nil && state.message.id == reply.id {
+					reply.path = state.message.path
+					reply.readCount, reply.readCountKnown = state.message.readCount, state.message.readCountKnown
+				} else {
+					notifier.captureReadCount(reply)
+				}
+				state.pending = reply
+			}
+			// Never fall back to an earlier eligible assistant reply.
+			break
+		}
+	case "agent_settled":
+		ready = state.pending
+		delete(notifier.clients, client)
+		if notifier.app.synchronizer != nil {
+			if sync := notifier.app.synchronizer.KnownBlocked(path); sync != nil && sync.Mode == sessions.SyncExternalFollow {
+				ready = nil
+			}
+		}
+		if ready != nil {
+			published, err := notifier.app.gatewayState.Complete(path, sessions.Completion{ID: ready.id, Preview: sessions.NotificationPreview(ready.text), ResponseCount: notifier.responseCount(path, state.responseCount)})
+			if err != nil {
+				log.Printf("save session completion: %v", err)
+			}
+			if !published {
+				ready = nil
+			}
+		}
+	}
+	notifier.mu.Unlock()
+	if ready != nil {
+		notifier.schedule(*ready)
+	}
+}
+
+// Only in-flight candidates retain clients; published metadata lives in GatewayState.
+func (notifier *completionNotifier) pruneClientsLocked() {
+	for client := range notifier.clients {
+		if notifier.app.rpcClients.PathForClient(client) == "" {
+			delete(notifier.clients, client)
+		}
+	}
+}
+
+func (notifier *completionNotifier) responseCount(path string, fallback int) int {
+	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
+	if session, found := store.Session(path); found {
+		return session.AssistantResponseCount
+	}
+	return fallback
+}
+
+func (notifier *completionNotifier) captureReadCount(reply *completedReply) {
+	if notifier.app.gatewayState == nil || reply.readCountKnown {
+		return
+	}
+	readCount, err := notifier.app.gatewayState.ReadCount(reply.path)
+	if err != nil {
+		log.Printf("capture completed-reply read state: %v", err)
+	} else {
+		reply.readCount = readCount
+		reply.readCountKnown = true
+	}
 }
 
 func (notifier *completionNotifier) schedule(reply completedReply) {
@@ -76,14 +187,9 @@ func (notifier *completionNotifier) schedule(reply completedReply) {
 		}
 	}
 	reply.observedAt = notifier.now()
-	if notifier.app.gatewayState != nil {
-		readCount, err := notifier.app.gatewayState.ReadCount(reply.path)
-		if err != nil {
-			log.Printf("capture completed-reply read state: %v", err)
-		} else {
-			reply.readCount = readCount
-			reply.readCountKnown = true
-		}
+	notifier.captureReadCount(&reply)
+	if _, _, pending := notifier.app.pendingSessions.Current(reply.path); !pending {
+		reply.client = nil
 	}
 
 	notifier.mu.Lock()
@@ -111,6 +217,7 @@ func (notifier *completionNotifier) Close(ctx context.Context) error {
 		return nil
 	}
 	notifier.closed = true
+	clear(notifier.clients)
 	started := notifier.started
 	notifier.cancel()
 	notifier.mu.Unlock()

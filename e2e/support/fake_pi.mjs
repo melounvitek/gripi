@@ -347,6 +347,19 @@ function acceptPrompt(command) {
     schedule(120, startPaginatedSubagent);
     return;
   }
+  if (command.message === "Hold a progress reply until final handoff") {
+    schedule(150, () => {
+      const progress = assistantMessage([{ type: "text", text: "Progress saved; still working before handoff." }], "stop");
+      appendMessage(progress);
+      emitMessage(progress);
+      emit({ type: "turn_end", message: progress, toolResults: [] });
+      emit({ type: "agent_end", messages: [progress], willRetry: false });
+      // An extension can continue after agent_end; only agent_settled hands control back.
+      pendingExtensionRequest = "e2e-settled-handoff";
+      emit({ type: "extension_ui_request", id: pendingExtensionRequest, method: "confirm", title: "Finish the handoff?" });
+    });
+    return;
+  }
   if (command.message === prompts.extension) {
     schedule(150, () => {
       pendingExtensionRequest = "e2e-release-approval";
@@ -671,6 +684,10 @@ function persistDeferredBashMessages() {
 function acceptExtensionResponse(command) {
   if (command.id !== pendingExtensionRequest) return;
   pendingExtensionRequest = null;
+  if (command.id === "e2e-settled-handoff") {
+    emit({ type: "agent_start" });
+    emit({ type: "turn_start" });
+  }
   if (activeScenario === prompts.extensionRace) {
     completeAssistant(replies.extensionRaceComplete);
     return;
