@@ -650,7 +650,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 		},
 		"messageData":    func(view *pageView, message *sessions.Message) messageData { return messageData{view, message} },
 		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL,
-		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint,
+		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
 		"messageBody": func(message *sessions.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
 				return template.HTML(markdownRenderer.Render(message.Text))
@@ -720,6 +720,19 @@ func activityDay(value time.Time) string {
 		return "Yesterday"
 	default:
 		return "Earlier"
+	}
+}
+
+// messageTimeLabel matches messageTimeLabel in public/assets/formatting.js.
+func messageTimeLabel(value, now time.Time) string {
+	local := value.In(now.Location())
+	switch {
+	case local.Year() != now.Year():
+		return local.Format("Jan 2 2006 15:04")
+	case local.YearDay() != now.YearDay():
+		return local.Format("Jan 2 15:04")
+	default:
+		return local.Format("15:04")
 	}
 }
 func compactRelativeTime(value time.Time) string {

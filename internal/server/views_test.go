@@ -36,6 +36,48 @@ func TestCompactRelativeTime(t *testing.T) {
 	}
 }
 
+func TestMessageTimeLabel(t *testing.T) {
+	zone := time.FixedZone("CEST", 2*60*60)
+	now := time.Date(2026, time.September, 28, 20, 30, 0, 0, zone)
+	for _, test := range []struct {
+		name  string
+		value time.Time
+		want  string
+	}{
+		{"today", time.Date(2026, time.September, 28, 19, 4, 0, 0, zone), "19:04"},
+		{"today in another zone", time.Date(2026, time.September, 27, 22, 5, 0, 0, time.UTC), "00:05"},
+		{"yesterday", time.Date(2026, time.September, 27, 23, 59, 0, 0, zone), "Sep 27 23:59"},
+		{"earlier this year", time.Date(2026, time.January, 7, 9, 3, 0, 0, zone), "Jan 7 09:03"},
+		{"same day last year", time.Date(2025, time.September, 28, 19, 4, 0, 0, zone), "Sep 28 2025 19:04"},
+		{"tomorrow", time.Date(2026, time.September, 29, 8, 0, 0, 0, zone), "Sep 29 08:00"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := messageTimeLabel(test.value, now); got != test.want {
+				t.Errorf("messageTimeLabel = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestMessageTemplateShowsShortTimeWithFullTitle(t *testing.T) {
+	timestamp := time.Now().Add(-time.Minute)
+	message := &sessions.Message{Role: "user", Text: "hello", Timestamp: timestamp}
+	templates, err := template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rendered strings.Builder
+	if err := templates.ExecuteTemplate(&rendered, "message", messageData{View: &pageView{}, Message: message}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := `<div class="message-meta" title="` + timestamp.Local().Format("2006-01-02 15:04") + `">` + messageTimeLabel(timestamp, time.Now()) + `</div>`
+	if !strings.Contains(rendered.String(), want) {
+		t.Fatalf("message time = %s, want %s", rendered.String(), want)
+	}
+}
+
 func TestMessageTemplateCollapsesLongSingleLineToolOutput(t *testing.T) {
 	message := &sessions.Message{
 		Role:     "toolResult",
