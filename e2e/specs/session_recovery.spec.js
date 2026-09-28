@@ -13,7 +13,8 @@ test("polling after sleep restores completed compaction without a browser wake e
 
   const draft = "Keep my unsent message after waking";
   await page.getByLabel("Message to Pi").fill(draft);
-  await page.setViewportSize({ width: 1000, height: 600 });
+  // Short enough that the top of this conversation is well away from the bottom.
+  await page.setViewportSize({ width: 1000, height: 500 });
   const conversation = page.locator("#conversation-scroll");
   await conversation.hover();
   await page.mouse.wheel(0, -2000);

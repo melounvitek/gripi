@@ -50,7 +50,7 @@ async function expectAlignedCard(card, assistant) {
   expect(Math.abs(bounds.x - reference.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(bounds.width - reference.width)).toBeLessThanOrEqual(1);
   const alignment = await card.evaluate((element) => {
-    const left = element.querySelector(".message-header").getBoundingClientRect().left;
+    const left = element.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(element).paddingLeft);
     const contents = element.querySelectorAll(".compact-summary, .bash-execution-status, .message-body");
     return Array.from(contents).filter((node) => node.getClientRects().length).map((node) => ({
       offset: node.getBoundingClientRect().left - left,
