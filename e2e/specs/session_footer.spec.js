@@ -25,6 +25,34 @@ async function expectContainedLayout(page) {
   }
 }
 
+// The composer's rules span the conversation column; composer, footer and desktop header text share its inset edges.
+async function expectColumnAlignment(page, isMobile) {
+  const edges = await page.evaluate(() => {
+    const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+    const textLeft = (selector) => {
+      const range = document.createRange();
+      range.selectNodeContents(document.querySelector(selector));
+      return range.getBoundingClientRect().left;
+    };
+    const textarea = document.querySelector(".composer-textarea-wrap textarea");
+    const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--text-inset")) * parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return {
+      column: box("#live-output"), rule: box(".composer-input-row"), inset,
+      textarea: textarea.getBoundingClientRect().left + parseFloat(getComputedStyle(textarea).paddingLeft),
+      footerLeft: textLeft('[data-status-key="ctx"] .session-status-label'), footerRight: box(".model-settings-chip").right,
+      title: textLeft(".session-header-name"), actionsRight: box(".session-header-actions").right
+    };
+  });
+  expect(Math.abs(edges.rule.left - edges.column.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(edges.rule.right - edges.column.right)).toBeLessThanOrEqual(1);
+  for (const left of [edges.textarea, edges.footerLeft, ...(isMobile ? [] : [edges.title])]) {
+    expect(Math.abs(left - edges.column.left - edges.inset)).toBeLessThanOrEqual(1);
+  }
+  for (const right of [edges.footerRight, ...(isMobile ? [] : [edges.actionsRight])]) {
+    expect(Math.abs(edges.column.right - edges.inset - right)).toBeLessThanOrEqual(1);
+  }
+}
+
 async function activate(control, isMobile) {
   if (isMobile) await control.tap();
   else await control.click();
@@ -79,6 +107,7 @@ test("long provider model names stay contained and settings open on first activa
       await expect(chip).toContainText(`${footerModel.provider}/${footerModel.id} (high)`);
       await expectFixedFooter(page);
       await expectContainedLayout(page);
+      await expectColumnAlignment(page, isMobile);
       const value = chip.locator(".session-status-value");
       await expect(value).toHaveCSS("text-overflow", "ellipsis");
       expect(await value.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);

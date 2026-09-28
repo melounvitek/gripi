@@ -83,6 +83,9 @@ export class ConversationController {
     this.followOversizedMessageBottom = false;
     if (!this.element) return;
 
+    this.syncScrollbarGutter();
+    this.listen(this.window, "resize", () => this.syncScrollbarGutter());
+
     this.listen(this.element, "click", (event) => {
       const toggle = event.target.closest?.("[data-focus-activity-toggle]");
       if (toggle) this.toggleFocusedActivity(toggle);
@@ -269,6 +272,12 @@ export class ConversationController {
     this.listen(this.window, "resize", reposition);
     this.listen(this.window.visualViewport, "resize", reposition);
     this.listen(this.window.visualViewport, "scroll", reposition);
+  }
+
+  // The header and composer sit outside the scroller, so they need its scrollbar gutter to line up with the column.
+  syncScrollbarGutter() {
+    const gutter = this.element.offsetWidth - this.element.clientWidth;
+    if (Number.isFinite(gutter)) this.document.documentElement?.style?.setProperty?.("--conversation-gutter", `${gutter}px`);
   }
 
   scheduleQuoteSelectionUpdate() {
