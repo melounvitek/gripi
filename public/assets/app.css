@@ -89,7 +89,8 @@
     .conversation-panel.is-conversation-focused .conversation-scroll .active-activity > .message { display: block; margin-right: 0; }
     .active-activity > .message:last-child { margin-bottom: 0; }
     .active-activity .message--live { box-shadow: none; }
-    .active-activity .focus-activity-header { grid-area: 1 / 2; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.75rem; }
+    .active-activity .focus-activity-header { grid-area: 1 / 2; justify-self: start; width: auto; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.75rem; }
+    .active-activity button.focus-activity-header::after { margin-left: 0; }
     .active-activity .focus-activity-summary-text::before { content: "· "; content: "· " / ""; color: var(--muted-soft); }
     .active-activity .focus-activity-details { grid-column: 1 / -1; margin-bottom: 0.65rem; border: 1px solid var(--border); border-radius: 0.3rem; }
     .focus-activity-summary { display: none; }
@@ -731,7 +732,8 @@
       .project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       .conversation-scroll { padding: 0.75rem; }
-      .active-activity .focus-activity-header { grid-area: 2 / 1 / 3 / -1; }
+      .active-activity .focus-activity-header { grid-area: 2 / 1 / 3 / -1; justify-self: stretch; }
+      .active-activity button.focus-activity-header::after { margin-left: auto; }
       .active-activity .focus-activity-summary-text::before { content: none; }
       .jump-controls.is-visible { transition: opacity 140ms ease, visibility 140ms ease; }
       body:not(.is-conversation-scrolling) .jump-controls.is-visible { visibility: hidden; opacity: 0; pointer-events: none; }
