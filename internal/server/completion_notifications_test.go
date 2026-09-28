@@ -52,12 +52,17 @@ func TestCompletedAssistantReplyAcceptsOnlyFinalTextFromCompletedAssistantMessag
 	}
 }
 
-func TestRPCMessageEndFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) {
+func TestRPCSettledReplyFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) {
 	root := t.TempDir()
 	path := writeNotificationSession(t, root, "RPC session")
-	delivered := make(chan string, 1)
-	app := notificationTestApplication(t, root, false, true, pushNotifierFunc(func(_ context.Context, owner string, _ []byte) error {
-		delivered <- owner
+	delivered := make(chan map[string]string, 10)
+	app := notificationTestApplication(t, root, false, true, pushNotifierFunc(func(_ context.Context, owner string, payload []byte) error {
+		var notification map[string]string
+		if err := json.Unmarshal(payload, &notification); err != nil {
+			return err
+		}
+		notification["owner"] = owner
+		delivered <- notification
 		return nil
 	}))
 	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
@@ -72,7 +77,11 @@ func TestRPCMessageEndFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) {
 	t.Cleanup(func() { _ = stdinReader.Close() })
 	stdoutReader, stdoutWriter := io.Pipe()
 	t.Cleanup(func() { _ = stdoutWriter.Close() })
-	client := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: notifier.Observe})
+	observed := make(chan struct{}, 10)
+	client := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: func(client *rpc.Client, event map[string]any) {
+		notifier.Observe(client, event)
+		observed <- struct{}{}
+	}})
 	t.Cleanup(func() { _ = client.Close() })
 	if err := app.rpcClients.Register(path, client); err != nil {
 		t.Fatal(err)
@@ -93,21 +102,49 @@ func TestRPCMessageEndFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) {
 			inspected <- struct{}{}
 		}
 	}()
-	if _, err := io.WriteString(stdoutWriter, `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`+"\n"); err != nil {
-		t.Fatal(err)
+	send := func(event string) {
+		t.Helper()
+		if _, err := io.WriteString(stdoutWriter, event+"\n"); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-observed:
+		case <-time.After(time.Second):
+			t.Fatal("RPC event observer blocked")
+		}
 	}
+	for _, event := range []string{
+		`{"type":"agent_start"}`,
+		`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"progress"}]}}`,
+		`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`,
+		`{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"progress"}]},{"role":"assistant","content":[{"type":"text","text":"done"}]}]}`,
+	} {
+		send(event)
+		select {
+		case notification := <-delivered:
+			t.Fatalf("delivered before settled: %#v", notification)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	send(`{"type":"agent_settled"}`)
 	select {
 	case <-inspected:
 	case <-time.After(time.Second):
 		t.Fatal("sync inspection was skipped or blocked the RPC event callback")
 	}
 	select {
-	case owner := <-delivered:
-		if owner != singleUserOwner {
-			t.Fatalf("delivery owner = %q", owner)
+	case notification := <-delivered:
+		if notification["owner"] != singleUserOwner || notification["body"] != "done" {
+			t.Fatalf("delivery = %#v", notification)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("normal RPC reply was not delivered after inspection")
+	}
+	send(`{"type":"agent_settled"}`)
+	select {
+	case notification := <-delivered:
+		t.Fatalf("duplicate settled delivery: %#v", notification)
+	case <-time.After(20 * time.Millisecond):
 	}
 }
 

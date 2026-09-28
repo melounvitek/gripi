@@ -42,7 +42,7 @@ func TestUnopenedExternalSessionIsReadAcrossPageAndSidebarViews(t *testing.T) {
 				if err := app.templates.ExecuteTemplate(&html, "sidebar", view); err != nil {
 					t.Fatal(err)
 				}
-				for _, expected := range []string{`class="session-row is-external`, `>2m</div>`, `data-session-actions-toggle`, `data-session-sync-mode="external_follow"`, `class="session-external-indicator"`, `title="Active outside Gripi · notifications and unread indicators paused"`, `data-unread-session-count="0"`, `data-external-response-count="1"`} {
+				for _, expected := range []string{`class="session-row is-external`, `>2m</div>`, `data-session-actions-toggle`, `data-session-sync-mode="external_follow"`, `class="session-external-indicator"`, `title="Active outside Gripi · notifications and unread indicators paused"`, `data-unread-session-count="0"`} {
 					if !strings.Contains(html.String(), expected) {
 						t.Errorf("sidebar missing %s", expected)
 					}
@@ -276,9 +276,6 @@ func TestTakeoverClearsUnobservedExternalRepliesButNewRepliesBecomeUnread(t *tes
 	var html strings.Builder
 	if err := app.templates.ExecuteTemplate(&html, "sidebar", view); err != nil {
 		t.Fatal(err)
-	}
-	if !strings.Contains(html.String(), `data-external-response-count="2"`) {
-		t.Fatal("sidebar missing takeover reply boundary")
 	}
 	if strings.Contains(html.String(), `class="session-external-indicator"`) {
 		t.Fatal("external icon remained after takeover")

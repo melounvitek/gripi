@@ -180,6 +180,7 @@ let sessionStatusRequestVersion = 0;
 let notificationRegistration = null;
 let webPushEnabled = false;
 const notifiedFinalReplyKeys = new Set();
+let pendingFinalAssistantReply = null;
 const MAIN_SESSION_HISTORY_KEY = "gripi-main-session-history";
 const conversationController = new ConversationController(document, window);
 const currentSessionFindController = new CurrentSessionFindController(document, conversationController);
@@ -730,25 +731,21 @@ function sessionIsActivelyViewed(sessionPath) {
   return sessionPath && sessionPath === currentSessionPath() && !document.hidden && document.hasFocus();
 }
 
-function finalAssistantReplyKey(sessionPath, event) {
-  const message = liveMessageParser.eventMessage(event);
+function finalAssistantReplyKey(sessionPath, message) {
   const text = liveMessageParser.messageText(message);
-  return [sessionPath, message?.id || message?.messageId || event.id || event.messageId || lastEventSeq, stableTextHash(text)].join(":");
+  return [sessionPath, message.id || message.messageId || message.responseId || message.timestamp, stableTextHash(text)].join(":");
 }
 
-function notifyFinalAssistantReply(event) {
+function notifyFinalAssistantReply(message) {
   if (liveOutput?.dataset.sessionSyncMode === "external_follow" || webPushController.enabled()) return;
-
-  const message = liveMessageParser.eventMessage(event);
-  const roleName = liveMessageParser.liveEventRole(event, message);
-  if (roleName !== "assistant" || event.type !== "message_end") return;
-  if (!liveMessageParser.eventHasFinalAssistantText(event)) return;
+  if (!message || (typeof message.stopReason === "string" && !["", "stop", "length"].includes(message.stopReason))) return;
+  if (!liveMessageParser.finalAssistantReplySegments(message).length) return;
 
   const sessionPath = currentSessionPath();
   if (!sessionPath) return;
   if (sessionIsActivelyViewed(sessionPath)) return;
 
-  const key = finalAssistantReplyKey(sessionPath, event);
+  const key = finalAssistantReplyKey(sessionPath, message);
   if (notifiedFinalReplyKeys.has(key)) return;
   notifiedFinalReplyKeys.add(key);
   const name = document.querySelector(".session-header-name")?.textContent.trim() || "current session";
@@ -1318,12 +1315,17 @@ function renderEvent(event) {
   }
 
   if (event.type === "agent_start") {
+    pendingFinalAssistantReply = null;
     liveAgentRunning = true;
     liveBusySince = eventTimeMilliseconds(event);
     liveErrorText = "";
     setComposerState("running", "Pi is running…", { since: liveBusySince });
     showStatus("Pi is thinking…");
     return;
+  }
+
+  if (event.type === "agent_end") {
+    pendingFinalAssistantReply = Array.isArray(event.messages) ? event.messages.findLast((message) => message?.role === "assistant") : null;
   }
 
   if (event.type === "turn_start") {
@@ -1350,7 +1352,6 @@ function renderEvent(event) {
       liveOutput.dataset.assistantResponseCount = String(Number(liveOutput.dataset.assistantResponseCount) + 1);
       markCurrentSessionRead();
     }
-    notifyFinalAssistantReply(event);
     if (event.type === "message_end") {
       renderErrorEvent(event);
       refreshSessionStatus().catch(() => {});
@@ -1450,6 +1451,9 @@ function renderEvent(event) {
   }
 
   if (event.type === "agent_settled") {
+    const reply = pendingFinalAssistantReply;
+    pendingFinalAssistantReply = null;
+    notifyFinalAssistantReply(reply);
     liveAgentRunning = false;
     liveBusySince = null;
     if (renderErrorEvent(event)) {
@@ -1722,6 +1726,7 @@ async function pollEvents() {
     pollSucceeded = true;
     hideReconnectBanner();
     if (sessionSyncRefreshRequired(payload.session_sync) || payload.missed) {
+      pendingFinalAssistantReply = null;
       if (sessionSyncBlocked() || ["external_follow", "conflict"].includes(payload.session_sync?.mode)) {
         await refreshExternalSession(controller, generation);
       } else {
@@ -2579,6 +2584,7 @@ async function copyText(text) {
 }
 
 function resetSessionViewState() {
+  pendingFinalAssistantReply = null;
   currentSessionFindController.close({ restoreFocus: false });
   imageViewerController.close();
   liveMessageRenderer.releaseMessageImageObjectURLs(conversationPanel);
