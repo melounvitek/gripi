@@ -423,7 +423,20 @@ test("keep wrapped tool output short until the first Expand tap", async ({ page 
   const card = page.locator(".message--tool-call").filter({ hasText: `$ ${tool.wrappedCommand}` }).last();
   await expectWrappedOutputCollapsed(card);
 
-  await card.getByRole("button", { name: "Expand" }).tap();
+  // The quiet text toggle keeps a 44px touch target, and its edge still expands on the first tap.
+  const expand = card.getByRole("button", { name: "Expand" });
+  const target = await expand.evaluate((button) => {
+    button.scrollIntoView({ block: "center" });
+    const bounds = button.getBoundingClientRect();
+    const x = bounds.left + bounds.width / 2;
+    const y = bounds.top + bounds.height / 2;
+    const hits = (dx, dy) => button.contains(document.elementFromPoint(x + dx, y + dy));
+    return { height: bounds.height, width: bounds.width, reach: hits(0, -21) && hits(0, 21) && hits(-(bounds.width / 2 + 7), 0) && hits(bounds.width / 2 + 7, 0), border: getComputedStyle(button).borderTopWidth, transform: getComputedStyle(button).textTransform };
+  });
+  expect(target.reach).toBe(true);
+  expect(target.border).toBe("0px");
+  expect(target.transform).toBe("none");
+  await expand.tap({ position: { x: target.width / 2, y: target.height / 2 + 19 } });
   await expect(card.locator("[data-tool-output-toggle]")).toHaveAttribute("aria-expanded", "true");
   const region = card.getByRole("region", { name: "Expanded tool output" });
   await expect(region).toContainText("oldest-wrapped-output");

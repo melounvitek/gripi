@@ -413,7 +413,13 @@
     if (activeToggle && !replacementFocus) replacementFocus = element.viewToggle.querySelector('[aria-pressed="true"]');
     replacementFocus?.focus({ preventScroll: true });
   }
-  function timeLabel(date = new Date()) { const pad = (value) => String(value).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`; }
+  // Same format as messageTimeLabel in public/assets/formatting.js.
+  function timeLabel(date = new Date(), now = new Date()) {
+    const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    const day = `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getMonth()]} ${date.getDate()}`;
+    if (date.getFullYear() !== now.getFullYear()) return `${day} ${date.getFullYear()} ${time}`;
+    return date.getMonth() !== now.getMonth() || date.getDate() !== now.getDate() ? `${day} ${time}` : time;
+  }
   function applyIdentity(target, session) {
     target.style.setProperty("--project-identity-bg", safeIdentityColor(session.background, "#4a281f"));
     target.style.setProperty("--project-identity-fg", safeIdentityColor(session.color, "#ff9b73"));

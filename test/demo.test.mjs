@@ -25,7 +25,10 @@ test("demo exposes the guide catalogue and safe portable helpers", () => {
   assert.equal(demo.safeGuideLink({ href: "javascript:alert(1)", label: "Unsafe" }), null);
   assert.equal(demo.safeIdentityColor("#12abEF", "#000000"), "#12abEF");
   assert.equal(demo.safeIdentityColor("red;background:url(//example.test)", "#123456"), "#123456");
-  assert.equal(demo.formatDemoTimestamp(new Date(2026, 6, 17, 16, 36)), "2026-07-17 16:36");
+  const now = new Date(2026, 6, 17, 20, 0);
+  assert.equal(demo.formatDemoTimestamp(new Date(2026, 6, 17, 16, 36), now), "16:36");
+  assert.equal(demo.formatDemoTimestamp(new Date(2026, 6, 16, 9, 5), now), "Jul 16 09:05");
+  assert.equal(demo.formatDemoTimestamp(new Date(2025, 6, 17, 16, 36), now), "Jul 17 2025 16:36");
 });
 
 test("every demo session includes activity that distinguishes the transcript views", () => {

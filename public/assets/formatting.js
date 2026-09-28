@@ -141,6 +141,19 @@ export function formatTimestamp(timestamp, fallbackToNow = true) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Matches messageTimeLabel in internal/server/views.go: "19:04" today, "Sep 27 19:04" this year, "Sep 27 2025 19:04" otherwise.
+export function messageTimeLabel(timestamp, now = new Date()) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  const day = `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`;
+  if (date.getFullYear() !== now.getFullYear()) return `${day} ${date.getFullYear()} ${time}`;
+  if (date.getMonth() !== now.getMonth() || date.getDate() !== now.getDate()) return `${day} ${time}`;
+  return time;
+}
+
 export function eventTimestamp(event) {
   return event?.gatewayTimestamp ?? event?.timestamp ?? event?.message?.timestamp ?? event?.gatewayPartialMessage?.timestamp ?? event?.delta?.timestamp ?? event?.item?.timestamp;
 }

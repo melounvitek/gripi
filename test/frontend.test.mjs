@@ -16,6 +16,7 @@ import {
   messageFingerprint,
   messageRoleKey,
   messageRoleLabel,
+  messageTimeLabel,
   messageTimestampKey,
   notificationReplyPreview,
   sessionAuthGuidanceSlashCommand,
@@ -92,6 +93,19 @@ test("formatting and message helpers preserve browser-facing semantics", () => {
   assert.equal(messageTimestampKey(0), "0");
   assert.equal(formatTimestamp(0, false), formatTimestamp(new Date(0), false));
   assert.notEqual(formatTimestamp(0, false), "");
+});
+
+test("message times match the server format in the browser's local time", () => {
+  // Same cases as TestMessageTimeLabel in internal/server/views_test.go.
+  const now = new Date(2026, 8, 28, 20, 30);
+  assert.equal(messageTimeLabel(new Date(2026, 8, 28, 19, 4), now), "19:04");
+  assert.equal(messageTimeLabel(new Date(2026, 8, 28, 0, 5).getTime(), now), "00:05");
+  assert.equal(messageTimeLabel(new Date(2026, 8, 27, 23, 59), now), "Sep 27 23:59");
+  assert.equal(messageTimeLabel(new Date(2026, 0, 7, 9, 3), now), "Jan 7 09:03");
+  assert.equal(messageTimeLabel(new Date(2025, 8, 28, 19, 4), now), "Sep 28 2025 19:04");
+  assert.equal(messageTimeLabel(new Date(2026, 8, 29, 8, 0), now), "Sep 29 08:00");
+  assert.equal(messageTimeLabel("not a date", now), "");
+  assert.equal(formatTimestamp(new Date(2026, 8, 28, 19, 4)), "2026-09-28 19:04");
 });
 
 test("extension notices and errors distinguish supported and terminal-only UI", () => {
