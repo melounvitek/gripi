@@ -945,7 +945,7 @@ func (collector *indexCollector) messageMetadata() (entry, bool) {
 				if isError {
 					pairedMinimum = scannedTrimmedContentMinimum(parts)
 				} else {
-					pairedMinimum = scannedImageBytes(parts)
+					pairedMinimum = 0
 				}
 			case "write":
 				pairedMinimum = scannedTrimmedContentMinimum(parts)
@@ -1397,7 +1397,7 @@ func safeHomeReplacementLower(value *scannedString) int {
 
 func scannedContentMinimum(parts []scannedPart) int64 {
 	textBytes, textParts := scannedJoinedText(parts)
-	return int64((textBytes+max(textParts-1, 0))*2) + scannedImageBytes(parts)
+	return int64((textBytes + max(textParts-1, 0)) * 2)
 }
 
 func scannedTrimmedContentMinimum(parts []scannedPart) int64 {
@@ -1407,16 +1407,6 @@ func scannedTrimmedContentMinimum(parts []scannedPart) int64 {
 			value += int64(stats.nonTrimWhitespace * 2)
 		}
 	}
-	return value + scannedImageBytes(parts)
-}
-
-func scannedImageBytes(parts []scannedPart) int64 {
-	value := int64(0)
-	for _, part := range parts {
-		if part.typeName == "image" && imageMIMETypes[part.mimeType] && part.data != nil {
-			value += int64(part.data.bytes)
-		}
-	}
 	return value
 }
 
@@ -1424,7 +1414,7 @@ func userScannedMinimum(parts []scannedPart) int64 {
 	for _, part := range parts {
 		if stats := scannedContentStats(part); stats != nil {
 			if strings.HasPrefix(strings.TrimLeft(stats.prefix(), " \t\r\n"), "<skill name=\"") {
-				return scannedImageBytes(parts)
+				return 0
 			}
 			break
 		}

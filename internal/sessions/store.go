@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"container/list"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -59,9 +60,11 @@ type Session struct {
 }
 
 type Image struct {
-	Data     string
 	MIMEType string
 	Src      string
+	// EntryID and Index locate an image stored inline in the session file.
+	EntryID string
+	Index   int
 }
 
 type Message struct {
@@ -1334,17 +1337,13 @@ func retainedMessageBytes(message *Message) int64 {
 	value := len(message.Role) + len(message.Text) + len(message.Summary) + len(message.ToolCallID) + len(message.ToolName) +
 		len(message.ToolSummaryHTML) + len(message.ToolPrompt) + len(message.EntryID) + len(message.CustomType) + len(message.BashFullOutputPath)
 	for _, image := range message.Images {
-		value += len(image.Data) + len(image.MIMEType) + len(image.Src)
+		value += len(image.MIMEType) + len(image.Src) + len(image.EntryID)
 	}
 	return int64(value)
 }
 
 func renderedMessageBytes(message *Message) int64 {
-	value := int64((len(message.Role) + len(message.Text) + len(message.Summary)) * 2)
-	for _, image := range message.Images {
-		value += int64(len(image.Data))
-	}
-	return value
+	return int64((len(message.Role) + len(message.Text) + len(message.Summary)) * 2)
 }
 
 func renderUnits(path string, indexed *index, selected []unit, home string) ([]*Message, error) {
@@ -1513,7 +1512,7 @@ func messagesFromRaw(raw map[string]any, home string) []*Message {
 		if displayed, _ := raw["display"].(bool); !displayed {
 			return nil
 		}
-		return []*Message{{Role: "custom", Text: contentText(raw["content"]), Timestamp: when, EntryID: stringValue(raw["id"]), Images: contentImages(raw["content"]), CustomType: stringValue(raw["customType"])}}
+		return []*Message{{Role: "custom", Text: contentText(raw["content"]), Timestamp: when, EntryID: stringValue(raw["id"]), Images: contentImages(raw["content"], stringValue(raw["id"])), CustomType: stringValue(raw["customType"])}}
 	}
 	if typeName == "error" || raw["error"] != nil || raw["finalError"] != nil {
 		if text := errorText(raw); text != "" {
@@ -1551,7 +1550,7 @@ func messagesFromRaw(raw map[string]any, home string) []*Message {
 				text = stringValue(details["diff"])
 			}
 		}
-		images := contentImages(message["content"])
+		images := contentImages(message["content"], stringValue(raw["id"]))
 		if text == "" && len(images) == 0 {
 			return nil
 		}
@@ -1719,16 +1718,69 @@ func contentText(content any) string {
 	return strings.Join(values, "\n")
 }
 
-func contentImages(content any) []Image {
+func contentImages(content any, entryID string) []Image {
 	var result []Image
+	for index, part := range inlineImageParts(content) {
+		result = append(result, Image{MIMEType: stringValue(part["mimeType"]), EntryID: entryID, Index: index})
+	}
+	return result
+}
+
+func inlineImageParts(content any) []map[string]any {
+	var result []map[string]any
 	for _, part := range arrayValue(content) {
 		object, _ := part.(map[string]any)
-		mimeType, data := stringValue(object["mimeType"]), stringValue(object["data"])
-		if stringValue(object["type"]) == "image" && imageMIMETypes[mimeType] && data != "" {
-			result = append(result, Image{Data: data, MIMEType: mimeType})
+		if stringValue(object["type"]) == "image" && imageMIMETypes[stringValue(object["mimeType"])] && stringValue(object["data"]) != "" {
+			result = append(result, object)
 		}
 	}
 	return result
+}
+
+// Image returns the decoded bytes and MIME type of an image stored inline in a session entry.
+func (store Store) Image(path, entryID string, index int) ([]byte, string, error) {
+	canonical, ok := store.canonicalSessionPath(path)
+	if !ok {
+		return nil, "", os.ErrNotExist
+	}
+	indexed, err := store.Cache.Index(canonical)
+	if err != nil {
+		return nil, "", err
+	}
+	position, ok := indexed.byID[entryID]
+	if !ok {
+		return nil, "", os.ErrNotExist
+	}
+	item := indexed.entries[position]
+	if item.Length > MaxRenderedEntryBytes {
+		return nil, "", errors.New("session entry exceeds rendering bound")
+	}
+	file, err := os.Open(canonical)
+	if err != nil {
+		return nil, "", err
+	}
+	defer file.Close()
+	data := make([]byte, item.Length)
+	if _, err := file.ReadAt(data, item.Offset); err != nil && !errors.Is(err, io.EOF) {
+		return nil, "", err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(data), &raw); err != nil {
+		return nil, "", err
+	}
+	content := asMap(raw["message"])["content"]
+	if stringValue(raw["type"]) == "custom_message" {
+		content = raw["content"]
+	}
+	parts := inlineImageParts(content)
+	if index < 0 || index >= len(parts) {
+		return nil, "", os.ErrNotExist
+	}
+	decoded, err := base64.StdEncoding.Strict().DecodeString(stringValue(parts[index]["data"]))
+	if err != nil {
+		return nil, "", err
+	}
+	return decoded, stringValue(parts[index]["mimeType"]), nil
 }
 
 func FinalAssistantText(content any) string {

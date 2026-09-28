@@ -61,18 +61,7 @@ func TestSessionRoutesRejectMalformedGatewayStateWithoutRewritingIt(t *testing.T
 
 func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T) {
 	fixture := seedNativeFixture(t)
-	imageEntry := `{"type":"message","id":"image-entry","parentId":"21000005","timestamp":"2026-07-20T12:30:00.000Z","message":{"role":"user","content":[{"type":"image","data":"cG5n","mimeType":"image/png"}]}}` + "\n"
-	file, err := os.OpenFile(fixture.markerPath, os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = file.WriteString(imageEntry); err != nil {
-		file.Close()
-		t.Fatal(err)
-	}
-	if err = file.Close(); err != nil {
-		t.Fatal(err)
-	}
+	imageURL := appendImageEntry(t, fixture.markerPath, "image-entry", "21000005")
 	handler := fixtureHandler(t, fixture)
 	before := snapshotJSONL(t, fixture.sessionsRoot)
 
@@ -86,7 +75,7 @@ func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T
 		`class="message message--assistant"`, `data-message-fingerprint="assistant:`,
 		`data-events-url="/events?session=`, `data-status-url="/status?session=`, `data-image-viewer`, `data-image-viewer-stage`,
 		`data-image-viewer-open`, `data-image-viewer-download`,
-		`aria-label="View attached image full size"`, `src="data:image/png;base64,cG5n"`,
+		`aria-label="View attached image full size"`, `src="` + imageURL + `"`,
 		`data-session-actions-menu`, `data-modal="session-rename-modal"`, `data-modal="session-delete-modal"`,
 	} {
 		if !strings.Contains(page.Body.String(), contract) {
@@ -109,8 +98,20 @@ func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T
 	if fragment.Code != http.StatusOK || json.Unmarshal(fragment.Body.Bytes(), &payload) != nil {
 		t.Fatalf("fragment = %d %q", fragment.Code, fragment.Body.String())
 	}
-	if payload["session"] != fixture.markerPath || !strings.Contains(payload["conversation_html"].(string), "Contract fixture marker") {
+	if payload["session"] != fixture.markerPath || !strings.Contains(payload["conversation_html"].(string), "Contract fixture marker") || !strings.Contains(payload["conversation_html"].(string), `src="`+imageURL+`"`) {
 		t.Fatalf("fragment payload = %#v", payload)
+	}
+	older := serve(t, handler, http.MethodGet, "/conversation_older?session="+url.QueryEscape(fixture.markerPath)+"&cursor=1000", "")
+	var olderPayload map[string]any
+	if older.Code != http.StatusOK || json.Unmarshal(older.Body.Bytes(), &olderPayload) != nil || !strings.Contains(olderPayload["html"].(string), `src="`+imageURL+`"`) {
+		t.Fatalf("older = %d %q", older.Code, older.Body.String())
+	}
+	image := serve(t, handler, http.MethodGet, imageURL, "")
+	if image.Code != http.StatusOK || image.Header().Get("Content-Type") != "image/png" || image.Body.String() != "png" {
+		t.Fatalf("image = %d %q %q", image.Code, image.Header().Get("Content-Type"), image.Body.String())
+	}
+	if missing := serve(t, handler, http.MethodGet, strings.Replace(imageURL, "/0.png", "/1.png", 1), ""); missing.Code != http.StatusNotFound {
+		t.Fatalf("missing image = %d", missing.Code)
 	}
 
 	status := serve(t, handler, http.MethodGet, "/status?session="+url.QueryEscape(fixture.markerPath), "")
@@ -715,6 +716,21 @@ func serve(t *testing.T, handler http.Handler, method, target, body string) *htt
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+// appendImageEntry appends a user message with an inline PNG and returns the URL that serves it.
+func appendImageEntry(t *testing.T, path, id, parentID string) string {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	entry := `{"type":"message","id":"` + id + `","parentId":"` + parentID + `","timestamp":"2026-07-20T12:30:00.000Z","message":{"role":"user","content":[{"type":"image","data":"cG5n","mimeType":"image/png"}]}}` + "\n"
+	if _, err := file.WriteString(entry); err != nil {
+		t.Fatal(err)
+	}
+	return "/session_images/" + id + "/0.png?session=" + url.QueryEscape(path)
 }
 func snapshotJSONL(t *testing.T, root string) map[string][]byte {
 	t.Helper()

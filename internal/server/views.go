@@ -1056,23 +1056,12 @@ func bashStatusItems(message *sessions.Message) []string {
 func attachmentLabel(count int) string {
 	return fmt.Sprintf("📎 %d image attachment%s", count, plural(count))
 }
-func imageSource(image sessions.Image) template.URL {
-	if strings.HasPrefix(image.Src, "/attachments/") {
-		return template.URL(image.Src)
+func imageSource(view *pageView, image sessions.Image) string {
+	if image.Src != "" {
+		return image.Src
 	}
-	if len(image.Data) == 0 || len(image.Data) > 32<<20 {
-		return ""
-	}
-	switch image.MIMEType {
-	case "image/png", "image/jpeg", "image/gif", "image/webp":
-	default:
-		return ""
-	}
-	decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(image.Data))
-	if _, err := io.Copy(io.Discard, decoder); err != nil {
-		return ""
-	}
-	return template.URL("data:" + image.MIMEType + ";base64," + image.Data)
+	// The extension keeps the image viewer's download filename meaningful.
+	return "/session_images/" + url.PathEscape(image.EntryID) + "/" + strconv.Itoa(image.Index) + "." + strings.TrimPrefix(image.MIMEType, "image/") + "?session=" + url.QueryEscape(view.Selected.Path)
 }
 func visibleImages(view *pageView, message *sessions.Message) []sessions.Image {
 	if len(message.Images) > 0 {

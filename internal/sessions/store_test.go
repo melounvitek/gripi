@@ -34,6 +34,44 @@ func TestWindowIndexesLargeNativeEntriesWithoutMaterializingThemIntoTheConversat
 	}
 }
 
+func TestInlineImagesDoNotShrinkTheWindowAndAreServedByEntry(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	data := strings.Repeat("AAAA", MaxIndexedEntryBytes/4+1024)
+	lines := []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Show screenshots")}
+	parent := "user"
+	for index := 0; index < 25; index++ {
+		call, result := fmt.Sprintf("call-%d", index), fmt.Sprintf("result-%d", index)
+		lines = append(lines,
+			`{"type":"message","id":"`+call+`","parentId":"`+parent+`","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"`+call+`","name":"read","arguments":{"path":"shot.png"}}]}}`,
+			`{"type":"message","id":"`+result+`","parentId":"`+call+`","timestamp":"2026-01-01T00:00:03Z","message":{"role":"toolResult","toolCallId":"`+call+`","toolName":"read","content":[{"type":"text","text":"Read image"},{"type":"image","data":"`+data+`","mimeType":"image/png"}],"isError":false,"timestamp":1}}`)
+		parent = result
+	}
+	lines = append(lines, `{"type":"custom_message","id":"custom","parentId":"`+parent+`","timestamp":"2026-01-01T00:00:04Z","customType":"screenshot","content":[{"type":"image","data":"cG5n","mimeType":"image/png"}],"display":true}`)
+	writeSessionLines(t, path, lines)
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	window, err := store.Window(path, "", false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if window.StartIndex != 0 || len(window.Messages) != 27 {
+		t.Fatalf("window = start %d, messages %d", window.StartIndex, len(window.Messages))
+	}
+	if images := window.Messages[1].Images; len(images) != 1 || images[0].EntryID != "result-0" || images[0].Index != 0 || images[0].MIMEType != "image/png" {
+		t.Fatalf("images = %#v", images)
+	}
+	decoded, mimeType, err := store.Image(path, "result-0", 0)
+	if err != nil || mimeType != "image/png" || len(decoded) != len(data)/4*3 {
+		t.Fatalf("image = %d bytes, %q, %v", len(decoded), mimeType, err)
+	}
+	if decoded, _, err := store.Image(path, "custom", 0); err != nil || string(decoded) != "png" {
+		t.Fatalf("custom image = %q, %v", decoded, err)
+	}
+	if _, _, err := store.Image(path, "result-0", 1); err == nil {
+		t.Fatal("missing image index was served")
+	}
+}
+
 func TestOversizedMultipartMessagesPreserveSegmentsWindowsAndSessionMetadata(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	large := strings.Repeat("x", MaxIndexedEntryBytes+1024)

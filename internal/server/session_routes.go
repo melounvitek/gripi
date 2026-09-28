@@ -26,6 +26,7 @@ func (app *application) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /session_fragment", app.sessionFragment)
 	mux.HandleFunc("GET /conversation_older", app.conversationOlder)
 	mux.HandleFunc("GET /attachments/{session_hash}/{file}", app.attachment)
+	mux.HandleFunc("GET /session_images/{entry_id}/{file}", app.sessionImage)
 	mux.HandleFunc("POST /composer/path_suggestions", app.composerPathSuggestions)
 	mux.HandleFunc("POST /markdown", app.renderMarkdown)
 	mux.HandleFunc("POST /sessions/pin", app.pinSession)
@@ -191,7 +192,7 @@ func (app *application) conversationOlder(response http.ResponseWriter, request 
 		return
 	}
 	matches := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}).Match(session.Path, window.Messages)
-	view := &pageView{Home: app.config.Home, Attachments: matches, HideThinkingBlock: app.piDisplaySettings(session.CWD).HideThinkingBlock}
+	view := &pageView{Selected: session, Home: app.config.Home, Attachments: matches, HideThinkingBlock: app.piDisplaySettings(session.CWD).HideThinkingBlock}
 	var html bytes.Buffer
 	for _, message := range window.Messages {
 		_ = app.templates.ExecuteTemplate(&html, "message", struct {
@@ -255,6 +256,32 @@ func (app *application) attachment(response http.ResponseWriter, request *http.R
 	}
 	response.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(path)))
 	http.ServeFile(response, request, path)
+}
+
+func (app *application) sessionImage(response http.ResponseWriter, request *http.Request) {
+	// Separate from heavyRequests so image loads do not delay session switches.
+	if !acquireRequestSlot(response, request, app.imageRequests) {
+		return
+	}
+	defer releaseRequestSlot(app.imageRequests)
+	path, owned := app.requireOwnedSession(response, request, request.URL.Query().Get("session"))
+	if !owned {
+		return
+	}
+	name, _, _ := strings.Cut(request.PathValue("file"), ".")
+	index, err := strconv.Atoi(name)
+	if err != nil {
+		http.NotFound(response, request)
+		return
+	}
+	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+	data, mimeType, err := store.Image(path, request.PathValue("entry_id"), index)
+	if err != nil {
+		http.NotFound(response, request)
+		return
+	}
+	response.Header().Set("Content-Type", mimeType)
+	_, _ = response.Write(data)
 }
 
 func (app *application) knownSessionHash(hash string) bool {
