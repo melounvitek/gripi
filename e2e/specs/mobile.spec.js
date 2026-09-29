@@ -214,31 +214,21 @@ test("do not highlight unopened sessions on coarse pointers", async ({ page }) =
   await expect(session).not.toHaveAttribute("aria-current", "page");
 });
 
-test("open selected session actions on the first mobile tap", async ({ page }) => {
+test("open selected session actions and pin from them on the first mobile tap", async ({ page }) => {
   await page.goto("/");
   await page.locator('label[aria-label="Open sessions"]').tap();
 
   const currentRow = page.locator('.session-row[data-current="true"]');
-  const pin = currentRow.getByRole("button", { name: /Pin session/ });
-  const pinBounds = await pin.boundingBox();
-  expect(pinBounds).not.toBeNull();
-  expect(pinBounds.width).toBeGreaterThanOrEqual(44);
-  expect(pinBounds.height).toBeGreaterThanOrEqual(44);
-
-  await pin.tap();
-  await expect(currentRow).toHaveAttribute("data-pinned", "true");
-  const unpin = currentRow.getByRole("button", { name: /Unpin session/ });
-  await expect(unpin).toHaveAttribute("aria-pressed", "true");
-  await expect(unpin).toBeEnabled();
-  await expect(unpin).not.toBeFocused();
-  await expect(unpin).toHaveCSS("outline-style", "none");
-  await unpin.tap();
-  await expect(currentRow).toHaveAttribute("data-pinned", "false");
-  await expect(pin).toBeEnabled();
-  await expect(pin).not.toBeFocused();
-  await expect(pin).toHaveCSS("outline-style", "none");
-
   const actions = currentRow.getByRole("button", { name: /Session actions/ });
+  // Touch rows keep Pin in the actions menu, so the row stays one line.
+  for (const pinned of [true, false]) {
+    await actions.tap();
+    await page.getByRole("menuitem", { name: pinned ? "Pin" : "Unpin", exact: true }).tap();
+    await expect(currentRow).toHaveAttribute("data-pinned", String(pinned));
+    await expect(page.getByRole("menu")).toBeHidden();
+    await expect(actions).toHaveCSS("outline-style", "none");
+  }
+
   const indicators = currentRow.locator(".session-indicators");
   await indicators.evaluate((element) => {
     const indicator = document.createElement("span");
@@ -248,7 +238,7 @@ test("open selected session actions on the first mobile tap", async ({ page }) =
   });
   const indicatorBounds = await indicators.locator(".session-fork-indicator").boundingBox();
   const oneLineActionBounds = await actions.boundingBox();
-  expect(indicatorBounds.y + indicatorBounds.height).toBeLessThanOrEqual(oneLineActionBounds.y);
+  expect(indicatorBounds.x + indicatorBounds.width).toBeLessThanOrEqual(oneLineActionBounds.x);
   await indicators.locator(".session-fork-indicator").evaluate((element) => element.remove());
 
   const title = currentRow.locator(".session-title");
@@ -265,7 +255,8 @@ test("open selected session actions on the first mobile tap", async ({ page }) =
   const bounds = await actions.boundingBox();
   const titleBounds = await title.boundingBox();
   expect(bounds).not.toBeNull();
-  expect(titleBounds.y + titleBounds.height).toBeLessThanOrEqual(bounds.y);
+  expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(bounds.x);
+  expect(Math.abs(titleBounds.y + titleBounds.height / 2 - bounds.y - bounds.height / 2)).toBeLessThan(1);
   expect(bounds.width).toBeGreaterThanOrEqual(44);
   expect(bounds.height).toBeGreaterThanOrEqual(44);
 

@@ -37,25 +37,22 @@ for (const width of [320, 393, 1440]) {
         const last = await overflow.boundingBox();
         const bounds = await row.boundingBox();
         if (isMobile || width <= 760) {
-          // Touch rows keep the project dot before the title; tags start the second line, glyph under the title.
+          // Touch rows keep one line: project dot, title, tags, then the time.
           const title = await row.locator(".session-title").boundingBox();
-          const glyph = await icon.locator("svg").boundingBox();
+          const meta = await row.locator(".session-meta").boundingBox();
           expect(project.x + project.width).toBeLessThanOrEqual(title.x);
-          expect(first.y).toBeGreaterThanOrEqual(title.y + title.height);
-          expect(Math.abs(glyph.x - title.x)).toBeLessThan(1);
+          expect(first.x).toBeGreaterThanOrEqual(title.x + title.width);
+          expect(Math.abs(first.y + first.height / 2 - title.y - title.height / 2)).toBeLessThan(2);
+          expect(last.x + last.width).toBeLessThanOrEqual(meta.x);
         } else {
           expect(first.x).toBeGreaterThanOrEqual(project.x + project.width);
           expect(Math.abs(first.y + first.height / 2 - project.y - project.height / 2)).toBeLessThan(2);
         }
         expect(last.x + last.width).toBeLessThanOrEqual(bounds.x + bounds.width);
-        const pin = await row.locator(".session-pin-toggle").boundingBox();
-        const actions = await row.locator(".session-actions-toggle").boundingBox();
-        expect(Math.min(pin.x, actions.x)).toBeGreaterThanOrEqual(last.x + last.width);
+        // Touch rows keep Pin in the actions menu; controls never cover the tags.
+        const controls = (await Promise.all([row.locator(".session-pin-toggle").boundingBox(), row.locator(".session-actions-toggle").boundingBox()])).filter(Boolean);
+        expect(Math.min(...controls.map((control) => control.x))).toBeGreaterThanOrEqual(last.x + last.width);
         expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-        if (isMobile) {
-          expect(first.width).toBeCloseTo(44, 2);
-          expect(first.height).toBeCloseTo(44, 2);
-        }
       };
       await checkLayout();
       // Even an unexpectedly long project name must leave all controls accessible.
@@ -98,8 +95,7 @@ for (const width of [320, 393, 1440]) {
         await icon.hover();
       }
       await page.locator(".session-sidebar").screenshot({ path: testInfo.outputPath("inline-tag-icons.png"), animations: "disabled" });
-      if (isMobile) await icon.tap();
-      else await icon.press("Enter");
+      await icon.press("Enter");
       await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(tags[0]);
       await expect(page.locator(".session-header-name")).toHaveText(sessions.marker);
       expect(new URL(page.url()).searchParams.get("session")).toBe(current);
@@ -119,15 +115,19 @@ for (const width of [320, 393, 1440]) {
       expect(await hoveredTitle(".session-project")).toBe(await row.locator(".session-project").getAttribute("title"));
       await row.locator(".session-indicators").evaluate((element) => {
         const indicator = document.createElement("span");
-        indicator.title = "Pi is working";
-        indicator.textContent = "•";
+        indicator.title = "Forked session";
+        indicator.textContent = "⑂";
         element.append(indicator);
       });
-      expect(await hoveredTitle(".session-indicators [title]")).toBe("Pi is working");
-      // The project line still navigates via the row link, not a nested button/link.
-      const project = await row.locator(".session-project").boundingBox();
-      if (isMobile) await page.touchscreen.tap(project.x + 5, project.y + project.height / 2);
-      else await page.mouse.click(project.x + 5, project.y + project.height / 2);
+      expect(await hoveredTitle(".session-indicators [title]")).toBe("Forked session");
+      // The project dot, and on touch the small tag glyphs, navigate via the row link on the first tap.
+      if (isMobile) {
+        const glyph = await icon.boundingBox();
+        await page.touchscreen.tap(glyph.x + glyph.width / 2, glyph.y + glyph.height / 2);
+      } else {
+        const project = await row.locator(".session-project").boundingBox();
+        await page.mouse.click(project.x + 5, project.y + project.height / 2);
+      }
       await expect(page.locator(".session-header-name")).toHaveText(sessions.history);
     } finally {
       for (const tag of tags) await assign(tag, false);

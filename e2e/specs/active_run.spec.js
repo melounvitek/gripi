@@ -166,6 +166,9 @@ test("runs extension commands and queues steering during compaction", async ({ p
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   await expect(page.locator(".composer-state")).toContainText("Compacting…");
+  // The sidebar marks compaction straight away, before its next refresh, in the time slot that hovering hides.
+  await page.mouse.move(900, 400);
+  await expect(page.locator(".session-row", { hasText: sessions.compactionFollowUp }).locator(".session-meta .session-compacting-indicator")).toBeVisible({ timeout: 2_000 });
 
   const composer = page.getByLabel("Message to Pi");
   const immediateResponsePromise = page.waitForResponse((response) => response.request().postData()?.includes("/immediate-command"));
@@ -303,7 +306,7 @@ test("show an active run in the sidebar and abort it", async ({ page }) => {
   await selectSession(page, sessions.controlsAbort);
   await sendPrompt(page, prompts.abortStart);
 
-  const activeSession = page.locator("a.session", { hasText: sessions.controlsAbort });
+  const activeSession = page.locator(".session-row", { hasText: sessions.controlsAbort });
   await expect(activeSession.locator(".session-running-indicator")).toBeVisible();
   await selectSession(page, sessions.marker);
   await expect(activeSession.locator(".session-running-indicator")).toBeVisible();

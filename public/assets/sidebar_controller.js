@@ -391,14 +391,14 @@ export class SidebarController {
     if (!link) return;
     link.classList.add("compacting");
     this.scheduleRefresh(2500);
-    const indicators = link.querySelector(".session-indicators");
-    if (!indicators || indicators.querySelector(".session-compacting-indicator")) return;
-    indicators.querySelector(".session-running-indicator")?.remove();
+    const meta = link.closest(".session-row")?.querySelector(".session-meta");
+    if (!meta || meta.querySelector(".session-compacting-indicator")) return;
     const indicator = this.document.createElement("span");
     indicator.className = "session-compacting-indicator";
+    indicator.setAttribute("role", "img");
     indicator.title = "Compacting context";
     indicator.setAttribute("aria-label", "Compacting context");
-    indicators.appendChild(indicator);
+    meta.replaceChildren(indicator);
   }
 
   syncUnreadBadges() {

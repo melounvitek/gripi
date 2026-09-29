@@ -421,7 +421,7 @@ for (const touch of [false, true]) {
             await page.waitForResponse(/\/sidebar(?:\?|$)/);
           }
           await openSidebar(page, touch);
-          await expect(link.locator('[aria-label="Pi is working"]')).toBeVisible({ timeout: 15_000 });
+          await expect(link.locator("..").locator('[aria-label="Pi is working"]')).toBeVisible({ timeout: 15_000 });
           await expect(link.locator("..")).toHaveAttribute("data-busy", "true");
           await expect(link).not.toHaveClass(/\bunread\b/);
           await expect(sidebar).toHaveAttribute("data-unread-session-count", String(unreadCount));
@@ -439,7 +439,7 @@ for (const touch of [false, true]) {
         await expect(sidebar).toHaveAttribute("data-unread-session-count", String(unreadCount + 1));
         await expectBadge(unreadCount + 1);
         await openSidebar(page, touch);
-        await expect(link.locator('[aria-label="Pi is working"]')).toHaveCount(0);
+        await expect(link.locator("..").locator('[aria-label="Pi is working"]')).toHaveCount(0);
         await expect(link.locator(".session-title")).toHaveCSS("font-weight", "700");
         if (touch) await expect(sidebar).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
         await page.screenshot({ path: testInfo.outputPath("settled-unread.png") });
@@ -455,7 +455,7 @@ for (const touch of [false, true]) {
         await openSidebar(page, touch);
         await expect(link).toHaveClass(/\bunread\b/);
         await expect(link.locator(".session-title")).toHaveCSS("font-weight", "700");
-        await expect(link.locator('[aria-label="Pi is working"]')).toHaveCount(0);
+        await expect(link.locator("..").locator('[aria-label="Pi is working"]')).toHaveCount(0);
         await expect(sidebar).toHaveAttribute("data-unread-session-count", String(unreadCount + 1));
         await activate(link);
         await expect(message(page, "assistant", replies.extensionApproved)).toBeVisible();
@@ -604,7 +604,6 @@ async function expectNormalRowShape(link, touch) {
     const shape = (row, lead) => ({
       row: box(row), lead: box(row.querySelector(lead)), title: box(row.querySelector(".session-title")),
       age: box(row.querySelector(".session-meta")), actions: box(row.querySelector("[data-session-actions-toggle]")),
-      pin: box(row.querySelector("[data-session-pin-toggle]")),
     });
     const reference = [...document.querySelectorAll(".session-row:not(.is-external)")].find((candidate) => candidate.getClientRects().length);
     const rowBox = element.getBoundingClientRect();
@@ -623,14 +622,12 @@ async function expectNormalRowShape(link, touch) {
   expect(external.actions.x + external.actions.width).toBeLessThanOrEqual(external.row.x + external.row.width + 0.01);
   expect(hits).toEqual([true, true]);
   if (touch) {
-    expect(external.title.y + external.title.height).toBeLessThanOrEqual(external.actions.y + 0.01);
+    expect(external.age.x + external.age.width).toBeLessThanOrEqual(external.actions.x + 0.01);
     // Transformed drawer bounds can round a 44px target slightly below 44.
     expect(external.row.height).toBeGreaterThanOrEqual(44 - 0.01);
-    for (const control of [external.actions, external.pin]) {
-      expect(control.height).toBeGreaterThanOrEqual(44 - 0.01);
-      expect(control.width).toBeGreaterThanOrEqual(44 - 0.01);
-    }
-  } else expect(external.title.x + external.title.width).toBeLessThanOrEqual(Math.min(external.pin.x, external.actions.x) + 0.01);
+    expect(external.actions.height).toBeGreaterThanOrEqual(44 - 0.01);
+    expect(external.actions.width).toBeGreaterThanOrEqual(44 - 0.01);
+  }
 }
 
 async function holdNextFragment(page) {

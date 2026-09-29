@@ -21,6 +21,9 @@ async function assign(page, session, tag, assigned = true) {
 
 const dialogFor = (page) => page.getByRole("dialog", { name: "Session tags", exact: true });
 
+// Touch rows pass taps on their small tag glyphs to the row link, so touch tests reach row tag buttons by keyboard.
+const activateRowTag = (control, isMobile) => isMobile ? control.press("Enter") : control.click();
+
 test("sidebar filters have matching heights and open on first activation", async ({ page, isMobile }, testInfo) => {
   await page.goto("/");
   if (isMobile) await page.locator('label[aria-label="Open sessions"]').tap();
@@ -149,7 +152,7 @@ test("closing the current session overflow editor restores focus after a sidebar
     await page.goto(`/?${new URLSearchParams({ session: current.path, tag: tags[0] })}`);
     if (isMobile) await activate(page.locator('label[aria-label="Open sessions"]'));
     const overflow = page.locator('.session-row[data-current="true"]').getByRole("button", { name: "Edit all 3 tags" });
-    await activate(overflow);
+    await activateRowTag(overflow, isMobile);
     const dialog = dialogFor(page);
     const checkbox = dialog.getByRole("checkbox", { name: tags[0], exact: true });
     await expect(checkbox).toBeChecked();
@@ -181,8 +184,7 @@ test("sidebar tag controls retain keyboard focus across polling and ArrowUp sele
       await expect.poll(() => original.evaluate((element) => element.isConnected)).toBe(false);
       await expect(control).toBeFocused();
     }
-    if (isMobile) await row.locator('.tag-overflow').tap();
-    else await row.locator('.tag-overflow').click();
+    await activateRowTag(row.locator('.tag-overflow'), isMobile);
     const dialog = dialogFor(page);
     const search = dialog.getByRole('searchbox');
     await expect(dialog.getByRole('checkbox').last()).toBeVisible();
@@ -256,7 +258,7 @@ test("tag filter combines across projects without switching conversation; pins b
     await expect(page.getByLabel("Message to Pi")).toHaveValue("Keep this draft");
     await expect(page.locator(".pinned-sessions-list .session-row").filter({ has: page.locator(".session-title", { hasText: pin.name }) })).toHaveAttribute("data-session-path", pin.path);
     const chip = page.locator(".sessions-list .session-row").filter({ has: page.locator(`.session-title`, { hasText: other.name }) }).getByRole("button", { name: `Filter sessions by ${tag}`, exact: true });
-    await activate(chip);
+    await activateRowTag(chip, isMobile);
     await expect.poll(() => new URL(page.url()).searchParams.get("session")).toBe(current.path);
     await activate(page.getByRole("button", { name: "Filter sessions by tag", exact: true }));
     const chooser = page.getByRole("dialog", { name: "Filter by tag", exact: true });
@@ -350,7 +352,7 @@ test("background actions and overflow edit tags without navigating, and stale ed
     const row = page.locator(".sessions-list .session-row");
     await expect(row).toHaveAttribute("data-session-path", other.path);
     await expect(row.locator("[data-tag-filter]")).toHaveCount(2);
-    await activate(row.getByRole("button", { name: "Edit all 3 tags" }));
+    await activateRowTag(row.getByRole("button", { name: "Edit all 3 tags" }), isMobile);
     const dialog = dialogFor(page);
     for (const tag of tags) await expect(dialog.getByRole("checkbox", { name: tag, exact: true })).toBeChecked();
     await activate(dialog.getByRole("button", { name: "Close tag picker" }));

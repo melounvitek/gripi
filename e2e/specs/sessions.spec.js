@@ -2,15 +2,15 @@ import { expect, test } from "@playwright/test";
 import { prompts, sessions } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
-test("keep desktop session activity indicators centred and clear of row controls", async ({ page }) => {
+test("show desktop session activity in the time slot, centred and on one line", async ({ page }) => {
   await page.goto("/");
   const row = page.locator('.session-row[data-current="true"]');
   const title = row.locator(".session-title");
-  const indicators = row.locator(".session-indicators");
-  await indicators.evaluate((element) => {
+  const meta = row.locator(".session-meta");
+  await meta.evaluate((element) => {
     const dot = document.createElement("span");
     dot.className = "session-running-indicator";
-    element.append(dot);
+    element.replaceChildren(dot);
   });
 
   for (const text of ["Short title", "Fix sidebar session deletion and native rename behavior"]) {
@@ -19,13 +19,12 @@ test("keep desktop session activity indicators centred and clear of row controls
     const lineHeight = await title.evaluate((element) => Number.parseFloat(getComputedStyle(element).lineHeight));
     expect(Math.round(titleBounds.height / lineHeight)).toBe(1);
     const linkBounds = await row.locator("a.session").boundingBox();
-    const dotBounds = await indicators.locator(".session-running-indicator").boundingBox();
+    const dotBounds = await meta.locator(".session-running-indicator").boundingBox();
     expect(Math.abs(dotBounds.y + dotBounds.height / 2 - linkBounds.y - linkBounds.height / 2)).toBeLessThan(1);
-    // Hover controls share the time slot, so they never cover the activity dot.
-    await row.hover();
-    const pinBounds = await row.locator(".session-pin-toggle").boundingBox();
-    const actionsBounds = await row.locator(".session-actions-toggle").boundingBox();
-    expect(dotBounds.x + dotBounds.width).toBeLessThanOrEqual(Math.min(pinBounds.x, actionsBounds.x));
+    // The dot takes the time's place, right-aligned with the other rows' times.
+    const timeRight = await page.locator('.session-row[data-current="false"] .session-meta').first().evaluate((element) => element.getBoundingClientRect().right);
+    expect(Math.abs(dotBounds.x + dotBounds.width - timeRight)).toBeLessThan(1);
+    expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(dotBounds.x);
   }
 });
 
@@ -39,11 +38,14 @@ for (const busy of [false, true]) {
     await row.locator(".session-title").evaluate((element) => {
       element.textContent = "Fix sidebar session deletion and native rename behavior";
     });
+    await page.locator('.session-row[data-current="false"] .session-title').first().evaluate((element) => {
+      element.textContent = "Short";
+    });
     if (busy) {
-      await row.locator(".session-indicators").evaluate((element) => {
+      await row.locator(".session-meta").evaluate((element) => {
         const dot = document.createElement("span");
         dot.className = "session-running-indicator";
-        element.append(dot);
+        element.replaceChildren(dot);
       });
     }
 
@@ -52,15 +54,40 @@ for (const busy of [false, true]) {
     const before = await layout();
     const badge = row.locator(".session-shortcut");
     await expect(badge).toBeHidden();
+    const timeRight = await row.locator(".session-meta").evaluate((element) => element.getBoundingClientRect().right);
     await page.keyboard.down("Control");
     await expect(badge).toBeVisible();
     expect(await layout()).toEqual(before);
+    // Numbers replace the time, so short and long titles share one column.
+    await expect(row.locator(".session-meta")).toBeHidden();
+    const badgeRights = await page.locator(".session-shortcut").evaluateAll((elements) =>
+      elements.filter((element) => element.getClientRects().length).map((element) => Math.round(element.getBoundingClientRect().right)));
+    expect(badgeRights.length).toBeGreaterThan(1);
+    expect(new Set(badgeRights)).toEqual(new Set([Math.round(timeRight)]));
     await page.screenshot({ path: testInfo.outputPath("shortcut-overlay.png") });
     await page.keyboard.up("Control");
     await expect(badge).toBeHidden();
     expect(await layout()).toEqual(before);
   });
 }
+
+test("Ctrl shortcut badges replace the actions button on narrow touch-style rows", async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').click();
+  await expect(page.locator(".session-sidebar")).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+  const row = page.locator('.session-row[data-current="true"]');
+  const actions = row.locator("[data-session-actions-toggle]");
+  const actionsBounds = await actions.boundingBox();
+  await page.keyboard.down("Control");
+  const badge = row.locator(".session-shortcut");
+  await expect(badge).toBeVisible();
+  await expect(row.locator(".session-meta")).toBeVisible();
+  const badgeBounds = await badge.boundingBox();
+  expect(Math.abs(badgeBounds.x + badgeBounds.width / 2 - actionsBounds.x - actionsBounds.width / 2)).toBeLessThan(1);
+  await page.keyboard.up("Control");
+  await expect(badge).toBeHidden();
+});
 
 test("hide the desktop sidebar and remember the preference", async ({ page }) => {
   await page.goto("/");

@@ -257,8 +257,8 @@
     .session-row .session-project { order: -1; flex: 0 0 0.75rem; margin: 0; }
     .session-row.is-external .session-project { display: none; }
     .session-row .session-project-monogram, .sidebar-filter-row .project-select-trigger > :is(.project-identity-icon, .project-select-neutral-icon) { width: 0.5rem; min-width: 0; height: 0.5rem; padding: 0; border: 0; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); font-size: 0; }
-    /* The time slot also holds the hover controls, so they never cover tags or activity. */
-    .session-row .session-meta { flex: 0 0 3rem; text-align: right; }
+    /* The time slot fits "13h" and shows the activity dot while Pi works. */
+    .session-row .session-meta { flex: none; min-width: 3ch; overflow: visible; text-align: right; }
     a.session { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: inherit; text-decoration: none; }
     a.session::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
     .session-row .session-content, .session-row .session-indicators { position: relative; z-index: 1; }
@@ -269,6 +269,11 @@
     }
     @media (min-width: 761px) and (hover: hover) and (pointer: fine) {
       .session-row:is(:hover, :has(:focus-visible)) .session-meta { visibility: hidden; }
+      /* Hover controls float over the end of the title, which fades under them. Rows with tags or a fork mark keep room for the controls instead, so those stay visible. */
+      .session-row:not(:has(.session-tags, .session-fork-indicator)):is(:hover, :has(:focus-visible)) .session-content { -webkit-mask-image: linear-gradient(to left, transparent 1.3rem, #000 2.3rem); mask-image: linear-gradient(to left, transparent 1.3rem, #000 2.3rem); }
+      .session-row:has(.session-tags, .session-fork-indicator) .session-meta { min-width: 2.5rem; }
+      /* Ctrl numbers take the time's place, so they line up whatever the title length; touch rows show them over the actions button. */
+      body.session-shortcuts-visible .session-row:has(.session-shortcut) .session-meta { visibility: hidden; }
     }
     .session-pin-toggle, .session-actions-toggle { position: absolute; z-index: 1; top: 50%; display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border: 1px solid transparent; border-radius: 0.25rem; background: transparent; color: var(--muted); opacity: 0; transform: translateY(-50%); }
     .session-pin-toggle { right: 2rem; padding: 0.28rem; }
@@ -301,11 +306,12 @@
     .session-row:has(a.session.selected) { background: var(--panel-softer); }
     a.session.unread .session-title { color: var(--text); font-weight: 700; }
     .session-row:has(a.session.unread) .session-meta { color: var(--accent); font-weight: 600; }
-    .session-content { min-width: 0; }
-    .session-indicators { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; min-width: 0.7rem; }
+    .session-content { flex: 1 1 auto; min-width: 0; }
+    .session-indicators { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem; }
+    .session-indicators:empty { display: none; }
     .session-fork-indicator { display: inline-flex; align-items: center; justify-content: center; min-width: 1.15rem; height: 1.15rem; border: 1px solid #f0c67447; border-radius: 0.2rem; background: #f0c67414; color: var(--gold); font-size: 0.86rem; font-weight: 700; line-height: 1; }
-    .session-shortcut { position: absolute; right: calc(100% + 0.35rem); top: 50%; transform: translateY(-50%); pointer-events: none; display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; background: var(--panel); color: var(--accent); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
-    body.session-shortcuts-visible .recent-session .session-shortcut { display: inline-flex; }
+    .session-shortcut { position: absolute; z-index: 2; right: 0.5rem; top: 50%; transform: translateY(-50%); pointer-events: none; display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; background: var(--panel); color: var(--accent); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+    body.session-shortcuts-visible .session-shortcut { display: inline-flex; }
     .session-title-line { display: flex; align-items: center; gap: 0.5rem; }
     .session-external-indicator { display: inline-flex; flex: 0 0 0.75rem; color: var(--muted); }
     .session-external-indicator svg { width: 0.75rem; height: 0.75rem; stroke-width: 2; }
@@ -752,20 +758,18 @@
     @keyframes streaming-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
     @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .focus-activity-spinner, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (max-width: 760px), (pointer: coarse) {
-      /* Touch rows: leading slot, title and time, then tags and the 44px controls. */
-      .session-row { display: grid; grid-template-columns: 0.75rem minmax(0, 1fr) auto; grid-template-rows: auto 2.75rem; column-gap: 0.5rem; min-height: 0; padding: 0.55rem 0.5rem 0.2rem; }
-      .session-row .session-project { grid-area: 1 / 1; }
-      .session-row > a.session { grid-area: 1 / 2; }
-      .session-row.is-external > a.session { grid-column: 1 / 3; }
-      .session-row > .session-meta { grid-area: 1 / 3; }
-      /* Line the first tag glyph up with the title inside its 44px target. */
-      .session-row .session-tags { grid-area: 2 / 2; margin-left: calc((14px - 44px) / 2); }
+      /* Touch rows: one line with the leading slot, title, tags, time and the 44px actions button, whose menu holds Pin. */
+      .session-row { min-height: 2.75rem; padding: 0 2.9rem 0 0.5rem; }
+      .session-row .session-tags { gap: 0; }
+      .session-row .session-tag-icon { width: 16px; padding: 1px; }
       .session-row .session-title { font-size: 0.95rem; }
-      .session-pin-toggle, .session-actions-toggle { top: auto; bottom: 0.2rem; width: 2.75rem; height: 2.75rem; opacity: 0.7; transform: none; }
-      .session-pin-toggle { right: 3.1rem; padding: 0.78rem; }
-      .session-actions-toggle { right: 0.35rem; }
+      .session-pin-toggle { display: none; }
+      .session-actions-toggle { top: 0; right: 0.15rem; width: 2.75rem; height: 2.75rem; opacity: 0.7; transform: none; }
+      .session-shortcut { right: calc(0.15rem + (2.75rem - 1.35rem) / 2); }
     }
     @media (pointer: coarse) {
+      /* Row tags are glyphs too small to tap, so taps open the session; the tag filter and the actions menu handle tags. */
+      .session-row :is(.session-tag-icon, .tag-overflow) { pointer-events: none; }
       .session-header-view-option { min-height: 2.75rem; }
       .send-control { min-width: 2.75rem; }
       .send-button { display: inline-flex; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; align-items: center; justify-content: center; font-size: 0; }
@@ -788,7 +792,7 @@
     @media (max-width: 760px) {
       html, body { width: 100%; max-width: 100vw; overflow-x: hidden; }
       .app-shell { display: block; width: 100%; max-width: 100vw; height: 100dvh; overflow-x: hidden; }
-      .session-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 10; display: flex; flex-direction: column; width: min(21rem, calc(100vw - 3rem)); max-height: none; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); border-right: 1px solid var(--border-strong); border-bottom: 0; transform: translateX(-105%); transition: transform 160ms ease; }
+      .session-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 10; display: flex; flex-direction: column; width: min(23rem, calc(100vw - 2.75rem)); max-height: none; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); border-right: 1px solid var(--border-strong); border-bottom: 0; transform: translateX(-105%); transition: transform 160ms ease; }
       .mobile-session-toggle:checked + .session-sidebar { transform: translateX(0); }
       .mobile-sidebar-backdrop { position: fixed; inset: 0; z-index: 9; background: #00000073; }
       .mobile-session-toggle:checked ~ .mobile-sidebar-backdrop { display: block; }
@@ -926,7 +930,7 @@
       .compact-tag-filter button { position: relative; }
       .compact-tag-filter button::after { content: ""; position: absolute; inset: -6px 0; }
       .compact-tag-filter .tag-filter-clear { min-width: 32px; }
-      .session-tag-icon, .session-tags .tag-overflow { min-width: 44px; min-height: 44px; }
+      .header-tags :is(.session-tag-icon, .tag-overflow) { min-width: 44px; min-height: 44px; }
       .tag-chip { position: relative; min-height: 28px; }
       .tag-chip::after { content: ""; position: absolute; inset: -8px 0; }
       .tag-overflow, .edit-tags { min-height: 44px; }
@@ -941,8 +945,11 @@
 </style>
 <style data-demo-mobile-overrides>
   .demo-pin-toggle { right: 0.55rem; }
+  @media (max-width: 760px), (pointer: coarse) {
+    /* The demo has no actions menu, so its pin keeps the actions button's slot. */
+    .demo-pin-toggle { display: inline-flex; top: 0; right: 0.15rem; width: 2.75rem; height: 2.75rem; padding: 0.78rem; opacity: 0.7; transform: none; }
+  }
   @media (max-width: 760px) {
-    .demo-pin-toggle { right: 0.35rem; }
     html, body { height: 100%; overflow: hidden; }
     /* Demo-only guard for mobile browsers that root-pan static pages as URL bars resize. */
     .app-shell { position: fixed; inset: 0; height: auto; overflow: hidden; }

@@ -44,6 +44,10 @@ for (const width of [320, 341, 393, 768, 1440]) {
         expect(toggle.x).toBeGreaterThanOrEqual(icons.x + icons.width);
         expect(toggle.x + toggle.width).toBeLessThanOrEqual(bounds.x + bounds.width);
         expect(await header.locator(".session-header-project").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+        if (isMobile) {
+          const target = await icon.boundingBox();
+          expect(Math.min(target.width, target.height)).toBeGreaterThanOrEqual(44);
+        }
         expect(Math.abs(bounds.height - emptyHeight)).toBeLessThanOrEqual(1);
         for (const segment of [brief, full]) {
           expect(await segment.evaluate((element) => {
