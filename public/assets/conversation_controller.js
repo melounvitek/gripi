@@ -520,12 +520,11 @@ export class ConversationController {
       this.completedActivity = null;
     } else if (!this.completedActivity) {
       this.completedActivity = [...this.activeActivityPositions.values()].findLast((message) => message.isConnected && message.hasAttribute("data-activity-completed")) || null;
-      this.completedActivity?.removeAttribute("data-activity-completed");
     }
     const displayed = new Set(this.completedActivity ? [this.completedActivity] : active);
     // Hold the tallest single-step height for the run so the conversation above doesn't move between steps.
     // Parallel steps aren't held, or every later step would sit in a box sized for several cards.
-    if (this.activeActivityGroup?.querySelectorAll(":scope > .message").length <= 1) {
+    if (this.activeActivityGroup && this.activeActivityGroup.querySelectorAll(":scope > .message").length <= 1) {
       this.activityHoldHeight = Math.max(this.activityHoldHeight, this.activeActivityGroup.getBoundingClientRect().height);
     }
     this.activeActivityPositions.forEach((message, position) => {
@@ -568,7 +567,8 @@ export class ConversationController {
     });
     group.querySelector(".active-activity-count").textContent = active.size ? `${active.size} running` : this.completedActivity ? (this.completedActivity.classList.contains("message--tool-error") ? "Failed" : "Done") : "";
     group.querySelector(".active-activity-waiting").hidden = displayed.size > 0;
-    group.style.minHeight = `${this.activityHoldHeight}px`;
+    // Stay below the visible height so a step taller than the view can't hold later steps off-screen.
+    group.style.minHeight = `${Math.min(this.activityHoldHeight, this.element.clientHeight * 0.9)}px`;
     if (this.liveOutput.lastElementChild !== group) this.liveOutput.append(group);
   }
 

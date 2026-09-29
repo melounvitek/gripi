@@ -91,7 +91,7 @@
     /* One readable column; long lines are hard to follow in a wide browser window. */
     .conversation-scroll > :not(.jump-controls, .current-session-find, .empty-state) { max-width: 60rem; margin-inline: auto; }
     /* A joined summary shares the header row: label, summary toggle, count. */
-    .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-content: start; align-items: center; min-height: 0; margin-bottom: 1.1rem; }
+    .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-content: start; align-items: center; margin-bottom: 1.1rem; }
     .active-activity > * { grid-column: 1 / -1; }
     .active-activity-header, .conversation-panel.is-conversation-focused .active-activity .focus-activity-summary { display: contents; }
     .active-activity-header { color: var(--muted); font-family: var(--mono); font-size: 0.74rem; font-weight: 500; }

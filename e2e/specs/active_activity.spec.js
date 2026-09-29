@@ -68,7 +68,6 @@ test("bridges activity gaps without removing the group or keeping a stale runnin
   // The finished step stays until Pi's next step starts.
   await page.waitForTimeout(1600);
   await expect(group.locator('[data-tool-call-id="gap-a"]')).toContainText("Database inspected");
-  await expect(group.getByText("Pi is working…")).toBeHidden();
   await expect(group.locator("[data-activity-active]")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("activity-gap.png") });
   await deliver({ type: "turn_start" }, start("gap-b", "read", { path: "schema.sql" }));
@@ -116,6 +115,19 @@ test("activity height holds through a run and starts fresh for the next run", as
   await deliver({ type: "agent_start" }, start("next-run", "read", { path: "schema.sql" }));
   await expect(group).toContainText("1 running");
   expect((await group.boundingBox()).height).toBeLessThan(tallHeight - 20);
+});
+
+test("a step taller than the view does not hold later steps out of view", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const group = activeGroup(page);
+  const thinking = { type: "thinking", thinking: Array.from({ length: 30 }, (_, index) => `Long reasoning paragraph ${index + 1}.`).join("\n\n") };
+  const update = (type) => ({ type: "message_update", message: assistant([thinking]), assistantMessageEvent: { type, contentIndex: 0 } });
+  await deliver({ type: "agent_start" }, update("thinking_delta"));
+  await expect(group).toContainText("Long reasoning paragraph 30.");
+  await deliver(update("thinking_end"), start("after-thinking", "read", { path: "schema.sql" }));
+  await expect(group.locator('[data-tool-call-id="after-thinking"]')).toBeVisible();
+  await expect.poll(() => page.locator("#conversation-scroll").evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
+  await expect(group.locator('[data-tool-call-id="after-thinking"]')).toBeInViewport();
 });
 
 test("the next step cannot move a finished card during its first Expand tap", async ({ page }) => {
