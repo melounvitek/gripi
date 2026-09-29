@@ -72,7 +72,7 @@
     .session-sidebar-content { scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
     .conversation-panel { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: transparent; }
     /* Title and actions share the conversation column's text edges; --conversation-gutter is the scroller's scrollbar gutter. */
-    .session-header { --header-text-start: calc(1.5rem + max(0px, (100% - 3rem - var(--conversation-gutter, 0px) - 46rem) / 2) + var(--text-inset)); position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; row-gap: 0.15rem; padding: 0.85rem calc(var(--header-text-start) + var(--conversation-gutter, 0px)) 0.6rem var(--header-text-start); border-bottom: 1px solid var(--border); background: var(--bg); }
+    .session-header { --header-text-start: calc(1.5rem + max(0px, (100% - 3rem - var(--conversation-gutter, 0px) - 60rem) / 2) + var(--text-inset)); position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; row-gap: 0.15rem; padding: 0.85rem calc(var(--header-text-start) + var(--conversation-gutter, 0px)) 0.6rem var(--header-text-start); border-bottom: 1px solid var(--border); background: var(--bg); }
     .session-header-title { display: contents; }
     .session-header-project, .session-relation-tree { grid-column: 2 / -1; }
     .session-header .mobile-sessions-button { grid-column: 1; grid-row: 1; }
@@ -108,7 +108,7 @@
     .session-header-window-action:hover { color: var(--text); background: #ffffff08; }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.75rem 1.5rem 1.5rem; }
     /* One readable column; long lines are hard to follow in a wide browser window. */
-    .conversation-scroll > :not(.jump-controls, .current-session-find, .empty-state) { max-width: 46rem; margin-inline: auto; }
+    .conversation-scroll > :not(.jump-controls, .current-session-find, .empty-state) { max-width: 60rem; margin-inline: auto; }
     /* A joined summary shares the header row: label, summary toggle, count. */
     .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: center; min-height: 0; margin-bottom: 1.1rem; transition: min-height 180ms ease; }
     .active-activity > * { grid-column: 1 / -1; }
@@ -177,7 +177,7 @@
     .pending-message { color: var(--muted); font-family: var(--mono); font-size: 0.72rem; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
     .pending-message--steering::before { content: "↳ "; color: var(--accent); }
     .pending-message--follow-up::before { content: "↳ "; color: var(--muted-soft); }
-    .composer-inner { display: grid; gap: 0.6rem; max-width: 46rem; margin-inline: auto; }
+    .composer-inner { display: grid; gap: 0.6rem; max-width: 60rem; margin-inline: auto; }
     .extension-widgets { display: grid; gap: 0.45rem; }
     .extension-widget { padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel-soft); color: var(--copy); font-family: var(--mono); font-size: 0.76rem; white-space: pre-wrap; }
     .extension-widget-title { display: block; margin-bottom: 0.25rem; color: var(--gold); font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
