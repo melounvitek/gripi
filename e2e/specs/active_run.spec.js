@@ -49,7 +49,13 @@ for (const width of [1440, 700]) {
     await sessionWindow.waitForLoadState("domcontentloaded");
     const abort = sessionWindow.getByRole("button", { name: "Abort running Pi" });
     await expect(abort).toBeVisible();
-    await expect(sessionWindow.locator(".composer-state")).toHaveAttribute("data-state", "running");
+    const composerState = sessionWindow.locator(".composer-state");
+    await expect(composerState).toHaveAttribute("data-state", "running");
+    await expect(composerState).toHaveText(/^Working \d+s$/);
+    const spinner = () => composerState.evaluate((element) => getComputedStyle(element, "::before").content);
+    const spinnerFrame = await spinner();
+    expect(spinnerFrame).toMatch(/^"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]"/);
+    await expect.poll(spinner).not.toBe(spinnerFrame);
     await sessionWindow.getByLabel("Message to Pi").focus();
 
     await sessionWindow.keyboard.press("Escape");

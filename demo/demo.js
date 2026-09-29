@@ -250,6 +250,9 @@
   let autoScrollEnabled = true;
   let focusedView = false;
   let activityRunning = false;
+  const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let spinnerFrame = 0;
+  let spinnerTimer = null;
   const focusedActivityMessageIds = new WeakMap();
   let focusedActivityMessageSequence = 0;
   let focusedActivitySignature = null;
@@ -618,6 +621,19 @@
     refreshFocusedActivity();
     element.state.dataset.state = running ? "running" : "idle";
     element.state.textContent = text || "";
+    clearInterval(spinnerTimer);
+    spinnerTimer = null;
+    if (running) {
+      element.state.dataset.spinner = spinnerFrames[spinnerFrame];
+      if (!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        spinnerTimer = setInterval(() => {
+          spinnerFrame = (spinnerFrame + 1) % spinnerFrames.length;
+          element.state.dataset.spinner = spinnerFrames[spinnerFrame];
+        }, 80);
+      }
+    } else {
+      delete element.state.dataset.spinner;
+    }
     element.stop.hidden = !running;
     element.stop.disabled = !running;
     element.stop.classList.toggle("is-visible", running);

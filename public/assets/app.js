@@ -145,9 +145,14 @@ let lastSessionSyncAt = Date.now();
 let lastEventSeq = 0;
 let lastQueueSeq = 0;
 let queueViewGeneration = 0;
+// Match Pi CLI's working indicator: default label and pi-tui Loader frames.
+const WORKING_LABEL = "Working";
+const COMPOSER_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 let waitingForOutputSince = null;
 let waitingForOutputTimer = null;
-let waitingForOutputLabel = "Pi is running…";
+let waitingForOutputLabel = WORKING_LABEL;
+let composerSpinnerTimer = null;
+let composerSpinnerFrame = 0;
 let extensionUiModal = null;
 let extensionUiForm = null;
 let extensionUiTitle = null;
@@ -809,6 +814,21 @@ function startWaitingForOutput(since = Date.now()) {
   waitingForOutputTimer = setInterval(updateWaitingForOutputStatus, 1000);
 }
 
+function syncComposerSpinner() {
+  if (!["running", "bash", "sending", "exporting"].includes(composerState?.dataset.state)) {
+    clearInterval(composerSpinnerTimer);
+    composerSpinnerTimer = null;
+    delete composerState?.dataset.spinner;
+    return;
+  }
+  composerState.dataset.spinner = COMPOSER_SPINNER_FRAMES[composerSpinnerFrame];
+  if (composerSpinnerTimer || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  composerSpinnerTimer = setInterval(() => {
+    composerSpinnerFrame = (composerSpinnerFrame + 1) % COMPOSER_SPINNER_FRAMES.length;
+    syncComposerSpinner();
+  }, 80);
+}
+
 function stopWaitingForOutput() {
   waitingForOutputSince = null;
   clearInterval(waitingForOutputTimer);
@@ -822,7 +842,7 @@ function sessionSyncBlocked() {
 function showCurrentActiveTask(idleState = "done", idleLabel = "Done") {
   const compacting = liveOutput?.dataset.composerCompacting === "true";
   if (liveAgentRunning || compacting) {
-    setComposerState("running", compacting ? "Compacting…" : "Pi is running…", { since: liveBusySince });
+    setComposerState("running", compacting ? "Compacting…" : WORKING_LABEL, { since: liveBusySince });
   } else if (liveBash) {
     setComposerState("bash", "Shell command running…");
   } else {
@@ -836,7 +856,7 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   if (state === "stopping") stoppingSessionPaths.add(sessionPath);
   if (state === "running" && stoppingSessionPaths.has(sessionPath)) return;
   if (!["running", "stopping"].includes(state)) stoppingSessionPaths.delete(sessionPath);
-  if (state === "running") waitingForOutputLabel = label || "Pi is running…";
+  if (state === "running") waitingForOutputLabel = label || WORKING_LABEL;
   if (state === "running" && (since || !waitingForOutputSince)) startWaitingForOutput(since || Date.now());
   if (!["running", "bash"].includes(state)) {
     escapeStopConfirmationExpiresAt = 0;
@@ -848,6 +868,7 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
     composerState.dataset.state = state;
     composerState.textContent = ["running", "bash", "sending", "exporting", "stopping", "error", "success"].includes(state) ? label : "";
     if (state === "running") updateWaitingForOutputStatus();
+    syncComposerSpinner();
   }
   const activeTask = liveAgentRunning || liveOutput?.dataset.composerCompacting === "true";
   const taskBusy = ["running", "bash", "sending", "stopping"].includes(state) || (state === "exporting" && activeTask);
@@ -1322,7 +1343,7 @@ function renderEvent(event) {
     liveAgentRunning = true;
     liveBusySince = eventTimeMilliseconds(event);
     liveErrorText = "";
-    setComposerState("running", "Pi is running…", { since: liveBusySince });
+    setComposerState("running", WORKING_LABEL, { since: liveBusySince });
     showStatus("Pi is thinking…");
     return;
   }
@@ -1334,7 +1355,7 @@ function renderEvent(event) {
   if (event.type === "turn_start") {
     liveBusySince ||= eventTimeMilliseconds(event);
     liveErrorText = "";
-    setComposerState("running", "Pi is running…", { since: liveBusySince });
+    setComposerState("running", WORKING_LABEL, { since: liveBusySince });
     showStatus("Pi is thinking…");
     return;
   }
@@ -2039,7 +2060,7 @@ async function submitPrompt(event) {
     if (queuedPrompt) {
       const currentState = composerState?.dataset.state;
       if (["running", "sending"].includes(currentState)) selectStreamingBehavior(streamingBehavior, { focus: false });
-      if (currentState === "sending") setComposerState("running", compactingQueuedPrompt ? "Compacting…" : "Pi is running…", { since: previousWaitingForOutputSince });
+      if (currentState === "sending") setComposerState("running", compactingQueuedPrompt ? "Compacting…" : WORKING_LABEL, { since: previousWaitingForOutputSince });
       showStatus(errorMessage, true);
       return;
     }
@@ -2185,14 +2206,14 @@ async function submitPrompt(event) {
       showStatus("Done");
     } else {
       liveAgentRunning = true;
-      setComposerState("running", "Pi is running…");
+      setComposerState("running", WORKING_LABEL);
       if (payload?.follow_up) showStatus("Sent to follow-up queue", true);
       else if (payload?.steer) showStatus("Steered Pi", true);
     }
   } else {
     clearStoredComposerDraft(submittedSession);
     liveAgentRunning = true;
-    setComposerState("running", "Pi is running…");
+    setComposerState("running", WORKING_LABEL);
   }
   conversationController.scrollToBottom();
 }
@@ -3404,7 +3425,7 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
   const initialComposerStateSince = Number(liveOutput.dataset.composerStateSince || 0);
   const initialComposerCompacting = liveOutput.dataset.composerCompacting === "true";
   liveBusySince = Number(liveOutput.dataset.composerBusySince || 0) || null;
-  const initialComposerLabel = initialComposerCompacting ? "Compacting…" : "Pi is running…";
+  const initialComposerLabel = initialComposerCompacting ? "Compacting…" : WORKING_LABEL;
   liveAgentRunning = liveOutput.dataset.agentRunning === "true";
   conversationController.setActivityRunning(liveAgentRunning);
   liveMessageRenderer.restorePersistedBashExecutions();

@@ -46,7 +46,7 @@ for (const transport of ["delta-only", "cumulative"]) {
     const extraText = " I expect about ten minutes.";
     const snapshot = { ...message, content: [{ type: "text", text: text + extraText }] };
     await deliver(update(transport === "delta-only" ? "toolcall_delta" : "toolcall_start", snapshot));
-    await expect(status).toContainText("Pi is running…");
+    await expect(status).toContainText("Working");
     await expect(card).toContainText(extraText);
     await expect(card).not.toHaveClass(/message--streaming/);
     await expect(preparation).toHaveCount(1);
@@ -68,12 +68,12 @@ for (const transport of ["delta-only", "cumulative"]) {
     await page.waitForTimeout(300);
     expect(await page.evaluate(() => window.preparationParagraph.isConnected && window.preparationCard.isConnected)).toBe(true);
     await expect(preparation).toHaveCount(1);
-    await expect(status).toContainText("Pi is running…");
+    await expect(status).toContainText("Working");
     await expect(card).not.toHaveClass(/message--streaming/);
 
     await activityView(page, "Brief").tap();
     await expect(preparation).toBeVisible();
-    await expect(status).toContainText("Pi is running…");
+    await expect(status).toContainText("Working");
     await expect(page.getByRole("region", { name: "Active now" })).toContainText("Preparing tool call…");
     await activityView(page, "Full").tap();
     await expect(preparation).toBeVisible();
@@ -88,7 +88,7 @@ for (const transport of ["delta-only", "cumulative"]) {
 
     // Continued text should restore ordinary output feedback and its cursor.
     await deliver(update("text_delta", { ...message, content: [{ type: "text", text: text + extraText + " Still working." }] }));
-    await expect(status).toContainText("Pi is running…");
+    await expect(status).toContainText("Working");
     await expect(card).toContainText("Still working.");
     await expect(preparation).toHaveCount(0);
     await expect(card).toHaveClass(/message--streaming/);
@@ -115,7 +115,7 @@ test("preparation yields to the current cumulative tool card, not an earlier too
   await deliver(update([earlierTool, currentTool]));
   await expect(page.locator('[data-tool-call-id="current-tool"]')).toBeVisible();
   await expect(preparation).toHaveCount(0);
-  await expect(page.locator(".composer-state")).toContainText("Pi is running…");
+  await expect(page.locator(".composer-state")).toContainText("Working");
 });
 
 test("cumulative subagent preparation stays visible until its execution card appears", async ({ page }) => {
@@ -154,7 +154,7 @@ test("tool-only preparation feedback clears at lifecycle boundaries", async ({ p
       { type: "message_start", message },
       { type: "message_update", assistantMessageEvent: { type: "toolcall_delta", delta: "hidden" }, gatewayPartialMessage: message },
     );
-    await expect(status).toContainText("Pi is running…");
+    await expect(status).toContainText("Working");
     await expect(preparation).toHaveCount(1);
     await expect(preparation).toBeVisible();
     await deliver(ending);
@@ -213,7 +213,7 @@ for (const boundary of ["reload", "abort", "forced abort"]) {
     await activityView(page, "Brief").tap();
     await expect(preparation).toBeVisible();
     await expect(page.getByRole("region", { name: "Active now" })).toContainText("Preparing tool call…");
-    await expect(status).toContainText("Pi is running…");
+    await expect(status).toContainText("Working");
 
     if (boundary === "reload") {
       await page.reload();
