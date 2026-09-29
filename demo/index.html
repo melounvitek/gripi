@@ -60,7 +60,7 @@
       --text-inset: 0.9rem;
     }
     html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-    html, body { height: 100%; }
+    html, body { height: 100%; overscroll-behavior: none; }
     *, *::before, *::after { box-sizing: border-box; }
     ::selection { background: #ff5a1f3d; }
     .visually-hidden, .message:not([data-role="custom"]) .role, .session-row .session-project-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
@@ -109,20 +109,18 @@
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.75rem 1.5rem 1.5rem; }
     /* One readable column; long lines are hard to follow in a wide browser window. */
     .conversation-scroll > :not(.jump-controls, .current-session-find, .empty-state) { max-width: 60rem; margin-inline: auto; }
-    /* A joined summary shares the header row: label, summary toggle, count. */
-    .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-content: start; align-items: center; margin-bottom: 1.1rem; }
+    /* A joined summary shares the header row: summary toggle, count. */
+    .active-activity { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 0.5rem; align-content: start; align-items: center; margin-bottom: 1.1rem; }
     .active-activity > * { grid-column: 1 / -1; }
     .active-activity-header, .conversation-panel.is-conversation-focused .active-activity .focus-activity-summary { display: contents; }
     .active-activity-header { color: var(--muted); font-family: var(--mono); font-size: 0.74rem; font-weight: 500; }
-    .active-activity-header > span:first-child { grid-area: 1 / 1; display: flex; align-items: center; gap: 0.5rem; padding-left: var(--text-inset); }
-    .active-activity-count { grid-area: 1 / 3; padding-right: var(--text-inset); color: var(--muted); font-weight: 400; }
+    .active-activity-count { grid-area: 1 / 2; padding-right: var(--text-inset); color: var(--muted); font-weight: 400; }
     .active-activity-header > span, .active-activity .focus-activity-header { margin-bottom: 0.65rem; }
     .active-activity-waiting { margin: 0; padding: 0.65rem var(--text-inset); color: var(--muted); font-size: 0.8rem; }
     .conversation-panel.is-conversation-focused .conversation-scroll .active-activity > .message { display: grid; }
     .active-activity > .message:last-child { margin-bottom: 0; }
-    .active-activity .focus-activity-header { grid-area: 1 / 2; justify-self: start; width: auto; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.75rem; }
+    .active-activity .focus-activity-header { grid-area: 1 / 1; justify-self: start; width: auto; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.75rem; }
     .active-activity button.focus-activity-header::after { margin-left: 0; }
-    .active-activity .focus-activity-summary-text::before { content: "· "; content: "· " / ""; color: var(--muted-soft); }
     .active-activity .focus-activity-details { grid-column: 1 / -1; margin-bottom: 0.65rem; border-radius: 0.2rem; background: var(--tool-ok); }
     .focus-activity-summary { display: none; }
     .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin-bottom: 1.1rem; overflow: hidden; border-radius: 0.2rem; background: var(--tool-ok); color: var(--tool-copy); font-family: var(--mono); font-size: 0.74rem; }
@@ -133,7 +131,6 @@
     button.focus-activity-header:hover { background: #ffffff08; color: var(--text); }
     button.focus-activity-header::after { content: "›"; flex: 0 0 auto; margin-left: auto; font-size: 1rem; line-height: 1; transition: transform 120ms ease; }
     .focus-activity-summary.is-expanded button.focus-activity-header::after { transform: rotate(90deg); }
-    .focus-activity-spinner { flex: 0 0 auto; width: 0.72rem; height: 0.72rem; border: 1.5px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     .focus-activity-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .focus-activity-error-count { flex: 0 0 auto; color: var(--danger); }
     .focus-activity-summary-text + .focus-activity-error-count { margin-left: -0.5rem; }
@@ -755,7 +752,7 @@
     @keyframes stop-button-pulse { 0% { transform: scale(0.82); opacity: 0.9; } 70%, 100% { transform: scale(1.28); opacity: 0; } }
     @keyframes progress-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
     @keyframes streaming-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .focus-activity-spinner, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (max-width: 760px), (pointer: coarse) {
       /* Touch rows: one line with the leading slot, title, tags, time and the 44px actions button, whose menu holds Pin. */
       .session-row { min-height: 2.75rem; padding: 0 2.9rem 0 0.5rem; }
@@ -816,9 +813,7 @@
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       :root { --text-inset: 0.75rem; }
       .conversation-scroll { padding: 0.75rem; }
-      .active-activity .focus-activity-header { grid-area: 2 / 1 / 3 / -1; justify-self: stretch; padding-inline: var(--text-inset); }
-      .active-activity button.focus-activity-header::after { margin-left: auto; }
-      .active-activity .focus-activity-summary-text::before { content: none; }
+      .active-activity .focus-activity-header { justify-self: stretch; padding-inline: var(--text-inset); }
       .jump-controls.is-visible { transition: opacity 140ms ease, visibility 140ms ease; }
       body:not(.is-conversation-scrolling) .jump-controls.is-visible { visibility: hidden; opacity: 0; pointer-events: none; }
       body:not(.is-conversation-scrolling) .jump-controls.is-loading { visibility: visible; opacity: 1; pointer-events: auto; }

@@ -390,7 +390,6 @@
       summary.dataset.focusActivitySummary = groupId;
       const header = document.createElement(items.length ? "button" : "div"); header.className = "focus-activity-header";
       if (items.length) { header.type = "button"; header.dataset.focusActivityToggle = "true"; header.setAttribute("aria-expanded", String(expanded)); }
-      if (running) { const spinner = document.createElement("span"); spinner.className = "focus-activity-spinner"; spinner.setAttribute("aria-hidden", "true"); header.append(spinner); }
       if (summaryData.text) { const text = document.createElement("span"); text.className = "focus-activity-summary-text"; text.textContent = summaryData.text; header.append(text); }
       if (summaryData.errorCount) { const error = document.createElement("span"); error.className = "focus-activity-error-count"; error.textContent = `${summaryData.errorCount} ${summaryData.errorCount === 1 ? "error" : "errors"}`; header.append(error); }
       summary.append(header);
