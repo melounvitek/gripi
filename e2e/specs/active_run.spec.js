@@ -313,6 +313,8 @@ test("show an active run in the sidebar and abort it", async ({ page }) => {
   await sendPrompt(page, prompts.abortStart);
 
   const activeSession = page.locator(".session-row", { hasText: sessions.controlsAbort });
+  // Hovering a row hides its running indicator.
+  await page.mouse.move(900, 400);
   await expect(activeSession.locator(".session-running-indicator")).toBeVisible();
   await selectSession(page, sessions.marker);
   await expect(activeSession.locator(".session-running-indicator")).toBeVisible();
