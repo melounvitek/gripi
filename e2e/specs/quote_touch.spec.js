@@ -288,7 +288,8 @@ test.describe("touch Quote selection", () => {
 
 async function openQuoteSession(page, title) {
   await page.setViewportSize({ width: 300, height: 700 });
-  await page.goto(`/?${new URLSearchParams({ session_search: title })}`);
+  // A searched session link also opens conversation find, whose focus and selection events race quoting.
+  await page.goto("/?show_all_sessions=1");
   await page.locator('label[aria-label="Open sessions"]').tap();
   await page.getByRole("link", { name: new RegExp(title) }).tap();
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
