@@ -241,7 +241,7 @@ test("tool preparation is visible with hidden thinking and is removed on reset o
   assert.equal(output.children.length, 0);
 });
 
-test("Markdown binding aborts stale work and superseded failures cannot replace current output", async () => {
+test("Markdown binding aborts stale work and newer text waits for the render in flight", async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = (_url, options) => {
@@ -264,9 +264,10 @@ test("Markdown binding aborts stale work and superseded failures cannot replace 
     renderer.render(body, "first", 0);
     await settle(() => requests.length === 2);
     renderer.render(body, "second", 0);
+    requests[1].resolve({ ok: true, json: async () => ({ html: "<p>first</p>" }) });
     await settle(() => requests.length === 3);
-    assert.equal(requests[1].signal.aborted, true);
-    requests[1].reject(new Error("superseded failure"));
+    assert.equal(requests[1].signal.aborted, false);
+    assert.equal(body.innerHTML, "<p>first</p>");
     requests[2].resolve({ ok: false });
     await settle(() => body.dataset.rendering === undefined);
     assert.equal(body.textContent, "second");
