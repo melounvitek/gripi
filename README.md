@@ -145,14 +145,6 @@ Gripi uses Pi’s own runtime, sessions, tools, models, and configuration. The c
 - **Extension UI is partial.** Select, confirm, input, editor, notify, title, and editor-prefill requests work. Extension status text is not shown in the footer, which shows only the model, thinking level, and context usage.
 - **There is no terminal UI.** For custom TUI components, terminal keybindings, or code that checks `ctx.mode === "tui"`, use Pi CLI.
 
-## Optional Pi setup
-
-If you do not already have a session-naming workflow, consider installing [`@furbyhaxx/pi-session-naming`](https://github.com/furbyhaxx/pi-session-naming):
-
-```sh
-pi install npm:@furbyhaxx/pi-session-naming
-```
-
 ## Development
 
 The gateway is written in Go. The browser UI and demo use plain JavaScript with no build step, and the desktop app uses Electron. Pi CLI must be on `PATH`; setup does not install it.
