@@ -15,9 +15,13 @@ for (const width of [1440, 390, 320]) {
     const toolCard = page.locator(".message--tool-call").filter({ hasText: tool.command }).last();
     await expectAlignedCard(toolCard, assistant);
 
+    const shells = page.locator('article[data-role="bashExecution"]');
+    const shellCount = await shells.count();
     await page.getByLabel("Message to Pi").fill(`!!${nativeBash.excluded.command}`);
     await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
-    const shell = page.locator('article[data-role="bashExecution"]').last();
+    // Earlier tests leave the same shell card in this shared session.
+    await expect(shells).toHaveCount(shellCount + 1);
+    const shell = shells.last();
     await expect(shell).toContainText(nativeBash.excluded.output.trim());
     await expectRunFinished(page);
     await expectAlignedCard(shell, assistant);
@@ -26,6 +30,8 @@ for (const width of [1440, 390, 320]) {
     await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
     const pending = page.locator('[data-pending-compaction="true"]');
     await expect(pending).toBeVisible();
+    // compaction_start replaces the optimistic card; measure the replacement.
+    await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
     await expectAlignedCard(pending, assistant);
     await expectRunFinished(page);
 
