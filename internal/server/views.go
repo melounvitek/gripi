@@ -634,7 +634,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return b
 		},
 		"base": filepath.Base, "urlquery": url.QueryEscape, "json": func(value any) string { data, _ := json.Marshal(value); return string(data) },
-		"projectIdentity": identityFor, "tagStyle": tagStyle, "relativeTime": relativeTime, "compactRelativeTime": compactRelativeTime, "formatTime": func(value time.Time) string {
+		"projectIdentity": identityFor, "tagStyle": tagStyle, "relativeTime": relativeTime, "compactRelativeTime": compactRelativeTime, "activityDay": activityDay, "formatTime": func(value time.Time) string {
 			if value.IsZero() {
 				return "unknown"
 			}
@@ -650,7 +650,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 		},
 		"messageData":    func(view *pageView, message *sessions.Message) messageData { return messageData{view, message} },
 		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL,
-		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint,
+		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
 		"messageBody": func(message *sessions.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
 				return template.HTML(markdownRenderer.Render(message.Text))
@@ -709,6 +709,31 @@ func relativeTime(value time.Time) string {
 		return "yesterday"
 	}
 	return local.Format("2006-01-02")
+}
+func activityDay(value time.Time) string {
+	local, today := value.Local(), time.Now().Local()
+	yesterday := today.AddDate(0, 0, -1)
+	switch {
+	case local.YearDay() == today.YearDay() && local.Year() == today.Year():
+		return "Today"
+	case local.YearDay() == yesterday.YearDay() && local.Year() == yesterday.Year():
+		return "Yesterday"
+	default:
+		return "Earlier"
+	}
+}
+
+// messageTimeLabel matches messageTimeLabel in public/assets/formatting.js.
+func messageTimeLabel(value, now time.Time) string {
+	local := value.In(now.Location())
+	switch {
+	case local.Year() != now.Year():
+		return local.Format("Jan 2 2006 15:04")
+	case local.YearDay() != now.YearDay():
+		return local.Format("Jan 2 15:04")
+	default:
+		return local.Format("15:04")
+	}
 }
 func compactRelativeTime(value time.Time) string {
 	if value.IsZero() {
@@ -911,6 +936,9 @@ func messageClass(message *sessions.Message) string {
 	}
 	if message.Error {
 		values = append(values, "message--tool-error")
+	}
+	if message.ToolPending {
+		values = append(values, "message--tool-pending")
 	}
 	return strings.Join(values, " ")
 }

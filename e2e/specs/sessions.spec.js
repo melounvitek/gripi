@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { prompts, sessions } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
-test("center desktop session activity indicators for short and multiline titles", async ({ page }) => {
+test("keep desktop session activity indicators centred and clear of row controls", async ({ page }) => {
   await page.goto("/");
   const row = page.locator('.session-row[data-current="true"]');
   const title = row.locator(".session-title");
@@ -17,12 +17,15 @@ test("center desktop session activity indicators for short and multiline titles"
     await title.evaluate((element, text) => { element.textContent = text; }, text);
     const titleBounds = await title.boundingBox();
     const lineHeight = await title.evaluate((element) => Number.parseFloat(getComputedStyle(element).lineHeight));
-    expect(Math.round(titleBounds.height / lineHeight)).toBe(text === "Short title" ? 1 : 2);
+    expect(Math.round(titleBounds.height / lineHeight)).toBe(1);
     const linkBounds = await row.locator("a.session").boundingBox();
     const dotBounds = await indicators.locator(".session-running-indicator").boundingBox();
     expect(Math.abs(dotBounds.y + dotBounds.height / 2 - linkBounds.y - linkBounds.height / 2)).toBeLessThan(1);
+    // Hover controls share the time slot, so they never cover the activity dot.
+    await row.hover();
+    const pinBounds = await row.locator(".session-pin-toggle").boundingBox();
     const actionsBounds = await row.locator(".session-actions-toggle").boundingBox();
-    expect(dotBounds.y + dotBounds.height).toBeLessThanOrEqual(actionsBounds.y);
+    expect(dotBounds.x + dotBounds.width).toBeLessThanOrEqual(Math.min(pinBounds.x, actionsBounds.x));
   }
 });
 

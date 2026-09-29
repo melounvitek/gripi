@@ -193,6 +193,23 @@ test("live thinking follows the bound Pi display setting through streaming updat
   assert.equal(visible.body.textContent, "Visible reasoning");
 });
 
+test("live message times use the short label with the full date as a tooltip", () => {
+  const document = new FakeDocument();
+  const conversation = { followLiveOutput: () => false, afterLiveOutputChange() {} };
+  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser(), { bind() {} });
+  renderer.liveOutput = new FakeElement("div");
+  const earlier = new Date(2025, 8, 27, 19, 4);
+
+  const user = renderer.appendMessage("user", "hello", false, false, earlier.getTime());
+  const meta = user.article.querySelector(".message-meta");
+  assert.equal(meta.textContent, "Sep 27 2025 19:04");
+  assert.equal(meta.getAttribute("title"), "2025-09-27 19:04");
+
+  const tool = renderer.appendCompactMessage("toolResult", "bash", "ok", false, false, null, { timestampFallback: false });
+  assert.equal(tool.meta.textContent, "");
+  assert.equal(tool.meta.getAttribute("title"), null);
+});
+
 test("tool preparation is visible with hidden thinking and is removed on reset or rebind", () => {
   const document = new FakeDocument();
   const output = new FakeElement("section");

@@ -83,6 +83,9 @@ export class ConversationController {
     this.followOversizedMessageBottom = false;
     if (!this.element) return;
 
+    this.syncScrollbarGutter();
+    this.listen(this.window, "resize", () => this.syncScrollbarGutter());
+
     this.listen(this.element, "click", (event) => {
       const toggle = event.target.closest?.("[data-focus-activity-toggle]");
       if (toggle) this.toggleFocusedActivity(toggle);
@@ -271,6 +274,12 @@ export class ConversationController {
     this.listen(this.window.visualViewport, "scroll", reposition);
   }
 
+  // The header and composer sit outside the scroller, so they need its scrollbar gutter to line up with the column.
+  syncScrollbarGutter() {
+    const gutter = this.element.offsetWidth - this.element.clientWidth;
+    if (Number.isFinite(gutter)) this.document.documentElement?.style?.setProperty?.("--conversation-gutter", `${gutter}px`);
+  }
+
   scheduleQuoteSelectionUpdate() {
     if (this.quoteUpdateFrame || this.quotePointerActive || this.document.activeElement === this.quoteButton) return;
     this.quoteUpdateFrame = this.window.requestAnimationFrame(() => {
@@ -441,7 +450,7 @@ export class ConversationController {
     if (reasoningCount > 0) parts.push(`${reasoningCount} reasoning ${reasoningCount === 1 ? "step" : "steps"}`);
     if (toolCount > 0) parts.push(`${toolCount} tool ${toolCount === 1 ? "update" : "updates"}`);
     if (otherCount > 0) parts.push(`${otherCount} other ${otherCount === 1 ? "update" : "updates"}`);
-    return { text: parts.join(" · "), errorCount };
+    return { text: parts.join(" · "), errorCount, pending: messages.some((message) => message.classList.contains("message--tool-pending")) };
   }
 
   focusedActivityItems(messages) {
@@ -607,6 +616,7 @@ export class ConversationController {
         message.classList.contains("message--thinking"),
         ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name)),
         error,
+        message.classList.contains("message--tool-pending"),
         itemText
       ].join(":");
     }).join("|")}`;
@@ -639,7 +649,7 @@ export class ConversationController {
       const summaryData = this.focusedActivitySummary(group);
       const items = this.focusedActivityItems(group);
       const summary = this.document.createElement("section");
-      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${expanded ? " is-expanded" : ""}`;
+      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${summaryData.pending ? " has-pending" : ""}${expanded ? " is-expanded" : ""}`;
       summary.dataset.focusActivitySummary = groupId;
 
       const header = this.document.createElement(items.length > 0 ? "button" : "div");

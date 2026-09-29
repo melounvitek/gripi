@@ -53,6 +53,31 @@ test("slash commands complete on the first mobile tap without submitting", async
   await expect(page.getByRole("dialog", { name: "Model & thinking" })).toBeHidden();
 });
 
+test("attach images opens the picker on the first mobile tap from the right of the message field", async ({ page }) => {
+  await page.goto(`/?${new URLSearchParams({ session_search: sessions.mobile })}`);
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  await page.getByRole("link", { name: new RegExp(sessions.mobile) }).tap();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.mobile })).toBeVisible();
+  const attach = page.locator('label[aria-label="Attach images"]');
+  const bounds = await attach.boundingBox();
+  const field = await page.getByLabel("Message to Pi").boundingBox();
+  const send = await page.locator(".send-button").boundingBox();
+  expect(bounds.width).toBeGreaterThanOrEqual(44);
+  expect(bounds.height).toBeGreaterThanOrEqual(44);
+  expect(bounds.x).toBeGreaterThanOrEqual(field.x + field.width - 1);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(send.x + 1);
+
+  const chooserPromise = page.waitForEvent("filechooser", { timeout: 3000 });
+  await attach.tap();
+  const chooser = await chooserPromise;
+  expect(chooser.isMultiple()).toBe(true);
+  await chooser.setFiles({ name: "first-tap.png", mimeType: "image/png", buffer: await page.screenshot() });
+  const attachment = page.locator(".attachment-tray .attachment");
+  await expect(attachment).toContainText("first-tap.png");
+  await attachment.getByRole("button", { name: "Remove" }).tap();
+  await expect(attachment).toHaveCount(0);
+});
+
 test("Clear queue confirms on the first mobile tap with a 44px target", async ({ page }) => {
   try {
     await prepareClearQueue(page, sessions.clearQueueMobile, true);
@@ -231,9 +256,11 @@ test("open selected session actions on the first mobile tap", async ({ page }) =
   const titleMetrics = await title.evaluate((element) => ({
     height: element.getBoundingClientRect().height,
     lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+    truncated: element.scrollWidth > element.clientWidth,
   }));
-  expect(titleMetrics.height).toBeGreaterThan(titleMetrics.lineHeight * 1.5);
-  expect(titleMetrics.height).toBeLessThanOrEqual(titleMetrics.lineHeight * 2 + 1);
+  // Long titles stay on one line so each row keeps a compact, predictable height.
+  expect(titleMetrics.height).toBeLessThanOrEqual(titleMetrics.lineHeight + 1);
+  expect(titleMetrics.truncated).toBe(true);
 
   const bounds = await actions.boundingBox();
   const titleBounds = await title.boundingBox();
@@ -347,6 +374,8 @@ test("keep native Tab order for coarse pointers", async ({ page }) => {
   const composer = page.locator('textarea[name="message"]');
   await composer.focus();
   await page.keyboard.press("Tab");
+  await expect(page.locator("#image-input")).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Send" })).toBeFocused();
 });
 
@@ -421,7 +450,20 @@ test("keep wrapped tool output short until the first Expand tap", async ({ page 
   const card = page.locator(".message--tool-call").filter({ hasText: `$ ${tool.wrappedCommand}` }).last();
   await expectWrappedOutputCollapsed(card);
 
-  await card.getByRole("button", { name: "Expand" }).tap();
+  // The quiet text toggle keeps a 44px touch target, and its edge still expands on the first tap.
+  const expand = card.getByRole("button", { name: "Expand" });
+  const target = await expand.evaluate((button) => {
+    button.scrollIntoView({ block: "center" });
+    const bounds = button.getBoundingClientRect();
+    const x = bounds.left + bounds.width / 2;
+    const y = bounds.top + bounds.height / 2;
+    const hits = (dx, dy) => button.contains(document.elementFromPoint(x + dx, y + dy));
+    return { height: bounds.height, width: bounds.width, reach: hits(0, -21) && hits(0, 21) && hits(-(bounds.width / 2 + 7), 0) && hits(bounds.width / 2 + 7, 0), border: getComputedStyle(button).borderTopWidth, transform: getComputedStyle(button).textTransform };
+  });
+  expect(target.reach).toBe(true);
+  expect(target.border).toBe("0px");
+  expect(target.transform).toBe("none");
+  await expand.tap({ position: { x: target.width / 2, y: target.height / 2 + 19 } });
   await expect(card.locator("[data-tool-output-toggle]")).toHaveAttribute("aria-expanded", "true");
   const region = card.getByRole("region", { name: "Expanded tool output" });
   await expect(region).toContainText("oldest-wrapped-output");

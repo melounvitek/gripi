@@ -43,6 +43,83 @@ for (const width of [1440, 390, 320]) {
   });
 }
 
+for (const touch of [false, true]) {
+  test.describe(touch ? "on touch" : "with a fine pointer", () => {
+    test.use({ hasTouch: touch });
+
+    test(`share one text edge and show times on user messages and answers ${touch ? "on touch" : "with a fine pointer"}`, async ({ page }) => {
+      await page.goto("/");
+      await selectSession(page, sessions.compactionFollowUp);
+      await sendPrompt(page, prompts.standard);
+      await expectRunFinished(page);
+      await expectMessageTimes(page, touch);
+
+      await page.reload();
+      await expectMessageTimes(page, touch);
+    });
+  });
+}
+
+async function expectMessageTimes(page, touch) {
+  const user = message(page, "user", prompts.standard).last();
+  const answer = message(page, "assistant", replies.standard).last();
+  const toolCard = page.locator(".message--tool-call").filter({ hasText: tool.command }).last();
+  await expect(answer).toHaveAttribute("data-final-assistant-response", "true");
+  const edge = await textGeometry(answer.locator(".message-body"));
+  for (const text of [user.locator(".message-body"), toolCard.locator(".compact-summary")]) {
+    expect(Math.abs((await textGeometry(text)).left - edge.left)).toBeLessThanOrEqual(1);
+  }
+
+  for (const card of [user, answer]) {
+    const meta = card.locator(".message-meta");
+    await expect(meta).toBeVisible();
+    await expect(meta).toHaveText(/^(?:[A-Z][a-z]{2} \d{1,2} )?\d\d:\d\d$/);
+    await expect(meta).toHaveAttribute("title", /^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+    const time = await textGeometry(meta);
+    expect(Math.abs(time.left - edge.left)).toBeLessThanOrEqual(1);
+    const body = await card.locator(".message-body").boundingBox();
+    expect(time.baseline).toBeGreaterThan(body.y + body.height);
+  }
+  const answerTime = await answer.locator(".message-meta").boundingBox();
+  const copy = await answer.getByRole("button", { name: "Copy" }).boundingBox();
+  expect(copy.x).toBeGreaterThan(answerTime.x + answerTime.width);
+  expect(Math.abs((copy.y + copy.height / 2) - (answerTime.y + answerTime.height / 2))).toBeLessThanOrEqual(1);
+
+  // Other rows keep their time in the DOM, revealed only by desktop hover at the end of the first line.
+  const toolTime = toolCard.locator(".message-meta");
+  await expect(toolTime).toHaveText(/\d\d:\d\d$/);
+  await expect(toolTime).toBeHidden();
+  if (touch) {
+    expect(await toolTime.evaluate((element) => element.getClientRects().length)).toBe(0);
+    return;
+  }
+  await toolCard.hover();
+  await expect(toolTime).toBeVisible();
+  const [summary, time] = [await textGeometry(toolCard.locator(".compact-summary")), await textGeometry(toolTime)];
+  expect(Math.abs(time.baseline - summary.baseline)).toBeLessThanOrEqual(1);
+  const card = await toolCard.evaluate((element) => ({ right: element.getBoundingClientRect().right, padding: Number.parseFloat(getComputedStyle(element).paddingRight) }));
+  expect(Math.abs(time.right - (card.right - card.padding))).toBeLessThanOrEqual(1);
+  await page.mouse.move(0, 0);
+  await expect(toolTime).toBeHidden();
+}
+
+// Left edge, right edge and baseline of an element's first line of text.
+async function textGeometry(locator) {
+  return locator.evaluate((element) => {
+    const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT, { acceptNode: (node) => node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP });
+    const text = walker.nextNode();
+    const range = element.ownerDocument.createRange();
+    range.selectNodeContents(text);
+    const line = range.getClientRects()[0];
+    const probe = element.ownerDocument.createElement("span");
+    probe.style.cssText = "display: inline-block; width: 0; height: 0; vertical-align: baseline";
+    text.before(probe);
+    const baseline = probe.getBoundingClientRect().top;
+    probe.remove();
+    return { left: line.left, right: line.right, baseline };
+  });
+}
+
 async function expectAlignedCard(card, assistant) {
   await expect(card).toBeVisible();
   const reference = await assistant.boundingBox();
@@ -50,7 +127,7 @@ async function expectAlignedCard(card, assistant) {
   expect(Math.abs(bounds.x - reference.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(bounds.width - reference.width)).toBeLessThanOrEqual(1);
   const alignment = await card.evaluate((element) => {
-    const left = element.querySelector(".message-header").getBoundingClientRect().left;
+    const left = element.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(element).paddingLeft);
     const contents = element.querySelectorAll(".compact-summary, .bash-execution-status, .message-body");
     return Array.from(contents).filter((node) => node.getClientRects().length).map((node) => ({
       offset: node.getBoundingClientRect().left - left,

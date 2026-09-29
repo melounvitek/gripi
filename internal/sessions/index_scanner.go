@@ -914,6 +914,7 @@ func (collector *indexCollector) messageMetadata() (entry, bool) {
 		if !callOK || !nameOK {
 			return entry{}, false
 		}
+		result.ResultToolCallID = toolCallID
 		visible := visibleScannedContent(parts)
 		if !visible && toolName == "edit" {
 			diff := collector.stringStats("message", "details", "diff")

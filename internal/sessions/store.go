@@ -78,6 +78,7 @@ type Message struct {
 	ToolCallID              string
 	ToolName                string
 	ToolResultPersisted      bool
+	ToolPending              bool
 	Thinking                bool
 	ToolSummaryHTML         string
 	ToolTranscript          bool
@@ -142,6 +143,7 @@ type entry struct {
 	Segments         []segment
 	SubagentIDs      []string
 	SubagentPrompts  map[string]string
+	ResultToolCallID string
 	Status           statusData
 	Session          indexedSessionData
 }
@@ -859,7 +861,7 @@ func estimatedEntryBytes(item entry) int64 {
 		value += 40 + len(id)
 	}
 	value += len(item.Status.Kind) + len(item.Status.Provider) + len(item.Status.ModelID) + len(item.Status.ThinkingLevel) + len(item.Status.StopReason) + len(item.Status.Usage)*64
-	value += len(item.Session.Role) + len(item.Session.Timestamp) + len(item.Session.Text) + len(item.Session.FinalText)
+	value += len(item.ResultToolCallID) + len(item.Session.Role) + len(item.Session.Timestamp) + len(item.Session.Text) + len(item.Session.FinalText)
 	return int64(value)
 }
 
@@ -867,6 +869,9 @@ func metadataFromRaw(raw map[string]any, ordinal int, offset, length int64) entr
 	result := entry{Ordinal: ordinal, Offset: offset, Length: length, Type: stringValue(raw["type"]), ID: stringValue(raw["id"]), ParentID: stringValue(raw["parentId"]), TargetID: stringValue(raw["targetId"])}
 	message, _ := raw["message"].(map[string]any)
 	result.Role = stringValue(message["role"])
+	if result.Role == "toolResult" {
+		result.ResultToolCallID = stringValue(message["toolCallId"])
+	}
 	parsed := messagesFromRaw(raw, "")
 	for _, item := range parsed {
 		result.Segments = append(result.Segments, segment{Role: item.Role, ToolCallID: item.ToolCallID, ToolName: item.ToolName})
@@ -1237,12 +1242,18 @@ type unit struct {
 	Entry        entry
 	Dependencies []entry
 	Estimate     int64
+	ToolPending  bool
 }
 
 func projectedUnits(entries []entry) ([]unit, bool) {
 	pending := make(map[string]int)
 	subagentSources := make(map[string]entry)
+	results := make(map[string]bool)
 	for _, item := range entries {
+		// Results with empty content have no segment but still complete their call.
+		if item.ResultToolCallID != "" {
+			results[item.ResultToolCallID] = true
+		}
 		for _, id := range item.SubagentIDs {
 			if _, exists := subagentSources[id]; !exists {
 				subagentSources[id] = item
@@ -1263,7 +1274,7 @@ func projectedUnits(entries []entry) ([]unit, bool) {
 					continue
 				}
 			}
-			created := unit{Key: [2]int{item.Ordinal, segmentIndex}, Entry: item, Estimate: part.Minimum}
+			created := unit{Key: [2]int{item.Ordinal, segmentIndex}, Entry: item, Estimate: part.Minimum, ToolPending: part.Role == "assistant" && part.ToolCallID != "" && !results[part.ToolCallID]}
 			if part.Role == "toolResult" && part.ToolName == "subagent" {
 				if source, ok := subagentSources[part.ToolCallID]; ok {
 					created.Dependencies = append(created.Dependencies, source)
@@ -1318,6 +1329,7 @@ func renderWindow(path string, indexed *index, units []unit, end int, after *int
 		if retainedBytes+messageRetainedBytes > MaxRetainedWindowBytes {
 			break
 		}
+		rendered[0].ToolPending = item.ToolPending
 		messages = append(messages, rendered[0])
 		bytesUsed += messageBytes
 		retainedBytes += messageRetainedBytes

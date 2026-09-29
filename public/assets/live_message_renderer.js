@@ -1,10 +1,18 @@
 import { PAIRED_TOOL_NAMES, TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES, TOOL_OUTPUT_TAIL_CHARACTERS } from "./constants.js";
 import { renderTextWithLinks } from "./dom.js";
-import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimestampKey, normalizedMessageText, stableTextHash } from "./formatting.js";
+import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimeLabel, messageTimestampKey, normalizedMessageText, stableTextHash } from "./formatting.js";
 import { hasTerminalControls, renderTerminalOutput } from "./terminal_output_renderer.js";
 
 const TERMINAL_OUTPUT_EXCLUDED_TOOLS = new Set(["read", "edit", "write"]);
 const PERSISTED_TOOL_REPLAY_LIMIT = 16;
+
+// Like the server template: a short local time, with the full date in the tooltip.
+function setMessageTime(meta, timestamp, fallbackToNow = true) {
+  const date = timestamp ?? (fallbackToNow ? new Date() : null);
+  meta.textContent = date === null ? "" : messageTimeLabel(date);
+  if (meta.textContent) meta.setAttribute("title", formatTimestamp(date));
+  else meta.removeAttribute("title");
+}
 
 export class LiveMessageRenderer {
   constructor(document, conversationController, parser, markdownRenderer, imageViewerController = null) {
@@ -240,7 +248,7 @@ export class LiveMessageRenderer {
 
     const meta = this.document.createElement("div");
     meta.className = "message-meta";
-    meta.textContent = formatTimestamp(timestamp);
+    setMessageTime(meta, timestamp);
 
     header.append(role);
     if (meta.textContent) header.append(meta);
@@ -275,7 +283,7 @@ export class LiveMessageRenderer {
     role.textContent = options.toolName && roleName === "assistant" ? "tool" : messageRoleLabel(roleName);
     const meta = this.document.createElement("div");
     meta.className = "message-meta";
-    meta.textContent = formatTimestamp(timestamp, options.timestampFallback !== false);
+    setMessageTime(meta, timestamp, options.timestampFallback !== false);
     header.append(role);
     if (meta.textContent) header.append(meta);
 
@@ -424,7 +432,7 @@ export class LiveMessageRenderer {
       const timestampKey = messageTimestampKey(timestamp);
       entry.article.dataset.messageTimestamp = timestampKey;
       entry.article.dataset.messageFingerprint = messageFingerprint("bashExecution", output, timestampKey);
-      entry.meta.textContent = formatTimestamp(timestamp);
+      setMessageTime(entry.meta, timestamp);
     }
     entry.article.classList.add("message--bash-execution", "message--tool-transcript");
     entry.article.classList.toggle("message--bash-excluded", excluded);
@@ -829,6 +837,7 @@ export class LiveMessageRenderer {
       if (article.dataset.toolCallId !== toolCallId) return;
       article.toggleAttribute("data-activity-active", active);
       article.toggleAttribute("data-activity-completed", !active);
+      article.classList.toggle("message--tool-pending", active);
     });
     this.conversationController.scheduleFocusedActivityRefresh?.();
   }
@@ -954,7 +963,7 @@ export class LiveMessageRenderer {
     article.dataset.messageTimestamp = messageTimestampKey(timestamp);
     article.dataset.messageFingerprint = messageFingerprint("user", segment.text, article.dataset.messageTimestamp);
     const meta = article.querySelector(".message-meta");
-    if (meta) meta.textContent = formatTimestamp(timestamp);
+    if (meta) setMessageTime(meta, timestamp);
     const body = article.querySelector(".message-body");
     const entry = { article, body, compact: false, userDisplayText: body?.textContent || segment.text };
     return entry;
@@ -1000,7 +1009,10 @@ export class LiveMessageRenderer {
     entry.article.classList.toggle("message--streaming", streamingAssistantResponse);
     if (finalAssistantResponse) entry.article.dataset.finalAssistantResponse = "true";
     this.liveAssistantSegments.set(key, entry);
-    if (segment.toolCallId && !segment.isToolResult) entry.article.setAttribute("data-activity-active", "");
+    if (segment.toolCallId && !segment.isToolResult) {
+      entry.article.setAttribute("data-activity-active", "");
+      entry.article.classList.add("message--tool-pending");
+    }
     if (PAIRED_TOOL_NAMES.has(segment.toolName) && segment.toolCallId && !segment.isToolResult) this.livePairedToolCalls.set(segment.toolCallId, entry);
     if (segment.toolCallId && !segment.isToolResult && !PAIRED_TOOL_NAMES.has(segment.toolName)) this.liveToolExecutions.set(segment.toolCallId, entry);
     return entry;
@@ -1033,7 +1045,7 @@ export class LiveMessageRenderer {
     const eventTimestampKey = messageTimestampKey(timestamp);
     if (eventTimestampKey) {
       entry.article.dataset.messageTimestamp = eventTimestampKey;
-      if (entry.meta) entry.meta.textContent = formatTimestamp(timestamp);
+      if (entry.meta) setMessageTime(entry.meta, timestamp);
     }
     const timestampKey = eventTimestampKey || entry.article.dataset.messageTimestamp;
     entry.article.dataset.messageFingerprint = messageFingerprint(entry.article.dataset.role, text, timestampKey);

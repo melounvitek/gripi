@@ -74,14 +74,14 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/melounvitek/gr
 
 The desktop app connects to a running gateway and can store and switch between multiple gateways.
 
-<img width="1468" height="930" alt="Screenshot 2026-07-15 at 19 23 37" src="https://github.com/user-attachments/assets/194b8d2a-5e1d-43c5-aae7-a8092e73b6f4" />
+<img width="1440" alt="Gripi on desktop, showing a Pi session with thinking, a failed command, an edit and a test run" src="docs/images/gripi-desktop-screenshot.png" />
 
 
 There is no mobile app, but on iPhone, adding the gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow works nicely. On iOS/iPadOS 16.4 or newer, the installed web app can enable Web Push notifications for completed replies; they continue working while Gripi is closed and require no App Store installation or Apple developer account. The gateway must be reached over HTTPS and have outbound internet access to the browser's push service.
 
 <img width="804" height="362" alt="image" src="https://github.com/user-attachments/assets/37ab55d7-7b34-4cce-932e-566a6d415041" />
 
-<img width="360" alt="Gripi running as an iPhone web app" src="docs/images/gripi-mobile-screenshot.png" />
+<img width="360" alt="Gripi on a phone, showing a conversation in the Brief view" src="docs/images/gripi-mobile-screenshot.png" />
 
 ## Usage modes
 

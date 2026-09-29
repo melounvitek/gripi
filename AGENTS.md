@@ -16,6 +16,10 @@ When the current plan is completed, delete the finished `PLAN.md`.
 
 Keep gateway features aligned with native Pi CLI behavior. Preserve Pi-owned data formats and workflows, and store gateway-only metadata separately when needed. If a web-specific behavior must diverge from Pi CLI behavior, call out the tradeoff before implementing.
 
+## Visual identity
+
+Gripi should look like Pi CLI in a browser, not like a generic chat app. Follow Pi's layout and theme colours: plain assistant text without cards or role labels, full-width user blocks, tool blocks tinted by state (pending, success, error), grey italic thinking, Pi's Markdown colours, and an editor framed by rules coloured by thinking level. Use mono for tool output and interface text. Avoid chat-app patterns such as message bubbles, avatars and pill-shaped composers. Browser-only additions, such as timestamps or touch controls, should stay quiet.
+
 ## UI rendering
 
 For changes affecting conversation/message rendering, check both server-rendered history and live-appended event rendering. Many message shapes are rendered twice: once by Go templates for page load, and once by JavaScript for live events. A fix that looks correct after a reload may still need a matching live-renderer update.
