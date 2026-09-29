@@ -5,9 +5,9 @@
   </picture>
 </p>
 
-**Gripi is a desktop and web portal for [Pi](https://pi.dev/), powered by a self-hosted gateway.** Run the gateway on a development machine or home server with Pi CLI installed, then use Pi from the desktop app or any web browser. Locally, or over an encrypted private network.
+**Gripi is a desktop and web interface for [Pi](https://pi.dev/), served by a self-hosted gateway.** Run the gateway on a development machine or home server with Pi CLI installed, then use Pi from the desktop app or a web browser, on the same machine or over an encrypted private network.
 
-**Pi stays Pi.** Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It is a gateway and UI layer for accessing the Pi environment you already run.
+**Pi stays Pi.** Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It works with the Pi setup you already have. The only addition is a small Gripi extension, loaded into each Pi process with `--extension`, that gives the browser access to Pi’s session tree.
 
 <p align="center">
   <strong><a href="https://gripi.w10.cz/">Try the live interactive demo →</a></strong><br>
@@ -16,13 +16,25 @@
 
 <a href="docs/images/gripi-architecture.svg"><img alt="Desktop, browser, and mobile clients connect over a local network or VPN to the Gripi gateway, which runs Pi with access to the gateway machine's projects, sessions, and credentials" src="docs/images/gripi-architecture.svg" /></a>
 
-> The project is a fully vibe-coded alpha version ATM. Initially, it was supposed to be a quick proof of concept, but I ended up using it for my daily work and I actually like it. So please, feel free to try it; but expect some rough edges, missing features, and behavior that may change. Happy to look at any feedback (use Github issues)!
+> The project is a fully vibe-coded alpha version at the moment. Initially, it was supposed to be a quick proof of concept, but I ended up using it for my daily work and I actually like it. So please, feel free to try it; but expect some rough edges, missing features, and behavior that may change. Happy to look at any feedback (use GitHub issues)!
+
+## Features
+
+- All Pi sessions on the gateway machine in one sidebar, with search, project and tag filters, pinning, and unread markers.
+- A Pi-style composer with slash commands, `@` file completion, `!` shell commands, and image attachments.
+- Steer Pi or queue follow-ups while it is running.
+- A Brief view that collapses tool calls, results, and thinking into summaries.
+- Find in conversation, model and thinking settings, and context usage.
+- Notifications when replies finish, including Web Push on phones.
 
 ## Install
 
-### Gateway
+Requirements:
 
-The gateway installer requires `curl` and Git. Running Gripi also requires [Pi CLI](https://pi.dev/) available on `PATH`, working, authenticated, and configured under the same OS user as the gateway.
+- A Linux or macOS machine for the gateway, with `curl` and Git.
+- [Pi CLI](https://pi.dev/) on `PATH`, already working, authenticated, and configured for the OS user that runs the gateway. Gripi does not install or configure Pi.
+
+### Gateway
 
 ```sh
 bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/melounvitek/gripi/master/bin/install | bash -s -- gateway'
@@ -49,11 +61,13 @@ Start the gateway:
 ~/.local/share/gripi/bin/start
 ```
 
-By default, the gateway listens only on `127.0.0.1`. Open <http://localhost:4567> and use the admin password in `~/.config/gripi/env` to approve your browser.
+The gateway listens only on `127.0.0.1:4567` by default. Open <http://localhost:4567> and approve the browser with the admin password printed by the installer. It is saved as `GRIPI_ADMIN_PASSWORD` in `~/.config/gripi/env`.
+
+To use the gateway from other devices, or keep it running with systemd, see [local and remote setups](docs/examples.md).
 
 ### Desktop app
 
-The desktop app installer is independent of the gateway. It requires `curl` and Git and supports macOS and Linux. On Linux, FUSE 2 is also required (`fuse2` on Arch Linux).
+The desktop app is installed separately from the gateway and supports macOS and Linux. It requires `curl` and Git; on Linux, it also requires FUSE 2 (`fuse2` on Arch Linux).
 
 ```sh
 bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/melounvitek/gripi/master/bin/install | bash -s -- desktop'
@@ -72,49 +86,64 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/melounvitek/gr
 
 </details>
 
-The desktop app connects to a running gateway and can store and switch between multiple gateways.
+The app connects to <http://localhost:4567> by default. Use **File → Add Server…** to add other gateways and **File → Next Server** (Ctrl+Tab) to switch between them. Pi always runs on the selected gateway machine.
 
 <img width="1440" alt="Gripi on desktop, showing a Pi session with thinking, a failed command, an edit and a test run" src="docs/images/gripi-desktop-screenshot.png" />
 
+### Phone
 
-There is no mobile app, but on iPhone, adding the gateway to the Home Screen with Apple's [Open as Web App](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios) flow works nicely. On iOS/iPadOS 16.4 or newer, the installed web app can enable Web Push notifications for completed replies; they continue working while Gripi is closed and require no App Store installation or Apple developer account. The gateway must be reached over HTTPS and have outbound internet access to the browser's push service.
-
-<img width="804" height="362" alt="image" src="https://github.com/user-attachments/assets/37ab55d7-7b34-4cce-932e-566a6d415041" />
+There is no mobile app. On iPhone, open the gateway in Safari, tap **Share**, choose **Add to Home Screen**, turn on **Open as Web App**, and tap **Add** ([Apple’s guide](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios)). On iOS/iPadOS 16.4 or newer, the Home Screen app can receive [Web Push notifications](docs/configuration.md#web-push-notifications) for finished replies, even while it is closed. Notifications require HTTPS, such as [Tailscale Serve](docs/examples.md#https-through-tailscale-serve).
 
 <img width="360" alt="Gripi on a phone, showing a conversation in the Brief view" src="docs/images/gripi-mobile-screenshot.png" />
 
-## Usage modes
+## Updating
 
-By default, the gateway runs in single-user mode and shows all Pi sessions to one trusted user. Optional multi-user mode gives each user a private user token and shows only the sessions associated with that token.
+The gateway shows an update control in the sidebar when a new version is available. It tests the update before installing it, then restarts. See [self-updates](docs/configuration.md#self-updates) for the requirements.
 
-Multi-user mode is intended for trusted users. It does not provide OS-level process, filesystem, or credential isolation, and settings such as the selected model and thinking effort are currently shared between users. See [configuration](docs/configuration.md#multi-user-mode) to enable it.
+To update manually, stop the gateway and run:
 
-## Security and remote access
+```sh
+cd ~/.local/share/gripi && git pull --ff-only && mise run setup
+```
 
-Do not expose the gateway directly to the public internet. Anyone who can use it can start Pi processes with the gateway machine's filesystem and credentials. Every approved user can directly execute arbitrary shell commands as the gateway OS user, with that user's filesystem, credentials, environment, and network access. In multi-user mode, session visibility is separate, but all approved users share this same OS-level authority.
+Then start it again. `mise run setup` rebuilds the gateway; without it, `bin/start` keeps running the old build.
 
-Keep access approval enabled for any gateway reachable from another device: browser approval in single-user mode, or user-token approval in multi-user mode. Use HTTPS or an encrypted VPN such as Tailscale for remote access; ordinary LAN or Wi-Fi HTTP can expose passwords and access cookies. Production mode rejects remote plaintext HTTP unless `GRIPI_ALLOW_INSECURE_REMOTE_HTTP=1` explicitly allows transport already encrypted by a private VPN. Only disable approval when access is already limited to trusted devices and users. Multi-user mode separates session visibility for trusted users; it is not a sandbox and does not isolate filesystem, process, or credential access.
+To update the desktop app, run its installer again.
 
-- [Example local and remote setups](docs/examples.md)
-- [Configuration options](docs/configuration.md)
+## Uninstalling
 
-## Pi compatibility
+Stop the gateway and remove any systemd unit or `tailscale serve` configuration you added. Then delete:
 
-Gripi is intentionally thin around Pi. It uses Pi’s existing runtime, sessions, tools, models, and configuration instead of replacing them with Gripi-specific behavior. Gateway-only metadata is stored separately when needed.
+- `~/.local/share/gripi`: the gateway.
+- `~/.config/gripi`: settings, including the admin password.
+- `~/.pi/gripi`: Gripi’s own data, such as approvals, tags, pins, and uploaded attachments.
 
-By default, Gripi automatically approves project-local resources for each Pi process it starts. This ensures project settings, extensions, skills, prompts, themes, system prompts, and packages work without first opening the directory in Pi CLI. Unlike Pi CLI’s default trust workflow, merely opening a project in Gripi may therefore load extensions or package installation scripts that execute arbitrary code as the gateway OS user. Only open projects whose contents you trust. See [configuration](docs/configuration.md#project-resource-approval) to disable automatic approval.
+Pi’s sessions and settings in `~/.pi/agent` are not affected. If the installer installed Mise and you no longer need it, also delete `~/.local/bin/mise`.
 
-The composer supports Pi-style `@` file search and path completion. `!command` runs a shell command and includes its result in later model context; `!!command` runs it but excludes its result from model context. Shell output appears when the RPC command completes rather than streaming. Bash remains available while Pi is running. When both are active, Stop cancels the shell command first; press Stop again to cancel the agent run. In a brand-new unsaved Pi session, bash history remains process-resident until Pi persists the session with an assistant response; Gripi does not write Pi session files itself.
+To remove the desktop app, delete `~/Applications/Gripi.app` on macOS. On Linux, delete `~/.local/share/gripi/Gripi.AppImage`, `~/.local/share/gripi/icon.png`, and `~/.local/share/applications/gripi.desktop`.
 
-While Pi is running, the send button steers by default; use its menu to select Follow-up mode for the next message. On desktop, Enter steers by default, Alt+Enter queues a follow-up, and Shift+Enter inserts a newline. Slash commands follow Pi CLI behavior: prompt templates and skills are queued using the selected delivery mode, extension commands run immediately, and built-in commands entered in Steer mode run as controls rather than messages.
+## Security
 
-Gripi supports RPC-compatible extension UI such as select, confirm, input, editor, notify, title, and editor-prefill requests. Unlike Pi CLI, Gripi does not display extension status text in the footer; it shows only the model, thinking level, and context usage. `/reload` refreshes the current Pi process’s extensions, skills, prompts, themes, and context files, then refreshes Gripi’s slash-command catalog. Pi terminal keybindings are not reloaded because the web interface uses Gripi’s browser controls. If a workflow depends on Pi’s native terminal UI, custom TUI components, terminal keybindings, or `ctx.mode === "tui"`, use Pi CLI directly.
+Anyone who can use Gripi can run shell commands as the gateway’s OS user, with that user’s files, credentials, environment, and network access. Therefore:
 
-## Session tags
+- Do not expose the gateway directly to the public internet.
+- For remote access, use HTTPS or an encrypted VPN such as Tailscale. Plain HTTP over a LAN or Wi-Fi can expose passwords and access cookies, so Gripi rejects remote plain HTTP unless you [explicitly allow it](docs/configuration.md#server-address) for a VPN.
+- Keep access approval enabled for any gateway reachable from another device. Only [disable it](docs/configuration.md#disabling-approval) when the network already limits access to trusted devices and users.
+- Only open projects you trust. Gripi [loads project resources automatically](#differences-from-pi-cli).
 
-Use the tag icon in the conversation header or **Tags…** in a session’s menu to group related sessions across projects. Click a tag to filter the sidebar; the adjacent × clears that tag filter. Pinned sessions remain visible. Tags are saved separately from Pi session files and are private to each user in multi-user mode.
+In the default single-user mode, every new browser must be approved once, either with the admin password or from a browser that is already approved. See [access approval](docs/configuration.md#access-approval) to change the password or remove a browser.
 
-Forks and clones inherit tags. The new-session dialog prefills the active filter’s tag, which you can remove before starting. Tag names are normalized to lowercase; unused tags disappear from suggestions.
+Optional [multi-user mode](docs/configuration.md#multi-user-mode) gives each user a private token and shows them only their own sessions. It is intended for users who trust each other: all users still run commands as the same OS user, and they share model and thinking settings.
+
+## Differences from Pi CLI
+
+Gripi uses Pi’s own runtime, sessions, tools, models, and configuration. The composer works like Pi CLI’s editor: while Pi is running, Enter steers and Alt+Enter queues a follow-up. It differs from Pi CLI in these ways:
+
+- **Project resources load automatically.** Gripi starts Pi with `--approve`, so project settings, extensions, skills, prompts, themes, system prompts, and packages work without first trusting the directory in Pi CLI. As a result, opening a project can run its extensions or package installation scripts. Only open projects you trust, or [turn this off](docs/configuration.md#project-resource-approval).
+- **The send button steers by default.** Use its menu to queue a follow-up instead. Prompt templates and skills use the selected mode, extension commands run immediately, and built-in commands sent in Steer mode run as controls rather than messages.
+- **Shell output appears when the command finishes.** `!command` adds its output to the model context, and `!!command` does not. Output is not streamed. If a shell command and Pi are both running, Stop cancels the shell command first; press it again to stop Pi.
+- **Extension UI is partial.** Select, confirm, input, editor, notify, title, and editor-prefill requests work. Extension status text is not shown in the footer, which shows only the model, thinking level, and context usage.
+- **There is no terminal UI.** For custom TUI components, terminal keybindings, or code that checks `ctx.mode === "tui"`, use Pi CLI.
 
 ## Optional Pi setup
 
@@ -126,16 +155,14 @@ pi install npm:@furbyhaxx/pi-session-naming
 
 ## Development
 
-The gateway is implemented in Go. The browser UI and demo use native JavaScript without a frontend build step, and the desktop shell uses Electron. Project setup and the canonical test suite require Pi CLI on `PATH`; `mise run setup` does not install Pi.
+The gateway is written in Go. The browser UI and demo use plain JavaScript with no build step, and the desktop app uses Electron. Pi CLI must be on `PATH`; setup does not install it.
 
 ```sh
+git clone https://github.com/melounvitek/gripi.git
+cd gripi
+mise install
+mise run setup
 mise run dev
-mise run test
-mise run frontend-check
-mise run pi-extension-check
-mise run desktop-check
-mise run fake-pi-check
-mise run e2e
 ```
 
-See [testing](docs/testing.md) for the complete check matrix, managed browser suite, external implementation contract, and optional real-Pi smoke test.
+`mise run dev` serves the gateway in development mode on <http://localhost:4567>. It uses the same port, settings, and Gripi data as an installed gateway, so stop that one first. Run the main checks with `mise run test`. See [testing](docs/testing.md) for the other checks and the browser suite, [frontend architecture](docs/frontend.md) for how the UI is organized, and [configuration](docs/configuration.md) for all settings.

@@ -17,7 +17,18 @@ mise run desktop-check
 mise run fake-pi-check
 ```
 
-`frontend-check` runs native Node `.test.mjs` behavior coverage for directly importable browser modules, browser controller races, and the static demo contract, then syntax-checks the browser and demo JavaScript. It requires no `node_modules`; dependency-backed Electron and Playwright checks remain separate. Canonical `mise run test` includes `pi-extension-check`, which loads the tree extension through the installed Pi package and verifies its bounded bridge projection. Pi CLI must therefore be installed on `PATH` before project setup, tests, CI validation, or self-update validation; Gripi does not install Pi. `scripts-check` exercises setup, launcher/restart, password-wrapper, and desktop installer behavior without requiring a second gateway implementation. Run concurrent gateway coverage with `go test -race ./...`; use `go vet ./...` and `govulncheck ./...` for static and vulnerability checks.
+- `frontend-check` runs native Node tests for the browser modules, controller races, and the static demo, then syntax-checks the JavaScript. It needs no `node_modules`.
+- `scripts-check` tests the setup, launcher, restart, password, and desktop installer scripts.
+- `pi-extension-check` loads the tree extension through the installed Pi package. Because `mise run test` includes it, Pi CLI must be on `PATH` for tests, CI, and self-update validation.
+- `desktop-check` and `e2e` need npm dependencies.
+
+For race detection, static analysis, and vulnerability checks, also run:
+
+```sh
+go test -race ./...
+go vet ./...
+govulncheck ./...
+```
 
 ## Browser contract suite
 
@@ -35,9 +46,9 @@ Run the managed suite:
 mise run e2e
 ```
 
-The managed runner creates a temporary home, projects, Pi sessions, gateway state, and loopback port. It builds and starts a separate Go gateway process directly on the host and removes it afterward. It does not use or restart `gripi.service`, and it does not read or modify the user's Gripi or Pi session state.
+The runner builds and starts a separate gateway with a temporary home, sessions, state, and port, then removes them. It does not touch `gripi.service` or your own Gripi and Pi data.
 
-The desktop Chromium project covers browser approval, session navigation, prompt streaming and persistence, new sessions, active-run controls, model settings, and extension UI. A focused mobile Chromium project covers the session drawer and a complete prompt lifecycle. Traces and screenshots are retained only for failed tests.
+A desktop Chromium project covers the main flows; a mobile Chromium project covers the session drawer and a complete prompt. Traces and screenshots are kept only for failed tests.
 
 ## External implementation
 
@@ -59,7 +70,7 @@ The command prints the fixture paths. Configure the target to use the printed se
 
 Configure the Pi command as a Node/script pair: `GRIPI_NODE=$(command -v node)` and `GRIPI_PI=$(pwd)/e2e/support/fake_pi.mjs`. The target should invoke the same script with Node and pass Pi RPC arguments through unchanged. Browser approval may be enabled with the supplied admin password or disabled by the target.
 
-Before any mutating specification runs, the setup project requires the visible `E2E Contract Ready` session and confirms that live status reports the `e2e/fixture-model` fake. This prevents accidentally running the suite against a personal gateway or a seeded target still connected to real Pi. The managed-server adapter is the only part which knows how to build and start the Go gateway, so browser scenarios remain implementation-independent.
+Before any mutating specification runs, the setup project requires the visible `E2E Contract Ready` session and confirms that live status reports the `e2e/fixture-model` fake. This prevents accidentally running the suite against a personal gateway or a seeded target still connected to real Pi.
 
 Use one worker and no retries while the suite shares a target. Each scenario has its own seeded session, but retries could still encounter state left by the failed attempt.
 
@@ -71,4 +82,14 @@ To make one real model request through the installed and authenticated Pi CLI:
 npm run test:e2e:real
 ```
 
-This is opt-in because it requires network access, credentials, model availability, and may incur provider cost. It uses the user's configured Pi agent directory for authentication and model settings, but stores the smoke-test session and all Gripi state under a temporary home. It is not run in CI. The smoke waits for a newly started session to acquire its asynchronous `?session=` URL before sending the prompt.
+This is opt-in because it needs network access, credentials, and an available model, and it may cost money. It uses the user's configured Pi agent directory for authentication and model settings, but stores the smoke-test session and all Gripi state under a temporary home. It is not run in CI.
+
+## Memory benchmark
+
+On Linux, measure the gateway’s memory and request times with:
+
+```sh
+mise run benchmark-go
+```
+
+It builds the gateway, starts it on a free loopback port with a temporary session fixture, sends 100 requests, and samples the memory of the whole gateway process tree. It does not use `gripi.service` or start real Pi.

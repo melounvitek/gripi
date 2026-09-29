@@ -29,11 +29,4 @@ Changes to message presentation or supported Pi event shapes must check both pat
 
 ## Testing
 
-Run the directly importable browser modules, demo, and JavaScript syntax checks with:
-
-```sh
-mise run frontend-check
-mise run pi-extension-check
-```
-
-The native suites cover Markdown cancellation, representative SSR/live shapes and deduplication, terminal update races, sidebar and history concurrency, first-touch project selection, and tree behavior. Managed Playwright covers out-of-order session orchestration and extension UI timeout/retry/queue behavior in the production app. The native suites do not replace integrated DOM coverage. The Pi extension check uses the installed Pi package to exercise the native tree bridge. Use `mise run test-go` for server-rendered HTML and route contracts, and `mise run e2e` for complete browser lifecycles. See [testing](testing.md) for the full matrix.
+`mise run frontend-check` runs native Node tests for the browser modules and demo, then syntax-checks the JavaScript. These tests do not replace integrated DOM coverage: use `mise run test-go` for server-rendered HTML and routes, and `mise run e2e` for complete browser flows. See [testing](testing.md).
