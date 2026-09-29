@@ -297,6 +297,33 @@ test("launcher completes a matching interrupted update cutover", async () => {
   assert.equal(await readFile(fixture.calls, "utf8"), "new\n");
 });
 
+test("Linux desktop installer keeps the app out of the gateway installation directory", async () => {
+  const root = temporaryDirectory();
+  const home = path.join(root, "home");
+  const project = path.join(root, "project");
+  const fakeBin = path.join(root, "fake-bin");
+  const fuseRoots = path.join(root, "fuse-roots");
+  const installer = path.join(project, "bin", "install-desktop");
+  await mkdir(path.dirname(installer), { recursive: true });
+  await mkdir(path.join(project, "node_modules", "electron-builder"), { recursive: true });
+  await mkdir(fuseRoots, { recursive: true });
+  await writeFile(path.join(fuseRoots, "libfuse.so.2"), "");
+  await cp(path.join(repoRoot, "bin/install-desktop"), installer);
+  await cp(path.join(repoRoot, "electron/assets/icons/1024x1024.png"), path.join(project, "electron/assets/icons/1024x1024.png"));
+  await executable(path.join(fakeBin, "uname"), "#!/bin/sh\necho Linux\n");
+  await executable(path.join(fakeBin, "mise"), "#!/bin/sh\n[ \"$*\" = 'run desktop-dist-linux' ] || exit 2\nmkdir -p dist\ntouch dist/Gripi-1.0.0-linux-x64.AppImage\n");
+  const env = { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, GRIPI_FUSE_LIBRARY_ROOTS: fuseRoots };
+  delete env.XDG_DATA_HOME;
+
+  const result = run(installer, [], { env });
+
+  assert.equal(result.status, 0, result.stderr);
+  const appImage = path.join(home, ".local", "share", "gripi-desktop", "Gripi.AppImage");
+  assert.equal((await stat(appImage)).isFile(), true);
+  assert.match(await readFile(path.join(home, ".local", "share", "applications", "gripi.desktop"), "utf8"), new RegExp(`Exec="${appImage}"`));
+  await assert.rejects(stat(path.join(home, ".local", "share", "gripi")));
+});
+
 test("desktop installer requires an available FUSE 2 library only on Linux", async () => {
   const root = temporaryDirectory();
   const project = path.join(root, "project");

@@ -84,7 +84,7 @@ install_linux() {
   [[ -n "$appimage_path" ]] || fail "built Linux AppImage was not found under dist/"
 
   local data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
-  local install_dir="$data_home/${DESKTOP_ID}"
+  local install_dir="$data_home/${DESKTOP_ID}-desktop"
   local applications_dir="$data_home/applications"
   local target_path="$install_dir/${PRODUCT_NAME}.AppImage"
   local icon_path="$install_dir/icon.png"

@@ -120,7 +120,7 @@ Stop the gateway and remove any systemd unit or `tailscale serve` configuration 
 
 Pi’s sessions and settings in `~/.pi/agent` are not affected. If the installer installed Mise and you no longer need it, also delete `~/.local/bin/mise`.
 
-To remove the desktop app, delete `~/Applications/Gripi.app` on macOS. On Linux, delete `~/.local/share/gripi/Gripi.AppImage`, `~/.local/share/gripi/icon.png`, and `~/.local/share/applications/gripi.desktop`.
+To remove the desktop app, delete `~/Applications/Gripi.app` on macOS. On Linux, delete `~/.local/share/gripi-desktop` and `~/.local/share/applications/gripi.desktop`.
 
 ## Security
 
