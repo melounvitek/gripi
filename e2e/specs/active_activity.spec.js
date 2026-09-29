@@ -164,10 +164,39 @@ test("discarded thinking is not kept as the finished step", async ({ page }) => 
   await deliver({ type: "message_update", message: assistant([thinking]), assistantMessageEvent: { type: "thinking_end", contentIndex: 0 } });
   await expect(group.locator(".active-activity-count")).toHaveText("Done");
   await deliver({ type: "message_end", message: assistant([{ type: "text", text: "Final answer without the tentative reasoning." }]) });
-  await expect(group).toContainText("Pi is working…");
-  await expect(page.locator(".message--thinking").filter({ hasText: thinking.thinking })).toHaveCount(0);
-  await deliver({ type: "agent_settled" });
   await expect(group).toHaveCount(0);
+  await expect(page.locator(".message--thinking").filter({ hasText: thinking.thinking })).toHaveCount(0);
+});
+
+test("a reply takes the place of the finished step", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const group = activeGroup(page);
+  const earlier = Array.from({ length: 40 }, (_, index) => `Earlier paragraph ${index + 1}.`).join("\n\n");
+  await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([{ type: "text", text: earlier }]) }, { type: "agent_end" });
+  await expect(page.locator(".message--assistant").filter({ hasText: "Earlier paragraph 40." })).toBeVisible();
+  const output = Array.from({ length: 10 }, (_, index) => `Inspection line ${index + 1}`).join("\n");
+  await deliver({ type: "agent_start" }, start("before-reply", "bash", { command: "inspect" }));
+  await expect(group).toContainText("1 running");
+  await deliver(end("before-reply", "bash", output));
+  await expect(group.locator(".active-activity-count")).toHaveText("Done");
+  const text = "Here is what the inspection found.";
+  await deliver({ type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  const reply = page.locator(".message--assistant").filter({ hasText: text });
+  await expect(reply).toBeVisible();
+  await expect(group).toHaveCount(0);
+  const summary = page.locator(".focus-activity-summary").last();
+  await expect(summary).toContainText("1 tool update");
+  // Measure both in one frame because the page may still be following the reply.
+  expect(await reply.evaluate((element) => [...document.querySelectorAll(".focus-activity-summary")].at(-1).getBoundingClientRect().bottom <= element.getBoundingClientRect().top)).toBe(true);
+  await expect.poll(() => page.locator("#conversation-scroll").evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
+  // Measure from the conversation's bottom edge, which moves when the composer's working line goes.
+  const bottomGap = () => reply.evaluate((element) => document.querySelector("#conversation-scroll").getBoundingClientRect().bottom - element.getBoundingClientRect().bottom);
+  const gap = await bottomGap();
+  await deliver({ type: "message_end", message: assistant([{ type: "text", text }]) }, { type: "agent_end" }, { type: "agent_settled" });
+  // The run's events arrive together, so the finished reply means they were all handled.
+  await expect(reply).not.toHaveClass(/message--streaming/);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(Math.abs(await bottomGap() - gap)).toBeLessThan(2);
 });
 
 test("joins the latest activity summary into the active group", async ({ page }) => {

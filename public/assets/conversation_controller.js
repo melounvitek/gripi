@@ -51,6 +51,7 @@ export class ConversationController {
     this.completedActivity = null;
     this.activityHoldHeight = 0;
     this.focusedActivityMessageIds = new WeakMap();
+    this.messagesDuringActivity = new WeakSet();
     this.focusedActivityMessageSequence = 0;
     this.messageSources = new WeakMap();
     this.focusedActivitySignature = null;
@@ -518,18 +519,24 @@ export class ConversationController {
   refreshActiveActivity(messages) {
     const active = new Set(this.focusedView ? messages.filter((message) => message.hasAttribute("data-activity-active")) : []);
     const keepGroup = this.focusedView && this.activityRunning;
-    if (!active.size && !(keepGroup && this.activityGroupShown)) {
+    const latest = messages.at(-1);
+    const latestVisible = latest && this.focusedViewMessage(latest);
+    if (active.size && latestVisible) this.messagesDuringActivity.add(latest);
+    // A reply after the finished step takes its place, so the step and its held space don't sit below the reply.
+    // Text that arrived while the step was running doesn't count.
+    const replyFollows = latestVisible && !this.messagesDuringActivity.has(latest);
+    if (!active.size && (!(keepGroup && this.activityGroupShown) || replyFollows)) {
       this.restoreActivityPositions();
       return;
     }
-    // A finished step stays shown until Pi's next step starts or the run ends.
+    // A finished step stays shown until Pi's next step starts, a reply follows or the run ends.
     if (active.size || (this.completedActivity && !this.completedActivity.isConnected)) {
       this.completedActivity = null;
     } else if (!this.completedActivity) {
       this.completedActivity = [...this.activeActivityPositions.values()].findLast((message) => message.isConnected && message.hasAttribute("data-activity-completed")) || null;
     }
     const displayed = new Set(this.completedActivity ? [this.completedActivity] : active);
-    // Hold the tallest single-step height for the run so the conversation above doesn't move between steps.
+    // Hold the tallest single-step height until the run ends or a reply follows, so the conversation above doesn't move between steps.
     // Parallel steps aren't held, or every later step would sit in a box sized for several cards.
     if (this.activeActivityGroup && this.activeActivityGroup.querySelectorAll(":scope > .message").length <= 1) {
       this.activityHoldHeight = Math.max(this.activityHoldHeight, this.activeActivityGroup.getBoundingClientRect().height);
