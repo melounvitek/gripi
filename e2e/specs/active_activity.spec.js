@@ -463,6 +463,27 @@ test("a text selection that scrolls the view stops following a streaming reply",
   await expectNotFollowing();
 });
 
+test("a streaming reply keeps rendering while Markdown responses are slow", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  await page.route("**/markdown", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await route.continue();
+  });
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) });
+  const reply = page.locator(".message--assistant").filter({ hasText: "Point 1" });
+  const renderedCounts = new Set();
+  let text = "";
+  // Updates arrive faster than the slow renders return.
+  for (let index = 1; index <= 25; index += 1) {
+    text += `**Point ${index}** keeps streaming.\n\n`;
+    await deliver({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+    await page.waitForTimeout(100);
+    const rendered = await reply.locator("strong").count();
+    if (rendered) renderedCounts.add(rendered);
+  }
+  expect(renderedCounts.size).toBeGreaterThan(1);
+});
+
 test("active output and subagent prompts open on the first tap during updates", async ({ page }) => {
   const deliver = await liveEvents(page);
   const tool = call("touch-bash", "bash", { command: "npm test" });

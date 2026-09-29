@@ -16,11 +16,12 @@ export class ServerMarkdownRenderer {
 
   render(body, text, delay = 120) {
     if (body.dataset.plainText === text && (this.jobs.has(body) || body.dataset.rendering !== "pending")) return;
-    this.cancel(this.jobs.get(body));
     body.dataset.plainText = text;
     body.dataset.rendering = "pending";
+    // A pending render picks up the latest text, so a streaming reply isn't restarted on every update.
+    if (this.jobs.has(body)) return;
 
-    const job = { body, text, epoch: this.epoch, timer: null, controller: null };
+    const job = { body, epoch: this.epoch, timer: null, controller: null };
     job.timer = setTimeout(() => this.request(job), delay);
     this.jobs.set(body, job);
   }
@@ -29,9 +30,10 @@ export class ServerMarkdownRenderer {
     job.timer = null;
     if (!this.current(job)) return;
 
+    const text = job.body.dataset.plainText;
     job.controller = new AbortController();
     const formData = new FormData();
-    formData.set("text", job.text);
+    formData.set("text", text);
     try {
       const response = await fetch("/markdown", { method: "POST", body: formData, signal: job.controller.signal });
       if (!response.ok) return this.fail(job);
@@ -41,11 +43,12 @@ export class ServerMarkdownRenderer {
 
       job.body.innerHTML = payload.html;
       enhanceMarkdownCodeBlocks(job.body, this.document);
-      delete job.body.dataset.rendering;
-      this.jobs.delete(job.body);
       if (this.conversationController.autoScrollEnabled && job.body.closest(".message") === this.conversationController.latestReadableAssistantMessage()) {
         this.conversationController.scheduleAutoScroll();
       }
+      if (job.body.dataset.plainText !== text) return this.request(job);
+      delete job.body.dataset.rendering;
+      this.jobs.delete(job.body);
     } catch (error) {
       if (error?.name !== "AbortError") this.fail(job);
     }
@@ -53,14 +56,14 @@ export class ServerMarkdownRenderer {
 
   fail(job) {
     if (!this.current(job)) return;
-    job.body.textContent = job.text;
+    job.body.textContent = job.body.dataset.plainText;
     delete job.body.dataset.plainText;
     delete job.body.dataset.rendering;
     this.jobs.delete(job.body);
   }
 
   current(job) {
-    return job.epoch === this.epoch && this.jobs.get(job.body) === job && job.body.dataset.plainText === job.text;
+    return job.epoch === this.epoch && this.jobs.get(job.body) === job;
   }
 
   cancel(job) {
