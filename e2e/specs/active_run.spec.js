@@ -167,6 +167,9 @@ test("queue a follow-up for an active run", async ({ page }) => {
 test("runs extension commands and queues steering during compaction", async ({ page, context }) => {
   await page.goto("/");
   await selectSession(page, sessions.compactionFollowUp);
+  // Open the restored page before compacting; the fake compaction lasts 4s, so only a reload fits inside it.
+  const restoredPage = await context.newPage();
+  await restoredPage.goto(page.url());
 
   await page.getByLabel("Message to Pi").fill("/compact");
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
@@ -191,9 +194,7 @@ test("runs extension commands and queues steering during compaction", async ({ p
   await expect(queuedSteer).toHaveText(`Steering: ${prompts.standard}`);
   await expect(page.locator('[data-pending-compaction="true"]')).toBeVisible();
 
-  const restoredPage = await context.newPage();
-  await restoredPage.goto("/");
-  await selectSession(restoredPage, sessions.compactionFollowUp);
+  await restoredPage.reload();
   await expect(restoredPage.locator(".pending-message--steering")).toHaveText(`Steering: ${prompts.standard}`);
   await restoredPage.close();
 

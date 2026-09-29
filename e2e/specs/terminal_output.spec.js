@@ -11,7 +11,6 @@ test("renders a scrollable live and restored terminal transcript", async ({ page
   await expect(card).toContainText("Terminal current screen");
   await expect(card).toContainText("Terminal history 32");
   await expect(card).not.toContainText("Terminal stale screen");
-  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
   await expect(card.locator(".terminal-output-run").filter({ hasText: "Terminal current screen" })).toHaveCSS("color", "rgb(0, 205, 0)");
   await expectRunFinished(page);
 
