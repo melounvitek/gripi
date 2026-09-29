@@ -729,7 +729,7 @@ async function showGripiNotification(title, body, url, tag) {
   if (worker.active) {
     worker.active.postMessage({ type: "gripi-notification", title, body, url, tag });
   } else {
-    await worker.showNotification(title, { body, tag, renotify: true, icon: "/app-icon.svg", badge: "/app-icon.svg", data: { url } });
+    await worker.showNotification(title, { body, tag, renotify: true, icon: "/app-icon.svg", badge: "/assets/notification-badge.png", data: { url } });
   }
 }
 

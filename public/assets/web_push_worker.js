@@ -25,7 +25,7 @@
       tag: data.tag || (test ? "gripi-notification-test" : "gripi-notification"),
       renotify: false,
       icon: "/app-icon.svg",
-      badge: "/app-icon.svg",
+      badge: "/assets/notification-badge.png",
       data: { url: data.url || (test ? "/notification-test" : "/") }
     });
     return true;

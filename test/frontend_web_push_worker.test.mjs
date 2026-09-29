@@ -33,7 +33,7 @@ test("completed-reply pushes are suppressed only for the focused target session"
     tag: "reply:background",
     renotify: false,
     icon: "/app-icon.svg",
-    badge: "/app-icon.svg",
+    badge: "/assets/notification-badge.png",
     data: { url: "/?session=%2Fsessions%2Fbackground.jsonl" }
   }]);
 });
