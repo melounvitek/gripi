@@ -130,6 +130,27 @@ test("a step taller than the view does not hold later steps out of view", async 
   await expect(group.locator('[data-tool-call-id="after-thinking"]')).toBeInViewport();
 });
 
+test("steps that start and finish between updates still show as the finished step", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const group = activeGroup(page);
+  const read = call("quick-read", "read", { path: "schema.sql" });
+  // Quick tools start and finish within one batch, so the page never sees them running.
+  await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([read]) }, start(read.id, read.name, read.arguments), end(read.id, read.name));
+  await expect(group.locator('[data-tool-call-id="quick-read"]')).toBeVisible();
+  await expect(group.locator(".active-activity-count")).toHaveText("Done");
+
+  const update = (type, content) => ({ type: "message_update", message: assistant(content), assistantMessageEvent: { type, contentIndex: 0 } });
+  await deliver({ type: "turn_end" }, { type: "turn_start" }, update("toolcall_delta", []));
+  await expect(group.locator(".message--tool-preparation")).toBeVisible();
+  const bash = call("quick-bash", "bash", { command: "npm test" });
+  await deliver(update("toolcall_end", [bash]), { type: "message_end", message: assistant([bash]) }, start(bash.id, bash.name, bash.arguments), end(bash.id, bash.name, "Tests passed"));
+  await expect(group.locator('[data-tool-call-id="quick-bash"]')).toBeVisible();
+  await expect(page.locator('[data-tool-call-id="quick-read"]')).toBeHidden();
+  await expect(group.locator(".focus-activity-summary")).toContainText("1 tool update");
+  await deliver({ type: "agent_end" });
+  await expect(group).toHaveCount(0);
+});
+
 test("the next step cannot move a finished card during its first Expand tap", async ({ page }) => {
   const deliver = await liveEvents(page);
   const group = activeGroup(page);
