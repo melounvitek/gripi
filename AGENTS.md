@@ -26,7 +26,7 @@ For changes affecting conversation/message rendering, check both server-rendered
 
 ## Local server
 
-The dev server runs as the user systemd service `gripi.service`, logging to `/tmp/gripi.log`.
+The dev server runs as the user systemd service `gripi.service`, logging to the systemd journal (`journalctl --user -u gripi.service`).
 
 Do not restart it unless explicitly asked. Go code, HTML templates, and frontend assets (including CSS and JavaScript) are compiled into the gateway binary. Changes to these files require a rebuild and service restart, followed by a browser refresh; presentation-only changes are not an exception.
 
