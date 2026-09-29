@@ -109,6 +109,11 @@ DESKTOP
 
   chmod 0644 "$desktop_path"
 
+  # Older installers put the app in the gateway's install directory.
+  local old_install_dir="$data_home/${DESKTOP_ID}"
+  rm -f -- "$old_install_dir/${PRODUCT_NAME}.AppImage" "$old_install_dir/icon.png"
+  rmdir -- "$old_install_dir" 2>/dev/null || true
+
   if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$applications_dir" >/dev/null 2>&1 || true
   fi

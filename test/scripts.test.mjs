@@ -322,6 +322,22 @@ test("Linux desktop installer keeps the app out of the gateway installation dire
   assert.equal((await stat(appImage)).isFile(), true);
   assert.match(await readFile(path.join(home, ".local", "share", "applications", "gripi.desktop"), "utf8"), new RegExp(`Exec="${appImage}"`));
   await assert.rejects(stat(path.join(home, ".local", "share", "gripi")));
+
+  const oldLocation = path.join(home, ".local", "share", "gripi");
+  await mkdir(path.join(oldLocation, "bin"), { recursive: true });
+  await writeFile(path.join(oldLocation, "Gripi.AppImage"), "");
+  await writeFile(path.join(oldLocation, "icon.png"), "");
+  await writeFile(path.join(oldLocation, "bin", "start"), "");
+  assert.equal(run(installer, [], { env }).status, 0);
+  await assert.rejects(stat(path.join(oldLocation, "Gripi.AppImage")));
+  await assert.rejects(stat(path.join(oldLocation, "icon.png")));
+  assert.equal((await stat(path.join(oldLocation, "bin", "start"))).isFile(), true);
+
+  await rm(path.join(oldLocation, "bin"), { recursive: true });
+  await writeFile(path.join(oldLocation, "Gripi.AppImage"), "");
+  await writeFile(path.join(oldLocation, "icon.png"), "");
+  assert.equal(run(installer, [], { env }).status, 0);
+  await assert.rejects(stat(oldLocation));
 });
 
 test("desktop installer requires an available FUSE 2 library only on Linux", async () => {
