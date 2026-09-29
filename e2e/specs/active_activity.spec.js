@@ -86,7 +86,7 @@ test("bridges activity gaps without removing the group or keeping a stale runnin
   await expect(group).toHaveCount(0);
 });
 
-test("activity height settles after a shorter replacement and timers cannot recreate a hidden group", async ({ page }) => {
+test("activity height holds through a run and starts fresh for the next run", async ({ page }) => {
   const deliver = await liveEvents(page);
   const group = activeGroup(page);
   const output = Array.from({ length: 10 }, () => "Long output line").join("\n");
@@ -94,38 +94,28 @@ test("activity height settles after a shorter replacement and timers cannot recr
   await expect(group).toContainText("Long output line");
   const tallHeight = (await group.boundingBox()).height;
   await group.evaluate((element) => {
-    const observer = new MutationObserver(() => {
-      if (!element.querySelector('[data-tool-call-id="short"]')) return;
-      window.activityReplacementHeight = element.getBoundingClientRect().height;
-      observer.disconnect();
-    });
-    observer.observe(element, { childList: true });
-    window.activityShrinkHeights = [];
-    element.addEventListener("transitionrun", (event) => {
-      if (event.propertyName !== "min-height") return;
-      const start = performance.now();
-      const sample = () => {
-        window.activityShrinkHeights.push(element.getBoundingClientRect().height);
-        if (performance.now() - start < 250) requestAnimationFrame(sample);
-      };
+    window.activityMinHeight = Infinity;
+    const sample = () => {
+      if (!element.isConnected) return;
+      window.activityMinHeight = Math.min(window.activityMinHeight, element.getBoundingClientRect().height);
       requestAnimationFrame(sample);
-    });
+    };
+    requestAnimationFrame(sample);
   });
   await deliver(end("tall", "bash", output), start("short", "read", { path: "schema.sql" }));
   await expect(group).toContainText("schema.sql");
-  expect(await page.evaluate(() => window.activityReplacementHeight)).toBeGreaterThanOrEqual(tallHeight - 1);
-  await expect.poll(async () => (await group.boundingBox()).height).toBeLessThan(tallHeight - 20);
-  await expect(group).toHaveCSS("min-height", "0px");
-  const shortHeight = (await group.boundingBox()).height;
-  await expect.poll(() => page.evaluate(({ tallHeight, shortHeight }) => window.activityShrinkHeights.some((height) => height > shortHeight + 1 && height < tallHeight - 1), { tallHeight, shortHeight })).toBe(true);
+  await expect(group.locator(".focus-activity-summary")).toContainText("1 tool update");
+  // The held space stays below the step instead of spreading out the rows.
+  expect(await group.evaluate((element) => element.querySelector('[data-tool-call-id="short"]').getBoundingClientRect().top - element.querySelector(".focus-activity-header").getBoundingClientRect().bottom)).toBeLessThan(24);
   await deliver(end("short", "read"));
   await expect(group.locator(".active-activity-count")).toHaveText("Done");
-  await activityView(page, "Full").tap();
-  await page.waitForTimeout(1600);
+  await page.waitForTimeout(600);
+  expect(await page.evaluate(() => window.activityMinHeight)).toBeGreaterThanOrEqual(tallHeight - 1);
+  await deliver({ type: "agent_end" });
   await expect(group).toHaveCount(0);
-  await expect(page.locator('[data-tool-call-id="short"]')).toBeVisible();
-  await activityView(page, "Brief").tap();
-  await expect(group).toHaveCount(0);
+  await deliver({ type: "agent_start" }, start("next-run", "read", { path: "schema.sql" }));
+  await expect(group).toContainText("1 running");
+  expect((await group.boundingBox()).height).toBeLessThan(tallHeight - 20);
 });
 
 test("the next step cannot move a finished card during its first Expand tap", async ({ page }) => {
@@ -247,9 +237,12 @@ test("groups parallel cards, summarizes each completion and restores original or
   expect(await bash.evaluate((card) => card === window.originalActivityCard)).toBe(true);
   await activityView(page, "Brief").tap();
   await expect(group.locator(".message")).toHaveCount(2);
+  const parallelHeight = (await group.boundingBox()).height;
   await deliver(end("active-read", "read"));
   await expect(read).toBeHidden();
   await expect(group.locator(".message")).toHaveCount(1);
+  // Only single-step heights are held, so the box shrinks once parallel tools finish.
+  await expect.poll(async () => (await group.boundingBox()).height).toBeLessThan(parallelHeight - 20);
   await expect(group).toContainText("1 running");
   await expect(page.locator(".focus-activity-summary").last()).toContainText("1 tool update");
   await deliver(end("active-bash", "bash", "Test failed", true));
@@ -259,8 +252,6 @@ test("groups parallel cards, summarizes each completion and restores original or
   await expect(bash).toBeHidden();
   await expect(page.locator(".focus-activity-summary").last()).toContainText("2 tool updates");
   await expect(page.locator(".focus-activity-summary").last()).toContainText("1 error");
-  // Let the pending height refresh finish so only the correction below can rebuild the summary.
-  await expect(group).toHaveCSS("min-height", "0px");
   const toggleSummary = page.locator("[data-focus-activity-toggle]").last();
   await toggleSummary.scrollIntoViewIfNeeded();
   const box = await toggleSummary.boundingBox();

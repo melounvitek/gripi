@@ -110,7 +110,7 @@
     /* One readable column; long lines are hard to follow in a wide browser window. */
     .conversation-scroll > :not(.jump-controls, .current-session-find, .empty-state) { max-width: 60rem; margin-inline: auto; }
     /* A joined summary shares the header row: label, summary toggle, count. */
-    .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: center; min-height: 0; margin-bottom: 1.1rem; transition: min-height 180ms ease; }
+    .active-activity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; align-content: start; align-items: center; min-height: 0; margin-bottom: 1.1rem; }
     .active-activity > * { grid-column: 1 / -1; }
     .active-activity-header, .conversation-panel.is-conversation-focused .active-activity .focus-activity-summary { display: contents; }
     .active-activity-header { color: var(--muted); font-family: var(--mono); font-size: 0.74rem; font-weight: 500; }
@@ -118,7 +118,6 @@
     .active-activity-count { grid-area: 1 / 3; padding-right: var(--text-inset); color: var(--muted); font-weight: 400; }
     .active-activity-header > span, .active-activity .focus-activity-header { margin-bottom: 0.65rem; }
     .active-activity-waiting { margin: 0; padding: 0.65rem var(--text-inset); color: var(--muted); font-size: 0.8rem; }
-    @media (prefers-reduced-motion: reduce) { .active-activity { transition: none; } }
     .conversation-panel.is-conversation-focused .conversation-scroll .active-activity > .message { display: grid; }
     .active-activity > .message:last-child { margin-bottom: 0; }
     .active-activity .focus-activity-header { grid-area: 1 / 2; justify-self: start; width: auto; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.75rem; }

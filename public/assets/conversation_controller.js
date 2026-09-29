@@ -46,7 +46,7 @@ export class ConversationController {
     this.activityRunning = false;
     this.activityGroupShown = false;
     this.completedActivity = null;
-    this.activityHeightTimer = null;
+    this.activityHoldHeight = 0;
     this.focusedActivityMessageIds = new WeakMap();
     this.focusedActivityMessageSequence = 0;
     this.messageSources = new WeakMap();
@@ -486,10 +486,11 @@ export class ConversationController {
   }
 
   restoreActivityPositions(preserveGroup = false) {
-    this.clearTimer(this.activityHeightTimer);
-    this.activityHeightTimer = null;
     this.completedActivity = null;
-    if (!preserveGroup) this.activityGroupShown = false;
+    if (!preserveGroup) {
+      this.activityGroupShown = false;
+      this.activityHoldHeight = 0;
+    }
     this.activeActivityPositions.forEach((message, position) => {
       if (message.isConnected && position.isConnected) position.replaceWith(message);
       else position.remove();
@@ -522,12 +523,10 @@ export class ConversationController {
       this.completedActivity?.removeAttribute("data-activity-completed");
     }
     const displayed = new Set(this.completedActivity ? [this.completedActivity] : active);
-    const previous = [...(this.activeActivityGroup?.querySelectorAll(":scope > .message") || [])];
-    const changed = previous.length !== displayed.size || previous.some((message) => !displayed.has(message));
-    const height = changed ? this.activeActivityGroup?.getBoundingClientRect().height : 0;
-    if (height) {
-      this.activeActivityGroup.style.transition = "none";
-      this.activeActivityGroup.style.minHeight = `${height}px`;
+    // Hold the tallest single-step height for the run so the conversation above doesn't move between steps.
+    // Parallel steps aren't held, or every later step would sit in a box sized for several cards.
+    if (this.activeActivityGroup?.querySelectorAll(":scope > .message").length <= 1) {
+      this.activityHoldHeight = Math.max(this.activityHoldHeight, this.activeActivityGroup.getBoundingClientRect().height);
     }
     this.activeActivityPositions.forEach((message, position) => {
       if (displayed.has(message)) return;
@@ -569,17 +568,7 @@ export class ConversationController {
     });
     group.querySelector(".active-activity-count").textContent = active.size ? `${active.size} running` : this.completedActivity ? (this.completedActivity.classList.contains("message--tool-error") ? "Failed" : "Done") : "";
     group.querySelector(".active-activity-waiting").hidden = displayed.size > 0;
-    if (height) {
-      this.clearTimer(this.activityHeightTimer);
-      this.activityHeightTimer = this.timeout(() => {
-        this.activityHeightTimer = null;
-        this.focusedActivitySignature = null;
-        this.scheduleFocusedActivityRefresh();
-      }, 250);
-    } else if (!this.activityHeightTimer) {
-      group.style.transition = "";
-      group.style.minHeight = "";
-    }
+    group.style.minHeight = `${this.activityHoldHeight}px`;
     if (this.liveOutput.lastElementChild !== group) this.liveOutput.append(group);
   }
 
