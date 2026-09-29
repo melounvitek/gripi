@@ -70,4 +70,6 @@ test("start a session in a configured directory and persist its first response",
   await expect(row).toHaveAttribute("data-pinned", "true");
   await expect(message(page, "user", prompts.newSession)).toBeVisible();
   await expect(message(page, "assistant", replies.newSession)).toBeVisible();
+  const deleted = await page.request.post("/sessions/delete", { form: { session: new URL(page.url()).searchParams.get("session") } });
+  expect(deleted.ok()).toBe(true);
 });

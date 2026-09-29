@@ -27,8 +27,10 @@ async function openNew(page, mobile) {
   await expect(newDialog(page)).toBeVisible();
 }
 
-async function cleanup(page, session, tags) {
+async function cleanup(page, session, tags, createdSession) {
   for (const tag of tags) await page.request.post("/sessions/tags", { form: { session, tag, assigned: "false" } });
+  // Leftover sessions push seeded ones off the first sidebar page for later tests.
+  if (createdSession) expect((await page.request.post("/sessions/delete", { form: { session: createdSession } })).ok()).toBe(true);
 }
 
 test("new-session tags are removable local drafts, with reusable tags, retry and nested keyboard focus", async ({ page, isMobile }, testInfo) => {
@@ -100,6 +102,7 @@ test("new-session tags are removable local drafts, with reusable tags, retry and
 test("explicit draft tags survive first response and reload while the URL tag remains a separate filter", async ({ page, isMobile }, testInfo) => {
   const { session, tag, reusable } = await setup(page, testInfo);
   const created = `created-${testInfo.project.name}`;
+  let createdSession;
   try {
     await openNew(page, isMobile);
     const modal = newDialog(page);
@@ -124,15 +127,16 @@ test("explicit draft tags survive first response and reload while the URL tag re
       await expect(page.locator(".header-tags").getByRole("button", { name: `Filter sessions by ${name}`, exact: true })).toBeVisible();
     }
     expect(new URL(page.url()).searchParams.get("tag")).toBe(tag);
-    const createdSession = new URL(page.url()).searchParams.get("session");
+    createdSession = new URL(page.url()).searchParams.get("session");
     expect((await (await page.request.get(`/sessions/tags?${new URLSearchParams({ session: createdSession })}`)).json()).tags).toEqual([created, reusable]);
   } finally {
-    await cleanup(page, session, [tag, reusable]);
+    await cleanup(page, session, [tag, reusable], createdSession);
   }
 });
 
 test("starting without selecting tags creates an untagged session and navigation keeps subsequent drafts empty", async ({ page, isMobile }, testInfo) => {
   const { session, tag, reusable } = await setup(page, testInfo);
+  let createdSession;
   try {
     await openNew(page, isMobile);
     const modal = newDialog(page);
@@ -140,7 +144,7 @@ test("starting without selecting tags creates an untagged session and navigation
     await expect(modal).toBeHidden();
     await expect(page.locator(".session-header-name")).toHaveText("New session (pending first assistant response)");
     expect(new URL(page.url()).searchParams.get("tag")).toBe(tag);
-    const createdSession = new URL(page.url()).searchParams.get("session");
+    createdSession = new URL(page.url()).searchParams.get("session");
     expect((await (await page.request.get(`/sessions/tags?${new URLSearchParams({ session: createdSession })}`)).json()).tags || []).toEqual([]);
     await openNew(page, isMobile);
     await expect(modal.getByRole("button", { name: /^Remove / })).toHaveCount(0);
@@ -150,6 +154,6 @@ test("starting without selecting tags creates an untagged session and navigation
     await openNew(page, isMobile);
     await expect(modal.getByRole("button", { name: /^Remove / })).toHaveCount(0);
   } finally {
-    await cleanup(page, session, [tag, reusable]);
+    await cleanup(page, session, [tag, reusable], createdSession);
   }
 });
