@@ -52,6 +52,7 @@ export class ConversationController {
     this.activityHoldHeight = 0;
     this.focusedActivityMessageIds = new WeakMap();
     this.messagesDuringActivity = new WeakSet();
+    this.completedMessages = new Set();
     this.focusedActivityMessageSequence = 0;
     this.messageSources = new WeakMap();
     this.focusedActivitySignature = null;
@@ -519,21 +520,22 @@ export class ConversationController {
   refreshActiveActivity(messages) {
     const active = new Set(this.focusedView ? messages.filter((message) => message.hasAttribute("data-activity-active")) : []);
     const keepGroup = this.focusedView && this.activityRunning;
+    // Steps finished since the last refresh, including quick ones never seen running.
+    const completed = messages.filter((message) => message.hasAttribute("data-activity-completed"));
+    const finished = completed.findLast((message) => !this.completedMessages.has(message));
+    this.completedMessages = new Set(completed);
+    // A finished step stays shown until Pi's next step starts, a reply follows or the run ends.
+    if (active.size || !this.completedActivity?.isConnected) this.completedActivity = null;
+    if (!active.size && finished) this.completedActivity = finished;
     const latest = messages.at(-1);
     const latestVisible = latest && this.focusedViewMessage(latest);
     if (active.size && latestVisible) this.messagesDuringActivity.add(latest);
     // A reply after the finished step takes its place, so the step and its held space don't sit below the reply.
     // Text that arrived while the step was running doesn't count.
     const replyFollows = latestVisible && !this.messagesDuringActivity.has(latest);
-    if (!active.size && (!(keepGroup && this.activityGroupShown) || replyFollows)) {
+    if (!active.size && (!(keepGroup && (this.activityGroupShown || this.completedActivity)) || replyFollows)) {
       this.restoreActivityPositions();
       return;
-    }
-    // A finished step stays shown until Pi's next step starts, a reply follows or the run ends.
-    if (active.size || (this.completedActivity && !this.completedActivity.isConnected)) {
-      this.completedActivity = null;
-    } else if (!this.completedActivity) {
-      this.completedActivity = [...this.activeActivityPositions.values()].findLast((message) => message.isConnected && message.hasAttribute("data-activity-completed")) || null;
     }
     const displayed = new Set(this.completedActivity ? [this.completedActivity] : active);
     // Hold the tallest single-step height until the run ends or a reply follows, so the conversation above doesn't move between steps.
