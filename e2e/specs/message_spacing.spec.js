@@ -39,7 +39,7 @@ for (const width of [1440, 390, 320]) {
     await expectAlignedCard(compacted, assistant);
     await expectCompactionToggle(compacted, width);
 
-    await page.reload();
+    await reloadWithoutLivePi(page);
     await expectAlignedCard(toolCard, assistant);
     await expectAlignedCard(shell, assistant);
     await expectAlignedCard(compacted, assistant);
@@ -60,10 +60,17 @@ for (const touch of [false, true]) {
       await expectRunFinished(page);
       await expectMessageTimes(page, touch);
 
-      await page.reload();
+      await reloadWithoutLivePi(page);
       await expectMessageTimes(page, touch);
     });
   });
+}
+
+// The managed E2E gateway retires idle Pi after 2s, and a page rendered while Pi ran then re-renders the whole
+// transcript. Waiting for that after reloading keeps it from replacing elements while they are measured.
+async function reloadWithoutLivePi(page) {
+  await page.reload();
+  if (process.env.GRIPI_E2E_FAKE_PI_LOG) await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "available");
 }
 
 async function expectMessageTimes(page, touch) {
