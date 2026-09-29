@@ -309,7 +309,8 @@ test("Linux desktop installer keeps the app out of the gateway installation dire
   await mkdir(fuseRoots, { recursive: true });
   await writeFile(path.join(fuseRoots, "libfuse.so.2"), "");
   await cp(path.join(repoRoot, "bin/install-desktop"), installer);
-  await cp(path.join(repoRoot, "electron/assets/icons/1024x1024.png"), path.join(project, "electron/assets/icons/1024x1024.png"));
+  await mkdir(path.join(project, "electron", "assets", "icons"), { recursive: true });
+  await writeFile(path.join(project, "electron", "assets", "icons", "1024x1024.png"), "");
   await executable(path.join(fakeBin, "uname"), "#!/bin/sh\necho Linux\n");
   await executable(path.join(fakeBin, "mise"), "#!/bin/sh\n[ \"$*\" = 'run desktop-dist-linux' ] || exit 2\nmkdir -p dist\ntouch dist/Gripi-1.0.0-linux-x64.AppImage\n");
   const env = { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, GRIPI_FUSE_LIBRARY_ROOTS: fuseRoots };
