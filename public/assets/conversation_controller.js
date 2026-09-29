@@ -539,14 +539,9 @@ export class ConversationController {
       group.setAttribute("aria-label", "Active now");
       const header = this.document.createElement("div");
       header.className = "active-activity-header";
-      const label = this.document.createElement("span");
-      const spinner = this.document.createElement("span");
-      spinner.className = "focus-activity-spinner";
-      spinner.setAttribute("aria-hidden", "true");
-      label.append(spinner, "Active now");
       const count = this.document.createElement("span");
       count.className = "active-activity-count";
-      header.append(label, count);
+      header.append(count);
       const waiting = this.document.createElement("p");
       waiting.className = "active-activity-waiting";
       waiting.textContent = "Pi is working…";
