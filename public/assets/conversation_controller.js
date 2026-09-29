@@ -46,7 +46,6 @@ export class ConversationController {
     this.activityRunning = false;
     this.activityGroupShown = false;
     this.completedActivity = null;
-    this.activityCompletionTimer = null;
     this.activityHeightTimer = null;
     this.focusedActivityMessageIds = new WeakMap();
     this.focusedActivityMessageSequence = 0;
@@ -487,9 +486,7 @@ export class ConversationController {
   }
 
   restoreActivityPositions(preserveGroup = false) {
-    this.clearTimer(this.activityCompletionTimer);
     this.clearTimer(this.activityHeightTimer);
-    this.activityCompletionTimer = null;
     this.activityHeightTimer = null;
     this.completedActivity = null;
     if (!preserveGroup) this.activityGroupShown = false;
@@ -517,22 +514,12 @@ export class ConversationController {
       this.restoreActivityPositions();
       return;
     }
+    // A finished step stays shown until Pi's next step starts or the run ends.
     if (active.size || (this.completedActivity && !this.completedActivity.isConnected)) {
-      this.clearTimer(this.activityCompletionTimer);
-      this.activityCompletionTimer = null;
       this.completedActivity = null;
     } else if (!this.completedActivity) {
       this.completedActivity = [...this.activeActivityPositions.values()].findLast((message) => message.isConnected && message.hasAttribute("data-activity-completed")) || null;
-      if (this.completedActivity) {
-        this.completedActivity.removeAttribute("data-activity-completed");
-        this.activityCompletionTimer = this.timeout(() => {
-          this.completedActivity?.removeAttribute("data-activity-completed");
-          this.completedActivity = null;
-          this.activityCompletionTimer = null;
-          this.focusedActivitySignature = null;
-          this.scheduleFocusedActivityRefresh();
-        }, 1200);
-      }
+      this.completedActivity?.removeAttribute("data-activity-completed");
     }
     const displayed = new Set(this.completedActivity ? [this.completedActivity] : active);
     const previous = [...(this.activeActivityGroup?.querySelectorAll(":scope > .message") || [])];

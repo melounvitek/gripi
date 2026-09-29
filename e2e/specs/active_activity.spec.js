@@ -39,12 +39,10 @@ test("tool images survive activity retirement, including standalone custom-tool 
   );
   const card = page.locator('[data-tool-call-id="image-tool"]');
   await expect(card.locator(".message-images")).toBeVisible();
-  await expect(activeGroup(page).locator(".message")).toHaveCount(0);
-  await expect(card.locator(".message-images")).toBeVisible();
-  await expect(card.locator(".message-details")).toBeHidden();
   await deliver({ type: "agent_end" });
   await expect(activeGroup(page)).toHaveCount(0);
   await expect(card.locator(".message-images")).toBeVisible();
+  await expect(card.locator(".message-details")).toBeHidden();
 
   await deliver({ type: "message_end", message: { role: "toolResult", toolCallId: "standalone-image", toolName: "screenshot", content } });
   const standalone = page.locator('[data-tool-call-id="standalone-image"]');
@@ -67,23 +65,23 @@ test("bridges activity gaps without removing the group or keeping a stale runnin
   await group.evaluate((element) => { window.activityShell = element; });
   await deliver(end("gap-a", "bash", "Database inspected"), { type: "turn_end" });
   await expect(group.locator(".active-activity-count")).toHaveText("Done");
-  await expect(group).toContainText("Database inspected");
+  // The finished step stays until Pi's next step starts.
+  await page.waitForTimeout(1600);
+  await expect(group.locator('[data-tool-call-id="gap-a"]')).toContainText("Database inspected");
+  await expect(group.getByText("Pi is working…")).toBeHidden();
   await expect(group.locator("[data-activity-active]")).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("activity-gap.png") });
   await deliver({ type: "turn_start" }, start("gap-b", "read", { path: "schema.sql" }));
   await expect(group).toContainText("1 running");
   await expect(group.locator('[data-tool-call-id="gap-b"]')).toBeVisible();
   await expect(page.locator('[data-tool-call-id="gap-a"]')).toBeHidden();
-  // The previous completion timer must not retire the new activity.
-  await page.waitForTimeout(1600);
-  await expect(group).toContainText("1 running");
   await deliver(end("gap-b", "read"));
   await expect(group.locator(".active-activity-count")).toHaveText("Done");
-  await expect(group).toContainText("Pi is working…");
-  await expect(group.locator(".message")).toHaveCount(0);
+  await expect(group.locator('[data-tool-call-id="gap-b"]')).toBeVisible();
   expect(await group.evaluate((element) => element === window.activityShell)).toBe(true);
-  await page.screenshot({ path: test.info().outputPath("activity-gap.png") });
   await deliver(start("gap-c", "bash", { command: "verify schema" }));
   await expect(group).toContainText("1 running");
+  await expect(page.locator('[data-tool-call-id="gap-b"]')).toBeHidden();
   await deliver({ type: "agent_end" });
   await expect(group).toHaveCount(0);
 });
@@ -130,7 +128,7 @@ test("activity height settles after a shorter replacement and timers cannot recr
   await expect(group).toHaveCount(0);
 });
 
-test("a completion timer cannot move a card during its first Expand tap", async ({ page }) => {
+test("the next step cannot move a finished card during its first Expand tap", async ({ page }) => {
   const deliver = await liveEvents(page);
   const group = activeGroup(page);
   const output = Array.from({ length: 40 }, (_, index) => `Completed line ${index + 1}`).join("\n");
@@ -143,16 +141,19 @@ test("a completion timer cannot move a card during its first Expand tap", async 
   const box = await expand.boundingBox();
   const touch = await page.context().newCDPSession(page);
   await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
-  await page.waitForTimeout(1500);
+  await deliver(start("after-touch", "read", { path: "schema.sql" }));
+  await expect(page.locator('[data-tool-call-id="after-touch"]')).toHaveCount(1);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(expand).toBeVisible();
   await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await touch.detach();
-  await expect(group).toContainText("Pi is working…");
+  await expect(group.locator('[data-tool-call-id="after-touch"]')).toBeVisible();
+  await expect(page.locator('[data-tool-call-id="completed-touch"]')).toBeHidden();
   await activityView(page, "Full").tap();
   await expect(page.locator('[data-tool-call-id="completed-touch"] [data-tool-output-collapse]')).toHaveAttribute("data-expanded", "true");
 });
 
-test("discarded thinking is not resurrected by its completion timer", async ({ page }) => {
+test("discarded thinking is not kept as the finished step", async ({ page }) => {
   const deliver = await liveEvents(page);
   const thinking = { type: "thinking", thinking: "Tentative reasoning that was removed." };
   await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([thinking]), assistantMessageEvent: { type: "thinking_delta", contentIndex: 0 } });
@@ -182,8 +183,7 @@ test("joins the latest activity summary into the active group", async ({ page })
   expect(await group.evaluate((element) => element.querySelector(".focus-activity-details").getBoundingClientRect().bottom <= element.querySelector('[data-tool-call-id="joined-bash"]').getBoundingClientRect().top)).toBe(true);
   await group.screenshot({ path: test.info().outputPath("joined-active-now.png") });
   await deliver(end("joined-bash", "bash"));
-  await expect(group).toContainText("Pi is working…");
-  await expect(summary).toContainText("2 tool updates");
+  await expect(group.locator(".active-activity-count")).toHaveText("Done");
   await deliver({ type: "agent_end" });
   await expect(group).toHaveCount(0);
   await expect(page.locator(".focus-activity-summary")).toContainText("2 tool updates");
@@ -254,7 +254,8 @@ test("groups parallel cards, summarizes each completion and restores original or
   await expect(page.locator(".focus-activity-summary").last()).toContainText("1 tool update");
   await deliver(end("active-bash", "bash", "Test failed", true));
   await expect(group.locator(".active-activity-count")).toHaveText("Failed");
-  await expect(group).toContainText("Pi is working…");
+  await expect(group.locator('[data-tool-call-id="active-bash"]')).toBeVisible();
+  await deliver(start("active-next", "read", { path: "README.md" }));
   await expect(bash).toBeHidden();
   await expect(page.locator(".focus-activity-summary").last()).toContainText("2 tool updates");
   await expect(page.locator(".focus-activity-summary").last()).toContainText("1 error");
