@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">
-  <!-- the grip: four corner clamps, brand orange -->
-  <path fill="#F24405" d="M0 0H200V100H100V200H0ZM600 0H800V200H700V100H600ZM0 600H100V700H200V800H0ZM700 600H800V800H600V700H700Z"/>
-  <!-- pi, verbatim from the pi CLI logo (4x4 grid, cell = 100), follows currentColor -->
-  <g fill="currentColor" transform="translate(200 200)">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400">
+  <!-- G from the wordmark, on pi's 4-row pixel grid (cell = 100), brand orange -->
+  <path fill="#F24405" d="M0 0H300V100H100V300H200V200H300V400H0Z"/>
+  <!-- pi, verbatim from the pi CLI logo, follows currentColor -->
+  <g fill="currentColor" transform="translate(400 0)">
     <path fill-rule="evenodd" d="M0 0H300V200H200V300H100V400H0ZM100 100V200H200V100Z"/>
     <path d="M300 200H400V400H300Z"/>
   </g>

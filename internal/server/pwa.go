@@ -3,8 +3,8 @@ package server
 import "net/http"
 
 const (
-	gripiIconGrip = `<path fill="#F24405" d="M0 0H200V100H100V200H0ZM600 0H800V200H700V100H600ZM0 600H100V700H200V800H0ZM700 600H800V800H600V700H700Z"/>`
-	gripiIconPI   = `<g fill="#F1EFE9" transform="translate(200 200)"><path fill-rule="evenodd" d="M0 0H300V200H200V300H100V400H0ZM100 100V200H200V100Z"/><path d="M300 200H400V400H300Z"/></g>`
+	gripiIconG    = `<path fill="#F24405" d="M0 0H300V100H100V300H200V200H300V400H0Z"/>`
+	gripiIconPI   = `<g fill="#F1EFE9" transform="translate(400 0)"><path fill-rule="evenodd" d="M0 0H300V200H200V300H100V400H0ZM100 100V200H200V100Z"/><path d="M300 200H400V400H300Z"/></g>`
 	serviceWorker = `importScripts("/assets/notification_preview.js", "/assets/web_push_worker.js");
 
 self.addEventListener("install", (event) => {
@@ -106,7 +106,7 @@ func (app *application) appIcon(response http.ResponseWriter, _ *http.Request) {
 	response.Header().Set("Content-Type", "image/svg+xml")
 	_, _ = response.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">
   <rect width="800" height="800" rx="96" fill="#18181e"/>
-  <g transform="translate(80 80) scale(0.8)">` + gripiIconGrip + gripiIconPI + `</g>
+  <g transform="translate(100 250) scale(0.75)">` + gripiIconG + gripiIconPI + `</g>
 </svg>
 `))
 }
@@ -115,7 +115,7 @@ func (app *application) maskableAppIcon(response http.ResponseWriter, _ *http.Re
 	response.Header().Set("Content-Type", "image/svg+xml")
 	_, _ = response.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">
   <rect width="800" height="800" fill="#18181e"/>
-  <g transform="translate(176 176) scale(0.56)">` + gripiIconGrip + gripiIconPI + `</g>
+  <g transform="translate(140 270) scale(0.65)">` + gripiIconG + gripiIconPI + `</g>
 </svg>
 `))
 }
