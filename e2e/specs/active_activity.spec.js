@@ -324,6 +324,116 @@ test("focused activity does not scroll past the beginning of an oversized answer
   await expect.poll(() => card.evaluate((element) => Math.abs(element.getBoundingClientRect().top - document.querySelector('#conversation-scroll').getBoundingClientRect().top))).toBeLessThan(40);
 });
 
+for (const view of ["Full", "Brief"]) {
+  const answer = (text) => ({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  const finding = (index) => `Finding ${index}: keep the start of this answer visible while it streams.\n\n`;
+  const topOffset = (card) => card.evaluate((element) => Math.abs(element.getBoundingClientRect().top - document.querySelector("#conversation-scroll").getBoundingClientRect().top));
+
+  test(`${view} keeps the start of a long answer in view while it streams`, async ({ page }) => {
+    test.setTimeout(40_000);
+    const deliver = await liveEvents(page);
+    await activityView(page, view).tap();
+    await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) });
+    let text = "";
+    // Stream at Pi's pace, so the page scrolls while earlier scrolls are still settling.
+    for (let index = 1; index <= 30; index += 1) {
+      text += finding(index);
+      await deliver(answer(text));
+      await page.waitForTimeout(120);
+    }
+    const card = page.locator(".message--assistant").filter({ hasText: "Finding 1:" });
+    await expect(card).toContainText("Finding 30:");
+    await expect.poll(() => topOffset(card)).toBeLessThan(40);
+  });
+
+  test(`${view} keeps the start of a long answer in view when the page shrinks below it`, async ({ page }) => {
+    const deliver = await liveEvents(page);
+    await activityView(page, view).tap();
+    const scroller = page.locator("#conversation-scroll");
+    await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, answer(finding(1)));
+    const card = page.locator(".message--assistant").filter({ hasText: "Finding 1:" });
+    await expect(card).toBeVisible();
+    // Stands in for a step below the answer that collapses without the user scrolling.
+    await scroller.evaluate((element) => element.insertAdjacentHTML("beforeend", '<div data-shrinking-step style="height: 400px"></div>'));
+    await deliver(answer(finding(1) + finding(2)));
+    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
+    await page.waitForTimeout(300);
+    await page.locator("[data-shrinking-step]").evaluate((element) => element.remove());
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await deliver(answer(Array.from({ length: 60 }, (_, index) => finding(index + 1)).join("")));
+    await expect(card).toContainText("Finding 60:");
+    await expect.poll(() => topOffset(card)).toBeLessThan(40);
+  });
+}
+
+async function streamingReplyAtBottom(page) {
+  const deliver = await liveEvents(page);
+  const scroller = page.locator("#conversation-scroll");
+  const earlier = Array.from({ length: 40 }, (_, index) => `Earlier paragraph ${index + 1}.`).join("\n\n");
+  await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([{ type: "text", text: earlier }]) }, { type: "agent_end" });
+  await expect(page.locator(".message--assistant").filter({ hasText: "Earlier paragraph 40." })).toBeVisible();
+  let text = "Streaming reply.";
+  const update = () => deliver({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) });
+  await update();
+  const fromBottom = () => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
+  await expect.poll(fromBottom).toBeLessThan(2);
+  return {
+    box: await scroller.boundingBox(),
+    fromBottom,
+    async expectNotFollowing() {
+      // Let a fling finish first, or it could hide a wrong follow scroll.
+      await expect.poll(async () => {
+        const before = await fromBottom();
+        await page.waitForTimeout(150);
+        return before === await fromBottom();
+      }).toBe(true);
+      text += " More.";
+      await update();
+      await expect(page.locator(".message--assistant").filter({ hasText: text })).toHaveCount(1);
+      // Leave time for the follow scroll that must not happen.
+      await page.waitForTimeout(500);
+      expect(await fromBottom()).toBeGreaterThan(120);
+    }
+  };
+}
+
+test("a touch drag that pauses still stops following a streaming reply", async ({ page }) => {
+  const { box, fromBottom, expectNotFollowing } = await streamingReplyAtBottom(page);
+  const touch = await page.context().newCDPSession(page);
+  const x = box.x + box.width / 2;
+  const move = async (from, to) => {
+    for (let step = 1; step <= 5; step += 1) await touch.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: from + (to - from) * step / 5 }] });
+  };
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y: box.y + 100 }] });
+  await move(box.y + 100, box.y + 150);
+  await page.waitForTimeout(600);
+  await move(box.y + 150, box.y + 400);
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touch.detach();
+  await expect.poll(fromBottom).toBeGreaterThan(120);
+  await expectNotFollowing();
+});
+
+test("a text selection that scrolls the view stops following a streaming reply", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Selecting with a mouse is a desktop interaction");
+  const { box, fromBottom, expectNotFollowing } = await streamingReplyAtBottom(page);
+  const x = box.x + 60;
+  await page.mouse.move(x, box.y + box.height - 100);
+  await page.mouse.down();
+  await page.mouse.move(x, box.y + box.height - 200, { steps: 5 });
+  // Pause so the scrolling starts well after the press.
+  await page.waitForTimeout(400);
+  // Holding the selection above the conversation scrolls it with no further input, like a scrollbar drag.
+  await page.mouse.move(x, box.y - 20, { steps: 5 });
+  await page.waitForTimeout(800);
+  await page.mouse.up();
+  await expect.poll(fromBottom).toBeGreaterThan(120);
+  // Clear the selection, which pauses following on its own.
+  await page.mouse.click(x, box.y + box.height / 2);
+  await expectNotFollowing();
+});
+
 test("active output and subagent prompts open on the first tap during updates", async ({ page }) => {
   const deliver = await liveEvents(page);
   const tool = call("touch-bash", "bash", { command: "npm test" });

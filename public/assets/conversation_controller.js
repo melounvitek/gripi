@@ -1,6 +1,7 @@
 import { enhanceMarkdownCodeBlocks, enhanceMessageLinks } from "./dom.js";
 
 const FOCUSED_ACTIVITY_ITEM_LIMIT = 10;
+const USER_SCROLL_WINDOW_MS = 250;
 
 export function appendQuote(draft, text) {
   const separator = !draft || draft.endsWith("\n\n") ? "" : draft.endsWith("\n") ? "\n" : "\n\n";
@@ -27,7 +28,9 @@ export class ConversationController {
     this.autoScrollEnabled = true;
     this.forceBottomAutoScroll = false;
     this.followOversizedMessageBottom = false;
-    this.programmaticScroll = false;
+    this.programmaticScrollTop = null;
+    this.scrollInputAt = 0;
+    this.pointerHeld = false;
     this.lastScrollTop = 0;
     this.scrollDirection = null;
     this.scrollIntent = null;
@@ -112,9 +115,13 @@ export class ConversationController {
       event.preventDefault();
       this.promptTextarea.focus({ preventScroll: true });
     });
-    ["wheel", "touchstart", "pointerdown"].forEach((type) => {
+    ["wheel", "touchstart", "touchmove", "pointerdown"].forEach((type) => {
       this.listen(this.element, type, () => this.recordScrollIntent("pointer"), { passive: true });
     });
+    // Scrollbar and text-selection drags scroll without further input, so a held pointer counts as the user scrolling.
+    this.listen(this.element, "pointerdown", () => { this.pointerHeld = true; }, { passive: true });
+    // A context menu can take the release, so it ends the hold too.
+    ["pointerup", "pointercancel", "contextmenu"].forEach((type) => this.listen(this.document, type, () => { this.pointerHeld = false; }));
     this.listen(this.element, "scroll", () => this.handleScroll(), { passive: true });
     this.listen(this.historyStatus(), "click", () => this.loadOlderWindow().catch(() => {}));
     this.observeHistoryStatus();
@@ -210,7 +217,7 @@ export class ConversationController {
     this.clearMessageJumpSuppressionScrollEndListener();
     this.messageJumpSuppressionGeneration += 1;
     this.messageJumpTargetsSuppressed = false;
-    this.programmaticScroll = false;
+    this.pointerHeld = false;
     this.document.body.classList.remove("is-conversation-scrolling");
   }
 
@@ -764,12 +771,18 @@ export class ConversationController {
 
   recordScrollIntent(intent) {
     this.scrollIntent = intent;
+    this.scrollInputAt = Date.now();
+    this.programmaticScrollTop = null;
     if (intent !== "keyboard") this.messageJumpTargetsSuppressed = false;
   }
 
   handleScroll() {
     const currentScrollTop = this.element.scrollTop;
-    if (!this.programmaticScroll) {
+    const ownScroll = this.programmaticScrollTop !== null && Math.abs(currentScrollTop - this.programmaticScrollTop) < 1;
+    // Only scrolls that follow the user's input change following, not the browser's adjustments after layout changes.
+    if (!ownScroll && (this.pointerHeld || Date.now() - this.scrollInputAt < USER_SCROLL_WINDOW_MS)) {
+      // Drags, flings and smooth scrolls keep scrolling after the input that started them.
+      this.scrollInputAt = Date.now();
       if (currentScrollTop > this.lastScrollTop) this.scrollDirection = "down";
       if (currentScrollTop < this.lastScrollTop) this.scrollDirection = "up";
       this.autoScrollEnabled = this.nearBottom();
@@ -839,9 +852,9 @@ export class ConversationController {
   }
 
   withProgrammaticScroll(callback) {
-    this.programmaticScroll = true;
     callback();
-    this.timeout(() => { this.programmaticScroll = false; }, 120);
+    // An instant scroll's event arrives a frame later, so recognise it by where it lands.
+    this.programmaticScrollTop = this.element.scrollTop;
   }
 
   scrollElementTopIntoView(element, behavior = "smooth", topOffset = 0) {
