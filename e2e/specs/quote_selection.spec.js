@@ -17,7 +17,8 @@ async function selectText(body) {
 }
 
 async function openQuoteSession(page, title) {
-  await page.goto(`/?${new URLSearchParams({ session_search: title })}`);
+  // A searched session link also opens conversation find, whose focus and selection events race quoting.
+  await page.goto("/?show_all_sessions=1");
   await selectSession(page, title);
 }
 
@@ -191,10 +192,6 @@ test("dismisses a selected streaming passage when its source is replaced", async
 
 test("cleans up selections across session switches and does not duplicate handlers", async ({ page }) => {
   await openQuoteSession(page, sessions.quoteHistory);
-  const url = new URL(page.url());
-  url.searchParams.delete("session_search");
-  url.searchParams.set("sidebar_sessions_limit", "100");
-  await page.goto(url.toString());
   await page.evaluate(() => { window.quoteNavigationSentinel = true; });
   const composer = page.getByLabel("Message to Pi");
   await composer.fill("Saved draft");
@@ -233,6 +230,8 @@ test("Escape cancels a Quote that has not appeared yet", async ({ page }) => {
   await openQuoteSession(page, sessions.quoteHistory);
   const body = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body");
   await body.evaluate(async (element) => {
+    // Let earlier selectionchange events pass so the listener below sees the one from this selection.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const range = document.createRange();
     range.selectNodeContents(element);
     getSelection().removeAllRanges();

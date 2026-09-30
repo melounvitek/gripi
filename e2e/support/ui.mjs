@@ -1,16 +1,12 @@
 import { expect } from "@playwright/test";
 
 export async function selectSession(page, title) {
-  let link = page.getByRole("link", { name: new RegExp(escapeRegExp(title)) });
-  if (!await link.isVisible()) {
-    await page.getByRole("button", { name: "Search sessions" }).click();
-    const search = page.getByRole("searchbox", { name: "Search sessions" });
-    await search.fill(title);
-    await Promise.all([
-      page.waitForURL((url) => url.searchParams.get("session_search") === title, { waitUntil: "domcontentloaded" }),
-      search.press("Enter")
-    ]);
-    link = page.getByRole("link", { name: new RegExp(escapeRegExp(title)) });
+  const link = page.getByRole("link", { name: new RegExp(escapeRegExp(title)) });
+  // Earlier tests push seeded sessions down the sidebar. Loading more keeps it unfiltered, unlike searching.
+  const loadMore = page.locator("[data-sidebar-load-more]");
+  while (!await link.isVisible() && await loadMore.isVisible()) {
+    await loadMore.click();
+    await expect(page.locator("[data-sidebar-load-more].is-loading")).toHaveCount(0);
   }
   await expect(link).toBeVisible();
   await link.click();

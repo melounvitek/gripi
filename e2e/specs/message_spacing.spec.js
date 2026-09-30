@@ -15,9 +15,13 @@ for (const width of [1440, 390, 320]) {
     const toolCard = page.locator(".message--tool-call").filter({ hasText: tool.command }).last();
     await expectAlignedCard(toolCard, assistant);
 
+    const shells = page.locator('article[data-role="bashExecution"]');
+    const shellCount = await shells.count();
     await page.getByLabel("Message to Pi").fill(`!!${nativeBash.excluded.command}`);
     await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
-    const shell = page.locator('article[data-role="bashExecution"]').last();
+    // Earlier tests leave the same shell card in this shared session.
+    await expect(shells).toHaveCount(shellCount + 1);
+    const shell = shells.last();
     await expect(shell).toContainText(nativeBash.excluded.output.trim());
     await expectRunFinished(page);
     await expectAlignedCard(shell, assistant);
@@ -26,6 +30,8 @@ for (const width of [1440, 390, 320]) {
     await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
     const pending = page.locator('[data-pending-compaction="true"]');
     await expect(pending).toBeVisible();
+    // compaction_start replaces the optimistic card; measure the replacement.
+    await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
     await expectAlignedCard(pending, assistant);
     await expectRunFinished(page);
 
@@ -33,7 +39,7 @@ for (const width of [1440, 390, 320]) {
     await expectAlignedCard(compacted, assistant);
     await expectCompactionToggle(compacted, width);
 
-    await page.reload();
+    await reloadWithoutLivePi(page);
     await expectAlignedCard(toolCard, assistant);
     await expectAlignedCard(shell, assistant);
     await expectAlignedCard(compacted, assistant);
@@ -54,10 +60,17 @@ for (const touch of [false, true]) {
       await expectRunFinished(page);
       await expectMessageTimes(page, touch);
 
-      await page.reload();
+      await reloadWithoutLivePi(page);
       await expectMessageTimes(page, touch);
     });
   });
+}
+
+// The managed E2E gateway retires idle Pi after 2s, and a page rendered while Pi ran then re-renders the whole
+// transcript. Waiting for that after reloading keeps it from replacing elements while they are measured.
+async function reloadWithoutLivePi(page) {
+  await page.reload();
+  if (process.env.GRIPI_E2E_FAKE_PI_LOG) await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "available");
 }
 
 async function expectMessageTimes(page, touch) {

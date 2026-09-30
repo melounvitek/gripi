@@ -118,10 +118,9 @@ test("Clear queue confirms on the first mobile tap with a 44px target", async ({
 });
 
 test("open and zoom live and persisted images on the first mobile tap", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?show_all_sessions=1");
   await page.locator('label[aria-label="Open sessions"]').tap();
   const session = page.getByRole("link", { name: new RegExp(sessions.imageViewer) });
-  if (!await session.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
   await session.tap();
   await expect(page.getByRole("heading", { level: 1, name: sessions.imageViewer })).toBeVisible();
 
@@ -272,17 +271,9 @@ test("open selected session actions and pin from them on the first mobile tap", 
 });
 
 test("keep parallel subagent order and timestamps stable on mobile", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?show_all_sessions=1");
   await page.locator('label[aria-label="Open sessions"]').tap();
-  let session = page.getByRole("link", { name: new RegExp(sessions.parallelSubagentsMobile) });
-  if (!await session.isVisible()) {
-    await page.getByRole("button", { name: "Search sessions" }).tap();
-    const search = page.getByRole("searchbox", { name: "Search sessions" });
-    await search.fill(sessions.parallelSubagentsMobile);
-    await search.press("Enter");
-    session = page.getByRole("link", { name: new RegExp(sessions.parallelSubagentsMobile) });
-  }
-  await session.tap();
+  await page.getByRole("link", { name: new RegExp(sessions.parallelSubagentsMobile) }).tap();
   await expect(page.getByRole("heading", { level: 1, name: sessions.parallelSubagentsMobile })).toBeVisible();
   await sendPrompt(page, prompts.parallelSubagentsMobile);
 
@@ -313,7 +304,7 @@ test("keep parallel subagent order and timestamps stable on mobile", async ({ pa
 });
 
 test("show agent activity segments that activate on the first tap", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?show_all_sessions=1");
 
   await page.locator('label[aria-label="Open sessions"]').tap();
   await page.getByRole("link", { name: new RegExp(sessions.toolSummary) }).tap();
@@ -429,12 +420,10 @@ test("navigate and complete a conversation from the mobile session drawer", asyn
 });
 
 test("keep wrapped tool output short until the first Expand tap", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?show_all_sessions=1");
 
   await page.locator('label[aria-label="Open sessions"]').click();
-  const wrappedOutputLink = page.getByRole("link", { name: new RegExp(sessions.wrappedToolOutput) });
-  if (!await wrappedOutputLink.isVisible()) await page.getByRole("link", { name: /Load \d+ more/ }).tap();
-  await wrappedOutputLink.click();
+  await page.getByRole("link", { name: new RegExp(sessions.wrappedToolOutput) }).click();
   await expect(page.getByRole("heading", { level: 1, name: sessions.wrappedToolOutput })).toBeVisible();
 
   await sendPrompt(page, prompts.wrappedToolOutput);

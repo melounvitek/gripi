@@ -48,6 +48,8 @@ export default defineConfig({
       name: "iphone",
       dependencies: ["setup"],
       testMatch: /quote_touch\.spec\.js/,
+      // Starting WebKit on a cold CI runner can take most of the default 20s.
+      timeout: 40_000,
       use: {
         ...devices["iPhone 13"],
         storageState
