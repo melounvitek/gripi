@@ -128,6 +128,11 @@ test("a step taller than the view does not hold later steps out of view", async 
   await expect(group.locator('[data-tool-call-id="after-thinking"]')).toBeVisible();
   await expect.poll(() => page.locator("#conversation-scroll").evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
   await expect(group.locator('[data-tool-call-id="after-thinking"]')).toBeInViewport();
+  // The group header stays below the top edge with the conversation's usual top padding, allowing for sub-pixel rounding.
+  await expect.poll(() => page.locator("#conversation-scroll").evaluate((element) => {
+    const header = element.querySelector(".active-activity .focus-activity-header");
+    return header.getBoundingClientRect().top - element.getBoundingClientRect().top - parseFloat(getComputedStyle(element).paddingTop);
+  })).toBeGreaterThan(-1);
 });
 
 test("steps that start and finish between updates still show as the finished step", async ({ page }) => {

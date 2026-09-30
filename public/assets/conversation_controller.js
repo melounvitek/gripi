@@ -578,9 +578,13 @@ export class ConversationController {
     });
     group.querySelector(".active-activity-count").textContent = active.size ? `${active.size} running` : this.completedActivity ? (this.completedActivity.classList.contains("message--tool-error") ? "Failed" : "Done") : "";
     group.querySelector(".active-activity-waiting").hidden = displayed.size > 0;
-    // Stay below the visible height so a step taller than the view can't hold later steps off-screen.
-    group.style.minHeight = `${Math.min(this.activityHoldHeight, this.element.clientHeight * 0.9)}px`;
     if (this.liveOutput.lastElementChild !== group) this.liveOutput.append(group);
+    // Cap the hold so the space kept after a taller step can't push the header above the top padding when following the latest output.
+    // Measure with the full hold applied, so the view is filled whenever the cap can matter.
+    group.style.minHeight = `${this.activityHoldHeight}px`;
+    const below = this.element.getBoundingClientRect().top + this.element.scrollHeight - this.element.scrollTop - group.getBoundingClientRect().bottom;
+    const available = this.element.clientHeight - parseFloat(this.window.getComputedStyle(this.element).paddingTop) - below;
+    group.style.minHeight = `${Math.min(this.activityHoldHeight, Math.max(0, available))}px`;
   }
 
   refreshFocusedActivity() {
