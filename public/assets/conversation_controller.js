@@ -2,6 +2,7 @@ import { enhanceMarkdownCodeBlocks, enhanceMessageLinks } from "./dom.js";
 
 const FOCUSED_ACTIVITY_ITEM_LIMIT = 10;
 const USER_SCROLL_WINDOW_MS = 250;
+const CONVERSATION_VIEW_KEY = "gripi:conversation-view";
 
 export function appendQuote(draft, text) {
   const separator = !draft || draft.endsWith("\n\n") ? "" : draft.endsWith("\n") ? "\n" : "\n\n";
@@ -42,6 +43,7 @@ export class ConversationController {
     this.messageJumpSuppressionScrollEndListener = null;
     this.messageJumpSuppressionGeneration = 0;
     this.focusedView = false;
+    try { this.focusedView = this.window.localStorage?.getItem(CONVERSATION_VIEW_KEY) === "brief"; } catch (_error) {}
     this.focusedActivityRefreshFrame = null;
     this.focusedActivityTouchActive = false;
     this.activeActivityPositions = new Map();
@@ -80,6 +82,10 @@ export class ConversationController {
       const focusedView = option.dataset.conversationView === "brief";
       if (focusedView === this.focusedView) return;
       this.focusedView = focusedView;
+      try {
+        if (focusedView) this.window.localStorage.setItem(CONVERSATION_VIEW_KEY, "brief");
+        else this.window.localStorage.removeItem(CONVERSATION_VIEW_KEY);
+      } catch (_error) {}
       this.applyFocusedView(true);
     });
     this.lastScrollTop = this.element?.scrollTop || 0;
