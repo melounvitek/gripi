@@ -531,7 +531,7 @@ func (app *application) modelSettings(response http.ResponseWriter, request *htt
 	if !ok {
 		return
 	}
-	var stateResponse, modelsResponse map[string]any
+	var stateResponse, modelsResponse, scopedResponse map[string]any
 	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
@@ -540,6 +540,10 @@ func (app *application) modelSettings(response http.ResponseWriter, request *htt
 		stateResponse, err = client.GetState(request.Context())
 		if err == nil {
 			modelsResponse, err = actions.GetAvailableModels(request.Context())
+		}
+		if err == nil {
+			// The scope only picks the list the picker opens on, so the picker still works without it.
+			scopedResponse, _ = actions.ScopedModels(request.Context())
 		}
 		return err
 	})
@@ -553,7 +557,11 @@ func (app *application) modelSettings(response http.ResponseWriter, request *htt
 		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not load model settings"})
 		return
 	}
-	writeJSON(response, map[string]any{"state": state, "models": models})
+	scopedModels, _ := successfulData(scopedResponse)["models"].([]any)
+	if scopedModels == nil {
+		scopedModels = []any{}
+	}
+	writeJSON(response, map[string]any{"state": state, "models": models, "scopedModels": scopedModels})
 }
 
 func (app *application) setModelSettings(response http.ResponseWriter, request *http.Request) {

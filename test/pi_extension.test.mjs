@@ -214,6 +214,12 @@ test("large native trees are compacted before crossing the extension bridge", as
     });
     assert.equal(reloadCalls, 1);
     assert.deepEqual(JSON.parse(statusText), { ok: false, error: "Session is busy" });
+
+    await commands.get("gripi_scoped_models").handler(reloadArgs("cab"), {
+      scopedModels: [{ model: { provider: "openai-codex", id: "gpt-6-astra", name: "GPT-6 Astra" }, thinkingLevel: "high" }],
+      ui: { setStatus(_key, value) { statusText = value; } },
+    });
+    assert.deepEqual(JSON.parse(statusText), { ok: true, models: [{ provider: "openai-codex", id: "gpt-6-astra" }] });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

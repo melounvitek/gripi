@@ -423,7 +423,7 @@ function acceptReloadBridge(command) {
 }
 
 function acceptTreeBridge(command) {
-  const match = command.message?.match(/^\/(gripi_tree_(?:snapshot|navigate|label|leaf)) ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
+  const match = command.message?.match(/^\/(gripi_tree_(?:snapshot|navigate|label|leaf)|gripi_scoped_models) ([a-f0-9]+) ([A-Za-z0-9_-]+)$/i);
   if (!match) return false;
   respond(command, true);
   const [, name, requestId, encoded] = match;
@@ -451,6 +451,8 @@ function acceptTreeBridge(command) {
     });
   } else if (name === "gripi_tree_leaf") {
     emitTreeBridge(name, requestId, { ok: true, leafId });
+  } else if (name === "gripi_scoped_models") {
+    emitTreeBridge(name, requestId, { ok: true, models: fakeModels().slice(0, 2).map(({ provider, id }) => ({ provider, id })) });
   } else if (name === "gripi_tree_navigate") {
     const target = entries.find((entry) => entry.id === payload.entryId);
     if (!target) emitTreeBridge(name, requestId, { ok: false, error: `Tree entry not found: ${payload.entryId}` });
