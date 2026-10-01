@@ -1,13 +1,5 @@
 import "./notification_preview.js";
 
-export function compactNumber(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return String(value || "");
-  if (number < 1000) return String(Math.round(number));
-  if (number < 1000000) return `${(number / 1000).toFixed(1).replace(/\.0$/, "")}k`;
-  return `${(number / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
-}
-
 export function formatWaitDuration(milliseconds) {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   if (seconds < 60) return `${seconds}s`;

@@ -3,7 +3,6 @@ import { AsyncGeneration } from "./async_generation.js";
 import { parseNativeBash } from "./bash.js";
 import { downloadResponse } from "./downloads.js";
 import {
-  compactNumber,
   eventErrorText,
   eventStatusText,
   eventTimestamp,
@@ -24,7 +23,7 @@ import {
   sessionTreeSlashCommand,
   stableTextHash
 } from "./formatting.js";
-import { modelSettingsKey, selectedThinkingLevel, supportedThinkingLevels } from "./model.js";
+import { matchingPickerModels, modelSettingsKey, scopedPickerModels, selectedThinkingLevel, sortedPickerModels, supportedThinkingLevels } from "./model.js";
 import {
   currentSessionFindNavigationShortcut,
   isCtrlOrMetaShortcut,
@@ -124,9 +123,13 @@ let liveErrorText = "";
 let liveStatusModel = null;
 let liveStatusThinking = null;
 let modelSettingsModels = [];
+let modelSettingsScopedModels = [];
+let modelSettingsVisibleModels = [];
+let modelSettingsScope = "all";
+let modelSettingsActiveIndex = 0;
+let modelSettingsPending = false;
 let modelSettingsCurrentModel = null;
 let modelSettingsCurrentThinking = "off";
-let modelSettingsSelectedKey = null;
 let modelSettingsOperationGeneration = 0;
 let thinkingCyclePending = false;
 let pendingImages = [];
@@ -460,8 +463,9 @@ function renderModelStatus() {
   removeStatusItem("thinking");
 }
 
-function selectedSettingsModel() {
-  return modelSettingsModels.find((model) => modelSettingsKey(model) === modelSettingsSelectedKey) || null;
+function syncModelSettingsControls() {
+  const controls = document.querySelector("[data-model-picker-controls]");
+  if (controls) controls.disabled = modelSettingsPending || ["sending", "exporting", "stopping"].includes(composerState?.dataset.state);
 }
 
 function setModelSettingsStatus(message, error = false) {
@@ -471,119 +475,120 @@ function setModelSettingsStatus(message, error = false) {
   status.classList.toggle("is-error", error);
 }
 
-function renderThinkingOptions(model, requestedLevel = null) {
+function renderThinkingOptions() {
   const container = document.querySelector("[data-thinking-levels]");
-  const fieldset = document.querySelector("[data-thinking-options]");
-  if (!container || !fieldset || !model) return;
-  const level = selectedThinkingLevel(model, requestedLevel || modelSettingsCurrentThinking);
+  const line = document.querySelector("[data-thinking-options]");
+  if (!container || !line) return;
+  const model = modelSettingsCurrentModel;
   container.replaceChildren();
-  supportedThinkingLevels(model).forEach((thinkingLevel) => {
-    const label = document.createElement("label");
-    label.className = "thinking-option";
-    const radio = document.createElement("input");
-    radio.type = "radio";
-    radio.name = "thinking";
-    radio.value = thinkingLevel;
-    radio.checked = thinkingLevel === level;
-    label.append(radio, thinkingLevel);
-    container.append(label);
+  line.hidden = !model;
+  if (!model) return;
+  supportedThinkingLevels(model).forEach((level, index) => {
+    if (index) {
+      const separator = document.createElement("span");
+      separator.className = "model-picker-separator";
+      separator.setAttribute("aria-hidden", "true");
+      separator.textContent = "|";
+      container.append(separator);
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = level;
+    button.setAttribute("aria-pressed", String(level === modelSettingsCurrentThinking));
+    button.addEventListener("click", () => { applyModelSettings(model, level).catch(() => {}); });
+    container.append(button);
   });
-  fieldset.hidden = false;
 }
 
-function modelMetadata(model) {
-  const metadata = [];
-  if (model.contextWindow) metadata.push(`${compactNumber(model.contextWindow)} context`);
-  if (model.maxTokens) metadata.push(`${compactNumber(model.maxTokens)} max output`);
-  if (Array.isArray(model.input) && model.input.includes("image")) metadata.push("images");
-  metadata.push(model.reasoning ? "reasoning" : "no reasoning");
-  return metadata.join(" · ");
+function setModelSettingsCursor(index) {
+  const list = document.querySelector("[data-model-list]");
+  const model = modelSettingsVisibleModels[index];
+  if (!list || !model) return;
+  modelSettingsActiveIndex = index;
+  [...list.children].forEach((row, rowIndex) => row.setAttribute("aria-selected", String(rowIndex === index)));
+  list.children[index].scrollIntoView({ block: "nearest" });
+  document.querySelector("[data-model-search]")?.setAttribute("aria-activedescendant", list.children[index].id);
+  const count = modelSettingsVisibleModels.length;
+  // Like Pi CLI, show the position only once the list is too long to see at a glance.
+  setModelSettingsStatus(`Model Name: ${model.name || model.id}${count > 10 ? ` (${index + 1}/${count})` : ""}`);
 }
 
 function renderModelSettingsModels() {
   const list = document.querySelector("[data-model-list]");
-  const search = document.querySelector("[data-model-search]")?.value.trim().toLowerCase() || "";
+  const search = document.querySelector("[data-model-search]");
   if (!list) return;
-  list.replaceChildren();
-  const matches = modelSettingsModels.filter((model) => [model.provider, model.id, model.name].some((value) => String(value || "").toLowerCase().includes(search)));
-  const providers = new Map();
-  matches.forEach((model) => {
-    const models = providers.get(model.provider || "Other") || [];
-    models.push(model);
-    providers.set(model.provider || "Other", models);
+  const query = search?.value.trim() || "";
+  const currentKey = modelSettingsKey(modelSettingsCurrentModel || {});
+  modelSettingsVisibleModels = matchingPickerModels(modelSettingsScope === "scoped" ? modelSettingsScopedModels : modelSettingsModels, query);
+  list.replaceChildren(...modelSettingsVisibleModels.map((model, index) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "model-picker-row";
+    row.id = `model-picker-option-${index}`;
+    row.tabIndex = -1;
+    row.setAttribute("role", "option");
+    if (modelSettingsKey(model) === currentKey) row.setAttribute("aria-current", "true");
+    const cursor = document.createElement("span");
+    cursor.className = "model-picker-cursor";
+    cursor.textContent = "→";
+    const check = document.createElement("span");
+    check.className = "model-picker-check";
+    check.textContent = "✓";
+    cursor.setAttribute("aria-hidden", "true");
+    check.setAttribute("aria-hidden", "true");
+    const provider = document.createElement("span");
+    provider.className = "model-picker-provider";
+    provider.textContent = `[${model.provider || "unknown"}]`;
+    const label = document.createElement("span");
+    label.append(model.id || "Unknown model", " ", provider);
+    row.append(cursor, check, label);
+    row.addEventListener("click", () => { applyModelSettings(model, selectedThinkingLevel(model, modelSettingsCurrentThinking)).catch(() => {}); });
+    return row;
+  }));
+  search?.removeAttribute("aria-activedescendant");
+  if (!modelSettingsVisibleModels.length) {
+    setModelSettingsStatus("No matching models");
+    return;
+  }
+  // Like Pi CLI: a search starts at its first match, otherwise the cursor rests on the current model.
+  setModelSettingsCursor(query ? 0 : Math.max(0, modelSettingsVisibleModels.findIndex((model) => modelSettingsKey(model) === currentKey)));
+}
+
+function setModelSettingsScope(scope) {
+  modelSettingsScope = scope;
+  const line = document.querySelector("[data-model-scope]");
+  if (line) line.hidden = !modelSettingsScopedModels.length;
+  document.querySelectorAll("[data-model-scope-option]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.modelScopeOption === scope));
   });
-  providers.forEach((models, provider) => {
-    const group = document.createElement("section");
-    group.className = "model-provider-group";
-    const heading = document.createElement("h3");
-    heading.className = "model-provider-heading";
-    heading.textContent = provider;
-    group.append(heading);
-    models.forEach((model) => {
-      const label = document.createElement("label");
-      label.className = "model-option";
-      const radio = document.createElement("input");
-      radio.type = "radio";
-      radio.name = "model";
-      radio.value = modelSettingsKey(model);
-      radio.checked = radio.value === modelSettingsSelectedKey;
-      radio.addEventListener("change", () => {
-        modelSettingsSelectedKey = radio.value;
-        renderThinkingOptions(model);
-      });
-      const details = document.createElement("span");
-      details.className = "model-option-details";
-      const id = document.createElement("span");
-      id.className = "model-option-id";
-      id.textContent = model.id || "Unknown model";
-      details.append(id);
-      if (model.name && model.name !== model.id) {
-        const name = document.createElement("span");
-        name.className = "model-option-name";
-        name.textContent = model.name;
-        details.append(name);
-      }
-      const metadata = document.createElement("span");
-      metadata.className = "model-option-meta";
-      metadata.textContent = modelMetadata(model);
-      details.append(metadata);
-      label.append(radio, details);
-      if (modelSettingsKey(model) === modelSettingsKey(modelSettingsCurrentModel || {})) {
-        const badge = document.createElement("span");
-        badge.className = "model-current-badge";
-        badge.textContent = "Current";
-        label.append(badge);
-      }
-      group.append(label);
-    });
-    list.append(group);
-  });
-  setModelSettingsStatus(matches.length ? `${matches.length} model${matches.length === 1 ? "" : "s"}` : "No matching models.");
+  renderModelSettingsModels();
 }
 
 async function loadModelSettings(modal, operation) {
   const sessionPath = currentSessionPath();
-  const apply = modal?.querySelector("[data-model-settings-apply]");
-  const list = modal?.querySelector("[data-model-list]");
   if (!modal || !sessionPath) return;
-  if (list) list.replaceChildren();
-  if (apply) apply.disabled = true;
+  modelSettingsModels = [];
+  modelSettingsScopedModels = [];
+  modelSettingsCurrentModel = null;
+  setModelSettingsScope("all");
+  renderThinkingOptions();
+  modelSettingsPending = true;
+  syncModelSettingsControls();
   setModelSettingsStatus("Loading models…");
   try {
     const response = await fetch(`/sessions/model_settings?session=${encodeURIComponent(sessionPath)}`, { headers: { "Accept": "application/json" } });
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload) throw new Error(payload?.error || "Could not load models.");
     if (operation !== modelSettingsOperationGeneration || modal.hidden || sessionPath !== currentSessionPath()) return;
-    modelSettingsModels = Array.isArray(payload.models) ? payload.models : [];
+    const models = Array.isArray(payload.models) ? payload.models : [];
     modelSettingsCurrentModel = payload.state?.model || null;
     modelSettingsCurrentThinking = payload.state?.thinkingLevel || "off";
-    modelSettingsSelectedKey = modelSettingsKey(modelSettingsCurrentModel || {});
-    if (!modelSettingsModels.some((model) => modelSettingsKey(model) === modelSettingsSelectedKey)) {
-      modelSettingsSelectedKey = modelSettingsModels[0] ? modelSettingsKey(modelSettingsModels[0]) : null;
-    }
-    renderModelSettingsModels();
-    renderThinkingOptions(selectedSettingsModel());
-    if (apply) apply.disabled = !selectedSettingsModel() || ["sending", "exporting", "stopping"].includes(composerState?.dataset.state);
+    modelSettingsModels = sortedPickerModels(models, modelSettingsCurrentModel);
+    modelSettingsScopedModels = scopedPickerModels(models, payload.scopedModels);
+    modelSettingsPending = false;
+    syncModelSettingsControls();
+    setModelSettingsScope(modelSettingsScopedModels.length ? "scoped" : "all");
+    renderThinkingOptions();
   } catch (error) {
     if (operation === modelSettingsOperationGeneration && !modal.hidden && sessionPath === currentSessionPath()) {
       setModelSettingsStatus(error.message || "Could not load models.", true);
@@ -598,24 +603,28 @@ function openModelSettingsModal() {
   if (search) search.value = "";
   const operation = ++modelSettingsOperationGeneration;
   openModal(modal);
+  // On touch screens focusing the search would open the keyboard over the list.
+  if (automaticComposerFocusEnabled()) search?.focus();
   loadModelSettings(modal, operation).catch(() => {});
   return !!modal;
 }
 
-async function applyModelSettings(form) {
-  const modal = form.closest("[data-modal]");
+async function applyModelSettings(model, thinking) {
+  const modal = document.querySelector('[data-modal="model-settings-modal"]');
   const sessionPath = currentSessionPath();
+  if (!modal || !sessionPath) return;
+  if (modelSettingsKey(model) === modelSettingsKey(modelSettingsCurrentModel || {}) && thinking === modelSettingsCurrentThinking) {
+    closeModal(modal);
+    return;
+  }
   const operation = ++modelSettingsOperationGeneration;
-  const model = selectedSettingsModel();
-  const thinking = form.querySelector('input[name="thinking"]:checked')?.value;
-  const apply = form.querySelector("[data-model-settings-apply]");
-  if (!model || !thinking || !sessionPath) return;
   const formData = new FormData();
   formData.set("session", sessionPath);
   formData.set("provider", model.provider || "");
   formData.set("model", model.id || "");
   formData.set("thinking", thinking);
-  if (apply) apply.disabled = true;
+  modelSettingsPending = true;
+  syncModelSettingsControls();
   setModelSettingsStatus("Applying settings…");
   try {
     const response = await fetch("/sessions/model_settings", { method: "POST", body: formData, headers: { "Accept": "application/json" } });
@@ -629,9 +638,28 @@ async function applyModelSettings(form) {
     closeModal(modal);
   } catch (error) {
     if (operation === modelSettingsOperationGeneration && !modal.hidden && sessionPath === currentSessionPath()) {
+      modelSettingsPending = false;
+      syncModelSettingsControls();
       setModelSettingsStatus(error.message || "Could not apply model settings.", true);
-      if (apply) apply.disabled = false;
     }
+  }
+}
+
+function handleModelSettingsKey(event) {
+  if (document.querySelector('[data-modal="model-settings-modal"]')?.hidden !== false) return;
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  const inSearch = event.target.matches?.("[data-model-search]");
+  const count = modelSettingsVisibleModels.length;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (count) setModelSettingsCursor((modelSettingsActiveIndex + (event.key === "ArrowDown" ? 1 : count - 1)) % count);
+  } else if (event.key === "Enter" && inSearch && !event.isComposing) {
+    event.preventDefault();
+    document.querySelector('[data-model-list] [aria-selected="true"]')?.click();
+  } else if (event.key === "Tab" && !event.shiftKey && inSearch && modelSettingsScopedModels.length) {
+    // Pi CLI's /model switches scope with Tab; Shift+Tab still moves focus.
+    event.preventDefault();
+    setModelSettingsScope(modelSettingsScope === "scoped" ? "all" : "scoped");
   }
 }
 
@@ -895,8 +923,7 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   if (focus && state !== previousState) syncComposerFocus(state);
   const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]');
   if (modelButton) modelButton.disabled = submitting || stopping || sessionSyncBlocked();
-  const modelApply = document.querySelector('[data-modal="model-settings-modal"] [data-model-settings-apply]');
-  if (modelApply && !document.querySelector('[data-modal="model-settings-modal"]')?.hidden) modelApply.disabled = submitting || stopping || !selectedSettingsModel();
+  syncModelSettingsControls();
   if (composerState && state === "running" && previousState !== "running") {
     resetEventPollBackoff();
     scheduleNextEventPoll(0);
@@ -3104,14 +3131,14 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("input", (event) => {
-  if (event.target.closest("[data-model-search]")) renderModelSettingsModels();
+  if (event.target.closest("[data-model-search]") && !modelSettingsPending) renderModelSettingsModels();
 });
 
-document.addEventListener("submit", (event) => {
-  const form = event.target.closest("[data-model-settings-form]");
-  if (!form) return;
-  event.preventDefault();
-  applyModelSettings(form).catch(() => {});
+document.addEventListener("click", (event) => {
+  const scope = event.target.closest("[data-model-scope-option]");
+  if (!scope) return;
+  setModelSettingsScope(scope.dataset.modelScopeOption);
+  if (automaticComposerFocusEnabled()) document.querySelector("[data-model-search]")?.focus();
 });
 
 document.addEventListener("click", (event) => {
@@ -3241,6 +3268,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  handleModelSettingsKey(event);
   handleModalTab(event);
   if (modalIsOpen()) return;
 

@@ -102,8 +102,10 @@ test("use slash commands while Pi is running", async ({ page }) => {
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
   const modelDialog = page.getByRole("dialog", { name: "Model & thinking" });
   await expect(modelDialog).toBeVisible();
-  await modelDialog.getByRole("radio", { name: /Contract Model/ }).check();
-  await modelDialog.getByRole("button", { name: "Apply" }).click();
+  // Without scoped models, like Pi CLI, the picker lists every model and offers no scope to switch.
+  await expect(modelDialog.getByRole("option")).toHaveCount(3);
+  await expect(modelDialog.getByRole("button", { name: "scoped" })).toBeHidden();
+  await modelDialog.getByRole("option", { name: /contract-model/ }).click();
   await expect(modelDialog).toBeHidden();
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
   await expect(abort).toBeVisible();

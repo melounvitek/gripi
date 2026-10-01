@@ -6,7 +6,6 @@ import { applyComposerPathCompletion, composerPathContext } from "../public/asse
 import { downloadResponse } from "../public/assets/downloads.js";
 import { activateToolOutputRegion, deactivateToolOutputRegion } from "../public/assets/dom.js";
 import {
-  compactNumber,
   eventErrorText,
   eventTimestamp,
   extensionUiRequestNotice,
@@ -26,7 +25,7 @@ import {
   sessionReloadSlashCommand,
 } from "../public/assets/formatting.js";
 import { LiveMessageParser } from "../public/assets/live_message_parser.js";
-import { selectedThinkingLevel, supportedThinkingLevels } from "../public/assets/model.js";
+import { matchingPickerModels, scopedPickerModels, selectedThinkingLevel, sortedPickerModels, supportedThinkingLevels } from "../public/assets/model.js";
 import { eventPollingDelay } from "../public/assets/polling.js";
 import { keyboardScrollKey } from "../public/assets/shortcuts.js";
 import { hasTerminalControls, renderTerminalOutput } from "../public/assets/terminal_output_renderer.js";
@@ -68,7 +67,6 @@ test("notification preview truncation preserves complete Unicode characters", ()
 });
 
 test("formatting and message helpers preserve browser-facing semantics", () => {
-  assert.equal(compactNumber(1500), "1.5k");
   assert.equal(formatWaitDuration(125000), "2m 05s");
   assert.equal(imageAttachmentLabel(1), "1 image attached");
   assert.equal(notificationReplyPreview("**Bold** and `code` [Label](https://example.com)"), "Bold and code Label");
@@ -206,6 +204,22 @@ test("model thinking levels follow capabilities and provide supported fallbacks"
     selectedThinkingLevel({ reasoning: true, thinkingLevelMap: { minimal: null } }, "minimal"),
     selectedThinkingLevel({ reasoning: false }, "high"),
   ], ["high", "low", "off"]);
+});
+
+test("model picker lists follow Pi CLI's scope, order, and search", () => {
+  const models = [
+    { provider: "openai-codex", id: "gpt-6-astra", name: "GPT-6 Astra" },
+    { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5" },
+    { provider: "openai-codex", id: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
+  ];
+  const ids = (list) => list.map(({ id }) => id);
+
+  // Scoped models keep Pi's order and skip models that are no longer available.
+  assert.deepEqual(ids(scopedPickerModels(models, [{ provider: "openai-codex", id: "gpt-6.1-sol" }, { provider: "openai-codex", id: "retired" }, { provider: "anthropic", id: "claude-opus-5-5" }])), ["gpt-6.1-sol", "claude-opus-5-5"]);
+  assert.deepEqual(ids(sortedPickerModels(models, { provider: "openai-codex", id: "gpt-6.1-sol" })), ["gpt-6.1-sol", "claude-opus-5-5", "gpt-6-astra"]);
+  assert.deepEqual(ids(sortedPickerModels(models, null)), ["claude-opus-5-5", "gpt-6-astra", "gpt-6.1-sol"]);
+  assert.deepEqual(ids(matchingPickerModels(models, " CODEX/gpt  sol ")), ["gpt-6.1-sol"]);
+  assert.deepEqual(ids(matchingPickerModels(models, "opus 5.5")), ["claude-opus-5-5"]);
 });
 
 test("composer path completion uses caret-local Pi-style contexts", () => {

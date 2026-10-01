@@ -94,9 +94,11 @@ test("long provider model names stay contained and settings open on first activa
   const dialog = page.getByRole("dialog", { name: "Model & thinking" });
   await activate(chip, isMobile);
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("radio", { name: new RegExp(footerModel.name) }).check();
-  await dialog.getByRole("radio", { name: "high", exact: true }).check();
-  await activate(dialog.getByRole("button", { name: "Apply", exact: true }), isMobile);
+  await activate(dialog.getByRole("button", { name: "all", exact: true }), isMobile);
+  await activate(dialog.getByRole("option", { name: new RegExp(footerModel.id) }), isMobile);
+  await expect(dialog).toBeHidden();
+  await activate(chip, isMobile);
+  await activate(dialog.getByRole("button", { name: "high", exact: true }), isMobile);
   await expect(dialog).toBeHidden();
   await expect(chip).toContainText(`${footerModel.provider}/${footerModel.id} (high)`);
 
@@ -113,7 +115,7 @@ test("long provider model names stay contained and settings open on first activa
       expect(await value.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
       await activate(chip, isMobile);
       await expect(dialog).toBeVisible();
-      await activate(dialog.getByRole("button", { name: "Cancel", exact: true }), isMobile);
+      await activate(dialog.getByRole("button", { name: "Close model and thinking settings" }), isMobile);
     }
   }
 });

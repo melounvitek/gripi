@@ -452,7 +452,9 @@ function acceptTreeBridge(command) {
   } else if (name === "gripi_tree_leaf") {
     emitTreeBridge(name, requestId, { ok: true, leafId });
   } else if (name === "gripi_scoped_models") {
-    emitTreeBridge(name, requestId, { ok: true, models: fakeModels().slice(0, 2).map(({ provider, id }) => ({ provider, id })) });
+    // controls-project stands for Pi without enabledModels, where nothing is scoped.
+    const scoped = path.basename(header?.cwd || "") === "controls-project" ? [] : fakeModels().slice(0, 2);
+    emitTreeBridge(name, requestId, { ok: true, models: scoped.map(({ provider, id }) => ({ provider, id })) });
   } else if (name === "gripi_tree_navigate") {
     const target = entries.find((entry) => entry.id === payload.entryId);
     if (!target) emitTreeBridge(name, requestId, { ok: false, error: `Tree entry not found: ${payload.entryId}` });
