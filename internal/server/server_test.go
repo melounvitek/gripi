@@ -27,7 +27,7 @@ func TestHandlerServesEmbeddedFrontendAssets(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "--") {
 		t.Fatal("response does not contain the application stylesheet")
 	}
-	if got := response.Header().Get("Cache-Control"); got != "no-cache" {
+	if got := response.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control = %q", got)
 	}
 }
