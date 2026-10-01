@@ -83,7 +83,8 @@ export class SessionActionsController {
   }
 
   moveMenuFocus(key) {
-    const items = Array.from(this.menu()?.querySelectorAll("button") || []).filter((button) => !button.disabled);
+    // offsetParent is null for items hidden by CSS, such as "Open in new window" on narrow screens.
+    const items = Array.from(this.menu()?.querySelectorAll("button") || []).filter((button) => !button.disabled && button.offsetParent !== null);
     if (items.length === 0) return;
     const current = items.indexOf(this.document.activeElement);
     let index = key === "End" ? items.length - 1 : 0;
@@ -169,6 +170,10 @@ export class SessionActionsController {
     if (action === "pin") {
       this.restoreFocus();
       this.togglePin(target).catch(() => {});
+    }
+    if (action === "window") {
+      this.restoreFocus();
+      this.window.open(`/?${new URLSearchParams({ session: target.path, session_only: "1" })}`, "_blank", "noopener");
     }
     if (action === "delete") this.openDelete(target);
   }
