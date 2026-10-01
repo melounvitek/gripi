@@ -173,6 +173,23 @@ test("quotes a mouse-drag selection", async ({ page }) => {
   await expect(page.getByLabel("Message to Pi")).toHaveValue("> Fixture answer\n\n");
 });
 
+test("quotes a triple-clicked last paragraph", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteHistory);
+  const paragraph = message(page, "assistant", `Fixture answer for ${sessions.quoteHistory}`).locator(".message-body p");
+  await paragraph.click({ clickCount: 3 });
+  await page.getByRole("button", { name: "Quote selection", exact: true }).click();
+  await expect(page.getByLabel("Message to Pi")).toHaveValue(`> Fixture answer for ${sessions.quoteHistory}\n\n`);
+});
+
+test("quotes a triple-clicked last code line", async ({ page }) => {
+  await openQuoteSession(page, sessions.quoteLive);
+  await sendPrompt(page, prompts.markdownFence);
+  await expectRunFinished(page);
+  await message(page, "assistant", "Modal fence stays in conversation").last().getByText("const safeValue = 42;").click({ clickCount: 3 });
+  await page.getByRole("button", { name: "Quote selection", exact: true }).click();
+  await expect(page.getByLabel("Message to Pi")).toHaveValue("> const safeValue = 42;\n\n");
+});
+
 test("dismisses a selected streaming passage when its source is replaced", async ({ page }) => {
   await openQuoteSession(page, sessions.quoteLive);
   await sendPrompt(page, prompts.deltaStreaming);
