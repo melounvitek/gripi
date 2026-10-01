@@ -399,6 +399,11 @@ export default function (pi: ExtensionAPI) {
     leafId: boundedMetadata(ctx.sessionManager.getLeafId()),
   }));
 
+  // Pi resolves `enabledModels` and `--models` itself; reporting its result keeps Gripi from re-implementing the patterns.
+  registerBridgeCommand(pi, "gripi_scoped_models", "Report the session's scoped models to Gripi", (_requestPayload, ctx) => ({
+    models: ctx.scopedModels.map(({ model }) => ({ provider: model.provider, id: model.id })),
+  }));
+
   registerBridgeCommand(pi, "gripi_tree_label", "Set or clear a native Pi tree label from Gripi", (requestPayload, ctx) => {
     if (!ctx.isIdle()) throw new Error("Session is busy");
     const payload = requestPayload as LabelPayload;

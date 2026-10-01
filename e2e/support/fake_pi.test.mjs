@@ -197,6 +197,11 @@ test("fake Pi supports model, tree, compaction, and branch control contracts", {
   assert.equal(tree.method, "setStatus");
   assert.equal(tree.statusKey, `gripi_tree_snapshot:${requestId}`);
   assert.ok(JSON.parse(tree.statusText).entries.length > 0);
+  child.stdin.write(`${JSON.stringify({ id: "scoped", type: "prompt", message: `/gripi_scoped_models ${requestId} ${Buffer.from("{}").toString("base64url")}` })}\n`);
+  assert.equal((await nextRecord(records)).id, "scoped");
+  const scoped = await nextRecord(records);
+  assert.equal(scoped.statusKey, `gripi_scoped_models:${requestId}`);
+  assert.deepEqual(JSON.parse(scoped.statusText).models, [{ provider: "e2e", id: "fixture-model" }, { provider: "e2e", id: "contract-model" }]);
 
   child.stdin.write(`${JSON.stringify({ id: "clone", type: "clone" })}\n`);
   assert.equal((await nextRecord(records)).success, true);

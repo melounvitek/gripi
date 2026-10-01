@@ -1700,7 +1700,7 @@ func internalBridgeStatusKey(response map[string]any) string {
 		return ""
 	}
 	key := stringValue(response["statusKey"])
-	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
+	matched, _ := regexp.MatchString(`(?i)^gripi_(?:reload|scoped_models|tree_(?:snapshot|leaf|navigate|label)):[a-f0-9]+$`, key)
 	if matched {
 		return key
 	}
@@ -2408,6 +2408,9 @@ func (client *Client) TreeSnapshot(ctx context.Context, filter string) (map[stri
 }
 func (client *Client) TreeLeaf(ctx context.Context) (map[string]any, error) {
 	return client.extensionRequest(ctx, "gripi_tree_leaf", map[string]any{}, client.treeBridgeTimeout, "Session tree request timed out")
+}
+func (client *Client) ScopedModels(ctx context.Context) (map[string]any, error) {
+	return client.extensionRequest(ctx, "gripi_scoped_models", map[string]any{}, client.treeBridgeTimeout, "Scoped models request timed out")
 }
 func (client *Client) NavigateTree(ctx context.Context, entryID, summary, instructions string) (map[string]any, error) {
 	payload := map[string]any{"entryId": entryID, "summary": summary}

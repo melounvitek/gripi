@@ -31,6 +31,7 @@ type PromptImage struct {
 
 type ActionClient interface {
 	GetAvailableModels(context.Context) (map[string]any, error)
+	ScopedModels(context.Context) (map[string]any, error)
 	GetForkMessages(context.Context) (map[string]any, error)
 	GetStateForInterrupt(context.Context) (map[string]any, error)
 	SetModel(context.Context, string, string) (map[string]any, error)

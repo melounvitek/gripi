@@ -127,6 +127,13 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 	if settingsResponse.Code != http.StatusOK || !strings.Contains(settingsResponse.Body.String(), `"fixture-model"`) {
 		t.Fatalf("model settings = %d %s", settingsResponse.Code, settingsResponse.Body.String())
 	}
+	var settingsPayload struct {
+		ScopedModels []map[string]string `json:"scopedModels"`
+	}
+	decodeActionJSON(t, settingsResponse, &settingsPayload)
+	if len(settingsPayload.ScopedModels) != 2 || settingsPayload.ScopedModels[1]["provider"] != "e2e" || settingsPayload.ScopedModels[1]["id"] != "contract-model" {
+		t.Fatalf("scoped models = %#v", settingsPayload.ScopedModels)
+	}
 	setSettings := serveAction(handler, formActionRequest("/sessions/model_settings", map[string]string{"session": sessionPath, "provider": "e2e", "model": "contract-model", "thinking": "high"}, true))
 	if setSettings.Code != http.StatusOK || !strings.Contains(setSettings.Body.String(), `"thinking":"high"`) {
 		t.Fatalf("set model = %d %s", setSettings.Code, setSettings.Body.String())

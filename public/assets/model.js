@@ -22,3 +22,24 @@ export function selectedThinkingLevel(model, currentLevel) {
 export function modelSettingsKey(model) {
   return `${model.provider || ""}\u0000${model.id || ""}`;
 }
+
+export function scopedPickerModels(models, scopedModels) {
+  const available = new Map(models.map((model) => [modelSettingsKey(model), model]));
+  return scopedModels.map((scoped) => available.get(modelSettingsKey(scoped))).filter(Boolean);
+}
+
+// Pi CLI's /model order: the current model first, then by provider.
+export function sortedPickerModels(models, currentModel) {
+  const currentKey = modelSettingsKey(currentModel || {});
+  return [...models].sort((a, b) =>
+    (modelSettingsKey(b) === currentKey) - (modelSettingsKey(a) === currentKey)
+      || String(a.provider || "").localeCompare(String(b.provider || "")));
+}
+
+export function matchingPickerModels(models, search) {
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+  return models.filter((model) => {
+    const text = `${model.provider}/${model.id} ${model.name}`.toLowerCase();
+    return words.every((word) => text.includes(word));
+  });
+}

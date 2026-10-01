@@ -53,6 +53,40 @@ test("slash commands complete on the first mobile tap without submitting", async
   await expect(page.getByRole("dialog", { name: "Model & thinking" })).toBeHidden();
 });
 
+test("the model picker applies on the first mobile tap without raising the keyboard", async ({ page }) => {
+  await page.goto(`/?${new URLSearchParams({ session_search: sessions.mobile })}`);
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  await page.getByRole("link", { name: new RegExp(sessions.mobile) }).tap();
+  const modelButton = page.getByRole("button", { name: "Open model and thinking settings" });
+  await modelButton.tap();
+
+  const dialog = page.getByRole("dialog", { name: "Model & thinking" });
+  const search = dialog.getByRole("combobox", { name: "Search models" });
+  await expect(dialog.getByRole("option")).toHaveCount(2);
+  // A focused search field would open the keyboard over the list.
+  await expect(search).not.toBeFocused();
+  await dialog.getByRole("button", { name: "all" }).tap();
+  await expect(dialog.getByRole("option")).toHaveCount(3);
+  await expect(search).not.toBeFocused();
+  const model = dialog.getByRole("option", { name: /contract-model/ });
+  expect((await model.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  await model.tap();
+  await expect(dialog).toBeHidden();
+  await expect(modelButton).toContainText("e2e/contract-model (medium)");
+
+  await modelButton.tap();
+  // Closing and thinking levels are small labels, so they need a full 44px target in both directions.
+  const level = dialog.getByRole("button", { name: "off", exact: true });
+  for (const control of [level, dialog.getByRole("button", { name: "Close model and thinking settings" })]) {
+    const bounds = await control.boundingBox();
+    expect(bounds.width).toBeGreaterThanOrEqual(44);
+    expect(bounds.height).toBeGreaterThanOrEqual(44);
+  }
+  await level.tap();
+  await expect(dialog).toBeHidden();
+  await expect(modelButton).toContainText("e2e/contract-model (off)");
+});
+
 test("attach images opens the picker on the first mobile tap from the right of the message field", async ({ page }) => {
   await page.goto(`/?${new URLSearchParams({ session_search: sessions.mobile })}`);
   await page.locator('label[aria-label="Open sessions"]').tap();
