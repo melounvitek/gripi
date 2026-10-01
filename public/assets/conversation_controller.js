@@ -315,12 +315,20 @@ export class ConversationController {
     if (!this.quoteButton || !this.promptTextarea || this.promptTextarea.disabled || this.promptTextarea.readOnly || this.document.body.classList.contains("session-switching")) return this.dismissQuoteSelection();
     const selection = this.window.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return this.dismissQuoteSelection();
-    const range = selection.getRangeAt(0);
-    const container = range.commonAncestorContainer;
-    const body = (container.nodeType === 1 ? container : container.parentElement)?.closest(".message-body");
+    const range = selection.getRangeAt(0).cloneRange();
+    const start = range.startContainer;
+    const body = (start.nodeType === 1 ? start : start.parentElement)?.closest(".message-body");
     if (!body || !this.element?.contains(body) || !body.getClientRects().length) return this.dismissQuoteSelection();
-    const text = selection.toString();
-    if (!text.trim()) return this.dismissQuoteSelection();
+    const text = selection.toString().trimEnd();
+    if (!text) return this.dismissQuoteSelection();
+    if (!body.contains(range.endContainer)) {
+      // A triple-click on a message's last block ends the selection at the next block. Accept an end outside the message only if it adds no text.
+      range.setEnd(body, body.childNodes.length);
+      const inside = range.cloneContents();
+      inside.querySelectorAll(".code-block-copy-button").forEach((button) => button.remove());
+      const compact = (value) => value.replace(/\s+/g, "");
+      if (compact(inside.textContent) !== compact(text)) return this.dismissQuoteSelection();
+    }
     const touch = this.window.matchMedia("(pointer: coarse)").matches;
     const rect = range.getBoundingClientRect();
     const scrollRect = this.element.getBoundingClientRect();
