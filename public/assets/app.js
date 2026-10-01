@@ -85,6 +85,7 @@ const sessionTagsController = new SessionTagsController(document, window, {
 const sessionActionsController = new SessionActionsController(document, window, {
   editTags: (target) => sessionTagsController.open(target.path, target.row.querySelector("[data-session-actions-toggle]")),
   currentSessionPath: () => currentSessionPath(),
+  detachSession: () => detachSession().catch(() => {}),
   openModal: (modal) => openModal(modal),
   closeModal: (modal) => closeModal(modal),
   refresh: () => sidebarController.refresh({ force: true }),

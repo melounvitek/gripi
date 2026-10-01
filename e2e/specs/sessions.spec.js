@@ -303,6 +303,19 @@ test("open a background session in a new window from its contextual actions", as
   await expect(page.getByRole("menu")).toBeHidden();
 });
 
+test("opening the current session in a new window moves the original window to another session", async ({ page }) => {
+  await page.goto("/");
+  const currentRow = page.locator('.session-row[data-current="true"]');
+  const sessionPath = await currentRow.getAttribute("data-session-path");
+  await currentRow.getByRole("button", { name: /Session actions/ }).click();
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("menuitem", { name: "Open in new window" }).click();
+  const sessionWindow = await popupPromise;
+  await expect(sessionWindow).toHaveURL((url) => url.searchParams.get("session") === sessionPath);
+  await expect(currentRow).toHaveCount(1);
+  await expect(currentRow).not.toHaveAttribute("data-session-path", sessionPath);
+});
+
 test("rename and delete a background session from its contextual actions", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "New session", exact: true }).click();
