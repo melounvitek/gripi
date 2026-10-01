@@ -45,6 +45,7 @@ test("show the full wrapped tool command live and after reload", async ({ page }
   await expectExpandedActivity(activity);
 
   await page.reload();
+  await activityView(page, "Full").click();
   const restoredCard = message(page, "assistant", "pi --no-session").last();
   await expectFullCommand(restoredCard, { wrapped: true });
   await showMessagesOnly(page);

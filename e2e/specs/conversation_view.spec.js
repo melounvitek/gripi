@@ -70,3 +70,17 @@ test("switches agent activity with accessible Brief and Full segments", async ({
   await full.click();
   await expect(count).toHaveText("1 / 1");
 });
+
+test("remembers the Brief view after a reload", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.toolSummary);
+  const brief = activityView(page, "Brief");
+  await brief.click();
+  await expect(brief).toHaveAttribute("aria-pressed", "true");
+
+  await page.reload();
+
+  await expect(brief).toHaveAttribute("aria-pressed", "true");
+  await expect(activityView(page, "Full")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".conversation-panel")).toHaveClass(/is-conversation-focused/);
+});
