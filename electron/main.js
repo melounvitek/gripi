@@ -10,6 +10,7 @@ const {
 } = require("./gateway_config");
 const { gatewayUrl } = require("./gateway_url");
 const { configureSessionExportDownload } = require("./downloads");
+const { allowsGatewayNavigation } = require("./navigation");
 
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 const GATEWAY_PRELOAD_PATH = path.join(__dirname, "gateway_preload.js");
@@ -272,14 +273,14 @@ function installGatewayNavigationGuard(guestContents, allowedOrigin, partition) 
   });
 
   guestContents.on("will-navigate", (event, url) => {
-    if (sameOrigin(url, allowedOrigin)) return;
+    if (allowsGatewayNavigation(url, allowedOrigin)) return;
 
     event.preventDefault();
     openExternalUrl(url);
   });
 
   guestContents.on("will-redirect", (event, url) => {
-    if (sameOrigin(url, allowedOrigin)) return;
+    if (allowsGatewayNavigation(url, allowedOrigin)) return;
 
     event.preventDefault();
     openExternalUrl(url);
