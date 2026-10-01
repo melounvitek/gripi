@@ -101,7 +101,7 @@ func TestHandlerServesTheNotificationTestTemplateWithFirstTapControls(t *testing
 	}
 }
 
-func TestStaticAssetsRemainNoCache(t *testing.T) {
+func TestStaticAssetsAreNotStored(t *testing.T) {
 	handler := newHandler(t, testConfig(t))
 	for _, path := range []string{"/assets/app.css", "/assets/app.js", "/apple-touch-icon.png"} {
 		request := httptest.NewRequest(http.MethodGet, "http://example.com"+path, nil)
@@ -110,7 +110,7 @@ func TestStaticAssetsRemainNoCache(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("%s status = %d", path, response.Code)
 		}
-		if got := response.Header().Get("Cache-Control"); got != "no-cache" {
+		if got := response.Header().Get("Cache-Control"); got != "no-store" {
 			t.Fatalf("%s Cache-Control = %q", path, got)
 		}
 	}

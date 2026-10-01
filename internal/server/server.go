@@ -259,8 +259,8 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	}
 	mux := http.NewServeMux()
 	assets := filesOnly(public, http.StripPrefix("/", http.FileServerFS(public)))
-	mux.Handle("GET /assets/", noCache(assets))
-	mux.Handle("GET /apple-touch-icon.png", noCache(assets))
+	mux.Handle("GET /assets/", noStore(assets))
+	mux.Handle("GET /apple-touch-icon.png", noStore(assets))
 	app.registerBrowserAccessRoutes(mux)
 	app.registerWorkspaceRoutes(mux)
 	app.registerPWARoutes(mux)
@@ -344,9 +344,11 @@ func filesOnly(root fs.FS, next http.Handler) http.Handler {
 	})
 }
 
-func noCache(next http.Handler) http.Handler {
+// Imported modules have unversioned URLs, and a browser restoring a page from history reuses cached copies without
+// revalidating them, so after a gateway update it would run old modules unless they are never stored.
+func noStore(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		response.Header().Set("Cache-Control", "no-cache")
+		response.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(response, request)
 	})
 }
