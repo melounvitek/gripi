@@ -289,6 +289,20 @@ test("find, select, and pin a session with persisted history", async ({ page }) 
   await expect(pin).toHaveCSS("outline-style", "solid");
 });
 
+test("open a background session in a new window from its contextual actions", async ({ page }) => {
+  await page.goto("/");
+  const row = page.locator('.session-row[data-current="false"]').first();
+  const sessionPath = await row.getAttribute("data-session-path");
+  const sessionName = await row.getAttribute("data-session-name");
+  await row.getByRole("button", { name: /Session actions/ }).click();
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("menuitem", { name: "Open in new window" }).click();
+  const sessionWindow = await popupPromise;
+  await expect(sessionWindow).toHaveURL((url) => url.searchParams.get("session") === sessionPath && url.searchParams.get("session_only") === "1");
+  await expect(sessionWindow.getByRole("heading", { level: 1, name: sessionName })).toBeVisible();
+  await expect(page.getByRole("menu")).toBeHidden();
+});
+
 test("rename and delete a background session from its contextual actions", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "New session", exact: true }).click();
