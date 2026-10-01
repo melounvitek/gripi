@@ -174,6 +174,7 @@ export class SessionActionsController {
     if (action === "window") {
       this.restoreFocus();
       this.window.open(`/?${new URLSearchParams({ session: target.path, session_only: "1" })}`, "_blank", "noopener");
+      if (target.path === this.callbacks.currentSessionPath?.()) this.callbacks.detachSession?.();
     }
     if (action === "delete") this.openDelete(target);
   }
