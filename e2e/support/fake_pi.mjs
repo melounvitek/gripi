@@ -512,7 +512,6 @@ function treeEntries(filter) {
       timestamp: entry.timestamp,
       current: entry.id === leafId,
       latest: entry === entries.at(-1),
-      ...(role === "user" ? { messageKind: "user" } : {}),
       ...(treeLabels.has(entry.id) ? { label: treeLabels.get(entry.id) } : {})
     });
     visibleParent = entry.id;

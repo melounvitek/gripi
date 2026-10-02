@@ -33,7 +33,6 @@ type ProjectedTreeEntry = {
   timestamp: string;
   current: boolean;
   latest: boolean;
-  messageKind?: "user" | "assistant-final";
   label?: string;
   labelTimestamp?: string;
 };
@@ -127,38 +126,6 @@ function previewText(value: unknown): string {
   return boundedText(String(value ?? "").replace(/\s+/g, " ").trim(), TREE_PREVIEW_BYTES);
 }
 
-function assistantTextPhase(part: { textSignature?: unknown }): "commentary" | "final_answer" | undefined {
-  if (typeof part.textSignature !== "string" || !part.textSignature.startsWith("{")) return undefined;
-
-  try {
-    const parsed: unknown = JSON.parse(part.textSignature);
-    if (!parsed || typeof parsed !== "object" || !("v" in parsed) || parsed.v !== 1 || !("id" in parsed) || typeof parsed.id !== "string") return undefined;
-    if (!("phase" in parsed) || (parsed.phase !== "commentary" && parsed.phase !== "final_answer")) return undefined;
-    return parsed.phase;
-  } catch {
-    return undefined;
-  }
-}
-
-function messageKind(entry: SessionEntry): ProjectedTreeEntry["messageKind"] {
-  if (entry.type !== "message") return undefined;
-  if (entry.message.role === "user") return "user";
-  if (entry.message.role !== "assistant") return undefined;
-
-  const stopReason = "stopReason" in entry.message ? entry.message.stopReason : undefined;
-  if (stopReason !== undefined && stopReason !== "stop" && stopReason !== "length") return undefined;
-  const content = entry.message.content;
-  const parts = Array.isArray(content) ? content : [content];
-  const finalText = parts
-    .filter((part): part is string | { type: "text"; text: string; textSignature?: unknown } =>
-      typeof part === "string" || !!part && typeof part === "object" && "type" in part && part.type === "text" && "text" in part && typeof part.text === "string")
-    .filter((part) => typeof part === "string" || assistantTextPhase(part) !== "commentary")
-    .map((part) => typeof part === "string" ? part : part.text)
-    .join("\n")
-    .trim();
-  return finalText ? "assistant-final" : undefined;
-}
-
 function entryRole(entry: SessionEntry): string {
   if (entry.type === "message") return entry.message.role || "message";
   if (entry.type === "custom_message") return "custom";
@@ -224,8 +191,6 @@ function projectedEntry(entry: SessionEntry, node: SessionTreeNode, parentId: st
     current: false,
     latest: false,
   };
-  const kind = messageKind(entry);
-  if (kind) projected.messageKind = kind;
   if (node.label !== undefined) projected.label = boundedText(node.label, TREE_PREVIEW_BYTES);
   if (node.labelTimestamp !== undefined) projected.labelTimestamp = boundedMetadata(node.labelTimestamp)!;
   return projected;
