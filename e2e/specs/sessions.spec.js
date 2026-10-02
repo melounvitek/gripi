@@ -249,6 +249,32 @@ test("counts matches and keeps the filters in place when the current session is 
   expect((await filters.boundingBox()).y).toBe(y);
 });
 
+test("filters sessions while typing without adding browser history", async ({ page }) => {
+  await page.goto("/");
+  const historyLength = await page.evaluate(() => history.length);
+  await page.getByRole("button", { name: "Search sessions" }).click();
+  const search = page.getByRole("searchbox", { name: "Search sessions" });
+
+  await search.pressSequentially("History Desktop");
+
+  await expect(page.locator(".sessions-list .session-row")).toHaveCount(1);
+  await expect(page.getByRole("link", { name: new RegExp(sessions.history) })).toBeVisible();
+  await expect(search).toBeFocused();
+  await expect.poll(() => new URL(page.url()).searchParams.get("session_search")).toBe("History Desktop");
+  expect(await page.evaluate(() => history.length)).toBe(historyLength);
+});
+
+test("choosing a project leaves the search field closed", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("combobox", { name: "Filter sessions by project" }).click();
+  await page.getByRole("option").nth(1).click();
+
+  await expect(page.locator("[data-sidebar-filter-count]")).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search sessions" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Search sessions" })).not.toHaveClass(/is-active/);
+});
+
 test("pin and unpin with the mouse without leaving a focus outline", async ({ page }) => {
   await page.goto("/?show_all_sessions=1");
   const row = page.locator(".session-row").filter({ has: page.locator(".session-title", { hasText: sessions.marker }) });
