@@ -663,41 +663,44 @@
     .project-select-option { min-width: 0; display: flex; align-items: center; gap: 1ch; padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); cursor: pointer; }
     .project-select-option.is-active { background: var(--accent-tint-04); color: var(--accent); }
     .picker-cursor, .picker-check { flex: none; visibility: hidden; color: var(--accent); }
-    .model-picker-row[aria-selected="true"] .picker-cursor, .model-picker-row[aria-current="true"] .picker-check, .project-select-option.is-active .picker-cursor, .project-select-option[aria-selected="true"] .picker-check, .tag-picker-option:focus-visible .picker-cursor, .tag-picker-option[aria-pressed="true"] .picker-check { visibility: visible; }
+    .picker-row[aria-selected="true"] .picker-cursor, .model-picker-row[aria-current="true"] .picker-check, .project-select-option.is-active .picker-cursor, .project-select-option[aria-selected="true"] .picker-check, .tag-picker-option:focus-visible .picker-cursor, .tag-picker-option[aria-pressed="true"] .picker-check { visibility: visible; }
     .project-select-option-label { min-width: 0; overflow-wrap: anywhere; }
     /* Like Pi CLI's /model selector: plain mono lines rather than cards. */
-    .model-picker-card { width: min(38rem, 100%); gap: 0.75rem; font-family: var(--mono); font-size: 0.86rem; }
-    .model-picker-line { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; margin: 0; color: var(--muted); }
-    .model-picker-line button, .model-picker-row { border: 0; background: transparent; font: inherit; letter-spacing: 0; text-transform: none; }
-    .model-picker-line button { justify-self: auto; padding: 0.15rem 0; color: var(--muted); }
-    .model-picker-line button:hover, .model-picker-row:hover { background: transparent; }
-    .model-picker-line button[aria-pressed="true"] { color: var(--accent); }
-    .model-picker-hint { margin: 0 0 0 auto; color: var(--muted-soft); font-size: 0.74rem; }
-    .model-picker-keys { margin-left: 0; }
+    .picker-card { gap: 0.75rem; font-family: var(--mono); font-size: 0.86rem; }
+    .model-picker-card { width: min(38rem, 100%); }
+    .picker-line { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; margin: 0; color: var(--muted); }
+    .picker-line button, .picker-row { border: 0; background: transparent; font: inherit; letter-spacing: 0; text-transform: none; }
+    .picker-line button { justify-self: auto; padding: 0.15rem 0; color: var(--muted); }
+    .picker-line button:hover, .picker-row:hover { background: transparent; }
+    .picker-line button[aria-pressed="true"] { color: var(--accent); }
+    .picker-hint { margin: 0 0 0 auto; color: var(--muted-soft); font-size: 0.74rem; }
+    .picker-keys { margin-left: 0; }
     .model-picker-card input[type="search"] { width: 100%; padding: 0.55rem 0.65rem; }
     .model-picker-controls { min-width: 0; display: grid; gap: 0.75rem; margin: 0; padding: 0; border: 0; }
     .model-picker-list { max-height: 17rem; overflow-y: auto; display: grid; }
     .model-picker-list:empty { display: none; }
-    .model-picker-row { justify-self: stretch; display: grid; grid-template-columns: 2ch 2ch minmax(0, 1fr); padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); text-align: left; overflow-wrap: anywhere; transition: none; }
-    .model-picker-row[aria-selected="true"] { background: var(--accent-tint-04); color: var(--accent); }
+    .picker-row { justify-self: stretch; display: grid; grid-template-columns: 2ch minmax(0, 1fr); padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); text-align: left; overflow-wrap: anywhere; transition: none; }
+    .picker-row[aria-selected="true"] { background: var(--accent-tint-04); }
+    .model-picker-row { grid-template-columns: 2ch 2ch minmax(0, 1fr); }
+    .model-picker-row[aria-selected="true"] { color: var(--accent); }
     .model-picker-provider { color: var(--muted); }
     .model-picker-status { min-height: 1.2rem; margin: 0; padding-left: calc(4ch + 0.25rem); color: var(--muted); overflow-wrap: anywhere; }
     .model-picker-status.is-error { color: var(--danger); }
     .model-picker-thinking { padding-top: 0.75rem; border-top: 1px solid var(--border); }
-    .model-picker-card button:disabled:hover { background: transparent; }
+    .picker-card button:disabled:hover { background: transparent; }
     @media (hover: hover) and (pointer: fine) {
-      .model-picker-line button:not([aria-pressed="true"]):hover { color: var(--text); }
-      .model-picker-row:hover { background: var(--accent-tint-04); }
+      .picker-line button:not([aria-pressed="true"]):hover { color: var(--text); }
+      .picker-row:hover { background: var(--accent-tint-04); }
     }
     @media (max-width: 760px), (pointer: coarse) {
-      .model-picker-card { font-size: 0.95rem; }
-      .model-picker-row, .model-picker-line button { min-height: 2.75rem; }
-      .model-picker-row { align-items: center; }
-      .model-picker-line { align-items: center; }
-      .model-picker-line button { min-width: 2.75rem; padding: 0 0.3rem; }
-      .model-picker-card .modal-close-button { width: 2.75rem; height: 2.75rem; }
+      .picker-card { font-size: 0.95rem; }
+      .picker-row, .picker-line button { min-height: 2.75rem; }
+      .picker-row { align-items: center; }
+      .picker-line { align-items: center; }
+      .picker-line button { min-width: 2.75rem; padding: 0 0.3rem; }
+      .picker-card .modal-close-button { width: 2.75rem; height: 2.75rem; }
       .model-picker-thinking { gap: 0 0.3rem; padding-top: 0.4rem; }
-      .model-picker-thinking .model-picker-separator, .model-picker-hint { display: none; }
+      .model-picker-thinking .picker-separator, .picker-hint { display: none; }
     }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
     .new-session-tags, [data-tag-draft-chips] { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
@@ -1122,7 +1125,7 @@
   </div>
   <div class="modal-overlay" data-modal="fork-session-modal" hidden><div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="fork-session-modal-title"><div class="modal-header"><h2 id="fork-session-modal-title">Fork session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><div class="fork-session-list"><p class="fork-session-status">Choose a point to fork from:</p><button type="button" class="fork-session-option" data-demo-fork><span class="tree-session-role">Assistant</span><br>Clone and start Gripi with these commands…</button><button type="button" class="fork-session-option" data-demo-fork><span class="tree-session-role">User</span><br>What is Gripi, and how can I get started?</button></div><div class="modal-actions"><button type="button" class="secondary" data-modal-close>Cancel</button></div></div></div>
   <div class="modal-overlay" data-modal="tree-session-modal" hidden><div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="tree-session-modal-title"><div class="modal-header"><h2 id="tree-session-modal-title">Session tree</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><div class="fork-session-list"><button type="button" class="fork-session-option" data-demo-tree data-demo-tree-target="new-to-pi"><span class="tree-session-role">Related</span><br><span data-demo-tree-target-title>New to Pi? Start here</span></button><button type="button" class="fork-session-option is-current-tree-entry" data-demo-tree><span class="tree-session-role">Current session</span><span class="tree-session-badge tree-session-badge--current">Current</span><br><span data-demo-tree-current-title>Welcome to Gripi</span></button></div><div class="modal-actions"><button type="button" class="secondary" data-modal-close>Cancel</button></div></div></div>
-  <div class="modal-overlay" data-modal="model-settings-modal" hidden><div class="modal-card model-picker-card" role="dialog" aria-modal="true" aria-labelledby="model-settings-title"><div class="modal-header"><h2 id="model-settings-title">Model &amp; thinking</h2><button type="button" class="secondary modal-close-button" data-modal-close aria-label="Close model settings">×</button></div><input type="search" aria-label="Search models" data-model-search data-modal-default-focus placeholder="Search models"><div class="model-picker-controls"><div class="model-picker-list" role="listbox" aria-label="Models"><button type="button" class="model-picker-row" role="option" aria-selected="true" aria-current="true" data-demo-model="openai-codex/gpt-5.5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5.5 <span class="model-picker-provider">[openai-codex]</span></span></button><button type="button" class="model-picker-row" role="option" aria-selected="false" data-demo-model="openai-codex/gpt-5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5 <span class="model-picker-provider">[openai-codex]</span></span></button></div><p class="model-picker-line model-picker-thinking"><span>Thinking:</span><span class="model-picker-line"><button type="button" aria-pressed="false" data-demo-thinking="off">off</button><span class="model-picker-separator" aria-hidden="true">|</span><button type="button" aria-pressed="true" data-demo-thinking="medium">medium</button></span></p></div></div></div>
+  <div class="modal-overlay" data-modal="model-settings-modal" hidden><div class="modal-card picker-card model-picker-card" role="dialog" aria-modal="true" aria-labelledby="model-settings-title"><div class="modal-header"><h2 id="model-settings-title">Model &amp; thinking</h2><button type="button" class="secondary modal-close-button" data-modal-close aria-label="Close model settings">×</button></div><input type="search" aria-label="Search models" data-model-search data-modal-default-focus placeholder="Search models"><div class="model-picker-controls"><div class="model-picker-list" role="listbox" aria-label="Models"><button type="button" class="picker-row model-picker-row" role="option" aria-selected="true" aria-current="true" data-demo-model="openai-codex/gpt-5.5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5.5 <span class="model-picker-provider">[openai-codex]</span></span></button><button type="button" class="picker-row model-picker-row" role="option" aria-selected="false" data-demo-model="openai-codex/gpt-5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5 <span class="model-picker-provider">[openai-codex]</span></span></button></div><p class="picker-line model-picker-thinking"><span>Thinking:</span><span class="picker-line"><button type="button" aria-pressed="false" data-demo-thinking="off">off</button><span class="picker-separator" aria-hidden="true">|</span><button type="button" aria-pressed="true" data-demo-thinking="medium">medium</button></span></p></div></div></div>
   <div class="session-switch-overlay" role="status" aria-live="polite" aria-label="Loading"><div class="session-switch-indicator"><span class="session-switch-spinner" aria-hidden="true"></span> Loading…</div></div>
   <div class="browser-access-overlay" data-browser-access-overlay aria-live="polite"><div class="browser-access-card"><div class="browser-access-title">Browser access request</div><div class="browser-access-meta">A connected browser is requesting access.</div><div class="browser-access-actions"><button class="secondary" type="button" data-demo-disabled>Deny</button><button type="button" data-demo-disabled>Allow</button></div></div></div>
   <div class="browser-access-overlay" data-workspace-access-overlay aria-live="polite"><div class="browser-access-card"><div class="browser-access-title">Workspace access request</div><div class="browser-access-meta">A trusted user is requesting this workspace.</div><div class="browser-access-actions"><button class="secondary" type="button" data-demo-disabled>Deny</button><button type="button" data-demo-disabled>Allow</button></div></div></div>

@@ -644,41 +644,44 @@
     .project-select-option { min-width: 0; display: flex; align-items: center; gap: 1ch; padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); cursor: pointer; }
     .project-select-option.is-active { background: var(--accent-tint-04); color: var(--accent); }
     .picker-cursor, .picker-check { flex: none; visibility: hidden; color: var(--accent); }
-    .model-picker-row[aria-selected="true"] .picker-cursor, .model-picker-row[aria-current="true"] .picker-check, .project-select-option.is-active .picker-cursor, .project-select-option[aria-selected="true"] .picker-check, .tag-picker-option:focus-visible .picker-cursor, .tag-picker-option[aria-pressed="true"] .picker-check { visibility: visible; }
+    .picker-row[aria-selected="true"] .picker-cursor, .model-picker-row[aria-current="true"] .picker-check, .project-select-option.is-active .picker-cursor, .project-select-option[aria-selected="true"] .picker-check, .tag-picker-option:focus-visible .picker-cursor, .tag-picker-option[aria-pressed="true"] .picker-check { visibility: visible; }
     .project-select-option-label { min-width: 0; overflow-wrap: anywhere; }
     /* Like Pi CLI's /model selector: plain mono lines rather than cards. */
-    .model-picker-card { width: min(38rem, 100%); gap: 0.75rem; font-family: var(--mono); font-size: 0.86rem; }
-    .model-picker-line { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; margin: 0; color: var(--muted); }
-    .model-picker-line button, .model-picker-row { border: 0; background: transparent; font: inherit; letter-spacing: 0; text-transform: none; }
-    .model-picker-line button { justify-self: auto; padding: 0.15rem 0; color: var(--muted); }
-    .model-picker-line button:hover, .model-picker-row:hover { background: transparent; }
-    .model-picker-line button[aria-pressed="true"] { color: var(--accent); }
-    .model-picker-hint { margin: 0 0 0 auto; color: var(--muted-soft); font-size: 0.74rem; }
-    .model-picker-keys { margin-left: 0; }
+    .picker-card { gap: 0.75rem; font-family: var(--mono); font-size: 0.86rem; }
+    .model-picker-card { width: min(38rem, 100%); }
+    .picker-line { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; margin: 0; color: var(--muted); }
+    .picker-line button, .picker-row { border: 0; background: transparent; font: inherit; letter-spacing: 0; text-transform: none; }
+    .picker-line button { justify-self: auto; padding: 0.15rem 0; color: var(--muted); }
+    .picker-line button:hover, .picker-row:hover { background: transparent; }
+    .picker-line button[aria-pressed="true"] { color: var(--accent); }
+    .picker-hint { margin: 0 0 0 auto; color: var(--muted-soft); font-size: 0.74rem; }
+    .picker-keys { margin-left: 0; }
     .model-picker-card input[type="search"] { width: 100%; padding: 0.55rem 0.65rem; }
     .model-picker-controls { min-width: 0; display: grid; gap: 0.75rem; margin: 0; padding: 0; border: 0; }
     .model-picker-list { max-height: 17rem; overflow-y: auto; display: grid; }
     .model-picker-list:empty { display: none; }
-    .model-picker-row { justify-self: stretch; display: grid; grid-template-columns: 2ch 2ch minmax(0, 1fr); padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); text-align: left; overflow-wrap: anywhere; transition: none; }
-    .model-picker-row[aria-selected="true"] { background: var(--accent-tint-04); color: var(--accent); }
+    .picker-row { justify-self: stretch; display: grid; grid-template-columns: 2ch minmax(0, 1fr); padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); text-align: left; overflow-wrap: anywhere; transition: none; }
+    .picker-row[aria-selected="true"] { background: var(--accent-tint-04); }
+    .model-picker-row { grid-template-columns: 2ch 2ch minmax(0, 1fr); }
+    .model-picker-row[aria-selected="true"] { color: var(--accent); }
     .model-picker-provider { color: var(--muted); }
     .model-picker-status { min-height: 1.2rem; margin: 0; padding-left: calc(4ch + 0.25rem); color: var(--muted); overflow-wrap: anywhere; }
     .model-picker-status.is-error { color: var(--danger); }
     .model-picker-thinking { padding-top: 0.75rem; border-top: 1px solid var(--border); }
-    .model-picker-card button:disabled:hover { background: transparent; }
+    .picker-card button:disabled:hover { background: transparent; }
     @media (hover: hover) and (pointer: fine) {
-      .model-picker-line button:not([aria-pressed="true"]):hover { color: var(--text); }
-      .model-picker-row:hover { background: var(--accent-tint-04); }
+      .picker-line button:not([aria-pressed="true"]):hover { color: var(--text); }
+      .picker-row:hover { background: var(--accent-tint-04); }
     }
     @media (max-width: 760px), (pointer: coarse) {
-      .model-picker-card { font-size: 0.95rem; }
-      .model-picker-row, .model-picker-line button { min-height: 2.75rem; }
-      .model-picker-row { align-items: center; }
-      .model-picker-line { align-items: center; }
-      .model-picker-line button { min-width: 2.75rem; padding: 0 0.3rem; }
-      .model-picker-card .modal-close-button { width: 2.75rem; height: 2.75rem; }
+      .picker-card { font-size: 0.95rem; }
+      .picker-row, .picker-line button { min-height: 2.75rem; }
+      .picker-row { align-items: center; }
+      .picker-line { align-items: center; }
+      .picker-line button { min-width: 2.75rem; padding: 0 0.3rem; }
+      .picker-card .modal-close-button { width: 2.75rem; height: 2.75rem; }
       .model-picker-thinking { gap: 0 0.3rem; padding-top: 0.4rem; }
-      .model-picker-thinking .model-picker-separator, .model-picker-hint { display: none; }
+      .model-picker-thinking .picker-separator, .picker-hint { display: none; }
     }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
     .new-session-tags, [data-tag-draft-chips] { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }

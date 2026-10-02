@@ -486,7 +486,7 @@ function renderThinkingOptions() {
   supportedThinkingLevels(model).forEach((level, index) => {
     if (index) {
       const separator = document.createElement("span");
-      separator.className = "model-picker-separator";
+      separator.className = "picker-separator";
       separator.setAttribute("aria-hidden", "true");
       separator.textContent = "|";
       container.append(separator);
@@ -523,7 +523,7 @@ function renderModelSettingsModels() {
   list.replaceChildren(...modelSettingsVisibleModels.map((model, index) => {
     const row = document.createElement("button");
     row.type = "button";
-    row.className = "model-picker-row";
+    row.className = "picker-row model-picker-row";
     row.id = `model-picker-option-${index}`;
     row.tabIndex = -1;
     row.setAttribute("role", "option");
