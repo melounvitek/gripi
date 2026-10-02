@@ -93,7 +93,8 @@ export class GatewayUpdateController {
 
     this.inProgress = true;
     this.channel?.postMessage({ type: "updating" });
-    this.apply({ ...this.state, state: "updating", message: "Updating gateway…" });
+    // Shown as waiting, which does not block: only the gateway's answer tells whether it has to.
+    this.apply({ ...this.state, state: "waiting", message: "Starting gateway update…" });
     try {
       const response = await fetch("/gateway-update", { method: "POST", headers: { "Accept": "application/json" } });
       if (!response.ok) throw new Error("Could not start gateway update");

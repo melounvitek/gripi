@@ -9,7 +9,10 @@ async function mockGateway(page, status) {
   page.on("framenavigated", () => { gateway.status = { ...gateway.status, instanceId: undefined }; });
   await page.route(/\/gateway-update(\/check)?$/, async (route) => {
     if (gateway.down) return route.abort();
-    if (route.request().method() === "POST" && !route.request().url().endsWith("/check")) gateway.status = gateway.started;
+    if (route.request().method() === "POST" && !route.request().url().endsWith("/check")) {
+      await gateway.starting;
+      gateway.status = gateway.started;
+    }
     await route.fulfill({ json: gateway.status });
   });
   return gateway;
@@ -65,9 +68,15 @@ test("leaves the page usable while waiting for active sessions and after a faile
   gateway.started = { state: "waiting", targetSha: "abc12345", message: "Waiting for 1 active Pi session to finish…" };
   await page.goto("/");
   const overlay = page.locator("[data-gateway-update-overlay]");
+  let answerStart;
+  gateway.starting = new Promise((resolve) => { answerStart = resolve; });
 
   await startUpdate(page);
 
+  // Only the gateway knows whether it has to wait, so nothing is blocked before it answers.
+  await expect(page.getByText("Starting gateway update…")).toBeVisible();
+  expect(await overlay.isVisible()).toBe(false);
+  answerStart();
   await expect(page.getByText("Waiting for 1 active Pi session to finish…")).toBeVisible();
   await expect(overlay).toBeHidden();
 
