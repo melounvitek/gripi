@@ -33,13 +33,11 @@ const (
 	toolOutputTailCharacters     = 2000
 )
 
-var projectColors = [][2]string{
-	{"#6a3b1d33", "#e6a66f"}, {"#334f7833", "#8db9ef"}, {"#563a7033", "#c5a0e8"}, {"#70374633", "#ef9aae"},
-	{"#4b612b33", "#acd276"}, {"#285d7033", "#75c5df"}, {"#67365f33", "#dfa0d4"}, {"#66502033", "#e0bd65"},
-	{"#315d3b33", "#86cb98"}, {"#3f477533", "#a5afe9"}, {"#713f3233", "#eda18b"}, {"#215f5933", "#76cbbf"},
+var projectColors = []string{
+	"#e6a66f", "#8db9ef", "#c5a0e8", "#ef9aae", "#acd276", "#75c5df",
+	"#dfa0d4", "#e0bd65", "#86cb98", "#a5afe9", "#eda18b", "#76cbbf",
 }
 
-type projectIdentity struct{ Monogram, Background, Foreground string }
 type sidebarActivity struct{ Busy, Compacting bool }
 type sidebarSessionData struct {
 	View     *pageView
@@ -635,7 +633,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return b
 		},
 		"base": filepath.Base, "urlquery": url.QueryEscape, "json": func(value any) string { data, _ := json.Marshal(value); return string(data) },
-		"projectIdentity": identityFor, "tagStyle": tagStyle, "relativeTime": relativeTime, "compactRelativeTime": compactRelativeTime, "activityDay": activityDay, "formatTime": func(value time.Time) string {
+		"projectColor": projectColor, "tagStyle": tagStyle, "relativeTime": relativeTime, "compactRelativeTime": compactRelativeTime, "activityDay": activityDay, "formatTime": func(value time.Time) string {
 			if value.IsZero() {
 				return "unknown"
 			}
@@ -667,27 +665,9 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 	}
 }
 
-func identityFor(cwd string) projectIdentity {
-	label := filepath.Base(cwd)
-	words := strings.FieldsFunc(label, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') })
-	monogram := ""
-	if len(words) > 1 {
-		monogram = firstRunes(strings.ToUpper(words[0]), 1) + firstRunes(strings.ToUpper(words[1]), 1)
-	} else if len(words) == 1 {
-		monogram = firstRunes(strings.ToUpper(words[0]), 2)
-	} else {
-		monogram = firstRunes(strings.ToUpper(label), 2)
-	}
-	digest := sha256.Sum256([]byte(label))
-	colors := projectColors[int(digest[0])%len(projectColors)]
-	return projectIdentity{Monogram: monogram, Background: colors[0], Foreground: colors[1]}
-}
-func firstRunes(value string, count int) string {
-	chars := []rune(value)
-	if len(chars) > count {
-		chars = chars[:count]
-	}
-	return string(chars)
+func projectColor(cwd string) string {
+	digest := sha256.Sum256([]byte(filepath.Base(cwd)))
+	return projectColors[int(digest[0])%len(projectColors)]
 }
 func relativeTime(value time.Time) string {
 	if value.IsZero() {
