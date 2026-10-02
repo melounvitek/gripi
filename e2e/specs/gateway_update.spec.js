@@ -39,6 +39,8 @@ test("blocks the page while the gateway updates and reloads it after the restart
   await page.keyboard.press("Escape");
   // Checked once, without retrying: the next status poll would reopen a dismissed overlay.
   expect(await overlay.isVisible()).toBe(true);
+  await page.keyboard.press("Control+n");
+  expect(await page.locator('[data-modal="new-session-modal"]').isVisible()).toBe(false);
 
   gateway.status = { state: "restarting", message: "Updated to abc12345" };
   await expect(overlay).toContainText("Restarting gateway…");

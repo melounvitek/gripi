@@ -9,11 +9,19 @@ export class GatewayUpdateController {
     this.inProgress = false;
     this.pollTimer = null;
     this.checkInterval = null;
+    this.overlay = document.querySelector("[data-gateway-update-overlay]");
     this.channel = typeof BroadcastChannelClass === "function" ? new BroadcastChannelClass("gripi-update") : null;
 
     document.addEventListener("click", (event) => {
       if (event.target.closest("[data-gateway-update-button]")) this.start();
     });
+    // The open overlay makes the page inert, but shortcuts bound to the document would still act.
+    // Browser shortcuts such as reload keep working.
+    window.addEventListener("keydown", (event) => {
+      if (this.overlay.open) event.stopImmediatePropagation();
+    }, true);
+    // For browsers without closedby, where Escape would dismiss the overlay.
+    this.overlay.addEventListener("cancel", (event) => event.preventDefault());
     this.channel?.addEventListener("message", (event) => {
       if (event.data?.type !== "updating") return;
       this.inProgress = true;
@@ -30,7 +38,11 @@ export class GatewayUpdateController {
   apply(payload = this.state) {
     if (!payload) return;
     this.state = payload;
-    this.block(payload.state);
+    // Waiting for active sessions leaves the page usable so they can still be watched or aborted.
+    const blocking = payload.state === "updating" || payload.state === "restarting";
+    this.overlay.querySelector("[data-gateway-update-overlay-message]").textContent = payload.state === "restarting" ? "Restarting gateway…" : "Updating gateway…";
+    if (blocking && !this.overlay.open) this.overlay.showModal();
+    if (!blocking && this.overlay.open) this.overlay.close();
     const control = this.document.querySelector("[data-gateway-update]");
     const button = control?.querySelector("[data-gateway-update-button]");
     const message = control?.querySelector("[data-gateway-update-message]");
@@ -51,17 +63,6 @@ export class GatewayUpdateController {
     } else {
       message.textContent = payload.message || (payload.state === "restarting" ? "Restarting gateway…" : "Updating gateway…");
     }
-  }
-
-  // Blocks the page while the gateway cannot serve it reliably. Waiting for active sessions stays
-  // usable so they can still be watched or aborted.
-  block(state) {
-    const overlay = this.document.querySelector("[data-gateway-update-overlay]");
-    if (!overlay) return;
-    const blocking = state === "updating" || state === "restarting";
-    overlay.querySelector("[data-gateway-update-overlay-message]").textContent = state === "restarting" ? "Restarting gateway…" : "Updating gateway…";
-    if (blocking && !overlay.open) overlay.showModal();
-    if (!blocking && overlay.open) overlay.close();
   }
 
   async check({ refresh = true } = {}) {
