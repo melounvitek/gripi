@@ -73,6 +73,8 @@ export class GatewayUpdateController {
     if (!response.ok) throw new Error("Could not check for gateway updates");
     const payload = await response.json();
     if (payload.instanceId && payload.instanceId !== this.instanceId) {
+      // Stop polling: navigating again would abandon a page load that takes longer than the poll.
+      this.inProgress = false;
       this.navigate(payload.currentSha || payload.instanceId);
       return payload;
     }

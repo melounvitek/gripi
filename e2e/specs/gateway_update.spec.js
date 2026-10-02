@@ -5,13 +5,12 @@ import { selectSession } from "../support/ui.mjs";
 // Stands in for the gateway's update endpoints; `gateway.down` makes them unreachable.
 async function mockGateway(page, status) {
   const gateway = { status, down: false };
+  // A page that has loaded again belongs to the restarted instance.
+  page.on("framenavigated", () => { gateway.status = { ...gateway.status, instanceId: undefined }; });
   await page.route(/\/gateway-update(\/check)?$/, async (route) => {
     if (gateway.down) return route.abort();
     if (route.request().method() === "POST" && !route.request().url().endsWith("/check")) gateway.status = gateway.started;
-    const status = gateway.status;
-    // Report the restarted instance once; the reloaded page then belongs to it.
-    if (status.instanceId) gateway.status = { ...status, instanceId: undefined };
-    await route.fulfill({ json: status });
+    await route.fulfill({ json: gateway.status });
   });
   return gateway;
 }
@@ -89,4 +88,19 @@ test("joins an update started elsewhere and reloads after the restart", async ({
   gateway.status = { state: "up_to_date", instanceId: "restarted-instance", currentSha: "abc12345" };
   await reloaded;
   await expect(overlay).toBeHidden();
+});
+
+test("reloads even when the restarted gateway is slow to serve the page", async ({ page }) => {
+  const gateway = await mockGateway(page, { state: "updating", message: "Updating gateway…" });
+  await page.goto("/");
+  await expect(page.locator("[data-gateway-update-overlay]")).toBeVisible();
+  // Slower than the status poll, which must not start the reload over again.
+  await page.route(/_gateway_updated=/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await route.continue();
+  });
+
+  const reloaded = page.waitForEvent("load");
+  gateway.status = { state: "up_to_date", instanceId: "restarted-instance", currentSha: "abc12345" };
+  await reloaded;
 });
