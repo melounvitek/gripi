@@ -606,6 +606,9 @@
     body.session-switching .session-switch-overlay { display: grid; }
     .session-switch-indicator { display: inline-flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: #1e1e24fa; color: var(--text); box-shadow: var(--shadow-soft); font-family: var(--mono); font-size: 0.85rem; font-weight: 600; }
     .session-switch-spinner { width: 1.1rem; height: 1.1rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
+    .gateway-update-overlay { padding: 0; border: 0; background: none; outline: none; }
+    .gateway-update-overlay::backdrop { background: #18181e80; backdrop-filter: blur(2px); }
+    .gateway-update-overlay-hint { margin-top: 0.2rem; color: var(--muted); font-size: 0.75rem; font-weight: 400; }
     .browser-access-overlay { position: fixed; inset: 0; z-index: 110; display: none; place-items: start center; padding: 1rem; background: #18181e61; pointer-events: none; }
     .browser-access-overlay.is-visible { display: grid; }
     .browser-access-card { width: min(38rem, 100%); display: grid; gap: 0.65rem; padding: 0.85rem 1rem; border: 1px solid var(--accent-line-55); border-radius: 0.4rem; background: #1e1e24fc; box-shadow: var(--shadow-soft); pointer-events: auto; }

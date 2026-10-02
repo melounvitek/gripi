@@ -30,6 +30,7 @@ export class GatewayUpdateController {
   apply(payload = this.state) {
     if (!payload) return;
     this.state = payload;
+    this.block(payload.state);
     const control = this.document.querySelector("[data-gateway-update]");
     const button = control?.querySelector("[data-gateway-update-button]");
     const message = control?.querySelector("[data-gateway-update-message]");
@@ -52,10 +53,23 @@ export class GatewayUpdateController {
     }
   }
 
+  // Blocks the page while the gateway cannot serve it reliably. Waiting for active sessions stays
+  // usable so they can still be watched or aborted.
+  block(state) {
+    const overlay = this.document.querySelector("[data-gateway-update-overlay]");
+    if (!overlay) return;
+    const blocking = state === "updating" || state === "restarting";
+    overlay.querySelector("[data-gateway-update-overlay-message]").textContent = state === "restarting" ? "Restarting gateway…" : "Updating gateway…";
+    if (blocking && !overlay.open) overlay.showModal();
+    if (!blocking && overlay.open) overlay.close();
+  }
+
   async check({ refresh = true } = {}) {
     const url = refresh ? "/gateway-update/check" : "/gateway-update";
     const method = refresh ? "POST" : "GET";
-    const response = await fetch(url, { method, headers: { "Accept": "application/json" }, cache: "no-store" });
+    // The poll is the only way out of the overlay, so it must not hang on a restarting gateway.
+    const signal = refresh ? undefined : AbortSignal.timeout(10000);
+    const response = await fetch(url, { method, headers: { "Accept": "application/json" }, cache: "no-store", signal });
     if (!response.ok) throw new Error("Could not check for gateway updates");
     const payload = await response.json();
     if (payload.instanceId && payload.instanceId !== this.instanceId) {
