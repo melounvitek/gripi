@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestTagFilteringCombinesBeforePaginationAndPreservesCurrentAndPins(t *testi
 	params := url.Values{"session": {current.Path}, "tag": {" REVIEW "}, "project": {all[len(all)-1].CWD}, "session_search": {all[len(all)-1].DisplayName}}
 	response = serve(t, handler, http.MethodGet, "/sidebar?"+params.Encode(), "")
 	html := response.Body.String()
-	for _, expected := range []string{`data-selected-tag="review"`, `data-tag-filter-count>1</span>`, `data-session-path="` + current.Path + `"`, `data-session-path="` + pinned.Path + `"`, `data-session-path="` + all[len(all)-1].Path + `"`} {
+	for _, expected := range []string{`data-selected-tag="review"`, `data-sidebar-filter-count>1 of ` + strconv.Itoa(len(all)-1) + `</span>`, `data-session-path="` + current.Path + `"`, `data-session-path="` + pinned.Path + `"`, `data-session-path="` + all[len(all)-1].Path + `"`} {
 		if !strings.Contains(html, expected) {
 			t.Errorf("sidebar missing %s", expected)
 		}

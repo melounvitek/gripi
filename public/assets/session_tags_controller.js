@@ -398,6 +398,13 @@ export class SessionTagsController {
       option.dataset.tagOption = tag;
       option.setAttribute("aria-pressed", String(tag === (new URL(this.window.location.href).searchParams.get("tag") || "")));
       option.addEventListener("click", () => this.filter(tag));
+      for (const [name, glyph] of [["picker-cursor", "→"], ["picker-check", "✓"]]) {
+        const mark = this.document.createElement("span");
+        mark.className = name;
+        mark.setAttribute("aria-hidden", "true");
+        mark.textContent = glyph;
+        option.append(mark);
+      }
     }
     const text = this.document.createElement("span");
     text.textContent = label;

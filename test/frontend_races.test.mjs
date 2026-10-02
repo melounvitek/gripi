@@ -145,10 +145,10 @@ test("obsolete sidebar filter failure does not cancel a newer filter", async () 
     dispatchEvent() {},
     querySelector: () => null,
   };
-  const pushed = [];
+  const replaced = [];
   const window = {
     location: { href: "https://example.test/?session=one", origin: "https://example.test", search: "?session=one" },
-    history: { state: null, pushState(_state, _title, url) { pushed.push(url); } },
+    history: { state: null, replaceState(_state, _title, url) { replaced.push(url); } },
     CustomEvent: class {},
   };
   const controller = new SidebarController(document, window, {}, {}, () => {});
@@ -163,7 +163,7 @@ test("obsolete sidebar filter failure does not cancel a newer filter", async () 
   globalThis.fetch = () => {
     requests += 1;
     if (requests === 1) return firstSidebar.promise;
-    return Promise.resolve(response(requests === 3 ? "new sidebar" : "new modal"));
+    return Promise.resolve(response("new sidebar"));
   };
 
   try {
@@ -181,8 +181,8 @@ test("obsolete sidebar filter failure does not cancel a newer filter", async () 
     await firstOperation;
 
     assert.equal(nativeSubmissions, 0);
-    assert.equal(pushed.length, 1);
-    assert.match(String(pushed[0]), /session_search=second/);
+    assert.equal(replaced.length, 1);
+    assert.match(String(replaced[0]), /session_search=second/);
     assert.equal(controller.filterOperationActive, false);
   } finally {
     globalThis.fetch = originalFetch;

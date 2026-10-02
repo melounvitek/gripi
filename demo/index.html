@@ -80,7 +80,6 @@
     .session-header h1 { grid-column: 2; grid-row: 1; min-width: 0; margin: 0; overflow: hidden; font-size: 1rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-project { container-type: inline-size; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.76rem; font-weight: 500; }
     .session-header-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .session-header-project .session-header-project-icon { width: 0.5rem; min-width: 0.5rem; height: 0.5rem; padding: 0; border: 0; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); font-size: 0; }
     .session-header-project-separator { flex: 0 0 auto; color: var(--muted-soft); }
     .session-header-view-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; margin-left: 0.2rem; }
     .session-header-view-option { position: relative; display: inline-flex; align-items: center; min-height: 2.1rem; padding: 0; border: 0; background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.7rem; font-weight: 500; letter-spacing: normal; text-transform: none; }
@@ -220,22 +219,27 @@
     .sidebar-search-toggle { min-width: 1.65rem; padding: 0.2rem 0.45rem; font-size: 1rem; }
     .sidebar-search-toggle.is-active { color: var(--accent); }
     .sidebar-project-filter-form { margin: 0; }
-    .sidebar-filter-row { display: flex; align-items: center; gap: 0.45rem; }
-    .sidebar-filter-row .project-select-trigger, .sidebar-filter-row .compact-tag-filter, .sidebar-filter-row .sidebar-search-toggle { height: 2.25rem; min-height: 0; padding-block: 0; }
-    .sidebar-filter-row .sidebar-search-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; padding: 0; }
-    .sidebar-filter-row .project-select-trigger { grid-template-columns: 0.75rem minmax(0, 1fr) auto; padding-inline: 0.5rem; border: 0; border-radius: 0.25rem; background: transparent; }
-    .sidebar-filter-row .project-select-trigger:is(:hover, [aria-expanded="true"]) { background: #ffffff08; }
-    .sidebar-filter-row :is(.project-select-trigger, .sidebar-search-toggle, .compact-tag-filter button):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; box-shadow: none; }
+    .sidebar-filter-row { position: relative; display: flex; align-items: center; gap: 0.15rem; }
+    .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle) { height: 2.25rem; min-height: 0; padding-block: 0; }
+    .sidebar-filter-row .sidebar-search-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; margin-left: auto; padding: 0; }
+    .sidebar-filter-row .project-select-trigger { grid-template-columns: 0.75rem minmax(0, 1fr) auto; padding-inline: 0.5rem 0.4rem; border: 0; border-radius: 0.25rem; background: transparent; font-size: 0.74rem; }
+    .sidebar-filter-row .project-select:has(option[value=""]:checked) .project-select-trigger { color: var(--muted); }
+    .sidebar-filter-row :is(.project-select-trigger:is(:hover, [aria-expanded="true"]), .tag-filter-toggle:hover) { background: #ffffff08; }
+    .sidebar-filter-row :is(.project-select-trigger, .sidebar-search-toggle, .tag-filter-toggle):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; box-shadow: none; }
     .sidebar-project-filter { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.8rem; font-weight: 500; background: var(--bg); }
-    .sidebar-filter-spinner { display: none; flex: 0 0 auto; width: 0.9rem; height: 0.9rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
-    .session-sidebar.is-filtering .sidebar-filter-spinner { display: inline-block; }
+    /* The spinner takes the search button's place only when a filter is slow, so fast typing does not flicker. */
+    .sidebar-filter-spinner { position: absolute; top: calc(50% - 0.45rem); right: 0.675rem; width: 0.9rem; height: 0.9rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; opacity: 0; pointer-events: none; }
+    .session-sidebar.is-filtering .sidebar-filter-spinner { opacity: 1; transition: opacity 0s 150ms; animation: session-switch-spin 800ms linear infinite; }
+    .session-sidebar.is-filtering .sidebar-search-toggle { color: transparent; transition: color 0s 150ms; }
     .session-sidebar.is-filtering .sidebar-project-filter, .session-sidebar.is-filtering .project-select-trigger, .session-sidebar.is-filtering .sidebar-filters-clear { opacity: 0.72; pointer-events: none; }
-    .sidebar-filters-clear { justify-self: end; padding-inline: 0.5rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; text-decoration: none; white-space: nowrap; }
-    .sidebar-filters-clear:hover { color: var(--text); text-decoration: underline; }
+    .sidebar-filters-clear { position: relative; margin-left: 0.3rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+    .sidebar-filters-clear::after { content: ""; position: absolute; inset: -0.7rem -0.4rem; }
+    .sidebar-filters-clear:hover { color: var(--text); }
     .recent-sessions { margin-bottom: 0.75rem; }
     .recent-sessions-header { display: flex; align-items: center; gap: 0.4rem; margin: 0.75rem 0 0.5rem; padding-left: 0.5rem; }
-    .recent-sessions-header h2, .sessions-day { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
-    .recent-sessions-header h2 { flex: 1; min-width: 0; }
+    .recent-sessions-header h2, .sessions-day, .sidebar-filter-count, .sidebar-search-empty { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .sidebar-filter-count { margin-left: 0.3rem; color: var(--muted-soft); white-space: nowrap; }
+    .sidebar-search-empty { margin: 0.85rem 0.5rem; }
     .sessions-day { margin: 0.85rem 0.5rem 0.2rem; }
     .sessions-list > .sessions-day:first-child { margin-top: 0.25rem; }
     .cwd-header { display: flex; align-items: center; gap: 0.4rem; margin: 1.25rem 0 0.5rem; }
@@ -252,7 +256,6 @@
     /* Every row starts with the same fixed slot: the project dot, or the terminal icon of a session active outside Gripi. */
     .session-row .session-project { order: -1; flex: 0 0 0.75rem; margin: 0; }
     .session-row.is-external .session-project { display: none; }
-    .session-row .session-project-monogram, .sidebar-filter-row .project-select-trigger > :is(.project-identity-icon, .project-select-neutral-icon) { width: 0.5rem; min-width: 0; height: 0.5rem; padding: 0; border: 0; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); font-size: 0; }
     /* The time slot fits "13h" and shows the activity dot while Pi works. */
     .session-row .session-meta { flex: none; min-width: 3ch; overflow: visible; text-align: right; }
     a.session { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: inherit; text-decoration: none; }
@@ -333,7 +336,7 @@
     .sidebar-notification-toggle.is-disabled { color: var(--muted); }
     .sidebar-notification-toggle.is-blocked .sidebar-notification-state { color: var(--danger); }
     .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.66rem; font-weight: 500; line-height: 1.25; }
-    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 1.95rem; height: 1.55rem; padding: 0 0.32rem; border: 1px solid color-mix(in srgb, var(--project-identity-fg, var(--accent)) 32%, transparent); border-radius: 0.2rem; background: var(--project-identity-bg); color: var(--project-identity-fg, var(--accent)); font-family: var(--mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; }
+    .project-identity-icon { flex: 0 0 auto; display: inline-flex; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); }
     .session-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 0.74rem; line-height: 1.4; }
     .session-relation-tree-heading { cursor: pointer; color: var(--gold); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -353,7 +356,7 @@
     .session-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.5rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); line-height: 1; }
     .sidebar-icon-button:hover { background: #ffffff08; color: var(--text); }
-    .sidebar-new-session-button { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--accent); letter-spacing: 0; text-transform: none; }
+    .sidebar-new-session-button { display: inline-flex; margin-left: auto; align-items: center; gap: 0.3rem; color: var(--accent); letter-spacing: 0; text-transform: none; }
     .sidebar-new-session-button span { font-size: 0.9rem; line-height: 1; }
     .sidebar-new-session-button:hover { color: var(--accent-bright); }
     .sidebar-new-session-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -642,21 +645,20 @@
     .extension-ui-option { justify-self: stretch; width: 100%; display: block; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: var(--bg); color: var(--text); text-align: left; text-transform: none; letter-spacing: normal; }
     .extension-ui-option:hover, .extension-ui-option:focus-visible { border-color: var(--accent-line-55); background: var(--accent-tint-08); color: var(--text); }
     .project-select { min-width: 0; width: 100%; }
-    .sidebar-filter-row > .project-select { flex: 1 1 0; width: 0; }
+    .sidebar-filter-row > .project-select { flex: 0 1 auto; width: auto; }
     .project-select-native-hidden { position: absolute !important; width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
     .project-select-trigger { width: 100%; min-width: 0; min-height: 2.45rem; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; padding: 0.42rem 0.55rem; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); text-align: left; font-family: var(--mono); font-size: 0.8rem; font-weight: 500; letter-spacing: normal; text-transform: none; }
     .project-select-trigger:hover, .project-select-trigger[aria-expanded="true"] { border-color: var(--accent-line-55); background: var(--bg); transform: none; }
     .project-select-trigger:focus-visible { border-color: var(--accent-line-55); outline: none; box-shadow: 0 0 0 2px var(--accent-tint-14); }
     .project-select-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .project-select-trigger--plain { grid-template-columns: minmax(0, 1fr) auto; }
     .project-select-chevron { color: var(--muted); font-size: 0.72rem; }
-    .project-select-listbox { position: fixed; z-index: 180; display: grid; gap: 0.2rem; overflow-y: auto; padding: 0.35rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; box-shadow: 0 16px 42px #00000080; }
-    .project-select-option { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.5rem; min-height: 2.25rem; padding: 0.35rem 0.5rem; border-radius: 0.25rem; color: var(--text); font-size: 0.82rem; cursor: pointer; }
-    .project-select-listbox--plain .project-select-option--plain { grid-template-columns: minmax(0, 1fr); }
-    .project-select-option:hover, .project-select-option.is-active { background: var(--panel-softer); }
-    .project-select-option[aria-selected="true"] { color: var(--project-identity-fg, var(--accent)); font-weight: 650; }
+    .project-select-listbox { position: fixed; z-index: 180; display: grid; overflow-y: auto; padding: 0.4rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; box-shadow: 0 16px 42px #00000080; font: 0.8rem var(--mono); }
+    .project-select-option { min-width: 0; display: flex; align-items: center; gap: 1ch; padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); cursor: pointer; }
+    .project-select-option.is-active { background: var(--accent-tint-04); color: var(--accent); }
+    .picker-cursor, .picker-check { flex: none; visibility: hidden; color: var(--accent); }
+    .model-picker-row[aria-selected="true"] .picker-cursor, .model-picker-row[aria-current="true"] .picker-check, .project-select-option.is-active .picker-cursor, .project-select-option[aria-selected="true"] .picker-check, .tag-picker-option:focus-visible .picker-cursor, .tag-picker-option[aria-pressed="true"] .picker-check { visibility: visible; }
     .project-select-option-label { min-width: 0; overflow-wrap: anywhere; }
-    .project-select-neutral-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 1.95rem; height: 1.55rem; border: 1px solid var(--border); border-radius: 0.2rem; background: var(--panel-soft); color: var(--muted); font-size: 0.85rem; font-weight: 700; }
+    .project-select-new-icon { flex: none; width: 0.5rem; color: var(--muted); text-align: center; }
     /* Like Pi CLI's /model selector: plain mono lines rather than cards. */
     .model-picker-card { width: min(38rem, 100%); gap: 0.75rem; font-family: var(--mono); font-size: 0.86rem; }
     .model-picker-line { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; margin: 0; color: var(--muted); }
@@ -672,8 +674,6 @@
     .model-picker-list:empty { display: none; }
     .model-picker-row { justify-self: stretch; display: grid; grid-template-columns: 2ch 2ch minmax(0, 1fr); padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); text-align: left; overflow-wrap: anywhere; transition: none; }
     .model-picker-row[aria-selected="true"] { background: var(--accent-tint-04); color: var(--accent); }
-    .model-picker-cursor, .model-picker-check { visibility: hidden; color: var(--accent); }
-    .model-picker-row[aria-selected="true"] .model-picker-cursor, .model-picker-row[aria-current="true"] .model-picker-check { visibility: visible; }
     .model-picker-provider { color: var(--muted); }
     .model-picker-status { min-height: 1.2rem; margin: 0; padding-left: calc(4ch + 0.25rem); color: var(--muted); overflow-wrap: anywhere; }
     .model-picker-status.is-error { color: var(--danger); }
@@ -696,8 +696,7 @@
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
     .new-session-tags, [data-tag-draft-chips] { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
     .new-session-tags [data-tag-draft-chips]:empty { display: none; }
-    .new-session-tags .tag-chip { gap: 6px; max-width: 100%; }
-    .new-session-tags-help { margin: 0; color: var(--muted); font: 11px/1.6 var(--sans); text-transform: none; letter-spacing: normal; }
+    .new-session-tags-help { margin: 0; color: var(--muted-soft); font: 0.7rem/1.6 var(--mono); text-transform: none; letter-spacing: normal; }
     .cwd-suggestions { max-height: min(16rem, 36dvh); display: grid; gap: 0.2rem; overflow-y: auto; padding: 0.3rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; }
     .cwd-suggestion { width: 100%; min-width: 0; display: block; padding: 0.5rem 0.6rem; border-radius: 0.25rem; background: transparent; color: var(--text); text-align: left; font-family: var(--mono); font-size: 0.82rem; font-weight: 500; letter-spacing: normal; text-transform: none; overflow-wrap: anywhere; }
     .cwd-suggestion:hover, .cwd-suggestion.is-active { background: var(--panel-softer); transform: none; }
@@ -824,8 +823,8 @@
       .session-header-project { font-size: 0.7rem; }
       .session-header-view-option { min-height: 2.75rem; }
       .project-select-trigger { min-height: 2.75rem; }
-      .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.4rem; }
-      .project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }
+      .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.4rem; font-size: 0.95rem; }
+      .project-select-option { min-height: 2.75rem; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       :root { --text-inset: 0.75rem; }
       .conversation-scroll { padding: 0.75rem; }
@@ -880,14 +879,9 @@
       .session-header-project-separator { display: none; }
     }
 
-    .compact-tag-filter { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 48%; border-radius: 0.25rem; }
-    .compact-tag-filter:not(.is-active):hover { background: #ffffff08; }
-    .compact-tag-filter button { display: inline-flex; align-items: center; gap: 5px; height: 100%; min-width: 0; padding: 0 8px; border: 0; background: transparent; color: var(--muted); font: 11px var(--sans); text-transform: none; letter-spacing: normal; }
-    .compact-tag-filter .tag-filter-toggle span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .compact-tag-filter .tag-filter-clear { flex: none; padding-left: 4px; font-size: 16px; }
-    .compact-tag-filter.is-active { background: var(--tag-bg); }
-    .compact-tag-filter.is-active button { color: var(--tag-fg); }
-    .tag-filter-count { margin-left: 5px; color: var(--muted-soft); letter-spacing: normal; }
+    .tag-filter-toggle { display: inline-flex; align-items: center; gap: 0.35rem; flex: 0 1 auto; min-width: 0; padding-inline: 0.5rem 0.4rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); font: 500 0.74rem var(--mono); text-transform: none; letter-spacing: normal; }
+    .tag-filter-toggle.is-active { color: var(--tag-fg); }
+    .tag-filter-toggle span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-tags { display: flex; align-items: center; flex: none; gap: 2px; }
     .session-tags > button { z-index: 1; }
     .session-tag-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 24px; padding: 3px; border: 0; border-radius: 4px; background: transparent; color: var(--tag-fg); }
@@ -898,35 +892,35 @@
     @media (hover: hover) and (pointer: fine) {
       .session-tag-icon:hover { background: var(--tag-bg); color: var(--tag-fg); }
     }
-    .tag-chip, .tag-overflow, .edit-tags { display: inline-flex; align-items: center; min-width: 0; padding: 5px 6px; border: 1px solid #ffffff16; border-radius: 4px; background: #ffffff05; color: #bbbcc6; font: 11px var(--sans); text-transform: none; letter-spacing: normal; }
-    .tag-chip { flex: 0 1 auto; background: var(--tag-bg); color: var(--tag-fg); }
+    .tag-chip, .tag-overflow, .edit-tags { display: inline-flex; align-items: center; gap: 1ch; min-width: 0; padding: 0.3rem 0.4rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); font: 0.74rem var(--mono); text-transform: none; letter-spacing: normal; }
+    .tag-chip { flex: 0 1 auto; max-width: 100%; color: var(--tag-fg); }
     .tag-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tag-overflow { flex: none; }
-    .tag-overflow, .edit-tags { border-color: transparent; background: transparent; color: var(--muted); }
     .header-tags:empty { display: none; }
-    .tag-chip:hover { background: var(--tag-bg); }
-    .tag-overflow:hover, .edit-tags:hover { background: transparent; }
-    .tag-picker { position: fixed; inset: 0; width: min(340px, calc(100vw - 24px)); max-height: min(600px, 85dvh); margin: auto; padding: 12px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-soft); overflow-y: auto; }
+    .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover { background: transparent; }
+    .tag-picker { position: fixed; inset: 0; width: min(340px, calc(100vw - 24px)); max-height: min(600px, 85dvh); margin: auto; padding: 0.6rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: var(--panel); color: var(--text); font: 0.8rem var(--mono); box-shadow: 0 16px 42px #00000080; overflow-y: auto; }
     .tag-picker[hidden] { display: none; }
     .tag-picker::backdrop { background: #0006; }
-    .tag-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .tag-picker-heading h2 { color: var(--text); font: 600 14px var(--sans); text-transform: none; letter-spacing: normal; }
-    .tag-picker-heading button { padding: 4px 8px; border: 0; background: transparent; color: var(--muted); font-size: 22px; }
-    .tag-picker-context { margin: 0 0 12px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-    .tag-picker input[type="search"] { width: 100%; margin: 8px 0; padding: 10px; font: 13px var(--sans); }
-    .tag-picker-options { display: grid; gap: 3px; }
-    .tag-picker-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px; border: 0; border-radius: 4px; background: var(--tag-bg, transparent); color: var(--tag-fg, var(--text)); font: 13px var(--sans); text-transform: none; letter-spacing: normal; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
-    .tag-picker-option:hover { background: var(--tag-bg, transparent); }
-    .tag-picker-option input { flex: none; width: 17px; height: 17px; margin: 0; accent-color: var(--tag-fg, #bbbcc6); }
-    .tag-picker-option .tag-count { flex: none; margin-left: auto; color: var(--muted); font: 11px var(--mono); }
-    .tag-picker-option[aria-pressed="true"], .tag-create { background: var(--tag-bg, var(--accent-tint-08)); }
-    .tag-picker-option[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--tag-fg, var(--accent-line-35)); }
+    .tag-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 0.25rem; }
+    .tag-picker-heading h2 { color: var(--muted); font: inherit; text-transform: none; letter-spacing: normal; }
+    .tag-picker-heading button { padding: 0 0.4rem; border: 0; background: transparent; color: var(--muted); font-size: 1.1rem; }
+    .tag-picker-context { margin: 0 0 0.4rem; padding-left: 0.25rem; overflow-wrap: anywhere; }
+    .tag-picker input[type="search"] { width: 100%; margin: 0.4rem 0; padding: 0.45rem 0.55rem; font: inherit; }
+    .tag-picker-options { display: grid; }
+    .tag-picker-option { display: flex; align-items: center; gap: 1ch; width: 100%; padding: 0.22rem 0.25rem; border: 0; border-radius: 0.2rem; background: transparent; color: var(--tag-fg, var(--text)); font: inherit; text-transform: none; letter-spacing: normal; text-align: left; cursor: pointer; overflow-wrap: anywhere; transition: none; }
+    .tag-picker-option:hover { background: transparent; }
+    .tag-picker-option:is(:focus-visible, :has(:focus-visible)) { background: var(--accent-tint-04); }
+    .tag-picker-option[aria-pressed]:focus-visible { outline: none; }
+    .tag-picker-option input { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--tag-fg, #bbbcc6); }
+    .tag-picker-option .tag-count { flex: none; margin-left: auto; color: var(--muted-soft); }
     .tag-picker-option:has(:disabled) { opacity: 0.65; cursor: wait; }
-    .tag-picker-footer, .tag-picker [role="status"] { color: var(--muted); font-size: 11px; line-height: 1.6; }
-    .tag-picker-footer { padding-top: 10px; margin: 10px 0 0; border-top: 1px solid var(--border); }
-    .tag-picker-error { color: var(--danger); font-size: 12px; }
+    .tag-picker-context, .tag-picker-footer, .tag-picker [role="status"] { color: var(--muted-soft); font-size: 0.7rem; line-height: 1.6; }
+    .tag-picker-footer { padding: 0.5rem 0.25rem 0; margin: 0.5rem 0 0; border-top: 1px solid var(--border); }
+    .tag-picker-error { color: var(--danger); }
     @media (hover: hover) and (pointer: fine) {
-      .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover, .tag-picker-option:hover { background: var(--tag-bg, #ffffff09); color: var(--tag-fg, var(--text)); }
+      .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover { background: #ffffff08; color: var(--tag-fg, var(--text)); }
+      .tag-picker-option:hover { background: var(--accent-tint-04); }
+      .tag-picker-option:hover .picker-cursor { visibility: visible; }
     }
     @media (min-width: 761px) {
       .tag-picker { inset: var(--tag-picker-top, 12px) auto auto var(--tag-picker-left, 12px); margin: 0; }
@@ -935,22 +929,20 @@
     @media (max-width: 760px), (pointer: coarse) {
       .session-header-tag-action { position: relative; min-width: 2.4rem; min-height: 2.4rem; }
       .session-header-tag-action::after { content: ""; position: absolute; inset: -3px; }
-      .sidebar-filter-row .project-select-trigger, .sidebar-filter-row .sidebar-search-toggle { position: relative; }
-      .sidebar-filter-row .project-select-trigger::after, .sidebar-filter-row .sidebar-search-toggle::after { content: ""; position: absolute; inset: -4px 0; }
-      .compact-tag-filter button { position: relative; }
-      .compact-tag-filter button::after { content: ""; position: absolute; inset: -6px 0; }
-      .compact-tag-filter .tag-filter-clear { min-width: 32px; }
+      .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle) { position: relative; }
+      .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle)::after { content: ""; position: absolute; inset: -4px 0; }
       .header-tags :is(.session-tag-icon, .tag-overflow) { min-width: 44px; min-height: 44px; }
       .tag-chip { position: relative; min-height: 28px; }
       .tag-chip::after { content: ""; position: absolute; inset: -8px 0; }
       .tag-overflow, .edit-tags { min-height: 44px; }
+      .tag-picker { font-size: 0.95rem; }
       .tag-picker-heading button { min-width: 44px; min-height: 44px; }
-      .tag-picker input[type="search"] { font-size: 16px; }
-      .tag-picker-option { min-height: 48px; font-size: 15px; }
+      .tag-picker input[type="search"] { padding: 0.6rem 0.65rem; font-size: 16px; }
+      .tag-picker-option { min-height: 2.75rem; }
       .tag-picker-option input { width: 20px; height: 20px; }
     }
     @media (max-width: 760px) {
-      .tag-picker { inset: auto 0 0; width: 100%; max-width: 100%; max-height: 85dvh; margin: 0; padding: 12px 16px max(16px, env(safe-area-inset-bottom)); border-radius: 12px 12px 0 0; }
+      .tag-picker { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)); width: auto; max-width: none; max-height: 85dvh; margin: 0; }
     }
 </style>
 <style data-demo-mobile-overrides>
@@ -991,23 +983,23 @@
             <div class="recent-sessions-header"><h2>Pinned</h2></div>
             <div class="pinned-sessions-list" id="pinned-sessions-list"></div>
           </section>
-          <div class="recent-sessions-header"><h2>Sessions</h2><button type="button" class="sidebar-icon-button sidebar-new-session-button" data-modal-open="new-session-modal"><span aria-hidden="true">+</span> New session</button></div>
+          <div class="recent-sessions-header"><h2>Sessions</h2><span class="sidebar-filter-count" data-sidebar-filter-count hidden></span><a class="sidebar-filters-clear" href="#" aria-label="Clear filters" data-sidebar-filters-clear hidden>clear</a><button type="button" class="sidebar-icon-button sidebar-new-session-button" data-modal-open="new-session-modal"><span aria-hidden="true">+</span> New session</button></div>
           <div class="sidebar-filters">
             <form class="sidebar-project-filter-form">
               <div class="sidebar-filter-row">
                 <div class="project-select" data-project-select>
                   <select class="sidebar-project-filter project-select-native-hidden" id="project-filter" aria-label="Filter sessions by project" data-sidebar-project-filter>
                     <option value="" data-project-option-kind="all">All projects</option>
-                    <option value="gripi" data-project-monogram="GR">gripi</option>
-                    <option value="website" data-project-monogram="WE">website</option>
-                    <option value="storefront" data-project-monogram="ST">storefront</option>
+                    <option value="gripi">gripi</option>
+                    <option value="website">website</option>
+                    <option value="storefront">storefront</option>
                   </select>
-                  <button type="button" class="project-select-trigger" id="project-select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="project-select-neutral-icon" aria-hidden="true">•</span><span class="project-select-trigger-label">All projects</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
+                  <button type="button" class="project-select-trigger" id="project-select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="project-identity-icon" aria-hidden="true"></span><span class="project-select-trigger-label">All projects</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
                   <div class="project-select-listbox" id="project-select-listbox" role="listbox" hidden>
-                    <div class="project-select-option is-active" role="option" aria-selected="true" data-project-value=""><span class="project-select-neutral-icon">•</span><span class="project-select-option-label">All projects</span></div>
-                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="gripi" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon">GR</span><span class="project-select-option-label">gripi</span></div>
-                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="website" style="--project-identity-bg:#1e334d;--project-identity-fg:#9fc5ff"><span class="project-identity-icon">WE</span><span class="project-select-option-label">website</span></div>
-                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="storefront" style="--project-identity-bg:#203c2b;--project-identity-fg:#b5e3b0"><span class="project-identity-icon">ST</span><span class="project-select-option-label">storefront</span></div>
+                    <div class="project-select-option is-active" role="option" aria-selected="true" data-project-value=""><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true"></span><span class="project-select-option-label">All projects</span></div>
+                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="gripi"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#ff9b73"></span><span class="project-select-option-label">gripi</span></div>
+                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="website"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#9fc5ff"></span><span class="project-select-option-label">website</span></div>
+                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="storefront"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#b5e3b0"></span><span class="project-select-option-label">storefront</span></div>
                   </div>
                 </div>
                 <button type="button" class="sidebar-icon-button sidebar-search-toggle" title="Search sessions" aria-label="Search sessions" aria-expanded="false" aria-controls="sidebar-session-search" data-sidebar-search-toggle>⌕</button>
@@ -1015,10 +1007,9 @@
               </div>
             </form>
             <form id="sidebar-session-search" class="sidebar-session-search" role="search"><input type="search" name="session_search" placeholder="Search sessions" aria-label="Search sessions"></form>
-            <a class="sidebar-filters-clear" href="#" data-sidebar-filters-clear hidden>Clear filters</a>
           </div>
           <div class="sessions-list" id="sessions-list"></div>
-          <p class="empty sidebar-search-empty" id="sidebar-empty" hidden>No sessions match these filters.</p>
+          <p class="sidebar-search-empty" id="sidebar-empty" hidden>No sessions match.</p>
         </section>
       </div>
       <div class="sidebar-gateway-update" data-gateway-update hidden>
@@ -1039,7 +1030,7 @@
         <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
         <div class="session-header-title" id="session-header-title">
           <h1 class="session-header-name">Welcome to Gripi</h1>
-          <div class="session-header-project" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon" aria-hidden="true">GR</span><span class="session-header-project-label">gripi</span><span class="session-header-project-separator" aria-hidden="true">·</span><div class="session-header-view-toggle" role="group" aria-label="Agent activity" data-conversation-view-toggle><button type="button" class="session-header-view-option" data-conversation-view="brief" aria-pressed="false" title="Collapse tool calls, results, and thinking into summaries"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h9"/></svg><span class="session-header-view-option-label">Brief</span></span></button><button type="button" class="session-header-view-option" data-conversation-view="full" aria-pressed="true" title="Include tool calls, results, and thinking"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 10h14M5 15h14M5 20h9"/></svg><span class="session-header-view-option-label">Full</span></span></button></div></div>
+          <div class="session-header-project" style="--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon" aria-hidden="true"></span><span class="session-header-project-label">gripi</span><span class="session-header-project-separator" aria-hidden="true">·</span><div class="session-header-view-toggle" role="group" aria-label="Agent activity" data-conversation-view-toggle><button type="button" class="session-header-view-option" data-conversation-view="brief" aria-pressed="false" title="Collapse tool calls, results, and thinking into summaries"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h9"/></svg><span class="session-header-view-option-label">Brief</span></span></button><button type="button" class="session-header-view-option" data-conversation-view="full" aria-pressed="true" title="Include tool calls, results, and thinking"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 10h14M5 15h14M5 20h9"/></svg><span class="session-header-view-option-label">Full</span></span></button></div></div>
         </div>
         <div class="session-header-actions">
           <a class="session-header-action session-header-window-action" href="#" title="Open session in new window" aria-label="Open session in new window" data-demo-disabled>↗</a>
@@ -1107,12 +1098,12 @@
               <select id="new-session-known-cwd" name="known_cwd" class="project-select-native-hidden" aria-labelledby="new-session-project-label" data-new-session-known-cwd>
                 <option value="gripi">gripi — /home/demo/Work/gripi</option><option value="website">website — /home/demo/Work/website</option><option value="storefront">storefront — /home/demo/Work/storefront</option><option value="__new_path__" data-project-option-kind="new">Add new path…</option>
               </select>
-              <button type="button" class="project-select-trigger" data-new-session-project-trigger data-modal-default-focus aria-haspopup="listbox" aria-expanded="false"><span class="project-identity-icon" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73">GR</span><span class="project-select-trigger-label">gripi — /home/demo/Work/gripi</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
+              <button type="button" class="project-select-trigger" data-new-session-project-trigger data-modal-default-focus aria-haspopup="listbox" aria-expanded="false"><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#ff9b73"></span><span class="project-select-trigger-label">gripi — /home/demo/Work/gripi</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
               <div class="project-select-listbox" data-new-session-project-list role="listbox" hidden>
-                <div class="project-select-option is-active" role="option" aria-selected="true" data-new-project="gripi"><span class="project-identity-icon" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73">GR</span><span class="project-select-option-label">gripi — /home/demo/Work/gripi</span></div>
-                <div class="project-select-option" role="option" aria-selected="false" data-new-project="website"><span class="project-identity-icon" style="--project-identity-bg:#1e334d;--project-identity-fg:#9fc5ff">WE</span><span class="project-select-option-label">website — /home/demo/Work/website</span></div>
-                <div class="project-select-option" role="option" aria-selected="false" data-new-project="storefront"><span class="project-identity-icon" style="--project-identity-bg:#203c2b;--project-identity-fg:#b5e3b0">ST</span><span class="project-select-option-label">storefront — /home/demo/Work/storefront</span></div>
-                <div class="project-select-option" role="option" aria-selected="false" data-new-project="__new_path__"><span class="project-select-neutral-icon">+</span><span class="project-select-option-label">Add new path…</span></div>
+                <div class="project-select-option is-active" role="option" aria-selected="true" data-new-project="gripi"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#ff9b73"></span><span class="project-select-option-label">gripi — /home/demo/Work/gripi</span></div>
+                <div class="project-select-option" role="option" aria-selected="false" data-new-project="website"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#9fc5ff"></span><span class="project-select-option-label">website — /home/demo/Work/website</span></div>
+                <div class="project-select-option" role="option" aria-selected="false" data-new-project="storefront"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#b5e3b0"></span><span class="project-select-option-label">storefront — /home/demo/Work/storefront</span></div>
+                <div class="project-select-option" role="option" aria-selected="false" data-new-project="__new_path__"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-select-new-icon" aria-hidden="true">+</span><span class="project-select-option-label">Add new path…</span></div>
               </div>
             </div>
           </div>
@@ -1125,7 +1116,7 @@
   </div>
   <div class="modal-overlay" data-modal="fork-session-modal" hidden><div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="fork-session-modal-title"><div class="modal-header"><h2 id="fork-session-modal-title">Fork session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><div class="fork-session-list"><p class="fork-session-status">Choose a point to fork from:</p><button type="button" class="fork-session-option" data-demo-fork><span class="tree-session-role">Assistant</span><br>Clone and start Gripi with these commands…</button><button type="button" class="fork-session-option" data-demo-fork><span class="tree-session-role">User</span><br>What is Gripi, and how can I get started?</button></div><div class="modal-actions"><button type="button" class="secondary" data-modal-close>Cancel</button></div></div></div>
   <div class="modal-overlay" data-modal="tree-session-modal" hidden><div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="tree-session-modal-title"><div class="modal-header"><h2 id="tree-session-modal-title">Session tree</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><div class="fork-session-list"><button type="button" class="fork-session-option" data-demo-tree data-demo-tree-target="new-to-pi"><span class="tree-session-role">Related</span><br><span data-demo-tree-target-title>New to Pi? Start here</span></button><button type="button" class="fork-session-option is-current-tree-entry" data-demo-tree><span class="tree-session-role">Current session</span><span class="tree-session-badge tree-session-badge--current">Current</span><br><span data-demo-tree-current-title>Welcome to Gripi</span></button></div><div class="modal-actions"><button type="button" class="secondary" data-modal-close>Cancel</button></div></div></div>
-  <div class="modal-overlay" data-modal="model-settings-modal" hidden><div class="modal-card model-picker-card" role="dialog" aria-modal="true" aria-labelledby="model-settings-title"><div class="modal-header"><h2 id="model-settings-title">Model &amp; thinking</h2><button type="button" class="secondary modal-close-button" data-modal-close aria-label="Close model settings">×</button></div><input type="search" aria-label="Search models" data-model-search data-modal-default-focus placeholder="Search models"><div class="model-picker-controls"><div class="model-picker-list" role="listbox" aria-label="Models"><button type="button" class="model-picker-row" role="option" aria-selected="true" aria-current="true" data-demo-model="openai-codex/gpt-5.5"><span class="model-picker-cursor" aria-hidden="true">→</span><span class="model-picker-check" aria-hidden="true">✓</span><span>gpt-5.5 <span class="model-picker-provider">[openai-codex]</span></span></button><button type="button" class="model-picker-row" role="option" aria-selected="false" data-demo-model="openai-codex/gpt-5"><span class="model-picker-cursor" aria-hidden="true">→</span><span class="model-picker-check" aria-hidden="true">✓</span><span>gpt-5 <span class="model-picker-provider">[openai-codex]</span></span></button></div><p class="model-picker-line model-picker-thinking"><span>Thinking:</span><span class="model-picker-line"><button type="button" aria-pressed="false" data-demo-thinking="off">off</button><span class="model-picker-separator" aria-hidden="true">|</span><button type="button" aria-pressed="true" data-demo-thinking="medium">medium</button></span></p></div></div></div>
+  <div class="modal-overlay" data-modal="model-settings-modal" hidden><div class="modal-card model-picker-card" role="dialog" aria-modal="true" aria-labelledby="model-settings-title"><div class="modal-header"><h2 id="model-settings-title">Model &amp; thinking</h2><button type="button" class="secondary modal-close-button" data-modal-close aria-label="Close model settings">×</button></div><input type="search" aria-label="Search models" data-model-search data-modal-default-focus placeholder="Search models"><div class="model-picker-controls"><div class="model-picker-list" role="listbox" aria-label="Models"><button type="button" class="model-picker-row" role="option" aria-selected="true" aria-current="true" data-demo-model="openai-codex/gpt-5.5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5.5 <span class="model-picker-provider">[openai-codex]</span></span></button><button type="button" class="model-picker-row" role="option" aria-selected="false" data-demo-model="openai-codex/gpt-5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5 <span class="model-picker-provider">[openai-codex]</span></span></button></div><p class="model-picker-line model-picker-thinking"><span>Thinking:</span><span class="model-picker-line"><button type="button" aria-pressed="false" data-demo-thinking="off">off</button><span class="model-picker-separator" aria-hidden="true">|</span><button type="button" aria-pressed="true" data-demo-thinking="medium">medium</button></span></p></div></div></div>
   <div class="session-switch-overlay" role="status" aria-live="polite" aria-label="Loading"><div class="session-switch-indicator"><span class="session-switch-spinner" aria-hidden="true"></span> Loading…</div></div>
   <div class="browser-access-overlay" data-browser-access-overlay aria-live="polite"><div class="browser-access-card"><div class="browser-access-title">Browser access request</div><div class="browser-access-meta">A connected browser is requesting access.</div><div class="browser-access-actions"><button class="secondary" type="button" data-demo-disabled>Deny</button><button type="button" data-demo-disabled>Allow</button></div></div></div>
   <div class="browser-access-overlay" data-workspace-access-overlay aria-live="polite"><div class="browser-access-card"><div class="browser-access-title">Workspace access request</div><div class="browser-access-meta">A trusted user is requesting this workspace.</div><div class="browser-access-actions"><button class="secondary" type="button" data-demo-disabled>Deny</button><button type="button" data-demo-disabled>Allow</button></div></div></div>

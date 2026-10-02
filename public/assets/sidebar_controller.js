@@ -13,6 +13,7 @@ export class SidebarController {
     this.notifyFinalReply = notifyFinalReply;
     this.element = null;
     this.refreshTimer = null;
+    this.searchTimer = null;
     this.asyncEpoch = 0;
     this.refreshRequestVersion = 0;
     this.lastInteractionAt = 0;
@@ -72,6 +73,7 @@ export class SidebarController {
 
   invalidate({ clearSessionsLimit = false } = {}) {
     this.asyncEpoch += 1;
+    if (this.filterOperationActive) this.setFiltering(false);
     this.filterOperationActive = false;
     clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
@@ -97,6 +99,11 @@ export class SidebarController {
       if (!form) return;
       event.preventDefault();
       this.changeSearchFilter(form).catch(() => form.submit());
+    });
+    this.document.addEventListener("input", (event) => {
+      if (!event.target.matches?.('.sidebar-session-search input[name="session_search"]')) return;
+      clearTimeout(this.searchTimer);
+      this.searchTimer = setTimeout(() => this.changeSearchFilter(this.element?.querySelector(".sidebar-session-search"))?.catch(() => {}), 200);
     });
     this.document.addEventListener("click", (event) => {
       const visibilityToggle = event.target.closest?.("[data-sidebar-visibility-toggle]");
@@ -220,7 +227,8 @@ export class SidebarController {
     const notificationToggle = oldElement.querySelector("[data-notification-toggle]");
     const resourceUsage = oldElement.querySelector("[data-resource-usage]");
     const previousSearchForm = preserveSearch ? oldElement.querySelector(".sidebar-session-search") : null;
-    const previousSearchQuery = previousSearchForm?.querySelector('input[name="session_search"]')?.value;
+    const previousSearchInput = previousSearchForm?.querySelector('input[name="session_search"]');
+    const previousSearchQuery = previousSearchInput?.value;
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
     const focusedControl = oldElement.contains(this.document.activeElement) ? this.document.activeElement : null;
     const focusedControlSelector = ["[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]"].find((selector) => focusedControl?.matches(selector));
@@ -229,7 +237,7 @@ export class SidebarController {
     const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");
     const visibilityToggleFocused = !!focusedVisibilityToggle && oldElement.contains(focusedVisibilityToggle);
     this.projectSelectController.destroy(oldElement);
-    oldElement.outerHTML = html;
+    if (previousSearchInput !== this.document.activeElement || !this.replaceAround(previousSearchInput, html)) oldElement.outerHTML = html;
     this.bind(this.document.querySelector(".session-sidebar"));
     if (!this.element) return null;
 
@@ -256,6 +264,25 @@ export class SidebarController {
     if (title) this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-selected-title", { detail: { title } }));
     this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-tags"));
     return title || null;
+  }
+
+  // Re-creating a focused search field would end typing and close the phone keyboard, so it and its ancestors stay while everything around them is replaced.
+  replaceAround(kept, html) {
+    const template = this.document.createElement("template");
+    template.innerHTML = html;
+    let fresh = template.content.querySelector('.sidebar-session-search input[name="session_search"]');
+    if (!fresh) return false;
+
+    for (; fresh.parentElement; kept = kept.parentElement, fresh = fresh.parentElement) {
+      const parent = kept.parentElement;
+      const freshNodes = [...fresh.parentElement.childNodes];
+      [...parent.childNodes].forEach((node) => { if (node !== kept) node.remove(); });
+      kept.before(...freshNodes.slice(0, freshNodes.indexOf(fresh)));
+      kept.after(...freshNodes.slice(freshNodes.indexOf(fresh) + 1));
+      [...parent.attributes].forEach(({ name }) => { if (!fresh.parentElement.hasAttribute(name)) parent.removeAttribute(name); });
+      [...fresh.parentElement.attributes].forEach(({ name, value }) => parent.setAttribute(name, value));
+    }
+    return true;
   }
 
   updateSessionName(path, name) {
@@ -310,16 +337,18 @@ export class SidebarController {
   }
 
   changeSearchFilter(form) {
+    clearTimeout(this.searchTimer);
     if (!form) return null;
 
     const targetUrl = new URL(this.window.location.href);
     const query = form.querySelector('input[name="session_search"]')?.value.trim() || "";
     if (query) targetUrl.searchParams.set("session_search", query);
     else targetUrl.searchParams.delete("session_search");
-    return this.applyFilters(targetUrl);
+    return this.applyFilters(targetUrl, { searchOnly: true });
   }
 
-  async applyFilters(targetUrl) {
+  // A search-only change keeps the field being typed in and the scroll position, and skips the New session dialog, which follows only the project filter.
+  async applyFilters(targetUrl, { searchOnly = false } = {}) {
     const refreshRequestVersion = this.refreshRequestVersion;
     this.setFiltering(true);
     this.filterOperationActive = true;
@@ -329,21 +358,20 @@ export class SidebarController {
     const epoch = ++this.asyncEpoch;
     const boundElement = this.element;
     try {
-      const [sidebarResponse, modalResponse] = await Promise.all([
-        fetch(this.fragmentUrl(targetUrl.href)),
-        fetch(newSessionModalUrl(targetUrl.href))
-      ]);
+      const urls = [this.fragmentUrl(targetUrl.href)];
+      if (!searchOnly) urls.push(newSessionModalUrl(targetUrl.href));
+      const responses = await Promise.all(urls.map((url) => fetch(url)));
       if (!this.current(epoch, boundElement)) return null;
-      if (!sidebarResponse.ok || !modalResponse.ok) throw new Error("Sidebar filter refresh failed");
-      const [html, modalHtml] = await Promise.all([sidebarResponse.text(), modalResponse.text()]);
+      if (responses.some((response) => !response.ok)) throw new Error("Sidebar filter refresh failed");
+      const [html, modalHtml] = await Promise.all(responses.map((response) => response.text()));
       if (!this.current(epoch, boundElement)) return null;
 
       this.filterOperationActive = false;
-      this.replace(html, { scrollTop: 0, notify: false, preserveSearch: false });
-      this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-filtered", { detail: { modalHtml } }));
-      this.window.history.pushState(this.window.history.state, "", targetUrl.href);
+      this.replace(html, { scrollTop: searchOnly ? undefined : 0, notify: false, preserveSearch: searchOnly });
+      if (!searchOnly) this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-filtered", { detail: { modalHtml } }));
+      this.window.history.replaceState(this.window.history.state, "", targetUrl.href);
       this.scheduleRefresh(refreshRequestVersion !== this.refreshRequestVersion ? 0 : undefined);
-      return modalHtml;
+      return html;
     } catch (error) {
       if (!this.current(epoch, boundElement)) return null;
       this.filterOperationActive = false;
@@ -425,9 +453,8 @@ export class SidebarController {
   setSearchOpen(form, button, open) {
     const input = form?.querySelector('input[name="session_search"]');
     if (!form || !input || !button) return false;
-    const projectSelect = form.closest(".recent-sessions")?.querySelector("[data-sidebar-project-filter]");
     form.classList.toggle("is-open", open);
-    button.classList.toggle("is-active", open || input.value.trim() !== "" || projectSelect?.value !== "");
+    button.classList.toggle("is-active", input.value.trim() !== "");
     button.setAttribute("aria-expanded", open ? "true" : "false");
     return true;
   }
@@ -481,7 +508,7 @@ export class SidebarController {
   }
 
   controlsActive() {
-    return this.projectSelectController.isActive(this.element) || !!this.document.activeElement?.closest?.(".sidebar-session-search") || this.document.body.classList.contains("session-shortcuts-visible") || this.document.body.classList.contains("session-pin-operation-active");
+    return this.projectSelectController.isActive(this.element) || this.document.body.classList.contains("session-shortcuts-visible") || this.document.body.classList.contains("session-pin-operation-active");
   }
 
   currentSessionPath() {

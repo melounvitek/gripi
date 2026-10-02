@@ -31,7 +31,7 @@ test("sidebar filters have matching heights and open on first activation", async
   const project = row.locator(".project-select-trigger");
   const tags = row.locator("[data-tag-chooser]");
   const search = row.getByRole("button", { name: "Search sessions", exact: true });
-  const bounds = await row.locator(".project-select-trigger, .compact-tag-filter, .sidebar-search-toggle").evaluateAll((controls) => controls.map((control) => {
+  const bounds = await row.locator(".project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle").evaluateAll((controls) => controls.map((control) => {
     const { y, height } = control.getBoundingClientRect();
     return { y, height };
   }));
@@ -177,7 +177,7 @@ test("sidebar tag controls retain keyboard focus across polling and ArrowUp sele
     await page.goto(`/?${new URLSearchParams({ session: current.path, tag: tags[0] })}`);
     if (isMobile) await page.locator('label[aria-label="Open sessions"]').tap();
     const row = page.locator('.sessions-list .session-row');
-    for (const control of [row.locator('[data-tag-filter]').first(), row.locator('.tag-overflow'), page.locator('[data-tag-chooser]'), page.getByRole('button', { name: 'Clear tag filter', exact: true })]) {
+    for (const control of [row.locator('[data-tag-filter]').first(), row.locator('.tag-overflow'), page.locator('[data-tag-chooser]')]) {
       await control.focus();
       const original = await control.elementHandle();
       await page.clock.runFor(10_100);
@@ -251,8 +251,8 @@ test("tag filter combines across projects without switching conversation; pins b
     if (isMobile) await activate(page.locator('label[aria-label="Open sessions"]'));
     await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(tag);
     await expect(page.locator(".sessions-list .session-row")).toHaveCount(2);
-    await expect(page.locator("[data-tag-filter-count]")).toHaveText("2");
-    const filterHeights = await page.locator(".sidebar-filter-row .project-select-trigger, .compact-tag-filter, .sidebar-search-toggle").evaluateAll((controls) => controls.map((control) => control.getBoundingClientRect().height));
+    await expect(page.locator("[data-sidebar-filter-count]")).toHaveText(/^2 of \d+$/);
+    const filterHeights = await page.locator(".sidebar-filter-row .project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle").evaluateAll((controls) => controls.map((control) => control.getBoundingClientRect().height));
     expect(filterHeights).toEqual([36, 36, 36]);
     await expect(page.locator(".session-header-name")).toHaveText(current.name);
     await expect(page.getByLabel("Message to Pi")).toHaveValue("Keep this draft");
@@ -273,7 +273,8 @@ test("tag filter combines across projects without switching conversation; pins b
     await expect(chooser.getByRole("button", { name: `${tag} 2`, exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await page.screenshot({ path: testInfo.outputPath("tag-filter.png"), animations: "disabled" });
-    await activate(page.getByRole("button", { name: "Clear tag filter", exact: true }));
+    await activate(page.getByRole("button", { name: "Filter sessions by tag", exact: true }));
+    await activate(chooser.getByRole("button", { name: "All tags", exact: true }));
     await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(null);
     const filter = page.getByRole("button", { name: "Filter sessions by tag", exact: true });
     await expect(filter).toHaveAttribute("title", "Filter by tags");

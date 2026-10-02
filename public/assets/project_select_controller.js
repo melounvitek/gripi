@@ -39,7 +39,7 @@ export class ProjectSelectController {
     const selectedOption = select?.selectedOptions[0];
     if (!state || !selectedOption) return;
 
-    this.renderOption(state.trigger, selectedOption, true, state.plain);
+    this.renderOption(state.trigger, selectedOption, true);
     state.options.forEach((customOption, index) => {
       customOption.setAttribute("aria-selected", index === select.selectedIndex ? "true" : "false");
     });
@@ -92,14 +92,13 @@ export class ProjectSelectController {
     if (!select || !select.options.length) return;
 
     const id = `project-select-${++this.serial}`;
-    const plain = wrapper.hasAttribute("data-project-select-plain");
     const labelledBy = select.getAttribute("aria-labelledby");
     const associatedLabel = labelledBy ? this.document.getElementById(labelledBy) : null;
     const accessibleLabel = select.getAttribute("aria-label") || associatedLabel?.textContent || "Choose project";
     const trigger = this.document.createElement("button");
     trigger.type = "button";
     trigger.id = `${id}-trigger`;
-    trigger.className = `project-select-trigger${plain ? " project-select-trigger--plain" : ""}`;
+    trigger.className = "project-select-trigger";
     trigger.setAttribute("role", "combobox");
     trigger.setAttribute("aria-haspopup", "listbox");
     trigger.setAttribute("aria-expanded", "false");
@@ -112,7 +111,7 @@ export class ProjectSelectController {
 
     const listbox = this.document.createElement("div");
     listbox.id = `${id}-listbox`;
-    listbox.className = `project-select-listbox${plain ? " project-select-listbox--plain" : ""}`;
+    listbox.className = "project-select-listbox";
     listbox.setAttribute("role", "listbox");
     listbox.setAttribute("aria-labelledby", trigger.id);
     listbox.hidden = true;
@@ -121,11 +120,11 @@ export class ProjectSelectController {
     const options = nativeOptions.map((nativeOption, index) => {
       const option = this.document.createElement("div");
       option.id = `${id}-option-${index}`;
-      option.className = `project-select-option${plain ? " project-select-option--plain" : ""}`;
+      option.className = "project-select-option";
       option.setAttribute("role", "option");
       option.setAttribute("aria-selected", index === select.selectedIndex ? "true" : "false");
       if (nativeOption.dataset.projectForeground) option.style.setProperty("--project-identity-fg", nativeOption.dataset.projectForeground);
-      this.renderOption(option, nativeOption, false, plain);
+      this.renderOption(option, nativeOption);
       option.addEventListener("click", (event) => {
         event.stopPropagation();
         this.selectOption(wrapper, option);
@@ -137,7 +136,7 @@ export class ProjectSelectController {
 
     const onChange = () => this.sync(select);
     wrapper._projectSelectState = {
-      select, trigger, listbox, nativeOptions, options, plain, onChange,
+      select, trigger, listbox, nativeOptions, options, onChange,
       activeIndex: Math.max(0, select.selectedIndex),
       typeahead: "", typeaheadTimer: null,
       originalTabIndex: select.tabIndex,
@@ -182,24 +181,28 @@ export class ProjectSelectController {
     trigger.addEventListener("keydown", (event) => this.handleKeydown(event, wrapper));
   }
 
-  renderOption(container, option, includeChevron = false, plain = false) {
+  renderOption(container, option, includeChevron = false) {
     container.replaceChildren();
     if (option.dataset.projectForeground) container.style.setProperty("--project-identity-fg", option.dataset.projectForeground);
     else container.style.removeProperty("--project-identity-fg");
-    if (!plain) {
-      const icon = this.document.createElement("span");
-      if (option.dataset.projectMonogram) {
-        icon.className = "project-identity-icon";
-        icon.textContent = option.dataset.projectMonogram;
-        icon.style.setProperty("--project-identity-bg", option.dataset.projectBackground);
-        icon.style.setProperty("--project-identity-fg", option.dataset.projectForeground);
-      } else {
-        icon.className = "project-select-neutral-icon";
-        icon.textContent = option.dataset.projectOptionKind === "new" ? "+" : "•";
+    if (!includeChevron) {
+      for (const [name, glyph] of [["picker-cursor", "→"], ["picker-check", "✓"]]) {
+        const mark = this.document.createElement("span");
+        mark.className = name;
+        mark.setAttribute("aria-hidden", "true");
+        mark.textContent = glyph;
+        container.append(mark);
       }
-      icon.setAttribute("aria-hidden", "true");
-      container.append(icon);
     }
+    const icon = this.document.createElement("span");
+    if (option.dataset.projectOptionKind === "new") {
+      icon.className = "project-select-new-icon";
+      icon.textContent = "+";
+    } else {
+      icon.className = "project-identity-icon";
+    }
+    icon.setAttribute("aria-hidden", "true");
+    container.append(icon);
 
     const label = this.document.createElement("span");
     label.className = includeChevron ? "project-select-trigger-label" : "project-select-option-label";

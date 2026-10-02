@@ -364,7 +364,6 @@ test("project selector opens on the first valid touch without sticky-hover behav
   window.innerWidth = 400;
 
   const wrapper = new FakeElement("div", ["[data-project-select]"]);
-  wrapper.setAttribute("data-project-select-plain", "");
   const select = new FakeElement("select");
   select.setAttribute("aria-label", "Filter sessions by project");
   select.options = [nativeOption("/alpha", "alpha"), nativeOption("/beta", "beta")];
