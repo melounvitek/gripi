@@ -17,6 +17,11 @@ test("pick a fork point from the keyboard like Pi's /fork selector", async ({ pa
   await expect(options.nth(1).locator(".picker-cursor")).toBeVisible();
   await expect(options.nth(0).locator(".picker-cursor")).toBeHidden();
 
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await sendPrompt(page, "/fork");
+  await expect(options.nth(1)).toBeFocused();
+
   await page.keyboard.press("ArrowUp");
   await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("ArrowUp");

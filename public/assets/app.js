@@ -2956,7 +2956,6 @@ function setForkSessionStatus(modal, text) {
   const list = modal?.querySelector("[data-fork-session-list]");
   if (!list) return;
   list.replaceChildren();
-  delete list.dataset.loaded;
   list.removeAttribute("role");
   const status = document.createElement("p");
   status.className = "picker-status";
@@ -2978,7 +2977,7 @@ function handlePickerListKey(event) {
 async function loadForkMessages(modal) {
   const list = modal?.querySelector("[data-fork-session-list]");
   const url = list?.dataset.forkMessagesUrl;
-  if (!list || !url || list.dataset.loaded === "true" || list.dataset.loading === "true") return;
+  if (!list || !url || list.dataset.loading === "true") return;
 
   list.dataset.loading = "true";
   setForkSessionStatus(modal, "Loading fork points…");
@@ -3012,7 +3011,6 @@ async function loadForkMessages(modal) {
       button.append(cursor, text, meta);
       list.append(button);
     });
-    list.dataset.loaded = "true";
     // Like Pi CLI, the cursor starts on the most recent message.
     movePickerCursor(list, messages.length - 1);
   } catch (_error) {

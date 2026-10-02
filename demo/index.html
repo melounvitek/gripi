@@ -701,6 +701,8 @@
       .picker-card .modal-close-button { width: 2.75rem; height: 2.75rem; }
       .model-picker-thinking { gap: 0 0.3rem; padding-top: 0.4rem; }
       .model-picker-thinking .picker-separator, .tree-session-browser .picker-separator, .picker-hint { display: none; }
+      /* Widens the tap target without moving the glyph out of the connector column. */
+      .tree-session-fold::after { content: ""; position: absolute; inset: -0.8rem -0.75rem; }
     }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
     .new-session-tags, [data-tag-draft-chips] { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
@@ -726,19 +728,18 @@
     .tree-session-input input, .tree-session-input input:focus { flex: 1 1 8rem; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; color: var(--accent); }
     .picker-line .tree-session-navigate { color: var(--text); }
     .tree-session-status { min-height: 1.2rem; margin: 0; padding: 0 0 0.5rem calc(2ch + 0.25rem); border-bottom: 1px solid var(--border); color: var(--muted); }
+    .tree-session-empty { padding-left: calc(2ch + 0.25rem); color: var(--muted); }
     .tree-session-status.is-error { color: var(--danger); }
     .tree-session-list { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; flex: 1 1 auto; padding-top: 0.4rem; border-top: 1px solid var(--border); }
     .tree-session-tree, .tree-session-children { margin: 0; padding: 0; list-style: none; }
     .tree-session-tree, .tree-session-node { min-width: 0; outline: none; }
     .tree-session-row { cursor: pointer; }
     .tree-session-row.is-active { background: var(--accent-tint-04); font-weight: 700; }
-    .tree-session-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+    .tree-session-line { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: pre; }
     .tree-session-connectors { color: var(--muted-soft); }
     .tree-session-connector-level:nth-last-child(n + 9) { display: none; }
     .tree-session-fold { position: relative; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; }
     .tree-session-fold:hover { background: transparent; }
-    /* Widens the tap target without moving the glyph out of the connector column. */
-    .tree-session-fold::after { content: ""; position: absolute; inset: -0.8rem -0.75rem; }
     .tree-session-path { color: var(--accent); }
     .tree-session-label { color: var(--gold); }
     .tree-session-role { color: var(--success); }

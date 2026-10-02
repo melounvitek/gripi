@@ -261,7 +261,7 @@ export class TreeSessionController {
       });
       this.statusLabels = `${payload.truncated ? ` of ${payload.totalEntries}` : ""}${FILTER_STATUS[this.filter] || ""}`;
       this.model.setSearch(modal.querySelector("[data-tree-search]")?.value || "");
-      this.render({ focus: !this.document.activeElement?.matches("input, select, textarea") });
+      this.render({ focus: !this.document.activeElement?.matches("input, textarea") });
     } catch (error) {
       if (operation === this.operation) this.setStatus(error.message || "Could not load session tree.", true);
     } finally {
@@ -360,7 +360,8 @@ export class TreeSessionController {
     const visible = structure.entries;
     if (!visible.length) {
       const empty = this.document.createElement("li");
-      empty.className = "tree-session-status";
+      empty.className = "tree-session-empty";
+      empty.setAttribute("role", "none");
       empty.textContent = "No entries found";
       viewport.append(empty);
     }
@@ -589,6 +590,25 @@ export class TreeSessionController {
     const modal = this.document.querySelector('[data-modal="tree-session-modal"]:not([hidden])');
     if (!modal) return;
     const key = String(event.key || "");
+    if (key === "Escape") {
+      event.preventDefault();
+      if (!modal.querySelector("[data-tree-summary-step]")?.hidden) this.summaryBack(modal);
+      else if (!modal.querySelector("[data-tree-label-form]").hidden) this.editLabel(false);
+      else {
+        const search = modal.querySelector("[data-tree-search]");
+        if (search?.value) { search.value = ""; this.model?.setSearch(""); this.render(); }
+        else this.close();
+      }
+      return;
+    }
+    // Like the composer, Enter submits only with a hardware keyboard; touch keyboards need it for new lines.
+    if (key === "Enter" && !event.shiftKey && !event.isComposing && event.target.matches?.("[data-tree-custom-instructions]") && this.window.matchMedia?.("(pointer: fine)").matches) {
+      event.preventDefault();
+      event.target.form.requestSubmit();
+      return;
+    }
+    // The tree's own shortcuts must not act on it from behind the summary step.
+    if (modal.querySelector("[data-tree-browser-step]").hidden) return;
     const searchShortcut = (key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.target.closest?.("input, textarea, select")) ||
       (key.toLowerCase() === "f" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey);
     if (searchShortcut) {
@@ -605,23 +625,6 @@ export class TreeSessionController {
     if (key.toLowerCase() === "l" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !event.target.closest?.("input, textarea") && this.selectedEntry()) {
       event.preventDefault();
       this.editLabel(true);
-      return;
-    }
-    if (key === "Escape") {
-      event.preventDefault();
-      if (!modal.querySelector("[data-tree-summary-step]")?.hidden) this.summaryBack(modal);
-      else if (!modal.querySelector("[data-tree-label-form]").hidden) this.editLabel(false);
-      else {
-        const search = modal.querySelector("[data-tree-search]");
-        if (search?.value) { search.value = ""; this.model?.setSearch(""); this.render(); }
-        else this.close();
-      }
-      return;
-    }
-    // Like the composer, Enter submits only with a hardware keyboard; touch keyboards need it for new lines.
-    if (key === "Enter" && !event.shiftKey && !event.isComposing && event.target.matches?.("[data-tree-custom-instructions]") && this.window.matchMedia?.("(pointer: fine)").matches) {
-      event.preventDefault();
-      event.target.form.requestSubmit();
       return;
     }
     if (event.target.closest?.("input, textarea, select")) return;

@@ -6,6 +6,7 @@ export const sessions = {
   history: "E2E History Desktop",
   prompt: "E2E Prompt Desktop",
   fork: "E2E Fork Desktop",
+  tree: "E2E Tree Desktop",
   quoteHistory: "E2E Quote Persisted Desktop",
   quoteLive: "E2E Quote Live Desktop",
   quoteMobileHistory: "E2E Quote Persisted Mobile",
