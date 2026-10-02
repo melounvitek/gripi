@@ -220,7 +220,7 @@ test("abort an active run before navigating the session tree", async ({ page }) 
   await page.locator(".prompt-form").evaluate((form) => form.requestSubmit());
   const dialog = page.getByRole("dialog", { name: "Session tree" });
   await expect(dialog).toBeVisible();
-  const firstEntry = dialog.locator("[data-tree-viewport] > [role=treeitem] > .tree-session-row [data-tree-entry-id]");
+  const firstEntry = dialog.locator("[data-tree-entry-id]").first();
   await firstEntry.click();
   await dialog.locator("[data-tree-navigate]").click();
   await dialog.locator("[data-tree-summary-submit]").click();

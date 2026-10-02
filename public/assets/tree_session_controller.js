@@ -36,7 +36,10 @@ export class TreeSessionModel {
         this.roots.push(entry);
       }
     });
-    this.selectedId = entries.find((entry) => entry.current)?.entryId || entries[0]?.entryId || null;
+    const current = entries.find((entry) => entry.current);
+    this.selectedId = current?.entryId || entries[0]?.entryId || null;
+    this.activePath = new Set();
+    for (let entry = current; entry; entry = this.byId.get(entry.parentId)) this.activePath.add(entry.entryId);
   }
 
   select(entryId) {
@@ -162,12 +165,18 @@ export class TreeSessionModel {
   }
 }
 
-function displayTimestamp(value) {
-  if (!value) return "";
+// Like Pi CLI: the time alone for today, with the date added for older labels.
+function labelTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const now = new Date();
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  if (date.toDateString() === now.toDateString()) return time;
+  const day = `${date.getMonth() + 1}/${date.getDate()}`;
+  return date.getFullYear() === now.getFullYear() ? `${day} ${time}` : `${String(date.getFullYear()).slice(-2)}/${day} ${time}`;
 }
+
+const FILTER_STATUS = { "no-tools": " [no-tools]", "user-only": " [user]", "labeled-only": " [labeled]", all: " [all]" };
 
 export class TreeSessionController {
   constructor(document, window, callbacks = {}) {
@@ -180,6 +189,7 @@ export class TreeSessionController {
     this.navigating = false;
     this.savingLabel = false;
     this.filterChosen = false;
+    this.statusLabels = "";
     this.treeUrl = null;
     this.operation = 0;
     this.bind();
@@ -250,10 +260,9 @@ export class TreeSessionController {
       const effectiveFilter = payload.filter || filter;
       const filterControl = modal.querySelector("[data-tree-filter]");
       if (filterControl && effectiveFilter) filterControl.value = effectiveFilter;
+      this.statusLabels = `${payload.truncated ? ` of ${payload.totalEntries}` : ""}${FILTER_STATUS[effectiveFilter] || ""}`;
       this.model.setSearch(modal.querySelector("[data-tree-search]")?.value || "");
-      this.render();
-      const count = this.model.entries.length;
-      this.setStatus(count ? `${count} ${count === 1 ? "entry" : "entries"}${payload.truncated ? ` shown of ${payload.totalEntries}` : ""}.` : "No session tree entries are available.");
+      this.render({ focus: !this.document.activeElement?.matches("input, select, textarea") });
     } catch (error) {
       if (operation === this.operation) this.setStatus(error.message || "Could not load session tree.", true);
     } finally {
@@ -277,83 +286,66 @@ export class TreeSessionController {
     if (!viewport || !this.model) return;
     viewport.replaceChildren();
     const structure = this.model.visibleStructure();
+    const showLabelTimes = modal.querySelector("[data-tree-label-timestamps]")?.checked;
+    const span = (className, text) => {
+      const element = this.document.createElement("span");
+      element.className = className;
+      element.textContent = text;
+      return element;
+    };
     const appendEntries = (entries, parent) => {
       entries.forEach((entry) => {
+        const selected = entry.entryId === this.model.selectedId;
         const item = this.document.createElement("li");
         item.className = "tree-session-node";
         item.dataset.treeFocusEntry = entry.entryId;
         item.id = `tree-entry-${encodeURIComponent(entry.entryId).replace(/%/g, "-")}`;
         item.setAttribute("role", "treeitem");
-        item.setAttribute("aria-selected", String(entry.entryId === this.model.selectedId));
-        item.tabIndex = entry.entryId === this.model.selectedId ? 0 : -1;
+        item.setAttribute("aria-selected", String(selected));
+        item.tabIndex = selected ? 0 : -1;
         const row = this.document.createElement("div");
-        row.className = "tree-session-row";
-        row.classList.toggle("is-active", entry.entryId === this.model.selectedId);
-        row.classList.toggle("is-current", !!entry.current);
-        row.classList.toggle("is-user-message", entry.messageKind === "user");
-        row.classList.toggle("is-final-assistant", entry.messageKind === "assistant-final");
-
-        const visual = structure.visual.get(entry.entryId);
-        const leading = this.document.createElement("span");
-        leading.className = "tree-session-connectors";
-        leading.setAttribute("aria-hidden", "true");
-        for (let level = 0; level < visual.indent; level += 1) {
-          const connector = this.document.createElement("span");
-          connector.className = "tree-session-connector-level";
-          const gutter = visual.gutters.find((candidate) => candidate.position === level);
-          if (gutter?.show) connector.textContent = "│";
-          if (visual.showConnector && level === visual.indent - 1) connector.textContent = visual.isLast ? "└" : "├";
-          leading.append(connector);
-        }
-        row.append(leading);
+        row.className = "picker-row tree-session-row";
+        row.classList.toggle("is-active", selected);
+        row.dataset.treeEntryId = entry.entryId;
+        const cursor = span("picker-cursor", "›");
+        cursor.setAttribute("aria-hidden", "true");
+        const line = span("tree-session-line", "");
 
         const allChildren = this.model.children.get(entry.entryId) || [];
         const children = structure.children.get(entry.entryId) || [];
-        if (allChildren.length) {
+        const collapsed = this.model.collapsed.has(entry.entryId);
+        const visual = structure.visual.get(entry.entryId);
+        // Like Pi CLI, only folded entries and the first entry of a branch show a fold marker.
+        const foldMarker = allChildren.length > 0 && (collapsed || visual.showConnector);
+        const connectors = span("tree-session-connectors", "");
+        connectors.setAttribute("aria-hidden", "true");
+        for (let level = 0; level < visual.indent; level += 1) {
+          const gutter = visual.gutters.find((candidate) => candidate.position === level);
+          const connector = span("tree-session-connector-level", gutter?.show ? "│  " : "   ");
+          if (visual.showConnector && level === visual.indent - 1) connector.textContent = `${visual.isLast ? "└" : "├"}${foldMarker ? "" : "─ "}`;
+          connectors.append(connector);
+        }
+        line.append(connectors);
+        if (allChildren.length) item.setAttribute("aria-expanded", String(!collapsed));
+        if (foldMarker) {
           const fold = this.document.createElement("button");
-          const collapsed = this.model.collapsed.has(entry.entryId);
           fold.type = "button";
-          fold.className = "tree-session-fold secondary";
+          fold.className = "tree-session-fold";
           fold.dataset.treeFold = entry.entryId;
           fold.tabIndex = -1;
           fold.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} branch`);
-          fold.textContent = collapsed ? "▸" : "▾";
-          item.setAttribute("aria-expanded", String(!collapsed));
-          row.append(fold);
-        } else {
-          const spacer = this.document.createElement("span");
-          spacer.className = "tree-session-fold-spacer";
-          row.append(spacer);
+          fold.textContent = collapsed ? "⊞" : "⊟";
+          line.append(fold, " ");
         }
 
-        const button = this.document.createElement("div");
-        button.className = "tree-session-entry";
-        button.dataset.treeEntryId = entry.entryId;
-
-        const heading = this.document.createElement("span");
-        heading.className = "tree-session-entry-heading";
-        const role = this.document.createElement("span");
-        role.className = "tree-session-role";
-        role.textContent = entry.role || entry.type || "entry";
-        const text = this.document.createElement("span");
-        text.className = "tree-session-text";
-        text.textContent = entry.text || "Untitled entry";
-        heading.append(role, text);
-        if (entry.current) heading.append(this.badge("Current", "current"));
-        if (entry.latest && !entry.current) heading.append(this.badge("Latest", "latest"));
-        button.append(heading);
-
-        const metadata = this.document.createElement("span");
-        metadata.className = "tree-session-meta";
-        const timestamp = displayTimestamp(entry.timestamp);
-        const values = [];
-        if (entry.label) values.push(`Label: ${entry.label}`);
-        if (timestamp) values.push(timestamp);
-        const showLabelTimestamps = modal.querySelector("[data-tree-label-timestamps]")?.checked;
-        if (showLabelTimestamps && entry.labelTimestamp) values.push(`labeled ${displayTimestamp(entry.labelTimestamp)}`);
-        metadata.textContent = values.join(" · ");
-        if (values.length) button.append(metadata);
-        row.append(button);
+        if (this.model.activePath.has(entry.entryId)) line.append(span("tree-session-path", "• "));
+        if (entry.label) line.append(span("tree-session-label", `[${entry.label}] `));
+        if (showLabelTimes && entry.label && entry.labelTimestamp) line.append(span("tree-session-dim", `${labelTime(entry.labelTimestamp)} `));
+        const role = entry.role || entry.type || "entry";
+        if (role === "user" || role === "assistant") line.append(span(`tree-session-role tree-session-role--${role}`, `${role}: `), entry.text || "");
+        else line.append(span("tree-session-dim", `[${role}]${entry.text ? `: ${entry.text}` : ""}`));
+        if (entry.latest && !entry.current) line.append(span("tree-session-dim", " (latest)"));
+        row.append(cursor, line);
         item.append(row);
 
         if (children.length) {
@@ -367,17 +359,18 @@ export class TreeSessionController {
       });
     };
     appendEntries(structure.roots, viewport);
+    const visible = structure.entries;
+    if (!visible.length) {
+      const empty = this.document.createElement("li");
+      empty.className = "tree-session-status";
+      empty.textContent = "No entries found";
+      viewport.append(empty);
+    }
+    this.setStatus(`(${visible.findIndex((entry) => entry.entryId === this.model.selectedId) + 1}/${visible.length})${this.statusLabels}`);
     this.syncSelectionControls();
     if (focus) [...modal.querySelectorAll("[data-tree-focus-entry]")]
       .find((entry) => entry.dataset.treeFocusEntry === this.model.selectedId)
       ?.focus({ preventScroll: true });
-  }
-
-  badge(label, kind) {
-    const badge = this.document.createElement("span");
-    badge.className = `tree-session-badge tree-session-badge--${kind}`;
-    badge.textContent = label;
-    return badge;
   }
 
   selectedEntry() {
