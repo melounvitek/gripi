@@ -251,7 +251,7 @@ test("tag filter combines across projects without switching conversation; pins b
     if (isMobile) await activate(page.locator('label[aria-label="Open sessions"]'));
     await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(tag);
     await expect(page.locator(".sessions-list .session-row")).toHaveCount(2);
-    await expect(page.locator("[data-tag-filter-count]")).toHaveText("2");
+    await expect(page.locator("[data-sidebar-filter-count]")).toHaveText(/^2 of \d+$/);
     const filterHeights = await page.locator(".sidebar-filter-row .project-select-trigger, .compact-tag-filter, .sidebar-search-toggle").evaluateAll((controls) => controls.map((control) => control.getBoundingClientRect().height));
     expect(filterHeights).toEqual([36, 36, 36]);
     await expect(page.locator(".session-header-name")).toHaveText(current.name);

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { prompts, sessions } from "../support/contract.mjs";
-import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
+import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
 test("show desktop session activity in the time slot, centred and on one line", async ({ page }) => {
   await page.goto("/");
@@ -234,6 +234,19 @@ test("clears session filters without reloading the page", async ({ page }) => {
   await expect.poll(() => new URL(page.url()).searchParams.get("session_search")).toBe(null);
   await expect(clearFilters).toBeHidden();
   await expect.poll(() => page.evaluate(() => window.__clearFiltersPageSentinel)).toBe(true);
+});
+
+test("counts matches and keeps the filters in place when the current session is filtered out", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.marker);
+  const filters = page.locator(".sidebar-filter-row");
+  const { y } = await filters.boundingBox();
+
+  await searchSessions(page, "History Desktop");
+
+  await expect(page.locator(".current-session-section")).toBeVisible();
+  await expect(page.locator("[data-sidebar-filter-count]")).toHaveText(/^1 of \d+$/);
+  expect((await filters.boundingBox()).y).toBe(y);
 });
 
 test("pin and unpin with the mouse without leaving a focus outline", async ({ page }) => {

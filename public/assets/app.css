@@ -211,12 +211,14 @@
     .sidebar-filter-spinner { display: none; flex: 0 0 auto; width: 0.9rem; height: 0.9rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; animation: session-switch-spin 800ms linear infinite; }
     .session-sidebar.is-filtering .sidebar-filter-spinner { display: inline-block; }
     .session-sidebar.is-filtering .sidebar-project-filter, .session-sidebar.is-filtering .project-select-trigger, .session-sidebar.is-filtering .sidebar-filters-clear { opacity: 0.72; pointer-events: none; }
-    .sidebar-filters-clear { justify-self: end; padding-inline: 0.5rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; text-decoration: none; white-space: nowrap; }
-    .sidebar-filters-clear:hover { color: var(--text); text-decoration: underline; }
+    .sidebar-filters-clear { position: relative; margin-left: 0.3rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+    .sidebar-filters-clear::after { content: ""; position: absolute; inset: -0.7rem -0.4rem; }
+    .sidebar-filters-clear:hover { color: var(--text); }
     .recent-sessions { margin-bottom: 0.75rem; }
     .recent-sessions-header { display: flex; align-items: center; gap: 0.4rem; margin: 0.75rem 0 0.5rem; padding-left: 0.5rem; }
-    .recent-sessions-header h2, .sessions-day { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
-    .recent-sessions-header h2 { flex: 1; min-width: 0; }
+    .recent-sessions-header h2, .sessions-day, .sidebar-filter-count, .sidebar-search-empty { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .sidebar-filter-count { margin-left: 0.3rem; color: var(--muted-soft); white-space: nowrap; }
+    .sidebar-search-empty { margin: 0.85rem 0.5rem; }
     .sessions-day { margin: 0.85rem 0.5rem 0.2rem; }
     .sessions-list > .sessions-day:first-child { margin-top: 0.25rem; }
     .cwd-header { display: flex; align-items: center; gap: 0.4rem; margin: 1.25rem 0 0.5rem; }
@@ -334,7 +336,7 @@
     .session-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.5rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); line-height: 1; }
     .sidebar-icon-button:hover { background: #ffffff08; color: var(--text); }
-    .sidebar-new-session-button { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--accent); letter-spacing: 0; text-transform: none; }
+    .sidebar-new-session-button { display: inline-flex; margin-left: auto; align-items: center; gap: 0.3rem; color: var(--accent); letter-spacing: 0; text-transform: none; }
     .sidebar-new-session-button span { font-size: 0.9rem; line-height: 1; }
     .sidebar-new-session-button:hover { color: var(--accent-bright); }
     .sidebar-new-session-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -868,7 +870,6 @@
     .compact-tag-filter .tag-filter-clear { flex: none; padding-left: 4px; font-size: 16px; }
     .compact-tag-filter.is-active { background: var(--tag-bg); }
     .compact-tag-filter.is-active button { color: var(--tag-fg); }
-    .tag-filter-count { margin-left: 5px; color: var(--muted-soft); letter-spacing: normal; }
     .session-tags { display: flex; align-items: center; flex: none; gap: 2px; }
     .session-tags > button { z-index: 1; }
     .session-tag-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 24px; padding: 3px; border: 0; border-radius: 4px; background: transparent; color: var(--tag-fg); }
