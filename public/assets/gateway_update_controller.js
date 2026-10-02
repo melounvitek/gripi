@@ -9,11 +9,19 @@ export class GatewayUpdateController {
     this.inProgress = false;
     this.pollTimer = null;
     this.checkInterval = null;
+    this.overlay = document.querySelector("[data-gateway-update-overlay]");
     this.channel = typeof BroadcastChannelClass === "function" ? new BroadcastChannelClass("gripi-update") : null;
 
     document.addEventListener("click", (event) => {
       if (event.target.closest("[data-gateway-update-button]")) this.start();
     });
+    // The open overlay makes the page inert, but shortcuts bound to the document would still act.
+    // No preventDefault: browser shortcuts such as reload must keep working.
+    window.addEventListener("keydown", (event) => {
+      if (this.overlay.open) event.stopImmediatePropagation();
+    }, true);
+    // For browsers without closedby, where Escape would dismiss the overlay.
+    this.overlay.addEventListener("cancel", (event) => event.preventDefault());
     this.channel?.addEventListener("message", (event) => {
       if (event.data?.type !== "updating") return;
       this.inProgress = true;
@@ -30,6 +38,12 @@ export class GatewayUpdateController {
   apply(payload = this.state) {
     if (!payload) return;
     this.state = payload;
+    // Waiting for active sessions leaves the page usable so they can still be watched or aborted.
+    const blocking = payload.state === "updating" || payload.state === "restarting";
+    const progressMessage = payload.state === "restarting" ? "Restarting gateway…" : "Updating gateway…";
+    this.overlay.querySelector("[data-gateway-update-overlay-message]").textContent = progressMessage;
+    if (blocking && !this.overlay.open) this.overlay.showModal();
+    if (!blocking && this.overlay.open) this.overlay.close();
     const control = this.document.querySelector("[data-gateway-update]");
     const button = control?.querySelector("[data-gateway-update-button]");
     const message = control?.querySelector("[data-gateway-update-message]");
@@ -48,21 +62,27 @@ export class GatewayUpdateController {
       button.title = payload.summary || payload.message || "Update gateway";
       message.textContent = payload.message || "Gateway update available";
     } else {
-      message.textContent = payload.message || (payload.state === "restarting" ? "Restarting gateway…" : "Updating gateway…");
+      message.textContent = payload.message || progressMessage;
     }
   }
 
   async check({ refresh = true } = {}) {
     const url = refresh ? "/gateway-update/check" : "/gateway-update";
     const method = refresh ? "POST" : "GET";
-    const response = await fetch(url, { method, headers: { "Accept": "application/json" }, cache: "no-store" });
+    // The poll must not hang on a restarting gateway.
+    const signal = refresh ? undefined : AbortSignal.timeout(10000);
+    const response = await fetch(url, { method, headers: { "Accept": "application/json" }, cache: "no-store", signal });
     if (!response.ok) throw new Error("Could not check for gateway updates");
     const payload = await response.json();
     if (payload.instanceId && payload.instanceId !== this.instanceId) {
+      // Stop polling: navigating again would abandon a page load that takes longer than the poll.
+      this.inProgress = false;
       this.navigate(payload.currentSha || payload.instanceId);
       return payload;
     }
-    if (this.inProgress && !PROGRESS_STATES.includes(payload.state)) this.inProgress = false;
+    // An update started in another window or device needs polling here too, to reload after it.
+    this.inProgress = PROGRESS_STATES.includes(payload.state);
+    if (this.inProgress) this.poll();
     this.apply(payload);
     return payload;
   }
@@ -73,7 +93,8 @@ export class GatewayUpdateController {
 
     this.inProgress = true;
     this.channel?.postMessage({ type: "updating" });
-    this.apply({ ...this.state, state: "updating", message: "Updating gateway…" });
+    // Shown as waiting, which does not block: only the gateway's answer tells whether the page is blocked.
+    this.apply({ ...this.state, state: "waiting", message: "Starting gateway update…" });
     try {
       const response = await fetch("/gateway-update", { method: "POST", headers: { "Accept": "application/json" } });
       if (!response.ok) throw new Error("Could not start gateway update");
