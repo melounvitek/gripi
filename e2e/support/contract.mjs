@@ -96,6 +96,7 @@ export const prompts = {
   markdownFence: "Show code fences with application class languages",
   extension: "Ask me for release approval",
   extensionRace: "Exercise queued extension requests",
+  extensionKinds: "Ask with every extension dialog",
   wrappedToolOutput: "Show wrapped tool output",
   writeOutput: "Show complete write output",
   imageHover: "Keep the attached image neutral on hover",

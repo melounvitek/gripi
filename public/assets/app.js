@@ -163,11 +163,10 @@ let extensionUiTitle = null;
 let extensionUiMessage = null;
 let extensionUiError = null;
 let extensionUiOptions = null;
-let extensionUiInputField = null;
 let extensionUiInput = null;
-let extensionUiEditorField = null;
 let extensionUiEditor = null;
 let extensionUiSubmit = null;
+let extensionUiHint = null;
 let extensionWidgetsAboveContainer = null;
 let extensionWidgetsBelowContainer = null;
 let activeExtensionUiRequest = null;
@@ -242,11 +241,10 @@ function bindSessionDom() {
   extensionUiMessage = extensionUiModal?.querySelector("[data-extension-ui-message]") || null;
   extensionUiError = extensionUiModal?.querySelector("[data-extension-ui-error]") || null;
   extensionUiOptions = extensionUiModal?.querySelector("[data-extension-ui-options]") || null;
-  extensionUiInputField = extensionUiModal?.querySelector("[data-extension-ui-input-field]") || null;
   extensionUiInput = extensionUiModal?.querySelector("[data-extension-ui-input]") || null;
-  extensionUiEditorField = extensionUiModal?.querySelector("[data-extension-ui-editor-field]") || null;
   extensionUiEditor = extensionUiModal?.querySelector("[data-extension-ui-editor]") || null;
   extensionUiSubmit = extensionUiModal?.querySelector("[data-extension-ui-submit]") || null;
+  extensionUiHint = extensionUiModal?.querySelector("[data-extension-ui-hint]") || null;
   extensionWidgetsAboveContainer = document.querySelector("[data-extension-widgets-above]");
   extensionWidgetsBelowContainer = document.querySelector("[data-extension-widgets-below]");
   promptSessionInput = promptForm?.querySelector('input[name="session"]') || null;
@@ -1117,15 +1115,12 @@ function resetExtensionUiModal() {
     extensionUiOptions.replaceChildren();
     extensionUiOptions.hidden = true;
   }
-  if (extensionUiInputField) extensionUiInputField.hidden = true;
-  if (extensionUiInput) extensionUiInput.value = "";
-  if (extensionUiEditorField) extensionUiEditorField.hidden = true;
-  if (extensionUiEditor) extensionUiEditor.value = "";
-  if (extensionUiSubmit) {
-    extensionUiSubmit.hidden = false;
-    extensionUiSubmit.textContent = "Submit";
-    delete extensionUiSubmit.dataset.confirmResponse;
-  }
+  [extensionUiInput, extensionUiEditor].forEach((field) => {
+    if (!field) return;
+    field.hidden = true;
+    field.value = "";
+  });
+  if (extensionUiSubmit) extensionUiSubmit.hidden = false;
   setExtensionUiDeliveryPending(false);
 }
 
@@ -1180,49 +1175,50 @@ function openExtensionUiDialog(event) {
     extensionUiMessage.hidden = false;
   }
 
-  if (event.method === "select") {
-    if (extensionUiOptions) {
-      (Array.isArray(event.options) ? event.options : []).forEach((option, index) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "extension-ui-option";
-        button.textContent = String(option);
-        if (index === 0) button.setAttribute("data-modal-default-focus", "");
-        button.addEventListener("click", async () => { await sendExtensionUiResponse({ value: String(option) }); });
-        extensionUiOptions.append(button);
-      });
-      extensionUiOptions.hidden = false;
-    }
-    if (extensionUiSubmit) extensionUiSubmit.hidden = true;
-  } else if (event.method === "confirm") {
-    if (extensionUiSubmit) {
-      extensionUiSubmit.textContent = "Confirm";
-      extensionUiSubmit.dataset.confirmResponse = "true";
-    }
-  } else if (event.method === "input") {
-    if (extensionUiInputField) extensionUiInputField.hidden = false;
-    if (extensionUiInput) {
-      extensionUiInput.placeholder = event.placeholder || "";
-      extensionUiInput.value = event.value || "";
-    }
-  } else if (event.method === "editor") {
-    if (extensionUiEditorField) extensionUiEditorField.hidden = false;
-    if (extensionUiEditor) extensionUiEditor.value = event.prefill || "";
+  // Like Pi CLI, a confirmation is a Yes/No selector.
+  const choices = event.method === "select"
+    ? (Array.isArray(event.options) ? event.options : []).map((option) => ({ label: String(option), response: { value: String(option) } }))
+    : event.method === "confirm"
+      ? [{ label: "Yes", response: { confirmed: "true" } }, { label: "No", response: { confirmed: "false" } }]
+      : null;
+  const field = event.method === "input" ? extensionUiInput : extensionUiEditor;
+  if (choices) {
+    choices.forEach(({ label, response }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "picker-row picker-option";
+      button.setAttribute("role", "option");
+      const cursor = document.createElement("span");
+      cursor.className = "picker-cursor";
+      cursor.setAttribute("aria-hidden", "true");
+      cursor.textContent = "→";
+      const text = document.createElement("span");
+      text.textContent = label;
+      button.append(cursor, text);
+      button.addEventListener("click", () => { sendExtensionUiResponse(response); });
+      extensionUiOptions.append(button);
+    });
+    extensionUiOptions.hidden = false;
+    extensionUiSubmit.hidden = true;
+  } else {
+    field.hidden = false;
+    field.placeholder = event.placeholder || "";
+    field.value = event.value || event.prefill || "";
   }
+  extensionUiHint.textContent = choices
+    ? "↑↓ navigate · enter select · esc cancel"
+    : `enter submit${event.method === "editor" ? " · shift+enter newline" : ""} · esc cancel`;
 
   openModal(extensionUiModal);
+  if (choices) movePickerCursor(extensionUiOptions, 0);
+  else field.focus();
 }
 
 async function submitExtensionUiDialog(event) {
   event.preventDefault();
-  if (!activeExtensionUiRequest) return;
-  if (activeExtensionUiRequest.method === "confirm") {
-    await sendExtensionUiResponse({ confirmed: "true" });
-  } else if (activeExtensionUiRequest.method === "input") {
-    await sendExtensionUiResponse({ value: extensionUiInput?.value || "" });
-  } else if (activeExtensionUiRequest.method === "editor") {
-    await sendExtensionUiResponse({ value: extensionUiEditor?.value || "" });
-  }
+  const method = activeExtensionUiRequest?.method;
+  if (method === "input") await sendExtensionUiResponse({ value: extensionUiInput.value });
+  else if (method === "editor") await sendExtensionUiResponse({ value: extensionUiEditor.value });
 }
 
 function handleExtensionEditorText(event) {
@@ -2583,6 +2579,12 @@ function bindSessionControls() {
   if (!extensionUiControlsBound) {
     extensionUiControlsBound = true;
     extensionUiForm?.addEventListener("submit", submitExtensionUiDialog);
+    // Like the composer, Enter submits only with a hardware keyboard; touch keyboards need it for new lines.
+    extensionUiEditor?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing || !automaticComposerFocusEnabled()) return;
+      event.preventDefault();
+      extensionUiForm.requestSubmit();
+    });
     extensionUiModal?.querySelectorAll("[data-extension-ui-cancel]").forEach((button) => button.addEventListener("click", cancelExtensionUiRequest));
   }
 

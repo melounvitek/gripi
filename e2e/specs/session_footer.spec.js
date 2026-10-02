@@ -84,7 +84,7 @@ test("plugin statuses do not change the footer live or after reload", async ({ p
     await expectFixedFooter(page);
     await expectContainedLayout(page);
   } finally {
-    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await dialog.getByRole("option", { name: "Yes" }).click();
     await expectRunFinished(page);
   }
 });

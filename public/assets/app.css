@@ -627,11 +627,9 @@
     .modal-field { display: grid; gap: 0.35rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
     .modal-field input, .modal-field select, .modal-field textarea { width: 100%; min-width: 0; letter-spacing: normal; text-transform: none; }
     .extension-ui-modal-card { width: min(40rem, 100%); }
+    .extension-ui-modal-card form { display: grid; gap: 0.75rem; }
     .extension-ui-message { margin: 0; color: var(--copy); white-space: pre-wrap; }
-    .extension-ui-error { margin: 0.75rem 0 0; color: var(--danger); }
-    .extension-ui-options { display: grid; gap: 0.45rem; }
-    .extension-ui-option { justify-self: stretch; width: 100%; display: block; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.3rem; background: var(--bg); color: var(--text); text-align: left; text-transform: none; letter-spacing: normal; }
-    .extension-ui-option:hover, .extension-ui-option:focus-visible { border-color: var(--accent-line-55); background: var(--accent-tint-08); color: var(--text); }
+    .extension-ui-error { margin: 0; color: var(--danger); }
     .project-select { min-width: 0; width: 100%; }
     .sidebar-filter-row > .project-select { flex: 0 1 auto; width: auto; }
     .project-select-native-hidden { position: absolute !important; width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }

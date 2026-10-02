@@ -22,6 +22,7 @@ let activeScenario = null;
 let queuedAbortSteer = null;
 const pendingMessages = [];
 let pendingExtensionRequest = null;
+let extensionAnswers = [];
 let activeBash = null;
 let resourcesReloaded = false;
 const treeLabels = new Map();
@@ -383,6 +384,16 @@ function acceptPrompt(command) {
     });
     return;
   }
+  if (command.message === prompts.extensionKinds) {
+    schedule(150, () => {
+      extensionAnswers = [];
+      pendingExtensionRequest = "e2e-extension-editor";
+      emit({ type: "extension_ui_request", id: "e2e-extension-select", method: "select", title: "Pick a target", options: ["staging", "production"] });
+      emit({ type: "extension_ui_request", id: "e2e-extension-input", method: "input", title: "Release name", placeholder: "v1.0" });
+      emit({ type: "extension_ui_request", id: pendingExtensionRequest, method: "editor", title: "Release notes" });
+    });
+    return;
+  }
   if ([prompts.steerStart, prompts.followUpStart, prompts.abortStart, prompts.clearQueueStart].includes(command.message)) return;
   if (command.message === prompts.deltaStreaming) {
     schedule(120, completeDeltaAssistant);
@@ -686,8 +697,13 @@ function persistDeferredBashMessages() {
 }
 
 function acceptExtensionResponse(command) {
+  if (activeScenario === prompts.extensionKinds) extensionAnswers.push(command.value);
   if (command.id !== pendingExtensionRequest) return;
   pendingExtensionRequest = null;
+  if (activeScenario === prompts.extensionKinds) {
+    completeAssistant(`Extension answers: ${extensionAnswers.join(" / ")}`);
+    return;
+  }
   if (command.id === "e2e-settled-handoff") {
     emit({ type: "agent_start" });
     emit({ type: "turn_start" });
