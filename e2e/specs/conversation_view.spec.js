@@ -84,3 +84,18 @@ test("remembers the Brief view after a reload", async ({ page }) => {
   await expect(activityView(page, "Full")).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator(".conversation-panel")).toHaveClass(/is-conversation-focused/);
 });
+
+test("opens a long conversation at the latest message before the app script loads", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.paginatedSubagent);
+  await page.route(/\/assets\/app\.js/, (route) => route.abort());
+
+  await page.reload();
+
+  const distances = await page.locator("#conversation-scroll").evaluate((element) => ({
+    overflow: element.scrollHeight - element.clientHeight,
+    fromBottom: element.scrollHeight - element.scrollTop - element.clientHeight
+  }));
+  expect(distances.overflow).toBeGreaterThan(0);
+  expect(distances.fromBottom).toBeLessThan(5);
+});
