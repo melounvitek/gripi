@@ -65,7 +65,7 @@ test("server-assigned tag colors agree across SSR, live, reload, picker, filter 
       const editor = page.getByRole("dialog", { name: "Session tags", exact: true });
       for (const tag of tags) {
         await expect(editor.getByRole("checkbox", { name: tag, exact: true })).toBeChecked();
-        await expectColors(pickerOption(editor, tag), expected.get(tag));
+        await expect(pickerOption(editor, tag)).toHaveCSS("color", expected.get(tag).foreground);
       }
       await editor.getByRole("button", { name: "Close tag picker" }).click();
     };
@@ -78,7 +78,7 @@ test("server-assigned tag colors agree across SSR, live, reload, picker, filter 
     // Each new assignment sorts into the visible pair, including Unicode and prototype-like names.
     for (const tag of [...tags].sort().reverse()) {
       const checkbox = editor.getByRole("checkbox", { name: tag, exact: true });
-      await expectColors(pickerOption(editor, tag), expected.get(tag));
+      await expect(pickerOption(editor, tag)).toHaveCSS("color", expected.get(tag).foreground);
       await checkbox.check();
       await expect(checkbox).toBeChecked();
       await expect(headerIcon(page, tag)).toHaveCSS("color", expected.get(tag).foreground);
@@ -97,9 +97,8 @@ test("server-assigned tag colors agree across SSR, live, reload, picker, filter 
     await chooser.locator(`[data-tag-option="${selected}"]`).click();
     await expect(filter).toContainText(selected);
     await expect(filter).toHaveCSS("color", expected.get(selected).foreground);
-    await expect(page.locator(".compact-tag-filter")).toHaveCSS("background-color", expected.get(selected).background);
     await filter.click();
-    for (const tag of tags) await expectColors(chooser.locator(`[data-tag-option="${tag}"]`), expected.get(tag));
+    for (const tag of tags) await expect(chooser.locator(`[data-tag-option="${tag}"]`)).toHaveCSS("color", expected.get(tag).foreground);
     await chooser.getByRole("button", { name: "Close tag picker" }).click();
 
     await page.getByRole("button", { name: "New session", exact: true }).click();
@@ -113,7 +112,7 @@ test("server-assigned tag colors agree across SSR, live, reload, picker, filter 
     // Unsaved names do not reserve a palette entry.
     await picker.getByRole("searchbox").fill("color-éx");
     const create = picker.getByRole("button", { name: "Create “color-éx”", exact: true });
-    await expectColors(create, colors("#a0a0a0"));
+    await expect(create).toHaveCSS("color", colors("#a0a0a0").foreground);
     await create.click();
     await expectColors(draft.getByRole("button", { name: "Remove color-éx", exact: true }), colors("#a0a0a0"));
     const unsaved = await (await page.request.get("/tags")).json();
@@ -140,7 +139,7 @@ test("session-only HTML initializes colors, swapped HTML is reingested, and new 
     await open();
     await expect(editor.getByRole("alert")).toBeVisible();
     await search.fill(names[0]);
-    await expectColors(editor.locator(".tag-create"), colors(initial.tag_colors[names[0]]));
+    await expect(editor.locator(".tag-create")).toHaveCSS("color", colors(initial.tag_colors[names[0]]).foreground);
     await close();
 
     // Allocate after initialization so only the newly swapped header can supply this color.
@@ -155,20 +154,20 @@ test("session-only HTML initializes colors, swapped HTML is reingested, and new 
     await open();
     await expect(editor.getByRole("alert")).toBeVisible();
     await search.fill(names[1]);
-    await expectColors(editor.locator(".tag-create"), colors(swapped.tag_colors[names[1]]));
+    await expect(editor.locator(".tag-create")).toHaveCSS("color", colors(swapped.tag_colors[names[1]]).foreground);
     await page.unroute("**/sessions/tags?*");
     await editor.getByRole("button", { name: "Retry", exact: true }).click();
-    await expectColors(pickerOption(editor, names[1]), colors(swapped.tag_colors[names[1]]));
+    await expect(pickerOption(editor, names[1])).toHaveCSS("color", colors(swapped.tag_colors[names[1]]).foreground);
 
     await search.fill(names[2]);
     const create = editor.getByRole("button", { name: `Create “${names[2]}”`, exact: true });
-    await expectColors(create, colors("#a0a0a0"));
+    await expect(create).toHaveCSS("color", colors("#a0a0a0").foreground);
     const savedResponse = page.waitForResponse((response) => response.url().endsWith("/sessions/tags") && response.request().method() === "POST");
     await create.click();
     const saved = await (await savedResponse).json();
     const expected = colors(saved.tag_colors[names[2]]);
     await expect(headerIcon(page, names[2])).toHaveCSS("color", expected.foreground);
-    await expectColors(pickerOption(editor, names[2]), expected);
+    await expect(pickerOption(editor, names[2])).toHaveCSS("color", expected.foreground);
     await close();
     await page.reload();
     await expect(headerIcon(page, names[2])).toHaveCSS("color", expected.foreground);

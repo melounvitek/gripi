@@ -74,6 +74,6 @@ func TestTagColorsRenderAcrossPageAndFragments(t *testing.T) {
 		for _, tag := range []string{"__proto__", "color-0"} {
 			assertColors(t, markup, `data-tag-filter="`+tag+`"`, tag, colors[tag][1])
 		}
-		assertColors(t, markup, `class="compact-tag-filter is-active"`, "color-🧪", colors["color-🧪"][0], colors["color-🧪"][1])
+		assertColors(t, markup, `class="tag-filter-toggle is-active"`, "color-🧪", colors["color-🧪"][0], colors["color-🧪"][1])
 	}
 }

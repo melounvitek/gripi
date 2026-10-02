@@ -90,7 +90,8 @@ test("new-session tags are removable local drafts, with reusable tags, retry and
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     if (isMobile && !(await page.locator("#mobile-session-toggle").isChecked())) await activate(page.locator('label[aria-label="Open sessions"]'), isMobile);
-    await activate(page.getByRole("button", { name: "Clear tag filter", exact: true }), isMobile);
+    await activate(page.getByRole("button", { name: "Filter sessions by tag", exact: true }), isMobile);
+    await activate(page.getByRole("dialog", { name: "Filter by tag", exact: true }).getByRole("button", { name: "All tags", exact: true }), isMobile);
     await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(null);
     await openNew(page, isMobile);
     await expect(modal.getByRole("button", { name: /^Remove / })).toHaveCount(0);
