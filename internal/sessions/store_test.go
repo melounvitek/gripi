@@ -475,6 +475,24 @@ func TestOversizedAssistantSessionMetadataExcludesCommentaryAndUnicodeWhitespace
 	}
 }
 
+func TestUnnamedSessionIsTitledByFirstUserMessageAfterSystemMessage(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	writeSessionLines(t, path, []string{
+		sessionLine(project),
+		`{"type":"message","id":"system","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"system","content":""}}`,
+		userLine("user", "system", "2026-01-01T00:00:02Z", "Question"),
+	})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	session, ok := store.Session(path)
+	if !ok {
+		t.Fatal("session was not discovered")
+	}
+	if session.DisplayName != "Question" {
+		t.Fatalf("display name = %q", session.DisplayName)
+	}
+}
+
 func TestOversizedNativeGeneralSubagentEntriesRemainDiscoverable(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	toolCount := 400
