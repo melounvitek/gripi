@@ -186,16 +186,22 @@ export class ProjectSelectController {
     container.replaceChildren();
     if (option.dataset.projectForeground) container.style.setProperty("--project-identity-fg", option.dataset.projectForeground);
     else container.style.removeProperty("--project-identity-fg");
+    if (!includeChevron) {
+      for (const glyph of ["→", "✓"]) {
+        const mark = this.document.createElement("span");
+        mark.className = "picker-mark";
+        mark.setAttribute("aria-hidden", "true");
+        mark.textContent = glyph;
+        container.append(mark);
+      }
+    }
     if (!plain) {
       const icon = this.document.createElement("span");
-      if (option.dataset.projectMonogram) {
-        icon.className = "project-identity-icon";
-        icon.textContent = option.dataset.projectMonogram;
-        icon.style.setProperty("--project-identity-bg", option.dataset.projectBackground);
-        icon.style.setProperty("--project-identity-fg", option.dataset.projectForeground);
+      if (option.dataset.projectOptionKind === "new") {
+        icon.className = "project-select-new-icon";
+        icon.textContent = "+";
       } else {
-        icon.className = "project-select-neutral-icon";
-        icon.textContent = option.dataset.projectOptionKind === "new" ? "+" : "•";
+        icon.className = "project-identity-icon";
       }
       icon.setAttribute("aria-hidden", "true");
       container.append(icon);

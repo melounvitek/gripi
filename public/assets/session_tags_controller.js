@@ -400,7 +400,7 @@ export class SessionTagsController {
       option.addEventListener("click", () => this.filter(tag));
       for (const glyph of ["→", "✓"]) {
         const mark = this.document.createElement("span");
-        mark.className = "tag-picker-mark";
+        mark.className = "picker-mark";
         mark.setAttribute("aria-hidden", "true");
         mark.textContent = glyph;
         option.append(mark);

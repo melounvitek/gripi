@@ -61,7 +61,6 @@
     .session-header h1 { grid-column: 2; grid-row: 1; min-width: 0; margin: 0; overflow: hidden; font-size: 1rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
     .session-header-project { container-type: inline-size; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.76rem; font-weight: 500; }
     .session-header-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .session-header-project .session-header-project-icon { width: 0.5rem; min-width: 0.5rem; height: 0.5rem; padding: 0; border: 0; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); font-size: 0; }
     .session-header-project-separator { flex: 0 0 auto; color: var(--muted-soft); }
     .session-header-view-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; margin-left: 0.2rem; }
     .session-header-view-option { position: relative; display: inline-flex; align-items: center; min-height: 2.1rem; padding: 0; border: 0; background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.7rem; font-weight: 500; letter-spacing: normal; text-transform: none; }
@@ -238,7 +237,6 @@
     /* Every row starts with the same fixed slot: the project dot, or the terminal icon of a session active outside Gripi. */
     .session-row .session-project { order: -1; flex: 0 0 0.75rem; margin: 0; }
     .session-row.is-external .session-project { display: none; }
-    .session-row .session-project-monogram, .sidebar-filter-row .project-select-trigger > :is(.project-identity-icon, .project-select-neutral-icon) { width: 0.5rem; min-width: 0; height: 0.5rem; padding: 0; border: 0; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); font-size: 0; }
     /* The time slot fits "13h" and shows the activity dot while Pi works. */
     .session-row .session-meta { flex: none; min-width: 3ch; overflow: visible; text-align: right; }
     a.session { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: inherit; text-decoration: none; }
@@ -319,7 +317,7 @@
     .sidebar-notification-toggle.is-disabled { color: var(--muted); }
     .sidebar-notification-toggle.is-blocked .sidebar-notification-state { color: var(--danger); }
     .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.66rem; font-weight: 500; line-height: 1.25; }
-    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 1.95rem; height: 1.55rem; padding: 0 0.32rem; border: 1px solid color-mix(in srgb, var(--project-identity-fg, var(--accent)) 32%, transparent); border-radius: 0.2rem; background: var(--project-identity-bg); color: var(--project-identity-fg, var(--accent)); font-family: var(--mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; }
+    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); font-size: 0; }
     .session-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 0.74rem; line-height: 1.4; }
     .session-relation-tree-heading { cursor: pointer; color: var(--gold); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -636,13 +634,13 @@
     .project-select-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .project-select-trigger--plain { grid-template-columns: minmax(0, 1fr) auto; }
     .project-select-chevron { color: var(--muted); font-size: 0.72rem; }
-    .project-select-listbox { position: fixed; z-index: 180; display: grid; gap: 0.2rem; overflow-y: auto; padding: 0.35rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; box-shadow: 0 16px 42px #00000080; }
-    .project-select-option { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.5rem; min-height: 2.25rem; padding: 0.35rem 0.5rem; border-radius: 0.25rem; color: var(--text); font-size: 0.82rem; cursor: pointer; }
-    .project-select-listbox--plain .project-select-option--plain { grid-template-columns: minmax(0, 1fr); }
-    .project-select-option:hover, .project-select-option.is-active { background: var(--panel-softer); }
-    .project-select-option[aria-selected="true"] { color: var(--project-identity-fg, var(--accent)); font-weight: 650; }
+    .project-select-listbox { position: fixed; z-index: 180; display: grid; overflow-y: auto; padding: 0.4rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; box-shadow: 0 16px 42px #00000080; font: 0.8rem var(--mono); }
+    .project-select-option { min-width: 0; display: flex; align-items: center; gap: 1ch; padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); cursor: pointer; }
+    .project-select-option.is-active { background: var(--accent-tint-04); color: var(--accent); }
+    .picker-mark { flex: none; visibility: hidden; color: var(--accent); }
+    .project-select-option.is-active .picker-mark:first-child, .project-select-option[aria-selected="true"] .picker-mark:nth-child(2), .tag-picker-option:focus-visible .picker-mark:first-child, .tag-picker-option[aria-pressed="true"] .picker-mark:nth-child(2) { visibility: visible; }
     .project-select-option-label { min-width: 0; overflow-wrap: anywhere; }
-    .project-select-neutral-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 1.95rem; height: 1.55rem; border: 1px solid var(--border); border-radius: 0.2rem; background: var(--panel-soft); color: var(--muted); font-size: 0.85rem; font-weight: 700; }
+    .project-select-new-icon { flex: none; width: 0.5rem; color: var(--muted); text-align: center; }
     /* Like Pi CLI's /model selector: plain mono lines rather than cards. */
     .model-picker-card { width: min(38rem, 100%); gap: 0.75rem; font-family: var(--mono); font-size: 0.86rem; }
     .model-picker-line { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; margin: 0; color: var(--muted); }
@@ -682,8 +680,7 @@
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
     .new-session-tags, [data-tag-draft-chips] { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
     .new-session-tags [data-tag-draft-chips]:empty { display: none; }
-    .new-session-tags .tag-chip { gap: 6px; max-width: 100%; }
-    .new-session-tags-help { margin: 0; color: var(--muted); font: 11px/1.6 var(--sans); text-transform: none; letter-spacing: normal; }
+    .new-session-tags-help { margin: 0; color: var(--muted-soft); font: 0.7rem/1.6 var(--mono); text-transform: none; letter-spacing: normal; }
     .cwd-suggestions { max-height: min(16rem, 36dvh); display: grid; gap: 0.2rem; overflow-y: auto; padding: 0.3rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; }
     .cwd-suggestion { width: 100%; min-width: 0; display: block; padding: 0.5rem 0.6rem; border-radius: 0.25rem; background: transparent; color: var(--text); text-align: left; font-family: var(--mono); font-size: 0.82rem; font-weight: 500; letter-spacing: normal; text-transform: none; overflow-wrap: anywhere; }
     .cwd-suggestion:hover, .cwd-suggestion.is-active { background: var(--panel-softer); transform: none; }
@@ -811,7 +808,8 @@
       .session-header-view-option { min-height: 2.75rem; }
       .project-select-trigger { min-height: 2.75rem; }
       .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.4rem; }
-      .project-select-option { min-height: 2.85rem; padding: 0.55rem 0.65rem; font-size: 16px; }
+      .project-select-listbox { font-size: 0.95rem; }
+      .project-select-option { min-height: 2.75rem; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       :root { --text-inset: 0.75rem; }
       .conversation-scroll { padding: 0.75rem; }
@@ -879,14 +877,12 @@
     @media (hover: hover) and (pointer: fine) {
       .session-tag-icon:hover { background: var(--tag-bg); color: var(--tag-fg); }
     }
-    .tag-chip, .tag-overflow, .edit-tags { display: inline-flex; align-items: center; min-width: 0; padding: 5px 6px; border: 1px solid #ffffff16; border-radius: 4px; background: #ffffff05; color: #bbbcc6; font: 11px var(--sans); text-transform: none; letter-spacing: normal; }
-    .tag-chip { flex: 0 1 auto; background: var(--tag-bg); color: var(--tag-fg); }
+    .tag-chip, .tag-overflow, .edit-tags { display: inline-flex; align-items: center; gap: 1ch; min-width: 0; padding: 0.3rem 0.4rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); font: 0.74rem var(--mono); text-transform: none; letter-spacing: normal; }
+    .tag-chip { flex: 0 1 auto; max-width: 100%; color: var(--tag-fg); }
     .tag-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tag-overflow { flex: none; }
-    .tag-overflow, .edit-tags { border-color: transparent; background: transparent; color: var(--muted); }
     .header-tags:empty { display: none; }
-    .tag-chip:hover { background: var(--tag-bg); }
-    .tag-overflow:hover, .edit-tags:hover { background: transparent; }
+    .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover { background: transparent; }
     .tag-picker { position: fixed; inset: 0; width: min(340px, calc(100vw - 24px)); max-height: min(600px, 85dvh); margin: auto; padding: 0.6rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: var(--panel); color: var(--text); font: 0.8rem var(--mono); box-shadow: 0 16px 42px #00000080; overflow-y: auto; }
     .tag-picker[hidden] { display: none; }
     .tag-picker::backdrop { background: #0006; }
@@ -901,16 +897,14 @@
     .tag-picker-option:is(:focus-visible, :has(:focus-visible)) { outline: none; background: var(--accent-tint-04); }
     .tag-picker-option input { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--tag-fg, #bbbcc6); }
     .tag-picker-option .tag-count { flex: none; margin-left: auto; color: var(--muted-soft); }
-    .tag-picker-mark { flex: none; visibility: hidden; color: var(--accent); }
-    .tag-picker-option:focus-visible .tag-picker-mark:first-child, .tag-picker-option[aria-pressed="true"] .tag-picker-mark:nth-child(2) { visibility: visible; }
     .tag-picker-option:has(:disabled) { opacity: 0.65; cursor: wait; }
     .tag-picker-context, .tag-picker-footer, .tag-picker [role="status"] { color: var(--muted-soft); font-size: 0.7rem; line-height: 1.6; }
     .tag-picker-footer { padding: 0.5rem 0.25rem 0; margin: 0.5rem 0 0; border-top: 1px solid var(--border); }
     .tag-picker-error { color: var(--danger); }
     @media (hover: hover) and (pointer: fine) {
-      .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover { background: var(--tag-bg, #ffffff09); color: var(--tag-fg, var(--text)); }
+      .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover { background: #ffffff08; color: var(--tag-fg, var(--text)); }
       .tag-picker-option:hover { background: var(--accent-tint-04); }
-      .tag-picker-option:hover .tag-picker-mark:first-child { visibility: visible; }
+      .tag-picker-option:hover .picker-mark:first-child { visibility: visible; }
     }
     @media (min-width: 761px) {
       .tag-picker { inset: var(--tag-picker-top, 12px) auto auto var(--tag-picker-left, 12px); margin: 0; }

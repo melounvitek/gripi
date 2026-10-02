@@ -6,12 +6,7 @@ const tags = ["color-a", "color-b", "color-c", "color-d", "color-e", "color-f", 
 function colors(hex) {
   expect(hex).toMatch(/^#[0-9a-f]{6}$/i);
   const rgb = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16)).join(", ");
-  return { foreground: `rgb(${rgb})`, background: `rgba(${rgb}, 0.12)` };
-}
-
-async function expectColors(control, expected) {
-  await expect(control).toHaveCSS("color", expected.foreground);
-  await expect(control).toHaveCSS("background-color", expected.background);
+  return { foreground: `rgb(${rgb})` };
 }
 
 async function assign(page, session, tag, assigned = true) {
@@ -107,14 +102,14 @@ test("server-assigned tag colors agree across SSR, live, reload, picker, filter 
     const picker = page.getByRole("dialog", { name: "New session tags", exact: true });
     for (const tag of tags) {
       await picker.getByRole("checkbox", { name: tag, exact: true }).check();
-      await expectColors(draft.getByRole("button", { name: `Remove ${tag}`, exact: true }), expected.get(tag));
+      await expect(draft.getByRole("button", { name: `Remove ${tag}`, exact: true })).toHaveCSS("color", expected.get(tag).foreground);
     }
     // Unsaved names do not reserve a palette entry.
     await picker.getByRole("searchbox").fill("color-éx");
     const create = picker.getByRole("button", { name: "Create “color-éx”", exact: true });
     await expect(create).toHaveCSS("color", colors("#a0a0a0").foreground);
     await create.click();
-    await expectColors(draft.getByRole("button", { name: "Remove color-éx", exact: true }), colors("#a0a0a0"));
+    await expect(draft.getByRole("button", { name: "Remove color-éx", exact: true })).toHaveCSS("color", colors("#a0a0a0").foreground);
     const unsaved = await (await page.request.get("/tags")).json();
     expect(Object.hasOwn(unsaved.tag_colors, "color-éx")).toBe(false);
   } finally {
