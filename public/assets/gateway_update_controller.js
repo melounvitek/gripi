@@ -76,7 +76,10 @@ export class GatewayUpdateController {
       this.navigate(payload.currentSha || payload.instanceId);
       return payload;
     }
-    if (this.inProgress && !PROGRESS_STATES.includes(payload.state)) this.inProgress = false;
+    // An update started in another window or device needs polling here too, to reload after it.
+    const progressing = PROGRESS_STATES.includes(payload.state);
+    if (progressing && !this.inProgress) this.poll();
+    this.inProgress = progressing;
     this.apply(payload);
     return payload;
   }

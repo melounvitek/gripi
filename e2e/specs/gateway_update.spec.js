@@ -76,3 +76,16 @@ test("leaves the page usable while waiting for active sessions and after a faile
   await expect(overlay).toBeHidden();
   await expect(page.getByRole("button", { name: "Retry update" })).toBeVisible();
 });
+
+test("joins an update started elsewhere and reloads after the restart", async ({ page }) => {
+  const gateway = await mockGateway(page, { state: "updating", message: "Updating gateway…" });
+  // Session-only windows have no sidebar, so they can only learn about the update this way.
+  await page.goto("/?session_only=1");
+  const overlay = page.locator("[data-gateway-update-overlay]");
+  await expect(overlay).toBeVisible();
+
+  const reloaded = page.waitForEvent("load");
+  gateway.status = { state: "up_to_date", instanceId: "restarted-instance", currentSha: "abc12345" };
+  await reloaded;
+  await expect(overlay).toBeHidden();
+});
