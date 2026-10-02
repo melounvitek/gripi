@@ -2955,11 +2955,32 @@ function setForkSessionStatus(modal, text) {
   if (!list) return;
   list.replaceChildren();
   delete list.dataset.loaded;
+  list.removeAttribute("role");
   const status = document.createElement("p");
-  status.className = "fork-session-status";
+  status.className = "picker-status";
   status.dataset.forkSessionStatus = "";
   status.textContent = text;
   list.append(status);
+}
+
+function moveForkSessionCursor(list, index) {
+  const rows = [...list.querySelectorAll("[data-fork-entry-id]")];
+  if (!rows.length) return;
+  const selected = (index + rows.length) % rows.length;
+  rows.forEach((row, rowIndex) => {
+    row.setAttribute("aria-selected", String(rowIndex === selected));
+    row.tabIndex = rowIndex === selected ? 0 : -1;
+  });
+  if (!list.closest("[data-modal]").hidden) rows[selected].focus();
+}
+
+function handleForkSessionKey(event) {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  const list = document.querySelector('[data-modal="fork-session-modal"]:not([hidden]) [data-fork-session-list]');
+  if (!list) return;
+  event.preventDefault();
+  const current = [...list.querySelectorAll("[data-fork-entry-id]")].findIndex((row) => row.getAttribute("aria-selected") === "true");
+  moveForkSessionCursor(list, current + (event.key === "ArrowDown" ? 1 : -1));
 }
 
 async function loadForkMessages(modal) {
@@ -2979,15 +3000,29 @@ async function loadForkMessages(modal) {
       setForkSessionStatus(modal, "No previous user messages are available to fork.");
       return;
     }
-    messages.forEach((message) => {
+    list.setAttribute("role", "listbox");
+    messages.forEach((message, index) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "fork-session-option";
+      button.className = "picker-row fork-session-option";
+      button.setAttribute("role", "option");
       button.dataset.forkEntryId = message.entryId || message.entry_id || "";
-      button.textContent = message.text || "Untitled prompt";
+      const cursor = document.createElement("span");
+      cursor.className = "picker-cursor";
+      cursor.setAttribute("aria-hidden", "true");
+      cursor.textContent = "›";
+      const text = document.createElement("span");
+      text.className = "fork-session-text";
+      text.textContent = message.text || "Untitled prompt";
+      const meta = document.createElement("span");
+      meta.className = "fork-session-meta";
+      meta.textContent = `Message ${index + 1} of ${messages.length}`;
+      button.append(cursor, text, meta);
       list.append(button);
     });
     list.dataset.loaded = "true";
+    // Like Pi CLI, the cursor starts on the most recent message.
+    moveForkSessionCursor(list, messages.length - 1);
   } catch (_error) {
     setForkSessionStatus(modal, "Could not load fork points.");
   } finally {
@@ -3054,13 +3089,14 @@ document.addEventListener("click", (event) => {
   if (forkOption) {
     event.preventDefault();
     const modal = forkOption.closest("[data-modal]");
-    const originalForkText = forkOption.textContent;
+    const forkMeta = forkOption.querySelector(".fork-session-meta");
+    const originalForkMeta = forkMeta.textContent;
     const formData = new FormData();
     formData.set("session", currentSessionPath());
     formData.set("entry_id", forkOption.dataset.forkEntryId);
     addSessionViewFormParams(formData);
     forkOption.disabled = true;
-    forkOption.textContent = "Forking…";
+    forkMeta.textContent = "Forking…";
     showSessionSwitching();
     fetch("/sessions/fork", { method: "POST", body: formData, headers: { "Accept": "application/json" } })
       .then(async (response) => {
@@ -3071,7 +3107,7 @@ document.addEventListener("click", (event) => {
       })
       .catch(() => {
         forkOption.disabled = false;
-        forkOption.textContent = originalForkText;
+        forkMeta.textContent = originalForkMeta;
         if (modal) {
           setForkSessionStatus(modal, "Could not fork this session.");
         } else {
@@ -3270,6 +3306,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   handleModelSettingsKey(event);
+  handleForkSessionKey(event);
   handleModalTab(event);
   if (modalIsOpen()) return;
 

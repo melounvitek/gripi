@@ -5,6 +5,7 @@ export const sessions = {
   marker: FIXTURE_MARKER,
   history: "E2E History Desktop",
   prompt: "E2E Prompt Desktop",
+  fork: "E2E Fork Desktop",
   quoteHistory: "E2E Quote Persisted Desktop",
   quoteLive: "E2E Quote Live Desktop",
   quoteMobileHistory: "E2E Quote Persisted Mobile",
