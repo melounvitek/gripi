@@ -540,9 +540,9 @@
     content.className = "session-content";
     const title = document.createElement("div"); title.className = "session-title"; title.textContent = session.name;
     const project = document.createElement("div"); project.className = "session-project"; applyIdentity(project, session);
-    const monogram = document.createElement("span"); monogram.className = "session-project-monogram";
+    const icon = document.createElement("span"); icon.className = "project-identity-icon";
     const projectLabel = document.createElement("span"); projectLabel.className = "session-project-label"; projectLabel.textContent = session.project;
-    project.append(monogram, projectLabel);
+    project.append(icon, projectLabel);
     const meta = document.createElement("div"); meta.className = "session-meta"; meta.textContent = session.age;
     content.append(title);
     const details = document.createElement("div"); details.className = "session-details";

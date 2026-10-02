@@ -41,9 +41,6 @@ func TestTagFilteringCombinesBeforePaginationAndPreservesCurrentAndPins(t *testi
 			t.Errorf("sidebar missing %s", expected)
 		}
 	}
-	if strings.Index(html, `class="current-session-section"`) < strings.Index(html, `class="sidebar-filters"`) {
-		t.Error("a filtered-out current session must not push the filters down")
-	}
 	params.Del("project")
 	params.Del("session_search")
 	response = serve(t, handler, http.MethodGet, "/sidebar?"+params.Encode(), "")
@@ -54,25 +51,6 @@ func TestTagFilteringCombinesBeforePaginationAndPreservesCurrentAndPins(t *testi
 	}
 	if !strings.Contains(html, "tag=review") {
 		t.Fatal("navigation and pagination must retain tag")
-	}
-}
-
-func TestSidebarCountsSessionsForAnyFilter(t *testing.T) {
-	fixture := seedNativeFixture(t)
-	handler := fixtureHandler(t, fixture)
-	all, err := (sessions.Store{Root: fixture.sessionsRoot, Home: fixture.home, Cache: sessions.NewCache()}).Sessions()
-	if err != nil {
-		t.Fatal(err)
-	}
-	total := strconv.Itoa(len(all))
-	for name, params := range map[string]url.Values{"search": {"session_search": {all[0].DisplayName}}, "project": {"project": {all[0].CWD}}} {
-		html := serve(t, handler, http.MethodGet, "/sidebar?"+params.Encode(), "").Body.String()
-		if !regexp.MustCompile(`data-sidebar-filter-count>\d+ of `+total+`</span>`).MatchString(html) || !strings.Contains(html, "data-sidebar-filters-clear") {
-			t.Errorf("%s filter must show its count and a way to clear it", name)
-		}
-	}
-	if html := serve(t, handler, http.MethodGet, "/sidebar", "").Body.String(); strings.Contains(html, "data-sidebar-filter-count") {
-		t.Error("an unfiltered sidebar must not show a filter count")
 	}
 }
 

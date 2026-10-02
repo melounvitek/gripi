@@ -610,7 +610,7 @@ async function expectNormalRowShape(link, touch) {
     const link = element.querySelector("a.session");
     // The stretched link is the tap target for the whole row, not only its title line.
     const hits = [rowBox.top + 2, rowBox.bottom - 2].map((y) => document.elementFromPoint(rowBox.left + 2, y)?.closest("a.session") === link);
-    return { external: shape(element, ".session-external-indicator svg"), normal: shape(reference, ".session-project-monogram"), hits };
+    return { external: shape(element, ".session-external-indicator svg"), normal: shape(reference, ".project-identity-icon"), hits };
   });
   // External rows share the normal row shape: the terminal icon takes the project dot's slot.
   // Transformed drawer bounds can round by a few millionths of a pixel.

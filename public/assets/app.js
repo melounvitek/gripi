@@ -529,10 +529,10 @@ function renderModelSettingsModels() {
     row.setAttribute("role", "option");
     if (modelSettingsKey(model) === currentKey) row.setAttribute("aria-current", "true");
     const cursor = document.createElement("span");
-    cursor.className = "model-picker-cursor";
+    cursor.className = "picker-cursor";
     cursor.textContent = "→";
     const check = document.createElement("span");
-    check.className = "model-picker-check";
+    check.className = "picker-check";
     check.textContent = "✓";
     cursor.setAttribute("aria-hidden", "true");
     check.setAttribute("aria-hidden", "true");

@@ -209,8 +209,8 @@
     .sidebar-filter-row :is(.project-select-trigger, .sidebar-search-toggle, .tag-filter-toggle):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; box-shadow: none; }
     .sidebar-project-filter { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.8rem; font-weight: 500; background: var(--bg); }
     /* The spinner takes the search button's place only when a filter is slow, so fast typing does not flicker. */
-    .sidebar-filter-spinner { position: absolute; top: calc(50% - 0.45rem); right: 0.675rem; width: 0.9rem; height: 0.9rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; opacity: 0; pointer-events: none; animation: session-switch-spin 800ms linear infinite; }
-    .session-sidebar.is-filtering .sidebar-filter-spinner { opacity: 1; transition: opacity 0s 150ms; }
+    .sidebar-filter-spinner { position: absolute; top: calc(50% - 0.45rem); right: 0.675rem; width: 0.9rem; height: 0.9rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; opacity: 0; pointer-events: none; }
+    .session-sidebar.is-filtering .sidebar-filter-spinner { opacity: 1; transition: opacity 0s 150ms; animation: session-switch-spin 800ms linear infinite; }
     .session-sidebar.is-filtering .sidebar-search-toggle { color: transparent; transition: color 0s 150ms; }
     .session-sidebar.is-filtering .sidebar-project-filter, .session-sidebar.is-filtering .project-select-trigger, .session-sidebar.is-filtering .sidebar-filters-clear { opacity: 0.72; pointer-events: none; }
     .sidebar-filters-clear { position: relative; margin-left: 0.3rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
@@ -317,7 +317,7 @@
     .sidebar-notification-toggle.is-disabled { color: var(--muted); }
     .sidebar-notification-toggle.is-blocked .sidebar-notification-state { color: var(--danger); }
     .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.66rem; font-weight: 500; line-height: 1.25; }
-    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); }
+    .project-identity-icon { flex: 0 0 auto; display: inline-flex; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); }
     .session-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 0.74rem; line-height: 1.4; }
     .session-relation-tree-heading { cursor: pointer; color: var(--gold); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -632,13 +632,12 @@
     .project-select-trigger:hover, .project-select-trigger[aria-expanded="true"] { border-color: var(--accent-line-55); background: var(--bg); transform: none; }
     .project-select-trigger:focus-visible { border-color: var(--accent-line-55); outline: none; box-shadow: 0 0 0 2px var(--accent-tint-14); }
     .project-select-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .project-select-trigger--plain { grid-template-columns: minmax(0, 1fr) auto; }
     .project-select-chevron { color: var(--muted); font-size: 0.72rem; }
     .project-select-listbox { position: fixed; z-index: 180; display: grid; overflow-y: auto; padding: 0.4rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; box-shadow: 0 16px 42px #00000080; font: 0.8rem var(--mono); }
     .project-select-option { min-width: 0; display: flex; align-items: center; gap: 1ch; padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); cursor: pointer; }
     .project-select-option.is-active { background: var(--accent-tint-04); color: var(--accent); }
-    .picker-mark { flex: none; visibility: hidden; color: var(--accent); }
-    .project-select-option.is-active .picker-mark:first-child, .project-select-option[aria-selected="true"] .picker-mark:nth-child(2), .tag-picker-option:focus-visible .picker-mark:first-child, .tag-picker-option[aria-pressed="true"] .picker-mark:nth-child(2) { visibility: visible; }
+    .picker-cursor, .picker-check { flex: none; visibility: hidden; color: var(--accent); }
+    .model-picker-row[aria-selected="true"] .picker-cursor, .model-picker-row[aria-current="true"] .picker-check, .project-select-option.is-active .picker-cursor, .project-select-option[aria-selected="true"] .picker-check, .tag-picker-option:focus-visible .picker-cursor, .tag-picker-option[aria-pressed="true"] .picker-check { visibility: visible; }
     .project-select-option-label { min-width: 0; overflow-wrap: anywhere; }
     .project-select-new-icon { flex: none; width: 0.5rem; color: var(--muted); text-align: center; }
     /* Like Pi CLI's /model selector: plain mono lines rather than cards. */
@@ -656,8 +655,6 @@
     .model-picker-list:empty { display: none; }
     .model-picker-row { justify-self: stretch; display: grid; grid-template-columns: 2ch 2ch minmax(0, 1fr); padding: 0.22rem 0.25rem; border-radius: 0.2rem; color: var(--text); text-align: left; overflow-wrap: anywhere; transition: none; }
     .model-picker-row[aria-selected="true"] { background: var(--accent-tint-04); color: var(--accent); }
-    .model-picker-cursor, .model-picker-check { visibility: hidden; color: var(--accent); }
-    .model-picker-row[aria-selected="true"] .model-picker-cursor, .model-picker-row[aria-current="true"] .model-picker-check { visibility: visible; }
     .model-picker-provider { color: var(--muted); }
     .model-picker-status { min-height: 1.2rem; margin: 0; padding-left: calc(4ch + 0.25rem); color: var(--muted); overflow-wrap: anywhere; }
     .model-picker-status.is-error { color: var(--danger); }
@@ -807,8 +804,7 @@
       .session-header-project { font-size: 0.7rem; }
       .session-header-view-option { min-height: 2.75rem; }
       .project-select-trigger { min-height: 2.75rem; }
-      .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.4rem; }
-      .project-select-listbox { font-size: 0.95rem; }
+      .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.4rem; font-size: 0.95rem; }
       .project-select-option { min-height: 2.75rem; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
       :root { --text-inset: 0.75rem; }
@@ -894,7 +890,8 @@
     .tag-picker-options { display: grid; }
     .tag-picker-option { display: flex; align-items: center; gap: 1ch; width: 100%; padding: 0.22rem 0.25rem; border: 0; border-radius: 0.2rem; background: transparent; color: var(--tag-fg, var(--text)); font: inherit; text-transform: none; letter-spacing: normal; text-align: left; cursor: pointer; overflow-wrap: anywhere; transition: none; }
     .tag-picker-option:hover { background: transparent; }
-    .tag-picker-option:is(:focus-visible, :has(:focus-visible)) { outline: none; background: var(--accent-tint-04); }
+    .tag-picker-option:is(:focus-visible, :has(:focus-visible)) { background: var(--accent-tint-04); }
+    .tag-picker-option[aria-pressed]:focus-visible { outline: none; }
     .tag-picker-option input { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--tag-fg, #bbbcc6); }
     .tag-picker-option .tag-count { flex: none; margin-left: auto; color: var(--muted-soft); }
     .tag-picker-option:has(:disabled) { opacity: 0.65; cursor: wait; }
@@ -904,7 +901,7 @@
     @media (hover: hover) and (pointer: fine) {
       .tag-chip:hover, .tag-overflow:hover, .edit-tags:hover { background: #ffffff08; color: var(--tag-fg, var(--text)); }
       .tag-picker-option:hover { background: var(--accent-tint-04); }
-      .tag-picker-option:hover .picker-mark:first-child { visibility: visible; }
+      .tag-picker-option:hover .picker-cursor { visibility: visible; }
     }
     @media (min-width: 761px) {
       .tag-picker { inset: var(--tag-picker-top, 12px) auto auto var(--tag-picker-left, 12px); margin: 0; }
