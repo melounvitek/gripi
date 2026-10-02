@@ -188,7 +188,8 @@ export class TreeSessionController {
     this.loading = false;
     this.navigating = false;
     this.savingLabel = false;
-    this.filterChosen = false;
+    this.filter = null;
+    this.showLabelTimes = false;
     this.statusLabels = "";
     this.treeUrl = null;
     this.operation = 0;
@@ -202,13 +203,12 @@ export class TreeSessionController {
   open() {
     const modal = this.modal();
     if (!modal) return false;
-    this.filterChosen = false;
-    const options = modal.querySelector("[data-tree-options]");
-    if (options) options.open = false;
+    // Each opening starts from Pi's configured filter.
+    this.filter = null;
+    this.showLabelTimes = false;
     const search = modal.querySelector("[data-tree-search]");
     if (search) search.value = "";
-    const labelTimestamps = modal.querySelector("[data-tree-label-timestamps]");
-    if (labelTimestamps) labelTimestamps.checked = false;
+    this.editLabel(false);
     if (this.model) {
       this.model.setSearch("");
       this.render();
@@ -243,8 +243,7 @@ export class TreeSessionController {
     this.setStatus("Loading session tree…");
     try {
       const url = new URL(baseUrl, this.window.location.origin);
-      const filter = modal.querySelector("[data-tree-filter]")?.value;
-      if (filter && this.filterChosen) url.searchParams.set("filter", filter);
+      if (this.filter) url.searchParams.set("filter", this.filter);
       const response = await fetch(url, { headers: { "Accept": "application/json" } });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload) throw new Error(payload?.error || "Could not load session tree.");
@@ -257,10 +256,11 @@ export class TreeSessionController {
       this.treeUrl = baseUrl;
       if (previousSelectedId) this.model.select(previousSelectedId);
       this.model.collapsed = new Set([...collapsed].filter((entryId) => this.model.byId.has(entryId)));
-      const effectiveFilter = payload.filter || filter;
-      const filterControl = modal.querySelector("[data-tree-filter]");
-      if (filterControl && effectiveFilter) filterControl.value = effectiveFilter;
-      this.statusLabels = `${payload.truncated ? ` of ${payload.totalEntries}` : ""}${FILTER_STATUS[effectiveFilter] || ""}`;
+      this.filter = payload.filter || this.filter;
+      modal.querySelectorAll("[data-tree-filter]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.treeFilter === this.filter));
+      });
+      this.statusLabels = `${payload.truncated ? ` of ${payload.totalEntries}` : ""}${FILTER_STATUS[this.filter] || ""}`;
       this.model.setSearch(modal.querySelector("[data-tree-search]")?.value || "");
       this.render({ focus: !this.document.activeElement?.matches("input, select, textarea") });
     } catch (error) {
@@ -286,7 +286,6 @@ export class TreeSessionController {
     if (!viewport || !this.model) return;
     viewport.replaceChildren();
     const structure = this.model.visibleStructure();
-    const showLabelTimes = modal.querySelector("[data-tree-label-timestamps]")?.checked;
     const span = (className, text) => {
       const element = this.document.createElement("span");
       element.className = className;
@@ -340,7 +339,7 @@ export class TreeSessionController {
 
         if (this.model.activePath.has(entry.entryId)) line.append(span("tree-session-path", "• "));
         if (entry.label) line.append(span("tree-session-label", `[${entry.label}] `));
-        if (showLabelTimes && entry.label && entry.labelTimestamp) line.append(span("tree-session-dim", `${labelTime(entry.labelTimestamp)} `));
+        if (this.showLabelTimes && entry.label && entry.labelTimestamp) line.append(span("tree-session-dim", `${labelTime(entry.labelTimestamp)} `));
         const role = entry.role || entry.type || "entry";
         if (role === "user" || role === "assistant") line.append(span(`tree-session-role tree-session-role--${role}`, `${role}: `), entry.text || "");
         else line.append(span("tree-session-dim", `[${role}]${entry.text ? `: ${entry.text}` : ""}`));
@@ -366,7 +365,7 @@ export class TreeSessionController {
       empty.textContent = "No entries found";
       viewport.append(empty);
     }
-    this.setStatus(`(${visible.findIndex((entry) => entry.entryId === this.model.selectedId) + 1}/${visible.length})${this.statusLabels}`);
+    this.setStatus(`(${visible.findIndex((entry) => entry.entryId === this.model.selectedId) + 1}/${visible.length})${this.statusLabels}${this.showLabelTimes ? " [+label time]" : ""}`);
     this.syncSelectionControls();
     if (focus) [...modal.querySelectorAll("[data-tree-focus-entry]")]
       .find((entry) => entry.dataset.treeFocusEntry === this.model.selectedId)
@@ -380,12 +379,24 @@ export class TreeSessionController {
   syncSelectionControls() {
     const modal = this.modal();
     const entry = this.selectedEntry();
-    const input = modal?.querySelector("[data-tree-label-input]");
-    if (input) input.value = entry?.label || "";
-    [modal?.querySelector("[data-tree-label-save]"), modal?.querySelector("[data-tree-label-clear]")]
-      .forEach((control) => { if (control) control.disabled = !entry || this.savingLabel; });
-    const navigate = modal?.querySelector("[data-tree-navigate]");
-    if (navigate) navigate.disabled = !entry || this.savingLabel;
+    modal?.querySelectorAll("[data-tree-navigate], [data-tree-label-edit]")
+      .forEach((control) => { control.disabled = !entry || this.savingLabel; });
+  }
+
+  // Like Pi CLI, the label editor takes the place of the tree's actions while it is open.
+  editLabel(editing) {
+    const modal = this.modal();
+    const form = modal?.querySelector("[data-tree-label-form]");
+    if (!form) return;
+    form.hidden = !editing;
+    modal.querySelector("[data-tree-actions]").hidden = editing;
+    const input = form.querySelector("[data-tree-label-input]");
+    if (editing) {
+      input.value = this.selectedEntry()?.label || "";
+      input.focus();
+    } else if (this.model) {
+      this.render({ focus: true });
+    }
   }
 
   select(entryId, focus = false) {
@@ -515,9 +526,15 @@ export class TreeSessionController {
     if (entry) { event.preventDefault(); this.select(entry.dataset.treeEntryId, true); return; }
     if (event.target.closest("[data-tree-navigate]")) { event.preventDefault(); this.requestNavigation(); return; }
     if (event.target.closest("[data-tree-summary-back]")) { event.preventDefault(); this.showTreeStep(modal); return; }
-    if (event.target.closest("[data-tree-label-clear]")) {
-      event.preventDefault();
-      this.saveLabel("").catch((error) => this.setStatus(error.message, true));
+    const filter = event.target.closest("[data-tree-filter]");
+    if (filter) { this.applyFilterChoice(filter.dataset.treeFilter); return; }
+    if (event.target.closest("[data-tree-label-edit]")) { this.editLabel(true); return; }
+    if (event.target.closest("[data-tree-label-cancel]")) { this.editLabel(false); return; }
+    const labelTimes = event.target.closest("[data-tree-label-timestamps]");
+    if (labelTimes) {
+      this.showLabelTimes = !this.showLabelTimes;
+      labelTimes.setAttribute("aria-pressed", String(this.showLabelTimes));
+      this.render();
     }
   }
 
@@ -530,8 +547,6 @@ export class TreeSessionController {
   }
 
   handleChange(event) {
-    if (event.target.matches?.("[data-tree-filter]")) this.applyFilterChoice();
-    if (event.target.matches?.("[data-tree-label-timestamps]")) this.render();
     if (event.target.matches?.('input[name="summary_mode"]')) this.syncSummaryChoice();
   }
 
@@ -542,8 +557,8 @@ export class TreeSessionController {
     if (custom) custom.hidden = mode !== "custom";
   }
 
-  applyFilterChoice() {
-    this.filterChosen = true;
+  applyFilterChoice(filter) {
+    this.filter = filter;
     this.model = null;
     this.load().catch(() => {});
   }
@@ -552,6 +567,7 @@ export class TreeSessionController {
     if (event.target.matches?.("[data-tree-label-form]")) {
       event.preventDefault();
       const input = event.target.querySelector("[data-tree-label-input]");
+      this.editLabel(false);
       this.saveLabel(input?.value || "").catch((error) => this.setStatus(error.message, true));
     }
     if (event.target.matches?.("[data-tree-summary-form]")) {
@@ -562,11 +578,6 @@ export class TreeSessionController {
     }
   }
 
-  revealOptions(modal = this.modal()) {
-    const options = modal?.querySelector("[data-tree-options]");
-    if (options) options.open = true;
-  }
-
   handleKeydown(event) {
     const modal = this.document.querySelector('[data-modal="tree-session-modal"]:not([hidden])');
     if (!modal) return;
@@ -575,30 +586,24 @@ export class TreeSessionController {
       (key.toLowerCase() === "f" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey);
     if (searchShortcut) {
       event.preventDefault();
-      this.revealOptions(modal);
       modal.querySelector("[data-tree-search]")?.focus();
       return;
     }
     if (key.toLowerCase() === "o" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
       event.preventDefault();
-      this.revealOptions(modal);
-      const filter = modal.querySelector("[data-tree-filter]");
-      if (filter) {
-        const index = TREE_FILTERS.findIndex((choice) => choice.value === filter.value);
-        filter.value = TREE_FILTERS[(index + 1) % TREE_FILTERS.length].value;
-        this.applyFilterChoice();
-      }
+      const index = TREE_FILTERS.findIndex((choice) => choice.value === this.filter);
+      this.applyFilterChoice(TREE_FILTERS[(index + 1) % TREE_FILTERS.length].value);
       return;
     }
-    if (key.toLowerCase() === "l" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (key.toLowerCase() === "l" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !event.target.closest?.("input, textarea") && this.selectedEntry()) {
       event.preventDefault();
-      this.revealOptions(modal);
-      modal.querySelector("[data-tree-label-input]")?.focus();
+      this.editLabel(true);
       return;
     }
     if (key === "Escape") {
       event.preventDefault();
       if (!modal.querySelector("[data-tree-summary-step]")?.hidden) this.showTreeStep(modal);
+      else if (!modal.querySelector("[data-tree-label-form]").hidden) this.editLabel(false);
       else {
         const search = modal.querySelector("[data-tree-search]");
         if (search?.value) { search.value = ""; this.model?.setSearch(""); this.render(); }

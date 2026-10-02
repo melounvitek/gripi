@@ -26,13 +26,32 @@ test("open, label, and navigate the native Pi session tree", async ({ page }) =>
   await entries.nth(0).click();
   await expect(status).toHaveText("(1/2)");
 
-  await dialog.getByText("Search & options").click();
-  await dialog.getByPlaceholder("Optional label").fill("E2E checkpoint");
-  await dialog.getByRole("button", { name: "Save label" }).click();
+  const labelInput = dialog.getByLabel("Label (empty to remove):");
+  await expect(labelInput).toBeHidden();
+  await page.keyboard.press("Shift+L");
+  await expect(labelInput).toBeFocused();
+  await labelInput.fill("E2E checkpoint");
+  await labelInput.press("Enter");
   await expect(status).toHaveText("Label updated.");
+  await expect(labelInput).toBeHidden();
   await expect(entries.nth(0)).toHaveText(`›[E2E checkpoint] user: Fixture question for ${sessions.prompt}`);
 
-  await dialog.locator("[data-tree-navigate]").click();
+  await dialog.getByRole("button", { name: "labeled-only" }).click();
+  await expect(status).toHaveText("(1/1) [labeled]");
+  await expect(dialog.getByRole("button", { name: "labeled-only" })).toHaveAttribute("aria-pressed", "true");
+  await dialog.getByRole("button", { name: "default" }).click();
+  await expect(status).toHaveText("(1/2)");
+
+  await page.keyboard.press("/");
+  const search = dialog.getByLabel("Type to search:");
+  await expect(search).toBeFocused();
+  await search.fill("answer");
+  await expect(entries).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(entries).toHaveCount(2);
+  await entries.nth(0).click();
+
+  await dialog.getByRole("button", { name: "navigate" }).click();
   await expect(dialog.getByText("Choose how to prepare the branch context.")).toBeVisible();
   await dialog.locator("[data-tree-summary-submit]").click();
 

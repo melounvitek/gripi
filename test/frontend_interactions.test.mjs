@@ -470,9 +470,9 @@ test("tree controller reports navigation failures, posts successful choices, sav
 
     controller.model = new TreeSessionModel([{ entryId: "old" }]);
     controller.load = async () => { reloads += 1; };
-    controller.applyFilterChoice();
+    controller.applyFilterChoice("user-only");
     await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(controller.filterChosen, true);
+    assert.equal(controller.filter, "user-only");
     assert.equal(controller.model, null);
     assert.equal(reloads, 2);
 
