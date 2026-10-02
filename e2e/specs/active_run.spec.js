@@ -223,7 +223,7 @@ test("abort an active run before navigating the session tree", async ({ page }) 
   const firstEntry = dialog.locator("[data-tree-entry-id]").first();
   await firstEntry.click();
   await dialog.locator("[data-tree-navigate]").click();
-  await dialog.locator("[data-tree-summary-submit]").click();
+  await dialog.getByRole("option", { name: "No summary" }).click();
 
   await expect(dialog).toBeHidden();
   await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();

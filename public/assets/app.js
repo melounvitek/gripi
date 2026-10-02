@@ -46,7 +46,7 @@ import { CurrentSessionFindController } from "./current_session_find_controller.
 import { LiveMessageParser } from "./live_message_parser.js";
 import { LiveMessageRenderer } from "./live_message_renderer.js";
 import { ServerMarkdownRenderer } from "./server_markdown_renderer.js";
-import { activateToolOutputRegion, enhanceMarkdownCodeBlocks, enhanceMessageLinks } from "./dom.js";
+import { activateToolOutputRegion, enhanceMarkdownCodeBlocks, enhanceMessageLinks, movePickerCursor } from "./dom.js";
 import { eventPollCurrent, eventPollingDelay } from "./polling.js";
 import { extensionUiRequestExpired, extensionUiResponseDisposition } from "./extension_ui.js";
 import { TreeSessionController } from "./tree_session_controller.js";
@@ -2963,24 +2963,14 @@ function setForkSessionStatus(modal, text) {
   list.append(status);
 }
 
-function moveForkSessionCursor(list, index) {
-  const rows = [...list.querySelectorAll("[data-fork-entry-id]")];
-  if (!rows.length) return;
-  const selected = (index + rows.length) % rows.length;
-  rows.forEach((row, rowIndex) => {
-    row.setAttribute("aria-selected", String(rowIndex === selected));
-    row.tabIndex = rowIndex === selected ? 0 : -1;
-  });
-  if (!list.closest("[data-modal]").hidden) rows[selected].focus();
-}
-
-function handleForkSessionKey(event) {
+function handlePickerListKey(event) {
   if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-  const list = document.querySelector('[data-modal="fork-session-modal"]:not([hidden]) [data-fork-session-list]');
+  // offsetParent is null while a list or one of its ancestors is hidden.
+  const list = [...document.querySelectorAll("[data-modal]:not([hidden]) [data-picker-list]")].find((candidate) => candidate.offsetParent);
   if (!list) return;
   event.preventDefault();
-  const current = [...list.querySelectorAll("[data-fork-entry-id]")].findIndex((row) => row.getAttribute("aria-selected") === "true");
-  moveForkSessionCursor(list, current + (event.key === "ArrowDown" ? 1 : -1));
+  const current = [...list.querySelectorAll('[role="option"]')].findIndex((row) => row.getAttribute("aria-selected") === "true");
+  movePickerCursor(list, current + (event.key === "ArrowDown" ? 1 : -1));
 }
 
 async function loadForkMessages(modal) {
@@ -3022,7 +3012,7 @@ async function loadForkMessages(modal) {
     });
     list.dataset.loaded = "true";
     // Like Pi CLI, the cursor starts on the most recent message.
-    moveForkSessionCursor(list, messages.length - 1);
+    movePickerCursor(list, messages.length - 1);
   } catch (_error) {
     setForkSessionStatus(modal, "Could not load fork points.");
   } finally {
@@ -3306,7 +3296,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   handleModelSettingsKey(event);
-  handleForkSessionKey(event);
+  handlePickerListKey(event);
   handleModalTab(event);
   if (modalIsOpen()) return;
 

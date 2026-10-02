@@ -52,8 +52,17 @@ test("open, label, and navigate the native Pi session tree", async ({ page }) =>
   await entries.nth(0).click();
 
   await dialog.getByRole("button", { name: "navigate" }).click();
-  await expect(dialog.getByText("Choose how to prepare the branch context.")).toBeVisible();
-  await dialog.locator("[data-tree-summary-submit]").click();
+  await expect(dialog.getByText("Summarize branch?")).toBeVisible();
+  const choices = dialog.getByRole("option");
+  await expect(choices).toHaveText(["→No summary", "→Summarize", "→Summarize with custom prompt"]);
+  await expect(choices.nth(0)).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(choices.nth(2)).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
+  await expect(dialog.getByLabel("Custom summarization instructions")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(choices.nth(0)).toBeFocused();
+  await page.keyboard.press("Enter");
 
   await expect(dialog).toBeHidden();
   await expect(page.getByPlaceholder("Ask Pi…")).toHaveValue(`Fixture question for ${sessions.prompt}`);

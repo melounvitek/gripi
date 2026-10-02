@@ -1,3 +1,5 @@
+import { movePickerCursor } from "./dom.js";
+
 export const TREE_FILTERS = [
   { value: "default", label: "Default" },
   { value: "no-tools", label: "No tools" },
@@ -9,7 +11,7 @@ export const TREE_FILTERS = [
 export const TREE_SUMMARY_CHOICES = [
   { value: "none", label: "No summary" },
   { value: "default", label: "Summarize" },
-  { value: "custom", label: "Summarize with custom instructions" }
+  { value: "custom", label: "Summarize with custom prompt" }
 ];
 
 function entrySearchText(entry) {
@@ -206,13 +208,11 @@ export class TreeSessionController {
     // Each opening starts from Pi's configured filter.
     this.filter = null;
     this.showLabelTimes = false;
+    modal.querySelector("[data-tree-label-timestamps]")?.setAttribute("aria-pressed", "false");
     const search = modal.querySelector("[data-tree-search]");
     if (search) search.value = "";
+    this.model?.setSearch("");
     this.editLabel(false);
-    if (this.model) {
-      this.model.setSearch("");
-      this.render();
-    }
     this.showTreeStep(modal);
     this.callbacks.openModal?.(modal);
     this.load(modal).catch(() => {});
@@ -228,7 +228,6 @@ export class TreeSessionController {
   bind() {
     this.document.addEventListener("click", (event) => this.handleClick(event));
     this.document.addEventListener("input", (event) => this.handleInput(event));
-    this.document.addEventListener("change", (event) => this.handleChange(event));
     this.document.addEventListener("submit", (event) => this.handleSubmit(event));
     this.document.addEventListener("keydown", (event) => this.handleKeydown(event));
   }
@@ -420,8 +419,21 @@ export class TreeSessionController {
       modal.querySelector(".tree-session-card")?.classList.toggle("is-summary-step", true);
       modal.querySelector("[data-tree-browser-step]").hidden = true;
       modal.querySelector("[data-tree-summary-step]").hidden = false;
-      modal.querySelector('input[name="summary_mode"]:checked')?.focus();
+      this.showSummaryChoices(modal);
     }
+  }
+
+  showSummaryChoices(modal) {
+    const choices = modal.querySelector("[data-tree-summary-choices]");
+    choices.hidden = false;
+    modal.querySelector("[data-tree-summary-form]").hidden = true;
+    movePickerCursor(choices, 0);
+  }
+
+  // Like Pi CLI, cancelling the custom prompt returns to the choices, and cancelling those returns to the tree.
+  summaryBack(modal) {
+    if (modal.querySelector("[data-tree-summary-form]").hidden) this.showTreeStep(modal);
+    else this.showSummaryChoices(modal);
   }
 
   showTreeStep(modal = this.modal()) {
@@ -431,6 +443,7 @@ export class TreeSessionController {
     modal.querySelector(".tree-session-card")?.classList.toggle("is-summary-step", false);
     if (browser) browser.hidden = false;
     if (summary) summary.hidden = true;
+    if (this.model) this.render({ focus: true });
   }
 
   navigate(summaryMode, customInstructions) {
@@ -525,7 +538,15 @@ export class TreeSessionController {
     const entry = event.target.closest("[data-tree-entry-id]");
     if (entry) { event.preventDefault(); this.select(entry.dataset.treeEntryId, true); return; }
     if (event.target.closest("[data-tree-navigate]")) { event.preventDefault(); this.requestNavigation(); return; }
-    if (event.target.closest("[data-tree-summary-back]")) { event.preventDefault(); this.showTreeStep(modal); return; }
+    if (event.target.closest("[data-tree-summary-back]")) { this.summaryBack(modal); return; }
+    const choice = event.target.closest("[data-tree-summary-choice]");
+    if (choice?.dataset.treeSummaryChoice === "custom") {
+      modal.querySelector("[data-tree-summary-choices]").hidden = true;
+      modal.querySelector("[data-tree-summary-form]").hidden = false;
+      modal.querySelector("[data-tree-custom-instructions]").focus();
+      return;
+    }
+    if (choice) { this.navigate(choice.dataset.treeSummaryChoice, ""); return; }
     const filter = event.target.closest("[data-tree-filter]");
     if (filter) { this.applyFilterChoice(filter.dataset.treeFilter); return; }
     if (event.target.closest("[data-tree-label-edit]")) { this.editLabel(true); return; }
@@ -543,18 +564,6 @@ export class TreeSessionController {
       this.model?.setSearch(event.target.value);
       this.render();
     }
-    if (event.target.matches?.("[data-tree-custom-instructions]")) this.syncSummaryChoice();
-  }
-
-  handleChange(event) {
-    if (event.target.matches?.('input[name="summary_mode"]')) this.syncSummaryChoice();
-  }
-
-  syncSummaryChoice() {
-    const modal = this.modal();
-    const custom = modal?.querySelector("[data-tree-custom-instructions]");
-    const mode = modal?.querySelector('input[name="summary_mode"]:checked')?.value;
-    if (custom) custom.hidden = mode !== "custom";
   }
 
   applyFilterChoice(filter) {
@@ -572,9 +581,7 @@ export class TreeSessionController {
     }
     if (event.target.matches?.("[data-tree-summary-form]")) {
       event.preventDefault();
-      const mode = event.target.querySelector('input[name="summary_mode"]:checked')?.value || "none";
-      const instructions = event.target.querySelector("[data-tree-custom-instructions]")?.value || "";
-      this.navigate(mode, instructions);
+      this.navigate("custom", event.target.querySelector("[data-tree-custom-instructions]").value);
     }
   }
 
@@ -602,13 +609,19 @@ export class TreeSessionController {
     }
     if (key === "Escape") {
       event.preventDefault();
-      if (!modal.querySelector("[data-tree-summary-step]")?.hidden) this.showTreeStep(modal);
+      if (!modal.querySelector("[data-tree-summary-step]")?.hidden) this.summaryBack(modal);
       else if (!modal.querySelector("[data-tree-label-form]").hidden) this.editLabel(false);
       else {
         const search = modal.querySelector("[data-tree-search]");
         if (search?.value) { search.value = ""; this.model?.setSearch(""); this.render(); }
         else this.close();
       }
+      return;
+    }
+    // Like the composer, Enter submits only with a hardware keyboard; touch keyboards need it for new lines.
+    if (key === "Enter" && !event.shiftKey && !event.isComposing && event.target.matches?.("[data-tree-custom-instructions]") && this.window.matchMedia?.("(pointer: fine)").matches) {
+      event.preventDefault();
+      event.target.form.requestSubmit();
       return;
     }
     if (event.target.closest?.("input, textarea, select")) return;

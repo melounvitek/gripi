@@ -665,7 +665,7 @@
     /* The cursor follows focus, so it already marks the focused row. */
     .picker-row[aria-selected="true"]:focus-visible { outline: none; }
     .model-picker-row { grid-template-columns: 2ch 2ch minmax(0, 1fr); }
-    .model-picker-row[aria-selected="true"] { color: var(--accent); }
+    .model-picker-row[aria-selected="true"], .picker-option[aria-selected="true"] { color: var(--accent); }
     .model-picker-provider { color: var(--muted); }
     .model-picker-status { min-height: 1.2rem; margin: 0; padding-left: calc(4ch + 0.25rem); color: var(--muted); overflow-wrap: anywhere; }
     .model-picker-status.is-error { color: var(--danger); }
@@ -693,6 +693,11 @@
     .cwd-suggestion { width: 100%; min-width: 0; display: block; padding: 0.5rem 0.6rem; border-radius: 0.25rem; background: transparent; color: var(--text); text-align: left; font-family: var(--mono); font-size: 0.82rem; font-weight: 500; letter-spacing: normal; text-transform: none; overflow-wrap: anywhere; }
     .cwd-suggestion:hover, .cwd-suggestion.is-active { background: var(--panel-softer); transform: none; }
     .picker-status { margin: 0; color: var(--muted); }
+    .picker-title { margin: 0; color: var(--accent); font-weight: 700; }
+    .picker-list { display: grid; }
+    /* Like Pi CLI's editor: framed by rules rather than a box. */
+    .picker-editor, .picker-editor:focus { padding: 0.5rem 0; border: 0; border-block: 1px solid var(--border-strong); border-radius: 0; background: transparent; box-shadow: none; outline: none; }
+    .picker-editor:focus { border-color: var(--accent-line-55); }
     .fork-session-list { max-height: 24rem; overflow-y: auto; display: grid; gap: 0.5rem; }
     .fork-session-option[aria-selected="true"] .fork-session-text { font-weight: 700; }
     .fork-session-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -700,7 +705,7 @@
     .tree-session-card { width: min(58rem, 100%); height: min(48rem, calc(100dvh - 2rem)); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
     .tree-session-card.is-summary-step { height: auto; grid-template-rows: auto auto; overflow-y: auto; }
     .tree-session-browser { min-height: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-    .tree-session-summary, .tree-session-summary form { min-height: 0; display: grid; gap: 0.75rem; }
+    .tree-session-summary, .tree-session-summary-choices, .tree-session-summary form { min-height: 0; display: grid; gap: 0.75rem; }
     .tree-session-input input, .tree-session-input input:focus { flex: 1 1 8rem; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; color: var(--accent); }
     .picker-line .tree-session-navigate { color: var(--text); }
     .tree-session-status { min-height: 1.2rem; margin: 0; padding: 0 0 0.5rem calc(2ch + 0.25rem); border-bottom: 1px solid var(--border); color: var(--muted); }
@@ -723,11 +728,6 @@
     .tree-session-role--user { color: var(--accent); }
     .tree-session-dim { color: var(--muted); }
     .tree-session-label-form { display: grid; gap: 0.5rem; }
-    .tree-session-summary-heading { margin: 0; color: var(--copy); }
-    .tree-session-summary-choices { display: grid; gap: 0.45rem; margin: 0; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.35rem; }
-    .tree-session-summary-choices legend { padding: 0 0.3rem; color: var(--muted); font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
-    .tree-session-summary-choices label { display: flex; align-items: center; gap: 0.45rem; color: var(--copy); }
-    .tree-session-summary-choices input { margin: 0; }
     .tree-position-banner, .session-sync-banner { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.75rem; padding: 0.7rem 0.8rem; border: 1px solid #f0c67447; border-radius: 0.35rem; background: var(--info-bg); color: var(--text); font-size: 0.85rem; }
     .tree-position-banner strong, .session-sync-banner strong { color: var(--gold); }
     .tree-position-banner span, .session-sync-banner span { color: var(--muted); }
