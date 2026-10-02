@@ -1071,12 +1071,6 @@ func (indexed *index) applySessionMetadata(raw map[string]any, item entry, stat 
 			}
 		}
 	}
-	if indexed.session.DisplayName == "" {
-		indexed.session.DisplayName = indexed.session.FirstUserMessage
-		if indexed.session.DisplayName == "" {
-			indexed.session.DisplayName = strings.TrimSuffix(filepath.Base(indexed.path), filepath.Ext(indexed.path))
-		}
-	}
 }
 
 func (indexed *index) latestLeafID() string {
