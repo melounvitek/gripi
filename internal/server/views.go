@@ -83,6 +83,7 @@ type pageView struct {
 	SeparateCurrent           *sessions.Session
 	KnownCWDs                 []string
 	NewSessionCWDs            []string
+	ProjectMonograms          map[string]string
 	SelectedProject           string
 	SearchQuery               string
 	SelectedTag               string
@@ -285,6 +286,9 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	view.KnownCWDs = knownCWDs(all, knownProjects)
 	view.NewSessionCWDs = app.newSessionCWDs(view)
+	if view.ProjectMonograms, err = app.gatewayState.ProjectMonograms(view.NewSessionCWDs); err != nil {
+		return nil, err
+	}
 	if includeConversation && selected != nil {
 		view.HideThinkingBlock = app.piDisplaySettings(selected.CWD).HideThinkingBlock
 		leafID, leafSupplied := "", false
@@ -633,7 +637,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return b
 		},
 		"base": filepath.Base, "urlquery": url.QueryEscape, "json": func(value any) string { data, _ := json.Marshal(value); return string(data) },
-		"projectColor": projectColor, "tagStyle": tagStyle, "relativeTime": relativeTime, "compactRelativeTime": compactRelativeTime, "activityDay": activityDay, "formatTime": func(value time.Time) string {
+		"projectColor": projectColor, "projectMonogram": projectMonogram, "tagStyle": tagStyle, "relativeTime": relativeTime, "compactRelativeTime": compactRelativeTime, "activityDay": activityDay, "formatTime": func(value time.Time) string {
 			if value.IsZero() {
 				return "unknown"
 			}
@@ -668,6 +672,14 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 func projectColor(cwd string) string {
 	digest := sha256.Sum256([]byte(filepath.Base(cwd)))
 	return projectColors[int(digest[0])%len(projectColors)]
+}
+
+// Directories outside the project list have no stored letters, so theirs may repeat.
+func projectMonogram(view *pageView, cwd string) string {
+	if monogram, ok := view.ProjectMonograms[cwd]; ok {
+		return monogram
+	}
+	return sessions.ProjectMonogram(cwd)
 }
 func relativeTime(value time.Time) string {
 	if value.IsZero() {

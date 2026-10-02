@@ -195,12 +195,8 @@ export class ProjectSelectController {
       }
     }
     const icon = this.document.createElement("span");
-    if (option.dataset.projectOptionKind === "new") {
-      icon.className = "project-select-new-icon";
-      icon.textContent = "+";
-    } else {
-      icon.className = "project-identity-icon";
-    }
+    icon.className = "project-monogram";
+    icon.textContent = option.dataset.projectOptionKind === "new" ? "+" : option.dataset.projectMonogram || "";
     icon.setAttribute("aria-hidden", "true");
     container.append(icon);
 
