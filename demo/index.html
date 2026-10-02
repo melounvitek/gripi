@@ -336,7 +336,7 @@
     .sidebar-notification-toggle.is-disabled { color: var(--muted); }
     .sidebar-notification-toggle.is-blocked .sidebar-notification-state { color: var(--danger); }
     .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.66rem; font-weight: 500; line-height: 1.25; }
-    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); font-size: 0; }
+    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); }
     .session-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 0.74rem; line-height: 1.4; }
     .session-relation-tree-heading { cursor: pointer; color: var(--gold); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -986,23 +986,23 @@
             <div class="recent-sessions-header"><h2>Pinned</h2></div>
             <div class="pinned-sessions-list" id="pinned-sessions-list"></div>
           </section>
-          <div class="recent-sessions-header"><h2>Sessions</h2><button type="button" class="sidebar-icon-button sidebar-new-session-button" data-modal-open="new-session-modal"><span aria-hidden="true">+</span> New session</button></div>
+          <div class="recent-sessions-header"><h2>Sessions</h2><span class="sidebar-filter-count" data-sidebar-filter-count hidden></span><a class="sidebar-filters-clear" href="#" aria-label="Clear filters" data-sidebar-filters-clear hidden>clear</a><button type="button" class="sidebar-icon-button sidebar-new-session-button" data-modal-open="new-session-modal"><span aria-hidden="true">+</span> New session</button></div>
           <div class="sidebar-filters">
             <form class="sidebar-project-filter-form">
               <div class="sidebar-filter-row">
                 <div class="project-select" data-project-select>
                   <select class="sidebar-project-filter project-select-native-hidden" id="project-filter" aria-label="Filter sessions by project" data-sidebar-project-filter>
                     <option value="" data-project-option-kind="all">All projects</option>
-                    <option value="gripi" data-project-monogram="GR">gripi</option>
-                    <option value="website" data-project-monogram="WE">website</option>
-                    <option value="storefront" data-project-monogram="ST">storefront</option>
+                    <option value="gripi">gripi</option>
+                    <option value="website">website</option>
+                    <option value="storefront">storefront</option>
                   </select>
-                  <button type="button" class="project-select-trigger" id="project-select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="project-select-neutral-icon" aria-hidden="true">•</span><span class="project-select-trigger-label">All projects</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
+                  <button type="button" class="project-select-trigger" id="project-select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="project-identity-icon" aria-hidden="true"></span><span class="project-select-trigger-label">All projects</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
                   <div class="project-select-listbox" id="project-select-listbox" role="listbox" hidden>
-                    <div class="project-select-option is-active" role="option" aria-selected="true" data-project-value=""><span class="project-select-neutral-icon">•</span><span class="project-select-option-label">All projects</span></div>
-                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="gripi" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon">GR</span><span class="project-select-option-label">gripi</span></div>
-                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="website" style="--project-identity-bg:#1e334d;--project-identity-fg:#9fc5ff"><span class="project-identity-icon">WE</span><span class="project-select-option-label">website</span></div>
-                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="storefront" style="--project-identity-bg:#203c2b;--project-identity-fg:#b5e3b0"><span class="project-identity-icon">ST</span><span class="project-select-option-label">storefront</span></div>
+                    <div class="project-select-option is-active" role="option" aria-selected="true" data-project-value=""><span class="picker-mark" aria-hidden="true">→</span><span class="picker-mark" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true"></span><span class="project-select-option-label">All projects</span></div>
+                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="gripi"><span class="picker-mark" aria-hidden="true">→</span><span class="picker-mark" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#ff9b73"></span><span class="project-select-option-label">gripi</span></div>
+                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="website"><span class="picker-mark" aria-hidden="true">→</span><span class="picker-mark" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#9fc5ff"></span><span class="project-select-option-label">website</span></div>
+                    <div class="project-select-option" role="option" aria-selected="false" data-project-value="storefront"><span class="picker-mark" aria-hidden="true">→</span><span class="picker-mark" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#b5e3b0"></span><span class="project-select-option-label">storefront</span></div>
                   </div>
                 </div>
                 <button type="button" class="sidebar-icon-button sidebar-search-toggle" title="Search sessions" aria-label="Search sessions" aria-expanded="false" aria-controls="sidebar-session-search" data-sidebar-search-toggle>⌕</button>
@@ -1010,10 +1010,9 @@
               </div>
             </form>
             <form id="sidebar-session-search" class="sidebar-session-search" role="search"><input type="search" name="session_search" placeholder="Search sessions" aria-label="Search sessions"></form>
-            <a class="sidebar-filters-clear" href="#" data-sidebar-filters-clear hidden>Clear filters</a>
           </div>
           <div class="sessions-list" id="sessions-list"></div>
-          <p class="empty sidebar-search-empty" id="sidebar-empty" hidden>No sessions match these filters.</p>
+          <p class="sidebar-search-empty" id="sidebar-empty" hidden>No sessions match.</p>
         </section>
       </div>
       <div class="sidebar-gateway-update" data-gateway-update hidden>
@@ -1034,7 +1033,7 @@
         <label for="mobile-session-toggle" class="mobile-sessions-button" aria-label="Open sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
         <div class="session-header-title" id="session-header-title">
           <h1 class="session-header-name">Welcome to Gripi</h1>
-          <div class="session-header-project" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon" aria-hidden="true">GR</span><span class="session-header-project-label">gripi</span><span class="session-header-project-separator" aria-hidden="true">·</span><div class="session-header-view-toggle" role="group" aria-label="Agent activity" data-conversation-view-toggle><button type="button" class="session-header-view-option" data-conversation-view="brief" aria-pressed="false" title="Collapse tool calls, results, and thinking into summaries"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h9"/></svg><span class="session-header-view-option-label">Brief</span></span></button><button type="button" class="session-header-view-option" data-conversation-view="full" aria-pressed="true" title="Include tool calls, results, and thinking"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 10h14M5 15h14M5 20h9"/></svg><span class="session-header-view-option-label">Full</span></span></button></div></div>
+          <div class="session-header-project" style="--project-identity-fg:#ff9b73"><span class="project-identity-icon session-header-project-icon" aria-hidden="true"></span><span class="session-header-project-label">gripi</span><span class="session-header-project-separator" aria-hidden="true">·</span><div class="session-header-view-toggle" role="group" aria-label="Agent activity" data-conversation-view-toggle><button type="button" class="session-header-view-option" data-conversation-view="brief" aria-pressed="false" title="Collapse tool calls, results, and thinking into summaries"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h9"/></svg><span class="session-header-view-option-label">Brief</span></span></button><button type="button" class="session-header-view-option" data-conversation-view="full" aria-pressed="true" title="Include tool calls, results, and thinking"><span class="session-header-view-option-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 10h14M5 15h14M5 20h9"/></svg><span class="session-header-view-option-label">Full</span></span></button></div></div>
         </div>
         <div class="session-header-actions">
           <a class="session-header-action session-header-window-action" href="#" title="Open session in new window" aria-label="Open session in new window" data-demo-disabled>↗</a>
@@ -1102,12 +1101,12 @@
               <select id="new-session-known-cwd" name="known_cwd" class="project-select-native-hidden" aria-labelledby="new-session-project-label" data-new-session-known-cwd>
                 <option value="gripi">gripi — /home/demo/Work/gripi</option><option value="website">website — /home/demo/Work/website</option><option value="storefront">storefront — /home/demo/Work/storefront</option><option value="__new_path__" data-project-option-kind="new">Add new path…</option>
               </select>
-              <button type="button" class="project-select-trigger" data-new-session-project-trigger data-modal-default-focus aria-haspopup="listbox" aria-expanded="false"><span class="project-identity-icon" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73">GR</span><span class="project-select-trigger-label">gripi — /home/demo/Work/gripi</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
+              <button type="button" class="project-select-trigger" data-new-session-project-trigger data-modal-default-focus aria-haspopup="listbox" aria-expanded="false"><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#ff9b73"></span><span class="project-select-trigger-label">gripi — /home/demo/Work/gripi</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
               <div class="project-select-listbox" data-new-session-project-list role="listbox" hidden>
-                <div class="project-select-option is-active" role="option" aria-selected="true" data-new-project="gripi"><span class="project-identity-icon" style="--project-identity-bg:#4a281f;--project-identity-fg:#ff9b73">GR</span><span class="project-select-option-label">gripi — /home/demo/Work/gripi</span></div>
-                <div class="project-select-option" role="option" aria-selected="false" data-new-project="website"><span class="project-identity-icon" style="--project-identity-bg:#1e334d;--project-identity-fg:#9fc5ff">WE</span><span class="project-select-option-label">website — /home/demo/Work/website</span></div>
-                <div class="project-select-option" role="option" aria-selected="false" data-new-project="storefront"><span class="project-identity-icon" style="--project-identity-bg:#203c2b;--project-identity-fg:#b5e3b0">ST</span><span class="project-select-option-label">storefront — /home/demo/Work/storefront</span></div>
-                <div class="project-select-option" role="option" aria-selected="false" data-new-project="__new_path__"><span class="project-select-neutral-icon">+</span><span class="project-select-option-label">Add new path…</span></div>
+                <div class="project-select-option is-active" role="option" aria-selected="true" data-new-project="gripi"><span class="picker-mark" aria-hidden="true">→</span><span class="picker-mark" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#ff9b73"></span><span class="project-select-option-label">gripi — /home/demo/Work/gripi</span></div>
+                <div class="project-select-option" role="option" aria-selected="false" data-new-project="website"><span class="picker-mark" aria-hidden="true">→</span><span class="picker-mark" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#9fc5ff"></span><span class="project-select-option-label">website — /home/demo/Work/website</span></div>
+                <div class="project-select-option" role="option" aria-selected="false" data-new-project="storefront"><span class="picker-mark" aria-hidden="true">→</span><span class="picker-mark" aria-hidden="true">✓</span><span class="project-identity-icon" aria-hidden="true" style="--project-identity-fg:#b5e3b0"></span><span class="project-select-option-label">storefront — /home/demo/Work/storefront</span></div>
+                <div class="project-select-option" role="option" aria-selected="false" data-new-project="__new_path__"><span class="picker-mark" aria-hidden="true">→</span><span class="picker-mark" aria-hidden="true">✓</span><span class="project-select-new-icon" aria-hidden="true">+</span><span class="project-select-option-label">Add new path…</span></div>
               </div>
             </div>
           </div>

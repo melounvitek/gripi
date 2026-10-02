@@ -5,7 +5,7 @@
   const TOUCH_TAP_TOLERANCE = 10;
   const initialSessions = [
     {
-      id: "welcome", name: "Welcome to Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "now", pinned: true,
+      id: "welcome", name: "Welcome to Gripi", project: "gripi", color: "#ff9b73", age: "now", pinned: true,
       messages: [
         { role: "user", text: "What is Gripi?" },
         { role: "thinking", text: "I’ll summarize what Gripi adds while keeping Pi’s role clear." },
@@ -13,7 +13,7 @@
       ]
     },
     {
-      id: "install", name: "Install Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "1m", pinned: false,
+      id: "install", name: "Install Gripi", project: "gripi", color: "#ff9b73", age: "1m", pinned: false,
       messages: [
         { role: "user", text: "How do I install Gripi and the desktop app?" },
         { role: "thinking", text: "I’ll separate gateway and desktop installation so each can be set up independently." },
@@ -22,7 +22,7 @@
       ]
     },
     {
-      id: "new-to-pi", name: "New to Pi? Start here", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "2m", pinned: false,
+      id: "new-to-pi", name: "New to Pi? Start here", project: "gripi", color: "#ff9b73", age: "2m", pinned: false,
       messages: [
         { role: "user", text: "I found Gripi before Pi. Is this a good place to start?" },
         { role: "thinking", text: "I’ll distinguish Pi itself from the Gripi interface and point to the best starting place." },
@@ -30,7 +30,7 @@
       ]
     },
     {
-      id: "pi-stays-pi", name: "Does Gripi change Pi?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "5m", pinned: false,
+      id: "pi-stays-pi", name: "Does Gripi change Pi?", project: "gripi", color: "#ff9b73", age: "5m", pinned: false,
       messages: [
         { role: "user", text: "Does Gripi change how Pi behaves?" },
         { role: "thinking", text: "I’ll check the boundary between Gripi and the Pi runtime." },
@@ -38,7 +38,7 @@
       ]
     },
     {
-      id: "unsupported", name: "Extension support in Gripi", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "9m", pinned: false,
+      id: "unsupported", name: "Extension support in Gripi", project: "gripi", color: "#ff9b73", age: "9m", pinned: false,
       messages: [
         { role: "user", text: "Which Pi extension features work in Gripi?" },
         { role: "thinking", text: "I’ll separate browser-compatible extension features from terminal-only UI behavior." },
@@ -46,7 +46,7 @@
       ]
     },
     {
-      id: "always-on", name: "Run Gripi on an always-on computer", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "14m", pinned: false,
+      id: "always-on", name: "Run Gripi on an always-on computer", project: "gripi", color: "#ff9b73", age: "14m", pinned: false,
       messages: [
         { role: "user", text: "I have an office PC or spare computer that stays on. Can it be my gateway?" },
         { role: "thinking", text: "I’ll outline a reliable private-network setup." },
@@ -54,7 +54,7 @@
       ]
     },
     {
-      id: "tailscale", name: "Access Gripi remotely with Tailscale", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "22m", pinned: false,
+      id: "tailscale", name: "Access Gripi remotely with Tailscale", project: "gripi", color: "#ff9b73", age: "22m", pinned: false,
       messages: [
         { role: "user", text: "What is the recommended way to connect from another device?" },
         { role: "thinking", text: "I’ll recommend a private-network setup that avoids exposing the gateway publicly." },
@@ -62,7 +62,7 @@
       ]
     },
     {
-      id: "mobile", name: "Use Gripi from a phone or tablet", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "31m", pinned: false,
+      id: "mobile", name: "Use Gripi from a phone or tablet", project: "gripi", color: "#ff9b73", age: "31m", pinned: false,
       messages: [
         { role: "user", text: "Can I use Gripi from my phone?" },
         { role: "thinking", text: "I’ll cover the private connection and the mobile web-app experience." },
@@ -70,7 +70,7 @@
       ]
     },
     {
-      id: "vps", name: "Should I run Gripi on a VPS?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "45m", pinned: false,
+      id: "vps", name: "Should I run Gripi on a VPS?", project: "gripi", color: "#ff9b73", age: "45m", pinned: false,
       messages: [
         { role: "user", text: "Could I deploy Gripi on an internet-hosted VPS?" },
         { role: "thinking", text: "This needs a strong warning because the gateway can execute Pi tools with the server user’s access." },
@@ -80,14 +80,14 @@
       ]
     },
     {
-      id: "demo-fidelity", name: "Does this look 1:1 realistic as the real product?", project: "gripi", monogram: "GR", color: "#ff9b73", background: "#4a281f", age: "1h", pinned: false,
+      id: "demo-fidelity", name: "Does this look 1:1 realistic as the real product?", project: "gripi", color: "#ff9b73", age: "1h", pinned: false,
       messages: [
         { role: "user", text: "Does this static demo look exactly like the real product?" },
         { role: "thinking", text: "I’ll be explicit about what this simulation simplifies." },
         { role: "assistant", text: "Not exactly. The demo uses the same overall interface, but some interactions and details are simplified, and a few parts are not as polished here as they are in the real app. A connected Gripi gateway has the full live session behavior, real tool output, and production rendering polish." }
       ]
     },
-    { id: "release-notes", name: "Draft release notes", project: "website", monogram: "WE", color: "#9fc5ff", background: "#1e334d", age: "2h", pinned: false, messages: [
+    { id: "release-notes", name: "Draft release notes", project: "website", color: "#9fc5ff", age: "2h", pinned: false, messages: [
       { role: "user", text: "Draft concise release notes from the changes in this branch.", time: "Monday" },
       { role: "thinking", text: "I’ll inspect the branch diff, then turn the user-facing parts into short release notes.", time: "Monday" },
       { role: "tool", title: "bash git status --short && git diff --stat origin/main...HEAD", text: " M app/components/sidebar/search.tsx\n M app/components/composer/index.tsx\n M app/lib/drafts.ts\n\n app/components/sidebar/search.tsx | 42 ++++++++++++++++++++++----\n app/components/composer/index.tsx | 18 +++++++----\n app/lib/drafts.ts                 | 27 +++++++++++++++--\n 3 files changed, 73 insertions(+), 14 deletions(-)", time: "Monday" },
@@ -95,7 +95,7 @@
       { role: "tool", title: "write content/app/releases.md", text: "Wrote release note draft with three bullets and a short upgrade note.", time: "Monday" },
       { role: "assistant", text: "Drafted concise release notes in `content/app/releases.md`.\n\nWhat’s new\n\n• Find sessions faster with sidebar search.\n• Enjoy a cleaner composer on mobile screens.\n• Keep unsent drafts when reconnecting.", time: "Monday" }
     ] },
-    { id: "billing-spec", name: "Investigate flaky checkout spec", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "1d", pinned: false, messages: [
+    { id: "billing-spec", name: "Investigate flaky checkout spec", project: "storefront", color: "#b5e3b0", age: "1d", pinned: false, messages: [
       { role: "user", text: "The checkout browser spec fails about one run in twenty. Can you investigate without weakening its assertions?", time: "Last week" },
       { role: "thinking", text: "I’ll reproduce it repeatedly and compare browser state on failed runs before changing the spec.", time: "Last week" },
       { role: "tool", title: "bash ./scripts/test-browser checkout --seed 18422", text: "Run seed: 18422\n\nFailure: checkout completes after payment\nExpected to find text \"Order confirmed\" in \"Redirecting…\"", time: "Last week" },
@@ -104,7 +104,7 @@
       { role: "tool", title: "bash ./scripts/test-browser checkout", text: "20 runs, 86 assertions, 0 failures, 0 errors, 0 skips", time: "Last week" },
       { role: "assistant", text: "The assertion sometimes ran before the payment redirect completed. I kept the same user-visible assertions and added an explicit wait for the order page navigation.\n\nFiles changed\n\n• `tests/browser/checkout-flow.test`", time: "Last week" }
     ] },
-    { id: "docs-navigation", name: "Simplify documentation navigation", project: "website", monogram: "WE", color: "#9fc5ff", background: "#1e334d", age: "31d", pinned: false, messages: [
+    { id: "docs-navigation", name: "Simplify documentation navigation", project: "website", color: "#9fc5ff", age: "31d", pinned: false, messages: [
       { role: "user", text: "Can you reorganize the setup and configuration guides?", time: "Last month" },
       { role: "thinking", text: "I’ll map the current docs first so the new navigation follows existing content instead of inventing new sections.", time: "Last month" },
       { role: "tool", title: "bash find docs -maxdepth 2 -type f | sort", text: "docs/configuration.md\ndocs/deployment.md\ndocs/getting-started.md\ndocs/troubleshooting.md", time: "Last month" },
@@ -113,7 +113,7 @@
       { role: "tool", title: "edit docs/configuration.md", text: "- See deployment.md for hosting details.\n+ See setup.md for local setup and deployment.md for hosting details.", time: "Last month" },
       { role: "assistant", text: "Reorganized the guides around installation, local use, and remote access. I kept the existing content, moved setup steps into `docs/setup.md`, and added cross-links from configuration and deployment.", time: "Last month" }
     ] },
-    { id: "checkout-copy", name: "Polish checkout confirmation copy", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "31d", pinned: false, messages: [
+    { id: "checkout-copy", name: "Polish checkout confirmation copy", project: "storefront", color: "#b5e3b0", age: "31d", pinned: false, messages: [
       { role: "user", text: "Make the confirmation screen clearer without adding more steps.", time: "Last month" },
       { role: "thinking", text: "I’ll keep the checkout flow unchanged and only adjust the confirmation page copy/layout.", time: "Last month" },
       { role: "tool", title: "read templates/checkout-confirmation.html", text: "<h1>Thank you for completing checkout</h1>\n<p>Your order is being prepared.</p>\n<p>Order {{ order_number }}</p>", time: "Last month" },
@@ -121,7 +121,7 @@
       { role: "tool", title: "bash ./scripts/test-browser checkout", text: "20 runs, 89 assertions, 0 failures, 0 errors, 0 skips", time: "Last month" },
       { role: "assistant", text: "Shortened the heading and surfaced the delivery estimate next to the order number. No checkout steps changed.\n\nFiles changed\n\n• `templates/checkout-confirmation.html`", time: "Last month" }
     ] },
-    { id: "ci-cache", name: "Speed up CI dependency caching", project: "storefront", monogram: "ST", color: "#b5e3b0", background: "#203c2b", age: "62d", pinned: false, messages: [
+    { id: "ci-cache", name: "Speed up CI dependency caching", project: "storefront", color: "#b5e3b0", age: "62d", pinned: false, messages: [
       { role: "user", text: "The test workflow spends too long installing unchanged dependencies.", time: "2 months ago" },
       { role: "thinking", text: "I’ll check which dependency managers are used and keep the cache key tied to lockfiles, not unrelated source changes.", time: "2 months ago" },
       { role: "tool", title: "read .github/workflows/test.yml", text: "- uses: actions/cache@v4\n  with:\n    path: .cache/dependencies\n    key: dependencies-${{ github.sha }}", time: "2 months ago" },
@@ -177,9 +177,7 @@
       id: String(session.id),
       name: String(session.name || "Demo session"),
       project: String(session.project || "project"),
-      monogram: String(session.monogram || "PR").slice(0, 3),
       color: safeIdentityColor(session.color, "#ff9b73"),
-      background: safeIdentityColor(session.background, "#4a281f"),
       age: String(session.age || "now"),
       pinned: !!session.pinned,
       messages: ensureSessionActivity(messages)
@@ -271,7 +269,7 @@
     history: document.getElementById("history-output"), live: document.getElementById("live-output"), scroll: document.getElementById("conversation-scroll"), sidebarScroll: document.querySelector(".session-sidebar-content"),
     pinned: document.getElementById("pinned-sessions-list"), sessions: document.getElementById("sessions-list"), empty: document.getElementById("sidebar-empty"),
     project: document.getElementById("project-filter"), projectTrigger: document.getElementById("project-select-trigger"), projectList: document.getElementById("project-select-listbox"),
-    searchForm: document.getElementById("sidebar-session-search"), search: document.querySelector('#sidebar-session-search input[type="search"]'), clearFilters: document.querySelector("[data-sidebar-filters-clear]"),
+    searchForm: document.getElementById("sidebar-session-search"), search: document.querySelector('#sidebar-session-search input[type="search"]'), clearFilters: document.querySelector("[data-sidebar-filters-clear]"), filterCount: document.querySelector("[data-sidebar-filter-count]"), searchToggle: document.querySelector("[data-sidebar-search-toggle]"),
     headerName: document.querySelector(".session-header-name"), headerProject: document.querySelector(".session-header-project"), form: document.getElementById("prompt-form"), prompt: document.querySelector(".prompt-form textarea"),
     panel: document.querySelector(".conversation-panel"), viewToggle: document.querySelector("[data-conversation-view-toggle]"),
     state: document.querySelector(".composer-state"), stop: document.getElementById("stop-button"), commands: document.getElementById("command-list"), attachmentTray: document.querySelector(".attachment-tray"),
@@ -423,7 +421,6 @@
     return date.getMonth() !== now.getMonth() || date.getDate() !== now.getDate() ? `${day} ${time}` : time;
   }
   function applyIdentity(target, session) {
-    target.style.setProperty("--project-identity-bg", safeIdentityColor(session.background, "#4a281f"));
     target.style.setProperty("--project-identity-fg", safeIdentityColor(session.color, "#ff9b73"));
   }
 
@@ -543,7 +540,7 @@
     content.className = "session-content";
     const title = document.createElement("div"); title.className = "session-title"; title.textContent = session.name;
     const project = document.createElement("div"); project.className = "session-project"; applyIdentity(project, session);
-    const monogram = document.createElement("span"); monogram.className = "session-project-monogram"; monogram.textContent = session.monogram;
+    const monogram = document.createElement("span"); monogram.className = "session-project-monogram";
     const projectLabel = document.createElement("span"); projectLabel.className = "session-project-label"; projectLabel.textContent = session.project;
     project.append(monogram, projectLabel);
     const meta = document.createElement("div"); meta.className = "session-meta"; meta.textContent = session.age;
@@ -586,7 +583,10 @@
       element.sessions.append(sessionRow(session));
     });
     element.empty.hidden = visible.length > 0;
-    element.clearFilters.hidden = !element.project.value && !element.search.value;
+    const query = element.search.value.trim();
+    element.clearFilters.hidden = element.filterCount.hidden = !element.project.value && !query;
+    element.filterCount.textContent = `${visible.filter((session) => !session.pinned).length} of ${sessions.filter((session) => !session.pinned).length}`;
+    element.searchToggle.classList.toggle("is-active", !!query);
     if (element.sidebarScroll) element.sidebarScroll.scrollTop = scrollTop;
   }
 
@@ -605,7 +605,6 @@
     const session = currentSession();
     element.headerName.textContent = session.name;
     applyIdentity(element.headerProject, session);
-    element.headerProject.querySelector(".session-header-project-icon").textContent = session.monogram;
     element.headerProject.querySelector(".session-header-project-label").textContent = session.project;
     const relatedSession = sessions.find(({ id }) => id === (session.id === defaultSessionId ? "new-to-pi" : defaultSessionId));
     element.treeTarget.dataset.demoTreeTarget = relatedSession.id;
@@ -866,7 +865,7 @@
   syncScrollbarGutter();
   window.addEventListener("resize", syncScrollbarGutter);
 
-  document.querySelector("[data-sidebar-search-toggle]").addEventListener("click", (event) => { const open = !element.searchForm.classList.contains("is-open"); element.searchForm.classList.toggle("is-open", open); event.currentTarget.classList.toggle("is-active", open); event.currentTarget.setAttribute("aria-expanded", String(open)); if (open) element.search.focus(); });
+  element.searchToggle.addEventListener("click", (event) => { const open = !element.searchForm.classList.contains("is-open"); element.searchForm.classList.toggle("is-open", open); event.currentTarget.setAttribute("aria-expanded", String(open)); if (open) element.search.focus(); });
   element.search.addEventListener("input", renderSidebar);
   function openSelectOnFirstTouch(trigger, closed, open) {
     let touchStart = null;
@@ -897,7 +896,7 @@
   function selectProject(value) {
     const option = element.projectList.querySelector(`[data-project-value="${value}"]`) || element.projectList.querySelector('[data-project-value=""]');
     element.project.value = option.dataset.projectValue;
-    element.projectTrigger.querySelector(":scope > :first-child").replaceWith(option.firstElementChild.cloneNode(true));
+    element.projectTrigger.querySelector(":scope > :first-child").replaceWith(option.querySelector(".project-identity-icon").cloneNode(true));
     element.projectTrigger.querySelector(".project-select-trigger-label").textContent = option.querySelector(".project-select-option-label").textContent;
     element.projectList.querySelectorAll("[role=option]").forEach((item) => { item.classList.toggle("is-active", item === option); item.setAttribute("aria-selected", String(item === option)); });
     element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); renderSidebar();
@@ -907,7 +906,7 @@
     element.projectList.hidden = false;
     element.projectTrigger.setAttribute("aria-expanded", "true");
     const rect = element.projectTrigger.getBoundingClientRect();
-    Object.assign(element.projectList.style, { left: `${rect.left}px`, top: `${rect.bottom + 4}px`, width: `${rect.width}px` });
+    Object.assign(element.projectList.style, { left: `${rect.left}px`, top: `${rect.bottom + 4}px`, width: `${Math.max(rect.width, 240)}px` });
   }
   openSelectOnFirstTouch(element.projectTrigger, () => element.projectList.hidden, openProjectList);
   element.projectTrigger.addEventListener("click", () => {
@@ -948,7 +947,7 @@
   document.querySelector("[data-current-session-find-next]").addEventListener("click", () => moveFind(1));
   document.querySelector("[data-current-session-find-close]").addEventListener("click", () => resetFind(true));
   document.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); element.searchForm.classList.add("is-open"); const searchToggle = document.querySelector("[data-sidebar-search-toggle]"); searchToggle.classList.add("is-active"); searchToggle.setAttribute("aria-expanded", "true"); if (matchMedia("(min-width: 761px)").matches) setDesktopSidebarHidden(false); else document.getElementById("mobile-session-toggle").checked = true; element.search.focus(); }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); element.searchForm.classList.add("is-open"); element.searchToggle.setAttribute("aria-expanded", "true"); if (matchMedia("(min-width: 761px)").matches) setDesktopSidebarHidden(false); else document.getElementById("mobile-session-toggle").checked = true; element.search.focus(); }
     if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); const find = document.querySelector("[data-current-session-find]"); find.hidden = false; find.querySelector("input").focus(); }
     if (event.key === "Escape") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (modal) closeModal(modal); else if (!element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); element.projectTrigger.focus(); } }
     if (event.key === "Tab") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (!modal) return; const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")]; if (!focusable.length) return; const first = focusable[0], last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
@@ -988,7 +987,7 @@
       newSessionMessage.textContent = "Enter an existing directory.";
       newSessionPathInput.focus();
     } else {
-      newSessionTrigger.querySelector(":scope > :first-child").replaceWith(option.firstElementChild.cloneNode(true));
+      newSessionTrigger.querySelector(":scope > :first-child").replaceWith(option.querySelector(".project-identity-icon").cloneNode(true));
       newSessionTrigger.querySelector(".project-select-trigger-label").textContent = option.querySelector(".project-select-option-label").textContent;
       newSessionCwd.value = `/home/demo/Work/${value}`;
     }
@@ -999,15 +998,15 @@
   document.querySelector(".new-session-cwd-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const identities = {
-      gripi: { monogram: "GR", color: "#ff9b73", background: "#4a281f" },
-      website: { monogram: "WE", color: "#9fc5ff", background: "#1e334d" },
-      storefront: { monogram: "ST", color: "#b5e3b0", background: "#203c2b" }
+      gripi: { color: "#ff9b73" },
+      website: { color: "#9fc5ff" },
+      storefront: { color: "#b5e3b0" }
     };
     const customMode = new FormData(event.target).get("known_cwd") === "__new_path__";
     const cwd = newSessionCwd.value.trim();
     if (!cwd.startsWith("/")) { newSessionMessage.textContent = "Enter an absolute directory path."; newSessionMessage.classList.add("is-invalid"); if (customMode) newSessionPathInput.focus(); return; }
     const project = cwd.split("/").filter(Boolean).pop() || "project";
-    const identity = identities[project] || { monogram: project.slice(0, 2).toUpperCase(), color: "#f0c674", background: "#3c3728" };
+    const identity = identities[project] || { color: "#f0c674" };
     const id = `local-${Date.now()}`;
     sessions.unshift(normalizeSession({ id, name: "New local demo session", project, ...identity, age: "now", pinned: false, messages: [{ role: "assistant", text: "This representative session was created locally. Enter a prompt to try streaming.", time: timeLabel() }] }));
     closeModal(event.target.closest("[data-modal]")); switchSession(id);

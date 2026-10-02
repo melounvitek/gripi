@@ -317,7 +317,7 @@
     .sidebar-notification-toggle.is-disabled { color: var(--muted); }
     .sidebar-notification-toggle.is-blocked .sidebar-notification-state { color: var(--danger); }
     .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.66rem; font-weight: 500; line-height: 1.25; }
-    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); font-size: 0; }
+    .project-identity-icon, .session-project-monogram { flex: 0 0 auto; display: inline-flex; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); }
     .session-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 0.74rem; line-height: 1.4; }
     .session-relation-tree-heading { cursor: pointer; color: var(--gold); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
