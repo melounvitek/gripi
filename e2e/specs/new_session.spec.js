@@ -34,6 +34,23 @@ test("delete a pending session before its first assistant response", async ({ pa
   await expect(page.getByRole("heading", { level: 1, name: sessions.history })).toBeVisible();
 });
 
+test("a search emptied by typing is not sent with a new session", async ({ page }) => {
+  await page.goto(`/?${new URLSearchParams({ session_search: "History Desktop" })}`);
+  await page.getByRole("searchbox", { name: "Search sessions" }).fill("");
+  await expect.poll(() => new URL(page.url()).searchParams.get("session_search")).toBe(null);
+  let posted;
+  await page.route("**/sessions/new_at_cwd", (route) => {
+    posted = route.request().postData();
+    return route.fulfill({ status: 422, contentType: "application/json", body: "{}" });
+  });
+
+  await page.getByRole("button", { name: "New session", exact: true }).click();
+  await page.getByRole("dialog", { name: "New session" }).getByRole("button", { name: "Start session" }).click();
+
+  await expect.poll(() => posted).toBeTruthy();
+  expect(posted).not.toContain("session_search");
+});
+
 test("start a session in a configured directory and persist its first response", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "New session" }).click();

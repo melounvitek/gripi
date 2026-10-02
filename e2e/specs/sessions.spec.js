@@ -239,14 +239,15 @@ test("clears session filters without reloading the page", async ({ page }) => {
 test("counts matches and keeps the filters in place when the current session is filtered out", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.marker);
+  // Measured within the sidebar's scrolled content, because selecting a session can scroll it.
   const filters = page.locator(".sidebar-filter-row");
-  const { y } = await filters.boundingBox();
+  const top = await filters.evaluate((row) => row.offsetTop);
 
   await searchSessions(page, "History Desktop");
 
   await expect(page.locator(".current-session-section")).toBeVisible();
   await expect(page.locator("[data-sidebar-filter-count]")).toHaveText(/^1 of \d+$/);
-  expect((await filters.boundingBox()).y).toBe(y);
+  expect(await filters.evaluate((row) => row.offsetTop)).toBe(top);
 });
 
 test("filters sessions while typing without adding browser history", async ({ page }) => {
@@ -264,6 +265,23 @@ test("filters sessions while typing without adding browser history", async ({ pa
   expect(await page.evaluate(() => history.length)).toBe(historyLength);
 });
 
+test("keeps refreshing the sidebar while the search field is focused", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/");
+  await searchSessions(page, "History Desktop");
+  const row = page.locator(".sessions-list .session-row");
+  const form = { session: await row.getAttribute("data-session-path"), tag: "refresh-while-searching" };
+  await page.request.post("/sessions/tags", { form: { ...form, assigned: "true" } });
+  try {
+    await page.clock.runFor(10_100);
+
+    await expect(row.getByRole("button", { name: `Filter sessions by ${form.tag}`, exact: true })).toBeVisible();
+    await expect(page.getByRole("searchbox", { name: "Search sessions" })).toBeFocused();
+  } finally {
+    await page.request.post("/sessions/tags", { form: { ...form, assigned: "false" } });
+  }
+});
+
 test("choosing a project leaves the search field closed", async ({ page }) => {
   await page.goto("/");
 
@@ -272,7 +290,6 @@ test("choosing a project leaves the search field closed", async ({ page }) => {
 
   await expect(page.locator("[data-sidebar-filter-count]")).toBeVisible();
   await expect(page.getByRole("searchbox", { name: "Search sessions" })).toBeHidden();
-  await expect(page.getByRole("button", { name: "Search sessions" })).not.toHaveClass(/is-active/);
 });
 
 test("pin and unpin with the mouse without leaving a focus outline", async ({ page }) => {

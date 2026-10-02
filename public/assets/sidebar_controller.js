@@ -13,6 +13,7 @@ export class SidebarController {
     this.notifyFinalReply = notifyFinalReply;
     this.element = null;
     this.refreshTimer = null;
+    this.searchTimer = null;
     this.asyncEpoch = 0;
     this.refreshRequestVersion = 0;
     this.lastInteractionAt = 0;
@@ -72,6 +73,7 @@ export class SidebarController {
 
   invalidate({ clearSessionsLimit = false } = {}) {
     this.asyncEpoch += 1;
+    if (this.filterOperationActive) this.setFiltering(false);
     this.filterOperationActive = false;
     clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
@@ -342,10 +344,11 @@ export class SidebarController {
     const query = form.querySelector('input[name="session_search"]')?.value.trim() || "";
     if (query) targetUrl.searchParams.set("session_search", query);
     else targetUrl.searchParams.delete("session_search");
-    return this.applyFilters(targetUrl, { preserveSearch: true });
+    return this.applyFilters(targetUrl, { searchOnly: true });
   }
 
-  async applyFilters(targetUrl, { preserveSearch = false } = {}) {
+  // A search-only change keeps the field being typed in and the scroll position, and skips the New session dialog, which follows only the project filter.
+  async applyFilters(targetUrl, { searchOnly = false } = {}) {
     const refreshRequestVersion = this.refreshRequestVersion;
     this.setFiltering(true);
     this.filterOperationActive = true;
@@ -355,21 +358,20 @@ export class SidebarController {
     const epoch = ++this.asyncEpoch;
     const boundElement = this.element;
     try {
-      const [sidebarResponse, modalResponse] = await Promise.all([
-        fetch(this.fragmentUrl(targetUrl.href)),
-        fetch(newSessionModalUrl(targetUrl.href))
-      ]);
+      const urls = [this.fragmentUrl(targetUrl.href)];
+      if (!searchOnly) urls.push(newSessionModalUrl(targetUrl.href));
+      const responses = await Promise.all(urls.map((url) => fetch(url)));
       if (!this.current(epoch, boundElement)) return null;
-      if (!sidebarResponse.ok || !modalResponse.ok) throw new Error("Sidebar filter refresh failed");
-      const [html, modalHtml] = await Promise.all([sidebarResponse.text(), modalResponse.text()]);
+      if (responses.some((response) => !response.ok)) throw new Error("Sidebar filter refresh failed");
+      const [html, modalHtml] = await Promise.all(responses.map((response) => response.text()));
       if (!this.current(epoch, boundElement)) return null;
 
       this.filterOperationActive = false;
-      this.replace(html, { scrollTop: 0, notify: false, preserveSearch });
-      this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-filtered", { detail: { modalHtml } }));
+      this.replace(html, { scrollTop: searchOnly ? undefined : 0, notify: false, preserveSearch: searchOnly });
+      if (!searchOnly) this.document.dispatchEvent(new this.window.CustomEvent("gripi:sidebar-filtered", { detail: { modalHtml } }));
       this.window.history.replaceState(this.window.history.state, "", targetUrl.href);
       this.scheduleRefresh(refreshRequestVersion !== this.refreshRequestVersion ? 0 : undefined);
-      return modalHtml;
+      return html;
     } catch (error) {
       if (!this.current(epoch, boundElement)) return null;
       this.filterOperationActive = false;
@@ -506,7 +508,7 @@ export class SidebarController {
   }
 
   controlsActive() {
-    return this.projectSelectController.isActive(this.element) || !!this.document.activeElement?.closest?.(".sidebar-session-search") || this.document.body.classList.contains("session-shortcuts-visible") || this.document.body.classList.contains("session-pin-operation-active");
+    return this.projectSelectController.isActive(this.element) || this.document.body.classList.contains("session-shortcuts-visible") || this.document.body.classList.contains("session-pin-operation-active");
   }
 
   currentSessionPath() {
