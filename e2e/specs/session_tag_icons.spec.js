@@ -37,7 +37,7 @@ for (const width of [320, 393, 1440]) {
         const last = await overflow.boundingBox();
         const bounds = await row.boundingBox();
         if (isMobile || width <= 760) {
-          // Touch rows keep one line: project dot, title, tags, then the time.
+          // Touch rows keep one line: project letters, title, tags, then the time.
           const title = await row.locator(".session-title").boundingBox();
           const meta = await row.locator(".session-meta").boundingBox();
           expect(project.x + project.width).toBeLessThanOrEqual(title.x);
@@ -120,7 +120,7 @@ for (const width of [320, 393, 1440]) {
         element.append(indicator);
       });
       expect(await hoveredTitle(".session-indicators [title]")).toBe("Forked session");
-      // The project dot, and on touch the small tag glyphs, navigate via the row link on the first tap.
+      // The project letters, and on touch the small tag glyphs, navigate via the row link on the first tap.
       if (isMobile) {
         const glyph = await icon.boundingBox();
         await page.touchscreen.tap(glyph.x + glyph.width / 2, glyph.y + glyph.height / 2);

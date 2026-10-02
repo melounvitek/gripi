@@ -35,7 +35,7 @@ for (const width of [320, 341, 393, 768, 1440]) {
       const checkLayout = async () => {
         await expect(icon.locator("svg")).toBeVisible();
         expect(await group.evaluate((element) => element.parentElement.classList.contains("session-header-project"))).toBe(true);
-        const project = await header.locator(".session-header-project-icon").boundingBox();
+        const project = await header.locator(width <= 340 ? ".project-monogram" : ".session-header-project-label").boundingBox();
         const icons = await group.boundingBox();
         const toggle = await activity.boundingBox();
         const bounds = await header.boundingBox();

@@ -292,6 +292,25 @@ test("choosing a project leaves the search field closed", async ({ page }) => {
   await expect(page.getByRole("searchbox", { name: "Search sessions" })).toBeHidden();
 });
 
+test("projects are marked by letters that no two projects share", async ({ page }) => {
+  await page.goto("/?show_all_sessions=1");
+  const row = page.locator(".session-row").filter({ has: page.locator(".session-title", { hasText: sessions.marker }) });
+  const trigger = page.getByRole("combobox", { name: "Filter sessions by project" });
+  const option = (name) => page.getByRole("option", { name, exact: true });
+  const letters = await row.locator(".project-monogram").textContent();
+
+  await trigger.click();
+  const marks = (await page.getByRole("option").locator(".project-monogram").allTextContents()).filter(Boolean);
+  expect(new Set(marks).size).toBe(marks.length);
+  await expect(option("contract-project").locator(".project-monogram")).toHaveText(letters);
+  // Both have the initials "cp", so whichever came second uses its first two letters instead.
+  expect([letters, await option("controls-project").locator(".project-monogram").textContent()].sort()).toEqual(["co", "cp"]);
+
+  await option("contract-project").click();
+  await expect(trigger.locator(".project-monogram")).toHaveText(letters);
+  await expect(page.locator(".sessions-list .session-row .project-monogram").first()).toHaveText(letters);
+});
+
 test("pin and unpin with the mouse without leaving a focus outline", async ({ page }) => {
   await page.goto("/?show_all_sessions=1");
   const row = page.locator(".session-row").filter({ has: page.locator(".session-title", { hasText: sessions.marker }) });

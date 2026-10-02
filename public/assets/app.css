@@ -203,8 +203,9 @@
     .sidebar-filter-row { position: relative; display: flex; align-items: center; gap: 0.15rem; }
     .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle) { height: 2.25rem; min-height: 0; padding-block: 0; }
     .sidebar-filter-row .sidebar-search-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; margin-left: auto; padding: 0; }
-    .sidebar-filter-row .project-select-trigger { grid-template-columns: 0.75rem minmax(0, 1fr) auto; padding-inline: 0.5rem 0.4rem; border: 0; border-radius: 0.25rem; background: transparent; font-size: 0.74rem; }
-    .sidebar-filter-row .project-select:has(option[value=""]:checked) .project-select-trigger { color: var(--muted); }
+    .sidebar-filter-row .project-select-trigger { grid-template-columns: 2ch minmax(0, 1fr) auto; padding-inline: 0.5rem 0.4rem; border: 0; border-radius: 0.25rem; background: transparent; font-size: 0.74rem; }
+    .sidebar-filter-row .project-select:has(option[value=""]:checked) .project-select-trigger { grid-template-columns: minmax(0, 1fr) auto; color: var(--muted); }
+    .sidebar-filter-row .project-select:has(option[value=""]:checked) .project-monogram { display: none; }
     .sidebar-filter-row :is(.project-select-trigger:is(:hover, [aria-expanded="true"]), .tag-filter-toggle:hover) { background: #ffffff08; }
     .sidebar-filter-row :is(.project-select-trigger, .sidebar-search-toggle, .tag-filter-toggle):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; box-shadow: none; }
     .sidebar-project-filter { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.8rem; font-weight: 500; background: var(--bg); }
@@ -234,8 +235,8 @@
     .sidebar-load-more.is-loading .sidebar-load-more-spinner { display: inline-block; }
     .session-row { position: relative; display: flex; align-items: center; gap: 0.5rem; min-height: 2rem; margin: 1px 0; padding: 0.25rem 0.5rem; border-radius: 0.25rem; transition: background 120ms ease; }
     .session-row > .session-details { display: contents; }
-    /* Every row starts with the same fixed slot: the project dot, or the terminal icon of a session active outside Gripi. */
-    .session-row .session-project { order: -1; flex: 0 0 0.75rem; margin: 0; }
+    /* Every row starts with the same fixed slot: the project letters, or the terminal icon of a session active outside Gripi. */
+    .session-row .session-project { order: -1; flex: 0 0 0.875rem; margin: 0; font-size: 0.7rem; }
     .session-row.is-external .session-project { display: none; }
     /* The time slot fits "13h" and shows the activity dot while Pi works. */
     .session-row .session-meta { flex: none; min-width: 3ch; overflow: visible; text-align: right; }
@@ -293,7 +294,7 @@
     .session-shortcut { position: absolute; z-index: 2; right: 0.5rem; top: 50%; transform: translateY(-50%); pointer-events: none; display: none; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; background: var(--panel); color: var(--accent); font-family: var(--mono); font-size: 0.72rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
     body.session-shortcuts-visible .session-shortcut { display: inline-flex; }
     .session-title-line { display: flex; align-items: center; gap: 0.5rem; }
-    .session-external-indicator { display: inline-flex; flex: 0 0 0.75rem; color: var(--muted); }
+    .session-external-indicator { display: inline-flex; flex: 0 0 0.875rem; color: var(--muted); }
     .session-external-indicator svg { width: 0.75rem; height: 0.75rem; stroke-width: 2; }
     .session-title { overflow: hidden; color: var(--copy); font-size: 0.84rem; font-weight: 400; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
     .session-row:has(a.session.selected) .session-title { color: var(--text); }
@@ -317,7 +318,10 @@
     .sidebar-notification-toggle.is-disabled { color: var(--muted); }
     .sidebar-notification-toggle.is-blocked .sidebar-notification-state { color: var(--danger); }
     .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.66rem; font-weight: 500; line-height: 1.25; }
-    .project-identity-icon { flex: 0 0 auto; display: inline-flex; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--project-identity-fg, var(--muted)); }
+    /* Two letters stand for a project; colours repeat once there are more projects than colours. */
+    .project-monogram { flex: none; width: 2ch; color: var(--project-identity-fg, var(--muted)); font-weight: 600; }
+    /* The header names the project, so it shows the letters only where the narrowest phones hide the name. */
+    @media (min-width: 341px) { .session-header-project .project-monogram { display: none; } }
     .session-project-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-relation-tree { max-width: min(42rem, 100%); margin-top: 0.45rem; padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 0.74rem; line-height: 1.4; }
     .session-relation-tree-heading { cursor: pointer; color: var(--gold); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -642,7 +646,6 @@
     .picker-cursor, .picker-check { flex: none; visibility: hidden; color: var(--accent); }
     .model-picker-row[aria-selected="true"] .picker-cursor, .model-picker-row[aria-current="true"] .picker-check, .project-select-option.is-active .picker-cursor, .project-select-option[aria-selected="true"] .picker-check, .tag-picker-option:focus-visible .picker-cursor, .tag-picker-option[aria-pressed="true"] .picker-check { visibility: visible; }
     .project-select-option-label { min-width: 0; overflow-wrap: anywhere; }
-    .project-select-new-icon { flex: none; width: 0.5rem; color: var(--muted); text-align: center; }
     /* Like Pi CLI's /model selector: plain mono lines rather than cards. */
     .model-picker-card { width: min(38rem, 100%); gap: 0.75rem; font-family: var(--mono); font-size: 0.86rem; }
     .model-picker-line { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; margin: 0; color: var(--muted); }

@@ -540,7 +540,7 @@
     content.className = "session-content";
     const title = document.createElement("div"); title.className = "session-title"; title.textContent = session.name;
     const project = document.createElement("div"); project.className = "session-project"; applyIdentity(project, session);
-    const icon = document.createElement("span"); icon.className = "project-identity-icon";
+    const icon = document.createElement("span"); icon.className = "project-monogram"; icon.setAttribute("aria-hidden", "true"); icon.textContent = session.project.slice(0, 2).toLowerCase();
     const projectLabel = document.createElement("span"); projectLabel.className = "session-project-label"; projectLabel.textContent = session.project;
     project.append(icon, projectLabel);
     const meta = document.createElement("div"); meta.className = "session-meta"; meta.textContent = session.age;
@@ -605,6 +605,7 @@
     const session = currentSession();
     element.headerName.textContent = session.name;
     applyIdentity(element.headerProject, session);
+    element.headerProject.querySelector(".project-monogram").textContent = session.project.slice(0, 2).toLowerCase();
     element.headerProject.querySelector(".session-header-project-label").textContent = session.project;
     const relatedSession = sessions.find(({ id }) => id === (session.id === defaultSessionId ? "new-to-pi" : defaultSessionId));
     element.treeTarget.dataset.demoTreeTarget = relatedSession.id;
@@ -896,7 +897,7 @@
   function selectProject(value) {
     const option = element.projectList.querySelector(`[data-project-value="${value}"]`) || element.projectList.querySelector('[data-project-value=""]');
     element.project.value = option.dataset.projectValue;
-    element.projectTrigger.querySelector(":scope > :first-child").replaceWith(option.querySelector(".project-identity-icon").cloneNode(true));
+    element.projectTrigger.querySelector(":scope > :first-child").replaceWith(option.querySelector(".project-monogram").cloneNode(true));
     element.projectTrigger.querySelector(".project-select-trigger-label").textContent = option.querySelector(".project-select-option-label").textContent;
     element.projectList.querySelectorAll("[role=option]").forEach((item) => { item.classList.toggle("is-active", item === option); item.setAttribute("aria-selected", String(item === option)); });
     element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); renderSidebar();
@@ -987,7 +988,7 @@
       newSessionMessage.textContent = "Enter an existing directory.";
       newSessionPathInput.focus();
     } else {
-      newSessionTrigger.querySelector(":scope > :first-child").replaceWith(option.querySelector(".project-identity-icon").cloneNode(true));
+      newSessionTrigger.querySelector(":scope > :first-child").replaceWith(option.querySelector(".project-monogram").cloneNode(true));
       newSessionTrigger.querySelector(".project-select-trigger-label").textContent = option.querySelector(".project-select-option-label").textContent;
       newSessionCwd.value = `/home/demo/Work/${value}`;
     }
