@@ -2806,7 +2806,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   } catch (_error) {
     if (!sessionSwitchGeneration.current(switchGeneration)) return false;
     // A gateway that is restarting would answer the navigation with its proxy's error page.
-    if (fallbackNavigation && !gatewayUpdateController.inProgress) {
+    if (fallbackNavigation && !gatewayUpdateController.overlay.open) {
       sessionNavigationPending = true;
       window.location.href = url;
     } else {
