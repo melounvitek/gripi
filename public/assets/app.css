@@ -699,7 +699,9 @@
     .new-session-row[data-new-session-action] .new-session-name { grid-column: 3 / -1; white-space: normal; overflow-wrap: anywhere; }
     .new-session-row[data-new-session-action="folder"] .new-session-name { grid-column: 3 / 5; }
     .new-session-row[data-new-session-action]:not([data-new-session-action="folder"]) { color: var(--muted); }
-    .new-session-row[aria-selected="true"] { color: var(--accent); }
+    .new-session-inside { grid-column: 6; display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; color: var(--muted); font-size: 1rem; line-height: 1; }
+    .new-session-row[aria-selected="true"], .new-session-row[aria-selected="true"] .new-session-inside { color: var(--accent); }
+    @media (hover: hover) and (pointer: fine) { .new-session-inside:hover { color: var(--accent-bright); } }
     /* The last row stays in reach below a scrolled list. */
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); }
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"])[aria-selected="true"] { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); }
@@ -715,6 +717,9 @@
       .new-session-row { padding-block: 0.4rem; }
       .new-session-path { grid-column: 3; grid-row: 2; font-size: 0.78rem; }
       .new-session-row[data-new-session-action="folder"] .new-session-name { grid-column: 3; }
+      /* A wide target of its own at the row's end, so looking inside is not mistaken for starting. */
+      .new-session-list:has(.new-session-inside) { grid-template-columns: 2ch 2ch minmax(0, 1fr) auto 2.75rem; }
+      .new-session-inside { grid-column: 5; grid-row: 1; align-self: stretch; width: auto; height: auto; margin: -0.4rem -0.25rem -0.4rem 0; border-left: 1px solid var(--border); font-size: 1.3rem; }
       .new-session-age { grid-column: 4; grid-row: 1; }
       .new-session-key { display: none; }
     }

@@ -15,7 +15,9 @@ export class NewSessionFormController {
         input: () => this.handleInput(form),
         click: (event) => {
           const option = event.target.closest?.('[role="option"]');
-          if (option) this.activate(form, option);
+          if (!option) return;
+          if (event.target.closest("[data-new-session-inside]")) this.browse(form, option.dataset.newSessionPath);
+          else this.activate(form, option);
         },
         keydown: (event) => this.handleKeydown(event, form)
       };
@@ -178,11 +180,20 @@ export class NewSessionFormController {
           row.querySelector(".project-monogram").replaceWith(project.querySelector(".project-monogram").cloneNode(true));
           row.append(project.querySelector(".new-session-age").cloneNode(true));
         }
+        // The row starts a session; this mark is a second target that lists the folder's own subfolders.
+        const inside = this.document.createElement("span");
+        inside.className = "new-session-inside";
+        inside.dataset.newSessionInside = "";
+        inside.setAttribute("aria-hidden", "true");
+        inside.textContent = "›";
+        row.append(inside);
         list.append(row);
       });
       // Only a folder row is ever preselected, so Enter never starts in the listed folder itself by accident.
       selected = folders.length ? Math.max(0, folders.findIndex((path) => name(path).toLowerCase() === query)) : -1;
       if (state.listing && !state.listing.error) list.append(this.row("start", "·", `Start in ${where} itself`, state.folder));
+      const up = this.parent(state.folder);
+      if (up !== state.folder) list.append(this.row("up", "↑", `Up to ${this.displayPath(form, up)}`, up));
       if (projects.length) list.append(this.row("back", "←", "Back to projects"));
 
       const place = this.document.createElement("span");
@@ -202,7 +213,7 @@ export class NewSessionFormController {
     }
     list.querySelectorAll('[role="option"]').forEach((option, index) => { option.id = `new-session-option-${index}`; });
     this.setCursor(form, cursor ?? selected);
-    form.querySelector("[data-new-session-hint]").textContent = browsing ? "↑↓ navigate · enter start · esc cancel" : "↑↓ navigate · enter start · ctrl+1…9 start directly · esc cancel";
+    form.querySelector("[data-new-session-hint]").textContent = browsing ? "↑↓ navigate · enter start · tab look inside · backspace up · esc cancel" : "↑↓ navigate · enter start · ctrl+1…9 start directly · esc cancel";
   }
 
   setCursor(form, index) {
@@ -227,6 +238,8 @@ export class NewSessionFormController {
     } else if (action === "path") {
       // New projects usually sit beside existing ones, so the first project's folder is listed first.
       this.browse(form, this.parent(this.projects(form)[0].dataset.newSessionProject));
+    } else if (action === "up") {
+      this.browse(form, path);
     } else if (action === "back") {
       this.showProjects(form);
     }
@@ -248,6 +261,13 @@ export class NewSessionFormController {
     } else if (event.key === "Enter" && event.target === this.input(form) && !event.isComposing) {
       event.preventDefault();
       if (options[cursor]) this.activate(form, options[cursor]);
+    } else if (event.key === "Tab" && !event.shiftKey && options[cursor]?.dataset.newSessionAction === "folder") {
+      event.preventDefault();
+      this.browse(form, options[cursor].dataset.newSessionPath);
+    } else if (event.key === "Backspace" && !this.input(form).value && !event.repeat) {
+      // Holding Backspace to clear the filter must not carry on up the folders.
+      const up = form.querySelector('[data-new-session-action="up"]');
+      if (up) this.activate(form, up);
     }
   }
 }

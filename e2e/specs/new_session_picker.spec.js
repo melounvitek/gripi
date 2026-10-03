@@ -111,6 +111,42 @@ test("hidden folders are listed once the filter starts with a dot", async ({ pag
   }
 });
 
+test("a folder is looked inside and left again before starting", async ({ page, isMobile }) => {
+  await open(page, isMobile);
+  const where = await projectsFolder(page);
+  await activate(option(page, "Other folder…"), isMobile);
+  await activate(option(page, `Up to ${path.dirname(where)}`), isMobile);
+  await expect(label(page)).toHaveText(`Folders in ${path.dirname(where)}:`);
+
+  // The mark at the end of a row is its own target: it looks inside instead of starting.
+  await activate(folders(page).filter({ hasText: "projects" }).locator("[data-new-session-inside]"), isMobile);
+  await expect(label(page)).toHaveText(`Folders in ${where}:`);
+  await activate(folders(page).filter({ hasText: "new-session-mobile" }), isMobile);
+  await expectStartedIn(page, "new-session-mobile");
+});
+
+test("Tab looks inside the highlighted folder and Backspace goes up", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await open(page, isMobile);
+  const where = await projectsFolder(page);
+  await activate(option(page, "Other folder…"), isMobile);
+  await expect(folders(page).first()).toBeVisible();
+  await page.keyboard.press("Backspace");
+  await expect(label(page)).toHaveText(`Folders in ${path.dirname(where)}:`);
+
+  await page.keyboard.type("proj");
+  await expect(folders(page).locator(".new-session-name")).toHaveText(["projects"]);
+  await page.keyboard.press("Tab");
+  await expect(label(page)).toHaveText(`Folders in ${where}:`);
+  await expect(input(page)).toBeFocused();
+  await expect(input(page)).toHaveValue("");
+
+  await page.keyboard.type("new-session-d");
+  await expect(folders(page).locator(".new-session-name")).toHaveText(["new-session-desktop"]);
+  await page.keyboard.press("Enter");
+  await expectStartedIn(page, "new-session-desktop");
+});
+
 test("only the most recent projects are listed until the rest are asked for", async ({ page, isMobile }) => {
   await open(page, isMobile);
   const total = await dialog(page).locator("[data-new-session-project]").count();
