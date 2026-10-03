@@ -733,6 +733,7 @@
     const modal = document.querySelector(`[data-modal="${name}"]`); if (!modal) return;
     previousModalFocus = returnFocus; modal.hidden = false; document.querySelector(".app-shell").inert = true;
     (modal.querySelector("[data-modal-default-focus]") || modal.querySelector("button, input, select"))?.focus();
+    if (name === "new-session-modal") enterNewSession("");
   }
   function closeModal(modal) { if (!modal) return; modal.hidden = true; document.querySelector(".app-shell").inert = false; if (modal.dataset.modal === "demo-intro-modal") markIntroSeen(); previousModalFocus?.focus(); previousModalFocus = null; }
   function handleSlash(command) {
@@ -954,63 +955,66 @@
     if (event.key === "Tab") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (!modal) return; const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")]; if (!focusable.length) return; const first = focusable[0], last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
 
-  const newSessionSelect = document.querySelector("[data-new-session-known-cwd]");
-  const newSessionTrigger = document.querySelector("[data-new-session-project-trigger]");
-  const newSessionList = document.querySelector("[data-new-session-project-list]");
-  const newSessionProjectFields = document.querySelector("[data-new-session-project-fields]");
-  const newSessionPathFields = document.querySelector("[data-new-session-path-fields]");
-  const newSessionPathInput = document.querySelector("[data-new-session-cwd-input]");
-  const newSessionCwd = document.querySelector("[data-new-session-cwd-value]");
-  const newSessionMessage = document.querySelector("[data-new-session-cwd-message]");
+  const newSessionForm = document.querySelector(".new-session-cwd-form");
+  const newSessionInput = newSessionForm.querySelector("[data-new-session-input]");
+  const newSessionRows = [...newSessionForm.querySelectorAll('[role="option"]')];
+  const visibleNewSessionRows = () => newSessionRows.filter((row) => !row.hidden);
 
-  function openNewSessionList() {
-    newSessionList.hidden = false;
-    newSessionTrigger.setAttribute("aria-expanded", "true");
-    const rect = newSessionTrigger.getBoundingClientRect();
-    Object.assign(newSessionList.style, { left: `${rect.left}px`, top: `${rect.bottom + 4}px`, width: `${rect.width}px` });
+  function moveNewSessionCursor(index) {
+    const rows = visibleNewSessionRows();
+    const selected = rows[(index + rows.length) % rows.length];
+    newSessionRows.forEach((row) => row.setAttribute("aria-selected", String(row === selected)));
   }
-  openSelectOnFirstTouch(newSessionTrigger, () => newSessionList.hidden, openNewSessionList);
-  newSessionTrigger.addEventListener("click", () => {
-    if (newSessionList.hidden) openNewSessionList();
-    else { newSessionList.hidden = true; newSessionTrigger.setAttribute("aria-expanded", "false"); }
-  });
-  newSessionList.addEventListener("click", (event) => {
-    const option = event.target.closest("[data-new-project]");
-    if (!option) return;
-    const value = option.dataset.newProject;
-    newSessionSelect.value = value;
-    newSessionList.querySelectorAll("[role=option]").forEach((item) => { item.classList.toggle("is-active", item === option); item.setAttribute("aria-selected", String(item === option)); });
-    newSessionList.hidden = true;
-    newSessionTrigger.setAttribute("aria-expanded", "false");
-    if (value === "__new_path__") {
-      newSessionProjectFields.hidden = true;
-      newSessionPathFields.hidden = false;
-      newSessionMessage.textContent = "Enter an existing directory.";
-      newSessionPathInput.focus();
-    } else {
-      newSessionTrigger.querySelector(":scope > :first-child").replaceWith(option.querySelector(".project-monogram").cloneNode(true));
-      newSessionTrigger.querySelector(".project-select-trigger-label").textContent = option.querySelector(".project-select-option-label").textContent;
-      newSessionCwd.value = `/home/demo/Work/${value}`;
-    }
-  });
-  document.querySelector("[data-new-session-project-mode]").addEventListener("click", () => { newSessionPathFields.hidden = true; newSessionProjectFields.hidden = false; newSessionSelect.value = "gripi"; newSessionCwd.value = "/home/demo/Work/gripi"; newSessionMessage.textContent = "The static demo creates a representative local session."; newSessionTrigger.focus(); });
-  newSessionPathInput.addEventListener("input", () => { newSessionCwd.value = newSessionPathInput.value.trim(); const valid = newSessionCwd.value.startsWith("/"); newSessionMessage.textContent = valid ? "Directory available in the static demo." : "Enter an absolute directory path."; newSessionMessage.classList.toggle("is-valid", valid); newSessionMessage.classList.toggle("is-invalid", !!newSessionCwd.value && !valid); });
 
-  document.querySelector(".new-session-cwd-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const identities = {
-      gripi: { color: "#ff9b73" },
-      website: { color: "#9fc5ff" },
-      storefront: { color: "#b5e3b0" }
-    };
-    const customMode = new FormData(event.target).get("known_cwd") === "__new_path__";
-    const cwd = newSessionCwd.value.trim();
-    if (!cwd.startsWith("/")) { newSessionMessage.textContent = "Enter an absolute directory path."; newSessionMessage.classList.add("is-invalid"); if (customMode) newSessionPathInput.focus(); return; }
+  // Like the real picker: a value starting like a path asks where to start, anything else filters the projects.
+  function renderNewSession() {
+    const query = newSessionInput.value.trim().toLowerCase();
+    const path = /^[/~]/.test(query);
+    let digit = 0;
+    newSessionRows.forEach((row) => {
+      const action = row.dataset.newSessionAction;
+      row.hidden = action ? (action === "path") === path : path || !row.querySelector(".new-session-path").textContent.toLowerCase().includes(query);
+      if (!action && !row.hidden) row.querySelector(".new-session-key").textContent = ++digit;
+    });
+    // The static demo has no file system to check, so any typed path can be started in.
+    newSessionForm.querySelector('[data-new-session-action="start"] .new-session-name').textContent = `Start in ${newSessionInput.value.trim().replace(/(.)\/$/, "$1")}`;
+    newSessionForm.querySelector("[data-new-session-hint]").textContent = path ? "↑↓ navigate · enter start · esc cancel" : "↑↓ navigate · enter start · ctrl+1…9 start directly · esc cancel";
+    moveNewSessionCursor(0);
+  }
+
+  function enterNewSession(value) {
+    newSessionInput.value = value;
+    // On touch screens focusing the input would open the keyboard over the list.
+    if (matchMedia("(pointer: fine)").matches) newSessionInput.focus();
+    renderNewSession();
+  }
+
+  function activateNewSessionRow(row) {
+    const action = row.dataset.newSessionAction;
+    if (action === "path") return enterNewSession("~/Work/");
+    if (action === "back") return enterNewSession("");
+    const cwd = row.dataset.newSessionProject || newSessionInput.value.trim();
     const project = cwd.split("/").filter(Boolean).pop() || "project";
-    const identity = identities[project] || { color: "#f0c674" };
+    const color = { gripi: "#ff9b73", website: "#9fc5ff", storefront: "#b5e3b0" }[project] || "#f0c674";
     const id = `local-${Date.now()}`;
-    sessions.unshift(normalizeSession({ id, name: "New local demo session", project, ...identity, age: "now", pinned: false, messages: [{ role: "assistant", text: "This representative session was created locally. Enter a prompt to try streaming.", time: timeLabel() }] }));
-    closeModal(event.target.closest("[data-modal]")); switchSession(id);
+    sessions.unshift(normalizeSession({ id, name: "New local demo session", project, color, age: "now", pinned: false, messages: [{ role: "assistant", text: "This representative session was created locally. Enter a prompt to try streaming.", time: timeLabel() }] }));
+    closeModal(newSessionForm.closest("[data-modal]")); switchSession(id);
+  }
+
+  newSessionInput.addEventListener("input", renderNewSession);
+  newSessionForm.addEventListener("click", (event) => { const row = event.target.closest('[role="option"]'); if (row) activateNewSessionRow(row); });
+  newSessionInput.addEventListener("keydown", (event) => {
+    const rows = visibleNewSessionRows();
+    const cursor = rows.findIndex((row) => row.getAttribute("aria-selected") === "true");
+    // Like the real picker, the key code covers layouts whose digit row types other characters.
+    const digit = event.ctrlKey && (/^[1-9]$/.test(event.key) ? event.key : event.code.match(/^(?:Digit|Numpad)([1-9])$/)?.[1]);
+    const shortcut = digit && rows.filter((row) => row.dataset.newSessionProject)[digit - 1];
+    if (shortcut) activateNewSessionRow(shortcut);
+    else if (event.key === "ArrowDown" || event.key === "ArrowUp") moveNewSessionCursor(cursor + (event.key === "ArrowDown" ? 1 : -1));
+    else if (event.key === "Enter" && !event.isComposing) activateNewSessionRow(rows[cursor]);
+    // As in the real picker, the input is the only focus stop.
+    else if (event.key !== "Tab") return;
+    event.preventDefault();
   });
   document.querySelectorAll("[data-demo-fork]").forEach((button) => button.addEventListener("click", () => { const source = currentSession(); const id = `fork-${Date.now()}`; sessions.unshift(normalizeSession({ ...source, id, name: `${source.name} (fork)`, age: "now", pinned: false, messages: source.messages.slice(0, 4).map((message) => ({ ...message })) })); closeModal(button.closest("[data-modal]")); switchSession(id); }));
   document.querySelectorAll("[data-demo-tree]").forEach((button) => button.addEventListener("click", () => { closeModal(button.closest("[data-modal]")); if (button.dataset.demoTreeTarget) switchSession(button.dataset.demoTreeTarget); }));

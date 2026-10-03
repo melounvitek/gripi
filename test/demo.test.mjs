@@ -96,7 +96,6 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
     'function openSelectOnFirstTouch(trigger, closed, open) {',
     'trigger.addEventListener("touchmove", trackTouch);',
     'openSelectOnFirstTouch(element.projectTrigger, () => element.projectList.hidden, openProjectList);',
-    'openSelectOnFirstTouch(newSessionTrigger, () => newSessionList.hidden, openNewSessionList);',
     'const introSeenKey = "gripi:static-demo:intro-seen";',
     'const desktopSidebarHiddenKey = "gripi:desktop-sidebar-hidden";',
     'sidebarVisibilityToggles: document.querySelectorAll("[data-sidebar-visibility-toggle]")',
