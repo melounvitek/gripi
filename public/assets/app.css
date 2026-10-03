@@ -703,8 +703,8 @@
     .new-session-inside { grid-column: 6; display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; color: var(--muted); font-size: 1rem; line-height: 1; }
     .new-session-row[aria-selected="true"], .new-session-row[aria-selected="true"] .new-session-inside { color: var(--accent); }
     @media (hover: hover) and (pointer: fine) { .new-session-row .new-session-inside:hover { color: var(--accent-bright); } }
-    /* The last row stays in reach below a scrolled list. */
-    .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); }
+    /* The last row stays in reach below a scrolled list. Its shadow covers the device pixel that a fractional pixel ratio leaves open under it. */
+    .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); box-shadow: 0 1px var(--panel); }
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"])[aria-selected="true"] { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); }
     @media (hover: hover) and (pointer: fine) { .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]):hover { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); } }
     @media (min-width: 761px) {
