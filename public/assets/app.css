@@ -684,22 +684,27 @@
       .tree-session-fold::after { content: ""; position: absolute; inset: -0.8rem -0.75rem; }
     }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
-    /* Rows share the list's columns: cursor, monogram, name, path, last activity and shortcut digit. */
-    .new-session-list { max-height: min(22rem, 55dvh); grid-template-columns: 2ch 2ch fit-content(22ch) minmax(0, 1fr) auto auto; column-gap: 1ch; overflow-y: auto; scroll-padding-bottom: 2rem; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
+    [data-new-session-label] { min-width: 0; overflow-wrap: anywhere; }
+    .new-session-where { color: var(--text); }
+    /* Rows share the list's columns: cursor, monogram, name, path, last activity and shortcut digit. Their height always fits a wrapped name, even when the list scrolls. */
+    .new-session-list { max-height: min(22rem, 55dvh); grid-template-columns: 2ch 2ch fit-content(22ch) minmax(0, 1fr) auto auto; grid-auto-rows: max-content; column-gap: 1ch; overflow-y: auto; scroll-padding-bottom: 2rem; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
     .new-session-row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
     .new-session-row .project-monogram { color: var(--project-identity-fg, inherit); }
-    .new-session-name, .new-session-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Clipped sideways only: a hidden overflow also cuts the underscore off the bottom of some fonts. */
+    .new-session-name, .new-session-path { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: nowrap; }
     .new-session-path, .new-session-age { color: var(--muted-soft); }
     .new-session-age { font-size: 0.74rem; text-align: right; }
     .new-session-key { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; color: var(--accent); font: 600 0.72rem/1 var(--mono); }
     .new-session-key:empty { visibility: hidden; }
     /* Wraps rather than truncates, so the directory a session would start in stays readable. */
     .new-session-row[data-new-session-action] .new-session-name { grid-column: 3 / -1; white-space: normal; overflow-wrap: anywhere; }
-    .new-session-row:is([data-new-session-action="more"], [data-new-session-action="path"], [data-new-session-action="back"]) { color: var(--muted); }
-    .new-session-row[data-new-session-action="start"] .project-monogram { color: var(--success); }
-    .new-session-row[aria-selected="true"] { color: var(--accent); }
-    /* The last row stays in reach below a scrolled list. */
-    .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); }
+    .new-session-row[data-new-session-action="folder"] .new-session-name { grid-column: 3 / 5; }
+    .new-session-row:not([data-new-session-project], [data-new-session-action="folder"]) { color: var(--muted); }
+    .new-session-inside { grid-column: 6; display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; color: var(--muted); font-size: 1rem; line-height: 1; }
+    .new-session-row[aria-selected="true"], .new-session-row[aria-selected="true"] .new-session-inside { color: var(--accent); }
+    @media (hover: hover) and (pointer: fine) { .new-session-row .new-session-inside:hover { color: var(--accent-bright); } }
+    /* The last row stays in reach below a scrolled list. Its shadow covers the device pixel that a fractional pixel ratio leaves open under it. */
+    .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); box-shadow: 0 1px var(--panel); }
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"])[aria-selected="true"] { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); }
     @media (hover: hover) and (pointer: fine) { .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]):hover { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); } }
     @media (min-width: 761px) {
@@ -712,6 +717,10 @@
       .new-session-list { max-height: 52dvh; grid-template-columns: 2ch 2ch minmax(0, 1fr) auto; scroll-padding-bottom: 2.75rem; }
       .new-session-row { padding-block: 0.4rem; }
       .new-session-path { grid-column: 3; grid-row: 2; font-size: 0.78rem; }
+      .new-session-row[data-new-session-action="folder"] .new-session-name { grid-column: 3; }
+      /* A wide target of its own at the row's end, so looking inside is not mistaken for starting. */
+      .new-session-list:has(.new-session-inside) { grid-template-columns: 2ch 2ch minmax(0, 1fr) auto 2.75rem; }
+      .new-session-inside { grid-column: 5; grid-row: 1; align-self: stretch; width: auto; height: auto; margin: -0.4rem -0.25rem -0.4rem 0; border-left: 1px solid var(--border); font-size: 1.3rem; }
       .new-session-age { grid-column: 4; grid-row: 1; }
       .new-session-key { display: none; }
     }

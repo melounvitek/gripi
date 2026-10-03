@@ -12,14 +12,17 @@ export class NewSessionFormController {
     this.forms(root).forEach((form) => {
       if (form._newSessionFormState) return;
       const listeners = {
-        input: () => this.refresh(form),
+        input: (event) => this.handleInput(event, form),
         click: (event) => {
           const option = event.target.closest?.('[role="option"]');
-          if (option) this.activate(form, option);
+          if (!option) return;
+          if (event.target.closest("[data-new-session-inside]")) this.browse(form, option.dataset.newSessionPath);
+          else this.activate(form, option);
         },
         keydown: (event) => this.handleKeydown(event, form)
       };
-      form._newSessionFormState = { timer: null, controller: null, listeners, browsed: null, cursor: 0, expanded: false };
+      // folder is null while the projects are listed; listing is null until that folder's subfolders arrive.
+      form._newSessionFormState = { controller: null, listeners, folder: null, listing: null, cursor: 0, expanded: false };
       Object.entries(listeners).forEach(([type, listener]) => form.addEventListener(type, listener));
     });
   }
@@ -37,7 +40,8 @@ export class NewSessionFormController {
   open(form) {
     if (!form?._newSessionFormState) return;
     form._newSessionFormState.expanded = false;
-    this.enter(form, this.projects(form).length ? "" : this.newPath(form));
+    if (this.projects(form).length) this.showProjects(form);
+    else this.browse(form, form.dataset.home);
   }
 
   setStatus(form, message, invalid = false) {
@@ -67,33 +71,17 @@ export class NewSessionFormController {
     return [...form.querySelectorAll('[role="option"]')].filter((option) => !option.hidden);
   }
 
-  // A value starting like a path browses directories; anything else filters the projects.
-  pathMode(form) {
-    return /^[/~]/.test(this.input(form).value.trim());
-  }
-
   displayPath(form, path) {
     const home = form.dataset.home;
     return home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path;
   }
 
-  directoryInput(form, path) {
-    return `${this.displayPath(form, path).replace(/\/$/, "")}/`;
-  }
-
-  // New projects usually sit beside existing ones, so browsing starts in the first project's parent.
-  newPath(form) {
-    const project = this.projects(form)[0]?.dataset.newSessionProject;
-    return this.directoryInput(form, project ? project.slice(0, project.lastIndexOf("/")) : form.dataset.home || "");
+  parent(path) {
+    return path.replace(/\/+$/, "").replace(/\/[^/]*$/, "") || "/";
   }
 
   cancelBrowse(form) {
-    const state = form?._newSessionFormState;
-    if (!state) return;
-    clearTimeout(state.timer);
-    state.timer = null;
-    state.controller?.abort();
-    state.controller = null;
+    form?._newSessionFormState?.controller?.abort();
   }
 
   focusInput(form) {
@@ -101,48 +89,46 @@ export class NewSessionFormController {
     if (this.window.matchMedia?.("(pointer: fine)").matches !== false) this.input(form).focus();
   }
 
-  enter(form, value) {
-    this.input(form).value = value;
-    this.focusInput(form);
-    this.refresh(form, 0);
-  }
-
-  refresh(form, delay = 250) {
-    const state = form._newSessionFormState;
+  showProjects(form) {
     this.cancelBrowse(form);
-    state.browsed = null;
-    state.cursor = 0;
-    if (this.pathMode(form)) {
-      // Nothing is selected until the path is checked, so Enter cannot act on a stale directory.
-      state.cursor = -1;
-      this.browse(form, delay);
-    }
+    form._newSessionFormState.folder = null;
+    this.input(form).value = "";
+    this.focusInput(form);
     this.render(form);
   }
 
-  browse(form, delay) {
+  async browse(form, folder, filter = "") {
     const state = form._newSessionFormState;
-    const cwd = this.input(form).value.trim();
-    state.timer = setTimeout(async () => {
-      state.timer = null;
-      const controller = new AbortController();
-      state.controller = controller;
-      let browsed = { cwd: "", directories: [], error: "Could not browse this path." };
-      try {
-        const url = new URL(form.dataset.cwdBrowserUrl, this.window.location.origin);
-        url.searchParams.set("cwd", cwd);
-        const response = await fetch(url, { headers: { "Accept": "application/json" }, signal: controller.signal });
-        const payload = await response.json().catch(() => null);
-        if (response.ok && payload) {
-          browsed = { cwd: payload.valid ? payload.cwd : "", directories: Array.isArray(payload.directories) ? payload.directories : [], error: payload.error || "Path must be an existing directory." };
-        }
-      } catch (_error) {}
-      if (controller.signal.aborted) return;
-      state.controller = null;
-      state.browsed = browsed;
-      state.cursor = browsed.cwd || browsed.directories.length ? 0 : -1;
-      this.render(form);
-    }, delay);
+    this.cancelBrowse(form);
+    const controller = new AbortController();
+    Object.assign(state, { controller, folder, listing: null });
+    this.input(form).value = filter;
+    this.focusInput(form);
+    this.render(form);
+    let payload = null;
+    try {
+      const url = new URL(form.dataset.cwdBrowserUrl, this.window.location.origin);
+      url.searchParams.set("cwd", folder);
+      const response = await fetch(url, { headers: { "Accept": "application/json" }, signal: controller.signal });
+      if (response.ok) payload = await response.json().catch(() => null);
+    } catch (_error) {}
+    if (controller.signal.aborted) return;
+    if (payload?.valid) Object.assign(state, { folder: payload.cwd, listing: { directories: payload.directories } });
+    else state.listing = { error: payload?.error || "Could not list this folder." };
+    this.render(form);
+  }
+
+  handleInput(event, form) {
+    const state = form._newSessionFormState;
+    const input = this.input(form);
+    // A pasted path means that folder, not what is inside it, so its trailing slash is dropped.
+    if (event.inputType === "insertFromPaste") input.value = input.value.replace(/([^~/])\/+$/, "$1");
+    const value = input.value;
+    const absolute = /^(\/|~\/)/.test(value);
+    if (!absolute && (state.folder === null || !value.includes("/"))) return this.render(form);
+    // A typed path names the folder to list up to its last slash; the rest filters that folder.
+    const cut = value.lastIndexOf("/") + 1;
+    this.browse(form, absolute ? value.slice(0, cut) : `${state.folder}/${value.slice(0, cut)}`, value.slice(cut));
   }
 
   row(action, glyph, label, path = "") {
@@ -167,36 +153,67 @@ export class NewSessionFormController {
     return row;
   }
 
-  render(form) {
+  render(form, cursor) {
     const state = form._newSessionFormState;
     const list = form.querySelector("[data-new-session-list]");
+    const label = form.querySelector("[data-new-session-label]");
     const query = this.input(form).value.trim().toLowerCase();
-    const path = this.pathMode(form);
+    const browsing = state.folder !== null;
     const projects = this.projects(form);
     list.querySelectorAll("[data-new-session-action]").forEach((row) => row.remove());
     // The path is searched too: a worktree is often named after its branch, not its project.
-    const matching = path ? [] : projects.filter((row) => [".new-session-name", ".new-session-path"].some((part) => row.querySelector(part).textContent.toLowerCase().includes(query)));
+    const matching = browsing ? [] : projects.filter((row) => [".new-session-name", ".new-session-path"].some((part) => row.querySelector(part).textContent.toLowerCase().includes(query)));
     const visible = query || state.expanded ? matching : matching.slice(0, RECENT_PROJECTS);
     projects.forEach((row) => { row.hidden = !visible.includes(row); });
     visible.forEach((row, index) => { row.querySelector(".new-session-key").textContent = index < 9 ? index + 1 : ""; });
-    if (path) {
-      if (state.browsed?.cwd) list.append(this.row("start", "✓", `Start in ${this.displayPath(form, state.browsed.cwd)}`, state.browsed.cwd));
-      (state.browsed?.directories || []).forEach((directory) => {
-        list.append(this.row("open", "", `${directory.slice(directory.lastIndexOf("/") + 1)}/`, directory));
+    let selected = 0;
+    if (browsing) {
+      const where = this.displayPath(form, state.folder).replace(/(.)\/+$/, "$1");
+      const name = (path) => path.slice(path.lastIndexOf("/") + 1);
+      // Hidden folders are listed once the filter starts with a dot.
+      const folders = (state.listing?.directories || []).filter((path) => name(path).toLowerCase().includes(query) && (!name(path).startsWith(".") || query.startsWith(".")));
+      folders.forEach((path) => {
+        const row = this.row("folder", "", name(path), path);
+        // A folder that is already a project keeps its letters and last activity.
+        const project = projects.find((candidate) => candidate.dataset.newSessionProject === path);
+        if (project) {
+          row.querySelector(".project-monogram").replaceWith(project.querySelector(".project-monogram").cloneNode(true));
+          row.append(project.querySelector(".new-session-age").cloneNode(true));
+        }
+        // The row starts a session; this mark is a second target that lists the folder's own subfolders.
+        const inside = this.document.createElement("span");
+        inside.className = "new-session-inside";
+        inside.dataset.newSessionInside = "";
+        inside.setAttribute("aria-hidden", "true");
+        inside.textContent = "›";
+        row.append(inside);
+        list.append(row);
       });
+      // Only a folder row is ever preselected, so Enter never starts in the listed folder itself by accident.
+      selected = folders.length ? Math.max(0, folders.findIndex((path) => name(path).toLowerCase() === query)) : -1;
+      if (state.listing && !state.listing.error) list.append(this.row("start", "·", `Start in ${where} itself`, state.folder));
+      const up = this.parent(state.folder);
+      if (up !== state.folder) list.append(this.row("up", "↑", `Up to ${this.displayPath(form, up)}`, up));
       if (projects.length) list.append(this.row("back", "←", "Back to projects"));
+
+      const place = this.document.createElement("span");
+      place.className = "new-session-where";
+      place.textContent = where;
+      label.replaceChildren("Folders in ", place, ":");
+      if (!state.listing) this.setStatus(form, "Loading…");
+      else if (state.listing.error) this.setStatus(form, state.listing.error, true);
+      else this.setStatus(form, folders.length ? "" : query ? "No matching folders." : "No folders inside.");
     } else {
       const more = matching.length - visible.length;
       if (more) list.append(this.row("more", "…", `${more} more project${more === 1 ? "" : "s"}`));
-      list.append(this.row("path", "+", "Add new path…"));
+      list.append(this.row("path", "+", "Other folder…"));
+
+      label.textContent = "Project or path:";
+      this.setStatus(form, query && !visible.length ? "No matching projects." : "");
     }
     list.querySelectorAll('[role="option"]').forEach((option, index) => { option.id = `new-session-option-${index}`; });
-    this.setCursor(form, state.cursor);
-
-    form.querySelector("[data-new-session-hint]").textContent = path ? "↑↓ navigate · enter open or start · esc cancel" : "↑↓ navigate · enter start · ctrl+1…9 start directly · esc cancel";
-    if (!path) this.setStatus(form, query && !visible.length ? "No matching projects." : "");
-    else if (!state.browsed) this.setStatus(form, "Checking…");
-    else this.setStatus(form, state.browsed.cwd || state.browsed.directories.length ? "" : state.browsed.error, true);
+    this.setCursor(form, cursor ?? selected);
+    form.querySelector("[data-new-session-hint]").textContent = browsing ? "↑↓ navigate · enter start · tab look inside · backspace up · esc cancel" : "↑↓ navigate · enter start · ctrl+1…9 start directly · esc cancel";
   }
 
   setCursor(form, index) {
@@ -210,21 +227,21 @@ export class NewSessionFormController {
   }
 
   activate(form, option) {
-    const action = option.dataset.newSessionAction;
-    const cwd = option.dataset.newSessionProject || (action === "start" && option.dataset.newSessionPath);
-    if (cwd) {
-      form.querySelector("[data-new-session-cwd-value]").value = cwd;
+    const { newSessionAction: action, newSessionPath: path, newSessionProject: project } = option.dataset;
+    if (project || action === "folder" || action === "start") {
+      form.querySelector("[data-new-session-cwd-value]").value = project || path;
       form.requestSubmit();
     } else if (action === "more") {
-      Object.assign(form._newSessionFormState, { expanded: true, cursor: RECENT_PROJECTS });
+      form._newSessionFormState.expanded = true;
       this.focusInput(form);
-      this.render(form);
+      this.render(form, RECENT_PROJECTS);
     } else if (action === "path") {
-      this.enter(form, this.newPath(form));
-    } else if (action === "open") {
-      this.enter(form, this.directoryInput(form, option.dataset.newSessionPath));
+      // New projects usually sit beside existing ones, so the first project's folder is listed first.
+      this.browse(form, this.parent(this.projects(form)[0].dataset.newSessionProject));
+    } else if (action === "up") {
+      this.browse(form, path);
     } else if (action === "back") {
-      this.enter(form, "");
+      this.showProjects(form);
     }
   }
 
@@ -244,6 +261,13 @@ export class NewSessionFormController {
     } else if (event.key === "Enter" && event.target === this.input(form) && !event.isComposing) {
       event.preventDefault();
       if (options[cursor]) this.activate(form, options[cursor]);
+    } else if (event.key === "Tab" && !event.shiftKey && !event.repeat && options[cursor]?.dataset.newSessionAction === "folder") {
+      event.preventDefault();
+      this.browse(form, options[cursor].dataset.newSessionPath);
+    } else if (event.key === "Backspace" && !this.input(form).value && !event.repeat) {
+      // Holding Backspace to clear the filter must not carry on up the folders.
+      const up = form.querySelector('[data-new-session-action="up"]');
+      if (up) this.activate(form, up);
     }
   }
 }
