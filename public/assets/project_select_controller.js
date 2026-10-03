@@ -29,7 +29,6 @@ export class ProjectSelectController {
       state.select.tabIndex = state.originalTabIndex;
       if (state.originalAriaHidden === null) state.select.removeAttribute("aria-hidden");
       else state.select.setAttribute("aria-hidden", state.originalAriaHidden);
-      if (state.associatedLabel && state.originalLabelFor !== null) state.associatedLabel.htmlFor = state.originalLabelFor;
       delete wrapper._projectSelectState;
     });
   }
@@ -92,9 +91,7 @@ export class ProjectSelectController {
     if (!select || !select.options.length) return;
 
     const id = `project-select-${++this.serial}`;
-    const labelledBy = select.getAttribute("aria-labelledby");
-    const associatedLabel = labelledBy ? this.document.getElementById(labelledBy) : null;
-    const accessibleLabel = select.getAttribute("aria-label") || associatedLabel?.textContent || "Choose project";
+    const accessibleLabel = select.getAttribute("aria-label") || "Choose project";
     const trigger = this.document.createElement("button");
     trigger.type = "button";
     trigger.id = `${id}-trigger`;
@@ -105,9 +102,6 @@ export class ProjectSelectController {
     trigger.setAttribute("aria-controls", `${id}-listbox`);
     trigger.setAttribute("aria-owns", `${id}-listbox`);
     trigger.setAttribute("aria-label", accessibleLabel.trim());
-
-    const originalLabelFor = associatedLabel?.htmlFor ?? null;
-    if (associatedLabel && associatedLabel.htmlFor === select.id) associatedLabel.htmlFor = trigger.id;
 
     const listbox = this.document.createElement("div");
     listbox.id = `${id}-listbox`;
@@ -140,8 +134,7 @@ export class ProjectSelectController {
       activeIndex: Math.max(0, select.selectedIndex),
       typeahead: "", typeaheadTimer: null,
       originalTabIndex: select.tabIndex,
-      originalAriaHidden: select.getAttribute("aria-hidden"),
-      associatedLabel, originalLabelFor
+      originalAriaHidden: select.getAttribute("aria-hidden")
     };
     select.classList.add("project-select-native-hidden");
     select.tabIndex = -1;
