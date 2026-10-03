@@ -1,3 +1,5 @@
+import { movePickerCursor } from "./dom.js";
+
 export const TREE_FILTERS = [
   { value: "default", label: "Default" },
   { value: "no-tools", label: "No tools" },
@@ -9,7 +11,7 @@ export const TREE_FILTERS = [
 export const TREE_SUMMARY_CHOICES = [
   { value: "none", label: "No summary" },
   { value: "default", label: "Summarize" },
-  { value: "custom", label: "Summarize with custom instructions" }
+  { value: "custom", label: "Summarize with custom prompt" }
 ];
 
 function entrySearchText(entry) {
@@ -36,7 +38,10 @@ export class TreeSessionModel {
         this.roots.push(entry);
       }
     });
-    this.selectedId = entries.find((entry) => entry.current)?.entryId || entries[0]?.entryId || null;
+    const current = entries.find((entry) => entry.current);
+    this.selectedId = current?.entryId || entries[0]?.entryId || null;
+    this.activePath = new Set();
+    for (let entry = current; entry; entry = this.byId.get(entry.parentId)) this.activePath.add(entry.entryId);
   }
 
   select(entryId) {
@@ -162,12 +167,18 @@ export class TreeSessionModel {
   }
 }
 
-function displayTimestamp(value) {
-  if (!value) return "";
+// Like Pi CLI: the time alone for today, with the date added for older labels.
+function labelTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const now = new Date();
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  if (date.toDateString() === now.toDateString()) return time;
+  const day = `${date.getMonth() + 1}/${date.getDate()}`;
+  return date.getFullYear() === now.getFullYear() ? `${day} ${time}` : `${String(date.getFullYear()).slice(-2)}/${day} ${time}`;
 }
+
+const FILTER_STATUS = { "no-tools": " [no-tools]", "user-only": " [user]", "labeled-only": " [labeled]", all: " [all]" };
 
 export class TreeSessionController {
   constructor(document, window, callbacks = {}) {
@@ -179,7 +190,9 @@ export class TreeSessionController {
     this.loading = false;
     this.navigating = false;
     this.savingLabel = false;
-    this.filterChosen = false;
+    this.filter = null;
+    this.showLabelTimes = false;
+    this.statusLabels = "";
     this.treeUrl = null;
     this.operation = 0;
     this.bind();
@@ -192,17 +205,14 @@ export class TreeSessionController {
   open() {
     const modal = this.modal();
     if (!modal) return false;
-    this.filterChosen = false;
-    const options = modal.querySelector("[data-tree-options]");
-    if (options) options.open = false;
+    // Each opening starts from Pi's configured filter.
+    this.filter = null;
+    this.showLabelTimes = false;
+    modal.querySelector("[data-tree-label-timestamps]")?.setAttribute("aria-pressed", "false");
     const search = modal.querySelector("[data-tree-search]");
     if (search) search.value = "";
-    const labelTimestamps = modal.querySelector("[data-tree-label-timestamps]");
-    if (labelTimestamps) labelTimestamps.checked = false;
-    if (this.model) {
-      this.model.setSearch("");
-      this.render();
-    }
+    this.model?.setSearch("");
+    this.editLabel(false);
     this.showTreeStep(modal);
     this.callbacks.openModal?.(modal);
     this.load(modal).catch(() => {});
@@ -218,7 +228,6 @@ export class TreeSessionController {
   bind() {
     this.document.addEventListener("click", (event) => this.handleClick(event));
     this.document.addEventListener("input", (event) => this.handleInput(event));
-    this.document.addEventListener("change", (event) => this.handleChange(event));
     this.document.addEventListener("submit", (event) => this.handleSubmit(event));
     this.document.addEventListener("keydown", (event) => this.handleKeydown(event));
   }
@@ -233,8 +242,7 @@ export class TreeSessionController {
     this.setStatus("Loading session tree…");
     try {
       const url = new URL(baseUrl, this.window.location.origin);
-      const filter = modal.querySelector("[data-tree-filter]")?.value;
-      if (filter && this.filterChosen) url.searchParams.set("filter", filter);
+      if (this.filter) url.searchParams.set("filter", this.filter);
       const response = await fetch(url, { headers: { "Accept": "application/json" } });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload) throw new Error(payload?.error || "Could not load session tree.");
@@ -247,13 +255,13 @@ export class TreeSessionController {
       this.treeUrl = baseUrl;
       if (previousSelectedId) this.model.select(previousSelectedId);
       this.model.collapsed = new Set([...collapsed].filter((entryId) => this.model.byId.has(entryId)));
-      const effectiveFilter = payload.filter || filter;
-      const filterControl = modal.querySelector("[data-tree-filter]");
-      if (filterControl && effectiveFilter) filterControl.value = effectiveFilter;
+      this.filter = payload.filter || this.filter;
+      modal.querySelectorAll("[data-tree-filter]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.treeFilter === this.filter));
+      });
+      this.statusLabels = `${payload.truncated ? ` of ${payload.totalEntries}` : ""}${FILTER_STATUS[this.filter] || ""}`;
       this.model.setSearch(modal.querySelector("[data-tree-search]")?.value || "");
-      this.render();
-      const count = this.model.entries.length;
-      this.setStatus(count ? `${count} ${count === 1 ? "entry" : "entries"}${payload.truncated ? ` shown of ${payload.totalEntries}` : ""}.` : "No session tree entries are available.");
+      this.render({ focus: !this.document.activeElement?.matches("input, textarea") });
     } catch (error) {
       if (operation === this.operation) this.setStatus(error.message || "Could not load session tree.", true);
     } finally {
@@ -277,83 +285,65 @@ export class TreeSessionController {
     if (!viewport || !this.model) return;
     viewport.replaceChildren();
     const structure = this.model.visibleStructure();
+    const span = (className, text) => {
+      const element = this.document.createElement("span");
+      element.className = className;
+      element.textContent = text;
+      return element;
+    };
     const appendEntries = (entries, parent) => {
       entries.forEach((entry) => {
+        const selected = entry.entryId === this.model.selectedId;
         const item = this.document.createElement("li");
         item.className = "tree-session-node";
         item.dataset.treeFocusEntry = entry.entryId;
         item.id = `tree-entry-${encodeURIComponent(entry.entryId).replace(/%/g, "-")}`;
         item.setAttribute("role", "treeitem");
-        item.setAttribute("aria-selected", String(entry.entryId === this.model.selectedId));
-        item.tabIndex = entry.entryId === this.model.selectedId ? 0 : -1;
+        item.setAttribute("aria-selected", String(selected));
+        item.tabIndex = selected ? 0 : -1;
         const row = this.document.createElement("div");
-        row.className = "tree-session-row";
-        row.classList.toggle("is-active", entry.entryId === this.model.selectedId);
-        row.classList.toggle("is-current", !!entry.current);
-        row.classList.toggle("is-user-message", entry.messageKind === "user");
-        row.classList.toggle("is-final-assistant", entry.messageKind === "assistant-final");
-
-        const visual = structure.visual.get(entry.entryId);
-        const leading = this.document.createElement("span");
-        leading.className = "tree-session-connectors";
-        leading.setAttribute("aria-hidden", "true");
-        for (let level = 0; level < visual.indent; level += 1) {
-          const connector = this.document.createElement("span");
-          connector.className = "tree-session-connector-level";
-          const gutter = visual.gutters.find((candidate) => candidate.position === level);
-          if (gutter?.show) connector.textContent = "│";
-          if (visual.showConnector && level === visual.indent - 1) connector.textContent = visual.isLast ? "└" : "├";
-          leading.append(connector);
-        }
-        row.append(leading);
+        row.className = "picker-row tree-session-row";
+        row.classList.toggle("is-active", selected);
+        row.dataset.treeEntryId = entry.entryId;
+        const cursor = span("picker-cursor", "›");
+        cursor.setAttribute("aria-hidden", "true");
+        const line = span("tree-session-line", "");
 
         const allChildren = this.model.children.get(entry.entryId) || [];
         const children = structure.children.get(entry.entryId) || [];
-        if (allChildren.length) {
+        const collapsed = this.model.collapsed.has(entry.entryId);
+        const visual = structure.visual.get(entry.entryId);
+        // Like Pi CLI, only folded entries and the first entry of a branch show a fold marker.
+        const foldMarker = allChildren.length > 0 && (collapsed || visual.showConnector);
+        const connectors = span("tree-session-connectors", "");
+        connectors.setAttribute("aria-hidden", "true");
+        for (let level = 0; level < visual.indent; level += 1) {
+          const gutter = visual.gutters.find((candidate) => candidate.position === level);
+          const connector = span("tree-session-connector-level", gutter?.show ? "│  " : "   ");
+          if (visual.showConnector && level === visual.indent - 1) connector.textContent = `${visual.isLast ? "└" : "├"}${foldMarker ? "" : "─ "}`;
+          connectors.append(connector);
+        }
+        line.append(connectors);
+        if (allChildren.length) item.setAttribute("aria-expanded", String(!collapsed));
+        if (foldMarker) {
           const fold = this.document.createElement("button");
-          const collapsed = this.model.collapsed.has(entry.entryId);
           fold.type = "button";
-          fold.className = "tree-session-fold secondary";
+          fold.className = "tree-session-fold";
           fold.dataset.treeFold = entry.entryId;
           fold.tabIndex = -1;
           fold.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} branch`);
-          fold.textContent = collapsed ? "▸" : "▾";
-          item.setAttribute("aria-expanded", String(!collapsed));
-          row.append(fold);
-        } else {
-          const spacer = this.document.createElement("span");
-          spacer.className = "tree-session-fold-spacer";
-          row.append(spacer);
+          fold.textContent = collapsed ? "⊞" : "⊟";
+          line.append(fold, " ");
         }
 
-        const button = this.document.createElement("div");
-        button.className = "tree-session-entry";
-        button.dataset.treeEntryId = entry.entryId;
-
-        const heading = this.document.createElement("span");
-        heading.className = "tree-session-entry-heading";
-        const role = this.document.createElement("span");
-        role.className = "tree-session-role";
-        role.textContent = entry.role || entry.type || "entry";
-        const text = this.document.createElement("span");
-        text.className = "tree-session-text";
-        text.textContent = entry.text || "Untitled entry";
-        heading.append(role, text);
-        if (entry.current) heading.append(this.badge("Current", "current"));
-        if (entry.latest && !entry.current) heading.append(this.badge("Latest", "latest"));
-        button.append(heading);
-
-        const metadata = this.document.createElement("span");
-        metadata.className = "tree-session-meta";
-        const timestamp = displayTimestamp(entry.timestamp);
-        const values = [];
-        if (entry.label) values.push(`Label: ${entry.label}`);
-        if (timestamp) values.push(timestamp);
-        const showLabelTimestamps = modal.querySelector("[data-tree-label-timestamps]")?.checked;
-        if (showLabelTimestamps && entry.labelTimestamp) values.push(`labeled ${displayTimestamp(entry.labelTimestamp)}`);
-        metadata.textContent = values.join(" · ");
-        if (values.length) button.append(metadata);
-        row.append(button);
+        if (this.model.activePath.has(entry.entryId)) line.append(span("tree-session-path", "• "));
+        if (entry.label) line.append(span("tree-session-label", `[${entry.label}] `));
+        if (this.showLabelTimes && entry.label && entry.labelTimestamp) line.append(span("tree-session-dim", `${labelTime(entry.labelTimestamp)} `));
+        const role = entry.role || entry.type || "entry";
+        if (role === "user" || role === "assistant") line.append(span(`tree-session-role tree-session-role--${role}`, `${role}: `), entry.text || "");
+        else line.append(span("tree-session-dim", `[${role}]${entry.text ? `: ${entry.text}` : ""}`));
+        if (entry.latest && !entry.current) line.append(span("tree-session-dim", " (latest)"));
+        row.append(cursor, line);
         item.append(row);
 
         if (children.length) {
@@ -367,17 +357,19 @@ export class TreeSessionController {
       });
     };
     appendEntries(structure.roots, viewport);
+    const visible = structure.entries;
+    if (!visible.length) {
+      const empty = this.document.createElement("li");
+      empty.className = "tree-session-empty";
+      empty.setAttribute("role", "none");
+      empty.textContent = "No entries found";
+      viewport.append(empty);
+    }
+    this.setStatus(`(${visible.findIndex((entry) => entry.entryId === this.model.selectedId) + 1}/${visible.length})${this.statusLabels}${this.showLabelTimes ? " [+label time]" : ""}`);
     this.syncSelectionControls();
     if (focus) [...modal.querySelectorAll("[data-tree-focus-entry]")]
       .find((entry) => entry.dataset.treeFocusEntry === this.model.selectedId)
       ?.focus({ preventScroll: true });
-  }
-
-  badge(label, kind) {
-    const badge = this.document.createElement("span");
-    badge.className = `tree-session-badge tree-session-badge--${kind}`;
-    badge.textContent = label;
-    return badge;
   }
 
   selectedEntry() {
@@ -387,12 +379,24 @@ export class TreeSessionController {
   syncSelectionControls() {
     const modal = this.modal();
     const entry = this.selectedEntry();
-    const input = modal?.querySelector("[data-tree-label-input]");
-    if (input) input.value = entry?.label || "";
-    [modal?.querySelector("[data-tree-label-save]"), modal?.querySelector("[data-tree-label-clear]")]
-      .forEach((control) => { if (control) control.disabled = !entry || this.savingLabel; });
-    const navigate = modal?.querySelector("[data-tree-navigate]");
-    if (navigate) navigate.disabled = !entry || this.savingLabel;
+    modal?.querySelectorAll("[data-tree-navigate], [data-tree-label-edit]")
+      .forEach((control) => { control.disabled = !entry || this.savingLabel; });
+  }
+
+  // Like Pi CLI, the label editor takes the place of the tree's actions while it is open.
+  editLabel(editing) {
+    const modal = this.modal();
+    const form = modal?.querySelector("[data-tree-label-form]");
+    if (!form) return;
+    form.hidden = !editing;
+    modal.querySelector("[data-tree-actions]").hidden = editing;
+    const input = form.querySelector("[data-tree-label-input]");
+    if (editing) {
+      input.value = this.selectedEntry()?.label || "";
+      input.focus();
+    } else if (this.model) {
+      this.render({ focus: true });
+    }
   }
 
   select(entryId, focus = false) {
@@ -416,8 +420,21 @@ export class TreeSessionController {
       modal.querySelector(".tree-session-card")?.classList.toggle("is-summary-step", true);
       modal.querySelector("[data-tree-browser-step]").hidden = true;
       modal.querySelector("[data-tree-summary-step]").hidden = false;
-      modal.querySelector('input[name="summary_mode"]:checked')?.focus();
+      this.showSummaryChoices(modal);
     }
+  }
+
+  showSummaryChoices(modal) {
+    const choices = modal.querySelector("[data-tree-summary-choices]");
+    choices.hidden = false;
+    modal.querySelector("[data-tree-summary-form]").hidden = true;
+    movePickerCursor(choices, 0);
+  }
+
+  // Like Pi CLI, cancelling the custom prompt returns to the choices, and cancelling those returns to the tree.
+  summaryBack(modal) {
+    if (modal.querySelector("[data-tree-summary-form]").hidden) this.showTreeStep(modal);
+    else this.showSummaryChoices(modal);
   }
 
   showTreeStep(modal = this.modal()) {
@@ -427,6 +444,7 @@ export class TreeSessionController {
     modal.querySelector(".tree-session-card")?.classList.toggle("is-summary-step", false);
     if (browser) browser.hidden = false;
     if (summary) summary.hidden = true;
+    if (this.model) this.render({ focus: true });
   }
 
   navigate(summaryMode, customInstructions) {
@@ -521,10 +539,24 @@ export class TreeSessionController {
     const entry = event.target.closest("[data-tree-entry-id]");
     if (entry) { event.preventDefault(); this.select(entry.dataset.treeEntryId, true); return; }
     if (event.target.closest("[data-tree-navigate]")) { event.preventDefault(); this.requestNavigation(); return; }
-    if (event.target.closest("[data-tree-summary-back]")) { event.preventDefault(); this.showTreeStep(modal); return; }
-    if (event.target.closest("[data-tree-label-clear]")) {
-      event.preventDefault();
-      this.saveLabel("").catch((error) => this.setStatus(error.message, true));
+    if (event.target.closest("[data-tree-summary-back]")) { this.summaryBack(modal); return; }
+    const choice = event.target.closest("[data-tree-summary-choice]");
+    if (choice?.dataset.treeSummaryChoice === "custom") {
+      modal.querySelector("[data-tree-summary-choices]").hidden = true;
+      modal.querySelector("[data-tree-summary-form]").hidden = false;
+      modal.querySelector("[data-tree-custom-instructions]").focus();
+      return;
+    }
+    if (choice) { this.navigate(choice.dataset.treeSummaryChoice, ""); return; }
+    const filter = event.target.closest("[data-tree-filter]");
+    if (filter) { this.applyFilterChoice(filter.dataset.treeFilter); return; }
+    if (event.target.closest("[data-tree-label-edit]")) { this.editLabel(true); return; }
+    if (event.target.closest("[data-tree-label-cancel]")) { this.editLabel(false); return; }
+    const labelTimes = event.target.closest("[data-tree-label-timestamps]");
+    if (labelTimes) {
+      this.showLabelTimes = !this.showLabelTimes;
+      labelTimes.setAttribute("aria-pressed", String(this.showLabelTimes));
+      this.render();
     }
   }
 
@@ -533,24 +565,10 @@ export class TreeSessionController {
       this.model?.setSearch(event.target.value);
       this.render();
     }
-    if (event.target.matches?.("[data-tree-custom-instructions]")) this.syncSummaryChoice();
   }
 
-  handleChange(event) {
-    if (event.target.matches?.("[data-tree-filter]")) this.applyFilterChoice();
-    if (event.target.matches?.("[data-tree-label-timestamps]")) this.render();
-    if (event.target.matches?.('input[name="summary_mode"]')) this.syncSummaryChoice();
-  }
-
-  syncSummaryChoice() {
-    const modal = this.modal();
-    const custom = modal?.querySelector("[data-tree-custom-instructions]");
-    const mode = modal?.querySelector('input[name="summary_mode"]:checked')?.value;
-    if (custom) custom.hidden = mode !== "custom";
-  }
-
-  applyFilterChoice() {
-    this.filterChosen = true;
+  applyFilterChoice(filter) {
+    this.filter = filter;
     this.model = null;
     this.load().catch(() => {});
   }
@@ -559,58 +577,54 @@ export class TreeSessionController {
     if (event.target.matches?.("[data-tree-label-form]")) {
       event.preventDefault();
       const input = event.target.querySelector("[data-tree-label-input]");
+      this.editLabel(false);
       this.saveLabel(input?.value || "").catch((error) => this.setStatus(error.message, true));
     }
     if (event.target.matches?.("[data-tree-summary-form]")) {
       event.preventDefault();
-      const mode = event.target.querySelector('input[name="summary_mode"]:checked')?.value || "none";
-      const instructions = event.target.querySelector("[data-tree-custom-instructions]")?.value || "";
-      this.navigate(mode, instructions);
+      this.navigate("custom", event.target.querySelector("[data-tree-custom-instructions]").value);
     }
-  }
-
-  revealOptions(modal = this.modal()) {
-    const options = modal?.querySelector("[data-tree-options]");
-    if (options) options.open = true;
   }
 
   handleKeydown(event) {
     const modal = this.document.querySelector('[data-modal="tree-session-modal"]:not([hidden])');
     if (!modal) return;
     const key = String(event.key || "");
-    const searchShortcut = (key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.target.closest?.("input, textarea, select")) ||
-      (key.toLowerCase() === "f" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey);
-    if (searchShortcut) {
-      event.preventDefault();
-      this.revealOptions(modal);
-      modal.querySelector("[data-tree-search]")?.focus();
-      return;
-    }
-    if (key.toLowerCase() === "o" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
-      event.preventDefault();
-      this.revealOptions(modal);
-      const filter = modal.querySelector("[data-tree-filter]");
-      if (filter) {
-        const index = TREE_FILTERS.findIndex((choice) => choice.value === filter.value);
-        filter.value = TREE_FILTERS[(index + 1) % TREE_FILTERS.length].value;
-        this.applyFilterChoice();
-      }
-      return;
-    }
-    if (key.toLowerCase() === "l" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      event.preventDefault();
-      this.revealOptions(modal);
-      modal.querySelector("[data-tree-label-input]")?.focus();
-      return;
-    }
     if (key === "Escape") {
       event.preventDefault();
-      if (!modal.querySelector("[data-tree-summary-step]")?.hidden) this.showTreeStep(modal);
+      if (!modal.querySelector("[data-tree-summary-step]")?.hidden) this.summaryBack(modal);
+      else if (!modal.querySelector("[data-tree-label-form]").hidden) this.editLabel(false);
       else {
         const search = modal.querySelector("[data-tree-search]");
         if (search?.value) { search.value = ""; this.model?.setSearch(""); this.render(); }
         else this.close();
       }
+      return;
+    }
+    // Like the composer, Enter submits only with a hardware keyboard; touch keyboards need it for new lines.
+    if (key === "Enter" && !event.shiftKey && !event.isComposing && event.target.matches?.("[data-tree-custom-instructions]") && this.window.matchMedia?.("(pointer: fine)").matches) {
+      event.preventDefault();
+      event.target.form.requestSubmit();
+      return;
+    }
+    // The tree's own shortcuts must not act on it from behind the summary step.
+    if (modal.querySelector("[data-tree-browser-step]").hidden) return;
+    const searchShortcut = (key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.target.closest?.("input, textarea, select")) ||
+      (key.toLowerCase() === "f" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey);
+    if (searchShortcut) {
+      event.preventDefault();
+      modal.querySelector("[data-tree-search]")?.focus();
+      return;
+    }
+    if (key.toLowerCase() === "o" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+      event.preventDefault();
+      const index = TREE_FILTERS.findIndex((choice) => choice.value === this.filter);
+      this.applyFilterChoice(TREE_FILTERS[(index + 1) % TREE_FILTERS.length].value);
+      return;
+    }
+    if (key.toLowerCase() === "l" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !event.target.closest?.("input, textarea") && this.selectedEntry()) {
+      event.preventDefault();
+      this.editLabel(true);
       return;
     }
     if (event.target.closest?.("input, textarea, select")) return;

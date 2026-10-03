@@ -97,3 +97,15 @@ export function enhanceMarkdownCodeBlocks(root, document = root?.ownerDocument |
     wrapper.append(button);
   });
 }
+
+// Pi-style option lists keep the cursor and the keyboard focus on the same row.
+export function movePickerCursor(list, index) {
+  const rows = [...list.querySelectorAll('[role="option"]')];
+  if (!rows.length) return;
+  const selected = (index + rows.length) % rows.length;
+  rows.forEach((row, rowIndex) => {
+    row.setAttribute("aria-selected", String(rowIndex === selected));
+    row.tabIndex = rowIndex === selected ? 0 : -1;
+  });
+  rows[selected].focus();
+}

@@ -46,7 +46,7 @@ import { CurrentSessionFindController } from "./current_session_find_controller.
 import { LiveMessageParser } from "./live_message_parser.js";
 import { LiveMessageRenderer } from "./live_message_renderer.js";
 import { ServerMarkdownRenderer } from "./server_markdown_renderer.js";
-import { activateToolOutputRegion, enhanceMarkdownCodeBlocks, enhanceMessageLinks } from "./dom.js";
+import { activateToolOutputRegion, enhanceMarkdownCodeBlocks, enhanceMessageLinks, movePickerCursor } from "./dom.js";
 import { eventPollCurrent, eventPollingDelay } from "./polling.js";
 import { extensionUiRequestExpired, extensionUiResponseDisposition } from "./extension_ui.js";
 import { TreeSessionController } from "./tree_session_controller.js";
@@ -163,11 +163,10 @@ let extensionUiTitle = null;
 let extensionUiMessage = null;
 let extensionUiError = null;
 let extensionUiOptions = null;
-let extensionUiInputField = null;
 let extensionUiInput = null;
-let extensionUiEditorField = null;
 let extensionUiEditor = null;
 let extensionUiSubmit = null;
+let extensionUiHint = null;
 let extensionWidgetsAboveContainer = null;
 let extensionWidgetsBelowContainer = null;
 let activeExtensionUiRequest = null;
@@ -242,11 +241,10 @@ function bindSessionDom() {
   extensionUiMessage = extensionUiModal?.querySelector("[data-extension-ui-message]") || null;
   extensionUiError = extensionUiModal?.querySelector("[data-extension-ui-error]") || null;
   extensionUiOptions = extensionUiModal?.querySelector("[data-extension-ui-options]") || null;
-  extensionUiInputField = extensionUiModal?.querySelector("[data-extension-ui-input-field]") || null;
   extensionUiInput = extensionUiModal?.querySelector("[data-extension-ui-input]") || null;
-  extensionUiEditorField = extensionUiModal?.querySelector("[data-extension-ui-editor-field]") || null;
   extensionUiEditor = extensionUiModal?.querySelector("[data-extension-ui-editor]") || null;
   extensionUiSubmit = extensionUiModal?.querySelector("[data-extension-ui-submit]") || null;
+  extensionUiHint = extensionUiModal?.querySelector("[data-extension-ui-hint]") || null;
   extensionWidgetsAboveContainer = document.querySelector("[data-extension-widgets-above]");
   extensionWidgetsBelowContainer = document.querySelector("[data-extension-widgets-below]");
   promptSessionInput = promptForm?.querySelector('input[name="session"]') || null;
@@ -486,7 +484,7 @@ function renderThinkingOptions() {
   supportedThinkingLevels(model).forEach((level, index) => {
     if (index) {
       const separator = document.createElement("span");
-      separator.className = "model-picker-separator";
+      separator.className = "picker-separator";
       separator.setAttribute("aria-hidden", "true");
       separator.textContent = "|";
       container.append(separator);
@@ -523,7 +521,7 @@ function renderModelSettingsModels() {
   list.replaceChildren(...modelSettingsVisibleModels.map((model, index) => {
     const row = document.createElement("button");
     row.type = "button";
-    row.className = "model-picker-row";
+    row.className = "picker-row model-picker-row";
     row.id = `model-picker-option-${index}`;
     row.tabIndex = -1;
     row.setAttribute("role", "option");
@@ -1117,15 +1115,12 @@ function resetExtensionUiModal() {
     extensionUiOptions.replaceChildren();
     extensionUiOptions.hidden = true;
   }
-  if (extensionUiInputField) extensionUiInputField.hidden = true;
-  if (extensionUiInput) extensionUiInput.value = "";
-  if (extensionUiEditorField) extensionUiEditorField.hidden = true;
-  if (extensionUiEditor) extensionUiEditor.value = "";
-  if (extensionUiSubmit) {
-    extensionUiSubmit.hidden = false;
-    extensionUiSubmit.textContent = "Submit";
-    delete extensionUiSubmit.dataset.confirmResponse;
-  }
+  [extensionUiInput, extensionUiEditor].forEach((field) => {
+    if (!field) return;
+    field.hidden = true;
+    field.value = "";
+  });
+  if (extensionUiSubmit) extensionUiSubmit.hidden = false;
   setExtensionUiDeliveryPending(false);
 }
 
@@ -1180,49 +1175,50 @@ function openExtensionUiDialog(event) {
     extensionUiMessage.hidden = false;
   }
 
-  if (event.method === "select") {
-    if (extensionUiOptions) {
-      (Array.isArray(event.options) ? event.options : []).forEach((option, index) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "extension-ui-option";
-        button.textContent = String(option);
-        if (index === 0) button.setAttribute("data-modal-default-focus", "");
-        button.addEventListener("click", async () => { await sendExtensionUiResponse({ value: String(option) }); });
-        extensionUiOptions.append(button);
-      });
-      extensionUiOptions.hidden = false;
-    }
-    if (extensionUiSubmit) extensionUiSubmit.hidden = true;
-  } else if (event.method === "confirm") {
-    if (extensionUiSubmit) {
-      extensionUiSubmit.textContent = "Confirm";
-      extensionUiSubmit.dataset.confirmResponse = "true";
-    }
-  } else if (event.method === "input") {
-    if (extensionUiInputField) extensionUiInputField.hidden = false;
-    if (extensionUiInput) {
-      extensionUiInput.placeholder = event.placeholder || "";
-      extensionUiInput.value = event.value || "";
-    }
-  } else if (event.method === "editor") {
-    if (extensionUiEditorField) extensionUiEditorField.hidden = false;
-    if (extensionUiEditor) extensionUiEditor.value = event.prefill || "";
+  // Like Pi CLI, a confirmation is a Yes/No selector.
+  const choices = event.method === "select"
+    ? (Array.isArray(event.options) ? event.options : []).map((option) => ({ label: String(option), response: { value: String(option) } }))
+    : event.method === "confirm"
+      ? [{ label: "Yes", response: { confirmed: "true" } }, { label: "No", response: { confirmed: "false" } }]
+      : null;
+  const field = event.method === "input" ? extensionUiInput : extensionUiEditor;
+  if (choices) {
+    choices.forEach(({ label, response }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "picker-row picker-option";
+      button.setAttribute("role", "option");
+      const cursor = document.createElement("span");
+      cursor.className = "picker-cursor";
+      cursor.setAttribute("aria-hidden", "true");
+      cursor.textContent = "→";
+      const text = document.createElement("span");
+      text.textContent = label;
+      button.append(cursor, text);
+      button.addEventListener("click", () => { sendExtensionUiResponse(response); });
+      extensionUiOptions.append(button);
+    });
+    extensionUiOptions.hidden = false;
+    extensionUiSubmit.hidden = true;
+  } else {
+    field.hidden = false;
+    field.placeholder = event.placeholder || "";
+    field.value = event.value || event.prefill || "";
   }
+  extensionUiHint.textContent = choices
+    ? "↑↓ navigate · enter select · esc cancel"
+    : `enter submit${event.method === "editor" ? " · shift+enter newline" : ""} · esc cancel`;
 
   openModal(extensionUiModal);
+  if (choices) movePickerCursor(extensionUiOptions, 0);
+  else field.focus();
 }
 
 async function submitExtensionUiDialog(event) {
   event.preventDefault();
-  if (!activeExtensionUiRequest) return;
-  if (activeExtensionUiRequest.method === "confirm") {
-    await sendExtensionUiResponse({ confirmed: "true" });
-  } else if (activeExtensionUiRequest.method === "input") {
-    await sendExtensionUiResponse({ value: extensionUiInput?.value || "" });
-  } else if (activeExtensionUiRequest.method === "editor") {
-    await sendExtensionUiResponse({ value: extensionUiEditor?.value || "" });
-  }
+  const method = activeExtensionUiRequest?.method;
+  if (method === "input") await sendExtensionUiResponse({ value: extensionUiInput.value });
+  else if (method === "editor") await sendExtensionUiResponse({ value: extensionUiEditor.value });
 }
 
 function handleExtensionEditorText(event) {
@@ -2583,6 +2579,12 @@ function bindSessionControls() {
   if (!extensionUiControlsBound) {
     extensionUiControlsBound = true;
     extensionUiForm?.addEventListener("submit", submitExtensionUiDialog);
+    // Like the composer, Enter submits only with a hardware keyboard; touch keyboards need it for new lines.
+    extensionUiEditor?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing || !automaticComposerFocusEnabled()) return;
+      event.preventDefault();
+      extensionUiForm.requestSubmit();
+    });
     extensionUiModal?.querySelectorAll("[data-extension-ui-cancel]").forEach((button) => button.addEventListener("click", cancelExtensionUiRequest));
   }
 
@@ -2954,18 +2956,28 @@ function setForkSessionStatus(modal, text) {
   const list = modal?.querySelector("[data-fork-session-list]");
   if (!list) return;
   list.replaceChildren();
-  delete list.dataset.loaded;
+  list.removeAttribute("role");
   const status = document.createElement("p");
-  status.className = "fork-session-status";
+  status.className = "picker-status";
   status.dataset.forkSessionStatus = "";
   status.textContent = text;
   list.append(status);
 }
 
+function handlePickerListKey(event) {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  // offsetParent is null while a list or one of its ancestors is hidden.
+  const list = [...document.querySelectorAll("[data-modal]:not([hidden]) [data-picker-list]")].find((candidate) => candidate.offsetParent);
+  if (!list) return;
+  event.preventDefault();
+  const current = [...list.querySelectorAll('[role="option"]')].findIndex((row) => row.getAttribute("aria-selected") === "true");
+  movePickerCursor(list, current + (event.key === "ArrowDown" ? 1 : -1));
+}
+
 async function loadForkMessages(modal) {
   const list = modal?.querySelector("[data-fork-session-list]");
   const url = list?.dataset.forkMessagesUrl;
-  if (!list || !url || list.dataset.loaded === "true" || list.dataset.loading === "true") return;
+  if (!list || !url || list.dataset.loading === "true") return;
 
   list.dataset.loading = "true";
   setForkSessionStatus(modal, "Loading fork points…");
@@ -2979,15 +2991,28 @@ async function loadForkMessages(modal) {
       setForkSessionStatus(modal, "No previous user messages are available to fork.");
       return;
     }
-    messages.forEach((message) => {
+    list.setAttribute("role", "listbox");
+    messages.forEach((message, index) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "fork-session-option";
+      button.className = "picker-row fork-session-option";
+      button.setAttribute("role", "option");
       button.dataset.forkEntryId = message.entryId || message.entry_id || "";
-      button.textContent = message.text || "Untitled prompt";
+      const cursor = document.createElement("span");
+      cursor.className = "picker-cursor";
+      cursor.setAttribute("aria-hidden", "true");
+      cursor.textContent = "›";
+      const text = document.createElement("span");
+      text.className = "fork-session-text";
+      text.textContent = message.text || "Untitled prompt";
+      const meta = document.createElement("span");
+      meta.className = "fork-session-meta";
+      meta.textContent = `Message ${index + 1} of ${messages.length}`;
+      button.append(cursor, text, meta);
       list.append(button);
     });
-    list.dataset.loaded = "true";
+    // Like Pi CLI, the cursor starts on the most recent message.
+    movePickerCursor(list, messages.length - 1);
   } catch (_error) {
     setForkSessionStatus(modal, "Could not load fork points.");
   } finally {
@@ -3054,13 +3079,14 @@ document.addEventListener("click", (event) => {
   if (forkOption) {
     event.preventDefault();
     const modal = forkOption.closest("[data-modal]");
-    const originalForkText = forkOption.textContent;
+    const forkMeta = forkOption.querySelector(".fork-session-meta");
+    const originalForkMeta = forkMeta.textContent;
     const formData = new FormData();
     formData.set("session", currentSessionPath());
     formData.set("entry_id", forkOption.dataset.forkEntryId);
     addSessionViewFormParams(formData);
     forkOption.disabled = true;
-    forkOption.textContent = "Forking…";
+    forkMeta.textContent = "Forking…";
     showSessionSwitching();
     fetch("/sessions/fork", { method: "POST", body: formData, headers: { "Accept": "application/json" } })
       .then(async (response) => {
@@ -3071,7 +3097,7 @@ document.addEventListener("click", (event) => {
       })
       .catch(() => {
         forkOption.disabled = false;
-        forkOption.textContent = originalForkText;
+        forkMeta.textContent = originalForkMeta;
         if (modal) {
           setForkSessionStatus(modal, "Could not fork this session.");
         } else {
@@ -3270,6 +3296,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   handleModelSettingsKey(event);
+  handlePickerListKey(event);
   handleModalTab(event);
   if (modalIsOpen()) return;
 

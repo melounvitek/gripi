@@ -582,6 +582,20 @@ func TestClientBoundsQueuedMessagesAndExtensionUISnapshots(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestExtensionEditorPrefillIsKeptWholeOrDropped(t *testing.T) {
+	request := func(prefill string) map[string]any {
+		return boundedExtensionUIEvent(map[string]any{"type": "extension_ui_request", "id": "notes", "method": "editor", "title": "Notes", "prefill": prefill})
+	}
+	draft := strings.Repeat("d", MaxSnapshotStringBytes)
+	if event := request(draft); event["prefill"] != draft {
+		t.Fatalf("editor draft was not kept whole: %d bytes", len(stringValue(event["prefill"])))
+	}
+	event := request(strings.Repeat("d", MaxExtensionUIItemBytes))
+	if _, kept := event["prefill"]; kept || event["title"] != "Notes" {
+		t.Fatalf("oversized editor draft was not dropped on its own: %#v", event)
+	}
+}
+
 func TestClientFailsExplicitlyOnOversizedFallbackLine(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()

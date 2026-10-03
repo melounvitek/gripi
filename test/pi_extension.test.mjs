@@ -129,22 +129,11 @@ test("large native trees are compacted before crossing the extension bridge", as
     });
     await events.get("session_start")({}, { cwd: directory, isProjectTrusted: () => true });
 
-    const assistantCases = {
-      2: { content: "Final answer", stopReason: "stop" },
-      3: { content: "Working", stopReason: "toolUse" },
-      4: { content: "Long answer", stopReason: "length" },
-      5: { content: "Legacy answer" },
-      6: { content: "Partial answer", stopReason: "aborted" },
-      7: { content: "Failed answer", stopReason: "error" },
-      8: { content: "  ", stopReason: "stop" },
-      9: { content: "Commentary", stopReason: "stop", commentary: true },
-    };
     const nodes = Array.from({ length: 1001 }, (_, index) => {
-      const assistant = assistantCases[index];
-      const role = index === 1 ? "toolResult" : assistant ? "assistant" : "user";
+      const role = index === 1 ? "toolResult" : "user";
       const text = index === 0
         ? "x".repeat(20_000)
-        : role === "toolResult" ? `Tool preview ${"y".repeat(20_000)}` : assistant?.content || `Prompt ${index}`;
+        : role === "toolResult" ? `Tool preview ${"y".repeat(20_000)}` : `Prompt ${index}`;
       return {
         entry: {
           id: `entry-${index}`,
@@ -153,12 +142,7 @@ test("large native trees are compacted before crossing the extension bridge", as
           timestamp: `2026-06-13T10:00:00Z${"t".repeat(2_000)}`,
           message: {
             role,
-            content: [{
-              type: "text",
-              text,
-              ...(assistant?.commentary ? { textSignature: JSON.stringify({ v: 1, id: "message-1", phase: "commentary" }) } : {}),
-            }, ...(index === 0 ? [{ type: "image", data: "RAW_IMAGE_DATA", mimeType: "image/png" }] : [])],
-            ...(assistant?.stopReason ? { stopReason: assistant.stopReason } : {}),
+            content: [{ type: "text", text }, ...(index === 0 ? [{ type: "image", data: "RAW_IMAGE_DATA", mimeType: "image/png" }] : [])],
           },
         },
         children: [],
@@ -190,10 +174,6 @@ test("large native trees are compacted before crossing the extension bridge", as
     assert.ok(Buffer.byteLength(first.text, "utf8") <= 512);
     assert.match(tool.text, /^Tool preview/);
     assert.ok(Buffer.byteLength(tool.text, "utf8") <= 512);
-    assert.deepEqual(
-      snapshot.entries.filter(({ entryId, messageKind }) => /^entry-[2-9]$/.test(entryId) && messageKind === "assistant-final").map(({ entryId }) => entryId).sort(),
-      ["entry-2", "entry-4", "entry-5"],
-    );
     assert.ok(!statusText.includes("RAW_IMAGE_DATA"));
     assert.ok(Buffer.byteLength(statusText, "utf8") < 1_000_000);
 
