@@ -649,12 +649,10 @@
     .extension-ui-modal-card form { display: grid; gap: 0.75rem; }
     .extension-ui-message { margin: 0; color: var(--copy); white-space: pre-wrap; }
     .extension-ui-error { margin: 0; color: var(--danger); }
-    .project-select { min-width: 0; width: 100%; }
+    .project-select { min-width: 0; }
     .sidebar-filter-row > .project-select { flex: 0 1 auto; width: auto; }
     .project-select-native-hidden { position: absolute !important; width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
-    .project-select-trigger { width: 100%; min-width: 0; min-height: 2.45rem; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; padding: 0.42rem 0.55rem; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); text-align: left; font-family: var(--mono); font-size: 0.8rem; font-weight: 500; letter-spacing: normal; text-transform: none; }
-    .project-select-trigger:hover, .project-select-trigger[aria-expanded="true"] { border-color: var(--accent-line-55); background: var(--bg); transform: none; }
-    .project-select-trigger:focus-visible { border-color: var(--accent-line-55); outline: none; box-shadow: 0 0 0 2px var(--accent-tint-14); }
+    .project-select-trigger { width: 100%; min-width: 0; justify-self: stretch; display: grid; align-items: center; gap: 0.5rem; color: var(--text); text-align: left; font-family: var(--mono); font-weight: 500; letter-spacing: normal; text-transform: none; }
     .project-select-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .project-select-chevron { color: var(--muted); font-size: 0.72rem; }
     .project-select-listbox { position: fixed; z-index: 180; display: grid; overflow-y: auto; padding: 0.4rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: #1e1e24; box-shadow: 0 16px 42px #00000080; font: 0.8rem var(--mono); }
@@ -780,7 +778,6 @@
     .session-sync-error { display: block; margin-top: 0.25rem; }
     .command-list.is-disabled > summary { opacity: 0.48; cursor: not-allowed; pointer-events: none; }
     .cwd-validation-message { min-height: 1.2rem; color: var(--muted); font-size: 0.85rem; }
-    .cwd-validation-message.is-valid { color: var(--success); }
     .cwd-validation-message.is-invalid { color: var(--danger); }
     .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
     @keyframes session-switch-spin { to { transform: rotate(360deg); } }
@@ -842,7 +839,6 @@
       .session-header h1 { font-size: 1rem; }
       .session-header-project { font-size: 0.7rem; }
       .session-header-view-option { min-height: 2.75rem; }
-      .project-select-trigger { min-height: 2.75rem; }
       .project-select-listbox { inset: auto 0.75rem calc(0.75rem + env(safe-area-inset-bottom)) !important; max-height: min(60dvh, 28rem) !important; width: auto !important; padding: 0.5rem; border-radius: 0.4rem; font-size: 0.95rem; }
       .project-select-option { min-height: 2.75rem; }
       .session-abort-button { width: 2.4rem; height: 2.4rem; }
@@ -1097,31 +1093,20 @@
     </div>
   </div>
   <div class="modal-overlay" data-modal="new-session-modal" hidden>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="new-session-modal-title">
-      <div class="modal-header"><h2 id="new-session-modal-title">New session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div>
-      <form class="new-session-cwd-form">
-        <input type="hidden" name="cwd" value="/home/demo/Work/gripi" data-new-session-cwd-value>
-        <div data-new-session-project-fields>
-          <div class="modal-field">
-            <label id="new-session-project-label" for="new-session-known-cwd">Project</label>
-            <div class="project-select" data-project-select>
-              <select id="new-session-known-cwd" name="known_cwd" class="project-select-native-hidden" aria-labelledby="new-session-project-label" data-new-session-known-cwd>
-                <option value="gripi">gripi — /home/demo/Work/gripi</option><option value="website">website — /home/demo/Work/website</option><option value="storefront">storefront — /home/demo/Work/storefront</option><option value="__new_path__" data-project-option-kind="new">Add new path…</option>
-              </select>
-              <button type="button" class="project-select-trigger" data-new-session-project-trigger data-modal-default-focus aria-haspopup="listbox" aria-expanded="false"><span class="project-monogram" aria-hidden="true" style="--project-identity-fg:#ff9b73">gr</span><span class="project-select-trigger-label">gripi — /home/demo/Work/gripi</span><span class="project-select-chevron" aria-hidden="true">▾</span></button>
-              <div class="project-select-listbox" data-new-session-project-list role="listbox" hidden>
-                <div class="project-select-option is-active" role="option" aria-selected="true" data-new-project="gripi"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-monogram" aria-hidden="true" style="--project-identity-fg:#ff9b73">gr</span><span class="project-select-option-label">gripi — /home/demo/Work/gripi</span></div>
-                <div class="project-select-option" role="option" aria-selected="false" data-new-project="website"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-monogram" aria-hidden="true" style="--project-identity-fg:#9fc5ff">we</span><span class="project-select-option-label">website — /home/demo/Work/website</span></div>
-                <div class="project-select-option" role="option" aria-selected="false" data-new-project="storefront"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-monogram" aria-hidden="true" style="--project-identity-fg:#b5e3b0">st</span><span class="project-select-option-label">storefront — /home/demo/Work/storefront</span></div>
-                <div class="project-select-option" role="option" aria-selected="false" data-new-project="__new_path__"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span class="project-monogram" aria-hidden="true">+</span><span class="project-select-option-label">Add new path…</span></div>
-              </div>
-            </div>
-          </div>
+    <div class="modal-card picker-card" role="dialog" aria-modal="true" aria-labelledby="new-session-modal-title">
+      <div class="modal-header"><h2 id="new-session-modal-title">New session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" tabindex="-1" data-modal-close>×</button></div>
+      <div class="new-session-cwd-form">
+        <label class="picker-line tree-session-input"><span>Project or path:</span><input type="text" autocomplete="off" placeholder="type to filter" data-new-session-input></label>
+        <div class="picker-list new-session-list" role="listbox" aria-label="Projects">
+          <button type="button" class="picker-row new-session-row" role="option" tabindex="-1" data-new-session-project="/home/demo/Work/gripi"><span class="picker-cursor" aria-hidden="true">→</span><span class="project-monogram" aria-hidden="true" style="--project-identity-fg:#ff9b73">gr</span><span class="new-session-name">gripi</span><span class="new-session-path">~/Work/gripi</span><span class="new-session-age">now</span><span class="new-session-key" aria-hidden="true"></span></button>
+          <button type="button" class="picker-row new-session-row" role="option" tabindex="-1" data-new-session-project="/home/demo/Work/website"><span class="picker-cursor" aria-hidden="true">→</span><span class="project-monogram" aria-hidden="true" style="--project-identity-fg:#9fc5ff">we</span><span class="new-session-name">website</span><span class="new-session-path">~/Work/website</span><span class="new-session-age">2h</span><span class="new-session-key" aria-hidden="true"></span></button>
+          <button type="button" class="picker-row new-session-row" role="option" tabindex="-1" data-new-session-project="/home/demo/Work/storefront"><span class="picker-cursor" aria-hidden="true">→</span><span class="project-monogram" aria-hidden="true" style="--project-identity-fg:#b5e3b0">st</span><span class="new-session-name">storefront</span><span class="new-session-path">~/Work/storefront</span><span class="new-session-age">1d</span><span class="new-session-key" aria-hidden="true"></span></button>
+          <button type="button" class="picker-row new-session-row" role="option" tabindex="-1" data-new-session-action="start" hidden><span class="picker-cursor" aria-hidden="true">→</span><span class="project-monogram" aria-hidden="true">✓</span><span class="new-session-name"></span></button>
+          <button type="button" class="picker-row new-session-row" role="option" tabindex="-1" data-new-session-action="back" hidden><span class="picker-cursor" aria-hidden="true">→</span><span class="project-monogram" aria-hidden="true">←</span><span class="new-session-name">Back to projects</span></button>
+          <button type="button" class="picker-row new-session-row" role="option" tabindex="-1" data-new-session-action="path"><span class="picker-cursor" aria-hidden="true">→</span><span class="project-monogram" aria-hidden="true">+</span><span class="new-session-name">Add new path…</span></button>
         </div>
-        <div data-new-session-path-fields hidden><label class="modal-field"><span>Path</span><input type="text" autocomplete="off" placeholder="/home/demo/projects/project" data-new-session-cwd-input></label><div class="cwd-suggestions" role="listbox" hidden></div><button type="button" class="secondary" data-new-session-project-mode>Choose existing project instead</button></div>
-        <div class="cwd-validation-message" data-new-session-cwd-message>The static demo creates a representative local session.</div>
-        <div class="modal-actions"><button type="submit" data-new-session-submit>Start session</button></div>
-      </form>
+        <p class="picker-hint picker-keys" data-new-session-hint></p>
+      </div>
     </div>
   </div>
   <div class="modal-overlay" data-modal="fork-session-modal" hidden><div class="modal-card picker-card" role="dialog" aria-modal="true" aria-labelledby="fork-session-modal-title"><div class="modal-header"><h2 id="fork-session-modal-title">Fork session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><p class="picker-status">Select a user message to copy the active path up to that point into a new session</p><div class="fork-session-list" role="listbox"><button type="button" class="picker-row fork-session-option" role="option" aria-selected="true" data-demo-fork data-modal-default-focus><span class="picker-cursor" aria-hidden="true">›</span><span class="fork-session-text">What is Gripi, and how can I get started?</span><span class="fork-session-meta">Message 1 of 1</span></button></div><p class="picker-hint picker-keys">enter select · esc cancel</p></div></div>

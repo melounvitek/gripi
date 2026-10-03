@@ -2,14 +2,16 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestSessionActionsRememberDiscoveredProjectOnlyOnSuccess(t *testing.T) {
@@ -45,7 +47,7 @@ func TestSessionActionsRememberDiscoveredProjectOnlyOnSuccess(t *testing.T) {
 					t.Fatal(err)
 				}
 				response := httptest.NewRecorder()
-				app.replaceSessionFromAction(response, tagLifecycleRequest("/sessions/"+operation, nil), parent, operation, "source")
+				app.replaceSessionFromAction(response, tagLifecycleRequest("/sessions/"+operation), parent, operation, "source")
 				wantStatus := http.StatusOK
 				if cancelled {
 					wantStatus = http.StatusConflict
@@ -95,8 +97,7 @@ func TestNewSessionProjectStorageFailureRollsBackCreation(t *testing.T) {
 				released = true
 				return nil
 			}
-			request := tagLifecycleRequest("/sessions/new_at_cwd", url.Values{"tags": {"work"}})
-			if _, err := app.startNewSession(request, app.config.Home); err == nil {
+			if _, err := app.startNewSession(tagLifecycleRequest("/sessions/new_at_cwd"), app.config.Home); err == nil {
 				t.Fatal("creation accepted broken project storage")
 			}
 			if app.rpcClients.Active(newPath) {
@@ -108,12 +109,34 @@ func TestNewSessionProjectStorageFailureRollsBackCreation(t *testing.T) {
 			if claimed && !released {
 				t.Error("failed creation did not release ownership")
 			}
-			tags, err := app.gatewayState.SessionTags()
-			if err != nil {
+		})
+	}
+}
+
+func TestNewSessionRegistrationFailureRollsBackCreation(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		t.Run(fmt.Sprint(native), func(t *testing.T) {
+			root := t.TempDir()
+			state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), root)
+			client := &remapClient{state: map[string]any{"data": map[string]any{}}}
+			if native {
+				client.state = map[string]any{"data": map[string]any{"sessionFile": filepath.Join(root, "native.jsonl")}}
+			}
+			registry := rpc.NewRegistry(nil, nil)
+			if err := registry.Shutdown(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if len(tags[newPath]) != 0 {
-				t.Errorf("failed creation left tags: %v", tags[newPath])
+			owned := map[string]bool{}
+			app := &application{config: config.Config{SessionsRoot: root}, gatewayState: state, rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), newRPCClient: func(string) (rpc.RPCClient, error) { return client, nil }, claimSession: func(_ *http.Request, path string) (bool, error) { owned[path] = true; return true, nil }, releaseSession: func(_ *http.Request, path string) error { delete(owned, path); return nil }}
+			if _, err := app.startNewSession(tagLifecycleRequest("/sessions/new_at_cwd"), root); err == nil {
+				t.Fatal("registration succeeded")
+			}
+			if len(owned) != 0 {
+				t.Fatalf("failed creation left ownership=%v", owned)
+			}
+			projects, err := state.ProjectCWDs(nil)
+			if err != nil || projects[root] {
+				t.Fatalf("failed registration left project=%v err=%v", projects, err)
 			}
 		})
 	}

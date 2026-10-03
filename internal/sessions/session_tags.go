@@ -89,37 +89,6 @@ func (state *GatewayState) SetTag(path, name string, assigned bool) error {
 	return err
 }
 
-func NormalizeTags(names []string) ([]string, error) {
-	result := make([]string, 0, len(names))
-	for _, name := range names {
-		normalized, err := NormalizeTag(name)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, normalized)
-	}
-	slices.Sort(result)
-	result = slices.Compact(result)
-	if len(result) > 32 {
-		return nil, ErrTooManyTags
-	}
-	return result, nil
-}
-
-func (state *GatewayState) SetTags(path string, names []string) (func() error, error) {
-	names, err := NormalizeTags(names)
-	if err != nil {
-		return nil, err
-	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	tags, err := state.readSessionTags()
-	if err != nil {
-		return nil, err
-	}
-	return state.replaceTags(tags, map[string][]string{state.configuredPath(path): names})
-}
-
 func (state *GatewayState) CopyTags(from, to string) (func() error, error) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
@@ -145,9 +114,11 @@ func (state *GatewayState) MigrateTags(from, to string) (func() error, error) {
 	if from == to || len(tags[from]) == 0 {
 		return nil, nil
 	}
-	names, err := NormalizeTags(append(slices.Clone(tags[to]), tags[from]...))
-	if err != nil {
-		return nil, err
+	names := append(slices.Clone(tags[to]), tags[from]...)
+	slices.Sort(names)
+	names = slices.Compact(names)
+	if len(names) > 32 {
+		return nil, ErrTooManyTags
 	}
 	return state.replaceTags(tags, map[string][]string{from: nil, to: names})
 }

@@ -77,17 +77,12 @@ func TestSessionTagLifecycleWithNativePi(t *testing.T) {
 	fresh := post("/prompt", url.Values{"session": {parent}, "message": {"/new"}, "tag": {"work"}})
 	assertTags(fresh, []string{})
 	assertTags(parent, []string{"work"})
-	explicit := post("/sessions/new_at_cwd?tag=filter", url.Values{"cwd": {root}, "tags": {" Alpha ", "WORK", "alpha"}})
-	assertTags(explicit, []string{"alpha", "work"})
-	untagged := post("/sessions/new_at_cwd?tag=work&tags=query-only", url.Values{"cwd": {root}})
-	assertTags(untagged, []string{})
-	newFromParent := post("/sessions/new", url.Values{"session": {parent}, "tags": {"fresh"}})
-	assertTags(newFromParent, []string{"fresh"})
 	for _, operation := range []string{"clone", "fork", "new"} {
-		pending := post("/sessions/new_at_cwd", url.Values{"cwd": {root}, "tags": {"pending"}})
+		pending := post("/sessions/new_at_cwd", url.Values{"cwd": {root}})
 		if _, err := os.Stat(pending); !os.IsNotExist(err) {
 			t.Fatalf("expected a pending source: %v", err)
 		}
+		readTagResponse(t, postWorkspaceForm(handler, "/sessions/tags", url.Values{"session": {pending}, "tag": {"pending"}, "assigned": {"true"}}, ""))
 		route := "/sessions/" + operation
 		if operation == "new" {
 			route = "/prompt"

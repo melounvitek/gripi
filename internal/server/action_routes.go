@@ -1564,13 +1564,6 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 }
 
 func (app *application) startNewSession(request *http.Request, cwd string) (string, error) {
-	if err := request.ParseForm(); err != nil {
-		return "", err
-	}
-	names, err := sessions.NormalizeTags(request.PostForm["tags"])
-	if err != nil {
-		return "", err
-	}
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
@@ -1579,6 +1572,7 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 		if !ok {
 			return "", nil, errors.New("Pi reported a session path outside the configured sessions root")
 		}
+		var err error
 		claimed := false
 		if app.claimSession != nil {
 			claimed, err = app.claimSession(request, path)
@@ -1586,14 +1580,11 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 				return "", nil, err
 			}
 		}
-		var tagRollback, projectRollback func() error
+		var projectRollback func() error
 		rollback := func() error {
 			var rollbackErr error
-			if tagRollback != nil {
-				rollbackErr = tagRollback()
-			}
 			if projectRollback != nil {
-				rollbackErr = errors.Join(rollbackErr, projectRollback())
+				rollbackErr = projectRollback()
 			}
 			if claimed && app.releaseSession != nil {
 				rollbackErr = errors.Join(rollbackErr, app.releaseSession(request, path))
@@ -1601,10 +1592,6 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 			return rollbackErr
 		}
 		if app.gatewayState != nil {
-			tagRollback, err = app.gatewayState.SetTags(path, names)
-			if err != nil {
-				return "", nil, errors.Join(err, rollback())
-			}
 			projectRollback, err = app.gatewayState.RememberProject(cwd)
 			if err != nil {
 				return "", nil, errors.Join(err, rollback())
@@ -1803,10 +1790,6 @@ func (app *application) writeSettingError(response http.ResponseWriter, err erro
 func (app *application) writeActionRPCError(response http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
-	}
-	if errors.Is(err, sessions.ErrInvalidTag) || errors.Is(err, sessions.ErrTooManyTags) {
-		writeJSONStatus(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
-		return true
 	}
 	var pending *pendingIdentificationError
 	if errors.As(err, &pending) {

@@ -51,7 +51,7 @@ func TestTagColorsDeterministicMigration(t *testing.T) {
 }
 
 func TestTagColorsReserveExistingNamesBeforeRemovalAndNewAssignments(t *testing.T) {
-	for _, operation := range []string{"remove", "insert", "replace", "forget"} {
+	for _, operation := range []string{"remove", "insert", "forget"} {
 		t.Run(operation, func(t *testing.T) {
 			state := newTagColorState(t)
 			if err := writeJSON(state.tagsPath, map[string][]string{"/session": {"zebra", "work", "zz"}}); err != nil {
@@ -63,8 +63,6 @@ func TestTagColorsReserveExistingNamesBeforeRemovalAndNewAssignments(t *testing.
 				err = state.SetTag("/session", "work", false)
 			case "insert":
 				err = state.SetTag("/session", "alpha", true)
-			case "replace":
-				_, err = state.SetTags("/session", []string{"alpha"})
 			case "forget":
 				err = state.Forget("/session")
 			}
@@ -81,16 +79,17 @@ func TestTagColorsReserveExistingNamesBeforeRemovalAndNewAssignments(t *testing.
 
 func TestTagColorsStabilityAndLifecycleRollback(t *testing.T) {
 	state := newTagColorState(t)
-	if _, err := state.SetTags("/parent", []string{" Work ", "alpha"}); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{" Work ", "alpha"} {
+		if err := state.SetTag("/parent", name, true); err != nil {
+			t.Fatal(err)
+		}
 	}
 	initial := tagColors(t, state)
-	rollback, err := state.SetTags("/parent", []string{"temporary"})
-	if err != nil {
+	if err := state.SetTag("/parent", "temporary", true); err != nil {
 		t.Fatal(err)
 	}
 	reserved := tagColors(t, state)
-	if err := rollback(); err != nil {
+	if err := state.SetTag("/parent", "temporary", false); err != nil {
 		t.Fatal(err)
 	}
 	for _, operation := range []func(string, string) (func() error, error){state.CopyTags, state.MigrateTags} {
@@ -112,8 +111,10 @@ func TestTagColorsStabilityAndLifecycleRollback(t *testing.T) {
 	if colors := tagColors(t, state); !maps.Equal(colors, reserved) {
 		t.Fatalf("reservations changed after reload: %v", colors)
 	}
-	if _, err := state.SetTags("/new", []string{"WORK", "temporary", "new"}); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"WORK", "temporary", "new"} {
+		if err := state.SetTag("/new", name, true); err != nil {
+			t.Fatal(err)
+		}
 	}
 	colors := tagColors(t, state)
 	for name, color := range reserved {
@@ -183,9 +184,6 @@ func TestTagColorsRejectMalformedStateWithoutChangingFiles(t *testing.T) {
 			}
 			if err := state.SetTag("/session", "new", true); err == nil {
 				t.Fatal("assigned tag with malformed colors")
-			}
-			if _, err := state.SetTags("/session", []string{"new"}); err == nil {
-				t.Fatal("assigned batch with malformed colors")
 			}
 			assertFileContents(t, path, []byte(malformed))
 			assertFileContents(t, state.tagsPath, original)
