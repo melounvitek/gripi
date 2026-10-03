@@ -63,7 +63,7 @@ const notifyAccessRequest = (title, body, tag) =>
 const browserAccessController = new BrowserAccessRequestController(document, notifyAccessRequest);
 const workspaceAccessController = new WorkspaceAccessRequestController(document, notifyAccessRequest);
 const projectSelectController = new ProjectSelectController(document, window);
-const newSessionFormController = new NewSessionFormController(document, window, projectSelectController);
+const newSessionFormController = new NewSessionFormController(document, window);
 const sidebarController = new SidebarController(
   document,
   window,
@@ -2683,13 +2683,9 @@ function replaceNewSessionModalHtml(html) {
   const currentModal = document.querySelector('[data-modal="new-session-modal"]');
   if (!html || !currentModal) return;
 
-  if (sessionTagsController.state?.form === currentModal.querySelector("form") && sessionTagsController.dialog?.open) sessionTagsController.close();
   newSessionFormController.destroy(currentModal);
-  projectSelectController.destroy(currentModal);
   currentModal.outerHTML = html;
-  const replacementModal = document.querySelector('[data-modal="new-session-modal"]');
-  projectSelectController.initialize(replacementModal);
-  newSessionFormController.initialize(replacementModal);
+  newSessionFormController.initialize(document.querySelector('[data-modal="new-session-modal"]'));
 }
 
 function replaceForkSessionModalHtml(html) {
@@ -2896,9 +2892,8 @@ function openNewSessionModal() {
   if (sessionSwitching()) return;
 
   const modal = document.querySelector('[data-modal="new-session-modal"]');
-  sessionTagsController.resetDraft(modal?.querySelector(".new-session-cwd-form"));
-  newSessionFormController.open(modal?.querySelector(".new-session-cwd-form"));
   openModal(modal);
+  newSessionFormController.open(modal?.querySelector(".new-session-cwd-form"));
 }
 
 function piModalIsOpen() {
@@ -2924,7 +2919,7 @@ function openModal(modal) {
 
 function closeModal(modal) {
   if (!modal || modal.dataset.sessionActionPending === "true") return;
-  if (modal.dataset.modal === "new-session-modal") newSessionFormController.close(modal.querySelector(".new-session-cwd-form"));
+  if (modal.dataset.modal === "new-session-modal") newSessionFormController.cancelBrowse(modal.querySelector(".new-session-cwd-form"));
   modal.hidden = true;
   if (modal.dataset.modal === "model-settings-modal") modelSettingsOperationGeneration += 1;
   document.body.classList.toggle("modal-open", piModalIsOpen());
@@ -3216,37 +3211,26 @@ document.addEventListener("submit", async (event) => {
   if (!form) return;
 
   event.preventDefault();
-  const submit = form.querySelector("[data-new-session-submit]");
-  if (submit?.disabled || form.dataset.submitting === "true" || sessionTagsController.dialog?.open) return;
+  if (form.dataset.submitting === "true") return;
 
-  newSessionFormController.sync(form);
   const formData = new FormData(form);
   addSessionViewFormParams(formData);
   const modal = form.closest("[data-modal]");
-  const originalSubmitText = submit?.textContent || "Start session";
   form.dataset.submitting = "true";
-  if (submit) {
-    submit.disabled = true;
-    submit.textContent = "Starting…";
-  }
+  newSessionFormController.setStatus(form, "Starting…");
   showSessionSwitching();
   try {
     const response = await fetch(form.action, { method: "POST", body: formData, headers: { "Accept": "application/json" } });
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
-      newSessionFormController.setValidationState(form, "invalid", payload?.error || "Path must be an existing directory.");
-      if (submit) submit.textContent = originalSubmitText;
+      newSessionFormController.setStatus(form, payload?.error || "Path must be an existing directory.", true);
       return;
     }
     const payload = await response.json();
     closeModal(modal);
     await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
   } catch (_error) {
-    newSessionFormController.setValidationState(form, "invalid", "Could not start the session. Try again.");
-    if (submit) {
-      submit.disabled = false;
-      submit.textContent = originalSubmitText;
-    }
+    newSessionFormController.setStatus(form, "Could not start the session. Try again.", true);
   } finally {
     delete form.dataset.submitting;
     hideSessionSwitching();
@@ -3267,7 +3251,7 @@ function handleModalTab(event) {
   if (event.key !== "Tab" || event.defaultPrevented) return;
   const modal = document.querySelector('dialog[open]') || document.querySelector('[data-modal]:not([hidden])');
   if (!modal) return;
-  const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+  const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
     .filter((element) => element.tabIndex >= 0 && !element.closest("[hidden]"));
   if (focusable.length === 0) return;
   const first = focusable[0];
@@ -3285,8 +3269,6 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && modalIsOpen() && !event.defaultPrevented) {
     event.preventDefault();
     const openModalElement = document.querySelector("[data-modal]:not([hidden])");
-    const cwdForm = openModalElement?.querySelector(".new-session-cwd-form");
-    if (newSessionFormController.closeSuggestions(cwdForm)) return;
     if (openModalElement === extensionUiModal && activeExtensionUiRequest) {
       cancelExtensionUiRequest();
       return;
@@ -3517,7 +3499,6 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
 function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery = null } = {}) {
   const generation = sessionViewGeneration;
   notificationPresenceController.sessionChanged();
-  projectSelectController.initialize(document.querySelector('[data-modal="new-session-modal"]'));
   newSessionFormController.initialize();
   ensureNotificationWorker().catch(() => {});
   browserAccessController.resume();

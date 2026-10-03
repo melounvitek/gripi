@@ -36,6 +36,19 @@ func TestCompactRelativeTime(t *testing.T) {
 	}
 }
 
+func TestTildePath(t *testing.T) {
+	for path, want := range map[string]string{
+		"/home/alice":          "~",
+		"/home/alice/Work/app": "~/Work/app",
+		"/home/alicex/app":     "/home/alicex/app",
+		"/srv/app":             "/srv/app",
+	} {
+		if got := tildePath("/home/alice", path); got != want {
+			t.Errorf("tildePath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func TestMessageTimeLabel(t *testing.T) {
 	zone := time.FixedZone("CEST", 2*60*60)
 	now := time.Date(2026, time.September, 28, 20, 30, 0, 0, zone)

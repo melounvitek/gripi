@@ -83,6 +83,7 @@ type pageView struct {
 	SeparateCurrent           *sessions.Session
 	KnownCWDs                 []string
 	NewSessionCWDs            []string
+	ProjectActivity           map[string]time.Time
 	ProjectMonograms          map[string]string
 	SelectedProject           string
 	SearchQuery               string
@@ -284,7 +285,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			view.SidebarActivity[session.Path] = activity
 		}
 	}
-	view.KnownCWDs = knownCWDs(all, knownProjects)
+	view.KnownCWDs, view.ProjectActivity = knownCWDs(all, knownProjects)
 	view.NewSessionCWDs = app.newSessionCWDs(view)
 	if view.ProjectMonograms, err = app.gatewayState.ProjectMonograms(view.NewSessionCWDs); err != nil {
 		return nil, err
@@ -562,7 +563,7 @@ func (view *pageView) prepareSidebar() {
 	}
 }
 
-func knownCWDs(all []*sessions.Session, projects map[string]bool) []string {
+func knownCWDs(all []*sessions.Session, projects map[string]bool) ([]string, map[string]time.Time) {
 	latest := make(map[string]time.Time)
 	for _, session := range all {
 		if projects[session.CWD] && session.ConversationActivityAt.After(latest[session.CWD]) {
@@ -579,7 +580,7 @@ func knownCWDs(all []*sessions.Session, projects map[string]bool) []string {
 		}
 		return strings.ToLower(filepath.Base(result[i])) < strings.ToLower(filepath.Base(result[j]))
 	})
-	return result
+	return result, latest
 }
 
 func (app *application) newSessionCWDs(view *pageView) []string {
@@ -665,7 +666,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 		"statusItems": statusItems, "bashStatusItems": bashStatusItems, "attachmentLabel": attachmentLabel,
 		"visibleImages": visibleImages, "attachmentCount": attachmentCount, "collapsible": collapsible, "toolOutputHiddenLabel": toolOutputHiddenLabel,
 		"terminalOutput": terminalOutput, "terminalSource": terminalSource, "terminalTruncated": func(message *sessions.Message) bool { return len(message.Text) > 262144 },
-		"conversationSearch": conversationSearch, "newCWDLabel": newCWDLabel,
+		"conversationSearch": conversationSearch, "tildePath": tildePath,
 	}
 }
 
@@ -870,18 +871,11 @@ func conversationSearch(view *pageView, session *sessions.Session) string {
 	}
 	return ""
 }
-func newCWDLabel(view *pageView, cwd string) string {
-	name := filepath.Base(cwd)
-	count := 0
-	for _, value := range view.NewSessionCWDs {
-		if filepath.Base(value) == name {
-			count++
-		}
+func tildePath(home, path string) string {
+	if rest, ok := strings.CutPrefix(path, home); ok && home != "" && (rest == "" || strings.HasPrefix(rest, string(filepath.Separator))) {
+		return "~" + rest
 	}
-	if count > 1 {
-		return name + " — " + cwd
-	}
-	return name
+	return path
 }
 
 func messageRoleKey(role string) string {

@@ -95,23 +95,6 @@ test("server-assigned tag colors agree across SSR, live, reload, picker, filter 
     await filter.click();
     for (const tag of tags) await expect(chooser.locator(`[data-tag-option="${tag}"]`)).toHaveCSS("color", expected.get(tag).foreground);
     await chooser.getByRole("button", { name: "Close tag picker" }).click();
-
-    await page.getByRole("button", { name: "New session", exact: true }).click();
-    const draft = page.getByRole("dialog", { name: "New session", exact: true });
-    await draft.getByRole("button", { name: "Add tag", exact: true }).click();
-    const picker = page.getByRole("dialog", { name: "New session tags", exact: true });
-    for (const tag of tags) {
-      await picker.getByRole("checkbox", { name: tag, exact: true }).check();
-      await expect(draft.getByRole("button", { name: `Remove ${tag}`, exact: true })).toHaveCSS("color", expected.get(tag).foreground);
-    }
-    // Unsaved names do not reserve a palette entry.
-    await picker.getByRole("searchbox").fill("color-éx");
-    const create = picker.getByRole("button", { name: "Create “color-éx”", exact: true });
-    await expect(create).toHaveCSS("color", colors("#a0a0a0").foreground);
-    await create.click();
-    await expect(draft.getByRole("button", { name: "Remove color-éx", exact: true })).toHaveCSS("color", colors("#a0a0a0").foreground);
-    const unsaved = await (await page.request.get("/tags")).json();
-    expect(Object.hasOwn(unsaved.tag_colors, "color-éx")).toBe(false);
   } finally {
     for (const session of paths) for (const tag of tags) await assign(page, session, tag, false);
   }

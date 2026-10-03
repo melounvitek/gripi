@@ -89,7 +89,8 @@ func TestReadOnlySessionRoutesUseNativeE2EFixtureAndPreservePiJSONL(t *testing.T
 		t.Fatalf("sidebar contract missing: status=%d", sidebar.Code)
 	}
 	modal := serve(t, handler, http.MethodGet, "/new_session_modal?session="+url.QueryEscape(fixture.markerPath), "")
-	if modal.Code != http.StatusOK || !strings.Contains(modal.Body.String(), "new-session-cwd-form") {
+	project := `data-new-session-project="` + filepath.Join(fixture.root, "projects", "contract-project") + `"`
+	if modal.Code != http.StatusOK || !strings.Contains(modal.Body.String(), "new-session-cwd-form") || !strings.Contains(modal.Body.String(), project) {
 		t.Fatalf("modal contract missing: status=%d", modal.Code)
 	}
 

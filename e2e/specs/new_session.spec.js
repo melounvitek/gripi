@@ -1,14 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { prompts, replies, sessions } from "../support/contract.mjs";
-import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
+import { expectRunFinished, message, selectSession, sendPrompt, startSession } from "../support/ui.mjs";
 
 test("delete a pending session before its first assistant response", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "New session", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "New session" });
-  await dialog.getByRole("combobox", { name: "Project" }).click();
-  await page.getByRole("option", { name: /new-session-desktop/ }).click();
-  await dialog.getByRole("button", { name: "Start session" }).click();
+  await startSession(page, "new-session-desktop");
   const title = "New session (pending first assistant response)";
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
   const path = await page.locator('.session-row[data-current="true"]').getAttribute("data-session-path");
@@ -45,7 +41,7 @@ test("a search emptied by typing is not sent with a new session", async ({ page 
   });
 
   await page.getByRole("button", { name: "New session", exact: true }).click();
-  await page.getByRole("dialog", { name: "New session" }).getByRole("button", { name: "Start session" }).click();
+  await page.getByRole("dialog", { name: "New session" }).getByRole("option").first().click();
 
   await expect.poll(() => posted).toBeTruthy();
   expect(posted).not.toContain("session_search");
@@ -53,13 +49,7 @@ test("a search emptied by typing is not sent with a new session", async ({ page 
 
 test("start a session in a configured directory and persist its first response", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "New session" }).click();
-
-  const dialog = page.getByRole("dialog", { name: "New session" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("combobox", { name: "Project" }).click();
-  await page.getByRole("option", { name: /new-session-desktop/ }).click();
-  await dialog.getByRole("button", { name: "Start session" }).click();
+  await startSession(page, "new-session-desktop");
   await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Current session" })).toBeHidden();
 

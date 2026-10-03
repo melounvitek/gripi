@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { prompts, sessions } from "../support/contract.mjs";
-import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
+import { expectRunFinished, message, selectSession, sendPrompt, startSession } from "../support/ui.mjs";
 
 test("show desktop session activity in the time slot, centred and on one line", async ({ page }) => {
   await page.goto("/");
@@ -393,12 +393,8 @@ test("opening the current session in a new window moves the original window to a
 
 test("rename and delete a background session from its contextual actions", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "New session", exact: true }).click();
-  const newSessionDialog = page.getByRole("dialog", { name: "New session" });
-  await newSessionDialog.getByRole("combobox", { name: "Project" }).click();
-  await page.getByRole("option", { name: /new-session-desktop/ }).click();
   const previousURL = page.url();
-  await newSessionDialog.getByRole("button", { name: "Start session" }).click();
+  await startSession(page, "new-session-desktop");
   await expect(page).not.toHaveURL(previousURL);
   await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
   await sendPrompt(page, prompts.newSession);
