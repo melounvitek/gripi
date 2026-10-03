@@ -684,6 +684,8 @@
       .tree-session-fold::after { content: ""; position: absolute; inset: -0.8rem -0.75rem; }
     }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
+    [data-new-session-label] { min-width: 0; overflow-wrap: anywhere; }
+    .new-session-where { color: var(--text); }
     /* Rows share the list's columns: cursor, monogram, name, path, last activity and shortcut digit. */
     .new-session-list { max-height: min(22rem, 55dvh); grid-template-columns: 2ch 2ch fit-content(22ch) minmax(0, 1fr) auto auto; column-gap: 1ch; overflow-y: auto; scroll-padding-bottom: 2rem; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
     .new-session-row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
@@ -695,8 +697,8 @@
     .new-session-key:empty { visibility: hidden; }
     /* Wraps rather than truncates, so the directory a session would start in stays readable. */
     .new-session-row[data-new-session-action] .new-session-name { grid-column: 3 / -1; white-space: normal; overflow-wrap: anywhere; }
-    .new-session-row:is([data-new-session-action="more"], [data-new-session-action="path"], [data-new-session-action="back"]) { color: var(--muted); }
-    .new-session-row[data-new-session-action="start"] .project-monogram { color: var(--success); }
+    .new-session-row[data-new-session-action="folder"] .new-session-name { grid-column: 3 / 5; }
+    .new-session-row[data-new-session-action]:not([data-new-session-action="folder"]) { color: var(--muted); }
     .new-session-row[aria-selected="true"] { color: var(--accent); }
     /* The last row stays in reach below a scrolled list. */
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); }
@@ -712,6 +714,7 @@
       .new-session-list { max-height: 52dvh; grid-template-columns: 2ch 2ch minmax(0, 1fr) auto; scroll-padding-bottom: 2.75rem; }
       .new-session-row { padding-block: 0.4rem; }
       .new-session-path { grid-column: 3; grid-row: 2; font-size: 0.78rem; }
+      .new-session-row[data-new-session-action="folder"] .new-session-name { grid-column: 3; }
       .new-session-age { grid-column: 4; grid-row: 1; }
       .new-session-key { display: none; }
     }

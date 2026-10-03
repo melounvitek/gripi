@@ -12,7 +12,6 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -24,7 +23,6 @@ import (
 )
 
 const (
-	cwdSuggestionLimit      = 30
 	treeEntryIDBytes        = 1_024
 	treeLabelBytes          = 4_096
 	treeInstructionsBytes   = 64 << 10
@@ -920,49 +918,20 @@ func (app *application) validateSessionCWD(response http.ResponseWriter, request
 
 func (app *application) browseSessionCWD(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Cache-Control", "no-store")
-	raw := request.URL.Query().Get("cwd")
-	cwd, message, valid := validatedCWD(raw, app.config.Home)
-	payload := map[string]any{"valid": valid, "directories": []string{}}
-	if valid {
-		payload["cwd"] = cwd
-	} else {
-		payload["error"] = message
-	}
-	if !utf8.ValidString(raw) || strings.TrimSpace(raw) == "" {
-		writeJSON(response, payload)
+	cwd, message, valid := validatedCWD(request.URL.Query().Get("cwd"), app.config.Home)
+	if !valid {
+		writeJSON(response, map[string]any{"valid": false, "error": message})
 		return
 	}
-	expanded, err := filepath.Abs(expandHomePath(strings.TrimSpace(raw), app.config.Home))
-	if err != nil {
-		writeJSON(response, payload)
-		return
-	}
-	parent, prefix := expanded, ""
-	if stat, statErr := os.Stat(expanded); statErr != nil || !stat.IsDir() {
-		parent, prefix = filepath.Dir(expanded), filepath.Base(expanded)
-	}
-	entries, err := os.ReadDir(parent)
-	if err != nil {
-		writeJSON(response, payload)
-		return
-	}
-	directories := make([]string, 0, cwdSuggestionLimit)
+	directories := []string{}
+	entries, _ := os.ReadDir(cwd)
 	for _, entry := range entries {
-		name := entry.Name()
-		if !utf8.ValidString(name) || strings.HasPrefix(name, ".") && !strings.HasPrefix(prefix, ".") || !strings.HasPrefix(name, prefix) {
-			continue
-		}
-		path := filepath.Join(parent, name)
-		if stat, statErr := os.Stat(path); statErr == nil && stat.IsDir() && directoryAccessible(path) {
+		path := filepath.Join(cwd, entry.Name())
+		if stat, err := os.Stat(path); utf8.ValidString(entry.Name()) && err == nil && stat.IsDir() && directoryAccessible(path) {
 			directories = append(directories, path)
 		}
 	}
-	sort.Strings(directories)
-	if len(directories) > cwdSuggestionLimit {
-		directories = directories[:cwdSuggestionLimit]
-	}
-	payload["directories"] = directories
-	writeJSON(response, payload)
+	writeJSON(response, map[string]any{"valid": true, "cwd": cwd, "directories": directories})
 }
 
 func (app *application) forkMessages(response http.ResponseWriter, request *http.Request) {

@@ -1,9 +1,15 @@
 import { expect, test } from "@playwright/test";
+import { mkdtemp, rm } from "node:fs/promises";
+import path from "node:path";
 
 const dialog = (page) => page.getByRole("dialog", { name: "New session", exact: true });
-const input = (page) => dialog(page).getByRole("combobox", { name: "Project or path" });
+const input = (page) => dialog(page).getByRole("combobox");
+const label = (page) => dialog(page).locator("[data-new-session-label]");
 const option = (page, name) => dialog(page).getByRole("option", { name, exact: true });
+const folders = (page) => dialog(page).locator('[data-new-session-action="folder"]');
 const activate = (control, mobile) => mobile ? control.tap() : control.click();
+// "Other folder…" starts in the folder the first project sits in.
+const projectsFolder = async (page) => path.dirname(await dialog(page).locator("[data-new-session-project]").first().getAttribute("data-new-session-project"));
 
 async function open(page, mobile) {
   await page.goto("/");
@@ -36,7 +42,7 @@ test("typing filters the projects and Enter starts in the highlighted one", asyn
 
   // The path is searched as well as the name.
   await page.keyboard.type("projects/NEW-SESSION-mob");
-  await expect(dialog(page).getByRole("option")).toHaveText([/new-session-mobile/, /Add new path…/]);
+  await expect(dialog(page).getByRole("option")).toHaveText([/new-session-mobile/, /Other folder…/]);
   await expect(dialog(page).locator(`#${await input(page).getAttribute("aria-activedescendant")}`)).toHaveText(/new-session-mobile/);
   await page.keyboard.press("Enter");
   await expectStartedIn(page, "new-session-mobile");
@@ -52,46 +58,69 @@ test("the first activation of a project starts a session there", async ({ page, 
   await expectStartedIn(page, cwd.split("/").pop());
 });
 
-test("a new path is browsed in the same list", async ({ page, isMobile }) => {
+test("another folder is picked from the list beside the projects", async ({ page, isMobile }) => {
   await open(page, isMobile);
-  await activate(option(page, "Add new path…"), isMobile);
-  await expect(input(page)).toHaveValue(/\/$/);
-  const parent = await input(page).inputValue();
-
-  await input(page).fill(`${parent}new-session-d`);
-  await activate(option(page, "new-session-desktop/"), isMobile);
-  await expect(input(page)).toHaveValue(`${parent}new-session-desktop/`);
-  const start = dialog(page).getByRole("option", { name: /^Start in .*new-session-desktop$/ });
-  await expect(start).toHaveAttribute("aria-selected", "true");
+  const where = await projectsFolder(page);
+  await activate(option(page, "Other folder…"), isMobile);
+  await expect(label(page)).toHaveText(`Folders in ${where}:`);
+  // The listed folder itself can be started in, but is never the preselected row.
+  await expect(folders(page).first()).toHaveAttribute("aria-selected", "true");
+  await expect(option(page, `Start in ${where} itself`)).toHaveAttribute("aria-selected", "false");
 
   await activate(option(page, "Back to projects"), isMobile);
-  await expect(input(page)).toHaveValue("");
+  await expect(label(page)).toHaveText("Project or path:");
   await expect(dialog(page).locator("[data-new-session-project]").first()).toBeVisible();
 
-  await input(page).fill(`${parent}new-session-desktop`);
-  await activate(start, isMobile);
+  await activate(option(page, "Other folder…"), isMobile);
+  await activate(folders(page).filter({ hasText: "new-session-desktop" }), isMobile);
   await expectStartedIn(page, "new-session-desktop");
 });
 
-test("a missing path is explained and kept for correction", async ({ page, isMobile }) => {
+test("a typed path lists its folder and filters by the rest", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
   await open(page, isMobile);
-  await input(page).fill("/gripi-e2e/missing");
-  await expect(dialog(page).getByRole("status")).toHaveText("Path must be an existing directory.");
+  const where = await projectsFolder(page);
+  await page.keyboard.type(`${where}/NEW-session-m`);
+  await expect(label(page)).toHaveText(`Folders in ${where}:`);
+  await expect(input(page)).toHaveValue("NEW-session-m");
+  await expect(folders(page)).toHaveText([/new-session-mobile/]);
   await page.keyboard.press("Enter");
-  await expect(input(page)).toHaveValue("/gripi-e2e/missing");
+  await expectStartedIn(page, "new-session-mobile");
+});
+
+test("a folder that does not exist is explained", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await open(page, isMobile);
+  await input(page).fill("/gripi-e2e-missing/");
+  await expect(label(page)).toHaveText("Folders in /gripi-e2e-missing:");
+  await expect(dialog(page).getByRole("status")).toHaveText("Path must be an existing directory.");
+});
+
+test("hidden folders are listed once the filter starts with a dot", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Not specific to touch");
+  await open(page, isMobile);
+  const hidden = await mkdtemp(path.join(await projectsFolder(page), ".picker-hidden-"));
+  try {
+    await activate(option(page, "Other folder…"), isMobile);
+    await expect(folders(page).first()).toBeVisible();
+    await expect(folders(page).filter({ hasText: path.basename(hidden) })).toHaveCount(0);
+    await input(page).fill(".picker-h");
+    await expect(folders(page).locator(".new-session-name")).toHaveText([path.basename(hidden)]);
+  } finally {
+    await rm(hidden, { recursive: true, force: true });
+  }
 });
 
 test("only the most recent projects are listed until the rest are asked for", async ({ page, isMobile }) => {
   await open(page, isMobile);
   const total = await dialog(page).locator("[data-new-session-project]").count();
   await expect(dialog(page).locator("[data-new-session-project]:visible")).toHaveCount(5);
-  await expect(option(page, "Add new path…")).toBeVisible();
+  await expect(option(page, "Other folder…")).toBeVisible();
 
   await activate(option(page, `${total - 5} more projects`), isMobile);
   await expect(dialog(page).getByRole("option")).toHaveCount(total + 1);
   await expect(dialog(page).getByRole("option").nth(5)).toHaveAttribute("aria-selected", "true");
-  await expect(option(page, "Add new path…")).toBeInViewport();
+  await expect(option(page, "Other folder…")).toBeInViewport();
 });
 
 test("Ctrl and a digit start directly in that visible row", async ({ page, isMobile }) => {

@@ -417,9 +417,16 @@ func TestGoGatewayValidatesAndBrowsesNewSessionDirectories(t *testing.T) {
 	if tilde.Code != http.StatusOK || !strings.Contains(tilde.Body.String(), filepath.Join(root, "alpha")) {
 		t.Fatalf("tilde validate = %d %s", tilde.Code, tilde.Body.String())
 	}
-	browse := serveAction(handler, getActionRequest("/sessions/browse_cwd?cwd="+url.QueryEscape("~/al")))
-	if browse.Code != http.StatusOK || !strings.Contains(browse.Body.String(), filepath.Join(root, "alpha")) || !strings.Contains(browse.Body.String(), filepath.Join(root, "alpine")) || strings.Contains(browse.Body.String(), ".away") {
-		t.Fatalf("browse = %d %s", browse.Code, browse.Body.String())
+	// Hidden folders are listed too; the picker decides when to show them.
+	browse := serveAction(handler, getActionRequest("/sessions/browse_cwd?cwd="+url.QueryEscape("~")))
+	for _, name := range []string{".away", "alpha", "alpine", "beta"} {
+		if browse.Code != http.StatusOK || !strings.Contains(browse.Body.String(), `"`+filepath.Join(root, name)+`"`) {
+			t.Fatalf("browse misses %s: %d %s", name, browse.Code, browse.Body.String())
+		}
+	}
+	missing := serveAction(handler, getActionRequest("/sessions/browse_cwd?cwd="+url.QueryEscape("~/al")))
+	if missing.Code != http.StatusOK || !strings.Contains(missing.Body.String(), `"valid":false`) || strings.Contains(missing.Body.String(), "alpha") {
+		t.Fatalf("browse of a missing folder = %d %s", missing.Code, missing.Body.String())
 	}
 	invalid := serveAction(handler, getActionRequest("/sessions/validate_cwd?cwd="+url.QueryEscape(filepath.Join(root, "missing"))))
 	if invalid.Code != http.StatusUnprocessableEntity || !strings.Contains(invalid.Body.String(), `"valid":false`) {
@@ -433,6 +440,9 @@ func TestGoGatewayValidatesAndBrowsesNewSessionDirectories(t *testing.T) {
 		blocked := serveAction(handler, getActionRequest("/sessions/validate_cwd?cwd="+url.QueryEscape(inaccessible)))
 		if blocked.Code != http.StatusUnprocessableEntity || !strings.Contains(blocked.Body.String(), "Directory is not accessible") {
 			t.Fatalf("inaccessible = %d %s", blocked.Code, blocked.Body.String())
+		}
+		if listed := serveAction(handler, getActionRequest("/sessions/browse_cwd?cwd="+url.QueryEscape(root))); strings.Contains(listed.Body.String(), "inaccessible") {
+			t.Fatalf("browse lists an inaccessible folder: %s", listed.Body.String())
 		}
 	}
 }
