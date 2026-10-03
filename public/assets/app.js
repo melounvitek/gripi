@@ -2919,7 +2919,7 @@ function openModal(modal) {
 
 function closeModal(modal) {
   if (!modal || modal.dataset.sessionActionPending === "true") return;
-  if (modal.dataset.modal === "new-session-modal") newSessionFormController.close(modal.querySelector(".new-session-cwd-form"));
+  if (modal.dataset.modal === "new-session-modal") newSessionFormController.cancelBrowse(modal.querySelector(".new-session-cwd-form"));
   modal.hidden = true;
   if (modal.dataset.modal === "model-settings-modal") modelSettingsOperationGeneration += 1;
   document.body.classList.toggle("modal-open", piModalIsOpen());

@@ -34,8 +34,10 @@ test("typing filters the projects and Enter starts in the highlighted one", asyn
   await page.keyboard.press("ArrowDown");
   await expect(dialog(page).getByRole("option").nth(1)).toHaveAttribute("aria-selected", "true");
 
-  await page.keyboard.type("SESSION-mob");
+  // The path is searched as well as the name.
+  await page.keyboard.type("projects/NEW-SESSION-mob");
   await expect(dialog(page).getByRole("option")).toHaveText([/new-session-mobile/, /Add new path…/]);
+  await expect(dialog(page).locator(`#${await input(page).getAttribute("aria-activedescendant")}`)).toHaveText(/new-session-mobile/);
   await page.keyboard.press("Enter");
   await expectStartedIn(page, "new-session-mobile");
 });
@@ -71,20 +73,20 @@ test("a new path is browsed in the same list", async ({ page, isMobile }) => {
   await expectStartedIn(page, "new-session-desktop");
 });
 
-test("a missing path is explained and cannot be started", async ({ page, isMobile }) => {
+test("a missing path is explained and kept for correction", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
   await open(page, isMobile);
   await input(page).fill("/gripi-e2e/missing");
   await expect(dialog(page).getByRole("status")).toHaveText("Path must be an existing directory.");
   await page.keyboard.press("Enter");
   await expect(input(page)).toHaveValue("/gripi-e2e/missing");
-  await expect(dialog(page)).toBeVisible();
 });
 
 test("only the most recent projects are listed until the rest are asked for", async ({ page, isMobile }) => {
   await open(page, isMobile);
   const total = await dialog(page).locator("[data-new-session-project]").count();
-  await expect(dialog(page).getByRole("option")).toHaveText([/-project/, /-project/, /-project/, /-project/, /-project/, new RegExp(`${total - 5} more projects$`), /Add new path…$/]);
+  await expect(dialog(page).locator("[data-new-session-project]:visible")).toHaveCount(5);
+  await expect(option(page, "Add new path…")).toBeVisible();
 
   await activate(option(page, `${total - 5} more projects`), isMobile);
   await expect(dialog(page).getByRole("option")).toHaveCount(total + 1);

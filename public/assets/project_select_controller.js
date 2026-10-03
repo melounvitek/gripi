@@ -196,7 +196,7 @@ export class ProjectSelectController {
     }
     const icon = this.document.createElement("span");
     icon.className = "project-monogram";
-    icon.textContent = option.dataset.projectOptionKind === "new" ? "+" : option.dataset.projectMonogram || "";
+    icon.textContent = option.dataset.projectMonogram || "";
     icon.setAttribute("aria-hidden", "true");
     container.append(icon);
 

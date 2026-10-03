@@ -719,10 +719,15 @@
     .new-session-row:is([data-new-session-action="more"], [data-new-session-action="path"], [data-new-session-action="back"]) { color: var(--muted); }
     .new-session-row[data-new-session-action="start"] .project-monogram { color: var(--success); }
     .new-session-row[aria-selected="true"] { color: var(--accent); }
-    /* Stays in reach below a scrolled project list. */
-    .new-session-row[data-new-session-action="path"] { position: sticky; bottom: 0; background: var(--panel); }
-    .new-session-row[data-new-session-action="path"][aria-selected="true"] { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); }
-    @media (hover: hover) and (pointer: fine) { .new-session-row[data-new-session-action="path"]:hover { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); } }
+    /* The last row stays in reach below a scrolled list. */
+    .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); }
+    .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"])[aria-selected="true"] { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); }
+    @media (hover: hover) and (pointer: fine) { .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]):hover { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); } }
+    @media (min-width: 761px) {
+      /* Anchored to the top, so the input stays put while the list changes height. */
+      [data-modal="new-session-modal"] { align-items: start; padding-top: 15dvh; }
+      [data-modal="new-session-modal"] .modal-card { max-height: calc(85dvh - 1rem); }
+    }
     @media (max-width: 760px), (pointer: coarse) {
       /* The path moves under the name, so a narrow sheet still tells worktrees apart. */
       .new-session-list { max-height: 52dvh; grid-template-columns: 2ch 2ch minmax(0, 1fr) auto; scroll-padding-bottom: 2.75rem; }
@@ -902,8 +907,7 @@
     @media (hover: hover) and (pointer: fine) {
       .session-tag-icon:hover { background: var(--tag-bg); color: var(--tag-fg); }
     }
-    .tag-overflow { display: inline-flex; align-items: center; gap: 1ch; min-width: 0; padding: 0.3rem 0.4rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); font: 0.74rem var(--mono); text-transform: none; letter-spacing: normal; }
-    .tag-overflow { flex: none; }
+    .tag-overflow { display: inline-flex; flex: none; align-items: center; gap: 1ch; min-width: 0; padding: 0.3rem 0.4rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); font: 0.74rem var(--mono); text-transform: none; letter-spacing: normal; }
     .header-tags:empty { display: none; }
     .tag-overflow:hover { background: transparent; }
     .tag-picker { position: fixed; inset: 0; width: min(340px, calc(100vw - 24px)); max-height: min(600px, 85dvh); margin: auto; padding: 0.6rem; border: 1px solid var(--border-strong); border-radius: 0.35rem; background: var(--panel); color: var(--text); font: 0.8rem var(--mono); box-shadow: 0 16px 42px #00000080; overflow-y: auto; }

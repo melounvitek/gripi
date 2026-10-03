@@ -13,7 +13,10 @@ export class NewSessionFormController {
       if (form._newSessionFormState) return;
       const listeners = {
         input: () => this.refresh(form),
-        click: (event) => this.handleClick(event, form),
+        click: (event) => {
+          const option = event.target.closest?.('[role="option"]');
+          if (option) this.activate(form, option);
+        },
         keydown: (event) => this.handleKeydown(event, form)
       };
       form._newSessionFormState = { timer: null, controller: null, listeners, browsed: null, cursor: 0, expanded: false };
@@ -35,10 +38,6 @@ export class NewSessionFormController {
     if (!form?._newSessionFormState) return;
     form._newSessionFormState.expanded = false;
     this.enter(form, this.projects(form).length ? "" : this.newPath(form));
-  }
-
-  close(form) {
-    this.cancelBrowse(form);
   }
 
   setStatus(form, message, invalid = false) {
@@ -175,7 +174,8 @@ export class NewSessionFormController {
     const path = this.pathMode(form);
     const projects = this.projects(form);
     list.querySelectorAll("[data-new-session-action]").forEach((row) => row.remove());
-    const matching = path ? [] : projects.filter((row) => row.querySelector(".new-session-name").textContent.toLowerCase().includes(query));
+    // The path is searched too: a worktree is often named after its branch, not its project.
+    const matching = path ? [] : projects.filter((row) => [".new-session-name", ".new-session-path"].some((part) => row.querySelector(part).textContent.toLowerCase().includes(query)));
     const visible = query || state.expanded ? matching : matching.slice(0, RECENT_PROJECTS);
     projects.forEach((row) => { row.hidden = !visible.includes(row); });
     visible.forEach((row, index) => { row.querySelector(".new-session-key").textContent = index < 9 ? index + 1 : ""; });
@@ -186,14 +186,14 @@ export class NewSessionFormController {
       });
       if (projects.length) list.append(this.row("back", "←", "Back to projects"));
     } else {
-      if (visible.length < matching.length) list.append(this.row("more", "…", `${matching.length - visible.length} more projects`));
+      const more = matching.length - visible.length;
+      if (more) list.append(this.row("more", "…", `${more} more project${more === 1 ? "" : "s"}`));
       list.append(this.row("path", "+", "Add new path…"));
     }
-    this.options(form).forEach((option, index) => { option.id = `new-session-option-${index}`; });
+    list.querySelectorAll('[role="option"]').forEach((option, index) => { option.id = `new-session-option-${index}`; });
     this.setCursor(form, state.cursor);
 
-    const digits = visible.length > 1 ? `ctrl+1…${Math.min(visible.length, 9)}` : "ctrl+1";
-    form.querySelector("[data-new-session-hint]").textContent = path ? "↑↓ navigate · enter open or start · esc cancel" : `↑↓ navigate · enter start${visible.length ? ` · ${digits} start directly` : ""} · esc cancel`;
+    form.querySelector("[data-new-session-hint]").textContent = path ? "↑↓ navigate · enter open or start · esc cancel" : "↑↓ navigate · enter start · ctrl+1…9 start directly · esc cancel";
     if (!path) this.setStatus(form, query && !visible.length ? "No matching projects." : "");
     else if (!state.browsed) this.setStatus(form, "Checking…");
     else this.setStatus(form, state.browsed.cwd || state.browsed.directories.length ? "" : state.browsed.error, true);
@@ -226,11 +226,6 @@ export class NewSessionFormController {
     } else if (action === "back") {
       this.enter(form, "");
     }
-  }
-
-  handleClick(event, form) {
-    const option = event.target.closest?.('[role="option"]');
-    if (option) this.activate(form, option);
   }
 
   handleKeydown(event, form) {
