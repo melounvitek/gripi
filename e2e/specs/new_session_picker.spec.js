@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 
 const dialog = (page) => page.getByRole("dialog", { name: "New session", exact: true });
@@ -86,6 +86,26 @@ test("a typed path lists its folder and filters by the rest", async ({ page, isM
   await expect(folders(page)).toHaveText([/new-session-mobile/]);
   await page.keyboard.press("Enter");
   await expectStartedIn(page, "new-session-mobile");
+});
+
+test("a pasted path highlights exactly that folder", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Not specific to touch");
+  await open(page, isMobile);
+  const where = await projectsFolder(page);
+  // A longer name sorts first and must not take the highlight.
+  const made = [path.join(where, "a-picker-exact"), path.join(where, "picker-exact")];
+  for (const folder of made) await mkdir(folder);
+  try {
+    await input(page).evaluate((element, value) => {
+      element.value = value;
+      element.dispatchEvent(new InputEvent("input", { inputType: "insertFromPaste", bubbles: true }));
+    }, `${where}/picker-exact/`);
+    await expect(label(page)).toHaveText(`Folders in ${where}:`);
+    await expect(folders(page).locator(".new-session-name")).toHaveText(["a-picker-exact", "picker-exact"]);
+    await expect(folders(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  } finally {
+    for (const folder of made) await rm(folder, { recursive: true, force: true });
+  }
 });
 
 test("a folder that does not exist is explained", async ({ page, isMobile }) => {

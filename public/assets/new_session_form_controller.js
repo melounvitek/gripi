@@ -12,7 +12,7 @@ export class NewSessionFormController {
     this.forms(root).forEach((form) => {
       if (form._newSessionFormState) return;
       const listeners = {
-        input: () => this.handleInput(form),
+        input: (event) => this.handleInput(event, form),
         click: (event) => {
           const option = event.target.closest?.('[role="option"]');
           if (!option) return;
@@ -81,9 +81,7 @@ export class NewSessionFormController {
   }
 
   cancelBrowse(form) {
-    const state = form?._newSessionFormState;
-    state?.controller?.abort();
-    if (state) state.controller = null;
+    form?._newSessionFormState?.controller?.abort();
   }
 
   focusInput(form) {
@@ -115,15 +113,17 @@ export class NewSessionFormController {
       if (response.ok) payload = await response.json().catch(() => null);
     } catch (_error) {}
     if (controller.signal.aborted) return;
-    state.controller = null;
     if (payload?.valid) Object.assign(state, { folder: payload.cwd, listing: { directories: payload.directories } });
-    else state.listing = { directories: [], error: payload?.error || "Could not list this folder." };
+    else state.listing = { error: payload?.error || "Could not list this folder." };
     this.render(form);
   }
 
-  handleInput(form) {
+  handleInput(event, form) {
     const state = form._newSessionFormState;
-    const value = this.input(form).value;
+    const input = this.input(form);
+    // A pasted path means that folder, not what is inside it, so its trailing slash is dropped.
+    if (event.inputType === "insertFromPaste") input.value = input.value.replace(/([^~/])\/+$/, "$1");
+    const value = input.value;
     const absolute = /^(\/|~\/)/.test(value);
     if (!absolute && (state.folder === null || !value.includes("/"))) return this.render(form);
     // A typed path names the folder to list up to its last slash; the rest filters that folder.
@@ -261,7 +261,7 @@ export class NewSessionFormController {
     } else if (event.key === "Enter" && event.target === this.input(form) && !event.isComposing) {
       event.preventDefault();
       if (options[cursor]) this.activate(form, options[cursor]);
-    } else if (event.key === "Tab" && !event.shiftKey && options[cursor]?.dataset.newSessionAction === "folder") {
+    } else if (event.key === "Tab" && !event.shiftKey && !event.repeat && options[cursor]?.dataset.newSessionAction === "folder") {
       event.preventDefault();
       this.browse(form, options[cursor].dataset.newSessionPath);
     } else if (event.key === "Backspace" && !this.input(form).value && !event.repeat) {

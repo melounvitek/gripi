@@ -699,10 +699,10 @@
     /* Wraps rather than truncates, so the directory a session would start in stays readable. */
     .new-session-row[data-new-session-action] .new-session-name { grid-column: 3 / -1; white-space: normal; overflow-wrap: anywhere; }
     .new-session-row[data-new-session-action="folder"] .new-session-name { grid-column: 3 / 5; }
-    .new-session-row[data-new-session-action]:not([data-new-session-action="folder"]) { color: var(--muted); }
+    .new-session-row:not([data-new-session-project], [data-new-session-action="folder"]) { color: var(--muted); }
     .new-session-inside { grid-column: 6; display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; color: var(--muted); font-size: 1rem; line-height: 1; }
     .new-session-row[aria-selected="true"], .new-session-row[aria-selected="true"] .new-session-inside { color: var(--accent); }
-    @media (hover: hover) and (pointer: fine) { .new-session-inside:hover { color: var(--accent-bright); } }
+    @media (hover: hover) and (pointer: fine) { .new-session-row .new-session-inside:hover { color: var(--accent-bright); } }
     /* The last row stays in reach below a scrolled list. */
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); }
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"])[aria-selected="true"] { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); }
