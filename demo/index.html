@@ -705,11 +705,12 @@
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
     [data-new-session-label] { min-width: 0; overflow-wrap: anywhere; }
     .new-session-where { color: var(--text); }
-    /* Rows share the list's columns: cursor, monogram, name, path, last activity and shortcut digit. */
-    .new-session-list { max-height: min(22rem, 55dvh); grid-template-columns: 2ch 2ch fit-content(22ch) minmax(0, 1fr) auto auto; column-gap: 1ch; overflow-y: auto; scroll-padding-bottom: 2rem; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
+    /* Rows share the list's columns: cursor, monogram, name, path, last activity and shortcut digit. Their height always fits a wrapped name, even when the list scrolls. */
+    .new-session-list { max-height: min(22rem, 55dvh); grid-template-columns: 2ch 2ch fit-content(22ch) minmax(0, 1fr) auto auto; grid-auto-rows: max-content; column-gap: 1ch; overflow-y: auto; scroll-padding-bottom: 2rem; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
     .new-session-row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
     .new-session-row .project-monogram { color: var(--project-identity-fg, inherit); }
-    .new-session-name, .new-session-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Clipped sideways only: a hidden overflow also cuts the underscore off the bottom of some fonts. */
+    .new-session-name, .new-session-path { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: nowrap; }
     .new-session-path, .new-session-age { color: var(--muted-soft); }
     .new-session-age { font-size: 0.74rem; text-align: right; }
     .new-session-key { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; color: var(--accent); font: 600 0.72rem/1 var(--mono); }
