@@ -733,7 +733,7 @@
     const modal = document.querySelector(`[data-modal="${name}"]`); if (!modal) return;
     previousModalFocus = returnFocus; modal.hidden = false; document.querySelector(".app-shell").inert = true;
     (modal.querySelector("[data-modal-default-focus]") || modal.querySelector("button, input, select"))?.focus();
-    if (name === "new-session-modal") enterNewSession("");
+    if (name === "new-session-modal") showNewSessionRows(false);
   }
   function closeModal(modal) { if (!modal) return; modal.hidden = true; document.querySelector(".app-shell").inert = false; if (modal.dataset.modal === "demo-intro-modal") markIntroSeen(); previousModalFocus?.focus(); previousModalFocus = null; }
   function handleSlash(command) {
@@ -959,31 +959,29 @@
   const newSessionInput = newSessionForm.querySelector("[data-new-session-input]");
   const newSessionRows = [...newSessionForm.querySelectorAll('[role="option"]')];
   const visibleNewSessionRows = () => newSessionRows.filter((row) => !row.hidden);
+  const selectNewSessionRow = (selected) => newSessionRows.forEach((row) => row.setAttribute("aria-selected", String(row === selected)));
+  // The static demo has no file system, so "Other folder…" lists one fixed folder: the one its projects sit in.
+  let newSessionBrowsing = false;
 
-  function moveNewSessionCursor(index) {
-    const rows = visibleNewSessionRows();
-    const selected = rows[(index + rows.length) % rows.length];
-    newSessionRows.forEach((row) => row.setAttribute("aria-selected", String(row === selected)));
-  }
-
-  // Like the real picker: a value starting like a path asks where to start, anything else filters the projects.
   function renderNewSession() {
     const query = newSessionInput.value.trim().toLowerCase();
-    const path = /^[/~]/.test(query);
     let digit = 0;
     newSessionRows.forEach((row) => {
       const action = row.dataset.newSessionAction;
-      row.hidden = action ? (action === "path") === path : path || !row.querySelector(".new-session-path").textContent.toLowerCase().includes(query);
+      const text = row.querySelector(action === "folder" ? ".new-session-name" : ".new-session-path")?.textContent.toLowerCase();
+      row.hidden = (!action || action === "path") === newSessionBrowsing || (text !== undefined && !text.includes(query));
       if (!action && !row.hidden) row.querySelector(".new-session-key").textContent = ++digit;
     });
-    // The static demo has no file system to check, so any typed path can be started in.
-    newSessionForm.querySelector('[data-new-session-action="start"] .new-session-name').textContent = `Start in ${newSessionInput.value.trim().replace(/(.)\/$/, "$1")}`;
-    newSessionForm.querySelector("[data-new-session-hint]").textContent = path ? "↑↓ navigate · enter start · esc cancel" : "↑↓ navigate · enter start · ctrl+1…9 start directly · esc cancel";
-    moveNewSessionCursor(0);
+    newSessionForm.querySelector("[data-new-session-label]").innerHTML = newSessionBrowsing ? 'Folders in <span class="new-session-where">~/Work</span>:' : "Project or path:";
+    newSessionForm.querySelector("[data-new-session-hint]").textContent = newSessionBrowsing ? "↑↓ navigate · enter start · esc cancel" : "↑↓ navigate · enter start · ctrl+1…9 start directly · esc cancel";
+    // Like the real picker, only a folder is preselected: Enter never starts in the listed folder itself by accident.
+    const first = visibleNewSessionRows()[0];
+    selectNewSessionRow(!newSessionBrowsing || first.dataset.newSessionAction === "folder" ? first : null);
   }
 
-  function enterNewSession(value) {
-    newSessionInput.value = value;
+  function showNewSessionRows(browsing) {
+    newSessionBrowsing = browsing;
+    newSessionInput.value = "";
     // On touch screens focusing the input would open the keyboard over the list.
     if (matchMedia("(pointer: fine)").matches) newSessionInput.focus();
     renderNewSession();
@@ -991,10 +989,8 @@
 
   function activateNewSessionRow(row) {
     const action = row.dataset.newSessionAction;
-    if (action === "path") return enterNewSession("~/Work/");
-    if (action === "back") return enterNewSession("");
-    const cwd = row.dataset.newSessionProject || newSessionInput.value.trim();
-    const project = cwd.split("/").filter(Boolean).pop() || "project";
+    if (action === "path" || action === "back") return showNewSessionRows(action === "path");
+    const project = (row.dataset.newSessionProject || row.dataset.newSessionPath).split("/").pop();
     const color = { gripi: "#ff9b73", website: "#9fc5ff", storefront: "#b5e3b0" }[project] || "#f0c674";
     const id = `local-${Date.now()}`;
     sessions.unshift(normalizeSession({ id, name: "New local demo session", project, color, age: "now", pinned: false, messages: [{ role: "assistant", text: "This representative session was created locally. Enter a prompt to try streaming.", time: timeLabel() }] }));
@@ -1010,8 +1006,9 @@
     const digit = event.ctrlKey && (/^[1-9]$/.test(event.key) ? event.key : event.code.match(/^(?:Digit|Numpad)([1-9])$/)?.[1]);
     const shortcut = digit && rows.filter((row) => row.dataset.newSessionProject)[digit - 1];
     if (shortcut) activateNewSessionRow(shortcut);
-    else if (event.key === "ArrowDown" || event.key === "ArrowUp") moveNewSessionCursor(cursor + (event.key === "ArrowDown" ? 1 : -1));
-    else if (event.key === "Enter" && !event.isComposing) activateNewSessionRow(rows[cursor]);
+    else if (event.key === "ArrowDown") selectNewSessionRow(rows[(cursor + 1) % rows.length]);
+    else if (event.key === "ArrowUp") selectNewSessionRow(rows[(Math.max(cursor, 0) - 1 + rows.length) % rows.length]);
+    else if (event.key === "Enter" && !event.isComposing) { if (rows[cursor]) activateNewSessionRow(rows[cursor]); }
     // As in the real picker, the input is the only focus stop.
     else if (event.key !== "Tab") return;
     event.preventDefault();
