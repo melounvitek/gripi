@@ -1512,6 +1512,10 @@ func boundedExtensionUIEvent(response map[string]any) map[string]any {
 	for _, key := range []string{"title", "message", "placeholder", "value", "statusText"} {
 		copyString(key, MaxSnapshotStringBytes/4)
 	}
+	// A shortened draft would be submitted back damaged, so it is kept whole or dropped by the item limit below.
+	if prefill, ok := response["prefill"].(string); ok {
+		result["prefill"] = prefill
+	}
 	if timeout, ok := numberValue(response["timeout"]); ok {
 		result["timeout"] = timeout
 	}
@@ -1539,7 +1543,7 @@ func boundedExtensionUIEvent(response map[string]any) map[string]any {
 		}
 	}
 	if jsonSize(result) > MaxExtensionUIItemBytes {
-		for _, key := range []string{"message", "value", "placeholder", "title", "options", "widgetLines"} {
+		for _, key := range []string{"prefill", "message", "value", "placeholder", "title", "options", "widgetLines"} {
 			delete(result, key)
 			if jsonSize(result) <= MaxExtensionUIItemBytes {
 				break

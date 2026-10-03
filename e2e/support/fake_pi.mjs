@@ -390,7 +390,7 @@ function acceptPrompt(command) {
       pendingExtensionRequest = "e2e-extension-editor";
       emit({ type: "extension_ui_request", id: "e2e-extension-select", method: "select", title: "Pick a target", options: ["staging", "production"] });
       emit({ type: "extension_ui_request", id: "e2e-extension-input", method: "input", title: "Release name", placeholder: "v1.0" });
-      emit({ type: "extension_ui_request", id: pendingExtensionRequest, method: "editor", title: "Release notes" });
+      emit({ type: "extension_ui_request", id: pendingExtensionRequest, method: "editor", title: "Release notes", prefill: "Draft notes" });
     });
     return;
   }

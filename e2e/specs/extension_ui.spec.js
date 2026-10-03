@@ -75,11 +75,11 @@ test("answer select, input, and editor requests from the keyboard", async ({ pag
 
   const editor = page.getByRole("dialog", { name: "Release notes" }).getByRole("textbox");
   await expect(editor).toBeFocused();
-  await editor.pressSequentially("Notes");
+  await expect(editor).toHaveValue("Draft notes");
   await editor.press("Shift+Enter");
   await editor.pressSequentially("Shipped");
   await editor.press("Enter");
 
-  await expect(message(page, "assistant", "Extension answers: production / v2 / Notes Shipped")).toBeVisible();
+  await expect(message(page, "assistant", "Extension answers: production / v2 / Draft notes Shipped")).toBeVisible();
   await expectRunFinished(page);
 });
