@@ -11,8 +11,10 @@ func TestTagsCopyMigrationAndRollbackPreserveOtherEdits(t *testing.T) {
 		t.Run(map[bool]string{false: "copy", true: "migrate"}[move], func(t *testing.T) {
 			root := t.TempDir()
 			state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), "")
-			if _, err := state.SetTags("/parent", []string{" WORK ", "alpha", "work"}); err != nil {
-				t.Fatal(err)
+			for _, name := range []string{" WORK ", "alpha"} {
+				if err := state.SetTag("/parent", name, true); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := state.SetTag("/child", "existing", true); err != nil {
 				t.Fatal(err)
@@ -49,28 +51,24 @@ func TestTagsCopyMigrationAndRollbackPreserveOtherEdits(t *testing.T) {
 	}
 }
 
-func TestSetTagsIsAtomicAndRollbackPreservesNewerDestinationEdit(t *testing.T) {
+func TestTagRollbackPreservesNewerDestinationEdit(t *testing.T) {
 	root := t.TempDir()
 	state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), "")
-	if _, err := state.SetTags("/session", []string{"work", "bad\n"}); err == nil {
-		t.Fatal("accepted invalid batch")
+	if err := state.SetTag("/parent", "work", true); err != nil {
+		t.Fatal(err)
 	}
-	tags, err := state.SessionTags()
-	if err != nil || len(tags) != 0 {
-		t.Fatalf("partial batch=%v %v", tags, err)
-	}
-	rollback, err := state.SetTags("/session", []string{"work"})
+	rollback, err := state.CopyTags("/parent", "/child")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := state.SetTag("/session", "work", true); err != nil {
+	if err := state.SetTag("/child", "newer", true); err != nil {
 		t.Fatal(err)
 	}
 	if err := rollback(); err != nil {
 		t.Fatal(err)
 	}
-	tags, err = state.SessionTags()
-	if err != nil || !reflect.DeepEqual(tags, map[string][]string{"/session": {"work"}}) {
+	tags, err := state.SessionTags()
+	if err != nil || !reflect.DeepEqual(tags, map[string][]string{"/parent": {"work"}, "/child": {"newer", "work"}}) {
 		t.Fatalf("newer edit lost=%v %v", tags, err)
 	}
 }

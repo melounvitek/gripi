@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,100 +16,6 @@ import (
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
-
-func TestNewSessionTagsValidateBeforeStartingPi(t *testing.T) {
-	tooMany := make([]string, 33)
-	for i := range tooMany {
-		tooMany[i] = fmt.Sprint(i)
-	}
-	for _, names := range [][]string{{"work", ""}, {"work", "bad\n"}, tooMany} {
-		started := false
-		app := &application{newRPCClient: func(string) (rpc.RPCClient, error) { started = true; return nil, fmt.Errorf("unexpected startup") }}
-		request := tagLifecycleRequest("/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "tags": names})
-		response := httptest.NewRecorder()
-		app.newSessionAtCWD(response, request)
-		if started || response.Code != http.StatusBadRequest {
-			t.Fatalf("invalid tags started Pi=%v: %d %s", started, response.Code, response.Body.String())
-		}
-	}
-}
-
-func TestInitialTagsPersistForSyntheticAndNativeSessions(t *testing.T) {
-	for _, kind := range []string{"synthetic", "native-pending", "native-persisted"} {
-		t.Run(kind, func(t *testing.T) {
-			root := t.TempDir()
-			reported := ""
-			if kind != "synthetic" {
-				reported = filepath.Join(root, "native.jsonl")
-			}
-			var before []byte
-			if kind == "native-persisted" {
-				writeSessionRecords(t, reported, []map[string]any{{"type": "session", "version": 3, "id": "native", "cwd": root}})
-				var err error
-				before, err = os.ReadFile(reported)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), root)
-			registry := rpc.NewRegistry(nil, nil)
-			app := &application{config: config.Config{SessionsRoot: root}, gatewayState: state, rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), newRPCClient: func(string) (rpc.RPCClient, error) {
-				return &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": reported}}}, nil
-			}}
-			path, err := app.startNewSession(tagLifecycleRequest("/sessions/new_at_cwd?tag=filter&tags=query", url.Values{"tags": {" Work ", "alpha", "WORK"}}), root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			reloaded := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), root)
-			tags, err := reloaded.SessionTags()
-			if err != nil || !reflect.DeepEqual(tags, map[string][]string{path: {"alpha", "work"}}) {
-				t.Fatalf("initial tags = %v, %v", tags, err)
-			}
-			if kind == "native-persisted" {
-				after, err := os.ReadFile(path)
-				if err != nil || string(before) != string(after) {
-					t.Fatalf("creation changed native contents: %v", err)
-				}
-			} else if _, err := os.Stat(path); !os.IsNotExist(err) {
-				t.Fatalf("tag assignment materialized a native file: %v", err)
-			}
-		})
-	}
-}
-
-func TestNewSessionTagsRollbackRegistrationFailure(t *testing.T) {
-	for _, native := range []bool{false, true} {
-		t.Run(fmt.Sprint(native), func(t *testing.T) {
-			root := t.TempDir()
-			state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), root)
-			if err := state.SetTag("/unrelated", "keep", true); err != nil {
-				t.Fatal(err)
-			}
-			client := &remapClient{state: map[string]any{"data": map[string]any{}}}
-			if native {
-				client.state = map[string]any{"data": map[string]any{"sessionFile": filepath.Join(root, "native.jsonl")}}
-			}
-			registry := rpc.NewRegistry(nil, nil)
-			if err := registry.Shutdown(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			owned := map[string]bool{}
-			app := &application{config: config.Config{SessionsRoot: root}, gatewayState: state, rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), newRPCClient: func(string) (rpc.RPCClient, error) { return client, nil }, claimSession: func(_ *http.Request, path string) (bool, error) { owned[path] = true; return true, nil }, releaseSession: func(_ *http.Request, path string) error { delete(owned, path); return nil }}
-			request := tagLifecycleRequest("/sessions/new_at_cwd", url.Values{"tags": {"draft"}})
-			if _, err := app.startNewSession(request, root); err == nil {
-				t.Fatal("registration succeeded")
-			}
-			tags, err := state.SessionTags()
-			if err != nil || !reflect.DeepEqual(tags, map[string][]string{"/unrelated": {"keep"}}) || len(owned) != 0 {
-				t.Fatalf("failed creation left tags=%v ownership=%v err=%v", tags, owned, err)
-			}
-			projects, err := state.ProjectCWDs(nil)
-			if err != nil || projects[root] {
-				t.Fatalf("failed registration left project=%v err=%v", projects, err)
-			}
-		})
-	}
-}
 
 func TestPendingTagsMaterializeInBackgroundWithoutRequest(t *testing.T) {
 	for _, multiUser := range []bool{false, true} {
@@ -232,31 +136,6 @@ func TestPendingTagMigrationFailureRollsBackMetadataAndOwnership(t *testing.T) {
 	}
 }
 
-func TestNewSessionTagStorageFailureReleasesOwnership(t *testing.T) {
-	root := t.TempDir()
-	tagsPath := filepath.Join(root, "tags")
-	if err := os.WriteFile(tagsPath, []byte("malformed"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), tagsPath, root)
-	path := filepath.Join(root, "native.jsonl")
-	registry := rpc.NewRegistry(nil, nil)
-	owned := false
-	app := &application{config: config.Config{SessionsRoot: root}, gatewayState: state, rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil),
-		newRPCClient: func(string) (rpc.RPCClient, error) {
-			return &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": path}}}, nil
-		},
-		claimSession:   func(*http.Request, string) (bool, error) { owned = true; return true, nil },
-		releaseSession: func(*http.Request, string) error { owned = false; return nil },
-	}
-	if _, err := app.startNewSession(tagLifecycleRequest("/sessions/new", url.Values{"tags": {"work"}}), root); err == nil {
-		t.Fatal("creation accepted malformed tag storage")
-	}
-	if owned || registry.Active(path) || len(app.pendingSessions.Entries()) != 0 {
-		t.Fatal("failed creation left ownership or pending state")
-	}
-}
-
 func TestBackgroundCompletionDoesNotMigrateTagsAfterConcurrentBranch(t *testing.T) {
 	for _, operation := range []string{"clone", "fork", "new"} {
 		t.Run(operation, func(t *testing.T) {
@@ -281,7 +160,7 @@ func TestBackgroundCompletionDoesNotMigrateTagsAfterConcurrentBranch(t *testing.
 			}()
 			<-client.observed
 			response := httptest.NewRecorder()
-			app.replaceSessionFromAction(response, tagLifecycleRequest("/sessions/"+operation, nil), parent, operation, "entry")
+			app.replaceSessionFromAction(response, tagLifecycleRequest("/sessions/"+operation), parent, operation, "entry")
 			close(client.branched)
 			if response.Code != http.StatusOK {
 				t.Fatalf("branch = %d %s", response.Code, response.Body.String())
@@ -334,9 +213,8 @@ func (client *branchCompletionClient) NewSession(context.Context, string) (map[s
 	return map[string]any{"success": true}, nil
 }
 
-func tagLifecycleRequest(path string, form url.Values) *http.Request {
-	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+func tagLifecycleRequest(path string) *http.Request {
+	request := httptest.NewRequest(http.MethodPost, path, nil)
 	request.Header.Set("Accept", "application/json")
 	return request
 }
