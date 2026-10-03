@@ -1,3 +1,7 @@
+import { recentSessionShortcutFromEvent } from "./shortcuts.js";
+
+const RECENT_PROJECTS = 5;
+
 export class NewSessionFormController {
   constructor(document, window) {
     this.document = document;
@@ -12,7 +16,7 @@ export class NewSessionFormController {
         click: (event) => this.handleClick(event, form),
         keydown: (event) => this.handleKeydown(event, form)
       };
-      form._newSessionFormState = { timer: null, controller: null, listeners, browsed: null, cursor: 0 };
+      form._newSessionFormState = { timer: null, controller: null, listeners, browsed: null, cursor: 0, expanded: false };
       Object.entries(listeners).forEach(([type, listener]) => form.addEventListener(type, listener));
     });
   }
@@ -29,6 +33,7 @@ export class NewSessionFormController {
 
   open(form) {
     if (!form?._newSessionFormState) return;
+    form._newSessionFormState.expanded = false;
     this.enter(form, this.projects(form).length ? "" : this.newPath(form));
   }
 
@@ -92,11 +97,14 @@ export class NewSessionFormController {
     state.controller = null;
   }
 
-  enter(form, value) {
-    const input = this.input(form);
-    input.value = value;
+  focusInput(form) {
     // On touch screens focusing the input would open the keyboard over the list.
-    if (this.window.matchMedia?.("(pointer: fine)").matches !== false) input.focus();
+    if (this.window.matchMedia?.("(pointer: fine)").matches !== false) this.input(form).focus();
+  }
+
+  enter(form, value) {
+    this.input(form).value = value;
+    this.focusInput(form);
     this.refresh(form, 0);
   }
 
@@ -167,9 +175,10 @@ export class NewSessionFormController {
     const path = this.pathMode(form);
     const projects = this.projects(form);
     list.querySelectorAll("[data-new-session-action]").forEach((row) => row.remove());
-    projects.forEach((row) => {
-      row.hidden = path || !row.querySelector(".new-session-name").textContent.toLowerCase().includes(query);
-    });
+    const matching = path ? [] : projects.filter((row) => row.querySelector(".new-session-name").textContent.toLowerCase().includes(query));
+    const visible = query || state.expanded ? matching : matching.slice(0, RECENT_PROJECTS);
+    projects.forEach((row) => { row.hidden = !visible.includes(row); });
+    visible.forEach((row, index) => { row.querySelector(".new-session-key").textContent = index < 9 ? index + 1 : ""; });
     if (path) {
       if (state.browsed?.cwd) list.append(this.row("start", "✓", `Start in ${this.displayPath(form, state.browsed.cwd)}`, state.browsed.cwd));
       (state.browsed?.directories || []).forEach((directory) => {
@@ -177,13 +186,15 @@ export class NewSessionFormController {
       });
       if (projects.length) list.append(this.row("back", "←", "Back to projects"));
     } else {
+      if (visible.length < matching.length) list.append(this.row("more", "…", `${matching.length - visible.length} more projects`));
       list.append(this.row("path", "+", "Add new path…"));
     }
     this.options(form).forEach((option, index) => { option.id = `new-session-option-${index}`; });
     this.setCursor(form, state.cursor);
 
-    form.querySelector("[data-new-session-hint]").textContent = path ? "↑↓ navigate · enter open or start · esc cancel" : "↑↓ navigate · enter start · esc cancel";
-    if (!path) this.setStatus(form, query && projects.every((row) => row.hidden) ? "No matching projects." : "");
+    const digits = visible.length > 1 ? `ctrl+1…${Math.min(visible.length, 9)}` : "ctrl+1";
+    form.querySelector("[data-new-session-hint]").textContent = path ? "↑↓ navigate · enter open or start · esc cancel" : `↑↓ navigate · enter start${visible.length ? ` · ${digits} start directly` : ""} · esc cancel`;
+    if (!path) this.setStatus(form, query && !visible.length ? "No matching projects." : "");
     else if (!state.browsed) this.setStatus(form, "Checking…");
     else this.setStatus(form, state.browsed.cwd || state.browsed.directories.length ? "" : state.browsed.error, true);
   }
@@ -204,6 +215,10 @@ export class NewSessionFormController {
     if (cwd) {
       form.querySelector("[data-new-session-cwd-value]").value = cwd;
       form.requestSubmit();
+    } else if (action === "more") {
+      Object.assign(form._newSessionFormState, { expanded: true, cursor: RECENT_PROJECTS });
+      this.focusInput(form);
+      this.render(form);
     } else if (action === "path") {
       this.enter(form, this.newPath(form));
     } else if (action === "open") {
@@ -221,7 +236,12 @@ export class NewSessionFormController {
   handleKeydown(event, form) {
     const options = this.options(form);
     const cursor = form._newSessionFormState.cursor;
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const shortcut = event.ctrlKey && !event.altKey && !event.metaKey ? recentSessionShortcutFromEvent(event) : null;
+    if (shortcut) {
+      event.preventDefault();
+      const project = this.projects(form).filter((row) => !row.hidden)[shortcut - 1];
+      if (project && !event.repeat) this.activate(form, project);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (!options.length) return;
       const step = event.key === "ArrowDown" ? 1 : -1;

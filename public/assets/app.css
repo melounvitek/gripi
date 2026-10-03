@@ -686,15 +686,18 @@
       .tree-session-fold::after { content: ""; position: absolute; inset: -0.8rem -0.75rem; }
     }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
-    /* Rows share the list's columns: cursor, monogram, name, path and last activity. */
-    .new-session-list { max-height: min(22rem, 55dvh); grid-template-columns: 2ch 2ch fit-content(22ch) minmax(0, 1fr) auto; column-gap: 1ch; overflow-y: auto; scroll-padding-bottom: 2rem; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
+    /* Rows share the list's columns: cursor, monogram, name, path, last activity and shortcut digit. */
+    .new-session-list { max-height: min(22rem, 55dvh); grid-template-columns: 2ch 2ch fit-content(22ch) minmax(0, 1fr) auto auto; column-gap: 1ch; overflow-y: auto; scroll-padding-bottom: 2rem; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
     .new-session-row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
     .new-session-row .project-monogram { color: var(--project-identity-fg, inherit); }
     .new-session-name, .new-session-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .new-session-path, .new-session-age { color: var(--muted-soft); }
     .new-session-age { font-size: 0.74rem; text-align: right; }
-    .new-session-row[data-new-session-action] .new-session-name { grid-column: 3 / -1; }
-    .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { color: var(--muted); }
+    .new-session-key { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; color: var(--accent); font: 600 0.72rem/1 var(--mono); }
+    .new-session-key:empty { visibility: hidden; }
+    /* Wraps rather than truncates, so the directory a session would start in stays readable. */
+    .new-session-row[data-new-session-action] .new-session-name { grid-column: 3 / -1; white-space: normal; overflow-wrap: anywhere; }
+    .new-session-row:is([data-new-session-action="more"], [data-new-session-action="path"], [data-new-session-action="back"]) { color: var(--muted); }
     .new-session-row[data-new-session-action="start"] .project-monogram { color: var(--success); }
     .new-session-row[aria-selected="true"] { color: var(--accent); }
     /* Stays in reach below a scrolled project list. */
@@ -707,6 +710,7 @@
       .new-session-row { padding-block: 0.4rem; }
       .new-session-path { grid-column: 3; grid-row: 2; font-size: 0.78rem; }
       .new-session-age { grid-column: 4; grid-row: 1; }
+      .new-session-key { display: none; }
     }
     .picker-status { margin: 0; color: var(--muted); }
     .picker-title { margin: 0; color: var(--accent); font-weight: 700; }

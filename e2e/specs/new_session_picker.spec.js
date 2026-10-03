@@ -80,3 +80,27 @@ test("a missing path is explained and cannot be started", async ({ page, isMobil
   await expect(input(page)).toHaveValue("/gripi-e2e/missing");
   await expect(dialog(page)).toBeVisible();
 });
+
+test("only the most recent projects are listed until the rest are asked for", async ({ page, isMobile }) => {
+  await open(page, isMobile);
+  const total = await dialog(page).locator("[data-new-session-project]").count();
+  await expect(dialog(page).getByRole("option")).toHaveText([/-project/, /-project/, /-project/, /-project/, /-project/, new RegExp(`${total - 5} more projects$`), /Add new path…$/]);
+
+  await activate(option(page, `${total - 5} more projects`), isMobile);
+  await expect(dialog(page).getByRole("option")).toHaveCount(total + 1);
+  await expect(dialog(page).getByRole("option").nth(5)).toHaveAttribute("aria-selected", "true");
+  await expect(option(page, "Add new path…")).toBeInViewport();
+});
+
+test("Ctrl and a digit start directly in that visible row", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await open(page, isMobile);
+  await expect(dialog(page).locator(".new-session-key:visible")).toHaveText(["1", "2", "3", "4", "5"]);
+
+  await page.keyboard.type("new-session-");
+  const second = dialog(page).getByRole("option").nth(1);
+  await expect(second.locator(".new-session-key")).toHaveText("2");
+  const cwd = await second.getAttribute("data-new-session-project");
+  await page.keyboard.press("Control+2");
+  await expectStartedIn(page, cwd.split("/").pop());
+});
