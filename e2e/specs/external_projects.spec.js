@@ -72,9 +72,9 @@ test("a new CLI project stays out of project dropdowns until explicit takeover",
 });
 
 async function expectProjectOptions(page, cwd, count) {
-  // The custom dropdowns hide these native selects; hidden options must still be checked.
+  // The custom dropdown hides its native select, and the picker is closed; both must still be checked.
   await expect(page.locator(`.sidebar-project-filter option[value="${cwd}"]`)).toHaveCount(count);
-  await expect(page.locator(`#new-session-known-cwd option[value="${cwd}"]`)).toHaveCount(count);
+  await expect(page.locator(`[data-new-session-project="${cwd}"]`)).toHaveCount(count);
 }
 
 async function appendCLIReply(file, text) {

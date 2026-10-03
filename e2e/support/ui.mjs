@@ -13,6 +13,13 @@ export async function selectSession(page, title) {
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
 }
 
+export async function startSession(page, project) {
+  await page.getByRole("button", { name: "New session", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "New session" });
+  await dialog.getByRole("combobox", { name: "Project or path" }).fill(project);
+  await dialog.getByRole("option", { name: new RegExp(escapeRegExp(project)) }).click();
+}
+
 export function message(page, role, text) {
   return page.locator(`article[data-role="${role}"]`).filter({ hasText: text });
 }

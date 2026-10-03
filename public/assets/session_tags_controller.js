@@ -57,17 +57,10 @@ export class SessionTagsController {
       const filter = event.target.closest?.("[data-tag-filter]");
       const edit = event.target.closest?.("[data-tag-edit]");
       const chooser = event.target.closest?.("[data-tag-chooser]");
-      const draft = event.target.closest?.("[data-tag-draft-add]");
-      const remove = event.target.closest?.("[data-tag-draft-remove]");
-      if (remove) {
-        const form = remove.closest("form");
-        this.renderDraft(form, [...new FormData(form).getAll("tags")].filter((tag) => tag !== remove.dataset.tagDraftRemove));
-        form.querySelector("[data-tag-draft-add]").focus();
-      }
-      if (filter || edit || chooser || draft) {
+      if (filter || edit || chooser) {
         event.preventDefault();
         if (filter) this.filter(filter.dataset.tagFilter, filter);
-        else this.open(edit?.dataset.tagEdit || "", edit || chooser || draft, draft?.closest("form"));
+        else this.open(edit?.dataset.tagEdit || "", edit || chooser);
       }
       if (event.target.closest?.("[data-tag-close]")) this.close();
       if (event.target.closest?.("[data-tag-retry]")) this.retry();
@@ -157,35 +150,7 @@ export class SessionTagsController {
     }
   }
 
-  resetDraft(form) {
-    const field = form?.querySelector("[data-new-session-tags]");
-    if (!field) return;
-    this.renderDraft(form, []);
-  }
-
-  renderDraft(form, tags) {
-    this.ingestHTMLColors();
-    const chips = form.querySelector("[data-tag-draft-chips]");
-    chips.replaceChildren();
-    for (const tag of tags) {
-      const input = this.document.createElement("input");
-      input.type = "hidden";
-      input.name = "tags";
-      input.value = tag;
-      const chip = this.document.createElement("button");
-      chip.type = "button";
-      chip.className = "tag-chip";
-      this.applyTagColors(chip, tag);
-      chip.dataset.tagDraftRemove = tag;
-      chip.setAttribute("aria-label", `Remove ${tag}`);
-      const label = this.document.createElement("span");
-      label.textContent = tag;
-      chip.append(label, " ×");
-      chips.append(input, chip);
-    }
-  }
-
-  open(path, trigger, form = null) {
+  open(path, trigger) {
     this.hideTooltip();
     this.ingestHTMLColors();
     this.trigger = trigger;
@@ -194,20 +159,20 @@ export class SessionTagsController {
     this.triggerKind = trigger?.matches("[data-session-actions-toggle]") ? "actions" : path ? "edit" : "filter";
     let state = path ? this.editors.get(path) : null;
     if (!state) {
-      state = { path, form, tags: form ? new FormData(form).getAll("tags") : [], available: [], query: "", loading: false, pending: false, version: 0 };
+      state = { path, tags: [], available: [], query: "", loading: false, pending: false, version: 0 };
       if (path) this.editors.set(path, state);
     }
     this.state = state;
-    this.dialog.querySelector("h2").textContent = form ? "New session tags" : path ? "Session tags" : "Filter by tag";
+    this.dialog.querySelector("h2").textContent = path ? "Session tags" : "Filter by tag";
     const context = this.dialog.querySelector("[data-tag-context]");
     const row = [...this.document.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === path);
     context.textContent = row?.dataset.sessionName || (this.document.querySelector("[data-tag-session]")?.dataset.tagSession === path ? this.document.querySelector(".session-header-name")?.textContent : "");
     context.hidden = !context.textContent || !path;
-    const label = path || form ? "Find or create a tag" : "Find a tag";
+    const label = path ? "Find or create a tag" : "Find a tag";
     this.search.setAttribute("aria-label", label);
     this.search.placeholder = `${label}…`;
     this.search.value = state.query;
-    this.dialog.querySelector("[data-tag-help]").textContent = form ? "Tags are saved when you start the session." : path ? "Changes apply immediately. Tags are available across all projects." : "Across all projects";
+    this.dialog.querySelector("[data-tag-help]").textContent = path ? "Changes apply immediately. Tags are available across all projects." : "Across all projects";
     this.dialog.hidden = false;
     this.dialog.showModal();
     this.callbacks.openModal?.(this.dialog);
@@ -262,13 +227,6 @@ export class SessionTagsController {
 
   async mutate(state, tag, assigned) {
     if (state.pending) return;
-    if (state.form) {
-      state.tags = assigned ? [...new Set([...state.tags, tag])] : state.tags.filter((name) => name !== tag);
-      this.renderDraft(state.form, state.tags);
-      this.render();
-      ([...this.options.querySelectorAll("[data-tag-option]")].find((control) => control.dataset.tagOption === tag) || this.search).focus({ preventScroll: true });
-      return;
-    }
     state.version += 1;
     state.pending = true;
     state.error = null;
@@ -349,18 +307,12 @@ export class SessionTagsController {
     this.options.replaceChildren();
     if (state.loading) return;
     const query = state.query.trim().toLowerCase();
-    const editable = state.path || state.form;
-    const available = [...state.available];
-    if (state.form) {
-      for (const name of state.tags) {
-        if (!available.some((tag) => tag.name === name)) available.push({ name, count: null });
-      }
-    }
+    const editable = state.path;
     if (!editable) this.addOption("All tags", "", null);
-    for (const tag of available.filter((tag) => tag.name.includes(query))) {
+    for (const tag of state.available.filter((tag) => tag.name.includes(query))) {
       this.addOption(tag.name, tag.name, editable ? null : tag.count);
     }
-    if (editable && query && !available.some((tag) => tag.name === query)) {
+    if (editable && query && !state.available.some((tag) => tag.name === query)) {
       const button = this.document.createElement("button");
       button.type = "button";
       button.className = "tag-picker-option tag-create";
@@ -377,10 +329,10 @@ export class SessionTagsController {
 
   addOption(label, tag, count) {
     const state = this.state;
-    const option = this.document.createElement(state.path || state.form ? "label" : "button");
+    const option = this.document.createElement(state.path ? "label" : "button");
     option.className = "tag-picker-option";
     if (tag) this.applyTagColors(option, tag);
-    if (state.path || state.form) {
+    if (state.path) {
       const checkbox = this.document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = state.tags.includes(tag);

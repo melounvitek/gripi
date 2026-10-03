@@ -114,7 +114,7 @@ Use one directory per line. Blank lines and `#` comments are ignored.
 
 ## Session tags
 
-Add tags with the tag icon in the conversation header or **Tags…** in a session’s menu. Select a tag in the sidebar to filter by it; pinned sessions stay visible. Forks and clones keep their tags. While a tag filter is active, the New Session dialog pre-fills that tag, and you can remove it before starting.
+Add tags with the tag icon in the conversation header or **Tags…** in a session’s menu. Select a tag in the sidebar to filter by it; pinned sessions stay visible. Forks and clones keep their tags.
 
 Tags are lowercased, up to 64 characters long, and limited to 32 per session. They are stored in `~/.pi/gripi/session-tags.json`, not in Pi’s session files, and are private to each user in multi-user mode.
 

@@ -38,7 +38,7 @@ export default defineConfig({
     {
       name: "mobile",
       dependencies: ["setup"],
-      testMatch: [/mobile\.spec\.js/, /session_footer\.spec\.js/, /active_activity\.spec\.js/, /tool_preparation\.spec\.js/, /quote_touch\.spec\.js/, /markdown_classes\.spec\.js/, /session_rename\.spec\.js/, /session_tags\.spec\.js/, /session_tag_creation\.spec\.js/, /session_tag_icons\.spec\.js/, /header_tag_icons\.spec\.js/],
+      testMatch: [/mobile\.spec\.js/, /session_footer\.spec\.js/, /active_activity\.spec\.js/, /tool_preparation\.spec\.js/, /quote_touch\.spec\.js/, /markdown_classes\.spec\.js/, /session_rename\.spec\.js/, /session_tags\.spec\.js/, /new_session_picker\.spec\.js/, /session_tag_icons\.spec\.js/, /header_tag_icons\.spec\.js/],
       use: {
         ...devices["Pixel 7"],
         storageState
