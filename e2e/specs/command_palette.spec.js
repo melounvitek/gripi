@@ -77,6 +77,24 @@ test("the first activation of a row opens that session", async ({ page, isMobile
   await expect(heading(page, sessions.marker)).toBeVisible();
 });
 
+test("Ctrl+K then Enter flips between the last two sessions this tab had open", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await open(page);
+  // Neither session is among the most recent, so only this tab's history puts one on top.
+  for (const [query, name] of [["contract ready", sessions.marker], ["history desktop", sessions.history]]) {
+    await input(page).fill(query);
+    await page.keyboard.press("Enter");
+    await expect(heading(page, name)).toBeVisible();
+    await page.keyboard.press("Control+k");
+  }
+  for (const name of [sessions.marker, sessions.history]) {
+    await expect(options(page).first()).toHaveText(new RegExp(name));
+    await page.keyboard.press("Enter");
+    await expect(heading(page, name)).toBeVisible();
+    await page.keyboard.press("Control+k");
+  }
+});
+
 test("Enter pressed before the sessions arrive opens the first match once they do", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
   await page.goto("/");

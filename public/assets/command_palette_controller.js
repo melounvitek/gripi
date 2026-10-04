@@ -120,6 +120,9 @@ export class CommandPaletteController {
     if (this.sessions) {
       const current = this.callbacks.currentSessionPath();
       const matching = this.sessions.filter((session) => session.path !== current && matches(`${session.name}\n${session.project}`));
+      // With nothing typed, the session this tab had open before leads, so Ctrl+K then Enter flips between two.
+      const previous = this.callbacks.previousSessionPath();
+      if (!words.length) matching.sort((left, right) => (right.path === previous) - (left.path === previous));
       const shown = matching.slice(0, words.length ? MATCHING_SESSIONS : RECENT_SESSIONS);
       more = matching.length - shown.length;
       this.group(words.length ? "Sessions" : "Recent sessions", shown.map((session) => this.sessionRow(session)));

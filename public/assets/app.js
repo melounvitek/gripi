@@ -208,6 +208,7 @@ const commandPaletteController = new CommandPaletteController(document, {
   closeModal,
   modalIsOpen,
   currentSessionPath,
+  previousSessionPath: () => readMainSessionHistory().previous,
   openSession: (path) => switchSession(sessionUrl(path), { push: true, focus: true }),
   commands: commandPaletteCommands
 });
