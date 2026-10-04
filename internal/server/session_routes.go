@@ -23,6 +23,7 @@ func (app *application) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", app.index)
 	mux.HandleFunc("GET /sidebar", app.sidebar)
 	mux.HandleFunc("GET /new_session_modal", app.newSessionModal)
+	mux.HandleFunc("GET /sessions/palette", app.sessionPalette)
 	mux.HandleFunc("GET /session_fragment", app.sessionFragment)
 	mux.HandleFunc("GET /conversation_older", app.conversationOlder)
 	mux.HandleFunc("GET /attachments/{session_hash}/{file}", app.attachment)
@@ -99,6 +100,32 @@ func (app *application) newSessionModal(response http.ResponseWriter, request *h
 	}
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = app.templates.ExecuteTemplate(response, "new_session_modal", view)
+}
+
+// Every session at once, so the browser filters them as fast as it filters its own commands.
+func (app *application) sessionPalette(response http.ResponseWriter, request *http.Request) {
+	if !acquireRequestSlot(response, request, app.heavyRequests) {
+		return
+	}
+	defer releaseRequestSlot(app.heavyRequests)
+	// Listing selects no session, so it marks none read.
+	request.URL.RawQuery = "no_session=1"
+	view, err := app.preparePage(request, false)
+	if err != nil {
+		logInternalError("prepare session palette", err)
+		http.Error(response, "Unable to read sessions", http.StatusInternalServerError)
+		return
+	}
+	entries := make([]map[string]any, 0, len(view.Sessions))
+	for _, session := range view.Sessions {
+		entries = append(entries, map[string]any{
+			"path": session.Path, "name": session.DisplayName, "project": tildePath(view.Home, session.CWD),
+			"monogram": projectMonogram(view, session.CWD), "color": projectColor(session.CWD),
+			"age": compactRelativeTime(session.ConversationActivityAt), "unread": view.Unread[session.Path],
+			"busy": app.rpcClients.Busy(session.Path) || app.rpcClients.Compacting(session.Path),
+		})
+	}
+	writeJSON(response, map[string]any{"sessions": entries})
 }
 
 func (app *application) sessionFragment(response http.ResponseWriter, request *http.Request) {

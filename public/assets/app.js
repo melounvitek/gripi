@@ -31,7 +31,7 @@ import {
   recentSessionShortcutFromEvent,
   sessionSearchShortcut
 } from "./shortcuts.js";
-import { sessionFragmentUrl } from "./urls.js";
+import { sessionFragmentUrl, sessionUrl } from "./urls.js";
 import { GatewayUpdateController } from "./gateway_update_controller.js";
 import { ResourceUsageController } from "./resource_usage_controller.js";
 import { BrowserAccessRequestController, WorkspaceAccessRequestController } from "./access_request_controllers.js";
@@ -41,6 +41,7 @@ import { SessionActionsController } from "./session_actions_controller.js";
 import { SessionTagsController } from "./session_tags_controller.js";
 import { SidebarController } from "./sidebar_controller.js";
 import { ConversationController } from "./conversation_controller.js";
+import { CommandPaletteController } from "./command_palette_controller.js";
 import { ComposerAutocompleteController } from "./composer_autocomplete_controller.js";
 import { CurrentSessionFindController } from "./current_session_find_controller.js";
 import { LiveMessageParser } from "./live_message_parser.js";
@@ -202,6 +203,13 @@ const liveMessageRenderer = new LiveMessageRenderer(document, conversationContro
 imageViewerController.bind();
 conversationController.historyEnhancer = (root) => liveMessageRenderer.hydrateTerminalOutputs(root, { notify: false });
 conversationController.historyReconciler = (root) => liveMessageRenderer.reconcilePersistedToolResults(root);
+const commandPaletteController = new CommandPaletteController(document, {
+  openModal,
+  closeModal,
+  modalIsOpen,
+  currentSessionPath,
+  openSession: (path) => switchSession(sessionUrl(path), { push: true, focus: true })
+});
 const treeSessionController = new TreeSessionController(document, window, {
   currentSessionPath: () => currentSessionPath(),
   addSessionViewFormParams: (formData) => addSessionViewFormParams(formData),
@@ -315,6 +323,12 @@ function requestSessionSearch() {
 
 function handleSessionSearchShortcut(event) {
   if (!sessionSearchShortcut(event) || !requestSessionSearch()) return false;
+  event.preventDefault();
+  return true;
+}
+
+function handleCommandPaletteShortcut(event) {
+  if (!isCtrlOrMetaShortcut(event, "k") || event.shiftKey || !commandPaletteController.toggle()) return false;
   event.preventDefault();
   return true;
 }
@@ -2938,7 +2952,7 @@ function focusPromptAfterModalClose(modal) {
     (modelButton || conversationScroll)?.focus({ preventScroll: true });
   } else if (["session-rename-modal", "session-delete-modal"].includes(modal?.dataset.modal)) {
     sessionActionsController.restoreFocus();
-  } else if (modal?.dataset.modal === "new-session-modal") {
+  } else if (["new-session-modal", "command-palette-modal"].includes(modal?.dataset.modal)) {
     syncComposerFocus();
   }
 }
@@ -3277,6 +3291,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (handleCommandPaletteShortcut(event)) return;
   handleModelSettingsKey(event);
   handlePickerListKey(event);
   handleModalTab(event);

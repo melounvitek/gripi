@@ -710,9 +710,9 @@
     .new-session-row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
     .new-session-row .project-monogram { color: var(--project-identity-fg, inherit); }
     /* Clipped sideways only: a hidden overflow also cuts the underscore off the bottom of some fonts. */
-    .new-session-name, .new-session-path { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: nowrap; }
-    .new-session-path, .new-session-age { color: var(--muted-soft); }
-    .new-session-age { font-size: 0.74rem; text-align: right; }
+    .new-session-name, .new-session-path, .command-palette-name { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: nowrap; }
+    .new-session-path, .new-session-age, .command-palette-meta { color: var(--muted-soft); }
+    .new-session-age, .command-palette-meta { font-size: 0.74rem; text-align: right; }
     .new-session-key { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; color: var(--accent); font: 600 0.72rem/1 var(--mono); }
     .new-session-key:empty { visibility: hidden; }
     /* Wraps rather than truncates, so the directory a session would start in stays readable. */
@@ -720,16 +720,26 @@
     .new-session-row[data-new-session-action="folder"] .new-session-name { grid-column: 3 / 5; }
     .new-session-row:not([data-new-session-project], [data-new-session-action="folder"]) { color: var(--muted); }
     .new-session-inside { grid-column: 6; display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; color: var(--muted); font-size: 1rem; line-height: 1; }
-    .new-session-row[aria-selected="true"], .new-session-row[aria-selected="true"] .new-session-inside { color: var(--accent); }
+    .new-session-row[aria-selected="true"], .new-session-row[aria-selected="true"] .new-session-inside, .command-palette-row[aria-selected="true"] { color: var(--accent); }
     @media (hover: hover) and (pointer: fine) { .new-session-row .new-session-inside:hover { color: var(--accent-bright); } }
     /* The last row stays in reach below a scrolled list. Its shadow covers the device pixel that a fractional pixel ratio leaves open under it. */
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); box-shadow: 0 1px var(--panel); }
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"])[aria-selected="true"] { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); }
     @media (hover: hover) and (pointer: fine) { .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]):hover { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); } }
+    .command-palette-card { width: min(40rem, 100%); }
+    .command-palette-list { max-height: 60dvh; grid-auto-rows: max-content; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
+    .command-palette-list [role="group"] { display: grid; }
+    .command-palette-row { grid-template-columns: 2ch 2ch minmax(0, 1fr) auto; column-gap: 1ch; align-items: center; }
+    .command-palette-row.is-unread .command-palette-name { font-weight: 700; }
+    .command-palette-row.is-unread .command-palette-meta { color: var(--accent); font-weight: 600; }
+    /* Smaller than the rows, so their three leading characters are 3.75 of these. */
+    .command-palette-section, .command-palette-status { margin: 0; padding-left: calc(3.75ch + 0.25rem); color: var(--muted-soft); font-size: 0.8em; }
+    .command-palette-section { margin: 0.55rem 0 0.1rem; color: var(--muted); }
+    .command-palette-list [role="group"]:first-child .command-palette-section { margin-top: 0; }
     @media (min-width: 761px) {
       /* Anchored to the top, so the input stays put while the list changes height. */
-      [data-modal="new-session-modal"] { align-items: start; padding-top: 15dvh; }
-      [data-modal="new-session-modal"] .modal-card { max-height: calc(85dvh - 1rem); }
+      :is([data-modal="new-session-modal"], [data-modal="command-palette-modal"]) { align-items: start; padding-top: 15dvh; }
+      :is([data-modal="new-session-modal"], [data-modal="command-palette-modal"]) .modal-card { max-height: calc(85dvh - 1rem); }
     }
     @media (max-width: 760px), (pointer: coarse) {
       /* The path moves under the name, so a narrow sheet still tells worktrees apart. */
@@ -742,6 +752,7 @@
       .new-session-inside { grid-column: 5; grid-row: 1; align-self: stretch; width: auto; height: auto; margin: -0.4rem -0.25rem -0.4rem 0; border-left: 1px solid var(--border); font-size: 1.3rem; }
       .new-session-age { grid-column: 4; grid-row: 1; }
       .new-session-key { display: none; }
+      .command-palette-list { max-height: 52dvh; }
     }
     .picker-status { margin: 0; color: var(--muted); }
     .picker-title { margin: 0; color: var(--accent); font-weight: 700; }

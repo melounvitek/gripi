@@ -109,3 +109,11 @@ export function movePickerCursor(list, index) {
   });
   rows[selected].focus();
 }
+
+// Pi-style filter lists keep the keyboard focus in the input, which points at the row under the cursor.
+export function pointPickerCursor(input, options, index) {
+  options.forEach((option, optionIndex) => option.setAttribute("aria-selected", String(optionIndex === index)));
+  if (!options[index]) return input.removeAttribute("aria-activedescendant");
+  input.setAttribute("aria-activedescendant", options[index].id);
+  options[index].scrollIntoView({ block: "nearest" });
+}

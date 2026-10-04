@@ -1,3 +1,4 @@
+import { pointPickerCursor } from "./dom.js";
 import { recentSessionShortcutFromEvent } from "./shortcuts.js";
 
 const RECENT_PROJECTS = 5;
@@ -217,13 +218,8 @@ export class NewSessionFormController {
   }
 
   setCursor(form, index) {
-    const input = this.input(form);
-    const options = this.options(form);
     form._newSessionFormState.cursor = index;
-    options.forEach((option, optionIndex) => option.setAttribute("aria-selected", String(optionIndex === index)));
-    if (!options[index]) return input.removeAttribute("aria-activedescendant");
-    input.setAttribute("aria-activedescendant", options[index].id);
-    options[index].scrollIntoView({ block: "nearest" });
+    pointPickerCursor(this.input(form), this.options(form), index);
   }
 
   activate(form, option) {
