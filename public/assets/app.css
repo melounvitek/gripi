@@ -711,6 +711,7 @@
     .command-palette-list { max-height: 60dvh; grid-auto-rows: max-content; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
     .command-palette-list [role="group"] { display: grid; }
     .command-palette-row { grid-template-columns: 2ch 2ch minmax(0, 1fr) auto; column-gap: 1ch; align-items: center; }
+    .command-palette-detail { color: var(--muted-soft); }
     .command-palette-row.is-unread .command-palette-name { font-weight: 700; }
     .command-palette-row.is-unread .command-palette-meta { color: var(--accent); font-weight: 600; }
     /* Smaller than the rows, so their three leading characters are 3.75 of these. */

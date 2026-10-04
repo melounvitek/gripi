@@ -55,7 +55,7 @@ export class CommandPaletteController {
     return [...this.list.querySelectorAll('[role="option"]')];
   }
 
-  row(mark, name, meta) {
+  row(mark, name, meta, run) {
     const row = this.document.createElement("button");
     row.type = "button";
     row.className = "picker-row command-palette-row";
@@ -68,12 +68,12 @@ export class CommandPaletteController {
       if (decorative) part.setAttribute("aria-hidden", "true");
       row.append(part);
     }
+    this.runs.set(row, run);
     return row;
   }
 
   sessionRow(session) {
-    const row = this.row(session.monogram, session.name, session.age);
-    row.dataset.sessionPath = session.path;
+    const row = this.row(session.monogram, session.name, session.age, () => this.callbacks.openSession(session.path));
     row.title = session.project;
     row.classList.toggle("is-unread", session.unread);
     row.querySelector(".project-monogram").style.setProperty("--project-identity-fg", session.color);
@@ -87,7 +87,19 @@ export class CommandPaletteController {
     return row;
   }
 
+  commandRow({ label, detail, keys = "", run }) {
+    const row = this.row("", label, keys, run);
+    if (detail) {
+      const slash = this.document.createElement("span");
+      slash.className = "command-palette-detail";
+      slash.textContent = detail;
+      row.querySelector(".command-palette-name").append(" ", slash);
+    }
+    return row;
+  }
+
   group(title, rows) {
+    if (!rows.length) return;
     const group = this.document.createElement("div");
     group.setAttribute("role", "group");
     group.setAttribute("aria-label", title);
@@ -96,21 +108,29 @@ export class CommandPaletteController {
     heading.setAttribute("aria-hidden", "true");
     heading.textContent = title;
     group.append(heading, ...rows);
-    return group;
+    this.list.append(group);
   }
 
   render() {
     const words = this.input.value.toLowerCase().split(/\s+/).filter(Boolean);
-    const current = this.callbacks.currentSessionPath();
-    const matching = (this.sessions || []).filter((session) => session.path !== current && words.every((word) => `${session.name}\n${session.project}`.toLowerCase().includes(word)));
-    const shown = matching.slice(0, words.length ? MATCHING_SESSIONS : RECENT_SESSIONS);
+    const matches = (text) => words.every((word) => text.toLowerCase().includes(word));
     this.list.replaceChildren();
-    if (shown.length) this.list.append(this.group(words.length ? "Sessions" : "Recent sessions", shown.map((session) => this.sessionRow(session))));
+    this.runs = new Map();
+    let more = 0;
+    if (this.sessions) {
+      const current = this.callbacks.currentSessionPath();
+      const matching = this.sessions.filter((session) => session.path !== current && matches(`${session.name}\n${session.project}`));
+      const shown = matching.slice(0, words.length ? MATCHING_SESSIONS : RECENT_SESSIONS);
+      more = matching.length - shown.length;
+      this.group(words.length ? "Sessions" : "Recent sessions", shown.map((session) => this.sessionRow(session)));
+      for (const [title, commands] of this.callbacks.commands()) {
+        this.group(title, commands.filter((command) => command && matches(`${command.label} ${command.detail || ""}`)).map((command) => this.commandRow(command)));
+      }
+    }
     const options = this.options();
     options.forEach((option, index) => { option.id = `command-palette-option-${index}`; });
     this.setCursor(0);
 
-    const more = matching.length - shown.length;
     let status = "";
     if (!this.sessions) status = "Loading…";
     else if (this.failed) status = "Could not load sessions.";
@@ -126,9 +146,10 @@ export class CommandPaletteController {
   }
 
   activate(option) {
-    if (!option) return;
+    const run = this.runs.get(option);
+    if (!run) return;
     this.callbacks.closeModal(this.modal);
-    this.callbacks.openSession(option.dataset.sessionPath);
+    run();
   }
 
   handleKeydown(event) {

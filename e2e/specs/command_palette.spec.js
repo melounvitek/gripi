@@ -4,6 +4,7 @@ import { sessions } from "../support/contract.mjs";
 const dialog = (page) => page.getByRole("dialog", { name: "Go to or run" });
 const input = (page) => dialog(page).getByRole("combobox");
 const options = (page) => dialog(page).getByRole("option");
+const command = (page, name) => dialog(page).getByRole("option", { name, exact: true });
 const heading = (page, name) => page.getByRole("heading", { level: 1, name, exact: true });
 const composer = (page) => page.getByLabel("Message to Pi");
 
@@ -11,18 +12,14 @@ async function open(page) {
   await page.goto("/");
   await page.keyboard.press("Control+k");
   await expect(input(page)).toBeFocused();
+  // Rows appear once the sessions have arrived.
+  await expect(options(page).first()).toHaveAttribute("aria-selected", "true");
 }
 
 test("Ctrl+K finds a session by words in any order and Enter opens it", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
   await open(page);
-  await expect(options(page).first()).toHaveAttribute("aria-selected", "true");
   await expect(dialog(page).getByRole("status")).toHaveText(/^\d+ more sessions · type to find them$/);
-  // The session already open is not offered.
-  const current = await page.locator('.prompt-form input[name="session"]').inputValue();
-  await page.keyboard.type(await page.locator(".session-header-name").textContent());
-  await expect(dialog(page).locator(`[data-session-path="${current}"]`)).toHaveCount(0);
-
   await input(page).fill("no such session anywhere");
   await expect(options(page)).toHaveCount(0);
   await expect(dialog(page).getByRole("status")).toHaveText("No matches.");
@@ -34,6 +31,11 @@ test("Ctrl+K finds a session by words in any order and Enter opens it", async ({
   await expect(dialog(page)).toBeHidden();
   await expect(heading(page, sessions.history)).toBeVisible();
   await expect(composer(page)).toBeFocused();
+
+  // The session already open is not offered.
+  await page.keyboard.press("Control+k");
+  await input(page).fill("desktop HISTORY-project e2e");
+  await expect(dialog(page).getByRole("status")).toHaveText("No matches.");
 });
 
 test("arrows move the cursor while the input keeps the focus, and Ctrl+K, Escape or a click outside closes", async ({ page, isMobile }) => {
@@ -103,4 +105,89 @@ test("Ctrl+K leaves another open dialog alone", async ({ page, isMobile }) => {
   await page.keyboard.press("Control+k");
   await expect(newSession).toBeVisible();
   await expect(dialog(page)).toBeHidden();
+});
+
+test("commands open what their own controls open and leave a composer draft alone", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await page.goto("/");
+  await composer(page).fill("half-written thought");
+
+  // The slash command a row stands for finds it too.
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type("/tree");
+  await expect(options(page)).toHaveText([/Session tree/]);
+  await page.keyboard.press("Enter");
+  await expect(dialog(page)).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Session tree" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  for (const [name, opened] of [
+    ["Choose model and thinking /model", page.getByRole("dialog", { name: "Model & thinking" })],
+    ["Fork from a message /fork", page.getByRole("dialog", { name: "Fork session" })],
+    ["New session… ctrl+n", page.getByRole("dialog", { name: "New session", exact: true })]
+  ]) {
+    await page.keyboard.press("Control+k");
+    await command(page, name).click();
+    await expect(opened).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(opened).toBeHidden();
+  }
+
+  // Opened from the composer, these two give the focus back to it.
+  const title = await page.locator(".session-header-name").textContent();
+  await page.keyboard.press("Control+k");
+  await command(page, "Rename…").click();
+  const rename = page.getByRole("dialog", { name: "Rename session" });
+  await expect(rename.getByLabel("Name")).toHaveValue(title);
+  await page.keyboard.press("Escape");
+  await expect(composer(page)).toBeFocused();
+  await page.keyboard.press("Control+k");
+  await command(page, "Tags…").click();
+  await expect(page.getByRole("dialog", { name: "Session tags" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(composer(page)).toBeFocused();
+
+  await page.keyboard.press("Control+k");
+  await command(page, "Find in session ctrl+f").click();
+  await expect(page.getByRole("searchbox", { name: "Find in conversation" })).toBeFocused();
+  await expect(composer(page)).toHaveValue("half-written thought");
+});
+
+test("commands are named after what they would change", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await page.goto("/");
+  const run = async (name) => {
+    await page.keyboard.press("Control+k");
+    await command(page, name).click();
+    await expect(dialog(page)).toBeHidden();
+  };
+
+  const row = page.locator('.session-row[data-current="true"]');
+  await run("Pin");
+  await expect(row).toHaveAttribute("data-pinned", "true");
+  await run("Unpin");
+  await expect(row).toHaveAttribute("data-pinned", "false");
+
+  const brief = page.getByRole("group", { name: "Agent activity", exact: true }).getByRole("button", { name: "Brief", exact: true });
+  await run("Brief activity");
+  await expect(brief).toHaveAttribute("aria-pressed", "true");
+  await run("Full activity");
+  await expect(brief).toHaveAttribute("aria-pressed", "false");
+
+  const sidebar = page.getByRole("complementary", { name: "Sessions" });
+  await run("Hide sidebar");
+  await expect(sidebar).toBeHidden();
+  await expect(composer(page)).toBeFocused();
+  await run("Show sidebar");
+  await expect(sidebar).toBeVisible();
+});
+
+test("without an open session only the commands that need none are listed", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await page.goto("/?no_session=1");
+  await expect(page.getByRole("heading", { level: 1, name: "Welcome to Pi" })).toBeVisible();
+  await page.keyboard.press("Control+k");
+  await expect(dialog(page).getByRole("group", { name: "Recent sessions" }).getByRole("option")).toHaveCount(5);
+  await expect(dialog(page).getByRole("group", { name: "Gripi" }).getByRole("option")).toHaveText([/New session…/, /Hide sidebar/]);
+  await expect(dialog(page).getByRole("group", { name: "This session" })).toHaveCount(0);
 });
