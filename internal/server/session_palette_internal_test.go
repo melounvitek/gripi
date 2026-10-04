@@ -1,7 +1,9 @@
 package server
 
 import (
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,12 +23,26 @@ func TestSessionPaletteListsSessionsWithoutMarkingThemRead(t *testing.T) {
 	assertSettledUnread(t, app, path, true)
 
 	// Naming a session must not select it: the second listing would then find it read.
-	for range 2 {
+	// A browser that takes it packed gets the same list.
+	for _, encoding := range []string{"", "gzip"} {
+		request := httptest.NewRequest(http.MethodGet, "/sessions/palette?session="+url.QueryEscape(path), nil)
+		request.Header.Set("Accept-Encoding", encoding)
 		response := httptest.NewRecorder()
-		app.sessionPalette(response, httptest.NewRequest(http.MethodGet, "/sessions/palette?session="+url.QueryEscape(path), nil))
+		app.sessionPalette(response, request)
+		if got := response.Header().Get("Content-Encoding"); got != encoding {
+			t.Fatalf("Content-Encoding = %q, want %q", got, encoding)
+		}
+		var body io.Reader = response.Body
+		if encoding == "gzip" {
+			unpacked, err := gzip.NewReader(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = unpacked
+		}
 		var payload struct{ Sessions []map[string]any }
-		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &payload) != nil || len(payload.Sessions) != 1 {
-			t.Fatalf("palette = %d %q", response.Code, response.Body.String())
+		if response.Code != http.StatusOK || json.NewDecoder(body).Decode(&payload) != nil || len(payload.Sessions) != 1 {
+			t.Fatalf("palette = %d, sessions = %v", response.Code, payload.Sessions)
 		}
 		session := payload.Sessions[0]
 		// The fixture's project is its home directory.

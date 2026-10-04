@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"mime"
 	"net/http"
 	"net/url"
@@ -125,7 +127,17 @@ func (app *application) sessionPalette(response http.ResponseWriter, request *ht
 			"busy": app.rpcClients.Busy(session.Path) || app.rpcClients.Compacting(session.Path),
 		})
 	}
-	writeJSON(response, map[string]any{"sessions": entries})
+	payload := map[string]any{"sessions": entries}
+	if !strings.Contains(request.Header.Get("Accept-Encoding"), "gzip") {
+		writeJSON(response, payload)
+		return
+	}
+	// Hundreds of sessions repeat most of their long paths. Packed, the list is a fifth of the size, which a slow link shows.
+	response.Header().Set("Content-Type", "application/json")
+	response.Header().Set("Content-Encoding", "gzip")
+	packed := gzip.NewWriter(response)
+	defer packed.Close()
+	_ = json.NewEncoder(packed).Encode(payload)
 }
 
 func (app *application) sessionFragment(response http.ResponseWriter, request *http.Request) {
