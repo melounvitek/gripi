@@ -201,6 +201,9 @@ test("commands are named after what they would change", async ({ page, isMobile 
   test.skip(isMobile, "Keyboard flow");
   await open(page);
   await openSession(page, "contract ready", sessions.marker);
+  // The test above leaves Pi running for this session, and the managed E2E gateway retires it after 2s idle. The page
+  // then re-renders and ignores keys meanwhile. Waiting for that keeps it from swallowing a Ctrl+K below.
+  if (process.env.GRIPI_E2E_FAKE_PI_LOG) await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "available");
   const run = async (name) => {
     await page.keyboard.press("Control+k");
     await command(page, name).click();
