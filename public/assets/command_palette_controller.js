@@ -48,7 +48,8 @@ export class CommandPaletteController {
     this.sessions = sessions || [];
     this.failed = !sessions;
     this.render();
-    if (this.enterPending) this.activate(this.options()[this.cursor]);
+    // Without the sessions the first row is a command, which a waiting Enter never meant.
+    if (this.enterPending && !this.failed) this.activate(this.options()[this.cursor]);
   }
 
   options() {
@@ -75,7 +76,13 @@ export class CommandPaletteController {
   sessionRow(session) {
     const row = this.row(session.monogram, session.name, session.age, () => this.callbacks.openSession(session.path));
     row.title = session.project;
-    row.classList.toggle("is-unread", session.unread);
+    if (session.unread) {
+      row.classList.add("is-unread");
+      const unread = this.document.createElement("span");
+      unread.className = "visually-hidden";
+      unread.textContent = "Unread: ";
+      row.querySelector(".command-palette-name").prepend(unread);
+    }
     row.querySelector(".project-monogram").style.setProperty("--project-identity-fg", session.color);
     if (session.busy) {
       const working = this.document.createElement("span");

@@ -715,8 +715,9 @@
     .command-palette-row.is-unread .command-palette-name { font-weight: 700; }
     .command-palette-row.is-unread .command-palette-meta { color: var(--accent); font-weight: 600; }
     /* Smaller than the rows, so their three leading characters are 3.75 of these. */
-    .command-palette-section, .command-palette-status { margin: 0; padding-left: calc(3.75ch + 0.25rem); color: var(--muted-soft); font-size: 0.8em; }
+    .command-palette-section, .command-palette-status { padding-left: calc(3.75ch + 0.25rem); font-size: 0.8em; }
     .command-palette-section { margin: 0.55rem 0 0.1rem; color: var(--muted); }
+    .command-palette-status { margin: 0; color: var(--muted-soft); }
     .command-palette-list [role="group"]:first-child .command-palette-section { margin-top: 0; }
     @media (min-width: 761px) {
       /* Anchored to the top, so the input stays put while the list changes height. */

@@ -363,12 +363,6 @@ function commandPaletteCommands() {
   ];
 }
 
-function handleCommandPaletteShortcut(event) {
-  if (!isCtrlOrMetaShortcut(event, "k") || event.shiftKey || !commandPaletteController.toggle()) return false;
-  event.preventDefault();
-  return true;
-}
-
 function requestCurrentSessionFindNavigation(direction) {
   if (sessionSwitching() || modalIsOpen() || !currentSessionFindController.open) return false;
   currentSessionFindController.move(direction === -1 ? -1 : 1);
@@ -3327,7 +3321,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (handleCommandPaletteShortcut(event)) return;
+  // A held key toggles once, and its repeats stay away from the browser's own Ctrl+K.
+  if (isCtrlOrMetaShortcut(event, "k") && !event.shiftKey && (event.repeat || commandPaletteController.toggle())) {
+    event.preventDefault();
+    return;
+  }
   handleModelSettingsKey(event);
   handlePickerListKey(event);
   handleModalTab(event);

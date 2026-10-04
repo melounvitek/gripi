@@ -123,6 +123,10 @@ func TestMultiUserFiltersListingsReadsActionsAndAttachments(t *testing.T) {
 	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), own) || strings.Contains(index.Body.String(), other) {
 		t.Fatalf("filtered index = %d %s", index.Code, index.Body.String())
 	}
+	palette := getWorkspace(handler, "/sessions/palette", cookie)
+	if palette.Code != http.StatusOK || !strings.Contains(palette.Body.String(), own) || strings.Contains(palette.Body.String(), other) {
+		t.Fatalf("filtered palette = %d %s", palette.Code, palette.Body.String())
+	}
 	older := getWorkspace(handler, "/conversation_older?session="+url.QueryEscape(other), cookie)
 	if older.Code != http.StatusNotFound {
 		t.Fatalf("other history = %d", older.Code)
