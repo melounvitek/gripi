@@ -489,6 +489,34 @@ test("a text selection that scrolls the view stops following a streaming reply",
   await expectNotFollowing();
 });
 
+test("the bottom jump button waits for the reader to scroll into a long answer", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Narrow screens only show the jump buttons while the reader scrolls");
+  const deliver = await liveEvents(page);
+  const scroller = page.locator("#conversation-scroll");
+  const jump = page.locator(".jump-to-latest");
+  const fromBottom = () => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
+  const paragraphs = (name) => Array.from({ length: 60 }, (_, index) => `${name} paragraph ${index + 1}.`).join("\n\n");
+  await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([{ type: "text", text: paragraphs("Earlier") }]) }, { type: "agent_end" });
+  await expect(page.locator(".message--assistant").filter({ hasText: "Earlier paragraph 60." })).toBeVisible();
+  await expect.poll(fromBottom).toBeLessThan(2);
+  // The reader's last scroll is downwards, back to the latest output.
+  const box = await scroller.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -600);
+  await expect.poll(fromBottom).toBeGreaterThan(120);
+  await page.mouse.wheel(0, 2000);
+  await expect.poll(fromBottom).toBeLessThan(2);
+  // Let that scroll finish, so the answer arrives with no scrolling under way.
+  await page.waitForTimeout(300);
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "text", text: paragraphs("Next") }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  const card = page.locator(".message--assistant").filter({ hasText: "Next paragraph 60." });
+  // The page stops at the start of the answer, with its end below the view.
+  await expect.poll(() => card.evaluate((element) => Math.abs(element.getBoundingClientRect().top - document.querySelector("#conversation-scroll").getBoundingClientRect().top))).toBeLessThan(40);
+  await expect(jump).toBeHidden();
+  await page.mouse.wheel(0, 300);
+  await expect(jump).toBeVisible();
+});
+
 test("a streaming reply keeps rendering while Markdown responses are slow", async ({ page }) => {
   const deliver = await liveEvents(page);
   await page.route("**/markdown", async (route) => {
