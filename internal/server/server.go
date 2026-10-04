@@ -103,6 +103,11 @@ func (handler *Handler) Close(ctx context.Context) error {
 	if handler.closed {
 		return nil
 	}
+	if handler.app.sessionCache != nil {
+		if err := handler.app.sessionCache.Save(); err != nil {
+			logInternalError("save session metadata cache", err)
+		}
+	}
 	if handler.app.updateCoordinator != nil {
 		if err := handler.app.updateCoordinator.Close(ctx); err != nil {
 			return err
@@ -196,10 +201,14 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		pendingSessions:      rpc.NewPendingSessionRegistry(nil),
 	}
 	if cfg.ReadStatePath != "" {
+		app.sessionCache = sessions.LoadCache(filepath.Join(filepath.Dir(cfg.ReadStatePath), "session-metadata-cache.json"))
 		store := sessions.Store{Root: cfg.SessionsRoot, Home: cfg.Home, Cache: app.sessionCache}
 		existing, err := store.Sessions()
 		if err != nil {
 			return nil, fmt.Errorf("list existing projects: %w", err)
+		}
+		if err := app.sessionCache.Save(); err != nil {
+			logInternalError("save session metadata cache", err)
 		}
 		if _, err := app.gatewayState.ProjectCWDs(existing); err != nil {
 			return nil, err
