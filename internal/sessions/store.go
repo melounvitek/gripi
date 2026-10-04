@@ -219,6 +219,7 @@ type Cache struct {
 	metadataBytes int64
 	metadataItems map[string]*metadataCacheItem
 	metadataOrder list.List
+	path          string
 }
 
 func NewCache() *Cache {
@@ -306,6 +307,11 @@ func (cache *Cache) cacheSessionMetadataLocked(path string, indexed *index) *Ses
 		return old.session
 	}
 	session := sessionFromIndex(indexed)
+	cache.storeSessionMetadataLocked(path, session, indexed.device, indexed.inode, indexed.size, indexed.mtime)
+	return session
+}
+
+func (cache *Cache) storeSessionMetadataLocked(path string, session *Session, device, inode uint64, size int64, mtime time.Time) {
 	bytes := estimatedSessionMetadataBytes(path, session)
 	if old := cache.metadataItems[path]; old != nil {
 		cache.metadataBytes -= old.bytes
@@ -313,11 +319,11 @@ func (cache *Cache) cacheSessionMetadataLocked(path string, indexed *index) *Ses
 		delete(cache.metadataItems, path)
 	}
 	if bytes > maxMetadataCacheBytes {
-		return session
+		return
 	}
 	item := &metadataCacheItem{
 		session: session,
-		device:  indexed.device, inode: indexed.inode, size: indexed.size, mtime: indexed.mtime,
+		device:  device, inode: inode, size: size, mtime: mtime,
 		bytes: bytes,
 	}
 	item.element = cache.metadataOrder.PushBack(path)
@@ -330,7 +336,6 @@ func (cache *Cache) cacheSessionMetadataLocked(path string, indexed *index) *Ses
 		delete(cache.metadataItems, oldestPath)
 		cache.metadataOrder.Remove(oldest)
 	}
-	return session
 }
 
 func estimatedSessionMetadataBytes(path string, session *Session) int64 {
