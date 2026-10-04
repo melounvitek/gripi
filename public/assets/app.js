@@ -31,7 +31,7 @@ import {
   recentSessionShortcutFromEvent,
   sessionSearchShortcut
 } from "./shortcuts.js";
-import { sessionFragmentUrl } from "./urls.js";
+import { sessionFragmentUrl, sessionUrl } from "./urls.js";
 import { GatewayUpdateController } from "./gateway_update_controller.js";
 import { ResourceUsageController } from "./resource_usage_controller.js";
 import { BrowserAccessRequestController, WorkspaceAccessRequestController } from "./access_request_controllers.js";
@@ -41,6 +41,7 @@ import { SessionActionsController } from "./session_actions_controller.js";
 import { SessionTagsController } from "./session_tags_controller.js";
 import { SidebarController } from "./sidebar_controller.js";
 import { ConversationController } from "./conversation_controller.js";
+import { CommandPaletteController } from "./command_palette_controller.js";
 import { ComposerAutocompleteController } from "./composer_autocomplete_controller.js";
 import { CurrentSessionFindController } from "./current_session_find_controller.js";
 import { LiveMessageParser } from "./live_message_parser.js";
@@ -202,6 +203,15 @@ const liveMessageRenderer = new LiveMessageRenderer(document, conversationContro
 imageViewerController.bind();
 conversationController.historyEnhancer = (root) => liveMessageRenderer.hydrateTerminalOutputs(root, { notify: false });
 conversationController.historyReconciler = (root) => liveMessageRenderer.reconcilePersistedToolResults(root);
+const commandPaletteController = new CommandPaletteController(document, {
+  openModal,
+  closeModal,
+  modalIsOpen,
+  currentSessionPath,
+  previousSessionPath: () => readMainSessionHistory().previous,
+  openSession: (path) => switchSession(sessionUrl(path), { push: true, focus: true }),
+  commands: commandPaletteCommands
+});
 const treeSessionController = new TreeSessionController(document, window, {
   currentSessionPath: () => currentSessionPath(),
   addSessionViewFormParams: (formData) => addSessionViewFormParams(formData),
@@ -317,6 +327,40 @@ function handleSessionSearchShortcut(event) {
   if (!sessionSearchShortcut(event) || !requestSessionSearch()) return false;
   event.preventDefault();
   return true;
+}
+
+// Each command calls what its own control calls. Commands that Pi runs through the composer stay under "/", where they cannot take a draft with them.
+function commandPaletteCommands() {
+  const row = sidebarController.element?.querySelector('.session-row[data-current="true"]');
+  const target = row && sessionActionsController.targetFor(row);
+  const writable = promptTextarea && !promptTextarea.disabled;
+  const otherView = document.querySelector('[data-conversation-view][aria-pressed="false"]');
+  const sidebarHidden = document.body.classList.contains("desktop-sidebar-hidden");
+  return [
+    ["This session", [
+      writable && { label: "Choose model and thinking", detail: "/model", run: openModelSettingsModal },
+      writable && { label: "Session tree", detail: "/tree", run: openTreeSessionModal },
+      writable && { label: "Fork from a message", detail: "/fork", run: openForkSessionModal },
+      target && {
+        label: "Rename…",
+        run: () => {
+          // No row menu opened this, so closing it has no menu button to return the focus to.
+          sessionActionsController.target = null;
+          sessionActionsController.openRename(target);
+        }
+      },
+      // Anchored to the composer, which gets the focus back.
+      target && { label: "Tags…", run: () => sessionTagsController.open(target.path, promptTextarea) },
+      target && { label: target.pinned ? "Unpin" : "Pin", run: () => sessionActionsController.togglePin(target).catch(() => {}) },
+      currentSessionFindController.available && { label: "Find in session", keys: "ctrl+f", run: requestCurrentSessionFind },
+      otherView && { label: `${otherView.dataset.conversationView === "brief" ? "Brief" : "Full"} activity`, run: () => otherView.click() }
+    ]],
+    ["Gripi", [
+      { label: "New session…", keys: "ctrl+n", run: openNewSessionModal },
+      // On narrow screens the sidebar is a drawer instead.
+      window.matchMedia("(min-width: 761px)").matches && { label: sidebarHidden ? "Show sidebar" : "Hide sidebar", run: () => sidebarController.setDesktopVisibility(!sidebarHidden, true) }
+    ]]
+  ];
 }
 
 function requestCurrentSessionFindNavigation(direction) {
@@ -2937,8 +2981,8 @@ function focusPromptAfterModalClose(modal) {
     const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]:not(:disabled)');
     (modelButton || conversationScroll)?.focus({ preventScroll: true });
   } else if (["session-rename-modal", "session-delete-modal"].includes(modal?.dataset.modal)) {
-    sessionActionsController.restoreFocus();
-  } else if (modal?.dataset.modal === "new-session-modal") {
+    if (!sessionActionsController.restoreFocus()) syncComposerFocus();
+  } else if (["new-session-modal", "command-palette-modal"].includes(modal?.dataset.modal)) {
     syncComposerFocus();
   }
 }
@@ -3277,6 +3321,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  // A held key toggles once, and its repeats stay away from the browser's own Ctrl+K.
+  if (isCtrlOrMetaShortcut(event, "k") && !event.shiftKey && (event.repeat || commandPaletteController.toggle())) {
+    event.preventDefault();
+    return;
+  }
   handleModelSettingsKey(event);
   handlePickerListKey(event);
   handleModalTab(event);

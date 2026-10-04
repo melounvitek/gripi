@@ -154,7 +154,9 @@ export class SessionActionsController {
 
   restoreFocus() {
     const row = this.rowForPath(this.target?.path) || this.target?.row;
-    row?.querySelector("[data-session-actions-toggle]")?.focus({ preventScroll: true });
+    const toggle = row?.querySelector("[data-session-actions-toggle]");
+    toggle?.focus({ preventScroll: true });
+    return !!toggle;
   }
 
   rowForPath(path) {

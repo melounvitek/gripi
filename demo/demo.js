@@ -233,6 +233,7 @@
   const desktopSidebarHiddenKey = "gripi:desktop-sidebar-hidden";
   let sessions = initialSessions;
   let currentId = defaultSessionId;
+  let previousId = null;
   const demoStartedAt = timeLabel();
   let streamController = null;
   let streamingEntry = null;
@@ -734,6 +735,7 @@
     previousModalFocus = returnFocus; modal.hidden = false; document.querySelector(".app-shell").inert = true;
     (modal.querySelector("[data-modal-default-focus]") || modal.querySelector("button, input, select"))?.focus();
     if (name === "new-session-modal") showNewSessionRows(false);
+    if (name === "command-palette-modal") { paletteInput.value = ""; renderPalette(); }
   }
   function closeModal(modal) { if (!modal) return; modal.hidden = true; document.querySelector(".app-shell").inert = false; if (modal.dataset.modal === "demo-intro-modal") markIntroSeen(); previousModalFocus?.focus(); previousModalFocus = null; }
   function handleSlash(command) {
@@ -750,6 +752,7 @@
     persistDraft(); cancelStream(); resetFind(true); document.body.classList.add("session-switching");
     setTimeout(() => {
       if (generation !== switchGeneration) return;
+      if (id !== currentId) previousId = currentId;
       currentId = id;
       const session = currentSession();
       renderHeader(); renderConversation(); renderSidebar(); loadDraft(); persist();
@@ -950,9 +953,95 @@
   document.querySelector("[data-current-session-find-close]").addEventListener("click", () => resetFind(true));
   document.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); element.searchForm.classList.add("is-open"); element.searchToggle.setAttribute("aria-expanded", "true"); if (matchMedia("(min-width: 761px)").matches) setDesktopSidebarHidden(false); else document.getElementById("mobile-session-toggle").checked = true; element.search.focus(); }
-    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); const find = document.querySelector("[data-current-session-find]"); find.hidden = false; find.querySelector("input").focus(); }
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); showFind(); }
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "k" && (!palette.hidden || !modalIsOpen())) { event.preventDefault(); if (palette.hidden) openModal("command-palette-modal"); else closeModal(palette); }
     if (event.key === "Escape") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (modal) closeModal(modal); else if (!element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); element.projectTrigger.focus(); } }
     if (event.key === "Tab") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (!modal) return; const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")]; if (!focusable.length) return; const first = focusable[0], last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
+  });
+
+  function showFind() { const find = document.querySelector("[data-current-session-find]"); find.hidden = false; find.querySelector("input").focus(); }
+
+  // The real palette in miniature: the other sessions, then the commands this demo can run.
+  const palette = document.querySelector('[data-modal="command-palette-modal"]');
+  const paletteInput = palette.querySelector("[data-command-palette-input]");
+  const paletteList = palette.querySelector("[data-command-palette-list]");
+  const paletteRows = () => [...paletteList.querySelectorAll('[role="option"]')];
+  const selectPaletteRow = (selected) => paletteRows().forEach((row) => row.setAttribute("aria-selected", String(row === selected)));
+  let paletteRuns = new Map();
+
+  function paletteRow(mark, name, meta, run) {
+    const row = document.createElement("button"); row.type = "button"; row.className = "picker-row command-palette-row"; row.tabIndex = -1; row.setAttribute("role", "option");
+    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["project-monogram", mark, true], ["command-palette-name", name], ["command-palette-meta", meta]]) {
+      const part = document.createElement("span"); part.className = className; part.textContent = text; if (decorative) part.setAttribute("aria-hidden", "true"); row.append(part);
+    }
+    paletteRuns.set(row, run);
+    return row;
+  }
+
+  function paletteGroup(title, rows) {
+    if (!rows.length) return;
+    const group = document.createElement("div"); group.setAttribute("role", "group"); group.setAttribute("aria-label", title);
+    const heading = document.createElement("p"); heading.className = "command-palette-section"; heading.setAttribute("aria-hidden", "true"); heading.textContent = title;
+    group.append(heading, ...rows); paletteList.append(group);
+  }
+
+  function renderPalette() {
+    const words = paletteInput.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = (text) => words.every((word) => text.toLowerCase().includes(word));
+    const session = currentSession();
+    const otherView = element.viewToggle.querySelector('[aria-pressed="false"]');
+    const sidebarHidden = document.body.classList.contains("desktop-sidebar-hidden");
+    paletteList.replaceChildren(); paletteRuns = new Map();
+    // With nothing typed, the session open before this one leads, so Ctrl+K then Enter flips between two.
+    const matching = sessions.filter((other) => other.id !== currentId && matches(`${other.name}\n${other.project}`));
+    if (!words.length) matching.sort((left, right) => (right.id === previousId) - (left.id === previousId));
+    const shown = matching.slice(0, words.length ? 8 : 5);
+    paletteGroup(words.length ? "Sessions" : "Recent sessions", shown.map((other) => {
+      const row = paletteRow(other.project.slice(0, 2).toLowerCase(), other.name, other.age, () => switchSession(other.id));
+      applyIdentity(row.querySelector(".project-monogram"), other);
+      return row;
+    }));
+    for (const [title, commands] of [
+      ["This session", [
+        ["Choose model and thinking", "/model", "", () => handleSlash("model")],
+        ["Session tree", "/tree", "", () => handleSlash("tree")],
+        ["Fork from a message", "/fork", "", () => handleSlash("fork")],
+        [session.pinned ? "Unpin" : "Pin", "", "", () => { session.pinned = !session.pinned; persist(); renderSidebar(); }],
+        ["Find in session", "", "ctrl+f", showFind],
+        [`${otherView.dataset.conversationView === "brief" ? "Brief" : "Full"} activity`, "", "", () => otherView.click()]
+      ]],
+      ["Gripi", [
+        ["New session…", "", "ctrl+n", () => handleSlash("new")],
+        // On narrow screens the sidebar is a drawer instead.
+        ...(matchMedia("(min-width: 761px)").matches ? [[sidebarHidden ? "Show sidebar" : "Hide sidebar", "", "", () => setDesktopSidebarHidden(!sidebarHidden, true)]] : [])
+      ]]
+    ]) {
+      paletteGroup(title, commands.filter(([label, slash]) => matches(`${label} ${slash}`)).map(([label, slash, keys, run]) => {
+        const row = paletteRow("", label, keys, run);
+        if (slash) { const detail = document.createElement("span"); detail.className = "command-palette-detail"; detail.textContent = slash; row.querySelector(".command-palette-name").append(" ", detail); }
+        return row;
+      }));
+    }
+    selectPaletteRow(paletteRows()[0]);
+    const more = matching.length - shown.length;
+    const status = palette.querySelector("[data-command-palette-status]");
+    status.textContent = !paletteRows().length ? "No matches." : more ? `${more} more session${more === 1 ? "" : "s"} · ${words.length ? "keep typing" : "type"} to find them` : "";
+    status.hidden = !status.textContent;
+  }
+
+  function activatePaletteRow(row) { const run = paletteRuns.get(row); if (!run) return; closeModal(palette); run(); }
+
+  paletteInput.addEventListener("input", renderPalette);
+  // There is no close button, so a click beside the card closes.
+  palette.addEventListener("click", (event) => { if (event.target === palette) closeModal(palette); else activatePaletteRow(event.target.closest('[role="option"]')); });
+  paletteInput.addEventListener("keydown", (event) => {
+    const rows = paletteRows();
+    const cursor = rows.findIndex((row) => row.getAttribute("aria-selected") === "true");
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") { if (rows.length) { const next = rows[(cursor + (event.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length]; selectPaletteRow(next); next.scrollIntoView({ block: "nearest" }); } }
+    else if (event.key === "Enter" && !event.isComposing) activatePaletteRow(rows[cursor]);
+    // As in the real palette, the input is the only focus stop.
+    else if (event.key !== "Tab") return;
+    event.preventDefault();
   });
 
   const newSessionForm = document.querySelector(".new-session-cwd-form");

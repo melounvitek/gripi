@@ -710,9 +710,9 @@
     .new-session-row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
     .new-session-row .project-monogram { color: var(--project-identity-fg, inherit); }
     /* Clipped sideways only: a hidden overflow also cuts the underscore off the bottom of some fonts. */
-    .new-session-name, .new-session-path { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: nowrap; }
-    .new-session-path, .new-session-age { color: var(--muted-soft); }
-    .new-session-age { font-size: 0.74rem; text-align: right; }
+    .new-session-name, .new-session-path, .command-palette-name { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: nowrap; }
+    .new-session-path, .new-session-age, .command-palette-meta { color: var(--muted-soft); }
+    .new-session-age, .command-palette-meta { font-size: 0.74rem; text-align: right; }
     .new-session-key { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; color: var(--accent); font: 600 0.72rem/1 var(--mono); }
     .new-session-key:empty { visibility: hidden; }
     /* Wraps rather than truncates, so the directory a session would start in stays readable. */
@@ -720,16 +720,28 @@
     .new-session-row[data-new-session-action="folder"] .new-session-name { grid-column: 3 / 5; }
     .new-session-row:not([data-new-session-project], [data-new-session-action="folder"]) { color: var(--muted); }
     .new-session-inside { grid-column: 6; display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; color: var(--muted); font-size: 1rem; line-height: 1; }
-    .new-session-row[aria-selected="true"], .new-session-row[aria-selected="true"] .new-session-inside { color: var(--accent); }
+    .new-session-row[aria-selected="true"], .new-session-row[aria-selected="true"] .new-session-inside, .command-palette-row[aria-selected="true"] { color: var(--accent); }
     @media (hover: hover) and (pointer: fine) { .new-session-row .new-session-inside:hover { color: var(--accent-bright); } }
     /* The last row stays in reach below a scrolled list. Its shadow covers the device pixel that a fractional pixel ratio leaves open under it. */
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]) { position: sticky; bottom: 0; background: var(--panel); box-shadow: 0 1px var(--panel); }
     .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"])[aria-selected="true"] { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); }
     @media (hover: hover) and (pointer: fine) { .new-session-row:is([data-new-session-action="path"], [data-new-session-action="back"]):hover { background: linear-gradient(var(--accent-tint-04), var(--accent-tint-04)), var(--panel); } }
+    .command-palette-card { width: min(40rem, 100%); }
+    .command-palette-list { max-height: 60dvh; grid-auto-rows: max-content; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; }
+    .command-palette-list [role="group"] { display: grid; }
+    .command-palette-row { grid-template-columns: 2ch 2ch minmax(0, 1fr) auto; column-gap: 1ch; align-items: center; }
+    .command-palette-detail { color: var(--muted-soft); }
+    .command-palette-row.is-unread .command-palette-name { font-weight: 700; }
+    .command-palette-row.is-unread .command-palette-meta { color: var(--accent); font-weight: 600; }
+    /* Smaller than the rows, so their three leading characters are 3.75 of these. */
+    .command-palette-section, .command-palette-status { padding-left: calc(3.75ch + 0.25rem); font-size: 0.8em; }
+    .command-palette-section { margin: 0.55rem 0 0.1rem; color: var(--muted); }
+    .command-palette-status { margin: 0; color: var(--muted-soft); }
+    .command-palette-list [role="group"]:first-child .command-palette-section { margin-top: 0; }
     @media (min-width: 761px) {
       /* Anchored to the top, so the input stays put while the list changes height. */
-      [data-modal="new-session-modal"] { align-items: start; padding-top: 15dvh; }
-      [data-modal="new-session-modal"] .modal-card { max-height: calc(85dvh - 1rem); }
+      :is([data-modal="new-session-modal"], [data-modal="command-palette-modal"]) { align-items: start; padding-top: 15dvh; }
+      :is([data-modal="new-session-modal"], [data-modal="command-palette-modal"]) .modal-card { max-height: calc(85dvh - 1rem); }
     }
     @media (max-width: 760px), (pointer: coarse) {
       /* The path moves under the name, so a narrow sheet still tells worktrees apart. */
@@ -742,6 +754,7 @@
       .new-session-inside { grid-column: 5; grid-row: 1; align-self: stretch; width: auto; height: auto; margin: -0.4rem -0.25rem -0.4rem 0; border-left: 1px solid var(--border); font-size: 1.3rem; }
       .new-session-age { grid-column: 4; grid-row: 1; }
       .new-session-key { display: none; }
+      .command-palette-list { max-height: 52dvh; }
     }
     .picker-status { margin: 0; color: var(--muted); }
     .picker-title { margin: 0; color: var(--accent); font-weight: 700; }
@@ -1122,6 +1135,7 @@
       </div>
     </div>
   </div>
+  <div class="modal-overlay" data-modal="command-palette-modal" hidden><div class="modal-card picker-card command-palette-card" role="dialog" aria-modal="true" aria-labelledby="command-palette-label"><label class="picker-line tree-session-input"><span id="command-palette-label">Go to or run:</span><input type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="type to filter" data-command-palette-input></label><div class="picker-list command-palette-list" role="listbox" aria-label="Sessions and commands" data-command-palette-list></div><p class="command-palette-status" role="status" data-command-palette-status hidden></p><p class="picker-hint picker-keys">↑↓ navigate · enter select · esc cancel</p></div></div>
   <div class="modal-overlay" data-modal="fork-session-modal" hidden><div class="modal-card picker-card" role="dialog" aria-modal="true" aria-labelledby="fork-session-modal-title"><div class="modal-header"><h2 id="fork-session-modal-title">Fork session</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><p class="picker-status">Select a user message to copy the active path up to that point into a new session</p><div class="fork-session-list" role="listbox"><button type="button" class="picker-row fork-session-option" role="option" aria-selected="true" data-demo-fork data-modal-default-focus><span class="picker-cursor" aria-hidden="true">›</span><span class="fork-session-text">What is Gripi, and how can I get started?</span><span class="fork-session-meta">Message 1 of 1</span></button></div><p class="picker-hint picker-keys">enter select · esc cancel</p></div></div>
   <div class="modal-overlay" data-modal="tree-session-modal" hidden><div class="modal-card picker-card" role="dialog" aria-modal="true" aria-labelledby="tree-session-modal-title"><div class="modal-header"><h2 id="tree-session-modal-title">Session tree</h2><button type="button" class="modal-close-button secondary" aria-label="Close" data-modal-close>×</button></div><div class="fork-session-list"><button type="button" class="picker-row tree-session-row" data-demo-tree data-demo-tree-target="new-to-pi"><span class="picker-cursor" aria-hidden="true">›</span><span class="tree-session-line"><span class="tree-session-dim">[related]: </span><span data-demo-tree-target-title>New to Pi? Start here</span></span></button><button type="button" class="picker-row tree-session-row is-active" data-demo-tree data-modal-default-focus><span class="picker-cursor" aria-hidden="true">›</span><span class="tree-session-line"><span class="tree-session-path">• </span><span class="tree-session-dim">[current]: </span><span data-demo-tree-current-title>Welcome to Gripi</span></span></button></div><p class="picker-hint picker-keys">enter select · esc cancel</p></div></div>
   <div class="modal-overlay" data-modal="model-settings-modal" hidden><div class="modal-card picker-card model-picker-card" role="dialog" aria-modal="true" aria-labelledby="model-settings-title"><div class="modal-header"><h2 id="model-settings-title">Model &amp; thinking</h2><button type="button" class="secondary modal-close-button" data-modal-close aria-label="Close model settings">×</button></div><input type="search" aria-label="Search models" data-model-search data-modal-default-focus placeholder="Search models"><div class="model-picker-controls"><div class="model-picker-list" role="listbox" aria-label="Models"><button type="button" class="picker-row model-picker-row" role="option" aria-selected="true" aria-current="true" data-demo-model="openai-codex/gpt-5.5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5.5 <span class="model-picker-provider">[openai-codex]</span></span></button><button type="button" class="picker-row model-picker-row" role="option" aria-selected="false" data-demo-model="openai-codex/gpt-5"><span class="picker-cursor" aria-hidden="true">→</span><span class="picker-check" aria-hidden="true">✓</span><span>gpt-5 <span class="model-picker-provider">[openai-codex]</span></span></button></div><p class="picker-line model-picker-thinking"><span>Thinking:</span><span class="picker-line"><button type="button" aria-pressed="false" data-demo-thinking="off">off</button><span class="picker-separator" aria-hidden="true">|</span><button type="button" aria-pressed="true" data-demo-thinking="medium">medium</button></span></p></div></div></div>

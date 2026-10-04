@@ -33,6 +33,7 @@
     <p class="tag-picker-footer" data-tag-help>Changes apply immediately. Tags are available across all projects.</p>
   </dialog>
   {{template "new_session_modal" .}}
+  {{if not .SessionOnly}}{{template "command_palette_modal" .}}{{end}}
   {{template "session_rename_modal" .}}
   {{template "session_delete_modal" .}}
   {{template "fork_session_modal" .}}
