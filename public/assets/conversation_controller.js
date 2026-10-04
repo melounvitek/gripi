@@ -867,8 +867,8 @@ export class ConversationController {
   updateJumpControls() {
     const messageTopTarget = this.scrollDirection === "up" ? this.oversizedMessageJumpTarget("up") : null;
     const messageBottomTarget = this.scrollDirection === "down" ? this.oversizedMessageJumpTarget("down") : null;
-    const allowJumpButtons = this.scrollIntent !== "keyboard";
-    const showFirst = allowJumpButtons && this.scrollDirection === "up" && !this.autoScrollEnabled && !this.nearTop();
+    const allowJumpButtons = this.scrollIntent !== "keyboard" && !this.autoScrollEnabled;
+    const showFirst = allowJumpButtons && this.scrollDirection === "up" && !this.nearTop();
     const showLatest = allowJumpButtons && this.scrollDirection === "down" && !this.nearBottom() && (!!messageBottomTarget || !this.latestReadableAssistantMessageIsVisible());
     this.setJumpButton(this.jumpToFirstButton, messageTopTarget ? "message" : "conversation", messageTopTarget ? "↑" : "↑↑", messageTopTarget ? "Message top" : "Top");
     this.setJumpButton(this.jumpToLatestButton, messageBottomTarget ? "message" : "conversation", messageBottomTarget ? "↓" : "↓↓", messageBottomTarget ? "Message bottom" : "Bottom");
