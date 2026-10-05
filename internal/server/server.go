@@ -87,6 +87,7 @@ func writeInternalError(response http.ResponseWriter, operation string, err erro
 
 type Handler struct {
 	next            http.Handler
+	local           http.Handler
 	app             *application
 	closeMu         sync.Mutex
 	closed          bool
@@ -95,6 +96,13 @@ type Handler struct {
 
 func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	handler.next.ServeHTTP(response, request)
+}
+
+// Local serves gripi commands. It skips browser authentication, so it must only
+// be exposed on a socket that the gateway's own user can open. It is nil in
+// multi-user mode, where no single user owns every session.
+func (handler *Handler) Local() http.Handler {
+	return handler.local
 }
 
 func (handler *Handler) Close(ctx context.Context) error {
@@ -286,7 +294,11 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	handler = app.securityHeaders(handler)
 	handler = app.authorizeHost(handler)
 	handler = app.limitRequestBody(handler)
-	return &Handler{next: handler, app: app}, nil
+	gateway := &Handler{next: handler, app: app}
+	if !cfg.MultiUserMode {
+		gateway.local = app.limitRequestBody(http.NewServeMux())
+	}
+	return gateway, nil
 }
 
 type restartRegistry interface {
