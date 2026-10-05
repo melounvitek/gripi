@@ -26,6 +26,7 @@
 - A Brief view that collapses tool calls, results, and thinking into summaries.
 - Find in conversation, model and thinking settings, and context usage.
 - Notifications when replies finish, including Web Push on phones.
+- A [`gripi` command](#command-line) that lets scripts and agents list sessions, send messages, and wait for replies.
 
 ## Install
 
@@ -50,6 +51,7 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/melounvitek/gr
 5. Uses Mise to install Gripi’s pinned Go and Node.js versions.
 6. Installs Node dependencies, builds the Go gateway, and ensures an admin password exists in `~/.config/gripi/env`. A newly generated password is printed.
 7. Moves the completed checkout to `~/.local/share/gripi`. It refuses to overwrite an existing installation.
+8. Links `~/.local/bin/gripi` to the built gateway, unless another file already has that name.
 
 It does not install or configure Pi, and it does not start the gateway.
 
@@ -64,6 +66,24 @@ Start the gateway:
 The gateway listens only on `127.0.0.1:4567` by default. Open <http://localhost:4567> and approve the browser with the admin password printed by the installer. It is saved as `GRIPI_ADMIN_PASSWORD` in `~/.config/gripi/env`.
 
 To use the gateway from other devices, or keep it running with systemd, see [local and remote setups](docs/examples.md).
+
+## Command line
+
+Scripts and agents on the gateway machine can work with sessions through the `gripi` command:
+
+```sh
+gripi list                                # sessions with their live state
+gripi send 01a107aa "Run the tests"       # prompt a session
+gripi wait 01a107aa --timeout 900 --json  # block until it stops working
+```
+
+`gripi help` describes every command, and each session command can print JSON. The gateway must be running, and not in [multi-user mode](docs/configuration.md#multi-user-mode).
+
+The installer links the command into `~/.local/bin`. For a gateway installed before the command existed, link it yourself:
+
+```sh
+ln -s ~/.local/share/gripi/tmp/gripi ~/.local/bin/gripi
+```
 
 ### Desktop app
 
@@ -115,6 +135,7 @@ To update the desktop app, run its installer again.
 Stop the gateway and remove any systemd unit or `tailscale serve` configuration you added. Then delete:
 
 - `~/.local/share/gripi`: the gateway.
+- `~/.local/bin/gripi`: the link to its command.
 - `~/.config/gripi`: settings, including the admin password.
 - `~/.pi/gripi`: Gripi’s own data, such as approvals, tags, pins, and uploaded attachments.
 
@@ -132,6 +153,8 @@ Anyone who can use Gripi can run shell commands as the gateway’s OS user, with
 - Only open projects you trust. Gripi [loads project resources automatically](#differences-from-pi-cli).
 
 In the default single-user mode, every new browser must be approved once, either with the admin password or from a browser that is already approved. See [access approval](docs/configuration.md#access-approval) to change the password or remove a browser.
+
+Programs that already run as the gateway’s OS user need no approval. The [`gripi` command](#command-line) reaches the gateway through a socket that only that user can open.
 
 Optional [multi-user mode](docs/configuration.md#multi-user-mode) gives each user a private token and shows them only their own sessions. It is intended for users who trust each other: all users still run commands as the same OS user, and they share model and thinking settings.
 

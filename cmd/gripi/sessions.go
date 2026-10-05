@@ -23,7 +23,7 @@ import (
 
 const listLimit = 20
 
-const sessionFields = `Each session has:
+const sessionFields = `Session fields:
   id          Session ID; commands accept any unique prefix of it
   path        Session file; commands accept it wherever they take an ID
   name        Session name, or its first message when it has no name

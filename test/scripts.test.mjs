@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
@@ -116,6 +116,19 @@ test("bootstrap installer sets up the gateway at its fixed user location", async
   assert.ok(calls.some((call) => call.endsWith("|run setup")));
   assert.ok(calls.some((call) => call.endsWith("|exec -- go build -o tmp/gripi ./cmd/gripi")));
   assert.match(result.stdout, new RegExp(`${installation}/bin/start`));
+  assert.equal(await readlink(path.join(fixture.home, ".local", "bin", "gripi")), path.join(installation, "tmp", "gripi"));
+  assert.match(result.stdout, /\.local\/bin\/gripi help/);
+});
+
+test("bootstrap installer leaves an unrelated gripi command alone", async () => {
+  const fixture = await bootstrapFixture();
+  const command = path.join(fixture.home, ".local", "bin", "gripi");
+  await executable(command, "#!/bin/sh\n");
+  const result = run(path.join(repoRoot, "bin", "install"), ["gateway"], { env: fixture.env });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(await readFile(command, "utf8"), "#!/bin/sh\n");
+  assert.doesNotMatch(result.stdout, /gripi help/);
 });
 
 test("bootstrap installer builds the desktop app without retaining a gateway checkout", async () => {
