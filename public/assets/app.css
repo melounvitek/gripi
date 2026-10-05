@@ -802,7 +802,7 @@
       /* Row tags are glyphs too small to tap, so taps open the session; the tag filter and the actions menu handle tags. */
       .session-row :is(.session-tag-icon, .tag-overflow) { pointer-events: none; }
       /* Opening a new window misbehaves in an installed Safari web app, so touch devices do without it. */
-      .session-actions-menu [data-session-action="window"] { display: none; }
+      .session-header-window-action, .session-actions-menu [data-session-action="window"] { display: none; }
       .session-header-view-option { min-height: 2.75rem; }
       .send-control { min-width: 2.75rem; }
       .send-button { display: inline-flex; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; align-items: center; justify-content: center; font-size: 0; }
