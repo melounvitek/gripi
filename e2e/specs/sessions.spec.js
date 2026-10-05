@@ -378,6 +378,19 @@ test("open a background session in a new window from its contextual actions", as
   await expect(page.getByRole("menu")).toBeHidden();
 });
 
+test("open a session in a new window from its actions in a narrow desktop window", async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').click();
+  const row = page.locator('.session-row[data-current="false"]').first();
+  const sessionPath = await row.getAttribute("data-session-path");
+  await row.getByRole("button", { name: /Session actions/ }).click();
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("menuitem", { name: "Open in new window" }).click();
+  const sessionWindow = await popupPromise;
+  await expect(sessionWindow).toHaveURL((url) => url.searchParams.get("session") === sessionPath && url.searchParams.get("session_only") === "1");
+});
+
 test("opening the current session in a new window moves the original window to another session", async ({ page }) => {
   await page.goto("/");
   const currentRow = page.locator('.session-row[data-current="true"]');
