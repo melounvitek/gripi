@@ -25,6 +25,7 @@ type command struct {
 }
 
 var commands = []command{
+	{name: "list", group: sessionCommands, summary: "List sessions with their state", run: listSessions, help: listHelp},
 	{name: "serve", group: gatewayCommands, summary: "Start the gateway", run: withoutArguments("serve", serve), help: `Usage:
   gripi serve
 

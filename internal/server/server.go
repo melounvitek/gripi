@@ -296,7 +296,9 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	handler = app.limitRequestBody(handler)
 	gateway := &Handler{next: handler, app: app}
 	if !cfg.MultiUserMode {
-		gateway.local = app.limitRequestBody(http.NewServeMux())
+		local := http.NewServeMux()
+		app.registerLocalRoutes(local)
+		gateway.local = app.limitRequestBody(local)
 	}
 	return gateway, nil
 }
