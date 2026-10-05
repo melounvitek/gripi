@@ -116,7 +116,6 @@ let highlightedCommandIndex = 0;
 let conversationScroll = null;
 let sessionStatusBar = null;
 let reconnectBanner = null;
-let reconnectButton = null;
 let liveAgentRunning = false;
 let liveBash = null;
 let liveBusySince = null;
@@ -293,7 +292,6 @@ function bindSessionDom() {
   liveStatusModel = existingModelMatch?.[1] || null;
   liveStatusThinking = existingModelMatch?.[2] || null;
   reconnectBanner = document.querySelector(".session-reconnect");
-  reconnectButton = document.querySelector(".reconnect-button");
   updateNotificationToggle();
   gatewayUpdateController.apply();
 }
@@ -1681,11 +1679,6 @@ async function refreshCurrentSessionPreservingComposer({ fallbackNavigation = tr
   return refreshed;
 }
 
-async function reconnectSession() {
-  hideReconnectBanner();
-  await refreshCurrentSessionPreservingComposer();
-}
-
 async function refreshStaleSessionAfterResume(hiddenDuration = 0) {
   if (!liveOutput || document.hidden || sessionSwitching()) return false;
   if (staleSessionRefreshInFlight) return true;
@@ -2591,7 +2584,6 @@ function bindSessionControls() {
     imageInput.value = "";
   });
 
-  reconnectButton?.addEventListener("click", reconnectSession);
   let touchSendMenuPointerDown = false;
   sendMenuToggle?.addEventListener("click", (event) => {
     const opening = sendMenu?.hidden === true;

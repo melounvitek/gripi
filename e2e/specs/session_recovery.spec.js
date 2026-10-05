@@ -45,7 +45,7 @@ test("polling after sleep restores completed compaction without a browser wake e
   await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
   await expect(page.locator(".pending-message--steering")).toHaveCount(0);
   await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
-  await expect(page.getByText("Session may be stale.")).toBeHidden();
+  await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
   await page.clock.runFor(2000);
   await expect.poll(() => conversation.evaluate((element) => element.scrollTop)).toBe(0);
   expect(refreshes).toBe(1);
@@ -73,13 +73,13 @@ test("failed wake recovery keeps the draft and warning while backing off before 
   await page.clock.setSystemTime(now + 61_000);
   await page.clock.resume();
 
-  await expect(page.getByText("Session may be stale.")).toBeVisible();
+  await expect(page.getByText("Connection lost. Retrying…")).toBeVisible();
   await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
   await page.waitForTimeout(1000);
   expect(refreshes).toBe(1);
 
   available = true;
-  await expect(page.getByText("Session may be stale.")).toBeHidden();
+  await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
   await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
   expect(refreshes).toBe(2);
 });
@@ -96,7 +96,7 @@ test("a failed poll stays silent until the next poll fails too", async ({ page }
     if (polls === 4) heldPoll = route;
     else return route.abort("connectionfailed");
   });
-  const warning = page.getByText("Session may be stale.");
+  const warning = page.getByText("Connection lost. Retrying…");
 
   // Poll 4 only starts once the app has handled the failure of poll 3. Failed polls back off for 2s.
   await expect.poll(() => polls, { timeout: 15_000 }).toBe(4);
@@ -122,7 +122,7 @@ test("failed polls are counted afresh once the browser is back online", async ({
 
   // No poll succeeds here, so the check 5s after returning will warn; assert before it does.
   await expect.poll(() => polls).toBe(4);
-  await expect(page.getByText("Session may be stale.")).toBeHidden();
+  await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
 });
 
 test("returning to the page with a dialog open does not warn about its paused polling", async ({ page }) => {
@@ -135,5 +135,5 @@ test("returning to the page with a dialog open does not warn about its paused po
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.clock.runFor(6000);
 
-  await expect(page.getByText("Session may be stale.")).toBeHidden();
+  await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
 });
