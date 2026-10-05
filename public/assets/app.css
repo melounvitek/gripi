@@ -153,7 +153,8 @@
     .pending-message { color: var(--muted); font-family: var(--mono); font-size: 0.72rem; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
     .pending-message--steering::before { content: "↳ "; color: var(--accent); }
     .pending-message--follow-up::before { content: "↳ "; color: var(--muted-soft); }
-    .composer-inner { display: grid; gap: 0.6rem; max-width: 60rem; margin-inline: auto; }
+    .composer-inner { display: grid; gap: 0.6rem; }
+    .composer > * { max-width: 60rem; margin-inline: auto; }
     .extension-widgets { display: grid; gap: 0.45rem; }
     .extension-widget { padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 0.35rem; background: var(--panel-soft); color: var(--copy); font-family: var(--mono); font-size: 0.76rem; white-space: pre-wrap; }
     .extension-widget-title { display: block; margin-bottom: 0.25rem; color: var(--gold); font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
