@@ -23,25 +23,29 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "password" {
-		if err := ensurePassword(); err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
+	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+func serve() error {
 	cfg, err := config.Load(os.Environ())
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	server := newHTTPServer(handler)
 	listener, err := net.Listen("tcp", cfg.Address)
 	if err != nil {
-		log.Fatal(err)
+		return err
+	}
+	var localServer *http.Server
+	if local, ok := handler.(interface{ Local() http.Handler }); ok && local.Local() != nil {
+		if localServer, err = startLocalServer(local.Local(), cfg.SocketPath); err != nil {
+			log.Printf("gripi commands are unavailable: %v", err)
+		}
 	}
 
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -63,6 +67,15 @@ func main() {
 		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Printf("close gateway listener: %v", err)
 		}
+		// Both listeners stop before either drains: a request accepted
+		// during a drain would lose its Pi process moments later.
+		if localServer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := localServer.Shutdown(ctx); err != nil {
+				log.Printf("gripi command socket shutdown: %v", err)
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
@@ -83,6 +96,7 @@ func main() {
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}
+	return nil
 }
 
 const (
@@ -98,6 +112,46 @@ func newHTTPServer(handler http.Handler) *http.Server {
 		ReadTimeout:       serverReadTimeout,
 		IdleTimeout:       serverIdleTimeout,
 	}
+}
+
+// startLocalServer serves gripi commands on a socket that only the gateway's
+// user can open, which stands in for browser authentication.
+func startLocalServer(handler http.Handler, path string) (*http.Server, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, err
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("%s exists and is not a socket", path)
+		}
+		connection, err := net.DialTimeout("unix", path, time.Second)
+		if err == nil {
+			connection.Close()
+			return nil, fmt.Errorf("another gateway is listening on %s", path)
+		}
+		// Only a refused connection proves that no gateway is listening.
+		if !errors.Is(err, syscall.ECONNREFUSED) {
+			return nil, err
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	previous := syscall.Umask(0177)
+	listener, err := net.Listen("unix", path)
+	syscall.Umask(previous)
+	if err != nil {
+		return nil, err
+	}
+	server := newHTTPServer(handler)
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("gripi command socket: %v", err)
+		}
+	}()
+	return server, nil
 }
 
 func ensurePassword() error {

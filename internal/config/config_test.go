@@ -332,3 +332,29 @@ func TestLoadPinsTheConfiguredPiRuntime(t *testing.T) {
 		t.Fatal("Production = true")
 	}
 }
+
+func TestSocketPathComesFromTheProcessEnvironmentOnly(t *testing.T) {
+	home := t.TempDir()
+	envPath := filepath.Join(home, "gateway.env")
+	if err := os.WriteFile(envPath, []byte("GRIPI_ADMIN_PASSWORD=secret\nGRIPI_SOCKET_PATH=/from/file.sock\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for configured, expected := range map[string]string{"": filepath.Join(home, ".pi", "gripi", "gripi.sock"), "/run/user/gripi.sock": "/run/user/gripi.sock"} {
+		environ := []string{"HOME=" + home, "GRIPI_ENV_PATH=" + envPath, "GRIPI_SOCKET_PATH=" + configured}
+		cfg, err := config.Load(environ)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Commands resolve the path without loading the gateway configuration.
+		path, err := config.SocketPath(environ)
+		if err != nil || path != expected || cfg.SocketPath != expected {
+			t.Fatalf("GRIPI_SOCKET_PATH=%q: command path %q (%v), gateway path %q", configured, path, err, cfg.SocketPath)
+		}
+	}
+	// Go would bind these as abstract sockets, which have no permissions.
+	for _, unsafe := range []string{"relative.sock", "@gripi"} {
+		if _, err := config.Load([]string{"HOME=" + home, "GRIPI_ENV_PATH=" + envPath, "GRIPI_SOCKET_PATH=" + unsafe}); err == nil || !strings.Contains(err.Error(), "GRIPI_SOCKET_PATH") {
+			t.Fatalf("GRIPI_SOCKET_PATH=%q error = %v", unsafe, err)
+		}
+	}
+}
