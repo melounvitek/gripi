@@ -51,7 +51,6 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/melounvitek/gr
 5. Uses Mise to install Gripi’s pinned Go and Node.js versions.
 6. Installs Node dependencies, builds the Go gateway, and ensures an admin password exists in `~/.config/gripi/env`. A newly generated password is printed.
 7. Moves the completed checkout to `~/.local/share/gripi`. It refuses to overwrite an existing installation.
-8. Links `~/.local/bin/gripi` to the built gateway, unless a file that is not a link already has that name.
 
 It does not install or configure Pi, and it does not start the gateway.
 
@@ -66,24 +65,6 @@ Start the gateway:
 The gateway listens only on `127.0.0.1:4567` by default. Open <http://localhost:4567> and approve the browser with the admin password printed by the installer. It is saved as `GRIPI_ADMIN_PASSWORD` in `~/.config/gripi/env`.
 
 To use the gateway from other devices, or keep it running with systemd, see [local and remote setups](docs/examples.md).
-
-## Command line
-
-Scripts and agents on the gateway machine can work with sessions through the `gripi` command:
-
-```sh
-gripi list                                # sessions with their live state
-gripi send 01a107aa "Run the tests"       # prompt a session
-gripi wait 01a107aa --timeout 900 --json  # block until it stops working
-```
-
-`gripi help` describes every command, and each session command can print JSON. The gateway must be running, and not in [multi-user mode](docs/configuration.md#multi-user-mode).
-
-The installer links the command into `~/.local/bin`. For a gateway installed before the command existed, link it yourself:
-
-```sh
-ln -s ~/.local/share/gripi/tmp/gripi ~/.local/bin/gripi
-```
 
 ### Desktop app
 
@@ -115,6 +96,20 @@ The app connects to <http://localhost:4567> by default. Use **File → Add Serve
 There is no mobile app. On iPhone, open the gateway in Safari, tap **Share**, choose **Add to Home Screen**, turn on **Open as Web App**, and tap **Add** ([Apple’s guide](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios)). On iOS/iPadOS 16.4 or newer, the Home Screen app can receive [Web Push notifications](docs/configuration.md#web-push-notifications) for finished replies, even while it is closed. Notifications require HTTPS, such as [Tailscale Serve](docs/examples.md#https-through-tailscale-serve).
 
 <img width="360" alt="Gripi on a phone, showing a conversation in the Brief view" src="docs/images/gripi-mobile-screenshot.png" />
+
+## Command line
+
+Scripts and agents on the gateway machine can work with sessions through the `gripi` command:
+
+```sh
+gripi list                                # sessions with their live state
+gripi send 01a107aa "Run the tests"       # prompt a session
+gripi wait 01a107aa --timeout 900 --json  # block until it stops working
+```
+
+`gripi help` describes every command, and each session command can print JSON. The gateway must be running, and not in [multi-user mode](docs/configuration.md#multi-user-mode).
+
+When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it links the command into `~/.local/bin`, unless something there is already named `gripi`. `~/.local/bin` must be on your `PATH`.
 
 ## Updating
 

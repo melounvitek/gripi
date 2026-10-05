@@ -50,6 +50,12 @@ if [[ ! -x "$binary" ]]; then
   mv -f -- "$temporary" "$binary"
   trap - EXIT
 fi
+# Only the installed gateway claims the command, so other checkouts leave it alone.
+command_link="${HOME:-}/.local/bin/gripi"
+if [[ -n "${HOME:-}" && "$root" -ef "$HOME/.local/share/gripi" && ! -e "$command_link" && ! -L "$command_link" ]]; then
+  # The gateway must start even where the link cannot be created.
+  mkdir -p -- "$HOME/.local/bin" && ln -s -- "$HOME/.local/share/gripi/tmp/gripi" "$command_link" || true
+fi
 if [[ -n "${GRIPI_RESTART_PATH:-}" ]]; then
   restart_path="$GRIPI_RESTART_PATH"
 elif [[ -n "${HOME:-}" ]]; then

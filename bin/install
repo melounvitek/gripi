@@ -56,13 +56,6 @@ case "$mode" in
 
     printf '\nGripi is installed at %s.\n' "$install_dir"
     printf 'Start it with:\n  %s/bin/start\n' "$install_dir"
-
-    command_link="$HOME/.local/bin/gripi"
-    if [[ -L "$command_link" || ! -e "$command_link" ]]; then
-      mkdir -p -- "$(dirname -- "$command_link")"
-      ln -sfn -- "$install_dir/tmp/gripi" "$command_link"
-      printf 'Scripts and agents can work with its sessions; see:\n  %s help\n' "$command_link"
-    fi
     ;;
   desktop)
     install_mise
