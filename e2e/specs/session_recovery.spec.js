@@ -45,7 +45,7 @@ test("polling after sleep restores completed compaction without a browser wake e
   await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
   await expect(page.locator(".pending-message--steering")).toHaveCount(0);
   await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
-  await expect(page.getByText("Session may be stale.")).toBeHidden();
+  await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
   await page.clock.runFor(2000);
   await expect.poll(() => conversation.evaluate((element) => element.scrollTop)).toBe(0);
   expect(refreshes).toBe(1);
@@ -73,13 +73,80 @@ test("failed wake recovery keeps the draft and warning while backing off before 
   await page.clock.setSystemTime(now + 61_000);
   await page.clock.resume();
 
-  await expect(page.getByText("Session may be stale.")).toBeVisible();
+  await expect(page.getByText("Connection lost. Retrying…")).toBeVisible();
   await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
   await page.waitForTimeout(1000);
   expect(refreshes).toBe(1);
 
   available = true;
-  await expect(page.getByText("Session may be stale.")).toBeHidden();
+  await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
   await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
   expect(refreshes).toBe(2);
+});
+
+test("a failed poll stays silent until the next poll fails too", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  let polls = 0;
+  let heldPoll;
+  // Polls 1 and 3 fail around a successful one; poll 4 waits for the test to fail it.
+  await page.route(/\/events(?:\?|$)/, (route) => {
+    polls += 1;
+    if (polls === 2 || polls > 4) return route.continue();
+    if (polls === 4) heldPoll = route;
+    else return route.abort("connectionfailed");
+  });
+  const warning = page.getByText("Connection lost. Retrying…");
+
+  // Poll 4 only starts once the app has handled the failure of poll 3. Failed polls back off for 2s.
+  await expect.poll(() => polls, { timeout: 15_000 }).toBe(4);
+  await expect(warning).toBeHidden();
+
+  await heldPoll.abort("connectionfailed");
+  await expect(warning).toBeVisible();
+  await expect(warning).toBeHidden();
+});
+
+test("failed polls are counted afresh once the browser is back online", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  let polls = 0;
+  // Odd polls fail; even ones stay pending, so each marks the previous failure as handled.
+  await page.route(/\/events(?:\?|$)/, (route) => {
+    polls += 1;
+    if (polls % 2 === 1) return route.abort("connectionfailed");
+  });
+
+  await expect.poll(() => polls).toBe(2);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+
+  // No poll succeeds here, so the check 5s after returning will warn; assert before it does.
+  await expect.poll(() => polls).toBe(4);
+  await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
+});
+
+test("returning to the page while still disconnected keeps the warning", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  await page.route(/\/events(?:\?|$)/, (route) => route.abort("connectionfailed"));
+  const warning = page.getByText("Connection lost. Retrying…");
+  await expect(warning).toBeVisible();
+
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+
+  // Checked once, without retrying: two more failed polls would bring a hidden warning back.
+  expect(await warning.isVisible()).toBe(true);
+});
+
+test("returning to the page with a dialog open does not warn about its paused polling", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  await page.getByRole("button", { name: "New session", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "New session", exact: true })).toBeVisible();
+  await page.clock.install();
+
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.clock.runFor(6000);
+
+  await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
 });

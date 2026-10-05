@@ -116,7 +116,6 @@ let highlightedCommandIndex = 0;
 let conversationScroll = null;
 let sessionStatusBar = null;
 let reconnectBanner = null;
-let reconnectButton = null;
 let liveAgentRunning = false;
 let liveBash = null;
 let liveBusySince = null;
@@ -139,6 +138,7 @@ let escapeStopConfirmationTimer = null;
 const stoppingSessionPaths = new Set();
 let eventPollTimer = null;
 let eventPollInFlight = false;
+let lastEventPollFailed = false;
 let eventPollAbortController = null;
 let eventPollResumeTimer = null;
 let staleSessionRefreshInFlight = false;
@@ -292,7 +292,6 @@ function bindSessionDom() {
   liveStatusModel = existingModelMatch?.[1] || null;
   liveStatusThinking = existingModelMatch?.[2] || null;
   reconnectBanner = document.querySelector(".session-reconnect");
-  reconnectButton = document.querySelector(".reconnect-button");
   updateNotificationToggle();
   gatewayUpdateController.apply();
 }
@@ -1574,6 +1573,7 @@ function nextEventPollDelay(failed = false) {
 
 function resetEventPollBackoff() {
   emptyEventPollCount = 0;
+  lastEventPollFailed = false;
 }
 
 function resetEventCursor() {
@@ -1679,11 +1679,6 @@ async function refreshCurrentSessionPreservingComposer({ fallbackNavigation = tr
   return refreshed;
 }
 
-async function reconnectSession() {
-  hideReconnectBanner();
-  await refreshCurrentSessionPreservingComposer();
-}
-
 async function refreshStaleSessionAfterResume(hiddenDuration = 0) {
   if (!liveOutput || document.hidden || sessionSwitching()) return false;
   if (staleSessionRefreshInFlight) return true;
@@ -1707,11 +1702,11 @@ async function resumeEventPolling(hiddenDuration = 0) {
   clearTimeout(eventPollResumeTimer);
   abortEventPoll();
   resetEventPollBackoff();
-  hideReconnectBanner();
   if (await refreshStaleSessionAfterResume(hiddenDuration)) return;
   scheduleNextEventPoll(0);
   eventPollResumeTimer = setTimeout(() => {
-    if (!document.hidden && lastSessionSyncAt < resumeStartedAt) showReconnectBanner();
+    // An open modal pauses polling, so a missing sync says nothing about the connection.
+    if (!document.hidden && !piModalIsOpen() && lastSessionSyncAt < resumeStartedAt) showReconnectBanner();
   }, 5000);
 }
 
@@ -1843,9 +1838,14 @@ async function pollEvents() {
     });
   } catch (_error) {
     pollSucceeded = false;
-    if (!controller.piSuppressedAbort && eventPollCurrent(generation, sessionViewGeneration) && !document.hidden) showReconnectBanner();
+    if (!controller.piSuppressedAbort && eventPollCurrent(generation, sessionViewGeneration)) {
+      // A single failed poll is usually a blip that the next poll recovers from.
+      if (lastEventPollFailed && !document.hidden) showReconnectBanner();
+      lastEventPollFailed = true;
+    }
   } finally {
     clearTimeout(pollTimeout);
+    if (pollSucceeded) lastEventPollFailed = false;
     if (eventPollAbortController === controller) {
       eventPollAbortController = null;
       eventPollInFlight = false;
@@ -2583,7 +2583,6 @@ function bindSessionControls() {
     imageInput.value = "";
   });
 
-  reconnectButton?.addEventListener("click", reconnectSession);
   let touchSendMenuPointerDown = false;
   sendMenuToggle?.addEventListener("click", (event) => {
     const opening = sendMenu?.hidden === true;

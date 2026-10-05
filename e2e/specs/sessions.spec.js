@@ -493,7 +493,7 @@ test("a stalled stale-session refresh recovers without reloading the current vie
 
   await expect(page.locator("body")).not.toHaveClass(/session-switching/);
   await expect.poll(() => page.evaluate(() => window.__staleRefreshSentinel)).toBe(true);
-  await expect(page.getByText("Session may be stale.")).toBeVisible();
+  await expect(page.getByText("Connection lost. Retrying…")).toBeVisible();
   releaseFragment();
 });
 
