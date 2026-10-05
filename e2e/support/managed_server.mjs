@@ -67,7 +67,7 @@ const serverEnv = {
   } : {})
 };
 
-const serverBinary = path.join(runtimeRoot, process.platform === "win32" ? "gripi-e2e.exe" : "gripi-e2e");
+const serverBinary = path.join(runtimeRoot, "gripi-e2e");
 const build = spawn("mise", ["exec", "--", "go", "build", "-o", serverBinary, "./cmd/gripi"], {
   cwd: repoRoot,
   env: process.env,
@@ -77,7 +77,7 @@ if (await childExitCode(build) !== 0) throw new Error(`Could not build managed G
 const server = spawn(serverBinary, [], {
   cwd: repoRoot,
   env: serverEnv,
-  detached: process.platform !== "win32",
+  detached: true,
   stdio: ["ignore", serverLog, serverLog]
 });
 server.once("error", (error) => { serverSpawnError = error; });
@@ -161,18 +161,15 @@ async function stop() {
   if (stopping) return;
   stopping = true;
   if (server.exitCode === null && !serverSpawnError) {
-    if (process.platform === "win32") server.kill("SIGTERM");
-    else {
-      try {
-        process.kill(-server.pid, "SIGTERM");
-      } catch (_error) {
-      }
+    try {
+      process.kill(-server.pid, "SIGTERM");
+    } catch (_error) {
     }
     await Promise.race([
       new Promise((resolve) => server.once("exit", resolve)),
       new Promise((resolve) => setTimeout(resolve, 3000))
     ]);
-    if (server.exitCode === null && process.platform !== "win32") {
+    if (server.exitCode === null) {
       try {
         process.kill(-server.pid, "SIGKILL");
       } catch (_error) {

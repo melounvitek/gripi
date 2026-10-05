@@ -1,5 +1,3 @@
-//go:build !windows
-
 package server
 
 import "golang.org/x/sys/unix"
