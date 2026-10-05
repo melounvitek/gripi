@@ -277,6 +277,10 @@ test("open selected session actions and pin from them on the first mobile tap", 
 
   const currentRow = page.locator('.session-row[data-current="true"]');
   const actions = currentRow.getByRole("button", { name: /Session actions/ });
+  // The Pinned heading's button needs two pinned sessions, so another one is pinned for it.
+  const otherPath = await page.locator('.session-row[data-current="false"]').first().getAttribute("data-session-path");
+  const pinOther = async (pinned) => expect((await page.request.post("/sessions/pin", { form: { session: otherPath, pinned: String(pinned) } })).ok()).toBe(true);
+  await pinOther(true);
   // Touch rows keep Pin in the actions menu, so the row stays one line.
   for (const pinned of [true, false]) {
     await actions.tap();
@@ -291,6 +295,7 @@ test("open selected session actions and pin from them on the first mobile tap", 
       await expect(openAll).toBeHidden();
     }
   }
+  await pinOther(false);
 
   const indicators = currentRow.locator(".session-indicators");
   await indicators.evaluate((element) => {

@@ -615,6 +615,7 @@
     element.pinned.replaceChildren(); element.sessions.replaceChildren();
     const visible = filteredSessions();
     visible.filter((session) => session.pinned).forEach((session) => element.pinned.append(sessionRow(session)));
+    document.querySelector(".sidebar-open-pinned-button").hidden = element.pinned.children.length < 2;
     let day = "";
     visible.filter((session) => !session.pinned).forEach((session) => {
       const sessionDay = /^(now|\d+[mh])$/.test(session.age) ? "Today" : session.age === "1d" ? "Yesterday" : "Earlier";

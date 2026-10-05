@@ -418,9 +418,15 @@ for (const desktopApp of [false, true]) {
       await currentRow.getAttribute("data-session-path"),
       ...await page.locator('.session-row[data-current="false"]').evaluateAll((rows) => rows.slice(0, 2).map((row) => row.dataset.sessionPath))
     ];
-    await setSessionsPinned(page, paths, true);
+    const openAll = page.getByRole("button", { name: "Open all" });
+    await setSessionsPinned(page, paths.slice(0, 1), true);
+    // One pinned session opens from its own row, so the button waits for a second one.
+    await expect(openAll).toHaveCount(0);
+    await setSessionsPinned(page, paths.slice(1, 2), true);
+    await expect(openAll).toBeVisible();
+    await setSessionsPinned(page, paths.slice(2), true);
 
-    await page.getByRole("button", { name: "Open all" }).click();
+    await openAll.click();
     await expect.poll(() => context.pages().length).toBe(4);
     const sessionWindows = context.pages().slice(1);
     for (const sessionWindow of sessionWindows) await expect(sessionWindow).toHaveURL(/session_only=1/);
