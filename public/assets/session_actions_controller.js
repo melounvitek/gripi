@@ -83,7 +83,7 @@ export class SessionActionsController {
   }
 
   moveMenuFocus(key) {
-    // offsetParent is null for items hidden by CSS, such as "Open in new window" on narrow screens.
+    // offsetParent is null for items hidden by CSS, such as "Open in new window" on touch devices.
     const items = Array.from(this.menu()?.querySelectorAll("button") || []).filter((button) => !button.disabled && button.offsetParent !== null);
     if (items.length === 0) return;
     const current = items.indexOf(this.document.activeElement);

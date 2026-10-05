@@ -302,6 +302,8 @@ test("open selected session actions and pin from them on the first mobile tap", 
   expect(menuBounds.x + menuBounds.width).toBeLessThanOrEqual(page.viewportSize().width);
   await expect(page.getByRole("menuitem", { name: "Rename…" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Delete session…" })).toHaveAttribute("aria-disabled", "true");
+  // Opening a new window misbehaves in an installed Safari web app, so touch devices do without it.
+  await expect(page.getByRole("menuitem", { name: "Open in new window" })).toBeHidden();
 });
 
 test("keep parallel subagent order and timestamps stable on mobile", async ({ page }) => {
