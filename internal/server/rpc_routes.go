@@ -568,10 +568,9 @@ func (app *application) retireStaleRPCClient(request *http.Request, path string)
 	if _, pending := app.pendingSessions.CWD(path); pending || app.environment == nil {
 		return nil
 	}
-	changedAt, err := app.environment.ChangedAt(app.environmentUser(request))
-	if err != nil {
-		logInternalError("read environment variables for Pi", err)
-		return err
+	changedAt := app.environment.ChangedAt(app.environmentUser(request))
+	if changedAt.IsZero() {
+		return nil
 	}
 	return app.retireRPCClient(request.Context(), path, func() (bool, error) {
 		return app.rpcClients.CloseClientIfStartedBefore(path, changedAt)

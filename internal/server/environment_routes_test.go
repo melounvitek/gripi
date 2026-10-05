@@ -126,18 +126,21 @@ func TestEnvironmentSavingRules(t *testing.T) {
 	if list.Code != http.StatusOK || list.Body.String() != `{"variables":[{"name":"FIRST"},{"name":"SECOND"},{"name":"THIRD"}]}` {
 		t.Fatalf("list = %d %s", list.Code, list.Body.String())
 	}
-	if list.Header().Get("Cache-Control") != "no-store" || list.Header().Get("Content-Type") != "application/json" {
+	if !strings.Contains(list.Header().Get("Cache-Control"), "no-store") || list.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("list headers = %#v", list.Header())
 	}
 
 	replaced := fixture.post("/environment/variable", url.Values{"name": {"SECOND"}, "value": {"second"}}, "")
-	if replaced.Code != http.StatusOK || replaced.Body.String() != list.Body.String() || replaced.Header().Get("Cache-Control") != "no-store" {
+	if replaced.Code != http.StatusOK || replaced.Body.String() != list.Body.String() || !strings.Contains(replaced.Header().Get("Cache-Control"), "no-store") {
 		t.Fatalf("replace = %d %#v %s", replaced.Code, replaced.Header(), replaced.Body.String())
 	}
 	assertValue("SECOND", "second")
 
-	fixture.save(t, "", "FOURTH", "four")
+	if padded := fixture.post("/environment/variable", url.Values{"name": {" FOURTH "}, "value": {" four \n"}}, ""); padded.Code != http.StatusOK {
+		t.Fatalf("padded = %d %s", padded.Code, padded.Body.String())
+	}
 	assertNames("append", "FIRST", "SECOND", "THIRD", "FOURTH")
+	assertValue("FOURTH", "four")
 
 	renamed := fixture.post("/environment/variable", url.Values{"name": {"RENAMED"}, "value": {"second"}, "previous_name": {"SECOND"}}, "")
 	if renamed.Code != http.StatusOK {
@@ -150,6 +153,9 @@ func TestEnvironmentSavingRules(t *testing.T) {
 	assertNames("rename onto a saved name", "FIRST", "RENAMED", "THIRD", "FOURTH")
 	assertValue("FIRST", "secret one")
 	assertValue("THIRD", "three")
+	// The previous name may be gone already, renamed or removed in another tab.
+	assertRejected(fixture.post("/environment/variable", url.Values{"name": {"FIRST"}, "value": {"moved"}, "previous_name": {"SECOND"}}, ""), "FIRST is already set.")
+	assertValue("FIRST", "secret one")
 
 	removed := fixture.post("/environment/variable/delete", url.Values{"name": {"THIRD"}}, "")
 	if removed.Code != http.StatusOK || removed.Body.String() != `{"variables":[{"name":"FIRST"},{"name":"RENAMED"},{"name":"FOURTH"}]}` {
@@ -485,7 +491,7 @@ func (fixture *environmentFixture) value(t *testing.T, cookie, name string) stri
 	var payload struct {
 		Value string `json:"value"`
 	}
-	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" || json.Unmarshal(response.Body.Bytes(), &payload) != nil {
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Cache-Control"), "no-store") || json.Unmarshal(response.Body.Bytes(), &payload) != nil {
 		t.Fatalf("value of %s = %d %#v %s", name, response.Code, response.Header(), response.Body.String())
 	}
 	return payload.Value

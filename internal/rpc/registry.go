@@ -576,7 +576,8 @@ func (registry *Registry) EventsAfter(path string, after int64) EventBatch {
 		defer registry.release(entry, false, false)
 		result := entry.client.EventsAfter(after)
 		// A cursor at the last event of the idle-retired client that this one replaced missed nothing, so it gets this
-		// client's events from the first one. Once this client reaches that sequence, the cursor counts as its own.
+		// client's events from the first one. Once this client reaches that sequence, the cursor counts as its own, so
+		// a viewer that first polls after that point misses this client's events up to that sequence.
 		if result.Missed && after > 0 && after == entry.replacedSequence {
 			result = entry.client.EventsAfter(0)
 		}
@@ -618,7 +619,11 @@ func (registry *Registry) CloseClientIfExpired(path string, idle time.Duration, 
 
 // CloseClientIfStartedBefore retires an idle client that started no later than the given time.
 func (registry *Registry) CloseClientIfStartedBefore(path string, moment time.Time) (bool, error) {
-	return registry.closeIdleWhen(path, func(entry *clientEntry) bool { return !entry.startedAt.After(moment) }, nil)
+	return registry.closeIdleWhen(path, func(entry *clientEntry) bool {
+		// Prompts deferred during a compaction exist only in the process until they are delivered.
+		state, ok := entry.client.(interface{ DeferringCompactionPrompts() bool })
+		return !entry.startedAt.After(moment) && !(ok && state.DeferringCompactionPrompts())
+	}, nil)
 }
 
 // closeIdleWhen closes an idle client that is due and keeps its last event sequence for EventsAfter.

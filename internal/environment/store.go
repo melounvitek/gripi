@@ -30,13 +30,8 @@ type Variable struct {
 	Value string `json:"value"`
 }
 
-type userVariables struct {
-	Variables []Variable `json:"variables"`
-	ChangedAt time.Time  `json:"changed_at"`
-}
-
 type storeState struct {
-	Users map[string]userVariables `json:"users"`
+	Users map[string][]Variable `json:"users"`
 }
 
 // Store keeps the variables of every user in one state file. The user ID is empty in single-user mode.
@@ -44,35 +39,36 @@ type Store struct {
 	path string
 	file *state.File
 	mu   sync.Mutex
+	// Kept in memory only: no Pi process outlives the gateway.
+	changedAt map[string]time.Time
 }
 
 func NewStore(path string) *Store {
-	return &Store{path: path, file: state.NewFile(path)}
+	return &Store{path: path, file: state.NewFile(path), changedAt: make(map[string]time.Time)}
 }
 
 func (store *Store) Variables(userID string) ([]Variable, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	value, err := store.read()
-	return value.Users[userID].Variables, err
+	return value.Users[userID], err
 }
 
-// ChangedAt returns when the user's variables last changed, or the zero time if they never did.
-func (store *Store) ChangedAt(userID string) (time.Time, error) {
+// ChangedAt returns when the user's variables last changed, or the zero time if they have not since the gateway started.
+func (store *Store) ChangedAt(userID string) time.Time {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	value, err := store.read()
-	return value.Users[userID].ChangedAt, err
+	return store.changedAt[userID]
 }
 
 // Save replaces the value of a saved name in place and appends a new name. A previousName renames in place.
 func (store *Store) Save(userID, previousName string, variable Variable) ([]Variable, error) {
 	return store.update(userID, func(variables []Variable) ([]Variable, error) {
 		if previousName != "" && previousName != variable.Name {
+			if indexOf(variables, variable.Name) >= 0 {
+				return nil, &InvalidError{variable.Name + " is already set."}
+			}
 			if index := indexOf(variables, previousName); index >= 0 {
-				if indexOf(variables, variable.Name) >= 0 {
-					return nil, &InvalidError{variable.Name + " is already set."}
-				}
 				variables[index].Name = variable.Name
 			}
 		}
@@ -156,19 +152,23 @@ func (store *Store) update(userID string, change func([]Variable) ([]Variable, e
 	if err != nil {
 		return nil, err
 	}
-	variables, err := change(value.Users[userID].Variables)
+	variables, err := change(value.Users[userID])
 	if err != nil {
 		return nil, err
 	}
 	if value.Users == nil {
-		value.Users = make(map[string]userVariables)
+		value.Users = make(map[string][]Variable)
 	}
-	value.Users[userID] = userVariables{Variables: variables, ChangedAt: time.Now().UTC()}
+	value.Users[userID] = variables
 	contents, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return nil, err
 	}
-	return variables, store.file.Write(append(contents, '\n'))
+	if err := store.file.Write(append(contents, '\n')); err != nil {
+		return nil, err
+	}
+	store.changedAt[userID] = time.Now()
+	return variables, nil
 }
 
 func (store *Store) read() (storeState, error) {

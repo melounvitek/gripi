@@ -4,16 +4,17 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"strings"
 
 	"github.com/melounvitek/gripi/internal/environment"
 )
 
 func (app *application) registerEnvironmentRoutes(mux *http.ServeMux) {
-	mux.Handle("GET /environment", noStore(http.HandlerFunc(app.environmentVariables)))
-	mux.Handle("GET /environment/value", noStore(http.HandlerFunc(app.environmentValue)))
-	mux.Handle("POST /environment/variable", noStore(http.HandlerFunc(app.saveEnvironmentVariable)))
-	mux.Handle("POST /environment/variables", noStore(http.HandlerFunc(app.saveEnvironmentVariables)))
-	mux.Handle("POST /environment/variable/delete", noStore(http.HandlerFunc(app.deleteEnvironmentVariable)))
+	mux.HandleFunc("GET /environment", app.environmentVariables)
+	mux.HandleFunc("GET /environment/value", app.environmentValue)
+	mux.HandleFunc("POST /environment/variable", app.saveEnvironmentVariable)
+	mux.HandleFunc("POST /environment/variables", app.saveEnvironmentVariables)
+	mux.HandleFunc("POST /environment/variable/delete", app.deleteEnvironmentVariable)
 }
 
 // environmentUser is the user whose variables a request reads and changes.
@@ -66,7 +67,8 @@ func (app *application) saveEnvironmentVariable(response http.ResponseWriter, re
 	if !parseForm(response, request) {
 		return
 	}
-	variable := environment.Variable{Name: request.FormValue("name"), Value: request.FormValue("value")}
+	// Trimmed like the lines of a block: a token pasted with a space after it would fail with nothing to see.
+	variable := environment.Variable{Name: strings.TrimSpace(request.FormValue("name")), Value: strings.TrimSpace(request.FormValue("value"))}
 	variables, err := app.environment.Save(app.environmentUser(request), request.FormValue("previous_name"), variable)
 	writeEnvironmentVariables(response, variables, nil, err)
 }
