@@ -97,7 +97,7 @@ User-token approval replaces browser approval:
 - The first user is created with the admin password.
 - Later users generate a token and select **Ask for access**. An approved user then approves the request.
 
-Approved users are listed under `approved_workspaces` in `~/.pi/gripi/workspace-access.json`. Entries contain an ID derived from the token, not a name. To find a user’s ID, look up one of their session files in `~/.pi/gripi/session-owners.json`; delete the matching entry to revoke access. With `GRIPI_BROWSER_AUTH_DISABLED=1`, every new token is approved automatically and stays approved until it is removed from that file. Only use that combination when every client that can reach the gateway is trusted.
+Approved users are listed under `approved_workspaces` in `~/.pi/gripi/workspace-access.json`. Entries contain an ID derived from the token, not a name. To find a user’s ID, look up one of their session files in `~/.pi/gripi/session-owners.json`; delete the matching entry to revoke access. The user’s saved [environment variables](#environment-variables) stay in `~/.pi/gripi/environment.json` under the same ID until you delete them there. With `GRIPI_BROWSER_AUTH_DISABLED=1`, every new token is approved automatically and stays approved until it is removed from that file. Only use that combination when every client that can reach the gateway is trusted.
 
 Multi-user mode separates session lists and [environment variables](#environment-variables), not permissions: all users run commands as the same OS user and share settings such as the selected model and thinking level. For the same reason, one user’s variables are not secret from the others.
 
@@ -109,7 +109,7 @@ Gripi can save environment variables for Pi, for example your own [GitHub](#gith
 
 Edit them in the Environment dialog, opened with the key icon in the sidebar header or **Environment…** in the Ctrl+K palette. The list shows names only; a value is shown only while its row is open for editing. Pasting several `NAME=value` lines adds them at once, and lines starting with `#` are ignored.
 
-In single-user mode, the variables apply to every Gripi session. In [multi-user mode](#multi-user-mode), each user has their own set, applied only to the sessions that user owns. A session with no owner gets none.
+In single-user mode, the variables apply to every Gripi session. In [multi-user mode](#multi-user-mode), each user has their own set, applied only to the sessions that user owns. A session with no owner gets none. Variables saved in one mode are not used or shown in the other, but they stay in the file.
 
 A change applies from the next message or `!` command in each session. If the session’s Pi process is idle and started before the change, Gripi restarts it first, which loses process-only state in the same way as [stopping an idle process](#pi-process-lifetime). A running turn keeps the old values until it ends, and so do messages steered or queued during it.
 
