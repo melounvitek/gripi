@@ -919,7 +919,7 @@
     else { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); }
   });
   element.projectList.addEventListener("click", (event) => { const option = event.target.closest("[data-project-value]"); if (option) selectProject(option.dataset.projectValue); });
-  document.querySelector("[data-notification-toggle]").addEventListener("click", (event) => { const enabled = !event.currentTarget.classList.contains("is-enabled"); event.currentTarget.classList.toggle("is-enabled", enabled); event.currentTarget.classList.toggle("is-disabled", !enabled); event.currentTarget.querySelector("[data-notification-toggle-state]").textContent = enabled ? "Demo on" : "Demo off"; });
+  document.querySelector("[data-notification-toggle]").addEventListener("click", (event) => { const enabled = event.currentTarget.classList.toggle("is-enabled"); const title = enabled ? "Demo notifications on — click to disable" : "Demo notifications off — click to enable"; event.currentTarget.title = title; event.currentTarget.setAttribute("aria-label", title); });
   element.viewToggle.addEventListener("click", (event) => {
     const option = event.target.closest("[data-conversation-view]");
     const nextFocusedView = option?.dataset.conversationView === "brief";

@@ -735,10 +735,10 @@ function notificationsEnabled() {
 }
 
 function notificationToggleState() {
-  if (notificationsDisabled()) return { name: "off", label: "Off", title: "Notifications off — click to enable" };
-  if (notificationsEnabled()) return { name: "enabled", label: "On", title: "Notifications on — click to disable" };
-  if (!desktopNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied") return { name: "blocked", label: "Blocked", title: "Notifications blocked — click for setup help" };
-  return { name: "enable", label: "Enable", title: "Enable notifications" };
+  if (notificationsDisabled()) return { name: "off", title: "Notifications off — click to enable" };
+  if (notificationsEnabled()) return { name: "enabled", title: "Notifications on — click to disable" };
+  if (!desktopNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied") return { name: "blocked", title: "Notifications blocked — click for setup help" };
+  return { name: "enable", title: "Enable notifications" };
 }
 
 function updateNotificationToggle() {
@@ -747,12 +747,9 @@ function updateNotificationToggle() {
 
   const state = notificationToggleState();
   toggle.classList.toggle("is-enabled", state.name === "enabled");
-  toggle.classList.toggle("is-disabled", state.name === "off" || state.name === "enable");
   toggle.classList.toggle("is-blocked", state.name === "blocked");
   toggle.title = state.title;
   toggle.setAttribute("aria-label", state.title);
-  const stateLabel = toggle.querySelector("[data-notification-toggle-state]");
-  if (stateLabel) stateLabel.textContent = state.label;
 }
 
 async function toggleNotifications() {

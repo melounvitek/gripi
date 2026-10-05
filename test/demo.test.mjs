@@ -101,6 +101,7 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
     'sidebarVisibilityToggles: document.querySelectorAll("[data-sidebar-visibility-toggle]")',
     'element.sidebarVisibilityToggles.forEach((toggle) => {',
     'if (!introSeen()) openModal("demo-intro-modal", null);',
+    'enabled ? "Demo notifications on — click to disable" : "Demo notifications off — click to enable"',
   ]) assert.ok(javascript.includes(expected), `missing ${expected}`);
 
   for (const expected of [
@@ -113,6 +114,7 @@ test("demo preserves first-touch controls and accessible static UI contracts", (
     'class="desktop-sessions-button desktop-sessions-close-button"',
     'class="desktop-sessions-button desktop-sessions-open-button"',
     'data-sidebar-visibility-toggle',
+    'title="Demo notifications off — click to enable" aria-label="Demo notifications off — click to enable" data-notification-toggle',
     'placeholder="Ask Pi…"',
     'openai-codex/gpt-5.5 (medium)',
   ]) assert.ok(html.includes(expected), `missing ${expected}`);

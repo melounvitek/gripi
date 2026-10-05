@@ -213,6 +213,21 @@
     .sidebar-title h1::before { content: "❯ "; color: var(--accent); }
     .sidebar-title h1 svg { height: 1rem; width: auto; vertical-align: -0.1rem; }
     .sidebar-server-origin { margin: -0.55rem 0 1rem; color: var(--muted-soft); font-family: var(--mono); font-size: 0.7rem; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* As tall as the hide button, so the icons centre on it whatever their own size. */
+    .sidebar-tools { display: flex; align-items: center; gap: 0.15rem; height: 2.4rem; margin-left: auto; }
+    .sidebar-tool { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 2.25rem; height: 2.25rem; padding: 0; background: transparent; color: var(--muted); }
+    .sidebar-tool:hover { background: transparent; }
+    .sidebar-tool svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    /* The first line is drawn in the background colour to cut the icon under the visible one. */
+    .sidebar-tool-slash path:first-child { stroke: var(--sidebar); stroke-width: 5; }
+    @media (hover: hover) and (pointer: fine) { .sidebar-tool:hover { background: #ffffff08; color: var(--text); } }
+    .sidebar-tool.is-enabled { color: var(--accent); }
+    .sidebar-tool.is-enabled .sidebar-tool-slash { display: none; }
+    .sidebar-tool.is-blocked { color: var(--danger); }
+    @media (max-width: 760px), (pointer: coarse) {
+      .sidebar-tool { width: 2.75rem; height: 2.75rem; }
+      .sidebar-tool svg { width: 20px; height: 20px; }
+    }
     .sidebar-filters { display: grid; gap: 0.5rem; margin-bottom: 0.65rem; }
     .sidebar-session-search { display: none; align-items: center; gap: 0.4rem; margin: 0; }
     .sidebar-session-search.is-open { display: flex; }
@@ -329,14 +344,6 @@
     .sidebar-gateway-update-button { width: 100%; padding: 0.6rem 0.65rem; border-radius: 0.3rem; background: var(--accent); color: var(--button-text); font-size: 0.72rem; }
     .sidebar-gateway-update-message { padding-inline: 0.5rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; line-height: 1.35; }
     .sidebar-gateway-update.is-error .sidebar-gateway-update-message { color: var(--danger); }
-    .sidebar-notification-toggle { width: 100%; justify-self: stretch; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.55rem; margin-top: 0.6rem; padding: 0.45rem 0.5rem; border: 0; border-radius: 0.3rem; background: transparent; color: var(--muted); font-size: 0.68rem; font-weight: 400; text-align: left; text-transform: none; letter-spacing: 0; font-family: var(--mono); }
-    .sidebar-notification-toggle:hover { background: #ffffff08; color: var(--text); }
-    .sidebar-notification-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
-    .sidebar-notification-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sidebar-notification-state { color: var(--muted); text-align: right; }
-    .sidebar-notification-toggle.is-enabled .sidebar-notification-icon, .sidebar-notification-toggle.is-enabled .sidebar-notification-state { color: var(--accent); }
-    .sidebar-notification-toggle.is-disabled { color: var(--muted); }
-    .sidebar-notification-toggle.is-blocked .sidebar-notification-state { color: var(--danger); }
     .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.66rem; font-weight: 500; line-height: 1.25; }
     /* Two letters stand for a project; colours repeat once there are more projects than colours. */
     .project-monogram { flex: none; width: 2ch; color: var(--project-identity-fg, var(--muted)); font-weight: 600; }
@@ -838,7 +845,7 @@
     @media (min-width: 761px) {
       body.desktop-sidebar-hidden .app-shell { grid-template-columns: minmax(0, 1fr); }
       body.desktop-sidebar-hidden .session-sidebar { display: none; }
-      .session-sidebar-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+      .session-sidebar-header { display: flex; align-items: flex-start; gap: 0.15rem; }
       .desktop-sessions-close-button, body.desktop-sidebar-hidden .desktop-sessions-open-button { display: inline-flex; }
       body.desktop-sidebar-hidden:not(.session-only) .session-header { padding-left: max(var(--header-text-start), 3.9rem); }
     }
@@ -850,8 +857,7 @@
       .mobile-sidebar-backdrop { position: fixed; inset: 0; z-index: 9; background: #00000073; }
       .mobile-session-toggle:checked ~ .mobile-sidebar-backdrop { display: block; }
       .mobile-sessions-button { display: inline-flex; }
-      .session-sidebar-header { position: sticky; top: calc(-0.75rem - env(safe-area-inset-top)); z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: calc(-0.75rem - env(safe-area-inset-top)) -0.75rem 0.5rem; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem 0.5rem; background: #1e1e24f0; backdrop-filter: blur(8px); }
-      .mobile-sessions-close-button { margin-left: auto; }
+      .session-sidebar-header { position: sticky; top: calc(-0.75rem - env(safe-area-inset-top)); z-index: 2; display: flex; align-items: center; gap: 0.15rem; margin: calc(-0.75rem - env(safe-area-inset-top)) -0.75rem 0.5rem; padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem 0.5rem; background: #1e1e24f0; backdrop-filter: blur(8px); }
       .session-sidebar h1 { margin: 0; font-size: 1rem; }
       .sidebar-server-origin { margin: 0.15rem 0 0; }
       .cwd-header { margin: 0.85rem 0 0.4rem; }
@@ -1005,6 +1011,7 @@
           <h1><svg viewBox="0 0 1400 400" role="img" aria-label="Gripi"><g style="fill: var(--accent)"><path d="M0 0H300V100H100V300H200V200H300V400H0Z"/><path fill-rule="evenodd" d="M400 0H700V200H600V300H500V400H400ZM500 100V200H600V100Z"/><path d="M600 300H700V400H600Z"/><path d="M800 0H900V400H800Z"/></g><g style="fill: var(--text)" transform="translate(1000 0)"><path fill-rule="evenodd" d="M0 0H300V200H200V300H100V400H0ZM100 100V200H200V100Z"/><path d="M300 200H400V400H300Z"/></g></svg></h1>
           <div class="sidebar-server-origin">static demo · local browser</div>
         </div>
+        <div class="sidebar-tools"><button type="button" class="sidebar-tool" title="Demo notifications off — click to enable" aria-label="Demo notifications off — click to enable" data-notification-toggle><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 16v-5a6 6 0 0 0-12 0v5l-1.5 2h15L18 16Z"/><path d="M9.5 20a2.7 2.7 0 0 0 5 0"/><g class="sidebar-tool-slash"><path d="M4.5 3.5 20 20.5"/><path d="M4 4 19.5 21"/></g></svg></button></div>
         <button type="button" class="desktop-sessions-button desktop-sessions-close-button" aria-label="Hide sessions" title="Hide sessions" aria-controls="session-sidebar" aria-expanded="true" data-sidebar-visibility-toggle><span class="hamburger-icon" aria-hidden="true"></span></button>
         <label for="mobile-session-toggle" class="mobile-sessions-button mobile-sessions-close-button" aria-label="Close sessions"><span class="hamburger-icon" aria-hidden="true"></span></label>
       </div>
@@ -1047,10 +1054,6 @@
         <button type="button" class="sidebar-gateway-update-button" data-demo-disabled>Update Gripi</button>
         <span class="sidebar-gateway-update-message">A gateway update is available.</span>
       </div>
-      <button type="button" class="sidebar-notification-toggle is-disabled" title="Enable demo notifications" data-notification-toggle>
-        <span class="sidebar-notification-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M18 16v-5a6 6 0 0 0-12 0v5l-1.5 2h15L18 16Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.5 20a2.7 2.7 0 0 0 5 0" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></span>
-        <span class="sidebar-notification-label">Notifications</span><span class="sidebar-notification-state" data-notification-toggle-state>Demo off</span>
-      </button>
       <button type="button" class="demo-about-button" data-modal-open="demo-intro-modal">About this demo</button>
     </aside>
     <label for="mobile-session-toggle" class="mobile-sidebar-backdrop" aria-label="Hide sessions"></label>
