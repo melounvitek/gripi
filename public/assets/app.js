@@ -1713,7 +1713,8 @@ async function resumeEventPolling(hiddenDuration = 0) {
   if (await refreshStaleSessionAfterResume(hiddenDuration)) return;
   scheduleNextEventPoll(0);
   eventPollResumeTimer = setTimeout(() => {
-    if (!document.hidden && lastSessionSyncAt < resumeStartedAt) showReconnectBanner();
+    // An open modal pauses polling, so a missing sync says nothing about the connection.
+    if (!document.hidden && !piModalIsOpen() && lastSessionSyncAt < resumeStartedAt) showReconnectBanner();
   }, 5000);
 }
 

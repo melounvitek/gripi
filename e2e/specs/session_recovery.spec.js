@@ -124,3 +124,16 @@ test("failed polls are counted afresh once the browser is back online", async ({
   await expect.poll(() => polls).toBe(4);
   await expect(page.getByText("Session may be stale.")).toBeHidden();
 });
+
+test("returning to the page with a dialog open does not warn about its paused polling", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  await page.getByRole("button", { name: "New session", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "New session", exact: true })).toBeVisible();
+  await page.clock.install();
+
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.clock.runFor(6000);
+
+  await expect(page.getByText("Session may be stale.")).toBeHidden();
+});
