@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	gripi "github.com/melounvitek/gripi"
 	"github.com/melounvitek/gripi/internal/access"
@@ -258,6 +259,102 @@ func TestMalformedEnvironmentStateIsLeftUntouchedAndStopsPi(t *testing.T) {
 	}
 }
 
+func TestChangedVariablesApplyFromTheNextMessage(t *testing.T) {
+	fixture := newEnvironmentFixture(t, false)
+	session := fixture.session(t, "existing", "")
+	fixture.save(t, "", "ENVTEST_TOKEN", "first")
+	fixture.prompt(t, session, "Use the first token", "")
+	waitForFakePiSettled(t, fixture.handler, session, 0)
+
+	fixture.save(t, "", "ENVTEST_TOKEN", "second")
+	fixture.prompt(t, session, "Use the second token", "")
+	fixture.assertTokens(t, session, "first", "second")
+	waitForFakePiSettled(t, fixture.handler, session, 0)
+
+	fixture.prompt(t, session, "!printf unchanged", "")
+	fixture.assertTokens(t, session, "first", "second")
+
+	fixture.save(t, "", "ENVTEST_TOKEN", "third")
+	fixture.prompt(t, session, "!printf changed", "")
+	fixture.assertTokens(t, session, "first", "second", "third")
+}
+
+func TestRestartForChangedVariablesKeepsTheEventCursorValid(t *testing.T) {
+	fixture := newEnvironmentFixture(t, false)
+	session := fixture.session(t, "existing", "")
+	fixture.save(t, "", "ENVTEST_TOKEN", "first")
+	fixture.prompt(t, session, "Use the first token", "")
+	waitForFakePiSettled(t, fixture.handler, session, 0)
+	cursor := fakePiEventCursor(t, fixture.handler, session)
+
+	fixture.save(t, "", "ENVTEST_TOKEN", "second")
+	// This turn stays open, so the new Pi's event sequence stays below the browser's cursor.
+	fixture.prompt(t, session, "Start the steer scenario", "")
+	fixture.assertTokens(t, session, "first", "second")
+
+	for deadline := time.Now().Add(4 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		response := fixture.get(fmt.Sprintf("/events?session=%s&after=%d", url.QueryEscape(session), cursor), "")
+		var batch struct {
+			Events  []map[string]any `json:"events"`
+			LastSeq int64            `json:"last_seq"`
+			Missed  bool             `json:"missed"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &batch) != nil || batch.LastSeq >= cursor {
+			t.Fatalf("events after the old Pi's last event %d = %d %s", cursor, response.Code, response.Body.String())
+		}
+		if batch.Missed {
+			t.Fatalf("the cursor at the old Pi's last event %d missed events: %s", cursor, response.Body.String())
+		}
+		if slices.ContainsFunc(batch.Events, func(event map[string]any) bool { return event["type"] == "agent_start" }) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the new turn did not arrive after the old Pi's last event %d: %s", cursor, response.Body.String())
+		}
+	}
+}
+
+func TestChangedVariablesDoNotRestartABusyPi(t *testing.T) {
+	fixture := newEnvironmentFixture(t, false)
+	session := fixture.session(t, "existing", "")
+	fixture.save(t, "", "ENVTEST_TOKEN", "first")
+	fixture.prompt(t, session, "Start the steer scenario", "")
+	for deadline := time.Now().Add(4 * time.Second); !strings.Contains(fixture.get("/events?session="+url.QueryEscape(session), "").Body.String(), `"gateway_busy":true`); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the turn did not start")
+		}
+	}
+
+	fixture.save(t, "", "ENVTEST_TOKEN", "second")
+	fixture.prompt(t, session, "Use the steered direction", "steer")
+	fixture.assertTokens(t, session, "first")
+	waitForFakePiSettled(t, fixture.handler, session, 0)
+
+	fixture.prompt(t, session, "Use the second token", "")
+	fixture.assertTokens(t, session, "first", "second")
+}
+
+func TestChangedVariablesLeaveAnUnsavedNewSessionAlone(t *testing.T) {
+	fixture := newEnvironmentFixture(t, false)
+	fixture.save(t, "", "ENVTEST_TOKEN", "first")
+	created := fixture.post("/sessions/new_at_cwd", url.Values{"cwd": {fixture.project}}, "")
+	var payload struct {
+		Session string `json:"session"`
+	}
+	if created.Code != http.StatusOK || json.Unmarshal(created.Body.Bytes(), &payload) != nil || payload.Session == "" {
+		t.Fatalf("new session = %d %s", created.Code, created.Body.String())
+	}
+
+	fixture.save(t, "", "ENVTEST_TOKEN", "second")
+	fixture.prompt(t, payload.Session, "Create the first deterministic response", "")
+	fixture.assertTokens(t, "", "first")
+	waitForFakePiSettled(t, fixture.handler, payload.Session, 0)
+
+	// Pi has saved the session now, so a new process can resume it.
+	fixture.prompt(t, payload.Session, "Use the second token", "")
+	fixture.assertTokens(t, "", "first", "second")
+}
+
 type environmentFixture struct {
 	handler http.Handler
 	cfg     config.Config
@@ -391,6 +488,32 @@ func (fixture *environmentFixture) startPi(t *testing.T, session, cookie string)
 	t.Helper()
 	if response := fixture.get("/sessions/model_settings?session="+url.QueryEscape(session), cookie); response.Code != http.StatusOK {
 		t.Fatalf("start Pi for %s = %d %s", session, response.Code, response.Body.String())
+	}
+}
+
+func (fixture *environmentFixture) prompt(t *testing.T, session, message, streamingBehavior string) {
+	t.Helper()
+	values := url.Values{"session": {session}, "message": {message}}
+	if streamingBehavior != "" {
+		values.Set("streaming_behavior", streamingBehavior)
+	}
+	if response := fixture.post("/prompt", values, ""); response.Code != http.StatusOK {
+		t.Fatalf("prompt %q = %d %s", message, response.Code, response.Body.String())
+	}
+}
+
+// assertTokens checks which ENVTEST_TOKEN each Pi started so far got, oldest first.
+func (fixture *environmentFixture) assertTokens(t *testing.T, session string, expected ...string) {
+	t.Helper()
+	var tokens []string
+	for _, start := range fixture.piStarts(t) {
+		if session != "" && !strings.Contains(start.arguments, "--session "+session) {
+			t.Fatalf("Pi started with %q, want session %s", start.arguments, session)
+		}
+		tokens = append(tokens, start.environment["ENVTEST_TOKEN"])
+	}
+	if !slices.Equal(tokens, expected) {
+		t.Fatalf("ENVTEST_TOKEN of each Pi start = %q, want %q", tokens, expected)
 	}
 }
 

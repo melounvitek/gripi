@@ -57,6 +57,14 @@ func (store *Store) Variables(userID string) ([]Variable, error) {
 	return value.Users[userID].Variables, err
 }
 
+// ChangedAt returns when the user's variables last changed, or the zero time if they never did.
+func (store *Store) ChangedAt(userID string) (time.Time, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	value, err := store.read()
+	return value.Users[userID].ChangedAt, err
+}
+
 // Save replaces the value of a saved name in place and appends a new name. A previousName renames in place.
 func (store *Store) Save(userID, previousName string, variable Variable) ([]Variable, error) {
 	return store.update(userID, func(variables []Variable) ([]Variable, error) {

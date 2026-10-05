@@ -103,6 +103,10 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		http.NotFound(response, request)
 		return
 	}
+	if err := app.retireStaleRPCClient(request, path); err != nil {
+		app.writeActionRPCError(response, err)
+		return
+	}
 	if command, bash := prompts.ParseBashCommand(message, request.FormValue("bash_mode")); bash {
 		if len(imageFiles) > 0 {
 			app.writeRequestError(response, request, http.StatusBadRequest, "Images cannot be attached to bash commands")

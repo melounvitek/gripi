@@ -25,6 +25,10 @@ type clientEntry struct {
 	interruptLane  chan struct{}
 	bashLane       chan struct{}
 	retiring       bool
+	// Taken before the client's factory ran, so before the factory read anything the client depends on.
+	startedAt time.Time
+	// Last event sequence of the idle-retired client that this one replaced.
+	replacedSequence int64
 }
 
 type Registry struct {
@@ -58,8 +62,8 @@ func (registry *Registry) SetDiagnostics(diagnostics *Diagnostics) {
 	registry.mu.Unlock()
 }
 
-func newClientEntry(client RPCClient, now time.Time) *clientEntry {
-	entry := &clientEntry{client: client, lastUsedAt: now, operationLane: make(chan struct{}, 1), interruptLane: make(chan struct{}, 1), bashLane: make(chan struct{}, 1)}
+func newClientEntry(client RPCClient, startedAt, now time.Time) *clientEntry {
+	entry := &clientEntry{client: client, startedAt: startedAt, lastUsedAt: now, operationLane: make(chan struct{}, 1), interruptLane: make(chan struct{}, 1), bashLane: make(chan struct{}, 1)}
 	entry.operationLane <- struct{}{}
 	entry.interruptLane <- struct{}{}
 	entry.bashLane <- struct{}{}
@@ -76,6 +80,10 @@ func (registry *Registry) EnsureClient(path string) (RPCClient, error) {
 }
 
 func (registry *Registry) Register(path string, client RPCClient) error {
+	return registry.registerStartedAt(path, client, registry.clock())
+}
+
+func (registry *Registry) registerStartedAt(path string, client RPCClient, startedAt time.Time) error {
 	var old RPCClient
 	registry.mu.Lock()
 	if registry.closed {
@@ -99,7 +107,7 @@ func (registry *Registry) Register(path string, client RPCClient) error {
 		if current != nil {
 			old = current.client
 		}
-		registry.clients[path] = newClientEntry(client, registry.clock())
+		registry.clients[path] = newClientEntry(client, startedAt, registry.clock())
 		delete(registry.retiredSequences, path)
 	}
 	diagnostics := registry.diagnostics
@@ -318,6 +326,7 @@ func (registry *Registry) acquire(path string, create, touch, observer bool) (*c
 	token := registry.nextCreation
 	registry.creating[path] = token
 	registry.factoryWG.Add(1)
+	startedAt := registry.clock()
 	registry.mu.Unlock()
 	client, err := registry.factory(path)
 	defer registry.factoryWG.Done()
@@ -345,7 +354,8 @@ func (registry *Registry) acquire(path string, create, touch, observer bool) (*c
 	entry := existing
 	unused := RPCClient(nil)
 	if entry == nil {
-		entry = newClientEntry(client, registry.clock())
+		entry = newClientEntry(client, startedAt, registry.clock())
+		entry.replacedSequence = registry.retiredSequences[path]
 		registry.clients[path] = entry
 		delete(registry.retiredSequences, path)
 	} else {
@@ -562,13 +572,14 @@ func (registry *Registry) moveWithCommit(oldPath, newPath string, prepare func()
 }
 
 func (registry *Registry) EventsAfter(path string, after int64) EventBatch {
-	var result EventBatch
-	active := false
-	_ = registry.WithActiveClient(context.Background(), path, false, func(client RPCClient) error {
-		result, active = client.EventsAfter(after), true
-		return nil
-	})
-	if active {
+	if entry, _ := registry.acquire(path, false, false, false); entry != nil {
+		defer registry.release(entry, false, false)
+		result := entry.client.EventsAfter(after)
+		// A cursor at the last event of the idle-retired client that this one replaced missed nothing, so it gets this
+		// client's events from the first one. Once this client reaches that sequence, the cursor counts as its own.
+		if result.Missed && after > 0 && after == entry.replacedSequence {
+			result = entry.client.EventsAfter(0)
+		}
 		return result
 	}
 	registry.mu.Lock()
@@ -602,8 +613,18 @@ func (registry *Registry) CloseClientWithoutOperations(path string) (bool, error
 	return registry.closeWhen(path, func(entry *clientEntry) bool { return entry.activeRequests <= entry.observers && !entry.client.Busy() }, nil)
 }
 func (registry *Registry) CloseClientIfExpired(path string, idle time.Duration, now time.Time, onClose func(string)) (bool, error) {
+	return registry.closeIdleWhen(path, func(entry *clientEntry) bool { return !activityAt(entry).Add(idle).After(now) }, onClose)
+}
+
+// CloseClientIfStartedBefore retires an idle client that started no later than the given time.
+func (registry *Registry) CloseClientIfStartedBefore(path string, moment time.Time) (bool, error) {
+	return registry.closeIdleWhen(path, func(entry *clientEntry) bool { return !entry.startedAt.After(moment) }, nil)
+}
+
+// closeIdleWhen closes an idle client that is due and keeps its last event sequence for EventsAfter.
+func (registry *Registry) closeIdleWhen(path string, due func(*clientEntry) bool, onClose func(string)) (bool, error) {
 	closed, err := registry.closeWhen(path, func(entry *clientEntry) bool {
-		if entry.activeRequests != 0 || entry.client.Busy() || activityAt(entry).Add(idle).After(now) {
+		if entry.activeRequests != 0 || entry.client.Busy() || !due(entry) {
 			return false
 		}
 		registry.retiredSequences[path] = entry.client.EventSequence()
