@@ -13,7 +13,7 @@ Each round is one commit and leaves `mise run test` green.
 1. [x] Pi gets the saved variables: storage, routes, validation, and the overlay on Pi's environment.
 2. [x] Changes apply from the next message: a stale idle Pi is restarted before the message is sent.
 3. [x] The bell: Notifications becomes an icon in the sidebar header.
-4. [ ] The dialog: the key icon, the Ctrl+K command, and the Environment dialog.
+4. [x] The dialog: the key icon, the Ctrl+K command, and the Environment dialog.
 5. [ ] Demo and docs. Delete this file.
 
 ## Storage

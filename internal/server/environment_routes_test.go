@@ -87,6 +87,14 @@ func TestMultiUserVariablesStayWithTheirOwner(t *testing.T) {
 	}
 }
 
+func TestMultiUserEnvironmentDialogSaysWhoGetsTheVariablesAndWhoCouldReadThem(t *testing.T) {
+	page := newEnvironmentFixture(t, true).get("/", "gripi_workspace=workspace-a").Body.String()
+	description := "Pi and every command it runs get these variables in your sessions only, on top of the gateway's own environment. They are stored on the gateway, where other users' Pi could read them."
+	if !strings.Contains(page, description) {
+		t.Fatal("the page lacks the multi-user description of the environment dialog")
+	}
+}
+
 func TestEnvironmentSavingRules(t *testing.T) {
 	fixture := newEnvironmentFixture(t, false)
 	assertNames := func(step string, expected ...string) {

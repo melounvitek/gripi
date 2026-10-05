@@ -717,7 +717,7 @@
     .new-session-row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
     .new-session-row .project-monogram { color: var(--project-identity-fg, inherit); }
     /* Clipped sideways only: a hidden overflow also cuts the underscore off the bottom of some fonts. */
-    .new-session-name, .new-session-path, .command-palette-name { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: nowrap; }
+    .new-session-name, .new-session-path, .command-palette-name, .environment-name { min-width: 0; overflow-x: clip; text-overflow: ellipsis; white-space: nowrap; }
     .new-session-path, .new-session-age, .command-palette-meta { color: var(--muted-soft); }
     .new-session-age, .command-palette-meta { font-size: 0.74rem; text-align: right; }
     .new-session-key { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; margin-left: 0.5ch; border: 1px solid var(--accent-line-35); border-radius: 0.2rem; color: var(--accent); font: 600 0.72rem/1 var(--mono); }
@@ -798,6 +798,33 @@
     .tree-session-role--user { color: var(--accent); }
     .tree-session-dim { color: var(--muted); }
     .tree-session-label-form { display: grid; gap: 0.5rem; }
+    /* Wide enough for the longest line of the GitHub block. */
+    .environment-card { width: min(42rem, 100%); }
+    /* Fits what the on-screen keyboard leaves of the overlay. */
+    [data-modal="environment-modal"] .modal-card { max-height: 100%; }
+    .environment-note { margin: 0; color: var(--muted); font-size: 0.8em; line-height: 1.45; }
+    .environment-warning { color: var(--gold); }
+    .environment-status[data-state="done"] { color: var(--success); }
+    .environment-status[data-state="error"] { color: var(--danger); }
+    /* Rows share the list's columns, so the hidden values line up after the longest name. */
+    .environment-list { grid-template-columns: 2ch fit-content(26ch) minmax(0, 1fr); column-gap: 1ch; }
+    .environment-row { grid-column: 1 / -1; grid-template-columns: subgrid; }
+    .environment-value { color: var(--muted); }
+    .environment-row[aria-selected="true"] .environment-value { color: var(--accent-line-55); }
+    .environment-add { color: var(--muted); }
+    .environment-add .environment-name { grid-column: 2 / -1; white-space: normal; }
+    .environment-add-detail { margin-left: 1ch; color: var(--muted-soft); font-size: 0.86em; }
+    .environment-row:not(.environment-add) + .environment-add { margin-top: 0.35rem; }
+    .environment-form { display: grid; gap: 0.35rem; padding-top: 0.55rem; border-top: 1px solid var(--border); }
+    .environment-form label > span { flex: none; width: 7ch; }
+    /* A field of the default line height cuts the underscores off. */
+    .environment-form input { line-height: 1.5; }
+    .environment-block { display: grid; gap: 0.75rem; }
+    .environment-editor { max-height: none; }
+    .environment-card button[type="submit"] { color: var(--accent); }
+    @media (max-width: 760px), (pointer: coarse) {
+      .environment-form label { min-height: 2.75rem; }
+    }
     .tree-position-banner, .session-sync-banner { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.75rem; padding: 0.7rem 0.8rem; border: 1px solid #f0c67447; border-radius: 0.35rem; background: var(--info-bg); color: var(--text); font-size: 0.85rem; }
     .tree-position-banner strong, .session-sync-banner strong { color: var(--gold); }
     .tree-position-banner span, .session-sync-banner span { color: var(--muted); }
@@ -908,6 +935,7 @@
       .modal-card { width: 100%; max-height: min(82dvh, calc(100dvh - env(safe-area-inset-top) - 1rem)); padding: 1rem; padding-bottom: calc(1rem + env(safe-area-inset-bottom)); border-right: 0; border-bottom: 0; border-left: 0; border-radius: 0.5rem 0.5rem 0 0; }
       .modal-header h2 { font-size: 0.85rem; }
       .tree-session-card { height: min(82dvh, calc(100dvh - env(safe-area-inset-top) - 1rem)); }
+      [data-modal="environment-modal"] .modal-card { max-height: min(82dvh, 100%); }
       .tree-session-connector-level:nth-last-child(n + 4) { display: none; }
       .modal-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
       .modal-actions button { width: 100%; justify-self: stretch; padding: 0.8rem 0.75rem; }

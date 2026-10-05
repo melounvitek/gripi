@@ -235,6 +235,6 @@ test("without an open session only the commands that need none are listed", asyn
   test.skip(isMobile, "Keyboard flow");
   await open(page);
   await expect(dialog(page).getByRole("group", { name: "Recent sessions" }).getByRole("option")).toHaveCount(5);
-  await expect(dialog(page).getByRole("group", { name: "Gripi" }).getByRole("option")).toHaveText([/New session…/, /Hide sidebar/]);
+  await expect(dialog(page).getByRole("group", { name: "Gripi" }).getByRole("option")).toHaveText([/New session…/, /Environment…/, /Hide sidebar/]);
   await expect(dialog(page).getByRole("group", { name: "This session" })).toHaveCount(0);
 });

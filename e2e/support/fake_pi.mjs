@@ -683,6 +683,9 @@ function bashResult(command) {
   if (command === nativeBash.included.command) return completedBashResult(nativeBash.included.output);
   if (command === nativeBash.excluded.command) return completedBashResult(nativeBash.excluded.output);
   if (command === nativeBash.nonzero.command) return completedBashResult(nativeBash.nonzero.output, nativeBash.nonzero.exitCode);
+  // Shows what the gateway put in this process's environment.
+  const variable = command.match(/^printenv (\w+)$/)?.[1];
+  if (variable) return completedBashResult(`${process.env[variable] ?? ""}\n`);
 
   return completedBashResult(`Fake Pi completed: ${command}\n`);
 }

@@ -57,6 +57,7 @@ export const sessions = {
   bashReload: "E2E Bash Reload Desktop",
   bashOverlap: "E2E Bash Overlap Desktop",
   bashMobile: "E2E Bash Cancel Mobile",
+  environment: "E2E Environment Desktop",
   wrappedToolOutput: "E2E Wrapped Tool Output Mobile",
   writeOutput: "E2E Write Output Desktop"
 };

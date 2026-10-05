@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { parseNativeBash } from "../public/assets/bash.js";
 import { applyComposerPathCompletion, composerPathContext } from "../public/assets/composer_autocomplete_controller.js";
 import { downloadResponse } from "../public/assets/downloads.js";
+import { githubBlock } from "../public/assets/environment_controller.js";
 import { activateToolOutputRegion, deactivateToolOutputRegion } from "../public/assets/dom.js";
 import {
   eventErrorText,
@@ -220,6 +221,21 @@ test("model picker lists follow Pi CLI's scope, order, and search", () => {
   assert.deepEqual(ids(sortedPickerModels(models, null)), ["claude-opus-5-5", "gpt-6-astra", "gpt-6.1-sol"]);
   assert.deepEqual(ids(matchingPickerModels(models, " CODEX/gpt  sol ")), ["gpt-6.1-sol"]);
   assert.deepEqual(ids(matchingPickerModels(models, "opus 5.5")), ["claude-opus-5-5"]);
+});
+
+test("the GitHub block keeps the lines that are not saved yet and the comments of their groups", () => {
+  // The commit identity is complete and the push settings are saved in part.
+  const saved = ["SENTRY_API_KEY", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_1"];
+  assert.equal(githubBlock(saved), [
+    "# gh: pull requests, issues, API",
+    "GH_TOKEN=",
+    "# git push over HTTPS with your token, also for SSH remotes; leave as is",
+    "GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0=git@github.com:",
+    "GIT_CONFIG_VALUE_1=!gh auth git-credential",
+  ].join("\n"));
+  // A saved name hides only its own line, not the lines it is the start of.
+  assert.match(githubBlock(["GIT_CONFIG_KEY", "GH"]), /^# gh: pull requests, issues, API\nGH_TOKEN=\n[^]*\nGIT_CONFIG_KEY_0=/);
 });
 
 test("composer path completion uses caret-local Pi-style contexts", () => {
