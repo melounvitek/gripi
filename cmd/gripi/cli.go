@@ -8,6 +8,7 @@ import (
 const (
 	exitFailure = 1
 	exitUsage   = 2
+	exitTimeout = 3
 )
 
 const (
@@ -27,6 +28,7 @@ type command struct {
 var commands = []command{
 	{name: "list", group: sessionCommands, summary: "List sessions with their state", run: listSessions, help: listHelp},
 	{name: "send", group: sessionCommands, summary: "Send a message to a session", run: sendMessage, help: sendHelp},
+	{name: "wait", group: sessionCommands, summary: "Wait until a session stops working", run: waitForSession, help: waitHelp},
 	{name: "serve", group: gatewayCommands, summary: "Start the gateway", run: withoutArguments("serve", serve), help: `Usage:
   gripi serve
 

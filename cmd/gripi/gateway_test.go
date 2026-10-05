@@ -86,7 +86,7 @@ func decodeSession(t *testing.T, output string) gateway.LocalSession {
 	return session
 }
 
-func waitForSession(t *testing.T, reference string, done func(gateway.LocalSession) bool) gateway.LocalSession {
+func eventually(t *testing.T, reference string, done func(gateway.LocalSession) bool) gateway.LocalSession {
 	t.Helper()
 	var listed []gateway.LocalSession
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
@@ -120,7 +120,7 @@ func TestSendDeliversPromptsAndReturnsOnceTheSessionIsWorking(t *testing.T) {
 	if code != 0 || stderr != "" || !strings.Contains(stdout, "0a1-alpha") || !strings.Contains(stdout, "working") {
 		t.Fatalf("queued gripi send = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
-	waitForSession(t, "0a1-alpha", func(session gateway.LocalSession) bool { return session.State == "idle" })
+	eventually(t, "0a1-alpha", func(session gateway.LocalSession) bool { return session.State == "idle" })
 	contents, err := os.ReadFile(alpha)
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestSendNeverRunsItsTextAsAShellCommand(t *testing.T) {
 	if code, _, stderr := runCLI("send", "0a1-b", "!touch pwned"); code != 0 {
 		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
 	}
-	waitForSession(t, "0a1-beta", func(session gateway.LocalSession) bool { return session.State == "idle" })
+	eventually(t, "0a1-beta", func(session gateway.LocalSession) bool { return session.State == "idle" })
 	contents, err := os.ReadFile(beta)
 	if err != nil {
 		t.Fatal(err)
@@ -166,5 +166,63 @@ func TestSendExplainsWhatItCannotDeliver(t *testing.T) {
 	code, stdout, stderr := runCLI("send", "0a1-beta", "message")
 	if code != 1 || stdout != "" || !strings.Contains(stderr, "Pi CLI") {
 		t.Fatalf("send to a session used in Pi CLI = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+func TestWaitReturnsTheReplyToAMessageSentJustBefore(t *testing.T) {
+	fakePiGateway(t)
+	if code, _, stderr := runCLI("send", "0a1-a", "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr := runCLI("wait", "0a1-a", "--json")
+	session := decodeSession(t, stdout)
+	if code != 0 || stderr != "" || session.State != "idle" || !session.Unread {
+		t.Fatalf("gripi wait = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if session.LastReply != "Deterministic browser response complete." {
+		t.Fatalf("wait returned before the new reply was readable: %q", session.LastReply)
+	}
+
+	// Waiting on a settled session returns at once, as a table by default.
+	if code, stdout, _ := runCLI("wait", "0a1-b"); code != 0 || !strings.Contains(stdout, "0a1-beta") || !strings.Contains(stdout, "idle") {
+		t.Fatalf("gripi wait on an idle session = %d, stdout %q", code, stdout)
+	}
+}
+
+func TestWaitGivesUpAfterItsTimeoutWhileTheSessionKeepsWorking(t *testing.T) {
+	fakePiGateway(t)
+	if code, _, stderr := runCLI("send", "0a1-a", "Start the follow-up scenario"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	started := time.Now()
+	code, stdout, stderr := runCLI("wait", "0a1-a", "--timeout", "0.6", "--json")
+	if elapsed := time.Since(started); code != 3 || elapsed < 600*time.Millisecond || elapsed > 3*time.Second {
+		t.Fatalf("gripi wait --timeout = %d after %s, stderr %q", code, elapsed, stderr)
+	}
+	if session := decodeSession(t, stdout); session.State != "working" || !strings.Contains(stderr, "still working") {
+		t.Fatalf("timed-out wait printed %+v, stderr %q", session, stderr)
+	}
+}
+
+func TestWaitEndsWhenPiNeedsAnAnswerInTheBrowser(t *testing.T) {
+	fakePiGateway(t)
+	if code, _, stderr := runCLI("send", "0a1-b", "Ask me for release approval"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr := runCLI("wait", "0a1-b", "--timeout", "5", "--json")
+	if session := decodeSession(t, stdout); code != 0 || session.State != "waiting" {
+		t.Fatalf("gripi wait = %d, stderr %q, session %+v", code, stderr, session)
+	}
+}
+
+func TestWaitExplainsWhatItCannotWaitFor(t *testing.T) {
+	fakePiGateway(t)
+	for _, usage := range [][]string{{"wait"}, {"wait", "0a1-a", "0a1-b"}, {"wait", "0a1-a", "--timeout", "soon"}, {"wait", "0a1-a", "--timeout", "-1"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help wait") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
+	}
+	if code, stdout, stderr := runCLI("wait", "zzz"); code != 1 || stdout != "" || !strings.Contains(stderr, "gripi list") {
+		t.Fatalf("unknown session = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }

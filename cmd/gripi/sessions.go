@@ -362,3 +362,79 @@ func printSession(stdout, stderr io.Writer, name string, session gateway.LocalSe
 	printSessions(stdout, []gateway.LocalSession{session})
 	return 0
 }
+
+const waitHelp = `Usage:
+  gripi wait <session> [--timeout <seconds>] [--json]
+
+Blocks until the session is no longer working or compacting, then prints it.
+Run it after 'gripi send' to get the reply: last_reply has its first 180
+characters, and the session file at path has the whole conversation.
+
+Check the printed state. idle means Pi finished. waiting, external and
+conflict also end the wait, because Pi will not continue until someone acts in
+the browser or in Pi CLI.
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+
+Flags:
+  --timeout <seconds>  Give up after this long; the session is still printed
+  --json               Print the session as a JSON object instead of a table
+
+` + sessionFields + `
+Example:
+  gripi send 01a107aa "Run the tests" && gripi wait 01a107aa --timeout 900 --json
+
+Exit codes:
+` + sessionExitCodes + `  3  --timeout passed while the session was still working
+`
+
+func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("wait", flag.ContinueOnError)
+	timeout := flags.Float64("timeout", 0, "")
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "wait", err.Error())
+	}
+	if len(positional) != 1 || positional[0] == "" {
+		return usageError(stderr, "wait", "takes exactly one session")
+	}
+	if *timeout < 0 {
+		return usageError(stderr, "wait", "--timeout cannot be negative")
+	}
+	client, err := newGatewayClient()
+	if err != nil {
+		return failure(stderr, "wait", err)
+	}
+	session, err := client.session(positional[0])
+	if err != nil {
+		return failure(stderr, "wait", err)
+	}
+	deadline := time.Now().Add(time.Duration(*timeout * float64(time.Second)))
+	for settled := false; ; {
+		current, err := client.sessions(session.Path)
+		if err != nil {
+			return failure(stderr, "wait", err)
+		}
+		if len(current) != 1 {
+			return failure(stderr, "wait", fmt.Errorf("session %s no longer exists", session.Path))
+		}
+		session = current[0]
+		working := session.State == "working" || session.State == "compacting"
+		// The gateway does not re-read a busy session's file, so the listing that
+		// first shows a finished turn can still carry the reply before it.
+		if !working && settled {
+			return printSession(stdout, stderr, "wait", session, *asJSON)
+		}
+		if settled = !working; settled {
+			continue
+		}
+		if *timeout > 0 && time.Now().After(deadline) {
+			fmt.Fprintf(stderr, "gripi wait: still working after %g seconds\n", *timeout)
+			printSession(stdout, stderr, "wait", session, *asJSON)
+			return exitTimeout
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
