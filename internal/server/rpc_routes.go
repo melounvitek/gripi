@@ -557,17 +557,38 @@ func (app *application) cleanupIdleRPCClient(ctx context.Context, path string, n
 		return nil
 	}
 	defer release()
+	return app.retireRPCClient(ctx, path, func() (bool, error) {
+		return app.rpcClients.CloseClientIfExpired(path, app.config.RPCIdleTimeout, now, nil)
+	})
+}
+
+// retireStaleRPCClient retires the session's idle Pi if it started before the user's variables last changed, so that
+// the next client gets them. Pi has not saved a pending session, so a new process could not resume it.
+func (app *application) retireStaleRPCClient(request *http.Request, path string) error {
+	if _, pending := app.pendingSessions.CWD(path); pending || app.environment == nil {
+		return nil
+	}
+	changedAt := app.environment.ChangedAt(app.environmentUser(request))
+	if changedAt.IsZero() {
+		return nil
+	}
+	return app.retireRPCClient(request.Context(), path, func() (bool, error) {
+		return app.rpcClients.CloseClientIfStartedBefore(path, changedAt)
+	})
+}
+
+func (app *application) retireRPCClient(ctx context.Context, path string, close func() (bool, error)) error {
 	var closed bool
 	var err error
 	if _, statErr := os.Stat(path); statErr == nil {
 		app.synchronizer.ReconcileIfAvailable(ctx, path, false, func(sessions.SyncResult) {
-			closed, err = app.rpcClients.CloseClientIfExpired(path, app.config.RPCIdleTimeout, now, nil)
+			closed, err = close()
 			if closed {
 				app.synchronizer.Forget(path)
 			}
 		})
 	} else {
-		closed, err = app.rpcClients.CloseClientIfExpired(path, app.config.RPCIdleTimeout, now, nil)
+		closed, err = close()
 	}
 	if closed {
 		app.pendingSessions.Forget(path)

@@ -46,6 +46,7 @@ const env = {
   GRIPI_ATTACHMENTS_ROOT: fixture.attachmentsRoot,
   GRIPI_SESSION_CWDS_PATH: fixture.configuredCwdsPath,
   GRIPI_READ_STATE_PATH: path.join(fixture.state, "read-state.json"),
+  GRIPI_ENVIRONMENT_PATH: path.join(fixture.state, "environment.json"),
   GRIPI_BROWSER_ACCESS_PATH: path.join(fixture.state, "browser-access.json"),
   GRIPI_WORKSPACE_SECRET_PATH: path.join(fixture.state, "workspace-secret"),
   GRIPI_WORKSPACE_ACCESS_PATH: path.join(fixture.state, "workspace-access.json"),

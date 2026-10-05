@@ -52,12 +52,51 @@ async function liveEvents(page) {
   };
 }
 
+const bell = (page) => page.getByRole("complementary", { name: "Sessions" }).getByRole("button", { name: /notifications/i });
+
+for (const [state, { permission, disabled = false, name, color, slashed }] of Object.entries({
+  "on": { permission: "granted", name: "Notifications on — click to disable", color: "rgb(255, 90, 31)", slashed: false },
+  "off": { permission: "granted", disabled: true, name: "Notifications off — click to enable", color: "rgb(128, 128, 128)", slashed: true },
+  "never enabled": { permission: "default", name: "Enable notifications", color: "rgb(128, 128, 128)", slashed: true },
+  "blocked": { permission: "denied", name: "Notifications blocked — click for setup help", color: "rgb(204, 102, 102)", slashed: true },
+})) {
+  test(`the sidebar bell shows notifications ${state}`, async ({ page }) => {
+    await page.addInitScript(({ permission, disabled }) => {
+      if (disabled) localStorage.setItem("gripi:notifications-disabled", "true");
+      else localStorage.removeItem("gripi:notifications-disabled");
+      delete window.PushManager;
+      Object.defineProperty(window, "Notification", { value: { permission } });
+    }, { permission, disabled });
+    await page.goto("/");
+    await expect(bell(page)).toHaveAccessibleName(name);
+    await expect(bell(page)).toHaveAttribute("title", name);
+    await expect(bell(page)).toHaveCSS("color", color);
+    await expect(bell(page).locator(".sidebar-tool-slash")).toBeVisible({ visible: slashed });
+  });
+}
+
+test("the sidebar bell sits beside the hide button and toggles notifications", async ({ page }) => {
+  await captureNotifications(page, "desktop");
+  await page.goto("/");
+  await expect(bell(page)).toHaveAccessibleName("Notifications on — click to disable");
+  const bellBox = await bell(page).boundingBox();
+  const hideBox = await page.getByRole("button", { name: "Hide sessions" }).boundingBox();
+  expect([bellBox.width, bellBox.height]).toEqual([36, 36]);
+  expect(bellBox.x + bellBox.width).toBeLessThanOrEqual(hideBox.x);
+  expect(bellBox.y + bellBox.height / 2).toBeCloseTo(hideBox.y + hideBox.height / 2, 1);
+
+  await bell(page).click();
+  await expect(bell(page)).toHaveAccessibleName("Notifications off — click to enable");
+  await bell(page).click();
+  await expect(bell(page)).toHaveAccessibleName("Notifications on — click to disable");
+});
+
 test("active Web Push suppresses local settled notifications", async ({ page }) => {
   await captureNotifications(page, "browser", true);
   await page.route("**/web-push/config", (route) => route.fulfill({ json: { public_key: "AQID" } }));
   await page.route("**/web-push/subscription", (route) => route.fulfill({ json: {} }));
   const deliver = await liveEvents(page);
-  await expect(page.locator("[data-notification-toggle-state]")).toHaveText("On");
+  await expect(bell(page)).toHaveAccessibleName("Notifications on — click to disable");
   const reply = assistant("push", "Delivered by Web Push");
   await deliver(ended(reply), agentEnd(reply));
   await deliver(settled);

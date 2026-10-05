@@ -18,6 +18,7 @@ type SessionClientMover interface {
 }
 
 func StartNewSession(ctx context.Context, cwd, sessionsRoot string, factory ClientFactory, clients *Registry, pending *PendingSessionRegistry, prepare func(string) (string, func() error, error)) (string, error) {
+	startedAt := clients.clock()
 	client, err := factory(cwd)
 	if err != nil {
 		return "", err
@@ -43,7 +44,7 @@ func StartNewSession(ctx context.Context, cwd, sessionsRoot string, factory Clie
 			return "", err
 		}
 	}
-	if err := clients.Register(path, client); err != nil {
+	if err := clients.registerStartedAt(path, client, startedAt); err != nil {
 		if rollback != nil {
 			return "", errors.Join(err, rollback())
 		}

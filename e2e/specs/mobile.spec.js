@@ -247,6 +247,30 @@ test("do not highlight unopened sessions on coarse pointers", async ({ page }) =
   await expect(session).not.toHaveAttribute("aria-current", "page");
 });
 
+test("the notification bell fits a 320px drawer header and toggles on the first mobile tap", async ({ page }) => {
+  await page.addInitScript(() => { window.gripiElectron = { showNotification: async () => {} }; });
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  const sidebar = page.getByRole("complementary", { name: "Sessions" });
+  await expect(sidebar).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+
+  const bell = sidebar.getByRole("button", { name: /notifications/i });
+  await expect(bell).toHaveAccessibleName("Notifications on — click to disable");
+  const [logo, bounds, close, drawer] = await Promise.all([sidebar.getByRole("img", { name: "Gripi" }), bell, sidebar.getByLabel("Close sessions"), sidebar].map((part) => part.boundingBox()));
+  expect([bounds.width, bounds.height]).toEqual([44, 44]);
+  expect(bounds.x).toBeGreaterThanOrEqual(logo.x + logo.width);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(close.x);
+  expect(close.x + close.width).toBeLessThanOrEqual(drawer.x + drawer.width);
+
+  // A hover style left behind by the tap would make the bell look pressed.
+  await bell.hover();
+  await bell.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+  await expect(bell).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await bell.tap();
+  await expect(bell).toHaveAccessibleName("Notifications off — click to enable");
+});
+
 test("open selected session actions and pin from them on the first mobile tap", async ({ page }) => {
   await page.goto("/");
   await page.locator('label[aria-label="Open sessions"]').tap();

@@ -27,6 +27,7 @@
 - Find in conversation, model and thinking settings, and context usage.
 - Notifications when replies finish, including Web Push on phones.
 - A [`gripi` command](#command-line) that lets scripts and agents list sessions, send messages, and wait for replies.
+- Saved [environment variables](docs/configuration.md#environment-variables) for Pi and every command it runs, such as your own GitHub token on a shared gateway.
 
 ## Install
 
@@ -151,7 +152,7 @@ In the default single-user mode, every new browser must be approved once, either
 
 Programs that already run as the gateway’s OS user need no approval. The [`gripi` command](#command-line) reaches the gateway through a socket that only that user can open.
 
-Optional [multi-user mode](docs/configuration.md#multi-user-mode) gives each user a private token and shows them only their own sessions. It is intended for users who trust each other: all users still run commands as the same OS user, and they share model and thinking settings.
+Optional [multi-user mode](docs/configuration.md#multi-user-mode) gives each user a private token and shows them only their own sessions. It is intended for users who trust each other: all users still run commands as the same OS user, and they share model and thinking settings. Each user can save their own [environment variables](docs/configuration.md#environment-variables), for example to use their own GitHub account. These are not secret between users.
 
 ## Differences from Pi CLI
 
@@ -162,6 +163,7 @@ Gripi uses Pi’s own runtime, sessions, tools, models, and configuration. The c
 - **Shell output appears when the command finishes.** `!command` adds its output to the model context, and `!!command` does not. Output is not streamed. If a shell command and Pi are both running, Stop cancels the shell command first; press it again to stop Pi.
 - **Extension UI is partial.** Select, confirm, input, editor, notify, title, and editor-prefill requests work. Extension status text is not shown in the footer, which shows only the model, thinking level, and context usage.
 - **There is no terminal UI.** For custom TUI components, terminal keybindings, or code that checks `ctx.mode === "tui"`, use Pi CLI.
+- **Saved environment variables stay in Gripi.** Pi CLI in a terminal does not get the [environment variables](docs/configuration.md#environment-variables) you save in Gripi, so a session continued there runs without them.
 
 ## Development
 

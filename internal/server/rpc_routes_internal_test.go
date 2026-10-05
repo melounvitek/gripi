@@ -217,7 +217,7 @@ func TestStartNewSessionNormalizesANotYetExistingNativePath(t *testing.T) {
 	claimed := ""
 	app := &application{
 		config:          config.Config{SessionsRoot: configuredRoot},
-		newRPCClient:    func(string) (rpc.RPCClient, error) { return client, nil },
+		newRPCClient:    func(string, string) (rpc.RPCClient, error) { return client, nil },
 		rpcClients:      registry,
 		pendingSessions: rpc.NewPendingSessionRegistry(nil),
 		claimSession:    func(_ *http.Request, path string) (bool, error) { claimed = path; return true, nil },

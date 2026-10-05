@@ -42,6 +42,7 @@ import { SessionTagsController } from "./session_tags_controller.js";
 import { SidebarController } from "./sidebar_controller.js";
 import { ConversationController } from "./conversation_controller.js";
 import { CommandPaletteController } from "./command_palette_controller.js";
+import { EnvironmentController } from "./environment_controller.js";
 import { ComposerAutocompleteController } from "./composer_autocomplete_controller.js";
 import { CurrentSessionFindController } from "./current_session_find_controller.js";
 import { LiveMessageParser } from "./live_message_parser.js";
@@ -212,6 +213,7 @@ const commandPaletteController = new CommandPaletteController(document, {
   openSession: (path) => switchSession(sessionUrl(path), { push: true, focus: true }),
   commands: commandPaletteCommands
 });
+const environmentController = new EnvironmentController(document, window, { openModal });
 const treeSessionController = new TreeSessionController(document, window, {
   currentSessionPath: () => currentSessionPath(),
   addSessionViewFormParams: (formData) => addSessionViewFormParams(formData),
@@ -356,6 +358,7 @@ function commandPaletteCommands() {
     ]],
     ["Gripi", [
       { label: "New session…", keys: "ctrl+n", run: openNewSessionModal },
+      { label: "Environment…", run: () => environmentController.open() },
       // On narrow screens the sidebar is a drawer instead.
       window.matchMedia("(min-width: 761px)").matches && { label: sidebarHidden ? "Show sidebar" : "Hide sidebar", run: () => sidebarController.setDesktopVisibility(!sidebarHidden, true) }
     ]]
@@ -735,10 +738,10 @@ function notificationsEnabled() {
 }
 
 function notificationToggleState() {
-  if (notificationsDisabled()) return { name: "off", label: "Off", title: "Notifications off — click to enable" };
-  if (notificationsEnabled()) return { name: "enabled", label: "On", title: "Notifications on — click to disable" };
-  if (!desktopNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied") return { name: "blocked", label: "Blocked", title: "Notifications blocked — click for setup help" };
-  return { name: "enable", label: "Enable", title: "Enable notifications" };
+  if (notificationsDisabled()) return { name: "off", title: "Notifications off — click to enable" };
+  if (notificationsEnabled()) return { name: "enabled", title: "Notifications on — click to disable" };
+  if (!desktopNotificationAvailable() && ("Notification" in window) && Notification.permission === "denied") return { name: "blocked", title: "Notifications blocked — click for setup help" };
+  return { name: "enable", title: "Enable notifications" };
 }
 
 function updateNotificationToggle() {
@@ -747,12 +750,9 @@ function updateNotificationToggle() {
 
   const state = notificationToggleState();
   toggle.classList.toggle("is-enabled", state.name === "enabled");
-  toggle.classList.toggle("is-disabled", state.name === "off" || state.name === "enable");
   toggle.classList.toggle("is-blocked", state.name === "blocked");
   toggle.title = state.title;
   toggle.setAttribute("aria-label", state.title);
-  const stateLabel = toggle.querySelector("[data-notification-toggle-state]");
-  if (stateLabel) stateLabel.textContent = state.label;
 }
 
 async function toggleNotifications() {
@@ -2967,6 +2967,7 @@ function openModal(modal) {
 function closeModal(modal) {
   if (!modal || modal.dataset.sessionActionPending === "true") return;
   if (modal.dataset.modal === "new-session-modal") newSessionFormController.cancelBrowse(modal.querySelector(".new-session-cwd-form"));
+  if (modal.dataset.modal === "environment-modal") environmentController.closeForm();
   modal.hidden = true;
   if (modal.dataset.modal === "model-settings-modal") modelSettingsOperationGeneration += 1;
   document.body.classList.toggle("modal-open", piModalIsOpen());
@@ -2985,7 +2986,7 @@ function focusPromptAfterModalClose(modal) {
     (modelButton || conversationScroll)?.focus({ preventScroll: true });
   } else if (["session-rename-modal", "session-delete-modal"].includes(modal?.dataset.modal)) {
     if (!sessionActionsController.restoreFocus()) syncComposerFocus();
-  } else if (["new-session-modal", "command-palette-modal"].includes(modal?.dataset.modal)) {
+  } else if (["new-session-modal", "command-palette-modal", "environment-modal"].includes(modal?.dataset.modal)) {
     syncComposerFocus();
   }
 }
@@ -3111,6 +3112,10 @@ document.addEventListener("click", (event) => {
     }
     if (opener.dataset.modalOpen === "model-settings-modal") {
       openModelSettingsModal();
+      return;
+    }
+    if (opener.dataset.modalOpen === "environment-modal") {
+      environmentController.open();
       return;
     }
     openModal(modal);
