@@ -778,6 +778,7 @@
     .session-sync-banner--conflict { border-color: #cc66666b; }
     .session-sync-banner--conflict strong, .session-sync-error { color: var(--red); }
     .session-sync-error { display: block; margin-top: 0.25rem; }
+    .session-sync-banner button { flex-shrink: 0; max-width: 40%; }
     .command-list.is-disabled > summary { opacity: 0.48; cursor: not-allowed; pointer-events: none; }
     .cwd-validation-message { min-height: 1.2rem; color: var(--muted); font-size: 0.85rem; }
     .cwd-validation-message.is-invalid { color: var(--danger); }
