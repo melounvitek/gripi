@@ -284,6 +284,12 @@ test("open selected session actions and pin from them on the first mobile tap", 
     await expect(currentRow).toHaveAttribute("data-pinned", String(pinned));
     await expect(page.getByRole("menu")).toBeHidden();
     await expect(actions).toHaveCSS("outline-style", "none");
+    if (pinned) {
+      // Touch devices do without new windows, so the Pinned heading's button is there but hidden.
+      const openAll = page.getByRole("button", { name: "Open all", includeHidden: true });
+      await expect(openAll).toHaveCount(1);
+      await expect(openAll).toBeHidden();
+    }
   }
 
   const indicators = currentRow.locator(".session-indicators");
