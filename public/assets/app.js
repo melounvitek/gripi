@@ -1702,7 +1702,6 @@ async function resumeEventPolling(hiddenDuration = 0) {
   clearTimeout(eventPollResumeTimer);
   abortEventPoll();
   resetEventPollBackoff();
-  hideReconnectBanner();
   if (await refreshStaleSessionAfterResume(hiddenDuration)) return;
   scheduleNextEventPoll(0);
   eventPollResumeTimer = setTimeout(() => {

@@ -125,6 +125,19 @@ test("failed polls are counted afresh once the browser is back online", async ({
   await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
 });
 
+test("returning to the page while still disconnected keeps the warning", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  await page.route(/\/events(?:\?|$)/, (route) => route.abort("connectionfailed"));
+  const warning = page.getByText("Connection lost. Retrying…");
+  await expect(warning).toBeVisible();
+
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+
+  // Checked once, without retrying: two more failed polls would bring a hidden warning back.
+  expect(await warning.isVisible()).toBe(true);
+});
+
 test("returning to the page with a dialog open does not warn about its paused polling", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.history);
