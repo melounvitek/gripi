@@ -237,7 +237,7 @@ func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string, bef
 		}
 		if before.Revision() != after.Revision() || position.LeafID != before.PersistedLeafID {
 			synchronizer.update(path, after, SyncExternalFollow, "", "")
-			return &SyncBlockedError{Mode: SyncExternalFollow, Message: "The session changed while the gateway was taking over. Finish using it in Pi CLI and try again."}
+			return &SyncBlockedError{Mode: SyncExternalFollow, Message: "The session was updated again during the takeover. Try again once you’re done in Pi CLI."}
 		}
 		if beforeManaged != nil {
 			if err := beforeManaged(); err != nil {
@@ -535,7 +535,7 @@ func blockedMessage(mode SyncMode, message string) string {
 	if mode == SyncConflict {
 		return "Session synchronization failed: " + message
 	}
-	return "This session changed outside the gateway. Finish using it in Pi CLI, then take over in the gateway."
+	return "This session was updated in Pi CLI. Take over once you’re done there."
 }
 func firstMode(mode SyncMode) SyncMode {
 	if mode == "" {

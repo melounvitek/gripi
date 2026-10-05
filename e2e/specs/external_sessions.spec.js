@@ -327,10 +327,11 @@ for (const touch of [false, true]) {
       await page.getByLabel("Message to Pi").fill("Draft retained through takeover");
       await appendCLIReply(copiedSession.file, "Before takeover");
       await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "external_follow");
+      await expect(page.getByLabel("Message to Pi")).toHaveAttribute("placeholder", "Sending is paused.");
       const pending = await holdNextFragment(page);
       await appendCLIReply(copiedSession.file, "Pending at takeover");
       await pending.requested;
-      const takeover = page.getByRole("button", { name: "Take over in gateway", exact: true });
+      const takeover = page.getByRole("button", { name: "Take over", exact: true });
       if (touch) await takeover.tap();
       else await takeover.click();
       await expect(page.getByLabel("Message to Pi")).toBeEnabled();
@@ -339,13 +340,14 @@ for (const touch of [false, true]) {
       await pending.finished;
       await expect(page.getByLabel("Message to Pi")).toBeEnabled();
       await expect(page.getByLabel("Message to Pi")).toHaveValue("Draft retained through takeover");
+      await expect(page.getByLabel("Message to Pi")).toHaveAttribute("placeholder", "Ask Pi…");
       await expect(message(page, "assistant", "Pending at takeover")).toBeAttached();
     });
 
     for (const retry of [false, true]) test(`takeover ${retry ? "retry" : "activation"} works on the first press when a CLI snapshot lands before release`, async ({ page, context, copiedSession }) => {
       await page.goto(copiedSession.url);
       await appendCLIReply(copiedSession.file, "Before takeover press");
-      const takeover = page.getByRole("button", { name: "Take over in gateway", exact: true });
+      const takeover = page.getByRole("button", { name: "Take over", exact: true });
       await expect(takeover).toBeVisible();
       if (retry) {
         await page.route("/sessions/takeover", (route) => route.fulfill({ status: 503, json: { error: "Please retry takeover" } }), { times: 1 });
@@ -525,7 +527,7 @@ for (const touch of [false, true]) {
       await expectExternalIcon(selectedLink);
       if (touch) await page.locator('label[aria-label="Close sessions"]').tap();
 
-      const takeover = page.getByRole("button", { name: "Take over in gateway", exact: true });
+      const takeover = page.getByRole("button", { name: "Take over", exact: true });
       if (touch) await takeover.tap();
       else await takeover.click();
       await expect(page.getByLabel("Message to Pi")).toBeEnabled();

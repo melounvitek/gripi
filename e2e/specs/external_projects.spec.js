@@ -48,7 +48,7 @@ test("a new CLI project stays out of project dropdowns until explicit takeover",
 
     const documentMarker = randomUUID();
     await page.evaluate((marker) => { window.externalProjectDocumentMarker = marker; }, documentMarker);
-    await page.getByRole("button", { name: "Take over in gateway", exact: true }).tap();
+    await page.getByRole("button", { name: "Take over", exact: true }).tap();
     await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "managed");
     await expect(page.getByLabel("Message to Pi")).toBeEnabled();
     await expectProjectOptions(page, cwd, 1);
