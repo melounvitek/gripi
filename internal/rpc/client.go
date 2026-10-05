@@ -225,23 +225,24 @@ type Client struct {
 	sampleInterval     time.Duration
 }
 
-func Start(sessionPath string, command []string, extensionPath string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+// Start runs Pi with the gateway's scrubbed environment and the given NAME=value variables on top.
+func Start(sessionPath string, command []string, extensionPath string, variables []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath, "--session", sessionPath}
-	return startProcess("", command, args, diagnostics, observer)
+	return startProcess("", command, args, variables, diagnostics, observer)
 }
 
-func StartInCWD(cwd string, command []string, extensionPath string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+func StartInCWD(cwd string, command []string, extensionPath string, variables []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath}
-	return startProcess(cwd, command, args, diagnostics, observer)
+	return startProcess(cwd, command, args, variables, diagnostics, observer)
 }
 
-func startProcess(cwd string, command, args []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+func startProcess(cwd string, command, args, variables []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	if len(command) == 0 {
 		return nil, errors.New("Pi RPC command is empty")
 	}
 	cmd := exec.Command(command[0], append(command[1:], args...)...)
 	cmd.Dir = cwd
-	cmd.Env = ScrubbedEnvironment(os.Environ())
+	cmd.Env = append(ScrubbedEnvironment(os.Environ()), variables...)
 	configureProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

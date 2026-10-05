@@ -1536,7 +1536,8 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
-	return rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, app.newRPCClient, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
+	factory := func(cwd string) (rpc.RPCClient, error) { return app.newRPCClient(cwd, app.environmentUser(request)) }
+	return rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, factory, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
 		path, ok := sessions.ConfiguredSessionPath(app.config.SessionsRoot, path)
 		if !ok {
 			return "", nil, errors.New("Pi reported a session path outside the configured sessions root")

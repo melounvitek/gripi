@@ -10,7 +10,7 @@ Mockups (untracked): `~/Work/gripi/tmp/mockups/env/` — `sheet-first.png`, `she
 
 Each round is one commit and leaves `mise run test` green.
 
-1. [ ] Pi gets the saved variables: storage, routes, validation, and the overlay on Pi's environment.
+1. [x] Pi gets the saved variables: storage, routes, validation, and the overlay on Pi's environment.
 2. [ ] Changes apply from the next message: a stale idle Pi is restarted before the message is sent.
 3. [ ] The bell: Notifications becomes an icon in the sidebar header.
 4. [ ] The dialog: the key icon, the Ctrl+K command, and the Environment dialog.

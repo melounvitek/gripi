@@ -17,6 +17,7 @@ import (
 
 	"github.com/melounvitek/gripi/internal/access"
 	"github.com/melounvitek/gripi/internal/config"
+	"github.com/melounvitek/gripi/internal/environment"
 	"github.com/melounvitek/gripi/internal/keyedlock"
 	"github.com/melounvitek/gripi/internal/push"
 	"github.com/melounvitek/gripi/internal/rendering"
@@ -36,6 +37,7 @@ type application struct {
 	browserStore            *access.BrowserStore
 	workspaceStore          *access.WorkspaceStore
 	ownershipStore          *access.WorkspaceOwnershipStore
+	environment             *environment.Store
 	workspaceSecret         string
 	pushIdentity            *push.VAPIDIdentity
 	pushSubscriptions       *push.SubscriptionStore
@@ -56,7 +58,7 @@ type application struct {
 	knownSessionHashes      map[string]bool
 	sessionHashesAt         time.Time
 	rpcClients              *rpc.Registry
-	newRPCClient            func(string) (rpc.RPCClient, error)
+	newRPCClient            func(cwd, userID string) (rpc.RPCClient, error)
 	rpcDiagnostics          *rpc.Diagnostics
 	pendingSessions         *rpc.PendingSessionRegistry
 	pendingRemapMu          sync.Mutex
@@ -189,6 +191,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		browserStore:         access.NewBrowserStore(cfg.BrowserAccessPath),
 		workspaceStore:       access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
 		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
+		environment:          environment.NewStore(cfg.EnvironmentPath),
 		workspaceSecret:      workspaceSecret,
 		pushIdentity:         pushIdentity,
 		pushSubscriptions:    pushSubscriptions,
@@ -226,19 +229,34 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	app.rpcDiagnostics = diagnostics
 	app.completionNotifications = newCompletionNotifier(app)
 	app.rpcClients = rpc.NewRegistry(func(sessionPath string) (rpc.RPCClient, error) {
+		owner := ""
+		if cfg.MultiUserMode {
+			var err error
+			if owner, err = app.ownershipStore.Owner(sessionPath); err != nil {
+				return nil, err
+			}
+		}
+		variables, err := app.piEnvironment(owner)
+		if err != nil {
+			return nil, err
+		}
 		extensionPath, err := app.rpcExtensionPath()
 		if err != nil {
 			return nil, err
 		}
-		return rpc.Start(sessionPath, cfg.PiCommand, extensionPath, diagnostics, app.completionNotifications.Observe)
+		return rpc.Start(sessionPath, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
-	app.newRPCClient = func(cwd string) (rpc.RPCClient, error) {
+	app.newRPCClient = func(cwd, userID string) (rpc.RPCClient, error) {
+		variables, err := app.piEnvironment(userID)
+		if err != nil {
+			return nil, err
+		}
 		extensionPath, err := app.rpcExtensionPath()
 		if err != nil {
 			return nil, err
 		}
-		return rpc.StartInCWD(cwd, cfg.PiCommand, extensionPath, diagnostics, app.completionNotifications.Observe)
+		return rpc.StartInCWD(cwd, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
 	}
 	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, app.sessionCache, app.rpcClients)
 	if cfg.MultiUserMode {
@@ -285,6 +303,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	app.registerOperationalRoutes(mux)
 	app.registerSessionRoutes(mux)
 	app.registerActionRoutes(mux)
+	app.registerEnvironmentRoutes(mux)
 
 	var handler http.Handler = mux
 	handler = app.enforceWorkspaceAccess(handler)
