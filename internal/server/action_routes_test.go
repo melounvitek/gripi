@@ -432,18 +432,16 @@ func TestGoGatewayValidatesAndBrowsesNewSessionDirectories(t *testing.T) {
 	if invalid.Code != http.StatusUnprocessableEntity || !strings.Contains(invalid.Body.String(), `"valid":false`) {
 		t.Fatalf("invalid = %d %s", invalid.Code, invalid.Body.String())
 	}
-	if runtime.GOOS != "windows" {
-		inaccessible := filepath.Join(root, "inaccessible")
-		if err := os.Mkdir(inaccessible, 0400); err != nil {
-			t.Fatal(err)
-		}
-		blocked := serveAction(handler, getActionRequest("/sessions/validate_cwd?cwd="+url.QueryEscape(inaccessible)))
-		if blocked.Code != http.StatusUnprocessableEntity || !strings.Contains(blocked.Body.String(), "Directory is not accessible") {
-			t.Fatalf("inaccessible = %d %s", blocked.Code, blocked.Body.String())
-		}
-		if listed := serveAction(handler, getActionRequest("/sessions/browse_cwd?cwd="+url.QueryEscape(root))); strings.Contains(listed.Body.String(), "inaccessible") {
-			t.Fatalf("browse lists an inaccessible folder: %s", listed.Body.String())
-		}
+	inaccessible := filepath.Join(root, "inaccessible")
+	if err := os.Mkdir(inaccessible, 0400); err != nil {
+		t.Fatal(err)
+	}
+	blocked := serveAction(handler, getActionRequest("/sessions/validate_cwd?cwd="+url.QueryEscape(inaccessible)))
+	if blocked.Code != http.StatusUnprocessableEntity || !strings.Contains(blocked.Body.String(), "Directory is not accessible") {
+		t.Fatalf("inaccessible = %d %s", blocked.Code, blocked.Body.String())
+	}
+	if listed := serveAction(handler, getActionRequest("/sessions/browse_cwd?cwd="+url.QueryEscape(root))); strings.Contains(listed.Body.String(), "inaccessible") {
+		t.Fatalf("browse lists an inaccessible folder: %s", listed.Body.String())
 	}
 }
 

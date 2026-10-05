@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -45,14 +44,12 @@ func TestEnsurePasswordAppendsOnceAndPreservesExistingBytes(t *testing.T) {
 	if !pattern.Match(contents) {
 		t.Fatalf("env contents = %q", contents)
 	}
-	if runtime.GOOS != "windows" {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm() != 0600 {
-			t.Fatalf("mode = %o", info.Mode().Perm())
-		}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("mode = %o", info.Mode().Perm())
 	}
 
 	before := append([]byte(nil), contents...)

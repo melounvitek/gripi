@@ -3,14 +3,10 @@ package sessions
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
 func TestDeleteSessionFileUsesTrashWhenAvailable(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell fixture is Unix-specific")
-	}
 	root := t.TempDir()
 	path := filepath.Join(root, "session.jsonl")
 	if err := os.WriteFile(path, []byte("session"), 0600); err != nil {
@@ -40,9 +36,6 @@ func TestDeleteSessionFileUsesTrashWhenAvailable(t *testing.T) {
 }
 
 func TestDeleteSessionFileUsesGIOTrashWhenAvailable(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell fixture is Unix-specific")
-	}
 	root := t.TempDir()
 	path := filepath.Join(root, "session.jsonl")
 	if err := os.WriteFile(path, []byte("session"), 0600); err != nil {
