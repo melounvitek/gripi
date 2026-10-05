@@ -139,6 +139,7 @@ let escapeStopConfirmationTimer = null;
 const stoppingSessionPaths = new Set();
 let eventPollTimer = null;
 let eventPollInFlight = false;
+let lastEventPollFailed = false;
 let eventPollAbortController = null;
 let eventPollResumeTimer = null;
 let staleSessionRefreshInFlight = false;
@@ -1574,6 +1575,7 @@ function nextEventPollDelay(failed = false) {
 
 function resetEventPollBackoff() {
   emptyEventPollCount = 0;
+  lastEventPollFailed = false;
 }
 
 function resetEventCursor() {
@@ -1843,9 +1845,14 @@ async function pollEvents() {
     });
   } catch (_error) {
     pollSucceeded = false;
-    if (!controller.piSuppressedAbort && eventPollCurrent(generation, sessionViewGeneration) && !document.hidden) showReconnectBanner();
+    if (!controller.piSuppressedAbort && eventPollCurrent(generation, sessionViewGeneration)) {
+      // A single failed poll is usually a blip that the next poll recovers from.
+      if (lastEventPollFailed && !document.hidden) showReconnectBanner();
+      lastEventPollFailed = true;
+    }
   } finally {
     clearTimeout(pollTimeout);
+    if (pollSucceeded) lastEventPollFailed = false;
     if (eventPollAbortController === controller) {
       eventPollAbortController = null;
       eventPollInFlight = false;

@@ -83,3 +83,44 @@ test("failed wake recovery keeps the draft and warning while backing off before 
   await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
   expect(refreshes).toBe(2);
 });
+
+test("a failed poll stays silent until the next poll fails too", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  let polls = 0;
+  let heldPoll;
+  // Polls 1 and 3 fail around a successful one; poll 4 waits for the test to fail it.
+  await page.route(/\/events(?:\?|$)/, (route) => {
+    polls += 1;
+    if (polls === 2 || polls > 4) return route.continue();
+    if (polls === 4) heldPoll = route;
+    else return route.abort("connectionfailed");
+  });
+  const warning = page.getByText("Session may be stale.");
+
+  // Poll 4 only starts once the app has handled the failure of poll 3. Failed polls back off for 2s.
+  await expect.poll(() => polls, { timeout: 15_000 }).toBe(4);
+  await expect(warning).toBeHidden();
+
+  await heldPoll.abort("connectionfailed");
+  await expect(warning).toBeVisible();
+  await expect(warning).toBeHidden();
+});
+
+test("failed polls are counted afresh once the browser is back online", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  let polls = 0;
+  // Odd polls fail; even ones stay pending, so each marks the previous failure as handled.
+  await page.route(/\/events(?:\?|$)/, (route) => {
+    polls += 1;
+    if (polls % 2 === 1) return route.abort("connectionfailed");
+  });
+
+  await expect.poll(() => polls).toBe(2);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+
+  // No poll succeeds here, so the check 5s after returning will warn; assert before it does.
+  await expect.poll(() => polls).toBe(4);
+  await expect(page.getByText("Session may be stale.")).toBeHidden();
+});
