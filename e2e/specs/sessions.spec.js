@@ -404,26 +404,39 @@ test("opening the current session in a new window moves the original window to a
   await expect(currentRow).not.toHaveAttribute("data-session-path", sessionPath);
 });
 
-test("open all pinned sessions in new windows", async ({ page, context }) => {
-  await page.goto("/");
-  const currentRow = page.locator('.session-row[data-current="true"]');
-  const paths = [
-    await currentRow.getAttribute("data-session-path"),
-    await page.locator('.session-row[data-current="false"]').first().getAttribute("data-session-path")
-  ];
-  await setSessionsPinned(page, paths, true);
+for (const desktopApp of [false, true]) {
+  test(`open all pinned sessions in new windows${desktopApp ? " in the desktop app" : ""}`, async ({ page, context }) => {
+    // The desktop app opens each window itself, so window.open returns nothing there even though the window opens.
+    if (desktopApp) await page.addInitScript(() => {
+      window.gripiElectron = {};
+      const open = window.open.bind(window);
+      window.open = (...args) => { open(...args); return null; };
+    });
+    await page.goto("/");
+    const currentRow = page.locator('.session-row[data-current="true"]');
+    const paths = [
+      await currentRow.getAttribute("data-session-path"),
+      ...await page.locator('.session-row[data-current="false"]').evaluateAll((rows) => rows.slice(0, 2).map((row) => row.dataset.sessionPath))
+    ];
+    await setSessionsPinned(page, paths, true);
 
-  await page.getByRole("button", { name: "Open all" }).click();
-  await expect.poll(() => context.pages().length).toBe(3);
-  const sessionWindows = context.pages().slice(1);
-  for (const sessionWindow of sessionWindows) await expect(sessionWindow).toHaveURL(/session_only=1/);
-  expect(sessionWindows.map((sessionWindow) => new URL(sessionWindow.url()).searchParams.get("session")).sort()).toEqual([...paths].sort());
-  // The current session now has its own window, so this one moves on, as it does for the menu's "Open in new window".
-  await expect(currentRow).toHaveCount(1);
-  await expect(currentRow).not.toHaveAttribute("data-session-path", paths[0]);
+    await page.getByRole("button", { name: "Open all" }).click();
+    await expect.poll(() => context.pages().length).toBe(4);
+    const sessionWindows = context.pages().slice(1);
+    for (const sessionWindow of sessionWindows) await expect(sessionWindow).toHaveURL(/session_only=1/);
+    expect(sessionWindows.map((sessionWindow) => new URL(sessionWindow.url()).searchParams.get("session")).sort()).toEqual([...paths].sort());
+    // A window that could report a pop-up blocker starts with a copy of this window's sessionStorage, which holds its notification identity.
+    const notificationClient = (sessionWindow) => sessionWindow.evaluate(() => sessionStorage.getItem("gripi:notification-presence-client"));
+    const mainClient = await notificationClient(page);
+    expect(mainClient).toBeTruthy();
+    for (const sessionWindow of sessionWindows) expect(await notificationClient(sessionWindow)).not.toBe(mainClient);
+    // The current session now has its own window, so this one moves on, as it does for the menu's "Open in new window".
+    await expect(currentRow).toHaveCount(1);
+    await expect(currentRow).not.toHaveAttribute("data-session-path", paths[0]);
 
-  await setSessionsPinned(page, paths, false);
-});
+    await setSessionsPinned(page, paths, false);
+  });
+}
 
 test("rename and delete a background session from its contextual actions", async ({ page }) => {
   await page.goto("/");
