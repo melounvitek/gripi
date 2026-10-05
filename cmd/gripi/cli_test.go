@@ -18,7 +18,7 @@ func runCLIWithInput(input string, arguments ...string) (code int, stdout, stder
 
 func TestBareCommandAndHelpFlagsPrintTheOverview(t *testing.T) {
 	_, overview, _ := runCLI()
-	for _, arguments := range [][]string{{}, {"help"}, {"-h"}, {"--help"}} {
+	for _, arguments := range [][]string{{}, {"help"}, {"-h"}, {"-help"}, {"--help"}, {"help", "--help"}} {
 		code, stdout, stderr := runCLI(arguments...)
 		if code != 0 || stdout != overview || stderr != "" {
 			t.Fatalf("gripi %v = %d, stdout %q, stderr %q", arguments, code, stdout, stderr)
@@ -43,7 +43,7 @@ func TestEveryCommandExplainsItselfWithoutRunning(t *testing.T) {
 		if !strings.HasPrefix(help, command.summary) || !strings.Contains(help, "Usage:\n  gripi "+command.name) {
 			t.Fatalf("gripi help %s = %q", command.name, help)
 		}
-		for _, flag := range []string{"-h", "--help"} {
+		for _, flag := range []string{"-h", "-help", "--help"} {
 			if code, stdout, stderr := runCLI(command.name, flag); code != 0 || stdout != help || stderr != "" {
 				t.Fatalf("gripi %s %s = %d, stdout %q, stderr %q", command.name, flag, code, stdout, stderr)
 			}

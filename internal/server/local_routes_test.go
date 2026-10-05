@@ -131,7 +131,7 @@ func promptOverTCP(t *testing.T, handler http.Handler, fields url.Values) {
 	}
 }
 
-func TestLocalSessionsReportLiveStateWithoutMarkingAnythingRead(t *testing.T) {
+func TestLocalSessionsReportFinishedRepliesWithoutMarkingThemRead(t *testing.T) {
 	handler, alpha, beta, project := fakePiGateway(t)
 	local := localHandler(t, handler)
 
@@ -152,9 +152,7 @@ func TestLocalSessionsReportLiveStateWithoutMarkingAnythingRead(t *testing.T) {
 		t.Fatalf("unknown session = %+v", missing)
 	}
 
-	promptOverTCP(t, handler, url.Values{"session": {alpha}, "message": {"Start the follow-up scenario"}})
-	waitForLocalSession(t, local, alpha, func(session gateway.LocalSession) bool { return session.State == "working" })
-	promptOverTCP(t, handler, url.Values{"session": {alpha}, "message": {"Continue with the queued follow-up"}, "streaming_behavior": {"follow_up"}})
+	promptOverTCP(t, handler, url.Values{"session": {alpha}, "message": {"Show the deterministic browser response"}})
 	waitForLocalSession(t, local, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" && session.Unread })
 	if again := localSessions(t, local, ""); again[0].Path != alpha || !again[0].Unread {
 		t.Fatalf("listing marked the finished session read or kept the old order: %+v", again)
@@ -165,15 +163,11 @@ func TestLocalSessionsReportLiveStateWithoutMarkingAnythingRead(t *testing.T) {
 		t.Fatalf("open session = %d", opened.Code)
 	}
 	waitForLocalSession(t, local, alpha, func(session gateway.LocalSession) bool { return !session.Unread })
-
-	promptOverTCP(t, handler, url.Values{"session": {beta}, "message": {"Ask me for release approval"}})
-	waitForLocalSession(t, local, beta, func(session gateway.LocalSession) bool { return session.State == "waiting" })
 }
 
 func TestSessionListForCommandsIsNotServedToBrowsers(t *testing.T) {
-	handler, _, _, _ := fakePiGateway(t)
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1:4567/sessions", nil))
+	newHandler(t, testConfig(t)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1:4567/sessions", nil))
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("GET /sessions over TCP = %d %s", response.Code, response.Body.String())
 	}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/config"
+	"github.com/melounvitek/gripi/internal/prompts"
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
@@ -42,7 +43,8 @@ const sessionFields = `Session fields:
 `
 
 const sessionExitCodes = `  0  success
-  1  the gateway is not running, or it refused the request
+  1  the gateway cannot be reached, it refused the request, or no single
+     session matched
   2  usage error
 `
 
@@ -86,7 +88,7 @@ func (client *gatewayClient) do(request *http.Request, result any) error {
 		if errors.As(err, &wrapped) {
 			err = wrapped.Err
 		}
-		return fmt.Errorf("cannot reach the gateway (%w); start it with 'gripi serve'. A gateway in multi-user mode accepts no commands", err)
+		return fmt.Errorf("cannot reach the gateway (%w). Is it running? A gateway in multi-user mode accepts no commands", err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
@@ -138,14 +140,17 @@ func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int
 	if err != nil {
 		return failure(stderr, "list", err)
 	}
-	if total := len(sessions); !*all && total > listLimit {
+	total := len(sessions)
+	if !*all && total > listLimit {
 		sessions = sessions[:listLimit]
-		fmt.Fprintf(stderr, "Showing the latest %d of %d sessions; pass --all for the rest.\n", listLimit, total)
 	}
 	if *asJSON {
 		return printJSON(stdout, stderr, "list", sessions)
 	}
 	printSessions(stdout, sessions)
+	if len(sessions) < total {
+		fmt.Fprintf(stderr, "Showing the latest %d of %d sessions; pass --all for the rest.\n", listLimit, total)
+	}
 	return 0
 }
 
@@ -235,12 +240,13 @@ Flags:
 
 While Pi is working, the message is queued and delivered once the agent has
 finished. With --steer it is delivered sooner: after the tool calls of the
-current step and before Pi's next request to the model. With --steer the
-gateway also acts on its own slash commands such as /compact or /new, as the
-browser's composer does; otherwise they reach Pi as plain text.
+current step and before Pi's next request to the model.
 
-The text is never run as a "!" shell command. Pi still expands its own skills,
-prompt templates and extension commands, such as /skill:name.
+The text only ever reaches Pi as a prompt. A leading "!" does not run a shell
+command, and the composer's own commands (/new, /compact, /name, /model,
+/fork, /tree, /clone, /reload, /login, /logout) are refused rather than run.
+Pi still expands its skills, prompt templates and extension commands, such as
+/skill:name.
 
 A session in state external or conflict accepts no messages.
 
@@ -283,6 +289,10 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	if message = strings.TrimSpace(message); message == "" {
 		return usageError(stderr, "send", "the message is empty")
 	}
+	// Steered, the gateway would run these as the composer does; otherwise Pi would get them as text.
+	if prompts.ParseSlashCommand(message).Type != "" {
+		return usageError(stderr, "send", strings.Fields(message)[0]+" is a command of the browser's composer, which send does not run")
+	}
 
 	client, err := newGatewayClient()
 	if err != nil {
@@ -313,15 +323,15 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	// Pi accepts a prompt just before it reports the turn. Returning in that gap
 	// would let a following 'gripi wait' see an idle session and finish at once.
 	// A message that starts no turn, such as an extension command, waits this out.
-	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(100 * time.Millisecond) {
 		current, err := client.sessions(accepted.Session)
 		if err != nil {
-			return failure(stderr, "send", err)
-		}
-		if len(current) == 1 {
+			// The message is delivered, so this must not look like a failed send.
+			fmt.Fprintf(stderr, "gripi send: delivered, but the session could not be read back: %v\n", err)
+		} else if len(current) == 1 {
 			session = current[0]
 		}
-		if session.State != "idle" || time.Now().After(deadline) {
+		if err != nil || session.State != "idle" || time.Now().After(deadline) {
 			return printSession(stdout, stderr, "send", session, *asJSON)
 		}
 	}
@@ -367,8 +377,9 @@ const waitHelp = `Usage:
   gripi wait <session> [--timeout <seconds>] [--json]
 
 Blocks until the session is no longer working or compacting, then prints it.
-Run it after 'gripi send' to get the reply: last_reply has its first 180
-characters, and the session file at path has the whole conversation.
+Without --timeout it waits as long as that takes. Run it after 'gripi send' to
+get the reply: last_reply has its first 180 characters, and the session file
+at path has the whole conversation.
 
 Check the printed state. idle means Pi finished. waiting, external and
 conflict also end the wait, because Pi will not continue until someone acts in
@@ -435,6 +446,6 @@ func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) i
 			printSession(stdout, stderr, "wait", session, *asJSON)
 			return exitTimeout
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(time.Second)
 	}
 }

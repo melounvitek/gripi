@@ -67,6 +67,15 @@ func serve() error {
 		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Printf("close gateway listener: %v", err)
 		}
+		// Both listeners stop before either drains: a request accepted
+		// during a drain would lose its Pi process moments later.
+		if localServer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := localServer.Shutdown(ctx); err != nil {
+				log.Printf("gripi command socket shutdown: %v", err)
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
@@ -74,13 +83,6 @@ func serve() error {
 		}
 		if err := <-serveErrors; err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			log.Printf("gateway server: %v", err)
-		}
-	}
-	if localServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := localServer.Shutdown(ctx); err != nil {
-			log.Printf("gripi command socket shutdown: %v", err)
 		}
 	}
 	if closer, ok := handler.(interface{ Close(context.Context) error }); ok {
@@ -122,11 +124,15 @@ func startLocalServer(handler http.Handler, path string) (*http.Server, error) {
 		if info.Mode()&os.ModeSocket == 0 {
 			return nil, fmt.Errorf("%s exists and is not a socket", path)
 		}
-		if connection, err := net.DialTimeout("unix", path, time.Second); err == nil {
+		connection, err := net.DialTimeout("unix", path, time.Second)
+		if err == nil {
 			connection.Close()
 			return nil, fmt.Errorf("another gateway is listening on %s", path)
 		}
-		// A gateway that did not shut down cleanly leaves its socket behind.
+		// Only a refused connection proves that no gateway is listening.
+		if !errors.Is(err, syscall.ECONNREFUSED) {
+			return nil, err
+		}
 		if err := os.Remove(path); err != nil {
 			return nil, err
 		}

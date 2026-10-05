@@ -51,7 +51,7 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/melounvitek/gr
 5. Uses Mise to install Gripi’s pinned Go and Node.js versions.
 6. Installs Node dependencies, builds the Go gateway, and ensures an admin password exists in `~/.config/gripi/env`. A newly generated password is printed.
 7. Moves the completed checkout to `~/.local/share/gripi`. It refuses to overwrite an existing installation.
-8. Links `~/.local/bin/gripi` to the built gateway, unless another file already has that name.
+8. Links `~/.local/bin/gripi` to the built gateway, unless a file that is not a link already has that name.
 
 It does not install or configure Pi, and it does not start the gateway.
 

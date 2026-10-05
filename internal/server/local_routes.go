@@ -52,29 +52,31 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 		}
 		result = append(result, LocalSession{
 			ID: session.ID, Path: session.Path, Name: session.DisplayName, CWD: session.CWD,
-			State: app.localSessionState(view, session.Path), Unread: view.Unread[session.Path], Pinned: view.Pinned[session.Path],
+			State: app.localSessionState(session.Path), Unread: view.Unread[session.Path], Pinned: view.Pinned[session.Path],
 			Tags: tags, UpdatedAt: session.ConversationActivityAt, LastReply: session.LatestAssistantResponsePreview,
 		})
 	}
 	writeJSON(response, map[string]any{"sessions": result})
 }
 
-func (app *application) localSessionState(view *pageView, path string) string {
+func (app *application) localSessionState(path string) string {
 	live := app.rpcClients.LiveSnapshot(path)
 	dialogs, _ := live.ExtensionUI["pending_dialogs"].([]map[string]any)
 	switch {
 	// A dialog keeps Pi busy until someone answers, so it must not read as working.
 	case len(dialogs) > 0:
 		return "waiting"
-	case live.Compacting:
+	// Prompts queued during a compaction are delivered just after it ends.
+	case app.rpcClients.DeferringCompactionPrompts(path):
 		return "compacting"
 	case live.Busy:
 		return "working"
-	case view.ExternalFollow[path]:
-		return "external"
 	}
-	if blocked := app.synchronizer.KnownBlocked(path); blocked != nil && blocked.Mode == sessions.SyncConflict {
-		return "conflict"
+	if blocked := app.synchronizer.KnownBlocked(path); blocked != nil {
+		if blocked.Mode == sessions.SyncConflict {
+			return "conflict"
+		}
+		return "external"
 	}
 	return "idle"
 }

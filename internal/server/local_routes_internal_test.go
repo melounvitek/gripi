@@ -1,11 +1,15 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func onlyLocalSession(t *testing.T, app *application) LocalSession {
@@ -42,5 +46,23 @@ func TestLocalSessionsReportSessionsChangedOutsideTheGateway(t *testing.T) {
 	}
 	if session := onlyLocalSession(t, app); session.State != "conflict" {
 		t.Fatalf("replaced session file = %+v", session)
+	}
+}
+
+// deferringClient has finished compacting but still holds prompts queued during it.
+type deferringClient struct{ *remapClient }
+
+func (deferringClient) DeferringCompactionPrompts() bool { return true }
+
+func TestLocalSessionsKeepCompactingUntilQueuedPromptsAreDelivered(t *testing.T) {
+	app, path, client := externalSessionTestApplication(t)
+	app.rpcClients = rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return deferringClient{client}, nil }, nil)
+	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, app.sessionCache, app.rpcClients)
+	if err := app.rpcClients.WithClient(context.Background(), path, func(rpc.RPCClient) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	// Reporting idle here would end 'gripi wait' before the queued prompt runs.
+	if session := onlyLocalSession(t, app); session.State != "compacting" {
+		t.Fatalf("session with prompts queued behind compaction = %+v", session)
 	}
 }

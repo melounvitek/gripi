@@ -80,6 +80,21 @@ func TestLocalServerLeavesARunningGatewayAndOrdinaryFilesAlone(t *testing.T) {
 		response.Body.Close()
 	}
 
+	// A socket that cannot be probed may belong to a live gateway.
+	unreadable := filepath.Join(filepath.Dir(path), "unreadable.sock")
+	stale, err := net.Listen("unix", unreadable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.(*net.UnixListener).SetUnlinkOnClose(false)
+	stale.Close()
+	if err := os.Chmod(unreadable, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := startLocalServer(http.NotFoundHandler(), unreadable); err == nil && os.Getuid() != 0 {
+		t.Fatal("gateway replaced a socket it could not probe")
+	}
+
 	file := filepath.Join(filepath.Dir(path), "notes.txt")
 	if err := os.WriteFile(file, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)

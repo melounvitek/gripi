@@ -70,22 +70,24 @@ func TestListPrintsTheLatestSessionsAsATable(t *testing.T) {
 }
 
 func TestListPrintsJSONForPrograms(t *testing.T) {
-	sessions := cannedSessions(3)
+	sessions := cannedSessions(25)
 	cannedGateway(t, sessions)
 	code, stdout, stderr := runCLI("list", "--json")
 	var listed []gateway.LocalSession
+	// Nothing but JSON is printed, so "2>&1 | jq" keeps working.
 	if err := json.Unmarshal([]byte(stdout), &listed); err != nil || code != 0 || stderr != "" {
 		t.Fatalf("gripi list --json = %d, stderr %q, %v:\n%s", code, stderr, err, stdout)
 	}
-	if !reflect.DeepEqual(listed, sessions) {
-		t.Fatalf("listed %+v, expected %+v", listed, sessions)
+	if !reflect.DeepEqual(listed, sessions[:20]) {
+		t.Fatalf("listed %+v, expected %+v", listed, sessions[:20])
 	}
 }
 
 func TestSessionCommandsExplainAnUnreachableGateway(t *testing.T) {
 	t.Setenv("GRIPI_SOCKET_PATH", socketPath(t))
 	code, stdout, stderr := runCLI("list")
-	if code != 1 || stdout != "" || !strings.Contains(stderr, "gripi serve") {
+	// Suggesting 'gripi serve' here would have agents start a second gateway.
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "cannot reach the gateway") || strings.Contains(stderr, "gripi serve") {
 		t.Fatalf("gripi list without a gateway = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }

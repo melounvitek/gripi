@@ -184,7 +184,8 @@ func SocketPath(environ []string) (string, error) {
 		}
 		path = filepath.Join(process["HOME"], ".pi", "gripi", "gripi.sock")
 	}
-	// Go binds other names as abstract sockets, which have no permissions.
+	// A relative path would name different files for the gateway and a command
+	// run elsewhere, and Go binds "@name" as an abstract socket without permissions.
 	if !filepath.IsAbs(path) {
 		return "", errors.New("GRIPI_SOCKET_PATH must be an absolute path")
 	}
