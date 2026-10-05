@@ -223,9 +223,51 @@
     return true;
   }
 
+  // What lets Pi act as the user on GitHub: each comment with the lines it explains.
+  const GITHUB_GROUPS = [
+    ["# gh: pull requests, issues, API", "GH_TOKEN="],
+    ["# your name and email on commits", "GIT_AUTHOR_NAME=", "GIT_AUTHOR_EMAIL=", "GIT_COMMITTER_NAME=", "GIT_COMMITTER_EMAIL="],
+    ["# git push over HTTPS with your token, also for SSH remotes; leave as is", "GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf", "GIT_CONFIG_VALUE_0=git@github.com:", "GIT_CONFIG_KEY_1=credential.https://github.com.helper", "GIT_CONFIG_VALUE_1=!gh auth git-credential"]
+  ];
+
+  // The GitHub lines whose names are not saved yet, under the comment of each group that still has one.
+  function githubBlock(saved) {
+    return GITHUB_GROUPS.flatMap(([comment, ...lines]) => {
+      const missing = lines.filter((line) => !saved.includes(line.slice(0, line.indexOf("="))));
+      return missing.length ? [comment, ...missing] : [];
+    }).join("\n");
+  }
+
+  // A NAME=value line split at its first "=". As on the gateway, the value loses one pair of quotes around it.
+  function environmentPair(line) {
+    const cut = line.indexOf("=");
+    return [line.slice(0, cut).trim(), line.slice(cut + 1).trim().replace(/^(["'])(.*)\1$/, "$2")];
+  }
+
+  // The gateway's rules for one variable, in its own words (internal/environment/store.go) and without its size limits.
+  function environmentError(name, value) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return `“${name}” is not a valid name. Use letters, digits and _.`;
+    if (name === "HOME" || name.startsWith("GRIPI_") || name.startsWith("PI_CODING_AGENT_")) return `“${name}” is reserved for Gripi and Pi.`;
+    return value ? "" : `${name} has no value.`;
+  }
+
+  // The variables of a block as the gateway reads it: all of them, or the first line it rejects.
+  function parseEnvironmentBlock(text) {
+    const variables = [];
+    for (const [index, source] of text.split("\n").entries()) {
+      const line = source.trim();
+      if (!line || line.startsWith("#")) continue;
+      const [name, value] = environmentPair(line);
+      const error = !line.includes("=") ? "expected NAME=value." : variables.some(([seen]) => seen === name) ? `${name} is set twice.` : environmentError(name, value);
+      if (error) return { error: `Line ${index + 1}: ${error}` };
+      variables.push([name, value]);
+    }
+    return { variables };
+  }
+
   const defaultSessionId = "welcome";
   const sessionCatalog = initialSessions.map(({ id, name, project, age, pinned, messages }) => ({ id, name, project, age, pinned, hasActivity: sessionHasActivity(messages) }));
-  global.GripiDemo = { playScript, responseScript, normalizeSession, safeIdentityColor, safeGuideLink, inlineCodeParts, toolSummaryParts, formatDemoTimestamp: timeLabel, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
+  global.GripiDemo = { playScript, responseScript, normalizeSession, safeIdentityColor, safeGuideLink, inlineCodeParts, toolSummaryParts, githubBlock, parseEnvironmentBlock, formatDemoTimestamp: timeLabel, defaultSessionId, sessionCatalog, demoSessionCount: initialSessions.length, hasUnreadSessions: false };
   if (typeof document === "undefined") return;
 
   const storageKey = "gripi:static-demo:v14";
@@ -736,8 +778,9 @@
     (modal.querySelector("[data-modal-default-focus]") || modal.querySelector("button, input, select"))?.focus();
     if (name === "new-session-modal") showNewSessionRows(false);
     if (name === "command-palette-modal") { paletteInput.value = ""; renderPalette(); }
+    if (name === "environment-modal") { environmentCursor = 0; showEnvironmentList(); }
   }
-  function closeModal(modal) { if (!modal) return; modal.hidden = true; document.querySelector(".app-shell").inert = false; if (modal.dataset.modal === "demo-intro-modal") markIntroSeen(); previousModalFocus?.focus(); previousModalFocus = null; }
+  function closeModal(modal) { if (!modal) return; if (modal === environmentModal) closeEnvironmentForm(); modal.hidden = true; document.querySelector(".app-shell").inert = false; if (modal.dataset.modal === "demo-intro-modal") markIntroSeen(); previousModalFocus?.focus(); previousModalFocus = null; }
   function handleSlash(command) {
     const modals = { new: "new-session-modal", fork: "fork-session-modal", tree: "tree-session-modal", model: "model-settings-modal" };
     if (modals[command]) openModal(modals[command]);
@@ -955,8 +998,8 @@
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); element.searchForm.classList.add("is-open"); element.searchToggle.setAttribute("aria-expanded", "true"); if (matchMedia("(min-width: 761px)").matches) setDesktopSidebarHidden(false); else document.getElementById("mobile-session-toggle").checked = true; element.search.focus(); }
     if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "f" && !modalIsOpen()) { event.preventDefault(); showFind(); }
     if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "k" && (!palette.hidden || !modalIsOpen())) { event.preventDefault(); if (palette.hidden) openModal("command-palette-modal"); else closeModal(palette); }
-    if (event.key === "Escape") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (modal) closeModal(modal); else if (!element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); element.projectTrigger.focus(); } }
-    if (event.key === "Tab") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (!modal) return; const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")]; if (!focusable.length) return; const first = focusable[0], last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
+    if (event.key === "Escape" && !event.defaultPrevented) { const modal = document.querySelector("[data-modal]:not([hidden])"); if (modal) closeModal(modal); else if (!element.projectList.hidden) { element.projectList.hidden = true; element.projectTrigger.setAttribute("aria-expanded", "false"); element.projectTrigger.focus(); } }
+    if (event.key === "Tab") { const modal = document.querySelector("[data-modal]:not([hidden])"); if (!modal) return; const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")].filter((control) => control.tabIndex >= 0 && !control.closest("[hidden]")); if (!focusable.length) return; const first = focusable[0], last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
 
   function showFind() { const find = document.querySelector("[data-current-session-find]"); find.hidden = false; find.querySelector("input").focus(); }
@@ -1012,6 +1055,7 @@
       ]],
       ["Gripi", [
         ["New session…", "", "ctrl+n", () => handleSlash("new")],
+        ["Environment…", "", "", () => openModal("environment-modal")],
         // On narrow screens the sidebar is a drawer instead.
         ...(matchMedia("(min-width: 761px)").matches ? [[sidebarHidden ? "Show sidebar" : "Hide sidebar", "", "", () => setDesktopSidebarHidden(!sidebarHidden, true)]] : [])
       ]]
@@ -1042,6 +1086,138 @@
     // As in the real palette, the input is the only focus stop.
     else if (event.key !== "Tab") return;
     event.preventDefault();
+  });
+
+  // The real Environment dialog, with this page in the gateway's place. A visitor may paste a real token here, so values live in this map only: never in storage, and in a field only while its form is open.
+  let environmentVariables = new Map();
+  const environmentModal = document.querySelector('[data-modal="environment-modal"]');
+  // The dialog's parts, each under the name its data-environment-… attribute ends with.
+  const environment = Object.fromEntries(["description", "list", "form", "name", "value", "remove", "block", "text", "warning", "status", "keys"].map((part) => [part, environmentModal.querySelector(`[data-environment-${part}]`)]));
+  let environmentCursor = 0;
+  let environmentPreviousName = "";
+
+  function setEnvironmentStatus(text, state = "") { environment.status.textContent = text; environment.status.hidden = !text; environment.status.dataset.state = state; }
+
+  function environmentRow(label, run, add) {
+    const row = document.createElement("button"); row.type = "button"; row.className = `picker-row picker-option environment-row${add ? " environment-add" : ""}`; row.setAttribute("role", "option");
+    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["environment-name", label], ...(add ? [] : [["environment-value", "••••••••", true]])]) {
+      const part = document.createElement("span"); part.className = className; part.textContent = text; if (decorative) part.setAttribute("aria-hidden", "true"); row.append(part);
+    }
+    row.addEventListener("click", () => { environmentCursor = [...environment.list.children].indexOf(row); run(); });
+    environment.list.append(row);
+    return row;
+  }
+
+  function moveEnvironmentCursor() {
+    [...environment.list.children].forEach((row, index) => { row.setAttribute("aria-selected", String(index === environmentCursor)); row.tabIndex = index === environmentCursor ? 0 : -1; });
+    environment.list.children[environmentCursor].focus();
+  }
+
+  // Closes the form and the block, lists the saved names and puts the cursor back.
+  function showEnvironmentList(message = "", state = "") {
+    closeEnvironmentForm();
+    const names = [...environmentVariables.keys()];
+    const github = githubBlock(names);
+    environment.list.replaceChildren();
+    for (const name of names) environmentRow(name, () => editEnvironmentVariable(name));
+    environmentRow("+ add variable", () => editEnvironmentVariable(""), true);
+    if (github) {
+      const none = github === githubBlock([]);
+      const row = environmentRow(none ? "+ add GitHub variables" : "+ add the rest for GitHub", () => openEnvironmentBlock(github, true), true);
+      if (none) { const detail = document.createElement("span"); detail.className = "environment-add-detail"; detail.textContent = "gh, commits and push as you"; row.lastChild.append(" ", detail); }
+    }
+    environment.description.hidden = environment.list.hidden = environment.keys.hidden = false;
+    environment.warning.hidden = !github || !environmentVariables.has("GH_TOKEN");
+    setEnvironmentStatus(message || (names.length ? "Changes apply from your next message in each session." : "Nothing set yet."), state);
+    moveEnvironmentCursor();
+  }
+
+  // Also runs when the dialog closes, so no value outlives the form that showed it.
+  function closeEnvironmentForm() { environment.form.hidden = environment.block.hidden = true; environment.form.reset(); environment.block.reset(); }
+
+  // The form opens under the list; the block takes the list's place.
+  function showEnvironmentEditor(editor, field) {
+    editor.hidden = false;
+    environment.description.hidden = environment.list.hidden = editor === environment.block;
+    environment.keys.hidden = environment.warning.hidden = true;
+    setEnvironmentStatus("");
+    // On touch screens focusing the field would raise the keyboard over what just opened.
+    if (matchMedia("(pointer: fine)").matches) field.focus();
+  }
+
+  function editEnvironmentVariable(name) {
+    // Another row's form may still be open.
+    showEnvironmentList();
+    environmentPreviousName = name;
+    environment.name.value = name;
+    environment.value.value = environmentVariables.get(name) || "";
+    environment.remove.hidden = environment.remove.nextElementSibling.hidden = !name;
+    showEnvironmentEditor(environment.form, name ? environment.value : environment.name);
+  }
+
+  // The block grows with its lines instead of scrolling inside the dialog.
+  function resizeEnvironmentText() { environment.text.style.height = "auto"; environment.text.style.height = `${environment.text.scrollHeight + environment.text.offsetHeight - environment.text.clientHeight}px`; }
+
+  function openEnvironmentBlock(text, github = false) {
+    closeEnvironmentForm();
+    environment.block.querySelectorAll("[data-environment-github]").forEach((part) => { part.hidden = !github; });
+    environment.block.querySelector("[data-environment-pasted]").hidden = github;
+    environment.text.value = text;
+    showEnvironmentEditor(environment.block, environment.text);
+    resizeEnvironmentText();
+    // The caret waits at the first value to fill in.
+    const empty = text.search(/=$/m) + 1;
+    if (empty) environment.text.setSelectionRange(empty, empty);
+  }
+
+  function saveEnvironment(form) {
+    let saved = 1;
+    if (form === environment.block) {
+      const result = parseEnvironmentBlock(environment.text.value);
+      if (result.error) return setEnvironmentStatus(result.error, "error");
+      for (const [name, value] of result.variables) environmentVariables.set(name, value);
+      saved = result.variables.length;
+      // A block leaves the cursor on "+ add variable"; a single variable keeps it on its row.
+      environmentCursor = environmentVariables.size;
+    } else {
+      const name = environment.name.value, value = environment.value.value;
+      const renamed = environmentPreviousName && environmentPreviousName !== name;
+      const error = renamed && environmentVariables.has(name) ? `${name} is already set.` : environmentError(name, value);
+      if (error) return setEnvironmentStatus(error, "error");
+      // A renamed variable keeps its place in the list.
+      if (renamed) environmentVariables = new Map([...environmentVariables].map((entry) => entry[0] === environmentPreviousName ? [name, value] : entry));
+      else environmentVariables.set(name, value);
+    }
+    showEnvironmentList(saved === 1 ? "Saved · used from your next message." : `Saved ${saved} variables · used from your next message.`, "done");
+  }
+
+  environmentModal.addEventListener("submit", (event) => { event.preventDefault(); saveEnvironment(event.target); });
+  environmentModal.querySelectorAll("[data-environment-cancel]").forEach((button) => button.addEventListener("click", () => showEnvironmentList()));
+  environment.remove.addEventListener("click", () => { environmentVariables.delete(environmentPreviousName); showEnvironmentList("Removed · applies from your next message.", "done"); });
+  environment.text.addEventListener("input", resizeEnvironmentText);
+  environment.name.addEventListener("paste", (event) => {
+    const text = event.clipboardData.getData("text");
+    if (text.split("\n").filter((line) => line.trim()).length > 1) { event.preventDefault(); openEnvironmentBlock(text.trim()); }
+    else if (text.includes("=")) { event.preventDefault(); [environment.name.value, environment.value.value] = environmentPair(text.trim()); environment.value.focus(); }
+  });
+  // On the document, so the keys still work after a click on the dialog's text took the focus off its controls.
+  document.addEventListener("keydown", (event) => {
+    if (environmentModal.hidden) return;
+    const editing = !environment.form.hidden || !environment.block.hidden;
+    // Handled here, the page does not go on to close the whole dialog.
+    if (event.key === "Escape" && editing) { event.preventDefault(); showEnvironmentList(); }
+    else if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !environment.block.hidden) { event.preventDefault(); environment.block.requestSubmit(); }
+    else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !editing) {
+      event.preventDefault();
+      const count = environment.list.children.length;
+      environmentCursor = (environmentCursor + (event.key === "ArrowDown" ? 1 : count - 1)) % count;
+      moveEnvironmentCursor();
+    }
+  }, true);
+  // The on-screen keyboard covers the bottom of the page, where a phone shows the dialog, so the overlay keeps to the part that stays visible.
+  for (const type of ["resize", "scroll"]) window.visualViewport?.addEventListener(type, () => {
+    environmentModal.style.top = `${window.visualViewport.offsetTop}px`; environmentModal.style.height = `${window.visualViewport.height}px`;
+    if (environmentModal.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
   });
 
   const newSessionForm = document.querySelector(".new-session-cwd-form");
