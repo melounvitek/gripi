@@ -21,11 +21,12 @@ type command struct {
 	summary string
 	// help follows the summary and starts with the usage section.
 	help string
-	run  func(arguments []string, stdout, stderr io.Writer) int
+	run  func(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int
 }
 
 var commands = []command{
 	{name: "list", group: sessionCommands, summary: "List sessions with their state", run: listSessions, help: listHelp},
+	{name: "send", group: sessionCommands, summary: "Send a message to a session", run: sendMessage, help: sendHelp},
 	{name: "serve", group: gatewayCommands, summary: "Start the gateway", run: withoutArguments("serve", serve), help: `Usage:
   gripi serve
 
@@ -45,7 +46,7 @@ by GRIPI_ENV_PATH) and prints it. Does nothing when a password is already set.
 `},
 }
 
-func run(arguments []string, stdout, stderr io.Writer) int {
+func run(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(arguments) == 0 || helpFlag(arguments[0]) {
 		printOverview(stdout)
 		return 0
@@ -71,7 +72,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 				return 0
 			}
 		}
-		return command.run(rest, stdout, stderr)
+		return command.run(rest, stdin, stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "gripi: unknown command %q\nRun 'gripi help' for the list of commands.\n", name)
 	return exitUsage
@@ -105,8 +106,8 @@ func usageError(stderr io.Writer, name, message string) int {
 	return exitUsage
 }
 
-func withoutArguments(name string, action func() error) func([]string, io.Writer, io.Writer) int {
-	return func(arguments []string, _, stderr io.Writer) int {
+func withoutArguments(name string, action func() error) func([]string, io.Reader, io.Writer, io.Writer) int {
+	return func(arguments []string, _ io.Reader, _, stderr io.Writer) int {
 		if len(arguments) > 0 {
 			return usageError(stderr, name, "takes no arguments")
 		}

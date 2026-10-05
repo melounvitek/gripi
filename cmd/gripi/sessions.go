@@ -121,7 +121,7 @@ func (client *gatewayClient) sessions(only string) ([]gateway.LocalSession, erro
 	return payload.Sessions, client.do(request, &payload)
 }
 
-func listSessions(arguments []string, stdout, stderr io.Writer) int {
+func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("list", flag.ContinueOnError)
 	all := flags.Bool("all", false, "")
 	asJSON := flags.Bool("json", false, "")
@@ -215,4 +215,150 @@ func age(elapsed time.Duration) string {
 		return fmt.Sprintf("%dh", int(elapsed.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(elapsed.Hours()/24))
+}
+
+const sendHelp = `Usage:
+  gripi send <session> [message] [--steer] [--json]
+
+Sends a message to a session as a prompt, then prints the session. It returns
+once Pi has taken the message and does not wait for the reply; use 'gripi wait'
+for that.
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+  message  The prompt. Leave it out, or pass -, to read it from stdin.
+           Put -- before a message that starts with a dash.
+
+Flags:
+  --steer  Deliver the message during the running turn instead of after it
+  --json   Print the session as a JSON object instead of a table
+
+While Pi is working, the message is queued and delivered once the agent has
+finished. With --steer it is delivered sooner: after the tool calls of the
+current step and before Pi's next request to the model. With --steer the
+gateway also acts on its own slash commands such as /compact or /new, as the
+browser's composer does; otherwise they reach Pi as plain text.
+
+The text is never run as a "!" shell command. Pi still expands its own skills,
+prompt templates and extension commands, such as /skill:name.
+
+A session in state external or conflict accepts no messages.
+
+` + sessionFields + `
+Examples:
+  gripi send 01a107aa "Run the tests and fix what fails"
+  git diff | gripi send 01a107aa
+  gripi send 01a107aa --steer "Stop and summarise what you have so far"
+
+Exit codes:
+` + sessionExitCodes
+
+func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("send", flag.ContinueOnError)
+	steer := flags.Bool("steer", false, "")
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "send", err.Error())
+	}
+	if len(positional) < 1 || len(positional) > 2 || positional[0] == "" {
+		return usageError(stderr, "send", "takes a session and one message; quote a message that has spaces")
+	}
+	message := ""
+	if len(positional) == 2 && positional[1] != "-" {
+		message = positional[1]
+	} else {
+		// Without this, a forgotten message would leave the command waiting on a terminal forever.
+		if file, ok := stdin.(*os.File); ok {
+			if info, err := file.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+				return usageError(stderr, "send", "needs a message as an argument or on stdin")
+			}
+		}
+		piped, err := io.ReadAll(stdin)
+		if err != nil {
+			return failure(stderr, "send", err)
+		}
+		message = string(piped)
+	}
+	if message = strings.TrimSpace(message); message == "" {
+		return usageError(stderr, "send", "the message is empty")
+	}
+
+	client, err := newGatewayClient()
+	if err != nil {
+		return failure(stderr, "send", err)
+	}
+	session, err := client.session(positional[0])
+	if err != nil {
+		return failure(stderr, "send", err)
+	}
+	behavior := "follow_up"
+	if *steer {
+		behavior = "steer"
+	}
+	// bash_mode keeps a leading "!" from being run as a shell command.
+	form := url.Values{"session": {session.Path}, "message": {message}, "streaming_behavior": {behavior}, "bash_mode": {"prompt"}}
+	request, err := http.NewRequest(http.MethodPost, "http://gripi/prompt", strings.NewReader(form.Encode()))
+	if err != nil {
+		return failure(stderr, "send", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	var accepted struct {
+		Session string `json:"session"`
+	}
+	if err := client.do(request, &accepted); err != nil {
+		return failure(stderr, "send", err)
+	}
+
+	// Pi accepts a prompt just before it reports the turn. Returning in that gap
+	// would let a following 'gripi wait' see an idle session and finish at once.
+	// A message that starts no turn, such as an extension command, waits this out.
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		current, err := client.sessions(accepted.Session)
+		if err != nil {
+			return failure(stderr, "send", err)
+		}
+		if len(current) == 1 {
+			session = current[0]
+		}
+		if session.State != "idle" || time.Now().After(deadline) {
+			return printSession(stdout, stderr, "send", session, *asJSON)
+		}
+	}
+}
+
+// session finds the one session a path, an ID or an ID prefix refers to.
+func (client *gatewayClient) session(reference string) (gateway.LocalSession, error) {
+	sessions, err := client.sessions("")
+	if err != nil {
+		return gateway.LocalSession{}, err
+	}
+	var matches []gateway.LocalSession
+	for _, session := range sessions {
+		if session.Path == reference || session.ID == reference {
+			return session, nil
+		}
+		if session.ID != "" && strings.HasPrefix(session.ID, reference) {
+			matches = append(matches, session)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return gateway.LocalSession{}, fmt.Errorf("no session matches %q; 'gripi list --all' shows every session", reference)
+	case 1:
+		return matches[0], nil
+	}
+	ids := make([]string, len(matches))
+	for index, match := range matches {
+		ids[index] = match.ID
+	}
+	return gateway.LocalSession{}, fmt.Errorf("%q matches %d sessions (%s); use more of the ID", reference, len(matches), strings.Join(ids, ", "))
+}
+
+func printSession(stdout, stderr io.Writer, name string, session gateway.LocalSession, asJSON bool) int {
+	if asJSON {
+		return printJSON(stdout, stderr, name, session)
+	}
+	printSessions(stdout, []gateway.LocalSession{session})
+	return 0
 }
