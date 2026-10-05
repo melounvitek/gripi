@@ -452,6 +452,10 @@ function updateStreamingSendControl(state = composerState?.dataset.state) {
 
 function updatePromptPlaceholder() {
   if (!promptTextarea) return;
+  if (sessionSyncBlocked()) {
+    promptTextarea.placeholder = "Sending is paused.";
+    return;
+  }
   if (composerState?.dataset.state === "running") {
     promptTextarea.placeholder = selectedStreamingBehavior() === "follow_up" ? "Queue follow-up…" : "Steer Pi…";
     return;

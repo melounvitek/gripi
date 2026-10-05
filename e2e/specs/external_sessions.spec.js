@@ -327,6 +327,7 @@ for (const touch of [false, true]) {
       await page.getByLabel("Message to Pi").fill("Draft retained through takeover");
       await appendCLIReply(copiedSession.file, "Before takeover");
       await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "external_follow");
+      await expect(page.getByLabel("Message to Pi")).toHaveAttribute("placeholder", "Sending is paused.");
       const pending = await holdNextFragment(page);
       await appendCLIReply(copiedSession.file, "Pending at takeover");
       await pending.requested;
@@ -339,6 +340,7 @@ for (const touch of [false, true]) {
       await pending.finished;
       await expect(page.getByLabel("Message to Pi")).toBeEnabled();
       await expect(page.getByLabel("Message to Pi")).toHaveValue("Draft retained through takeover");
+      await expect(page.getByLabel("Message to Pi")).toHaveAttribute("placeholder", "Ask Pi…");
       await expect(message(page, "assistant", "Pending at takeover")).toBeAttached();
     });
 
