@@ -422,7 +422,9 @@ for (const desktopApp of [false, true]) {
     await setSessionsPinned(page, paths.slice(0, 1), true);
     // One pinned session opens from its own row, so the button waits for a second one.
     await expect(openAll).toHaveCount(0);
-    await setSessionsPinned(page, paths.slice(1), true);
+    await setSessionsPinned(page, paths.slice(1, 2), true);
+    await expect(openAll).toBeVisible();
+    await setSessionsPinned(page, paths.slice(2), true);
 
     await openAll.click();
     await expect.poll(() => context.pages().length).toBe(4);
