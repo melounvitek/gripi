@@ -8,6 +8,16 @@ import {
 
 test.afterEach(async ({ page }) => stopClearQueueRun(page));
 
+test("queued messages stay in the composer column on a wide display", async ({ page }) => {
+  await page.setViewportSize({ width: 2200, height: 900 });
+  await prepareClearQueue(page, sessions.clearQueue);
+
+  const column = await page.locator(".composer-inner").boundingBox();
+  const queue = await page.locator("[data-pending-queue]").boundingBox();
+  expect(queue.x).toBeCloseTo(column.x, 0);
+  expect(queue.width).toBeCloseTo(column.width, 0);
+});
+
 test("cancel Clear queue without sending a request or changing the draft", async ({ page }) => {
   await prepareClearQueue(page, sessions.clearQueue);
   await attachClearQueueDraft(page);
