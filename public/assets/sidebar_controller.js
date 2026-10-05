@@ -226,6 +226,7 @@ export class SidebarController {
     const previousReplyIds = this.completedReplyIds(oldElement);
     const notificationToggle = oldElement.querySelector("[data-notification-toggle]");
     const resourceUsage = oldElement.querySelector("[data-resource-usage]");
+    const pinnedSessionsBlocked = oldElement.querySelector("[data-pinned-sessions-blocked]");
     const previousSearchForm = preserveSearch ? oldElement.querySelector(".sidebar-session-search") : null;
     const previousSearchInput = previousSearchForm?.querySelector('input[name="session_search"]');
     const previousSearchQuery = previousSearchInput?.value;
@@ -248,6 +249,7 @@ export class SidebarController {
     if (previousSearchOpen !== undefined) this.setSearchOpen(replacementSearchForm, replacementSearchButton, previousSearchOpen);
     if (notificationToggle) this.element.querySelector("[data-notification-toggle]")?.replaceWith(notificationToggle);
     if (resourceUsage) this.element.querySelector("[data-resource-usage]")?.replaceWith(resourceUsage);
+    if (pinnedSessionsBlocked) this.element.querySelector("[data-pinned-sessions-blocked]")?.replaceWith(pinnedSessionsBlocked);
     if (focusedControlSelector) {
       const focusedRow = [...this.element.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === focusedSessionPath);
       const root = focusedSessionPath ? focusedRow : this.element;

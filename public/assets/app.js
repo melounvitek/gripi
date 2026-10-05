@@ -86,7 +86,7 @@ const sessionTagsController = new SessionTagsController(document, window, {
 const sessionActionsController = new SessionActionsController(document, window, {
   editTags: (target) => sessionTagsController.open(target.path, target.row.querySelector("[data-session-actions-toggle]")),
   currentSessionPath: () => currentSessionPath(),
-  detachSession: () => detachSession().catch(() => {}),
+  detachSession: (paths) => detachSession(paths).catch(() => {}),
   openModal: (modal) => openModal(modal),
   closeModal: (modal) => closeModal(modal),
   refresh: () => sidebarController.refresh({ force: true }),
@@ -2795,16 +2795,16 @@ function rememberMainSessionSelection(sessionPath) {
   }
 }
 
-function detachedSessionFallbackUrl(detachedSessionPath) {
+function detachedSessionFallbackUrl(detachedSessionPaths) {
   const url = new URL("/", window.location.origin);
   const previousSessionPath = readMainSessionHistory().previous;
-  if (previousSessionPath && previousSessionPath !== detachedSessionPath) url.searchParams.set("session", previousSessionPath);
-  url.searchParams.set("session_fallback_excluding", detachedSessionPath);
+  if (previousSessionPath && !detachedSessionPaths.includes(previousSessionPath)) url.searchParams.set("session", previousSessionPath);
+  for (const path of detachedSessionPaths) url.searchParams.append("session_fallback_excluding", path);
   return `${url.pathname}${url.search}`;
 }
 
-function detachSession() {
-  return switchSession(detachedSessionFallbackUrl(currentSessionPath()), { push: true, focus: true });
+function detachSession(paths = [currentSessionPath()]) {
+  return switchSession(detachedSessionFallbackUrl(paths), { push: true, focus: true });
 }
 
 async function switchSession(url, { push = true, focus = true, preserveScroll = false, findQuery = null, fallbackNavigation = true } = {}) {

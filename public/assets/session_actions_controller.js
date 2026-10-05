@@ -5,6 +5,7 @@ export class SessionActionsController {
     this.callbacks = callbacks;
     this.target = null;
     this.pinOperationActive = false;
+    this.blockedSessionPaths = [];
     this.initialized = false;
   }
 
@@ -36,6 +37,13 @@ export class SessionActionsController {
       event.stopPropagation?.();
       const rect = toggle.getBoundingClientRect();
       this.openMenu(toggle.closest(".session-row"), { x: rect.left, y: rect.bottom });
+      return;
+    }
+
+    const openPinned = event.target.closest?.("[data-open-pinned-sessions]");
+    if (openPinned) {
+      this.closeMenu();
+      this.openPinnedSessions({ blockedOnly: openPinned.dataset.openPinnedSessions === "blocked" });
       return;
     }
 
@@ -175,10 +183,43 @@ export class SessionActionsController {
     }
     if (action === "window") {
       this.restoreFocus();
-      this.window.open(`/?${new URLSearchParams({ session: target.path, session_only: "1" })}`, "_blank", "noopener");
+      this.openSessionWindow(target.path);
       if (target.path === this.callbacks.currentSessionPath?.()) this.callbacks.detachSession?.();
     }
     if (action === "delete") this.openDelete(target);
+  }
+
+  openSessionWindow(path, features = "noopener") {
+    return this.window.open(`/?${new URLSearchParams({ session: path, session_only: "1" })}`, "_blank", features);
+  }
+
+  openPinnedSessions({ blockedOnly }) {
+    const pinned = Array.from(this.document.querySelectorAll(".pinned-sessions-list .session-row"), (row) => row.dataset.sessionPath);
+    const paths = blockedOnly ? this.blockedSessionPaths : pinned;
+    let blocked = [];
+    if (paths.length < 2 || this.window.gripiElectron) {
+      paths.forEach((path) => this.openSessionWindow(path));
+    } else {
+      // A browser that blocks pop-ups lets one click open one window, and window.open reports a blocked window only
+      // without noopener. So the second window opens without it, sharing this window's process, to learn whether the
+      // rest will open. The desktop app blocks nothing and its window.open always returns null.
+      this.openSessionWindow(paths[0]);
+      const probe = this.openSessionWindow(paths[1], "");
+      if (probe) {
+        // Without noopener it also starts with a copy of this window's sessionStorage, which holds its notification identity.
+        try { probe.sessionStorage.clear(); } catch (_error) {}
+        paths.slice(2).forEach((path) => this.openSessionWindow(path));
+      } else {
+        blocked = paths.slice(1);
+      }
+    }
+    this.blockedSessionPaths = blocked;
+    const note = this.document.querySelector("[data-pinned-sessions-blocked]");
+    note.querySelector("[data-pinned-sessions-blocked-count]").textContent = `Browser blocked ${blocked.length} ${blocked.length === 1 ? "window" : "windows"}.`;
+    note.hidden = blocked.length === 0;
+    const current = this.callbacks.currentSessionPath?.();
+    // Every pinned session gets its own window, so this one moves on to a session that is not pinned.
+    if (paths.includes(current) && !blocked.includes(current)) this.callbacks.detachSession?.(pinned);
   }
 
   openRename(target) {

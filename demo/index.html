@@ -254,9 +254,13 @@
     .sidebar-filters-clear:hover { color: var(--text); }
     .recent-sessions { margin-bottom: 0.75rem; }
     .recent-sessions-header { display: flex; align-items: center; gap: 0.4rem; margin: 0.75rem 0 0.5rem; padding-left: 0.5rem; }
-    .recent-sessions-header h2, .sessions-day, .sidebar-filter-count, .sidebar-search-empty { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .recent-sessions-header h2, .sessions-day, .sidebar-filter-count, .sidebar-search-empty, .pinned-sessions-blocked { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
     .sidebar-filter-count { margin-left: 0.3rem; color: var(--muted-soft); white-space: nowrap; }
     .sidebar-search-empty { margin: 0.85rem 0.5rem; }
+    .pinned-sessions-blocked { margin: 0 0.5rem 0.6rem; line-height: 1.55; }
+    .pinned-sessions-blocked span { color: var(--gold); }
+    .pinned-sessions-blocked button { padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: 0; text-decoration: underline var(--border-strong); text-transform: none; text-underline-offset: 2px; }
+    .pinned-sessions-blocked button:hover { background: none; color: var(--text); }
     .sessions-day { margin: 0.85rem 0.5rem 0.2rem; }
     .sessions-list > .sessions-day:first-child { margin-top: 0.25rem; }
     .cwd-header { display: flex; align-items: center; gap: 0.4rem; margin: 1.25rem 0 0.5rem; }
@@ -368,10 +372,11 @@
     .session-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.5rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); line-height: 1; }
     .sidebar-icon-button:hover { background: #ffffff08; color: var(--text); }
-    .sidebar-new-session-button { display: inline-flex; margin-left: auto; align-items: center; gap: 0.3rem; color: var(--accent); letter-spacing: 0; text-transform: none; }
-    .sidebar-new-session-button span { font-size: 0.9rem; line-height: 1; }
+    .sidebar-new-session-button, .sidebar-open-pinned-button { display: inline-flex; margin-left: auto; align-items: center; gap: 0.3rem; letter-spacing: 0; text-transform: none; }
+    .sidebar-new-session-button { color: var(--accent); }
+    .sidebar-new-session-button span, .sidebar-open-pinned-button span { font-size: 0.9rem; line-height: 1; }
     .sidebar-new-session-button:hover { color: var(--accent-bright); }
-    .sidebar-new-session-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+    .sidebar-new-session-button:focus-visible, .sidebar-open-pinned-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
     .session-running-indicator, .session-compacting-indicator { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--success); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; }
     .session-running-indicator::before, .session-compacting-indicator::before { content: ""; width: 0.45rem; height: 0.45rem; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 3px #b5bd6829; animation: progress-blink 1000ms ease-in-out infinite; }
     .session-compacting-indicator::before { background: var(--warning); box-shadow: 0 0 0 4px #ffff0024; }
@@ -854,7 +859,7 @@
       /* Row tags are glyphs too small to tap, so taps open the session; the tag filter and the actions menu handle tags. */
       .session-row :is(.session-tag-icon, .tag-overflow) { pointer-events: none; }
       /* Opening a new window misbehaves in an installed Safari web app, so touch devices do without it. */
-      .session-header-window-action, .session-actions-menu [data-session-action="window"] { display: none; }
+      .session-header-window-action, .session-actions-menu [data-session-action="window"], .sidebar-open-pinned-button { display: none; }
       .session-header-view-option { min-height: 2.75rem; }
       .send-control { min-width: 2.75rem; }
       .send-button { display: inline-flex; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; align-items: center; justify-content: center; font-size: 0; }
@@ -1044,7 +1049,7 @@
       <div class="session-sidebar-content">
         <section class="recent-sessions">
           <section class="pinned-sessions-section">
-            <div class="recent-sessions-header"><h2>Pinned</h2></div>
+            <div class="recent-sessions-header"><h2>Pinned</h2><button type="button" class="sidebar-icon-button sidebar-open-pinned-button" title="Open all pinned sessions in new windows" data-demo-disabled><span aria-hidden="true">↗</span> Open all</button></div>
             <div class="pinned-sessions-list" id="pinned-sessions-list"></div>
           </section>
           <div class="recent-sessions-header"><h2>Sessions</h2><span class="sidebar-filter-count" data-sidebar-filter-count hidden></span><a class="sidebar-filters-clear" href="#" aria-label="Clear filters" data-sidebar-filters-clear hidden>clear</a><button type="button" class="sidebar-icon-button sidebar-new-session-button" data-modal-open="new-session-modal"><span aria-hidden="true">+</span> New session</button></div>
