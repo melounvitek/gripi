@@ -49,7 +49,6 @@ export class EnvironmentController {
     document.addEventListener("keydown", (event) => {
       if (!this.modal.hidden) this.handleKeydown(event);
     }, true);
-    for (const type of ["resize", "scroll"]) window.visualViewport?.addEventListener(type, () => this.fitVisualViewport());
   }
 
   async open() {
@@ -60,7 +59,8 @@ export class EnvironmentController {
     if (await this.request("/environment")) this.showList();
   }
 
-  // Asks the gateway. Its error is shown as it is, and an answer the dialog no longer waits for is dropped.
+  // Asks the gateway. Its error is shown as it is. An answer the dialog no longer waits for is dropped, unless it
+  // is to a change: the change was made, so the list has to show it.
   async request(url, fields) {
     const operation = ++this.operation;
     let payload = null;
@@ -70,7 +70,7 @@ export class EnvironmentController {
       payload = await response.json().catch(() => null);
       ok = response.ok && !!payload;
     } catch (_error) {}
-    if (operation !== this.operation) return null;
+    if (operation !== this.operation && !fields) return null;
     if (!ok) {
       this.setStatus(payload?.error || "Could not read or save environment variables. Try again.", "error");
       return null;
@@ -243,13 +243,5 @@ export class EnvironmentController {
       this.cursor = (this.cursor + (event.key === "ArrowDown" ? 1 : count - 1)) % count;
       movePickerCursor(this.list, this.cursor);
     }
-  }
-
-  // The on-screen keyboard covers the bottom of the page, where a phone shows the dialog, so the overlay keeps to the part that stays visible.
-  fitVisualViewport() {
-    const viewport = this.window.visualViewport;
-    this.modal.style.top = `${viewport.offsetTop}px`;
-    this.modal.style.height = `${viewport.height}px`;
-    if (this.modal.contains(this.document.activeElement)) this.document.activeElement.scrollIntoView({ block: "nearest" });
   }
 }

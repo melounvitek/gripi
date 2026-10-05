@@ -1180,7 +1180,7 @@
       // A block leaves the cursor on "+ add variable"; a single variable keeps it on its row.
       environmentCursor = environmentVariables.size;
     } else {
-      const name = environment.name.value, value = environment.value.value;
+      const name = environment.name.value.trim(), value = environment.value.value.trim();
       const renamed = environmentPreviousName && environmentPreviousName !== name;
       const error = renamed && environmentVariables.has(name) ? `${name} is already set.` : environmentError(name, value);
       if (error) return setEnvironmentStatus(error, "error");
@@ -1214,12 +1214,6 @@
       moveEnvironmentCursor();
     }
   }, true);
-  // The on-screen keyboard covers the bottom of the page, where a phone shows the dialog, so the overlay keeps to the part that stays visible.
-  for (const type of ["resize", "scroll"]) window.visualViewport?.addEventListener(type, () => {
-    environmentModal.style.top = `${window.visualViewport.offsetTop}px`; environmentModal.style.height = `${window.visualViewport.height}px`;
-    if (environmentModal.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
-  });
-
   const newSessionForm = document.querySelector(".new-session-cwd-form");
   const newSessionInput = newSessionForm.querySelector("[data-new-session-input]");
   const newSessionRows = [...newSessionForm.querySelectorAll('[role="option"]')];

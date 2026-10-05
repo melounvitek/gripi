@@ -800,8 +800,6 @@
     .tree-session-label-form { display: grid; gap: 0.5rem; }
     /* Wide enough for the longest line of the GitHub block. */
     .environment-card { width: min(42rem, 100%); }
-    /* Fits what the on-screen keyboard leaves of the overlay. */
-    [data-modal="environment-modal"] .modal-card { max-height: 100%; }
     .environment-note { margin: 0; color: var(--muted); font-size: 0.8em; line-height: 1.45; }
     .environment-warning { color: var(--gold); }
     .environment-status[data-state="done"] { color: var(--success); }
@@ -935,7 +933,6 @@
       .modal-card { width: 100%; max-height: min(82dvh, calc(100dvh - env(safe-area-inset-top) - 1rem)); padding: 1rem; padding-bottom: calc(1rem + env(safe-area-inset-bottom)); border-right: 0; border-bottom: 0; border-left: 0; border-radius: 0.5rem 0.5rem 0 0; }
       .modal-header h2 { font-size: 0.85rem; }
       .tree-session-card { height: min(82dvh, calc(100dvh - env(safe-area-inset-top) - 1rem)); }
-      [data-modal="environment-modal"] .modal-card { max-height: min(82dvh, 100%); }
       .tree-session-connector-level:nth-last-child(n + 4) { display: none; }
       .modal-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
       .modal-actions button { width: 100%; justify-self: stretch; padding: 0.8rem 0.75rem; }

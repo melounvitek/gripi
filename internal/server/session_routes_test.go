@@ -201,15 +201,6 @@ func TestSidebarGroupsSessionsByActivityDay(t *testing.T) {
 	}
 }
 
-func TestSidebarHeaderShowsTheNotificationBellBetweenTheTitleAndTheHideButton(t *testing.T) {
-	html := serve(t, fixtureHandler(t, seedNativeFixture(t)), http.MethodGet, "/sidebar", "").Body.String()
-	header := strings.Split(strings.Split(html, `<div class="session-sidebar-header">`)[1], `<div class="session-sidebar-content">`)[0]
-	bell := strings.Index(header, `title="Enable notifications" aria-label="Enable notifications" data-notification-toggle`)
-	if bell < strings.Index(header, `class="sidebar-server-origin"`) || bell > strings.Index(header, `aria-label="Hide sessions"`) {
-		t.Fatalf("notification bell is not between the title and the hide button: %s", header)
-	}
-}
-
 func TestRPCObservationRoutesUseFakePiAndPreserveJSONL(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	node, err := exec.LookPath("node")

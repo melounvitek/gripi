@@ -148,6 +148,18 @@ test("what the gateway rejects is shown in its own words and the form stays open
   await expect(valueInput(page)).toHaveValue("fake-value");
 });
 
+test("a save cancelled while the gateway answers still shows up in the list", async ({ page, isMobile }) => {
+  await open(page, isMobile);
+  // The gateway gets the request only after the form was closed.
+  await page.route("**/environment/variable", async (route) => {
+    await activate(button(page, "cancel"), isMobile);
+    await route.continue();
+  });
+  await add(page, isMobile, "E2E_TOKEN", "fake-value");
+  await expect(row(page, "E2E_TOKEN")).toBeVisible();
+  await expect(status(page)).toHaveText("Saved · used from your next message.");
+});
+
 test("a state file the gateway cannot read is reported instead of an empty list", async ({ page, isMobile }) => {
   await page.route("**/environment", (route) => route.fulfill({ status: 500, json: { error: "Unable to read or save environment variables" } }));
   await page.goto("/?no_session=1");
@@ -280,29 +292,6 @@ test("on a phone the first tap opens the dialog and a row, and every target is t
 
   for (const target of await dialog(page).locator("button:visible").all()) {
     expect((await target.boundingBox()).height, await target.textContent()).toBeGreaterThanOrEqual(44);
-  }
-});
-
-test("on a phone the GitHub block stays in reach above the on-screen keyboard", async ({ page, isMobile }) => {
-  test.skip(!isMobile, "Touch flow");
-  await open(page, isMobile);
-  await githubRow(page).tap();
-  await expect(block(page)).toBeVisible();
-  // The keyboard covers the bottom of the page without resizing it: only the visual viewport shrinks.
-  const visible = 320;
-  await page.evaluate((height) => {
-    Object.defineProperty(window.visualViewport, "height", { get: () => height });
-    window.visualViewport.dispatchEvent(new Event("resize"));
-  }, visible);
-
-  const sheet = await dialog(page).boundingBox();
-  expect(sheet.y).toBeGreaterThanOrEqual(0);
-  expect(sheet.y + sheet.height).toBeLessThanOrEqual(visible);
-  for (const part of [dialog(page).getByText("GitHub: act as yourself"), button(page, "save")]) {
-    await part.scrollIntoViewIfNeeded();
-    const bounds = await part.boundingBox();
-    expect(bounds.y).toBeGreaterThanOrEqual(sheet.y);
-    expect(bounds.y + bounds.height).toBeLessThanOrEqual(visible);
   }
 });
 
