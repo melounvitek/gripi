@@ -213,9 +213,9 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			}
 		}
 		if selected == nil && len(all) > 0 {
-			excluded := params.Get("session_fallback_excluding")
+			excluded := params["session_fallback_excluding"]
 			for _, session := range all {
-				if session.Path != excluded {
+				if !slices.Contains(excluded, session.Path) {
 					selected = session
 					break
 				}

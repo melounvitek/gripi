@@ -23,8 +23,8 @@ test("open pinned sessions one click at a time while the browser blocks pop-ups"
 
   await openRest.click();
   await expect.poll(() => context.pages().length).toBe(3);
-  // The current session's window is open now, so this one moves on, and the note outlives the sidebar it re-renders.
-  await expect(currentRow).not.toHaveAttribute("data-session-path", paths[1]);
+  // The current session's window is open now, so this one moves on to a session that is not pinned, and the note outlives the sidebar that re-renders.
+  await expect(currentRow).toHaveAttribute("data-pinned", "false");
   await expect(note).toContainText("Browser blocked 1 window.");
 
   await openRest.click();

@@ -218,7 +218,8 @@ export class SessionActionsController {
     note.querySelector("[data-pinned-sessions-blocked-count]").textContent = `Browser blocked ${blocked.length} ${blocked.length === 1 ? "window" : "windows"}.`;
     note.hidden = blocked.length === 0;
     const current = this.callbacks.currentSessionPath?.();
-    if (paths.includes(current) && !blocked.includes(current)) this.callbacks.detachSession?.();
+    // Every pinned session gets its own window, so this one moves on to a session that is not pinned.
+    if (paths.includes(current) && !blocked.includes(current)) this.callbacks.detachSession?.(pinned);
   }
 
   openRename(target) {

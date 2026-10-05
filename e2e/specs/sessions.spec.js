@@ -430,9 +430,8 @@ for (const desktopApp of [false, true]) {
     const mainClient = await notificationClient(page);
     expect(mainClient).toBeTruthy();
     for (const sessionWindow of sessionWindows) expect(await notificationClient(sessionWindow)).not.toBe(mainClient);
-    // The current session now has its own window, so this one moves on, as it does for the menu's "Open in new window".
-    await expect(currentRow).toHaveCount(1);
-    await expect(currentRow).not.toHaveAttribute("data-session-path", paths[0]);
+    // Every pinned session now has its own window, so this one moves on to a session that is not pinned.
+    await expect(currentRow).toHaveAttribute("data-pinned", "false");
 
     await setSessionsPinned(page, paths, false);
   });
