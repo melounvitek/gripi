@@ -99,9 +99,63 @@ User-token approval replaces browser approval:
 
 Approved users are listed under `approved_workspaces` in `~/.pi/gripi/workspace-access.json`. Entries contain an ID derived from the token, not a name. To find a user’s ID, look up one of their session files in `~/.pi/gripi/session-owners.json`; delete the matching entry to revoke access. With `GRIPI_BROWSER_AUTH_DISABLED=1`, every new token is approved automatically and stays approved until it is removed from that file. Only use that combination when every client that can reach the gateway is trusted.
 
-Multi-user mode separates session lists, not permissions: all users run commands as the same OS user and share settings such as the selected model and thinking level.
+Multi-user mode separates session lists and [environment variables](#environment-variables), not permissions: all users run commands as the same OS user and share settings such as the selected model and thinking level. For the same reason, one user’s variables are not secret from the others.
 
 The [`gripi` command](../README.md#command-line) is unavailable in multi-user mode, because it would show every user’s sessions.
+
+## Environment variables
+
+Gripi can save environment variables for Pi, for example your own [GitHub](#github) token on a shared gateway. Pi and every command it runs get them on top of the gateway’s own environment, and a saved variable replaces a gateway variable of the same name.
+
+Edit them in the Environment dialog, opened with the key icon in the sidebar header or **Environment…** in the Ctrl+K palette. The list shows names only; a value is shown only while its row is open for editing. Pasting several `NAME=value` lines adds them at once, and lines starting with `#` are ignored.
+
+In single-user mode, the variables apply to every Gripi session. In [multi-user mode](#multi-user-mode), each user has their own set, applied only to the sessions that user owns. A session with no owner gets none.
+
+A change applies from the next message or `!` command in each session. If the session’s Pi process is idle and started before the change, Gripi restarts it first, which loses process-only state in the same way as [stopping an idle process](#pi-process-lifetime). A running turn keeps the old values until it ends, and so do messages steered or queued during it.
+
+A new session that has no message yet keeps the values it started with, so its first message still uses them. Pi CLI in a terminal does not get the variables; `gripi send` does, because it goes through the same path as a message from the browser.
+
+Names consist of letters, digits, and `_`, and cannot start with a digit. `HOME`, `GRIPI_*`, and `PI_CODING_AGENT_*` are refused, because they move Gripi’s or Pi’s directories. A value cannot be empty and is at most 16 KiB long. Each user can save at most 100 variables.
+
+The values are stored as plain text in `~/.pi/gripi/environment.json`, which only the gateway’s OS user can read; nothing Pi-owned changes. In multi-user mode, the variables separate identity, not secrets: every user runs commands as that OS user, so one user’s Pi can read the file with another user’s values. For real separation, run one gateway per OS user.
+
+### GitHub
+
+The main use is acting as yourself on GitHub from a shared gateway. `GH_TOKEN` alone only changes `gh`: pull requests, issues, and API calls. Commits and `git push` still use the gateway’s identity unless your name, email, and git configuration are set too.
+
+**+ add GitHub variables** in the dialog opens the whole set, with the first five values empty:
+
+```txt
+# gh: pull requests, issues, API
+GH_TOKEN=
+# your name and email on commits
+GIT_AUTHOR_NAME=
+GIT_AUTHOR_EMAIL=
+GIT_COMMITTER_NAME=
+GIT_COMMITTER_EMAIL=
+# git push over HTTPS with your token, also for SSH remotes; leave as is
+GIT_CONFIG_COUNT=2
+GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf
+GIT_CONFIG_VALUE_0=git@github.com:
+GIT_CONFIG_KEY_1=credential.https://github.com.helper
+GIT_CONFIG_VALUE_1=!gh auth git-credential
+```
+
+Fill in the empty values and save:
+
+- `GH_TOKEN` is your GitHub token, used by `gh`. Create it at <https://github.com/settings/tokens>. For a classic token, `gh` asks for at least the `repo`, `read:org`, and `gist` scopes.
+- The `GIT_AUTHOR_*` and `GIT_COMMITTER_*` variables put your name and email on commits.
+- The `GIT_CONFIG_*` variables make git reach GitHub over HTTPS and ask `gh` for the token, so pushes to `git@github.com:` remotes use your token too. They need `gh` installed on the gateway machine. Remotes written as `ssh://git@github.com/…` are not covered and would need one more key and value pair.
+
+On the gateway machine, `gh` must be the only credential helper git uses for GitHub. Make it so by running this once as the gateway’s OS user:
+
+```sh
+gh auth setup-git --hostname github.com --force
+```
+
+If git also uses another helper there, such as the macOS keychain or `store`, a login saved in it is used instead of your token, and a successful push saves the pushing user’s token in it for everyone.
+
+If `GH_TOKEN` is saved without the rest, the dialog warns that commits and `git push` still use the gateway’s identity and offers **+ add the rest for GitHub**.
 
 ## Pinned session directories
 
@@ -166,7 +220,7 @@ The timeout is a whole number of seconds; `0` disables it. The sweep interval se
 
 ## Web Push notifications
 
-Turn notifications on with the **Notifications** control in the sidebar. On iPhone and iPad, this requires iOS/iPadOS 16.4 or newer and Gripi added to the Home Screen.
+Turn notifications on with the bell icon in the sidebar header, which is orange when they are on and crossed out when they are off or blocked. On iPhone and iPad, this requires iOS/iPadOS 16.4 or newer and Gripi added to the Home Screen.
 
 Gripi sends the notification one minute after a reply finishes, unless the session has been read in any of your Gripi clients or is open and focused in one of them. A client that disconnects stops counting as focused after about 30 seconds.
 
@@ -225,6 +279,7 @@ Gripi stores its own data separately from Pi’s. Each location can be changed w
 | `~/.pi/gripi/read-state.json` | Read markers | `GRIPI_READ_STATE_PATH` |
 | `~/.pi/gripi/pinned-sessions.json` | Pinned sessions | `GRIPI_PINNED_SESSIONS_PATH` |
 | `~/.pi/gripi/session-tags.json` | Session tags | `GRIPI_SESSION_TAGS_PATH` |
+| `~/.pi/gripi/environment.json` | Saved [environment variables](#environment-variables); contains secrets in plain text, so do not share it | `GRIPI_ENVIRONMENT_PATH` |
 | `~/.pi/gripi/attachments/` | Uploaded attachments | `GRIPI_ATTACHMENTS_ROOT` |
 | `~/.pi/gripi/web-push-vapid.json` | Web Push keys | `GRIPI_WEB_PUSH_VAPID_PATH` |
 | `~/.pi/gripi/push-subscriptions.json` | Web Push subscriptions | `GRIPI_PUSH_SUBSCRIPTIONS_PATH` |
