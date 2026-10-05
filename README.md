@@ -26,6 +26,7 @@
 - A Brief view that collapses tool calls, results, and thinking into summaries.
 - Find in conversation, model and thinking settings, and context usage.
 - Notifications when replies finish, including Web Push on phones.
+- A [`gripi` command](#command-line) that lets scripts and agents list sessions, send messages, and wait for replies.
 
 ## Install
 
@@ -96,6 +97,20 @@ There is no mobile app. On iPhone, open the gateway in Safari, tap **Share**, ch
 
 <img width="360" alt="Gripi on a phone, showing a conversation in the Brief view" src="docs/images/gripi-mobile-screenshot.png" />
 
+## Command line
+
+Scripts and agents on the gateway machine can work with sessions through the `gripi` command:
+
+```sh
+gripi list                                # sessions with their live state
+gripi send 01a107aa "Run the tests"       # prompt a session
+gripi wait 01a107aa --timeout 900 --json  # block until it stops working
+```
+
+`gripi help` describes every command, and each session command can print JSON. The gateway must be running, and not in [multi-user mode](docs/configuration.md#multi-user-mode).
+
+When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it links the command into `~/.local/bin`, unless something there is already named `gripi`. `~/.local/bin` must be on your `PATH`.
+
 ## Updating
 
 The gateway shows an update control in the sidebar when a new version is available. It tests the update before installing it, then restarts. See [self-updates](docs/configuration.md#self-updates) for the requirements.
@@ -115,6 +130,7 @@ To update the desktop app, run its installer again.
 Stop the gateway and remove any systemd unit or `tailscale serve` configuration you added. Then delete:
 
 - `~/.local/share/gripi`: the gateway.
+- `~/.local/bin/gripi`: the link to its command.
 - `~/.config/gripi`: settings, including the admin password.
 - `~/.pi/gripi`: Gripi’s own data, such as approvals, tags, pins, and uploaded attachments.
 
@@ -132,6 +148,8 @@ Anyone who can use Gripi can run shell commands as the gateway’s OS user, with
 - Only open projects you trust. Gripi [loads project resources automatically](#differences-from-pi-cli).
 
 In the default single-user mode, every new browser must be approved once, either with the admin password or from a browser that is already approved. See [access approval](docs/configuration.md#access-approval) to change the password or remove a browser.
+
+Programs that already run as the gateway’s OS user need no approval. The [`gripi` command](#command-line) reaches the gateway through a socket that only that user can open.
 
 Optional [multi-user mode](docs/configuration.md#multi-user-mode) gives each user a private token and shows them only their own sessions. It is intended for users who trust each other: all users still run commands as the same OS user, and they share model and thinking settings.
 

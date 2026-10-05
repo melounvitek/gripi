@@ -101,6 +101,8 @@ Approved users are listed under `approved_workspaces` in `~/.pi/gripi/workspace-
 
 Multi-user mode separates session lists, not permissions: all users run commands as the same OS user and share settings such as the selected model and thinking level.
 
+The [`gripi` command](../README.md#command-line) is unavailable in multi-user mode, because it would show every user’s sessions.
+
 ## Pinned session directories
 
 List frequently used directories in `~/.config/gripi/pinned-dirs` to keep them available in the New Session dialog:
@@ -227,6 +229,7 @@ Gripi stores its own data separately from Pi’s. Each location can be changed w
 | `~/.pi/gripi/web-push-vapid.json` | Web Push keys | `GRIPI_WEB_PUSH_VAPID_PATH` |
 | `~/.pi/gripi/push-subscriptions.json` | Web Push subscriptions | `GRIPI_PUSH_SUBSCRIPTIONS_PATH` |
 | `~/.pi/gripi/restart-request` | Restart signal for `bin/start` (not read from the env file) | `GRIPI_RESTART_PATH` |
+| `~/.pi/gripi/gripi.sock` | Socket for the [`gripi` command](../README.md#command-line), which must run with the same value (not read from the env file) | `GRIPI_SOCKET_PATH` |
 
 If a file is malformed, Gripi leaves it untouched instead of replacing it. Requests that depend on it fail, and the gateway log names the file. To recover, stop the gateway, back up the file, then fix it or move it aside. Moving a file aside resets only its own data, such as approvals or read markers. Pi’s session files are not affected.
 

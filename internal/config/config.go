@@ -33,6 +33,7 @@ type Config struct {
 	WorkspaceAccessPath       string
 	WorkspaceOwnershipPath    string
 	RestartPath               string
+	SocketPath                string
 	AdminPassword             string
 	BrowserAuthDisabled       bool
 	MultiUserMode             bool
@@ -129,6 +130,11 @@ func Load(environ []string) (Config, error) {
 		return Config{}, fmt.Errorf("GRIPI_ADMIN_PASSWORD is required; set it in %s or in the gateway process environment", envPath)
 	}
 
+	socketPath, err := SocketPath(environ)
+	if err != nil {
+		return Config{}, err
+	}
+
 	environment := firstNonempty(process["APP_ENV"], "production")
 	cfg := Config{
 		Address:                   net.JoinHostPort(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]"), strconv.Itoa(port)),
@@ -150,6 +156,7 @@ func Load(environ []string) (Config, error) {
 		WorkspaceAccessPath:       valueOr(values, "GRIPI_WORKSPACE_ACCESS_PATH", filepath.Join(home, ".pi", "gripi", "workspace-access.json")),
 		WorkspaceOwnershipPath:    valueOr(values, "GRIPI_WORKSPACE_OWNERSHIP_PATH", filepath.Join(home, ".pi", "gripi", "session-owners.json")),
 		RestartPath:               valueOr(process, "GRIPI_RESTART_PATH", filepath.Join(home, ".pi", "gripi", "restart-request")),
+		SocketPath:                socketPath,
 		AdminPassword:             adminPassword,
 		BrowserAuthDisabled:       browserAuthDisabled,
 		MultiUserMode:             multiUserMode,
@@ -164,6 +171,25 @@ func Load(environ []string) (Config, error) {
 		PiCommand:                 piCommand,
 	}
 	return cfg, nil
+}
+
+// SocketPath is where gripi commands reach the gateway. It ignores the env file,
+// so commands and the gateway agree without the commands loading its configuration.
+func SocketPath(environ []string) (string, error) {
+	process := environmentMap(environ)
+	path := process["GRIPI_SOCKET_PATH"]
+	if path == "" {
+		if process["HOME"] == "" {
+			return "", errors.New("HOME is required")
+		}
+		path = filepath.Join(process["HOME"], ".pi", "gripi", "gripi.sock")
+	}
+	// A relative path would name different files for the gateway and a command
+	// run elsewhere, and Go binds "@name" as an abstract socket without permissions.
+	if !filepath.IsAbs(path) {
+		return "", errors.New("GRIPI_SOCKET_PATH must be an absolute path")
+	}
+	return path, nil
 }
 
 func piAgentDir(home, configured string) string {

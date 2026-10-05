@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
@@ -26,9 +26,12 @@ function run(command, args = [], options = {}) {
   return spawnSync(command, args, { encoding: "utf8", ...options });
 }
 
-async function launcherFixture() {
+// The installer puts the gateway here, relative to the user's home.
+const installedLocation = path.join(".local", "share", "gripi");
+
+async function launcherFixture(location = "project") {
   const root = temporaryDirectory();
-  const project = path.join(root, "project");
+  const project = path.join(root, location);
   const fakeBin = path.join(root, "fake-bin");
   const launcher = path.join(project, "bin", "start");
   const gateway = path.join(project, "tmp", "gripi");
@@ -40,7 +43,7 @@ async function launcherFixture() {
   await chmod(launcher, 0o755);
   return {
     root, project, fakeBin, launcher, gateway, calls, restart,
-    env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, CALLS_PATH: calls, RESTART_PATH: restart, GRIPI_RESTART_PATH: restart, GRIPI_HOST: "", GRIPI_PORT: "" },
+    env: { ...process.env, HOME: root, PATH: `${fakeBin}:${process.env.PATH}`, CALLS_PATH: calls, RESTART_PATH: restart, GRIPI_RESTART_PATH: restart, GRIPI_HOST: "", GRIPI_PORT: "" },
   };
 }
 
@@ -199,13 +202,52 @@ test("launcher clears stale restart state, passes production defaults, and prese
   await writeFile(fixture.restart, "stale");
   const result = run(fixture.launcher, [], { cwd: fixture.project, env: fixture.env });
   assert.equal(result.status, 23);
-  assert.equal(await readFile(fixture.calls, "utf8"), "|production|127.0.0.1\n");
+  assert.equal(await readFile(fixture.calls, "utf8"), "serve|production|127.0.0.1\n");
   await assert.rejects(readFile(fixture.restart));
 
   const hostCalls = path.join(fixture.root, "host-calls");
   const hostResult = run(fixture.launcher, ["100.64.0.1"], { cwd: fixture.project, env: { ...fixture.env, CALLS_PATH: hostCalls } });
   assert.equal(hostResult.status, 23);
-  assert.equal(await readFile(hostCalls, "utf8"), "|production|100.64.0.1\n");
+  assert.equal(await readFile(hostCalls, "utf8"), "serve|production|100.64.0.1\n");
+});
+
+test("launcher links the gripi command of an installed gateway into ~/.local/bin", async () => {
+  const fixture = await launcherFixture(installedLocation);
+  await executable(fixture.gateway, "#!/bin/sh\nexit 23\n");
+  const result = run(fixture.launcher, [], { cwd: fixture.project, env: fixture.env });
+
+  assert.equal(result.status, 23, result.stderr);
+  assert.equal(await readlink(path.join(fixture.root, ".local", "bin", "gripi")), fixture.gateway);
+});
+
+test("launcher leaves an unrelated gripi command alone", async () => {
+  const fixture = await launcherFixture(installedLocation);
+  const command = path.join(fixture.root, ".local", "bin", "gripi");
+  await executable(fixture.gateway, "#!/bin/sh\nexit 23\n");
+  await executable(command, "#!/bin/sh\n");
+  const result = run(fixture.launcher, [], { cwd: fixture.project, env: fixture.env });
+
+  assert.equal(result.status, 23, result.stderr);
+  assert.equal(await readFile(command, "utf8"), "#!/bin/sh\n");
+});
+
+test("launcher starts the gateway even when it cannot link the gripi command", async () => {
+  const fixture = await launcherFixture(installedLocation);
+  await executable(fixture.gateway, "#!/bin/sh\nexit 23\n");
+  await mkdir(path.join(fixture.root, ".local", "bin"), { mode: 0o555 });
+  const result = run(fixture.launcher, [], { cwd: fixture.project, env: fixture.env });
+
+  assert.equal(result.status, 23, result.stderr);
+});
+
+test("launcher leaves the gripi command to the installed gateway when started from another checkout", async () => {
+  const fixture = await launcherFixture();
+  await executable(fixture.gateway, "#!/bin/sh\n");
+  await mkdir(path.join(fixture.root, installedLocation), { recursive: true });
+  const result = run(fixture.launcher, [], { cwd: fixture.project, env: fixture.env });
+
+  assert.equal(result.status, 0, result.stderr);
+  await assert.rejects(readlink(path.join(fixture.root, ".local", "bin", "gripi")));
 });
 
 test("launcher exposes Mise installed in the default user location", async () => {

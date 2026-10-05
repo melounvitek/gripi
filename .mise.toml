@@ -12,7 +12,7 @@ run = "bin/start"
 
 [tasks.dev]
 description = "Run the Go web gateway in development mode on port 4567"
-run = "APP_ENV=development GRIPI_BIND_HOST=127.0.0.1 go run ./cmd/gripi"
+run = "APP_ENV=development GRIPI_BIND_HOST=127.0.0.1 go run ./cmd/gripi serve"
 
 [tasks.test]
 description = "Run the Go gateway, frontend, shell script, and Pi extension tests"
