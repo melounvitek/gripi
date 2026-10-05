@@ -199,13 +199,13 @@ test("launcher clears stale restart state, passes production defaults, and prese
   await writeFile(fixture.restart, "stale");
   const result = run(fixture.launcher, [], { cwd: fixture.project, env: fixture.env });
   assert.equal(result.status, 23);
-  assert.equal(await readFile(fixture.calls, "utf8"), "|production|127.0.0.1\n");
+  assert.equal(await readFile(fixture.calls, "utf8"), "serve|production|127.0.0.1\n");
   await assert.rejects(readFile(fixture.restart));
 
   const hostCalls = path.join(fixture.root, "host-calls");
   const hostResult = run(fixture.launcher, ["100.64.0.1"], { cwd: fixture.project, env: { ...fixture.env, CALLS_PATH: hostCalls } });
   assert.equal(hostResult.status, 23);
-  assert.equal(await readFile(hostCalls, "utf8"), "|production|100.64.0.1\n");
+  assert.equal(await readFile(hostCalls, "utf8"), "serve|production|100.64.0.1\n");
 });
 
 test("launcher exposes Mise installed in the default user location", async () => {

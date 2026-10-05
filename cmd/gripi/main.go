@@ -23,25 +23,23 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "password" {
-		if err := ensurePassword(); err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func serve() error {
 	cfg, err := config.Load(os.Environ())
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	server := newHTTPServer(handler)
 	listener, err := net.Listen("tcp", cfg.Address)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -83,6 +81,7 @@ func main() {
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}
+	return nil
 }
 
 const (

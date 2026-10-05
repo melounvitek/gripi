@@ -61,7 +61,7 @@ fi
 
 rm -f -- "$restart_path"
 set +e
-(cd "$root" && APP_ENV=production GRIPI_BIND_HOST="$host" "$binary")
+(cd "$root" && APP_ENV=production GRIPI_BIND_HOST="$host" "$binary" serve)
 status=$?
 set -e
 if [[ -e "$restart_path" ]]; then

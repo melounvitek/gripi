@@ -78,7 +78,7 @@ if (build.status !== 0) {
 }
 
 let logs = "";
-const child = spawn(command, [], {
+const child = spawn(command, ["serve"], {
   cwd: repoRoot,
   env,
   detached: true,

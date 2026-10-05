@@ -74,7 +74,7 @@ const build = spawn("mise", ["exec", "--", "go", "build", "-o", serverBinary, ".
   stdio: ["ignore", serverLog, serverLog]
 });
 if (await childExitCode(build) !== 0) throw new Error(`Could not build managed Go gateway; see ${serverLogPath}`);
-const server = spawn(serverBinary, [], {
+const server = spawn(serverBinary, ["serve"], {
   cwd: repoRoot,
   env: serverEnv,
   detached: true,
