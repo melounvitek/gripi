@@ -753,10 +753,10 @@ func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {
 	if err := app.templates.ExecuteTemplate(&rendered, "conversation", view); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rendered.String(), `data-session-takeover>Take over in gateway</button>`) {
+	if !strings.Contains(rendered.String(), `data-session-takeover>Take over</button>`) {
 		t.Errorf("external follow conversation does not offer takeover: %s", rendered.String())
 	}
-	if !strings.Contains(rendered.String(), `gateway.</strong> <span>Following external activity.`) {
+	if !strings.Contains(rendered.String(), `Pi CLI.</strong> <span>New messages still appear here`) {
 		t.Errorf("external follow message has incorrect spacing: %s", rendered.String())
 	}
 
