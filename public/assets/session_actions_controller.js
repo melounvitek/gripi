@@ -39,6 +39,14 @@ export class SessionActionsController {
       return;
     }
 
+    if (event.target.closest?.("[data-open-pinned-sessions]")) {
+      this.closeMenu();
+      const paths = Array.from(this.document.querySelectorAll(".pinned-sessions-list .session-row"), (row) => row.dataset.sessionPath);
+      paths.forEach((path) => this.openSessionWindow(path));
+      if (paths.includes(this.callbacks.currentSessionPath?.())) this.callbacks.detachSession?.();
+      return;
+    }
+
     const action = event.target.closest?.("[data-session-action]");
     if (action && this.menu()?.contains(action)) {
       event.preventDefault();
@@ -175,10 +183,14 @@ export class SessionActionsController {
     }
     if (action === "window") {
       this.restoreFocus();
-      this.window.open(`/?${new URLSearchParams({ session: target.path, session_only: "1" })}`, "_blank", "noopener");
+      this.openSessionWindow(target.path);
       if (target.path === this.callbacks.currentSessionPath?.()) this.callbacks.detachSession?.();
     }
     if (action === "delete") this.openDelete(target);
+  }
+
+  openSessionWindow(path) {
+    this.window.open(`/?${new URLSearchParams({ session: path, session_only: "1" })}`, "_blank", "noopener");
   }
 
   openRename(target) {

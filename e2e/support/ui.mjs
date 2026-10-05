@@ -20,6 +20,14 @@ export async function startSession(page, project) {
   await dialog.getByRole("option", { name: new RegExp(escapeRegExp(project)) }).click();
 }
 
+export async function setSessionsPinned(page, paths, pinned) {
+  for (const path of paths) {
+    const toggle = page.locator(`.session-row[data-session-path="${path}"] [data-session-pin-toggle]`);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", String(pinned));
+  }
+}
+
 export function message(page, role, text) {
   return page.locator(`article[data-role="${role}"]`).filter({ hasText: text });
 }
