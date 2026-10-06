@@ -21,6 +21,7 @@ type Snapshot struct {
 	BehindCount        *int
 	Summary            *string
 	ActiveSessionCount *int
+	Failure            *StepFailure
 }
 
 type Coordinator struct {
@@ -399,6 +400,7 @@ func progressSnapshot(previous Snapshot) Snapshot {
 	previous.Reason = nil
 	previous.Message = stringPointer("Updating gateway…")
 	previous.ActiveSessionCount = nil
+	previous.Failure = nil
 	return previous
 }
 
@@ -422,6 +424,7 @@ func waitingSnapshot(previous Snapshot, active int) Snapshot {
 	previous.Reason = nil
 	previous.Message = stringPointer(fmt.Sprintf("Waiting for %d active Pi %s to finish…", active, sessions))
 	previous.ActiveSessionCount = intPointer(active)
+	previous.Failure = nil
 	return previous
 }
 
@@ -449,6 +452,7 @@ func snapshotFromResult(result Result) Snapshot {
 	snapshot := snapshotFromStatus(result.Status)
 	snapshot.State = result.State
 	snapshot.Message = stringPointerOrNil(result.Message)
+	snapshot.Failure = result.Failure
 	if snapshot.Reason == nil {
 		snapshot.Reason = stringPointer(result.State)
 	}

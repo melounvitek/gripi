@@ -399,3 +399,21 @@ func TestCoordinatorLeavesUpdatingStateWithUsefulErrorWhenUpdateTimesOut(t *test
 	}
 	t.Fatalf("coordinator remained in %+v", coordinator.CachedStatus())
 }
+
+func TestCoordinatorReportsTheFailedStepUntilTheUpdateIsRetried(t *testing.T) {
+	failure := &StepFailure{Step: "Check with Pi", ExitStatus: 1, Output: "$ gripi check\nPi exited with status 1"}
+	updater := &fakeUpdater{result: Result{State: "dependency_failed", Message: "The new version failed its check on this machine.", Failure: failure}}
+	coordinator := NewCoordinator(updater, func(context.Context) error { return nil }, nil, nil)
+	coordinator.Start()
+
+	deadline := time.Now().Add(time.Second)
+	for coordinator.CachedStatus().State != "dependency_failed" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if snapshot := coordinator.CachedStatus(); snapshot.Failure != failure {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if retry := coordinator.Start(); retry.State != "updating" || retry.Failure != nil {
+		t.Fatalf("retry = %+v", retry)
+	}
+}

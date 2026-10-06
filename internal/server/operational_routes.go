@@ -64,15 +64,16 @@ func (app *application) gatewayUpdateStart(response http.ResponseWriter, _ *http
 func (app *application) writeUpdateSnapshot(response http.ResponseWriter, status int, snapshot update.Snapshot) {
 	response.Header().Set("Cache-Control", "no-store")
 	writeJSONStatus(response, status, struct {
-		InstanceID         string  `json:"instanceId"`
-		State              string  `json:"state"`
-		Reason             *string `json:"reason"`
-		Message            *string `json:"message"`
-		CurrentSHA         *string `json:"currentSha"`
-		TargetSHA          *string `json:"targetSha"`
-		BehindCount        *int    `json:"behindCount"`
-		Summary            *string `json:"summary"`
-		ActiveSessionCount *int    `json:"activeSessionCount"`
+		InstanceID         string              `json:"instanceId"`
+		State              string              `json:"state"`
+		Reason             *string             `json:"reason"`
+		Message            *string             `json:"message"`
+		CurrentSHA         *string             `json:"currentSha"`
+		TargetSHA          *string             `json:"targetSha"`
+		BehindCount        *int                `json:"behindCount"`
+		Summary            *string             `json:"summary"`
+		ActiveSessionCount *int                `json:"activeSessionCount"`
+		Failure            *update.StepFailure `json:"failure"`
 	}{
 		InstanceID:         app.instanceID,
 		State:              snapshot.State,
@@ -83,5 +84,6 @@ func (app *application) writeUpdateSnapshot(response http.ResponseWriter, status
 		BehindCount:        snapshot.BehindCount,
 		Summary:            snapshot.Summary,
 		ActiveSessionCount: snapshot.ActiveSessionCount,
+		Failure:            snapshot.Failure,
 	})
 }

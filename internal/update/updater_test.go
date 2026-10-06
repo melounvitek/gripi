@@ -54,14 +54,14 @@ func TestUpdaterValidatesIsolatedTargetBeforeFastForwardAndAtomicallyInstallsBin
 	validated := ""
 	updater := NewUpdater(fixture.checkout)
 	updater.StageParent = fixture.root
-	updater.Validate = func(_ context.Context, directory, binary string) error {
+	updater.Validate = func(_ context.Context, directory, binary string) *StepFailure {
 		validated = directory
 		live, _ := os.ReadFile(filepath.Join(fixture.checkout, "app.txt"))
 		staged, _ := os.ReadFile(filepath.Join(directory, "app.txt"))
 		if string(live) != "initial\n" || string(staged) != "updated\n" {
-			return errors.New("validation did not run before live checkout changed")
+			return &StepFailure{Summary: "validation did not run before live checkout changed"}
 		}
-		return os.WriteFile(binary, []byte("new binary\n"), 0700)
+		return stageBinary(t, binary)
 	}
 
 	result := updater.Update(context.Background())
@@ -116,8 +116,8 @@ func TestDefaultValidationBuildsTheTargetAndRunsItsCheck(t *testing.T) {
 	directory, record := fakeBuildTools(t)
 	target := filepath.Join(directory, "private", "gripi")
 
-	if err := validateCheckout(context.Background(), directory, target); err != nil {
-		t.Fatal(err)
+	if failure := validateCheckout(context.Background(), directory, target); failure != nil {
+		t.Fatalf("failure = %+v", failure)
 	}
 
 	calls, _ := os.ReadFile(record)
@@ -126,15 +126,16 @@ func TestDefaultValidationBuildsTheTargetAndRunsItsCheck(t *testing.T) {
 	}
 }
 
-func TestDefaultValidationFailsWithTheCheckOutput(t *testing.T) {
+func TestDefaultValidationReportsTheFailedCheck(t *testing.T) {
 	directory, _ := fakeBuildTools(t)
 	t.Setenv("CHECK_STATUS", "1")
 	t.Setenv("CHECK_OUTPUT", "gripi check: Pi exited with status 1")
+	target := filepath.Join(directory, "private", "gripi")
 
-	err := validateCheckout(context.Background(), directory, filepath.Join(directory, "private", "gripi"))
+	failure := validateCheckout(context.Background(), directory, target)
 
-	if err == nil || !strings.Contains(err.Error(), "gripi check: Pi exited with status 1") {
-		t.Fatalf("validation error = %v", err)
+	if failure == nil || failure.Step != "Check with Pi" || failure.ExitStatus != 1 || failure.Output != "$ "+target+" check\ngripi check: Pi exited with status 1" {
+		t.Fatalf("failure = %+v", failure)
 	}
 }
 
@@ -145,8 +146,8 @@ func TestUpdaterRequiresFreshCutoverAdmissionAndResumesItAfterFailure(t *testing
 	upstreamCommit(t, fixture, "app.txt", "updated\n", "Add update")
 	updater := NewUpdater(fixture.checkout)
 	updater.StageParent = fixture.root
-	updater.Validate = func(_ context.Context, _ string, staged string) error {
-		return os.WriteFile(staged, []byte("new binary\n"), 0700)
+	updater.Validate = func(_ context.Context, _ string, staged string) *StepFailure {
+		return stageBinary(t, staged)
 	}
 	resumed := false
 	updater.AdmitCutover = func() bool { return false }
@@ -168,11 +169,11 @@ func TestUpdaterRefusesCutoverWhenLiveCheckoutChangesDuringValidation(t *testing
 	upstreamCommit(t, fixture, "app.txt", "updated\n", "Add update")
 	updater := NewUpdater(fixture.checkout)
 	updater.StageParent = fixture.root
-	updater.Validate = func(_ context.Context, _ string, staged string) error {
+	updater.Validate = func(_ context.Context, _ string, staged string) *StepFailure {
 		if err := os.WriteFile(filepath.Join(fixture.checkout, "app.txt"), []byte("local work\n"), 0644); err != nil {
-			return err
+			t.Fatal(err)
 		}
-		return os.WriteFile(staged, []byte("new binary\n"), 0700)
+		return stageBinary(t, staged)
 	}
 
 	result := updater.Update(context.Background())
@@ -222,9 +223,13 @@ exit 1
 			if result.State != "dependency_failed" || result.RolledBack {
 				t.Fatalf("result = %+v", result)
 			}
-			for _, detail := range []string{"Could not validate updated checkout", test.stdout, test.stderr} {
-				if !strings.Contains(result.Message, detail) {
-					t.Fatalf("message = %q; missing %q", result.Message, detail)
+			failure := result.Failure
+			if result.Message != "The new version did not build." || failure == nil || failure.Step != "Build" || failure.ExitStatus != 1 || failure.TimedOut {
+				t.Fatalf("message = %q, failure = %+v", result.Message, failure)
+			}
+			for _, detail := range []string{"$ mise exec -- go build -o ", test.stdout, test.stderr} {
+				if !strings.Contains(failure.Output, detail) {
+					t.Fatalf("output = %q; missing %q", failure.Output, detail)
 				}
 			}
 			if got := gitOutput(t, fixture.checkout, "rev-parse", "HEAD"); got != old {
@@ -246,8 +251,8 @@ func TestUpdaterRollsBackTrackedCheckoutAndPreservesBinaryAfterPostCheckoutFailu
 	upstreamCommit(t, fixture, "app.txt", "updated\n", "Add update")
 	updater := NewUpdater(fixture.checkout)
 	updater.StageParent = fixture.root
-	updater.Validate = func(_ context.Context, _ string, staged string) error {
-		return os.WriteFile(staged, []byte("new binary\n"), 0700)
+	updater.Validate = func(_ context.Context, _ string, staged string) *StepFailure {
+		return stageBinary(t, staged)
 	}
 	updater.Install = func(string, string) error { return errors.New("install failed") }
 	resumed := false
@@ -372,6 +377,15 @@ func TestRunCommandBoundsOutputToTailAndReportsDeadline(t *testing.T) {
 	if _, err := os.Stat(descendantEffect); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("timed-out command descendant survived: %v", err)
 	}
+}
+
+// stageBinary stands in for a validation that built the new binary.
+func stageBinary(t *testing.T, path string) *StepFailure {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("new binary\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return nil
 }
 
 func installFixtureBinary(t *testing.T, checkout, contents string) string {

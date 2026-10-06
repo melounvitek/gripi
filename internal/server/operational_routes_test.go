@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/config"
@@ -72,6 +73,26 @@ func TestResourceUsageDisabledAndUnsupported(t *testing.T) {
 	app.resourceUsage(response, httptest.NewRequest(http.MethodGet, "/resource-usage", nil))
 	if response.Body.String() != "{\"supported\":false}" {
 		t.Fatalf("unsupported = %s", response.Body.String())
+	}
+}
+func TestGatewayUpdateStatusSeparatesTheFailedStepFromTheMessage(t *testing.T) {
+	message := "The new version did not build."
+	failure := &update.StepFailure{Summary: message, Step: "Build", ExitStatus: 2, Output: "$ mise exec -- go build\nundefined: rpc.Start"}
+	app := &application{instanceID: "instance", updateCoordinator: &fakeUpdateCoordinator{snapshot: update.Snapshot{State: "dependency_failed", Message: &message, Failure: failure}}}
+	response := httptest.NewRecorder()
+
+	app.gatewayUpdateStatus(response, httptest.NewRequest(http.MethodGet, "/gateway-update", nil))
+
+	var payload struct {
+		Message string
+		Failure map[string]any
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	expected := map[string]any{"step": "Build", "exitStatus": 2.0, "timedOut": false, "output": "$ mise exec -- go build\nundefined: rpc.Start"}
+	if payload.Message != message || !reflect.DeepEqual(payload.Failure, expected) {
+		t.Fatalf("payload = %+v, want failure %v", payload, expected)
 	}
 }
 func TestGatewayUpdateRoutesExposeInstanceAndCoordinatorState(t *testing.T) {

@@ -43,6 +43,17 @@ type Result struct {
 	Status     Status
 	RolledBack bool
 	Message    string
+	Failure    *StepFailure
+}
+
+// StepFailure describes the validation step that failed before the live checkout changed.
+type StepFailure struct {
+	Summary    string `json:"-"`
+	Step       string `json:"step"`
+	ExitStatus int    `json:"exitStatus"`
+	TimedOut   bool   `json:"timedOut"`
+	// Output is the command line followed by the end of what the command printed.
+	Output string `json:"output"`
 }
 
 type commandResult struct {
@@ -56,7 +67,7 @@ type Updater struct {
 	Directory     string
 	BinaryPath    string
 	StageParent   string
-	Validate      func(context.Context, string, string) error
+	Validate      func(context.Context, string, string) *StepFailure
 	Install       func(string, string) error
 	AdmitCutover  func() bool
 	ResumeCutover func()
@@ -191,8 +202,8 @@ func (updater *Updater) Update(ctx context.Context) Result {
 		return Result{State: "error", Status: precondition, Message: commandError("Could not stage updated checkout", worktreeResult)}
 	}
 	added = true
-	if err := updater.Validate(ctx, worktree, stagedBinary); err != nil {
-		return Result{State: "dependency_failed", Status: precondition, Message: "Update validation failed before changing the live checkout: " + err.Error()}
+	if failure := updater.Validate(ctx, worktree, stagedBinary); failure != nil {
+		return Result{State: "dependency_failed", Status: precondition, Message: failure.Summary, Failure: failure}
 	}
 	if err := validateStagedBinary(stagedBinary); err != nil {
 		return Result{State: "dependency_failed", Status: precondition, Message: "Updated gateway build is invalid: " + err.Error()}
@@ -435,20 +446,24 @@ func (updater *Updater) commitSummary(ctx context.Context, value string) string 
 	return ""
 }
 
-func validateCheckout(ctx context.Context, directory, target string) error {
+func validateCheckout(ctx context.Context, directory, target string) *StepFailure {
 	steps := []struct {
-		timeout time.Duration
-		args    []string
+		name, failure string
+		timeout       time.Duration
+		args          []string
 	}{
-		{miseInstallTimeout, []string{"mise", "install"}},
-		{goBuildTimeout, []string{"mise", "exec", "--", "go", "build", "-o", target, "./cmd/gripi"}},
+		{"Install tools", "The tools the new version needs could not be installed.", miseInstallTimeout, []string{"mise", "install"}},
+		{"Build", "The new version did not build.", goBuildTimeout, []string{"mise", "exec", "--", "go", "build", "-o", target, "./cmd/gripi"}},
 		// The test suite runs in CI. Here the new build only has to work with this machine's Pi.
-		{checkTimeout, []string{target, "check"}},
+		{"Check with Pi", "The new version failed its check on this machine.", checkTimeout, []string{target, "check"}},
 	}
 	for _, step := range steps {
 		result := runCommand(ctx, directory, step.timeout, step.args[0], step.args[1:]...)
 		if !result.success {
-			return errors.New(commandError("Could not validate updated checkout", result))
+			return &StepFailure{
+				Summary: step.failure, Step: step.name, ExitStatus: result.exitStatus, TimedOut: result.timedOut,
+				Output: strings.TrimSpace("$ " + strings.Join(step.args, " ") + "\n" + strings.TrimSpace(result.stdout+"\n"+result.stderr)),
+			}
 		}
 	}
 	return nil
