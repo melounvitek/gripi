@@ -49,7 +49,7 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(pendingPath, project)
+	pending.Remember(pendingPath, project, "")
 	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), sessionsRoot)
 	if err := gatewayState.SetPinned(pendingPath, true); err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestCanonicalRPCSessionPathNormalizesNativePhysicalPathToConfiguredRoot(t *
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(pendingPath, project)
+	pending.Remember(pendingPath, project, "")
 	metadata := filepath.Join(attachmentsRoot, sessions.SessionHash(pendingPath)+".jsonl")
 	if err := os.WriteFile(metadata, []byte("gateway metadata\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -257,7 +257,7 @@ func TestCanonicalRPCSessionPathFinalizesPendingSessionAtSameConfiguredPath(t *t
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(configuredPath, project)
+	pending.Remember(configuredPath, project, "")
 	app := &application{config: config.Config{SessionsRoot: configuredRoot, AttachmentsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
 
 	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), physicalPath)
@@ -284,7 +284,7 @@ func TestCanonicalRPCSessionPathDoesNotInspectAnotherWorkspacePendingClient(t *t
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(pendingPath, project)
+	pending.Remember(pendingPath, project, "")
 	app := &application{config: config.Config{SessionsRoot: root}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending,
 		ownsSession: func(_ *http.Request, path string) bool { return path == target },
 	}
@@ -313,7 +313,7 @@ func TestPreparePageCanonicalizesSelectedPendingSessionBeforeBuildingView(t *tes
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(pendingPath, project)
+	pending.Remember(pendingPath, project, "")
 	cache := sessions.NewCache()
 	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: pending}
 	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
@@ -342,7 +342,7 @@ func TestPreparePageOrdersPendingSessionByRecentActivity(t *testing.T) {
 	pending := rpc.NewPendingSessionRegistry(func() time.Time {
 		return time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
 	})
-	pending.Remember(pendingPath, project)
+	pending.Remember(pendingPath, project, "")
 	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
 	app := &application{config: config.Config{SessionsRoot: root, Home: root}, sessionCache: sessions.NewCache(), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: pending}
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
@@ -366,7 +366,7 @@ func TestImagePromptLockFollowsRemapChainAndBlocksTheFinalPath(t *testing.T) {
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
 	pending.Remap("/pending", "/intermediate")
-	pending.Remember("/intermediate", "/project")
+	pending.Remember("/intermediate", "/project", "")
 	app := &application{config: config.Config{AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
 	path, unlock, err := app.lockResolvedImagePromptPath(request, "/pending")
@@ -398,7 +398,7 @@ func TestPendingRemapVerifiesSourceOwnershipAndClaimsDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember("/pending", "/project")
+	pending.Remember("/pending", "/project", "")
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
 	claimed := ""
 	app := &application{config: config.Config{AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending,
@@ -417,7 +417,7 @@ func TestPendingRemapVerifiesSourceOwnershipAndClaimsDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	otherPending := rpc.NewPendingSessionRegistry(nil)
-	otherPending.Remember("/other-pending", "/project")
+	otherPending.Remember("/other-pending", "/project", "")
 	app.rpcClients, app.pendingSessions = other, otherPending
 	app.ownsSession = func(*http.Request, string) bool { return false }
 	if err := app.movePendingRPCClient(request, "/other-pending", "/other-real"); err == nil {
@@ -434,7 +434,7 @@ func TestPendingRemapRejectsADeletedDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember("/pending", "/project")
+	pending.Remember("/pending", "/project", "")
 	root := t.TempDir()
 	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
 	if err := gatewayState.Forget("/real"); err != nil {
@@ -455,7 +455,7 @@ func TestPendingRemapRejectsADeletedDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	samePending := rpc.NewPendingSessionRegistry(nil)
-	samePending.Remember("/same", "/project")
+	samePending.Remember("/same", "/project", "")
 	app.rpcClients, app.pendingSessions = sameRegistry, samePending
 	if err := gatewayState.Forget("/same"); err != nil {
 		t.Fatal(err)
@@ -787,7 +787,7 @@ func TestAcceptedPromptImageSurvivesAttachmentMetadataFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(path, "/project")
+	pending.Remember(path, "/project", "")
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, sessions.SessionHash(path)+".jsonl"), 0700); err != nil {
 		t.Fatal(err)
@@ -936,7 +936,7 @@ func TestAbortDoesNotRetireAQueuedPendingSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(path, "/project")
+	pending.Remember(path, "/project", "")
 	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -958,7 +958,7 @@ func TestAbortAllowsTrackedSyntheticPendingSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(path, "/project")
+	pending.Remember(path, "/project", "")
 	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -994,7 +994,7 @@ func TestAbortMatchesPendingClientReportingPhysicalSessionPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(pendingPath, project)
+	pending.Remember(pendingPath, project, "")
 	cache := sessions.NewCache()
 	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
 	app.synchronizer = sessions.NewSynchronizer(configuredRoot, root, cache, registry)
@@ -1042,7 +1042,7 @@ func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *
 		<-started
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(path, t.TempDir())
+	pending.Remember(path, t.TempDir(), "")
 	cache := sessions.NewCache()
 	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: t.TempDir()}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
 	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), cache, registry)
@@ -1228,7 +1228,7 @@ func TestPendingRemapWaitsForPromptAttachmentBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(from, "/project")
+	pending.Remember(from, "/project", "")
 	app := &application{config: config.Config{AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
 	unlockBoundary := app.imagePromptLocks.Lock(from)
 	moved := make(chan error, 1)
@@ -1260,7 +1260,7 @@ func TestAttachmentPromptRecordingCannotRacePendingMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(from, "/project")
+	pending.Remember(from, "/project", "")
 	app := &application{config: config.Config{AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending}
 	started, record := make(chan struct{}), make(chan struct{})
 	recorded := make(chan error, 1)
@@ -1298,7 +1298,7 @@ func TestPendingClientMoveRollsBackWhenAttachmentMigrationFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(from, "/project")
+	pending.Remember(from, "/project", "")
 	source := filepath.Join(root, sessions.SessionHash(from)+".jsonl")
 	if err := os.WriteFile(source, []byte("metadata\n"), 0600); err != nil {
 		t.Fatal(err)

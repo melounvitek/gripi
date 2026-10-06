@@ -218,7 +218,7 @@ func newPendingAdmissionFixture(t *testing.T) (*idleRetirementFixture, string) {
 	if err := fixture.app.rpcClients.Move(fixture.path, pending); err != nil {
 		t.Fatal(err)
 	}
-	fixture.app.pendingSessions.Remember(pending, fixture.app.config.SessionsRoot)
+	fixture.app.pendingSessions.Remember(pending, fixture.app.config.SessionsRoot, "")
 	return fixture, pending
 }
 

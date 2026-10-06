@@ -158,9 +158,10 @@ func openSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	if err != nil {
 		return failure(stderr, "open", err)
 	}
+	_, err = os.Stat(session.Path)
 	switch {
 	// Until the first reply only the gateway's Pi process has the session; it has no file yet.
-	case session.ID == "":
+	case errors.Is(err, os.ErrNotExist):
 		return failure(stderr, "open", errors.New("the session has no reply yet, so Pi CLI has nothing to continue"))
 	case session.State != "idle" && session.State != "external" && session.State != "conflict":
 		return failure(stderr, "open", fmt.Errorf("the gateway is running the session (%s); Pi CLI can continue it once that has ended", session.State))

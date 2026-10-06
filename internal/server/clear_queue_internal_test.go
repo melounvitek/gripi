@@ -32,7 +32,7 @@ func TestClearQueueUsesOnlyExistingClientAndRecordedAliases(t *testing.T) {
 				if err := f.app.rpcClients.Move(f.path, pending); err != nil {
 					t.Fatal(err)
 				}
-				f.app.pendingSessions.Remember(pending, f.app.config.SessionsRoot)
+				f.app.pendingSessions.Remember(pending, f.app.config.SessionsRoot, "")
 				f.path, requested = pending, pending
 			case "alias_chain":
 				requested = f.path

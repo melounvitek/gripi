@@ -49,7 +49,7 @@ func TestDeletePendingSession(t *testing.T) {
 			registry := rpc.NewRegistry(nil, nil)
 			pending := rpc.NewPendingSessionRegistry(nil)
 			if test.name != "unknown" {
-				pending.Remember(path, root)
+				pending.Remember(path, root, "")
 			}
 			if test.name != "retired" && test.name != "unknown" {
 				if err := registry.Register(path, client); err != nil {
@@ -211,7 +211,7 @@ func newPendingDeleteFixture(t *testing.T) *idleRetirementFixture {
 	root := fixture.app.config.SessionsRoot
 	fixture.app.config.AttachmentsRoot = filepath.Join(root, "attachments")
 	fixture.app.gatewayState = sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), root)
-	fixture.app.pendingSessions.Remember(fixture.path, root)
+	fixture.app.pendingSessions.Remember(fixture.path, root, "")
 	fixture.old.state = map[string]any{"success": true, "data": map[string]any{"sessionFile": fixture.path}}
 	return fixture
 }

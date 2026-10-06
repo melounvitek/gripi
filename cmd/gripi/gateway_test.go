@@ -261,14 +261,14 @@ func TestNewStartsASessionThatTakesMessages(t *testing.T) {
 
 	code, stdout, stderr := runCLI("new", directory, "--json")
 	started := decodeSession(t, stdout)
-	if code != 0 || stderr != "" || started.Path == "" || started.CWD != directory || started.State != "idle" {
+	if code != 0 || stderr != "" || started.ID == "" || started.CWD != directory || started.State != "idle" {
 		t.Fatalf("gripi new = %d, stderr %q, session %+v", code, stderr, started)
 	}
-	if code, _, stderr := runCLI("send", started.Path, "Show the deterministic browser response"); code != 0 {
+	if code, _, stderr := runCLI("send", started.ID, "Show the deterministic browser response"); code != 0 {
 		t.Fatalf("gripi send to the new session = %d, stderr %q", code, stderr)
 	}
-	code, stdout, stderr = runCLI("wait", started.Path, "--json")
-	if session := decodeSession(t, stdout); code != 0 || session.CWD != directory || session.LastReply != "Deterministic browser response complete." {
+	code, stdout, stderr = runCLI("wait", started.ID, "--json")
+	if session := decodeSession(t, stdout); code != 0 || session.ID != started.ID || session.CWD != directory || session.LastReply != "Deterministic browser response complete." {
 		t.Fatalf("gripi wait on the new session = %d, stderr %q, session %+v", code, stderr, session)
 	}
 }

@@ -206,11 +206,7 @@ func printSessions(stdout io.Writer, sessions []gateway.LocalSession) {
 	table := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(table, "ID\tSTATE\tUNREAD\tPINNED\tUPDATED\tPROJECT\tTAGS\tNAME")
 	for _, session := range sessions {
-		id, tags := session.ID, "-"
-		// A session that has not produced its first reply has no ID yet.
-		if id == "" {
-			id = "-"
-		}
+		tags := "-"
 		if len(session.Tags) > 0 {
 			tags = strings.Join(session.Tags, ",")
 		}
@@ -218,7 +214,7 @@ func printSessions(stdout io.Writer, sessions []gateway.LocalSession) {
 		if len(name) > 60 {
 			name = append(name[:59], '…')
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", id, session.State, yesOrDash(session.Unread), yesOrDash(session.Pinned), age(time.Since(session.UpdatedAt)), filepath.Base(session.CWD), tags, string(name))
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", session.ID, session.State, yesOrDash(session.Unread), yesOrDash(session.Pinned), age(time.Since(session.UpdatedAt)), filepath.Base(session.CWD), tags, string(name))
 	}
 	table.Flush()
 }
@@ -249,9 +245,6 @@ Starts a session in a project directory, then prints it. The session is empty
 until 'gripi send' gives it a first message, and it keeps a Pi process running
 until then, so start one only to use it.
 
-A new session has no ID until Pi has replied once. Until then, refer to it by
-its path.
-
 Arguments:
   directory  Project directory for the session; it must exist
 
@@ -260,7 +253,7 @@ Flags:
 
 ` + sessionFields + `
 Example:
-  session=$(gripi new ~/Work/project --json | jq -r .path)
+  session=$(gripi new ~/Work/project --json | jq -r .id)
   gripi send "$session" "Run the tests" && gripi wait "$session"
 
 Exit codes:
@@ -429,7 +422,7 @@ func (client *gatewayClient) session(reference string) (gateway.LocalSession, er
 		if session.Path == reference || session.ID == reference {
 			return session, nil
 		}
-		if session.ID != "" && strings.HasPrefix(session.ID, reference) {
+		if strings.HasPrefix(session.ID, reference) {
 			matches = append(matches, session)
 		}
 	}

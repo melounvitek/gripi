@@ -76,7 +76,7 @@ func TestStartNewSessionClosesClientWhenStateFails(t *testing.T) {
 func TestBranchSessionMovesAndTracksTheClient(t *testing.T) {
 	root := t.TempDir()
 	previous, next := filepath.Join(root, "previous.jsonl"), filepath.Join(root, "next.jsonl")
-	client := &workflowClient{registryClient: newRegistryClient(), state: map[string]any{"success": true, "data": map[string]any{"sessionFile": next}}}
+	client := &workflowClient{registryClient: newRegistryClient(), state: map[string]any{"success": true, "data": map[string]any{"sessionFile": next, "sessionId": "01a-next"}}}
 	registry := NewRegistry(func(string) (RPCClient, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(previous, client); err != nil {
 		t.Fatal(err)
@@ -89,8 +89,8 @@ func TestBranchSessionMovesAndTracksTheClient(t *testing.T) {
 	if err != nil || response["success"] != true || result != next || registry.Active(previous) || !registry.Active(next) {
 		t.Fatalf("result=%q previous=%v next=%v err=%v", result, registry.Active(previous), registry.Active(next), err)
 	}
-	if cwd, ok := pending.CWD(next); !ok || cwd != root {
-		t.Fatalf("pending cwd = %q, %v", cwd, ok)
+	if entries := pending.Entries(); len(entries) != 1 || entries[0].Path != next || entries[0].CWD != root || entries[0].ID != "01a-next" {
+		t.Fatalf("pending = %#v", entries)
 	}
 }
 

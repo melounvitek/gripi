@@ -24,9 +24,9 @@ func TestCommandCatalogPreservesBuiltinsAndFiltersPrivateExtensionCommands(t *te
 func TestPendingSessionRegistryPreservesCreationTime(t *testing.T) {
 	now := time.Unix(1000, 0)
 	registry := NewPendingSessionRegistry(func() time.Time { return now })
-	registry.Remember("/pending", "/one")
+	registry.Remember("/pending", "/one", "")
 	now = now.Add(time.Hour)
-	registry.Remember("/pending", "/two")
+	registry.Remember("/pending", "/two", "")
 	entries := registry.Entries()
 	if len(entries) != 1 || entries[0].CWD != "/two" || !entries[0].CreatedAt.Equal(time.Unix(1000, 0)) {
 		t.Fatalf("entries = %#v", entries)
@@ -35,7 +35,7 @@ func TestPendingSessionRegistryPreservesCreationTime(t *testing.T) {
 	if _, ok := registry.CWD("/pending"); ok {
 		t.Fatal("pending entry remained")
 	}
-	registry.Remember("/pending", "/three")
+	registry.Remember("/pending", "/three", "")
 	if entries := registry.Entries(); len(entries) != 1 || entries[0].CWD != "/three" {
 		t.Fatalf("re-remembered entries = %#v", entries)
 	}
