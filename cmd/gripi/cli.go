@@ -19,8 +19,16 @@ Usage:
 
 Session commands (need a running gateway on this machine):
   list      List sessions with their state
+  new       Start a session in a directory
   send      Send a message to a session
   wait      Wait until a session stops working
+  show      Print the latest reply or the conversation of a session
+  open      Continue a session in Pi CLI
+  pin       Pin a session in the browser's sidebar
+  unpin     Unpin a session
+  tag       Add tags to a session
+  untag     Remove tags from a session
+  tags      List tags and how many sessions have each
 
 Gateway commands:
   serve     Start the gateway
@@ -39,8 +47,16 @@ type command struct {
 
 var commands = []command{
 	{name: "list", summary: "List sessions with their state", run: listSessions, help: listHelp},
+	{name: "new", summary: "Start a session in a directory", run: newSession, help: newHelp},
 	{name: "send", summary: "Send a message to a session", run: sendMessage, help: sendHelp},
 	{name: "wait", summary: "Wait until a session stops working", run: waitForSession, help: waitHelp},
+	{name: "show", summary: "Print the latest reply or the conversation of a session", run: showConversation, help: showHelp},
+	{name: "open", summary: "Continue a session in Pi CLI", run: openSession, help: openHelp},
+	{name: "pin", summary: "Pin a session in the browser's sidebar", run: pinSession("pin", true), help: pinHelp},
+	{name: "unpin", summary: "Unpin a session", run: pinSession("unpin", false), help: unpinHelp},
+	{name: "tag", summary: "Add tags to a session", run: tagSession("tag", true), help: tagHelp},
+	{name: "untag", summary: "Remove tags from a session", run: tagSession("untag", false), help: untagHelp},
+	{name: "tags", summary: "List tags and how many sessions have each", run: listTags, help: tagsHelp},
 	{name: "serve", summary: "Start the gateway", run: withoutArguments("serve", serve), help: `Usage:
   gripi serve
 

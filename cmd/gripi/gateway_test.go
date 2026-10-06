@@ -251,3 +251,37 @@ func TestWaitExplainsWhatItCannotWaitFor(t *testing.T) {
 		t.Fatalf("unknown session = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }
+
+func TestNewStartsASessionThatTakesMessages(t *testing.T) {
+	fakePiGateway(t)
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI("new", directory, "--json")
+	started := decodeSession(t, stdout)
+	if code != 0 || stderr != "" || started.Path == "" || started.CWD != directory || started.State != "idle" {
+		t.Fatalf("gripi new = %d, stderr %q, session %+v", code, stderr, started)
+	}
+	if code, _, stderr := runCLI("send", started.Path, "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send to the new session = %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr = runCLI("wait", started.Path, "--json")
+	if session := decodeSession(t, stdout); code != 0 || session.CWD != directory || session.LastReply != "Deterministic browser response complete." {
+		t.Fatalf("gripi wait on the new session = %d, stderr %q, session %+v", code, stderr, session)
+	}
+}
+
+func TestNewExplainsWhereItCannotStartASession(t *testing.T) {
+	fakePiGateway(t)
+	for _, usage := range [][]string{{"new"}, {"new", ""}, {"new", "one", "two"}, {"new", ".", "--bogus"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help new") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
+	}
+	missing := filepath.Join(t.TempDir(), "missing")
+	if code, stdout, stderr := runCLI("new", missing); code != 1 || stdout != "" || !strings.Contains(stderr, "existing directory") {
+		t.Fatalf("gripi new in a missing directory = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}

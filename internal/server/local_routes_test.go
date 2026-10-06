@@ -119,16 +119,15 @@ func waitForLocalSession(t *testing.T, local http.Handler, path string, done fun
 	return gateway.LocalSession{}
 }
 
-func promptOverTCP(t *testing.T, handler http.Handler, fields url.Values) {
-	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:4567/prompt", strings.NewReader(fields.Encode()))
+const browserHost, socketHost = "127.0.0.1:4567", "gripi"
+
+func postPrompt(target http.Handler, host string, fields url.Values) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, "http://"+host+"/prompt", strings.NewReader(fields.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("prompt %v = %d %s", fields, response.Code, response.Body.String())
-	}
+	target.ServeHTTP(response, request)
+	return response
 }
 
 func TestLocalSessionsReportFinishedRepliesWithoutMarkingThemRead(t *testing.T) {
@@ -152,7 +151,9 @@ func TestLocalSessionsReportFinishedRepliesWithoutMarkingThemRead(t *testing.T) 
 		t.Fatalf("unknown session = %+v", missing)
 	}
 
-	promptOverTCP(t, handler, url.Values{"session": {alpha}, "message": {"Show the deterministic browser response"}})
+	if response := postPrompt(handler, browserHost, url.Values{"session": {alpha}, "message": {"Show the deterministic browser response"}}); response.Code != http.StatusOK {
+		t.Fatalf("prompt = %d %s", response.Code, response.Body.String())
+	}
 	waitForLocalSession(t, local, alpha, func(session gateway.LocalSession) bool { return session.State == "idle" && session.Unread })
 	if again := localSessions(t, local, ""); again[0].Path != alpha || !again[0].Unread {
 		t.Fatalf("listing marked the finished session read or kept the old order: %+v", again)
@@ -165,10 +166,59 @@ func TestLocalSessionsReportFinishedRepliesWithoutMarkingThemRead(t *testing.T) 
 	waitForLocalSession(t, local, alpha, func(session gateway.LocalSession) bool { return !session.Unread })
 }
 
-func TestSessionListForCommandsIsNotServedToBrowsers(t *testing.T) {
-	response := httptest.NewRecorder()
-	newHandler(t, testConfig(t)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1:4567/sessions", nil))
-	if response.Code != http.StatusNotFound {
-		t.Fatalf("GET /sessions over TCP = %d %s", response.Code, response.Body.String())
+func TestPromptsReportWhatPiDidWithThem(t *testing.T) {
+	handler, alpha, _, _ := fakePiGateway(t)
+	local := localHandler(t, handler)
+	disposition := func(message string) any {
+		t.Helper()
+		response := postPrompt(local, socketHost, url.Values{"session": {alpha}, "message": {message}, "streaming_behavior": {"follow_up"}})
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || response.Code != http.StatusOK {
+			t.Fatalf("prompt %q = %d %s (%v)", message, response.Code, response.Body.String(), err)
+		}
+		return payload["disposition"]
+	}
+	// An extension command starts no turn, which 'gripi send' must know to not wait for one.
+	if got := disposition("/immediate-command"); got != "handled" {
+		t.Fatalf("extension command = %v", got)
+	}
+	if got := disposition("Start the follow-up scenario"); got != "started" {
+		t.Fatalf("prompt to an idle session = %v", got)
+	}
+	if got := disposition("Continue with the queued follow-up"); got != "queued" {
+		t.Fatalf("prompt during a turn = %v", got)
+	}
+}
+
+func TestPromptsRefuseTheGatewaysOwnExtensionCommands(t *testing.T) {
+	handler, alpha, _, _ := fakePiGateway(t)
+	for host, target := range map[string]http.Handler{browserHost: handler, socketHost: localHandler(t, handler)} {
+		for _, message := range []string{"/gripi_reload abc123 e30", "/gripi_tree_navigate abc123 e30", "/gripi_scoped_models"} {
+			for _, behavior := range []string{"", "steer", "follow_up"} {
+				response := postPrompt(target, host, url.Values{"session": {alpha}, "message": {message}, "streaming_behavior": {behavior}})
+				if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), strings.Fields(message)[0]) {
+					t.Fatalf("%q with behavior %q on %s = %d %s", message, behavior, host, response.Code, response.Body.String())
+				}
+			}
+		}
+	}
+	if _, err := os.Stat(os.Getenv("GRIPI_E2E_FAKE_PI_LOG")); !os.IsNotExist(err) {
+		t.Fatalf("Pi was started for a refused message (%v)", err)
+	}
+	// Only a message that Pi would run as the command is refused.
+	if response := postPrompt(handler, browserHost, url.Values{"session": {alpha}, "message": {"What does /gripi_reload do?"}}); response.Code != http.StatusOK {
+		t.Fatalf("message that mentions a command = %d %s", response.Code, response.Body.String())
+	}
+}
+
+// These routes answer for every session, which only the socket's single user may see.
+func TestRoutesForCommandsAreNotServedToBrowsers(t *testing.T) {
+	handler := newHandler(t, testConfig(t))
+	for _, target := range []string{"/sessions", "/conversation?session=%2Fsessions%2Fany.jsonl"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://"+browserHost+target, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("GET %s over TCP = %d %s", target, response.Code, response.Body.String())
+		}
 	}
 }

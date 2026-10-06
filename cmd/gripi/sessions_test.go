@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,15 +14,19 @@ import (
 )
 
 // cannedGateway answers the session list on a private socket that the commands will find.
+// It takes every prompt the way Pi takes an extension command: without starting a turn.
 func cannedGateway(t *testing.T, sessions []gateway.LocalSession) {
 	t.Helper()
 	path := socketPath(t)
 	server, err := startLocalServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodGet || request.URL.Path != "/sessions" {
+		switch request.Method + " " + request.URL.Path {
+		case "GET /sessions":
+			json.NewEncoder(response).Encode(map[string]any{"sessions": sessions})
+		case "POST /prompt":
+			json.NewEncoder(response).Encode(map[string]any{"session": request.FormValue("session"), "disposition": "handled"})
+		default:
 			http.NotFound(response, request)
-			return
 		}
-		json.NewEncoder(response).Encode(map[string]any{"sessions": sessions})
 	}), path)
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +44,7 @@ func cannedSessions(count int) []gateway.LocalSession {
 		}
 	}
 	sessions[0].State, sessions[0].Unread, sessions[0].Name = "working", true, "Fix the\nflaky   test"
+	sessions[0].Pinned, sessions[0].Tags = true, []string{"cli", "urgent"}
 	return sessions
 }
 
@@ -49,14 +55,14 @@ func TestListPrintsTheLatestSessionsAsATable(t *testing.T) {
 	if code != 0 || len(lines) != 21 {
 		t.Fatalf("gripi list = %d with %d lines, stderr %q:\n%s", code, len(lines), stderr, stdout)
 	}
-	if header := strings.Fields(lines[0]); !reflect.DeepEqual(header, []string{"ID", "STATE", "UNREAD", "UPDATED", "PROJECT", "NAME"}) {
+	if header := strings.Fields(lines[0]); !reflect.DeepEqual(header, []string{"ID", "STATE", "UNREAD", "PINNED", "UPDATED", "PROJECT", "TAGS", "NAME"}) {
 		t.Fatalf("header = %q", lines[0])
 	}
 	first, second := strings.Fields(lines[1]), strings.Fields(lines[2])
-	if strings.Join(append(first[:3:3], first[4:]...), " ") != "session-00 working yes project-00 Fix the flaky test" {
-		t.Fatalf("busy unread row = %q", lines[1])
+	if strings.Join(append(first[:4:4], first[5:]...), " ") != "session-00 working yes yes project-00 cli,urgent Fix the flaky test" {
+		t.Fatalf("busy, unread, pinned and tagged row = %q", lines[1])
 	}
-	if strings.Join(append(second[:3:3], second[4:]...), " ") != "session-01 idle - project-01 Task 01" {
+	if strings.Join(append(second[:4:4], second[5:]...), " ") != "session-01 idle - - project-01 - Task 01" {
 		t.Fatalf("idle row = %q", lines[2])
 	}
 	if !strings.Contains(stderr, "20 of 25") || !strings.Contains(stderr, "--all") {
@@ -80,6 +86,41 @@ func TestListPrintsJSONForPrograms(t *testing.T) {
 	}
 	if !reflect.DeepEqual(listed, sessions[:20]) {
 		t.Fatalf("listed %+v, expected %+v", listed, sessions[:20])
+	}
+}
+
+func TestSendDoesNotWaitForATurnThatPiWillNotStart(t *testing.T) {
+	cannedGateway(t, cannedSessions(2))
+	started := time.Now()
+	code, stdout, stderr := runCLI("send", "session-01", "/extension-command", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID != "session-01" || session.State != "idle" {
+		t.Fatalf("gripi send = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("gripi send waited %s for a turn to start", elapsed)
+	}
+}
+
+func TestNewNamesARelativeDirectoryInFullBecauseTheGatewayRunsElsewhere(t *testing.T) {
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, requested := socketPath(t), ""
+	server, err := startLocalServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/sessions/new_at_cwd" {
+			requested = request.FormValue("cwd")
+		}
+		json.NewEncoder(response).Encode(map[string]any{"session": "/sessions/00.jsonl", "sessions": cannedSessions(1)})
+	}), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { server.Close() })
+	t.Setenv("GRIPI_SOCKET_PATH", path)
+	t.Chdir(directory)
+	if code, _, stderr := runCLI("new", "."); code != 0 || requested != directory {
+		t.Fatalf("gripi new . = %d, stderr %q, asked for %q instead of %q", code, stderr, requested, directory)
 	}
 }
 
