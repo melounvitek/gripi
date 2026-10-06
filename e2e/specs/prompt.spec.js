@@ -496,13 +496,11 @@ test("keep a large image read visible with agent activity off without blocking t
     await expect.poll(() => image.locator("img").evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
     const card = page.locator("article").filter({ has: image });
     await expect(card.locator(".message-header")).toBeHidden();
-    await expect(card.locator(".message-details")).toBeHidden();
+    await expect(card.getByText("read /tmp/e2e-large-image.png")).toBeVisible();
     await activityView(page, "Full").click();
     await expect(image).toBeVisible();
-    await expect(card.locator(".message-details")).toBeVisible();
     await brief.click();
     await expect(image).toBeVisible();
-    await expect(card.locator(".message-details")).toBeHidden();
     await image.click();
     const viewer = page.getByRole("dialog", { name: "Full-size image viewer" });
     const downloadPromise = page.waitForEvent("download");

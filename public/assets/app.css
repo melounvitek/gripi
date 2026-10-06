@@ -132,7 +132,8 @@
     .conversation-panel.is-conversation-focused .conversation-scroll .message[data-role="status"]:not(.message--compaction),
     .conversation-panel.is-conversation-focused .conversation-scroll .message[data-role="system"] { display: none; }
     .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images) { display: grid; }
-    .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images):not(.active-activity > .message) > :is(.message-header, .message-details) { display: none; }
+    .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images):not(.active-activity > .message) > .message-header,
+    .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images):not(.active-activity > .message) > .message-details > :not(.message-details-summary) { display: none; }
     .conversation-scroll:focus-visible { outline: none; }
     .current-session-find { position: sticky; top: 0.4rem; z-index: 5; width: min(38rem, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto repeat(3, 2rem); align-items: center; gap: 0.4rem; margin: 0 0 0.75rem auto; padding: 0.55rem; border: 1px solid var(--border-strong); border-radius: 0.4rem; background: #1e1e24fa; box-shadow: var(--shadow-soft); }
     .current-session-find input[type="search"] { min-width: 0; padding: 0.5rem 0.65rem; }
