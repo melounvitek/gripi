@@ -101,7 +101,7 @@ Approved users are listed under `approved_workspaces` in `~/.pi/gripi/workspace-
 
 Multi-user mode separates session lists and [environment variables](#environment-variables), not permissions: all users run commands as the same OS user and share settings such as the selected model and thinking level. For the same reason, one user’s variables are not secret from the others.
 
-The [`gripi` command](../README.md#command-line) is unavailable in multi-user mode, because it would show every user’s sessions.
+The session commands of the [`gripi` command](../README.md#command-line) are unavailable in multi-user mode, because they would reach every user’s sessions.
 
 ## Environment variables
 
@@ -170,7 +170,7 @@ Use one directory per line. Blank lines and `#` comments are ignored.
 
 ## Session tags
 
-Add tags with the tag icon in the conversation header or **Tags…** in a session’s menu. Select a tag in the sidebar to filter by it; pinned sessions stay visible. Forks and clones keep their tags.
+Add tags with the tag icon in the conversation header, **Tags…** in a session’s menu, or [`gripi tag`](../README.md#command-line). Select a tag in the sidebar to filter by it; pinned sessions stay visible. Forks and clones keep their tags.
 
 Tags are lowercased, up to 64 characters long, and limited to 32 per session. They are stored in `~/.pi/gripi/session-tags.json`, not in Pi’s session files, and are private to each user in multi-user mode.
 

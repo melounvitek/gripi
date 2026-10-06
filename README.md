@@ -103,12 +103,13 @@ There is no mobile app. On iPhone, open the gateway in Safari, tap **Share**, ch
 Scripts and agents on the gateway machine can work with sessions through the `gripi` command:
 
 ```sh
-gripi list                                # sessions with their live state
-gripi send 01a107aa "Run the tests"       # prompt a session
-gripi wait 01a107aa --timeout 900 --json  # block until it stops working
+gripi list                           # sessions with their live state
+gripi send 01a107aa "Run the tests"  # prompt a session
+gripi wait 01a107aa --timeout 900    # block until it stops working
+gripi show 01a107aa                  # print the reply
 ```
 
-`gripi help` describes every command, and each session command can print JSON. The gateway must be running, and not in [multi-user mode](docs/configuration.md#multi-user-mode).
+Other commands start a session (`new`), continue one in Pi CLI (`open`), and pin or tag sessions (`pin`, `unpin`, `tag`, `untag`, `tags`). `gripi help` describes every command, and each session command can print JSON. The gateway must be running, and not in [multi-user mode](docs/configuration.md#multi-user-mode).
 
 When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it links the command into `~/.local/bin`, unless something there is already named `gripi`. `~/.local/bin` must be on your `PATH`.
 
