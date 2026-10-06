@@ -1,11 +1,15 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
+	"syscall"
 
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
@@ -93,6 +97,72 @@ func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer)
 		if index < len(messages)-1 {
 			fmt.Fprintln(stdout)
 		}
+	}
+	return 0
+}
+
+const openHelp = `Usage:
+  gripi open <session>
+
+Continues a session in Pi CLI. It changes to the session's project directory
+and replaces itself with 'pi --session <path>', so it needs a terminal and
+does not return until Pi CLI exits.
+
+The gateway must not be running the session: its state has to be idle,
+external or conflict. Once Pi CLI has written to the session, the gateway only
+follows it (state external) until someone takes it over in the browser.
+
+Pi CLI starts as it does for any session. It does not get the environment
+variables saved in Gripi, and it asks before it trusts a project.
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+
+Example:
+  gripi open 01a107aa
+
+Exit codes:
+  1  the gateway cannot be reached, no single session matched, the gateway is
+     running the session, there is no terminal, or pi is not on PATH
+  2  usage error
+`
+
+// Tests exchange this, because they have to outlive the command.
+var replaceProcess = syscall.Exec
+
+func openSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	positional, err := parseArguments(flag.NewFlagSet("open", flag.ContinueOnError), arguments)
+	if err != nil {
+		return usageError(stderr, "open", err.Error())
+	}
+	if len(positional) != 1 || positional[0] == "" {
+		return usageError(stderr, "open", "takes exactly one session")
+	}
+	// Redirected, Pi CLI would not open its interface but run once on whatever stdin holds.
+	for _, stream := range []any{stdin, stdout} {
+		if file, ok := stream.(*os.File); ok {
+			if info, err := file.Stat(); err != nil || info.Mode()&os.ModeCharDevice == 0 {
+				return failure(stderr, "open", errors.New("Pi CLI needs a terminal for its interface"))
+			}
+		}
+	}
+	_, session, err := connect(positional[0])
+	if err != nil {
+		return failure(stderr, "open", err)
+	}
+	switch session.State {
+	case "working", "compacting", "waiting":
+		return failure(stderr, "open", fmt.Errorf("the gateway is running the session (%s); Pi CLI can continue it once that has ended", session.State))
+	}
+	pi, err := exec.LookPath("pi")
+	if err != nil {
+		return failure(stderr, "open", errors.New("pi is not on PATH"))
+	}
+	if err := os.Chdir(session.CWD); err != nil {
+		return failure(stderr, "open", err)
+	}
+	if err := replaceProcess(pi, []string{"pi", "--session", session.Path}, os.Environ()); err != nil {
+		return failure(stderr, "open", err)
 	}
 	return 0
 }

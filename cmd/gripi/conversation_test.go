@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	gateway "github.com/melounvitek/gripi/internal/server"
@@ -97,5 +101,80 @@ func TestShowExplainsWhatItCannotShow(t *testing.T) {
 	}
 	if code, stdout, stderr := runCLI("show", "zzz"); code != 1 || stdout != "" || !strings.Contains(stderr, "gripi list") {
 		t.Fatalf("gripi show on an unknown session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+// piOnPath puts a pi command on PATH and records how 'gripi open' starts it instead of letting it replace the test.
+func piOnPath(t *testing.T) (pi string, started *[]string, directory *string) {
+	t.Helper()
+	bin := t.TempDir()
+	pi = filepath.Join(bin, "pi")
+	if err := os.WriteFile(pi, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// Restores the working directory that the command changes.
+	t.Chdir(t.TempDir())
+	started, directory = new([]string), new(string)
+	replaceProcess = func(path string, arguments, _ []string) error {
+		*started = append([]string{path}, arguments...)
+		*directory, _ = os.Getwd()
+		return nil
+	}
+	t.Cleanup(func() { replaceProcess = syscall.Exec })
+	return pi, started, directory
+}
+
+func TestOpenContinuesASessionInPiCLIFromItsProjectDirectory(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	project := listedSession(t, "0a1-alpha").CWD
+	pi, started, directory := piOnPath(t)
+
+	code, stdout, stderr := runCLI("open", "0a1-a")
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("gripi open = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if !reflect.DeepEqual(*started, []string{pi, "pi", "--session", alpha}) || *directory != project {
+		t.Fatalf("started %q in %q, expected pi --session %s in %s", *started, *directory, alpha, project)
+	}
+}
+
+func TestOpenLeavesASessionAloneWhileTheGatewayRunsIt(t *testing.T) {
+	fakePiGateway(t)
+	_, started, _ := piOnPath(t)
+	if code, _, stderr := runCLI("send", "0a1-b", "Start the follow-up scenario"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr := runCLI("open", "0a1-b")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "working") || *started != nil {
+		t.Fatalf("gripi open on a working session = %d, stdout %q, stderr %q, started %q", code, stdout, stderr, *started)
+	}
+}
+
+func TestOpenNeedsATerminalAndPiCLI(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	_, started, _ := piOnPath(t)
+	// Redirected, Pi CLI would run once on whatever stdin holds rather than open its interface.
+	redirected, err := os.Open(alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer redirected.Close()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"open", "0a1-a"}, redirected, &stdout, &stderr); code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "terminal") || *started != nil {
+		t.Fatalf("gripi open without a terminal = %d, stdout %q, stderr %q, started %q", code, stdout.String(), stderr.String(), *started)
+	}
+
+	for _, usage := range [][]string{{"open"}, {"open", ""}, {"open", "0a1-a", "0a1-b"}, {"open", "0a1-a", "--json"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help open") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
+	}
+	if code, stdout, stderr := runCLI("open", "zzz"); code != 1 || stdout != "" || !strings.Contains(stderr, "gripi list") {
+		t.Fatalf("gripi open on an unknown session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	t.Setenv("PATH", t.TempDir())
+	if code, stdout, stderr := runCLI("open", "0a1-a"); code != 1 || stdout != "" || !strings.Contains(stderr, "PATH") || *started != nil {
+		t.Fatalf("gripi open without Pi CLI = %d, stdout %q, stderr %q, started %q", code, stdout, stderr, *started)
 	}
 }
