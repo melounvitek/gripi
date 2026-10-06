@@ -47,6 +47,23 @@ test("a search emptied by typing is not sent with a new session", async ({ page 
   expect(posted).not.toContain("session_search");
 });
 
+test("a session that cannot start says why", async ({ page }) => {
+  const reason = "Pi could not start: fork/exec /missing/pi: no such file or directory";
+  let failure = { status: 502, contentType: "application/json", body: JSON.stringify({ error: reason }) };
+  await page.route("**/sessions/new_at_cwd", (route) => route.fulfill(failure));
+  await page.goto("/");
+  await page.getByRole("button", { name: "New session", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "New session" });
+
+  await dialog.getByRole("option").first().click();
+  await expect(dialog.getByRole("status")).toHaveText(reason);
+
+  // Failures the gateway cannot explain come as plain text.
+  failure = { status: 500, contentType: "text/plain", body: "Pi RPC request failed" };
+  await dialog.getByRole("option").first().click();
+  await expect(dialog.getByRole("status")).toHaveText("Could not start the session. Try again.");
+});
+
 test("start a session in a configured directory and persist its first response", async ({ page }) => {
   await page.goto("/");
   await startSession(page, "new-session-desktop");

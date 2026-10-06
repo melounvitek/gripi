@@ -30,6 +30,9 @@ func StartNewSession(ctx context.Context, cwd, sessionsRoot string, factory Clie
 		}
 	}()
 	state, err := client.GetState(ctx)
+	if errors.Is(err, ErrProcessExited) {
+		return "", fmt.Errorf("%w: it exited before the session was ready", ErrStartFailed)
+	}
 	if err != nil {
 		return "", err
 	}

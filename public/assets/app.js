@@ -3280,7 +3280,7 @@ document.addEventListener("submit", async (event) => {
     const response = await fetch(form.action, { method: "POST", body: formData, headers: { "Accept": "application/json" } });
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
-      newSessionFormController.setStatus(form, payload?.error || "Path must be an existing directory.", true);
+      newSessionFormController.setStatus(form, payload?.error || "Could not start the session. Try again.", true);
       return;
     }
     const payload = await response.json();
