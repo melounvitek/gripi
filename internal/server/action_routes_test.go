@@ -445,6 +445,26 @@ func TestGoGatewayValidatesAndBrowsesNewSessionDirectories(t *testing.T) {
 	}
 }
 
+func TestNewSessionSaysWhyPiCouldNotStart(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "pi")
+	for _, test := range []struct {
+		command []string
+		want    string
+	}{
+		{[]string{missing}, "Pi could not start: fork/exec " + missing + ": no such file or directory"},
+		{[]string{"false"}, "Pi could not start: it exited before the session was ready"},
+	} {
+		cfg := testConfig(t)
+		cfg.PiCommand = test.command
+		response := serveAction(newHandler(t, cfg), formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": t.TempDir()}, true))
+		var payload map[string]any
+		decodeActionJSON(t, response, &payload)
+		if response.Code != http.StatusBadGateway || payload["error"] != test.want {
+			t.Fatalf("%v: %d %v", test.command, response.Code, payload["error"])
+		}
+	}
+}
+
 func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

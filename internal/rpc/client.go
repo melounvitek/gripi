@@ -56,6 +56,7 @@ var nativeToolUpdatePrefix = regexp.MustCompile(`^\{"type":"tool_execution_updat
 
 var (
 	ErrProcessExited      = errors.New("Pi RPC process exited")
+	ErrStartFailed        = errors.New("Pi could not start")
 	ErrRPCLineTooLarge    = fmt.Errorf("%w: RPC response exceeds the compatibility limit", ErrProcessExited)
 	ErrBashAlreadyRunning = errors.New("a bash command is already running for this Pi RPC client")
 )
@@ -263,7 +264,7 @@ func startProcess(cwd string, command, args, variables []string, diagnostics *Di
 		_ = stdin.Close()
 		_ = stdout.Close()
 		_ = stderr.Close()
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrStartFailed, err)
 	}
 	group, err := attachProcessGroup(cmd)
 	if err != nil {

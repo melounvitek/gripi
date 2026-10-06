@@ -1785,6 +1785,10 @@ func (app *application) writeActionRPCError(response http.ResponseWriter, err er
 	if app.writeRPCError(response, err) {
 		return true
 	}
+	if errors.Is(err, rpc.ErrStartFailed) {
+		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return true
+	}
 	if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, rpc.ErrProcessExited) {
 		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Pi RPC client disconnected"})
 		return true
