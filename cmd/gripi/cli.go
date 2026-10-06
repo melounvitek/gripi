@@ -19,6 +19,7 @@ Usage:
 
 Session commands (need a running gateway on this machine):
   list      List sessions with their state
+  new       Start a session in a directory
   send      Send a message to a session
   wait      Wait until a session stops working
   pin       Pin a session in the browser's sidebar
@@ -44,6 +45,7 @@ type command struct {
 
 var commands = []command{
 	{name: "list", summary: "List sessions with their state", run: listSessions, help: listHelp},
+	{name: "new", summary: "Start a session in a directory", run: newSession, help: newHelp},
 	{name: "send", summary: "Send a message to a session", run: sendMessage, help: sendHelp},
 	{name: "wait", summary: "Wait until a session stops working", run: waitForSession, help: waitHelp},
 	{name: "pin", summary: "Pin a session in the browser's sidebar", run: pinSession("pin", true), help: pinHelp},

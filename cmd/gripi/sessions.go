@@ -242,6 +242,64 @@ func age(elapsed time.Duration) string {
 	return fmt.Sprintf("%dd", int(elapsed.Hours()/24))
 }
 
+const newHelp = `Usage:
+  gripi new <directory> [--json]
+
+Starts a session in a project directory, then prints it. The session is empty
+until 'gripi send' gives it a first message.
+
+A new session has no ID until Pi has replied once. Until then, refer to it by
+its path.
+
+Arguments:
+  directory  Project directory for the session; it must exist
+
+Flags:
+  --json  Print the session as a JSON object instead of a table
+
+` + sessionFields + `
+Example:
+  session=$(gripi new ~/Work/project --json | jq -r .path)
+  gripi send "$session" "Run the tests" && gripi wait "$session"
+
+Exit codes:
+` + sessionExitCodes
+
+func newSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("new", flag.ContinueOnError)
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "new", err.Error())
+	}
+	if len(positional) != 1 || positional[0] == "" {
+		return usageError(stderr, "new", "takes exactly one directory")
+	}
+	// The gateway would resolve a relative directory against its own.
+	directory, err := filepath.Abs(positional[0])
+	if err != nil {
+		return failure(stderr, "new", err)
+	}
+	client, err := newGatewayClient()
+	if err != nil {
+		return failure(stderr, "new", err)
+	}
+	var started struct {
+		Session string `json:"session"`
+	}
+	if err := client.post("/sessions/new_at_cwd", url.Values{"cwd": {directory}}, &started); err != nil {
+		return failure(stderr, "new", err)
+	}
+	sessions, err := client.sessions(started.Session)
+	if err != nil {
+		return failure(stderr, "new", err)
+	}
+	if len(sessions) != 1 {
+		return failure(stderr, "new", fmt.Errorf("session %s no longer exists", started.Session))
+	}
+	return printSession(stdout, stderr, "new", sessions[0], *asJSON)
+}
+
 const sendHelp = `Usage:
   gripi send <session> [message] [--steer] [--json]
 

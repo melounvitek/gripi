@@ -25,6 +25,7 @@ type LocalSession struct {
 func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sessions", app.localSessions)
 	mux.HandleFunc("POST /prompt", app.prompt)
+	mux.HandleFunc("POST /sessions/new_at_cwd", app.newSessionAtCWD)
 	mux.HandleFunc("POST /sessions/pin", app.pinSession)
 	mux.HandleFunc("POST /sessions/tags", app.sessionTags)
 	mux.HandleFunc("GET /tags", app.tags)
