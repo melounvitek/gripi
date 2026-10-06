@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
@@ -55,10 +56,29 @@ type Synchronizer struct {
 	locks    keyedlock.Mutexes
 	statesMu sync.Mutex
 	states   map[string]syncState
+	// externalPath is the file that lists the sessions in external follow.
+	externalPath string
 }
 
 func NewSynchronizer(root, home string, cache *Cache, clients *rpc.Registry) *Synchronizer {
 	return &Synchronizer{store: Store{Root: root, Home: home, Cache: cache}, clients: clients, states: make(map[string]syncState)}
+}
+
+// PersistExternalFollow restores the sessions Pi CLI was using when the gateway last ran
+// and keeps the file at path current. Without it a restart would let the gateway write to
+// a session Pi CLI is still working in, until Pi CLI next appended to it.
+func (synchronizer *Synchronizer) PersistExternalFollow(path string) error {
+	var external []string
+	if err := readJSONIfExists(path, &external); err != nil {
+		return fmt.Errorf("read external sessions state %s: %w", path, err)
+	}
+	synchronizer.statesMu.Lock()
+	defer synchronizer.statesMu.Unlock()
+	synchronizer.externalPath = path
+	for _, sessionPath := range external {
+		synchronizer.states[sessionPath] = syncState{Mode: SyncExternalFollow}
+	}
+	return nil
 }
 
 func (synchronizer *Synchronizer) Inspect(ctx context.Context, path string, includePosition bool) (SyncResult, error) {
@@ -87,7 +107,8 @@ func (synchronizer *Synchronizer) ReconcileIfAvailable(ctx context.Context, path
 
 func (synchronizer *Synchronizer) KnownBlocked(path string) *SyncResult {
 	state := synchronizer.state(path)
-	if state.Snapshot != nil && (state.Mode == SyncExternalFollow || state.Mode == SyncConflict) {
+	// A session restored after a restart has no snapshot until it is first inspected.
+	if state.Mode == SyncExternalFollow || (state.Mode == SyncConflict && state.Snapshot != nil) {
 		result := resultFor(state)
 		return &result
 	}
@@ -95,8 +116,12 @@ func (synchronizer *Synchronizer) KnownBlocked(path string) *SyncResult {
 }
 func (synchronizer *Synchronizer) Forget(path string) {
 	synchronizer.statesMu.Lock()
+	defer synchronizer.statesMu.Unlock()
+	wasExternal := synchronizer.states[path].Mode == SyncExternalFollow
 	delete(synchronizer.states, path)
-	synchronizer.statesMu.Unlock()
+	if wasExternal {
+		synchronizer.saveExternalLocked()
+	}
 }
 func (synchronizer *Synchronizer) RetireManagedClientIfAvailable(path string, retire func() (bool, error)) (bool, error) {
 	unlock, locked := synchronizer.locks.TryLock(path)
@@ -500,8 +525,27 @@ func (synchronizer *Synchronizer) state(path string) syncState {
 }
 func (synchronizer *Synchronizer) setState(path string, state syncState) {
 	synchronizer.statesMu.Lock()
+	defer synchronizer.statesMu.Unlock()
+	wasExternal := synchronizer.states[path].Mode == SyncExternalFollow
 	synchronizer.states[path] = state
-	synchronizer.statesMu.Unlock()
+	if wasExternal != (state.Mode == SyncExternalFollow) {
+		synchronizer.saveExternalLocked()
+	}
+}
+func (synchronizer *Synchronizer) saveExternalLocked() {
+	if synchronizer.externalPath == "" {
+		return
+	}
+	external := []string{}
+	for path, state := range synchronizer.states {
+		if state.Mode == SyncExternalFollow {
+			external = append(external, path)
+		}
+	}
+	// The mode still holds in memory, so a failed save only costs it at the next restart.
+	if err := writeJSON(synchronizer.externalPath, external); err != nil {
+		log.Printf("save external sessions state: %v", err)
+	}
 }
 func (synchronizer *Synchronizer) update(path string, snapshot FileSnapshot, mode SyncMode, leaf, message string) {
 	copy := snapshot

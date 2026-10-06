@@ -259,6 +259,11 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		return rpc.StartInCWD(cwd, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
 	}
 	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, app.sessionCache, app.rpcClients)
+	if cfg.ReadStatePath != "" {
+		if err := app.synchronizer.PersistExternalFollow(filepath.Join(filepath.Dir(cfg.ReadStatePath), "external-sessions.json")); err != nil {
+			return nil, err
+		}
+	}
 	if cfg.MultiUserMode {
 		app.ownsSession = func(request *http.Request, path string) bool {
 			owned, err := app.ownershipStore.OwnedBy(path, currentWorkspaceID(request))
