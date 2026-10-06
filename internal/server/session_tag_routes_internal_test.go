@@ -32,7 +32,7 @@ func TestSessionTagsResolveSymlinksAndPendingAliasesWithoutRPC(t *testing.T) {
 	pending := rpc.NewPendingSessionRegistry(nil)
 	pendingPath := filepath.Join(configured, "pending.jsonl")
 	alias := filepath.Join(configured, "old-pending.jsonl")
-	pending.Remember(pendingPath, root)
+	pending.Remember(pendingPath, root, "")
 	pending.Remap(alias, configuredPath)
 	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { t.Error("tag request started RPC"); return nil, os.ErrNotExist }, nil)
 	app := &application{config: config.Config{SessionsRoot: configured, Home: root}, sessionCache: sessions.NewCache(), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), configured), pendingSessions: pending, rpcClients: registry}

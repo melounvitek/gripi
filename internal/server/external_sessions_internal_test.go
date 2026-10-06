@@ -80,7 +80,7 @@ func TestSidebarKeepsExternalSessionQuietDuringAnExclusiveOperation(t *testing.T
 func TestSidebarObservationDoesNotBlockPendingSessions(t *testing.T) {
 	app, actual, _ := externalSessionTestApplication(t)
 	path := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
-	app.pendingSessions.Remember(path, app.config.SessionsRoot)
+	app.pendingSessions.Remember(path, app.config.SessionsRoot, "")
 	appendExternalSessionReply(t, actual, "external", "")
 	view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestSidebarResolvesOwnedPendingAliasesBeforeObservingDiskSessions(t *testin
 			now := time.Now()
 			app.rpcClients = rpc.NewRegistry(nil, func() time.Time { return now })
 			app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, app.sessionCache, app.rpcClients)
-			app.pendingSessions.Remember(pending, app.config.SessionsRoot)
+			app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 			if err := app.rpcClients.Register(pending, client); err != nil {
 				t.Fatal(err)
 			}
@@ -179,7 +179,7 @@ func TestSidebarResolvesOwnedPendingAliasesBeforeObservingDiskSessions(t *testin
 func TestSidebarKeepsPendingSessionManagedDuringRemapPreparation(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	pending := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
-	app.pendingSessions.Remember(pending, app.config.SessionsRoot)
+	app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 	if err := app.rpcClients.Register(pending, client); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestSidebarDoesNotQueryUnownedPendingAliases(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	pending := filepath.Join(app.config.SessionsRoot, "unowned.jsonl")
 	client.state = map[string]any{"data": map[string]any{"sessionFile": path}}
-	app.pendingSessions.Remember(pending, app.config.SessionsRoot)
+	app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 	if err := app.rpcClients.Register(pending, client); err != nil {
 		t.Fatal(err)
 	}

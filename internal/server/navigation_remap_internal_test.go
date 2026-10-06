@@ -10,7 +10,7 @@ import (
 func TestNavigationPendingRemapHTTPConflict(t *testing.T) {
 	fixture := newTreeNavigationFixture(t)
 	from, to := fixture.path, fixture.session(t, "native")
-	fixture.app.pendingSessions.Remember(from, fixture.app.config.SessionsRoot)
+	fixture.app.pendingSessions.Remember(from, fixture.app.config.SessionsRoot, "")
 	entered, release, block := idleRetirementBarrier()
 	defer release()
 	response := httptest.NewRecorder()
@@ -48,7 +48,7 @@ func TestNavigationPreventsPendingRemap(t *testing.T) {
 		t.Run(protected, func(t *testing.T) {
 			fixture := newTreeNavigationFixture(t)
 			from, to := fixture.path, fixture.session(t, "native")
-			fixture.app.pendingSessions.Remember(from, fixture.app.config.SessionsRoot)
+			fixture.app.pendingSessions.Remember(from, fixture.app.config.SessionsRoot, "")
 			path := from
 			if protected == "destination" {
 				path = to

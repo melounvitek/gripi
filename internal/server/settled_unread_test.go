@@ -166,7 +166,7 @@ func TestPendingCompletionMigratesWithoutLosingUnreadOrReadSuppression(t *testin
 				t.Fatal(err)
 			}
 			pending := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
-			app.pendingSessions.Remember(pending, app.config.SessionsRoot)
+			app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 			app.config.AttachmentsRoot = t.TempDir()
 			client := notificationRPCClient(t, app, pending)
 			notifier.Observe(client, map[string]any{"type": "agent_start"})
@@ -217,7 +217,7 @@ func TestUnresolvedPendingSidebarDoesNotExposeProgressOrReadIt(t *testing.T) {
 			assertSettledUnread(t, app, older, true)
 
 			pending := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
-			app.pendingSessions.Remember(pending, app.config.SessionsRoot)
+			app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 			app.config.AttachmentsRoot = t.TempDir()
 			in, input := io.Pipe()
 			output, out := io.Pipe()

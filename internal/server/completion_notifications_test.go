@@ -737,7 +737,7 @@ func TestCompletionNotifierResolvesAndClaimsAPendingSessionForItsWorkspace(t *te
 	if err := app.rpcClients.Register(pendingPath, client); err != nil {
 		t.Fatal(err)
 	}
-	app.pendingSessions.Remember(pendingPath, root)
+	app.pendingSessions.Remember(pendingPath, root, "")
 
 	notifier := newCompletionNotifier(app)
 	if err := notifier.deliver(context.Background(), completedReply{client: client, path: pendingPath, text: "done", id: "reply-9"}); err != nil {

@@ -166,7 +166,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		if knownPaths[pending.Path] {
 			continue
 		}
-		all = append(all, &sessions.Session{Path: pending.Path, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt})
+		all = append(all, &sessions.Session{Path: pending.Path, ID: pending.ID, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt})
 	}
 	sort.SliceStable(all, func(left, right int) bool {
 		return all[left].ConversationActivityAt.After(all[right].ConversationActivityAt)

@@ -38,7 +38,7 @@ func TestComposerPathSuggestionsUseSessionCWD(t *testing.T) {
 			case "persisted":
 				writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": cwd}})
 			case "pending", "unowned pending":
-				app.pendingSessions.Remember(path, cwd)
+				app.pendingSessions.Remember(path, cwd, "")
 			}
 
 			form := url.Values{"session": {path}, "mode": {"path"}, "query": {"../"}}

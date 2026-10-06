@@ -52,7 +52,7 @@ func StartNewSession(ctx context.Context, cwd, sessionsRoot string, factory Clie
 	}
 	registered = true
 	if _, err := os.Stat(path); err != nil {
-		pending.Remember(path, cwd)
+		pending.Remember(path, cwd, sessionIDFromResponse(state))
 	}
 	return path, nil
 }
@@ -60,6 +60,7 @@ func StartNewSession(ctx context.Context, cwd, sessionsRoot string, factory Clie
 func BranchSession(ctx context.Context, previous, cwd string, clients SessionClientMover, pending *PendingSessionRegistry, switchSession func(RPCClient) (map[string]any, error), normalize func(string) (string, error), prepare func(string, string) (func() error, error)) (string, map[string]any, error) {
 	_, wasPending := pending.CWD(previous)
 	var actionResponse map[string]any
+	var id string
 	path, err := clients.WithClientMove(ctx, previous, true, func(client RPCClient) (string, error) {
 		var err error
 		actionResponse, err = switchSession(client)
@@ -70,6 +71,7 @@ func BranchSession(ctx context.Context, previous, cwd string, clients SessionCli
 		if err != nil {
 			return "", err
 		}
+		id = sessionIDFromResponse(state)
 		path := sessionFileFromResponse(state)
 		if path == "" {
 			return "", errors.New("Pi did not report the switched session path")
@@ -89,7 +91,7 @@ func BranchSession(ctx context.Context, previous, cwd string, clients SessionCli
 			pending.Remap(from, to)
 		}
 		if _, statErr := os.Stat(to); statErr != nil {
-			pending.Remember(to, cwd)
+			pending.Remember(to, cwd, id)
 		}
 	})
 	return path, actionResponse, err
@@ -133,6 +135,12 @@ func sessionFileFromResponse(response map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func sessionIDFromResponse(response map[string]any) string {
+	data, _ := response["data"].(map[string]any)
+	id, _ := data["sessionId"].(string)
+	return id
 }
 
 func randomSessionID() string {

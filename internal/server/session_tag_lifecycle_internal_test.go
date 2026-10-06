@@ -41,7 +41,7 @@ func TestPendingTagsMaterializeInBackgroundWithoutRequest(t *testing.T) {
 			if err := app.rpcClients.Register(pending, client); err != nil {
 				t.Fatal(err)
 			}
-			app.pendingSessions.Remember(pending, root)
+			app.pendingSessions.Remember(pending, root, "")
 			if err := app.gatewayState.SetTag(pending, "work", true); err != nil {
 				t.Fatal(err)
 			}
@@ -98,7 +98,7 @@ func TestPendingTagMigrationFailureRollsBackMetadataAndOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := rpc.NewPendingSessionRegistry(nil)
-	pending.Remember(from, root)
+	pending.Remember(from, root, "")
 	attachments := filepath.Join(root, "attachments")
 	if err := os.Mkdir(attachments, 0700); err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestBackgroundCompletionDoesNotMigrateTagsAfterConcurrentBranch(t *testing.
 			if err := app.rpcClients.Register(parent, client); err != nil {
 				t.Fatal(err)
 			}
-			app.pendingSessions.Remember(parent, root)
+			app.pendingSessions.Remember(parent, root, "")
 			if err := app.gatewayState.SetTag(parent, "parent", true); err != nil {
 				t.Fatal(err)
 			}

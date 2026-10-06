@@ -8,6 +8,7 @@ import (
 type PendingSession struct {
 	Path      string
 	CWD       string
+	ID        string
 	CreatedAt time.Time
 }
 
@@ -27,7 +28,7 @@ func NewPendingSessionRegistry(clock func() time.Time) *PendingSessionRegistry {
 	return &PendingSessionRegistry{clock: clock, entries: make(map[string]PendingSession), remaps: make(map[string]string)}
 }
 
-func (registry *PendingSessionRegistry) Remember(path, cwd string) {
+func (registry *PendingSessionRegistry) Remember(path, cwd, id string) {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	delete(registry.remaps, path)
@@ -37,7 +38,7 @@ func (registry *PendingSessionRegistry) Remember(path, cwd string) {
 		entry = PendingSession{Path: path, CreatedAt: registry.clock()}
 		registry.order = append(registry.order, path)
 	}
-	entry.CWD = cwd
+	entry.CWD, entry.ID = cwd, id
 	registry.entries[path] = entry
 }
 
