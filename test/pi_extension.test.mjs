@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,18 +10,36 @@ import { test } from "node:test";
 
 const piExecutable = process.env.GRIPI_PI || execFileSync("sh", ["-c", "command -v pi"], { encoding: "utf8" }).trim();
 const piPackageRoot = await resolvePiPackageRoot(piExecutable);
-const { createJiti } = await import(pathToFileURL(path.join(piPackageRoot, "node_modules/jiti/lib/jiti.mjs")));
+// npm nests jiti inside a global Pi package but hoists it beside the package in Pi's managed install.
+const jitiRoot = path.dirname(createRequire(path.join(piPackageRoot, "package.json")).resolve("jiti/package.json"));
+const { createJiti } = await import(pathToFileURL(path.join(jitiRoot, "lib/jiti.mjs")));
 const piIndex = path.join(piPackageRoot, "dist/index.js");
 const extensionPath = path.resolve("pi_extensions/gripi-tree.ts");
 
 async function resolvePiPackageRoot(executable) {
-  let directory = path.dirname(await realpath(executable));
+  const root = await packageRootAbove(executable) || await packageRootAbove(scriptBehindLauncher(executable));
+  if (!root) throw new Error(`Cannot find Pi package root for ${executable}`);
+  return root;
+}
+
+async function packageRootAbove(file) {
+  let directory = path.dirname(await realpath(file));
   while (!existsSync(path.join(directory, "package.json"))) {
     const parent = path.dirname(directory);
-    if (parent === directory) throw new Error(`Cannot find Pi package root for ${executable}`);
+    if (parent === directory) return null;
     directory = parent;
   }
   return directory;
+}
+
+// Pi's installer puts a shell launcher on PATH, outside the package. A Node preload reports the
+// script the launcher ends up running; --version keeps Pi from starting if the preload is ignored.
+function scriptBehindLauncher(launcher) {
+  return execFileSync(launcher, ["--version"], {
+    encoding: "utf8",
+    timeout: 10_000,
+    env: { ...process.env, NODE_OPTIONS: "--import=data:text/javascript,console.log(process.argv[1]);process.exit(0)" },
+  }).trim();
 }
 
 for (const entrypoint of ["dist/cli.js", "dist/bundle/cli.js"]) {
@@ -42,6 +61,23 @@ for (const entrypoint of ["dist/cli.js", "dist/bundle/cli.js"]) {
     }
   });
 }
+
+test("resolves the Pi package root behind a launcher script", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "gripi-pi-launcher-"));
+  try {
+    const packageRoot = path.join(directory, "release", "pi-package");
+    const cli = path.join(packageRoot, "dist/cli.js");
+    await mkdir(path.dirname(cli), { recursive: true });
+    await writeFile(path.join(packageRoot, "package.json"), JSON.stringify({ type: "module" }));
+    await writeFile(cli, "#!/usr/bin/env node\n", { mode: 0o755 });
+    const launcher = path.join(directory, "pi");
+    await writeFile(launcher, `#!/bin/sh\nexec "${cli}" "$@"\n`, { mode: 0o755 });
+
+    assert.equal(await resolvePiPackageRoot(launcher), packageRoot);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("reload bridge refreshes native Pi resources in RPC mode", { timeout: 20_000 }, async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "gripi-reload-extension-"));
