@@ -519,3 +519,51 @@ func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) i
 		time.Sleep(time.Second)
 	}
 }
+
+const deleteHelp = `Usage:
+  gripi delete <session> [--json]
+
+Deletes a session, then prints it as it was. The command does not ask first.
+
+The session file moves to Trash when the 'trash' or 'gio' command can do that
+on the gateway's machine; otherwise it is deleted for good. The session's pin,
+its tags and the files attached to its messages are always deleted for good.
+
+The gateway refuses while Pi is running a turn in the session or compacting
+it; wait for it with 'gripi wait' first. A turn that asked a question (state
+waiting) keeps running until someone answers in the browser. The gateway does
+not know whether Pi CLI still has the session open, so a session in state
+external or conflict is deleted like any other.
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+
+Flags:
+  --json  Print the session as a JSON object instead of a table
+
+` + sessionFields + `
+Example:
+  gripi delete 01a107aa
+
+Exit codes:
+` + sessionExitCodes
+
+func deleteSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("delete", flag.ContinueOnError)
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "delete", err.Error())
+	}
+	if len(positional) != 1 || positional[0] == "" {
+		return usageError(stderr, "delete", "takes exactly one session")
+	}
+	client, session, err := connect(positional[0])
+	if err != nil {
+		return failure(stderr, "delete", err)
+	}
+	if err := client.post("/sessions/delete", url.Values{"session": {session.Path}}, &struct{}{}); err != nil {
+		return failure(stderr, "delete", err)
+	}
+	return printSession(stdout, stderr, "delete", session, *asJSON)
+}
