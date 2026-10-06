@@ -34,6 +34,7 @@ Session commands (need a running gateway on this machine):
 Gateway commands:
   serve     Start the gateway
   password  Create the admin password if it is missing
+  check     Check that this build works with this machine's Pi
 
 Run 'gripi help <command>' or 'gripi <command> --help' for details.
 `
@@ -78,6 +79,18 @@ Example:
 
 Adds a random GRIPI_ADMIN_PASSWORD to ~/.config/gripi/env (or the file named
 by GRIPI_ENV_PATH) and prints it. Does nothing when a password is already set.
+`},
+	// The update of every installed version runs the next version's "gripi check",
+	// so the command must keep its name and keep working without arguments.
+	{name: "check", summary: "Check that this build works with this machine's Pi", run: withoutArguments("check", checkPi), help: `Usage:
+  gripi check
+
+Starts the Pi that the gateway is configured to run, with this build's Pi
+extension and an empty Pi configuration. Prints nothing when Pi offers the
+extension's commands; otherwise fails with the reason. Reads the gateway's
+settings but needs no running gateway.
+
+The gateway runs this on a new version before it updates to it.
 `},
 }
 
