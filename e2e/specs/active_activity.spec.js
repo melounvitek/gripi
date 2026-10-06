@@ -42,16 +42,18 @@ test("tool images survive activity retirement, including standalone custom-tool 
   await deliver({ type: "agent_end" });
   await expect(activeGroup(page)).toHaveCount(0);
   await expect(card.locator(".message-images")).toBeVisible();
-  await expect(card.locator(".message-details")).toBeHidden();
+  await expect(card.getByText("screenshot", { exact: true })).toBeVisible();
+  await expect(card.getByText("Screenshot captured")).toBeHidden();
 
   await deliver({ type: "message_end", message: { role: "toolResult", toolCallId: "standalone-image", toolName: "screenshot", content } });
   const standalone = page.locator('[data-tool-call-id="standalone-image"]');
   await expect(standalone.locator(".message-images")).toBeVisible();
-  await expect(standalone.locator(".message-details")).toBeHidden();
+  await expect(standalone.getByText("screenshot", { exact: true })).toBeVisible();
+  await expect(standalone.getByText("Screenshot captured")).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("focused-tool-images.png") });
   await activityView(page, "Full").tap();
-  await expect(card.locator(".message-details")).toBeVisible();
-  await expect(standalone.locator(".message-details")).toBeVisible();
+  await expect(card.getByText("Screenshot captured")).toBeVisible();
+  await expect(standalone.getByText("Screenshot captured")).toBeVisible();
   await expect(page.locator(".message-images")).toHaveCount(2);
 });
 
