@@ -497,6 +497,10 @@ test("keep a large image read visible with agent activity off without blocking t
     const card = page.locator("article").filter({ has: image });
     await expect(card.locator(".message-header")).toBeHidden();
     await expect(card.getByText("read /tmp/e2e-large-image.png")).toBeVisible();
+    await page.keyboard.press("Control+f");
+    await page.getByRole("searchbox", { name: "Find in conversation" }).fill("e2e-large-image");
+    await expect(page.locator("[data-current-session-find-count]")).toHaveText("1 / 1");
+    await page.getByRole("button", { name: "Close find" }).click();
     await activityView(page, "Full").click();
     await expect(image).toBeVisible();
     await brief.click();

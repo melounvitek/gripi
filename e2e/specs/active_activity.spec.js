@@ -51,6 +51,11 @@ test("tool images survive activity retirement, including standalone custom-tool 
   await expect(standalone.getByText("screenshot", { exact: true })).toBeVisible();
   await expect(standalone.getByText("Screenshot captured")).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("focused-tool-images.png") });
+  // Find matches the two summary lines, not the hidden output below them.
+  await page.keyboard.press("Control+f");
+  await page.getByRole("searchbox", { name: "Find in conversation" }).fill("screenshot");
+  await expect(page.locator("[data-current-session-find-count]")).toHaveText("1 / 2");
+  await page.getByRole("button", { name: "Close find" }).click();
   await activityView(page, "Full").tap();
   await expect(card.getByText("Screenshot captured")).toBeVisible();
   await expect(standalone.getByText("Screenshot captured")).toBeVisible();
