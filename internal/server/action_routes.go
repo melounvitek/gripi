@@ -305,6 +305,10 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	if behavior != "" && rpcResponse["compacting"] == true {
 		payload["queued_after_compaction"] = true
 	}
+	// Pi says whether the message started a turn, was queued behind one or was handled without one.
+	if disposition, ok := responseData(rpcResponse)["disposition"].(string); ok {
+		payload["disposition"] = disposition
+	}
 	if handledSlashCommand {
 		payload["compacting"] = compactingAfterHandledCommand
 		payload["running"] = runningAfterHandledCommand

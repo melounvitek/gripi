@@ -381,7 +381,8 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		behavior = "steer"
 	}
 	var accepted struct {
-		Session string `json:"session"`
+		Session     string `json:"session"`
+		Disposition string `json:"disposition"`
 	}
 	// bash_mode keeps a leading "!" from being run as a shell command.
 	form := url.Values{"session": {session.Path}, "message": {message}, "streaming_behavior": {behavior}, "bash_mode": {"prompt"}}
@@ -391,7 +392,7 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 
 	// Pi accepts a prompt just before it reports the turn. Returning in that gap
 	// would let a following 'gripi wait' see an idle session and finish at once.
-	// A message that starts no turn, such as an extension command, waits this out.
+	// No turn follows a message that Pi handled itself, such as an extension command.
 	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(100 * time.Millisecond) {
 		current, err := client.sessions(accepted.Session)
 		if err != nil {
@@ -400,7 +401,7 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		} else if len(current) == 1 {
 			session = current[0]
 		}
-		if err != nil || session.State != "idle" || time.Now().After(deadline) {
+		if err != nil || session.State != "idle" || accepted.Disposition == "handled" || time.Now().After(deadline) {
 			return printSession(stdout, stderr, "send", session, *asJSON)
 		}
 	}

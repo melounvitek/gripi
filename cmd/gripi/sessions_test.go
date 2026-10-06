@@ -13,15 +13,19 @@ import (
 )
 
 // cannedGateway answers the session list on a private socket that the commands will find.
+// It takes every prompt the way Pi takes an extension command: without starting a turn.
 func cannedGateway(t *testing.T, sessions []gateway.LocalSession) {
 	t.Helper()
 	path := socketPath(t)
 	server, err := startLocalServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodGet || request.URL.Path != "/sessions" {
+		switch request.Method + " " + request.URL.Path {
+		case "GET /sessions":
+			json.NewEncoder(response).Encode(map[string]any{"sessions": sessions})
+		case "POST /prompt":
+			json.NewEncoder(response).Encode(map[string]any{"session": request.FormValue("session"), "disposition": "handled"})
+		default:
 			http.NotFound(response, request)
-			return
 		}
-		json.NewEncoder(response).Encode(map[string]any{"sessions": sessions})
 	}), path)
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +85,18 @@ func TestListPrintsJSONForPrograms(t *testing.T) {
 	}
 	if !reflect.DeepEqual(listed, sessions[:20]) {
 		t.Fatalf("listed %+v, expected %+v", listed, sessions[:20])
+	}
+}
+
+func TestSendDoesNotWaitForATurnThatPiWillNotStart(t *testing.T) {
+	cannedGateway(t, cannedSessions(2))
+	started := time.Now()
+	code, stdout, stderr := runCLI("send", "session-01", "/extension-command", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID != "session-01" || session.State != "idle" {
+		t.Fatalf("gripi send = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("gripi send waited %s for a turn to start", elapsed)
 	}
 }
 

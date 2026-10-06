@@ -292,7 +292,7 @@ function setModel(command) {
 function acceptPrompt(command) {
   if (acceptReloadBridge(command) || acceptTreeBridge(command)) return;
   if (command.message === "/immediate-command") {
-    respond(command, true);
+    respond(command, true, { data: { disposition: "handled" } });
     return;
   }
   if (busy && command.streamingBehavior === "steer") {
@@ -309,7 +309,7 @@ function acceptPrompt(command) {
   }
   const user = userMessage(command.message);
   appendMessage(user);
-  respond(command, true);
+  respond(command, true, { data: { disposition: "started" } });
   busy = true;
   activeScenario = command.message;
   if (process.env.GRIPI_E2E_HOLD_PROMPT_EVENTS === "1") heldPromptEvents = [];
@@ -566,7 +566,7 @@ function acceptQueuedMessage(command, kind, reply) {
   }
   const pending = { kind, message: command.message, timer: null };
   pendingMessages.push(pending);
-  respond(command, true);
+  respond(command, true, { data: { disposition: "queued" } });
   emit({ type: "queue_update", ...queuedMessages() });
   if (kind === "steering" && command.message === prompts.queuedAbortSteer) {
     queuedAbortSteer = command.message;

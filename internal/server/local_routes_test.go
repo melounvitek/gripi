@@ -165,6 +165,35 @@ func TestLocalSessionsReportFinishedRepliesWithoutMarkingThemRead(t *testing.T) 
 	waitForLocalSession(t, local, alpha, func(session gateway.LocalSession) bool { return !session.Unread })
 }
 
+func TestPromptsReportWhatPiDidWithThem(t *testing.T) {
+	handler, alpha, _, _ := fakePiGateway(t)
+	local := localHandler(t, handler)
+	disposition := func(message string) any {
+		t.Helper()
+		fields := url.Values{"session": {alpha}, "message": {message}, "streaming_behavior": {"follow_up"}}
+		request := httptest.NewRequest(http.MethodPost, "http://gripi/prompt", strings.NewReader(fields.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Accept", "application/json")
+		response := httptest.NewRecorder()
+		local.ServeHTTP(response, request)
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || response.Code != http.StatusOK {
+			t.Fatalf("prompt %q = %d %s (%v)", message, response.Code, response.Body.String(), err)
+		}
+		return payload["disposition"]
+	}
+	// An extension command starts no turn, which 'gripi send' must know to not wait for one.
+	if got := disposition("/immediate-command"); got != "handled" {
+		t.Fatalf("extension command = %v", got)
+	}
+	if got := disposition("Start the follow-up scenario"); got != "started" {
+		t.Fatalf("prompt to an idle session = %v", got)
+	}
+	if got := disposition("Continue with the queued follow-up"); got != "queued" {
+		t.Fatalf("prompt during a turn = %v", got)
+	}
+}
+
 func TestSessionListForCommandsIsNotServedToBrowsers(t *testing.T) {
 	response := httptest.NewRecorder()
 	newHandler(t, testConfig(t)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1:4567/sessions", nil))
