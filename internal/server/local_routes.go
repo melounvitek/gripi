@@ -1,8 +1,10 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -22,8 +24,16 @@ type LocalSession struct {
 	LastReply string    `json:"last_reply"`
 }
 
+// LocalMessage is how gripi commands see one message of a conversation.
+type LocalMessage struct {
+	Role      string    `json:"role"`
+	Text      string    `json:"text"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sessions", app.localSessions)
+	mux.HandleFunc("GET /conversation", app.localConversation)
 	mux.HandleFunc("POST /prompt", app.prompt)
 	mux.HandleFunc("POST /sessions/new_at_cwd", app.newSessionAtCWD)
 	mux.HandleFunc("POST /sessions/pin", app.pinSession)
@@ -61,6 +71,36 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 		})
 	}
 	writeJSON(response, map[string]any{"sessions": result})
+}
+
+// localConversation answers with the most recent messages of a session, as many as the browser first shows.
+func (app *application) localConversation(response http.ResponseWriter, request *http.Request) {
+	if !acquireRequestSlot(response, request, app.heavyRequests) {
+		return
+	}
+	defer releaseRequestSlot(app.heavyRequests)
+	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+	window, err := store.Window(request.URL.Query().Get("session"), "", false, nil, nil)
+	// A new session has no file, and so no messages, until Pi has replied once.
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		writeInternalError(response, "read conversation for gripi commands", err)
+		return
+	}
+	messages := []LocalMessage{}
+	for _, message := range window.Messages {
+		local := LocalMessage{Role: message.Role, Text: message.Text, Timestamp: message.Timestamp}
+		switch {
+		case message.Thinking:
+			continue
+		case message.Compaction:
+			local.Text = message.Summary
+		// Tool calls and shell commands: the summary says what ran, the text holds the output.
+		case message.Compact:
+			local.Role, local.Text = "tool", message.Summary
+		}
+		messages = append(messages, local)
+	}
+	writeJSON(response, map[string]any{"messages": messages})
 }
 
 func (app *application) localSessionState(path string) string {

@@ -22,6 +22,7 @@ Session commands (need a running gateway on this machine):
   new       Start a session in a directory
   send      Send a message to a session
   wait      Wait until a session stops working
+  show      Print the latest reply or the conversation of a session
   pin       Pin a session in the browser's sidebar
   unpin     Unpin a session
   tag       Add tags to a session
@@ -48,6 +49,7 @@ var commands = []command{
 	{name: "new", summary: "Start a session in a directory", run: newSession, help: newHelp},
 	{name: "send", summary: "Send a message to a session", run: sendMessage, help: sendHelp},
 	{name: "wait", summary: "Wait until a session stops working", run: waitForSession, help: waitHelp},
+	{name: "show", summary: "Print the latest reply or the conversation of a session", run: showConversation, help: showHelp},
 	{name: "pin", summary: "Pin a session in the browser's sidebar", run: pinSession("pin", true), help: pinHelp},
 	{name: "unpin", summary: "Unpin a session", run: pinSession("unpin", false), help: unpinHelp},
 	{name: "tag", summary: "Add tags to a session", run: tagSession("tag", true), help: tagHelp},
