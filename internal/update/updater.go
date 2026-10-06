@@ -21,8 +21,8 @@ const (
 	fetchStepTimeout     = 2 * time.Minute
 	worktreeStepTimeout  = 2 * time.Minute
 	miseInstallTimeout   = 5 * time.Minute
-	testTimeout          = 15 * time.Minute
 	goBuildTimeout       = 5 * time.Minute
+	checkTimeout         = 2 * time.Minute
 	updateCleanupTimeout = 5 * time.Second
 )
 
@@ -441,8 +441,9 @@ func validateCheckout(ctx context.Context, directory, target string) error {
 		args    []string
 	}{
 		{miseInstallTimeout, []string{"mise", "install"}},
-		{testTimeout, []string{"mise", "run", "test"}},
 		{goBuildTimeout, []string{"mise", "exec", "--", "go", "build", "-o", target, "./cmd/gripi"}},
+		// The test suite runs in CI. Here the new build only has to work with this machine's Pi.
+		{checkTimeout, []string{target, "check"}},
 	}
 	for _, step := range steps {
 		result := runCommand(ctx, directory, step.timeout, step.args[0], step.args[1:]...)

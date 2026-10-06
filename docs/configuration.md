@@ -254,7 +254,7 @@ The log includes request and session paths, RPC command types and IDs, rejection
 
 On Linux and macOS, Gripi checks `origin/master` when the page loads and shows a sidebar control when an update is available. Anyone who can use the gateway can start an update.
 
-The update waits until no Pi session is running. Gripi builds and tests the new version in a separate worktree first, so a failed update leaves the running gateway unchanged. If a later step fails, Gripi restores the previous version. Updating needs network access and Pi CLI on the gateway’s `PATH`, and can take a few minutes.
+The update waits until no Pi session is running. Gripi first builds the new version in a separate worktree and checks that it works with this machine’s Pi, so a failed update leaves the running gateway unchanged. If a later step fails, Gripi restores the previous version. Updating needs network access and can take a few minutes.
 
 The checkout must:
 

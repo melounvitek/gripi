@@ -79,92 +79,62 @@ func TestUpdaterValidatesIsolatedTargetBeforeFastForwardAndAtomicallyInstallsBin
 	assertNoPendingCutover(t, fixture.checkout)
 }
 
-func TestDefaultValidationUsesCanonicalChecksWithoutDependencyMutation(t *testing.T) {
-	directory := t.TempDir()
+// fakeBuildTools puts a mise on PATH whose build produces a gripi that records how it is run.
+func fakeBuildTools(t *testing.T) (directory, calls string) {
+	t.Helper()
+	directory = t.TempDir()
 	bin := filepath.Join(directory, "bin")
 	if err := os.MkdirAll(bin, 0755); err != nil {
 		t.Fatal(err)
 	}
-	record := filepath.Join(directory, "calls")
-	script := `#!/bin/sh
-printf '%s\n' "$*" >> "$VALIDATION_CALLS"
+	calls = filepath.Join(directory, "calls")
+	mise := `#!/bin/sh
+printf 'mise %s\n' "$*" >> "$VALIDATION_CALLS"
 previous=''
 for argument in "$@"; do
-  if [ "$previous" = "-o" ]; then mkdir -p "$(dirname "$argument")"; printf built > "$argument"; fi
+  if [ "$previous" = "-o" ]; then mkdir -p "$(dirname "$argument")"; cp "$FAKE_GRIPI" "$argument"; fi
   previous="$argument"
 done
 `
-	if err := os.WriteFile(filepath.Join(bin, "mise"), []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("VALIDATION_CALLS", record)
-	target := filepath.Join(directory, "private", "gripi")
-	if err := validateCheckout(context.Background(), directory, target); err != nil {
-		t.Fatal(err)
-	}
-	calls, _ := os.ReadFile(record)
-	for _, expected := range []string{"install", "run test", "exec -- go build -o " + target} {
-		if !strings.Contains(string(calls), expected) {
-			t.Fatalf("calls = %s; missing %q", calls, expected)
-		}
-	}
-	if strings.Contains(string(calls), "npm") {
-		t.Fatalf("validation mutated Node dependencies: %s", calls)
-	}
-}
-
-func TestUpdaterValidationChecksNeedNoNodeModules(t *testing.T) {
-	checkout := t.TempDir()
-	root := filepath.Clean(filepath.Join("..", ".."))
-	for _, directory := range []string{"bin", "demo", "pi_extensions", "public", "test"} {
-		if err := os.CopyFS(filepath.Join(checkout, directory), os.DirFS(filepath.Join(root, directory))); err != nil {
+	gripi := `#!/bin/sh
+printf 'gripi %s\n' "$*" >> "$VALIDATION_CALLS"
+printf '%s' "$CHECK_OUTPUT" >&2
+exit "${CHECK_STATUS:-0}"
+`
+	for path, script := range map[string]string{filepath.Join(bin, "mise"): mise, filepath.Join(directory, "fake-gripi"): gripi} {
+		if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	packageJSON, err := os.ReadFile(filepath.Join(root, "package.json"))
-	if err != nil {
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_GRIPI", filepath.Join(directory, "fake-gripi"))
+	t.Setenv("VALIDATION_CALLS", calls)
+	return directory, calls
+}
+
+func TestDefaultValidationBuildsTheTargetAndRunsItsCheck(t *testing.T) {
+	directory, record := fakeBuildTools(t)
+	target := filepath.Join(directory, "private", "gripi")
+
+	if err := validateCheckout(context.Background(), directory, target); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(checkout, "package.json"), packageJSON, 0600); err != nil {
-		t.Fatal(err)
-	}
-	miseConfig, err := os.ReadFile(filepath.Join(root, ".mise.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	canonicalTask := `run = "go test ./... && npm run frontend:check && npm run scripts:check && npm run pi-extension:check"`
-	if !strings.Contains(string(miseConfig), canonicalTask) {
-		t.Fatalf("mise test task does not use all dependency-self-contained checks: %s", miseConfig)
-	}
-	piExecutable, err := exec.LookPath("pi")
-	if err != nil {
-		t.Fatalf("Pi CLI is required for canonical validation: %v", err)
-	}
-	for _, script := range []string{"frontend:check", "scripts:check", "pi-extension:check"} {
-		command := exec.Command("npm", "run", script)
-		command.Dir = checkout
-		command.Env = append(os.Environ(), "GRIPI_PI="+piExecutable)
-		output, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("dependency-self-contained %s failed without node_modules: %v\n%s", script, err, output)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(checkout, "node_modules")); !os.IsNotExist(err) {
-		t.Fatalf("validation created node_modules: %v", err)
+
+	calls, _ := os.ReadFile(record)
+	if expected := "mise install\nmise exec -- go build -o " + target + " ./cmd/gripi\ngripi check\n"; string(calls) != expected {
+		t.Fatalf("calls = %q, want %q", calls, expected)
 	}
 }
 
-func TestBrowserWorkflowInstallsPiBeforeCanonicalValidation(t *testing.T) {
-	root := filepath.Clean(filepath.Join("..", ".."))
-	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "browser_e2e.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	piInstall := strings.Index(string(workflow), "npm install --global @earendil-works/pi-coding-agent@")
-	canonicalValidation := strings.Index(string(workflow), "mise run test")
-	if piInstall < 0 || canonicalValidation < 0 || piInstall > canonicalValidation {
-		t.Fatalf("browser workflow must install Pi before canonical validation: %s", workflow)
+func TestDefaultValidationFailsWithTheCheckOutput(t *testing.T) {
+	directory, _ := fakeBuildTools(t)
+	t.Setenv("CHECK_STATUS", "1")
+	t.Setenv("CHECK_OUTPUT", "gripi check: Pi exited with status 1")
+
+	err := validateCheckout(context.Background(), directory, filepath.Join(directory, "private", "gripi"))
+
+	if err == nil || !strings.Contains(err.Error(), "gripi check: Pi exited with status 1") {
+		t.Fatalf("validation error = %v", err)
 	}
 }
 

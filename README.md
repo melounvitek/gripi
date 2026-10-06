@@ -115,7 +115,7 @@ When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it link
 
 ## Updating
 
-The gateway shows an update control in the sidebar when a new version is available. It tests the update before installing it, then restarts. See [self-updates](docs/configuration.md#self-updates) for the requirements.
+The gateway shows an update control in the sidebar when a new version is available. It builds the update and checks it against your Pi before installing it, then restarts. See [self-updates](docs/configuration.md#self-updates) for the requirements.
 
 To update manually, stop the gateway and run:
 

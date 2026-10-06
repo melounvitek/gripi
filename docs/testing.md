@@ -19,7 +19,7 @@ mise run fake-pi-check
 
 - `frontend-check` runs native Node tests for the browser modules, controller races, and the static demo, then syntax-checks the JavaScript. It needs no `node_modules`.
 - `scripts-check` tests the setup, launcher, restart, password, and desktop installer scripts.
-- `pi-extension-check` loads the tree extension through the installed Pi package. Because `mise run test` includes it, Pi CLI must be on `PATH` for tests, CI, and self-update validation.
+- `pi-extension-check` loads the tree extension through the installed Pi package. Because `mise run test` includes it, Pi CLI must be on `PATH` for tests and CI.
 - `desktop-check` and `e2e` need npm dependencies.
 
 For race detection, static analysis, and vulnerability checks, also run:
