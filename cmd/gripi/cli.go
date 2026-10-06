@@ -23,6 +23,9 @@ Session commands (need a running gateway on this machine):
   wait      Wait until a session stops working
   pin       Pin a session in the browser's sidebar
   unpin     Unpin a session
+  tag       Add tags to a session
+  untag     Remove tags from a session
+  tags      List tags and how many sessions have each
 
 Gateway commands:
   serve     Start the gateway
@@ -45,6 +48,9 @@ var commands = []command{
 	{name: "wait", summary: "Wait until a session stops working", run: waitForSession, help: waitHelp},
 	{name: "pin", summary: "Pin a session in the browser's sidebar", run: pinSession("pin", true), help: pinHelp},
 	{name: "unpin", summary: "Unpin a session", run: pinSession("unpin", false), help: unpinHelp},
+	{name: "tag", summary: "Add tags to a session", run: tagSession("tag", true), help: tagHelp},
+	{name: "untag", summary: "Remove tags from a session", run: tagSession("untag", false), help: untagHelp},
+	{name: "tags", summary: "List tags and how many sessions have each", run: listTags, help: tagsHelp},
 	{name: "serve", summary: "Start the gateway", run: withoutArguments("serve", serve), help: `Usage:
   gripi serve
 
