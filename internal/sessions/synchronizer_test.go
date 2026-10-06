@@ -270,6 +270,60 @@ func TestSynchronizerTakeoverDetectsConcurrentPiCLIWrite(t *testing.T) {
 	}
 }
 
+func TestSynchronizerKeepsFollowingExternalSessionAcrossRestarts(t *testing.T) {
+	for name, leave := range map[string]func(*Synchronizer, string) error{
+		"until taken over": func(synchronizer *Synchronizer, path string) error {
+			_, err := synchronizer.TakeOver(context.Background(), path, nil)
+			return err
+		},
+		// The gateway forgets a session it deletes or whose Pi it restarts.
+		"until forgotten": func(synchronizer *Synchronizer, path string) error {
+			synchronizer.Forget(path)
+			return nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, path := synchronizerSession(t)
+			appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
+			client := newSyncClient()
+			client.positions["pi-cli"] = rpc.SessionEntries{Known: true, LeafID: "pi-cli"}
+			registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+			statePath := filepath.Join(t.TempDir(), "external-sessions.json")
+			restart := func() *Synchronizer {
+				t.Helper()
+				synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+				if err := synchronizer.PersistExternalFollow(statePath); err != nil {
+					t.Fatal(err)
+				}
+				return synchronizer
+			}
+
+			synchronizer := restart()
+			inspectSync(t, synchronizer, path, false)
+			appendSyncEntry(t, path, map[string]any{"type": "message", "id": "pi-cli", "parentId": "old", "message": map[string]any{"role": "assistant", "content": []any{}}})
+			if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow {
+				t.Fatalf("Pi CLI append = %#v", result)
+			}
+
+			synchronizer = restart()
+			// Sending must stay paused even before anything looks at the session file again.
+			if blocked := synchronizer.KnownBlocked(path); blocked == nil || blocked.Mode != SyncExternalFollow {
+				t.Fatalf("restart forgot that Pi CLI is using the session: %#v", blocked)
+			}
+			if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow || result.PersistedLeafID != "pi-cli" {
+				t.Fatalf("inspection after restart = %#v", result)
+			}
+
+			if err := leave(synchronizer, path); err != nil {
+				t.Fatal(err)
+			}
+			if result := inspectSync(t, restart(), path, false); result.Blocked() {
+				t.Fatalf("restart brought back external follow: %#v", result)
+			}
+		})
+	}
+}
+
 func TestSynchronizerDoesNotTurnRequestCancellationIntoConflict(t *testing.T) {
 	root, path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
