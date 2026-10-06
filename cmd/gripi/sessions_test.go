@@ -39,6 +39,7 @@ func cannedSessions(count int) []gateway.LocalSession {
 		}
 	}
 	sessions[0].State, sessions[0].Unread, sessions[0].Name = "working", true, "Fix the\nflaky   test"
+	sessions[0].Pinned, sessions[0].Tags = true, []string{"cli", "urgent"}
 	return sessions
 }
 
@@ -49,14 +50,14 @@ func TestListPrintsTheLatestSessionsAsATable(t *testing.T) {
 	if code != 0 || len(lines) != 21 {
 		t.Fatalf("gripi list = %d with %d lines, stderr %q:\n%s", code, len(lines), stderr, stdout)
 	}
-	if header := strings.Fields(lines[0]); !reflect.DeepEqual(header, []string{"ID", "STATE", "UNREAD", "UPDATED", "PROJECT", "NAME"}) {
+	if header := strings.Fields(lines[0]); !reflect.DeepEqual(header, []string{"ID", "STATE", "UNREAD", "PINNED", "UPDATED", "PROJECT", "TAGS", "NAME"}) {
 		t.Fatalf("header = %q", lines[0])
 	}
 	first, second := strings.Fields(lines[1]), strings.Fields(lines[2])
-	if strings.Join(append(first[:3:3], first[4:]...), " ") != "session-00 working yes project-00 Fix the flaky test" {
-		t.Fatalf("busy unread row = %q", lines[1])
+	if strings.Join(append(first[:4:4], first[5:]...), " ") != "session-00 working yes yes project-00 cli,urgent Fix the flaky test" {
+		t.Fatalf("busy, unread, pinned and tagged row = %q", lines[1])
 	}
-	if strings.Join(append(second[:3:3], second[4:]...), " ") != "session-01 idle - project-01 Task 01" {
+	if strings.Join(append(second[:4:4], second[5:]...), " ") != "session-01 idle - - project-01 - Task 01" {
 		t.Fatalf("idle row = %q", lines[2])
 	}
 	if !strings.Contains(stderr, "20 of 25") || !strings.Contains(stderr, "--all") {

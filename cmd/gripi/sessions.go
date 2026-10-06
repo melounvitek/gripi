@@ -36,8 +36,8 @@ const sessionFields = `Session fields:
               conflict    the session file changed in a way the gateway cannot follow
               idle        nothing is running
   unread      true when a reply finished that nobody has opened in the browser
-  pinned      true when the session is pinned in the sidebar
-  tags        Tags assigned in the browser
+  pinned      true when the session is pinned in the browser's sidebar
+  tags        Tags of the session
   updated_at  Time of the latest message
   last_reply  First 180 characters of the latest assistant reply
 `
@@ -107,20 +107,33 @@ func (client *gatewayClient) do(request *http.Request, result any) error {
 	return json.Unmarshal(body, result)
 }
 
+func (client *gatewayClient) get(route string, result any) error {
+	request, err := http.NewRequest(http.MethodGet, "http://gripi"+route, nil)
+	if err != nil {
+		return err
+	}
+	return client.do(request, result)
+}
+
+func (client *gatewayClient) post(route string, form url.Values, result any) error {
+	request, err := http.NewRequest(http.MethodPost, "http://gripi"+route, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return client.do(request, result)
+}
+
 // sessions lists every session, or just the one with the given path.
 func (client *gatewayClient) sessions(only string) ([]gateway.LocalSession, error) {
-	target := "http://gripi/sessions"
+	route := "/sessions"
 	if only != "" {
-		target += "?session=" + url.QueryEscape(only)
-	}
-	request, err := http.NewRequest(http.MethodGet, target, nil)
-	if err != nil {
-		return nil, err
+		route += "?session=" + url.QueryEscape(only)
 	}
 	var payload struct {
 		Sessions []gateway.LocalSession `json:"sessions"`
 	}
-	return payload.Sessions, client.do(request, &payload)
+	return payload.Sessions, client.get(route, &payload)
 }
 
 func listSessions(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
@@ -191,23 +204,30 @@ func printJSON(stdout, stderr io.Writer, name string, value any) int {
 
 func printSessions(stdout io.Writer, sessions []gateway.LocalSession) {
 	table := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(table, "ID\tSTATE\tUNREAD\tUPDATED\tPROJECT\tNAME")
+	fmt.Fprintln(table, "ID\tSTATE\tUNREAD\tPINNED\tUPDATED\tPROJECT\tTAGS\tNAME")
 	for _, session := range sessions {
-		id, unread := session.ID, "-"
+		id, tags := session.ID, "-"
 		// A session that has not produced its first reply has no ID yet.
 		if id == "" {
 			id = "-"
 		}
-		if session.Unread {
-			unread = "yes"
+		if len(session.Tags) > 0 {
+			tags = strings.Join(session.Tags, ",")
 		}
 		name := []rune(strings.Join(strings.Fields(session.Name), " "))
 		if len(name) > 60 {
 			name = append(name[:59], '…')
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", id, session.State, unread, age(time.Since(session.UpdatedAt)), filepath.Base(session.CWD), string(name))
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", id, session.State, yesOrDash(session.Unread), yesOrDash(session.Pinned), age(time.Since(session.UpdatedAt)), filepath.Base(session.CWD), tags, string(name))
 	}
 	table.Flush()
+}
+
+func yesOrDash(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "-"
 }
 
 func age(elapsed time.Duration) string {
@@ -294,11 +314,7 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return usageError(stderr, "send", strings.Fields(message)[0]+" is a command of the browser's composer, which send does not run")
 	}
 
-	client, err := newGatewayClient()
-	if err != nil {
-		return failure(stderr, "send", err)
-	}
-	session, err := client.session(positional[0])
+	client, session, err := connect(positional[0])
 	if err != nil {
 		return failure(stderr, "send", err)
 	}
@@ -306,17 +322,12 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	if *steer {
 		behavior = "steer"
 	}
-	// bash_mode keeps a leading "!" from being run as a shell command.
-	form := url.Values{"session": {session.Path}, "message": {message}, "streaming_behavior": {behavior}, "bash_mode": {"prompt"}}
-	request, err := http.NewRequest(http.MethodPost, "http://gripi/prompt", strings.NewReader(form.Encode()))
-	if err != nil {
-		return failure(stderr, "send", err)
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	var accepted struct {
 		Session string `json:"session"`
 	}
-	if err := client.do(request, &accepted); err != nil {
+	// bash_mode keeps a leading "!" from being run as a shell command.
+	form := url.Values{"session": {session.Path}, "message": {message}, "streaming_behavior": {behavior}, "bash_mode": {"prompt"}}
+	if err := client.post("/prompt", form, &accepted); err != nil {
 		return failure(stderr, "send", err)
 	}
 
@@ -335,6 +346,16 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 			return printSession(stdout, stderr, "send", session, *asJSON)
 		}
 	}
+}
+
+// connect reaches the gateway and finds the session that the reference names.
+func connect(reference string) (*gatewayClient, gateway.LocalSession, error) {
+	client, err := newGatewayClient()
+	if err != nil {
+		return nil, gateway.LocalSession{}, err
+	}
+	session, err := client.session(reference)
+	return client, session, err
 }
 
 // session finds the one session a path, an ID or an ID prefix refers to.
@@ -414,11 +435,7 @@ func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) i
 	if *timeout < 0 {
 		return usageError(stderr, "wait", "--timeout cannot be negative")
 	}
-	client, err := newGatewayClient()
-	if err != nil {
-		return failure(stderr, "wait", err)
-	}
-	session, err := client.session(positional[0])
+	client, session, err := connect(positional[0])
 	if err != nil {
 		return failure(stderr, "wait", err)
 	}

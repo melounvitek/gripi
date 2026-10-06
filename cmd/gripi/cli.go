@@ -21,6 +21,8 @@ Session commands (need a running gateway on this machine):
   list      List sessions with their state
   send      Send a message to a session
   wait      Wait until a session stops working
+  pin       Pin a session in the browser's sidebar
+  unpin     Unpin a session
 
 Gateway commands:
   serve     Start the gateway
@@ -41,6 +43,8 @@ var commands = []command{
 	{name: "list", summary: "List sessions with their state", run: listSessions, help: listHelp},
 	{name: "send", summary: "Send a message to a session", run: sendMessage, help: sendHelp},
 	{name: "wait", summary: "Wait until a session stops working", run: waitForSession, help: waitHelp},
+	{name: "pin", summary: "Pin a session in the browser's sidebar", run: pinSession("pin", true), help: pinHelp},
+	{name: "unpin", summary: "Unpin a session", run: pinSession("unpin", false), help: unpinHelp},
 	{name: "serve", summary: "Start the gateway", run: withoutArguments("serve", serve), help: `Usage:
   gripi serve
 
