@@ -530,15 +530,17 @@ func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) i
 const deleteHelp = `Usage:
   gripi delete <session> [--json]
 
-Deletes a session, then prints it as it was. Its pin, its tags and the files
-attached to its messages go with it. The command does not ask first.
+Deletes a session, then prints it as it was. The command does not ask first.
 
 The session file moves to Trash when the 'trash' or 'gio' command can do that
-on the gateway's machine. Otherwise it is deleted for good.
+on the gateway's machine; otherwise it is deleted for good. The session's pin,
+its tags and the files attached to its messages are always deleted for good.
 
-The gateway refuses while Pi is working in the session or compacting it; wait
-for it with 'gripi wait' first. It does not know whether Pi CLI still has the
-session open, so a session in state external is deleted like any other.
+The gateway refuses while Pi is running a turn in the session or compacting
+it; wait for it with 'gripi wait' first. A turn that asked a question (state
+waiting) keeps running until someone answers in the browser. The gateway does
+not know whether Pi CLI still has the session open, so a session in state
+external or conflict is deleted like any other.
 
 Arguments:
   session  Session ID, a unique prefix of it, or the session file path
