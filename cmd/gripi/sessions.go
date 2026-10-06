@@ -458,9 +458,9 @@ const waitHelp = `Usage:
   gripi wait <session> [--timeout <seconds>] [--json]
 
 Blocks until the session is no longer working or compacting, then prints it.
-Without --timeout it waits as long as that takes. Run it after 'gripi send' to
-get the reply: last_reply has its first 180 characters, and 'gripi show' prints
-all of it.
+Without --timeout it waits as long as that takes. Run it after 'gripi send',
+then read the reply with 'gripi show'. last_reply has the first 180 characters
+of the session's latest reply, which is an older one when the turn failed.
 
 Check the printed state. idle means Pi finished. waiting, external and
 conflict also end the wait, because Pi will not continue until someone acts in

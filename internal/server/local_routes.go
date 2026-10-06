@@ -90,9 +90,11 @@ func (app *application) localConversation(response http.ResponseWriter, request 
 	for _, message := range window.Messages {
 		local := LocalMessage{Role: message.Role, Text: message.Text, Timestamp: message.Timestamp}
 		switch {
+		case message.Thinking:
+			continue
 		// A result stored apart from its tool call would list the call twice.
 		// Only a subagent's call is not listed, so its result stands in for it.
-		case message.Thinking, message.Role == "toolResult" && message.ToolName != "subagent":
+		case message.Role == "toolResult" && message.ToolName != "subagent":
 			continue
 		case message.Compaction:
 			local.Text = message.Summary

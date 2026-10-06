@@ -69,7 +69,8 @@ func pinSession(name string, pinned bool) func([]string, io.Reader, io.Writer, i
 		var answer struct {
 			Pinned bool `json:"pinned"`
 		}
-		if err := client.post("/sessions/pin", url.Values{"session": {session.Path}, "pinned": {strconv.FormatBool(pinned)}}, &answer); err != nil {
+		form := url.Values{"session": {session.Path}, "pinned": {strconv.FormatBool(pinned)}}
+		if err := client.post("/sessions/pin", form, &answer); err != nil {
 			return failure(stderr, name, err)
 		}
 		session.Pinned = answer.Pinned
@@ -145,7 +146,8 @@ func tagSession(name string, assigned bool) func([]string, io.Reader, io.Writer,
 			var answer struct {
 				Tags []string `json:"tags"`
 			}
-			if err := client.post("/sessions/tags", url.Values{"session": {session.Path}, "tag": {tag}, "assigned": {strconv.FormatBool(assigned)}}, &answer); err != nil {
+			form := url.Values{"session": {session.Path}, "tag": {tag}, "assigned": {strconv.FormatBool(assigned)}}
+			if err := client.post("/sessions/tags", form, &answer); err != nil {
 				return failure(stderr, name, err)
 			}
 			session.Tags = answer.Tags

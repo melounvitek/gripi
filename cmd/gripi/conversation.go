@@ -76,8 +76,8 @@ func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer)
 		messages = []gateway.LocalMessage{}
 		for _, message := range conversation.Messages {
 			switch message.Role {
-			// A reply from before the latest message does not answer it.
-			case "user":
+			// Neither a reply from before the latest message nor what Pi wrote before a turn failed is an answer.
+			case "user", "error":
 				messages = []gateway.LocalMessage{}
 			case "assistant":
 				messages = []gateway.LocalMessage{message}
@@ -87,11 +87,7 @@ func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer)
 	if *asJSON {
 		return printJSON(stdout, stderr, "show", messages)
 	}
-	switch {
-	case len(messages) > 0:
-	case *all:
-		fmt.Fprintln(stderr, "gripi show: the session has no messages yet")
-	default:
+	if len(messages) == 0 && !*all {
 		fmt.Fprintln(stderr, "gripi show: there is no reply to the latest message; 'gripi show --all' prints what happened")
 	}
 	for index, message := range messages {
@@ -134,7 +130,8 @@ Example:
 Exit codes:
   Pi CLI's own once it has started. Before that:
   1  the gateway cannot be reached, no single session matched, the gateway is
-     running the session, there is no terminal, or pi is not on PATH
+     running the session or it has no reply yet, there is no terminal, or pi
+     is not on PATH
   2  usage error
 `
 

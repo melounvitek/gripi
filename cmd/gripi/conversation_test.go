@@ -93,13 +93,14 @@ func TestShowDoesNotPassOffAnOlderReplyAsTheAnswerToTheLatestMessage(t *testing.
 	_, beta := fakePiGateway(t)
 	appendSessionRecords(t, beta,
 		sessionMessage("user-2", "assistant-1", "1", map[string]any{"role": "user", "content": []any{textPart("Try again")}}),
-		sessionMessage("assistant-2", "user-2", "2", map[string]any{"role": "assistant", "stopReason": "error", "errorMessage": "429 rate limited", "content": []any{}}),
+		// What Pi wrote before the turn failed is not its answer either.
+		sessionMessage("assistant-2", "user-2", "2", map[string]any{"role": "assistant", "stopReason": "error", "errorMessage": "429 rate limited", "content": []any{textPart("Let me look.")}}),
 	)
 	code, stdout, stderr := runCLI("show", "0a1-b")
 	if code != 0 || stdout != "" || !strings.Contains(stderr, "no reply") || !strings.Contains(stderr, "--all") {
 		t.Fatalf("gripi show after a failed turn = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
-	if code, stdout, stderr := runCLI("show", "0a1-b", "--all"); code != 0 || stderr != "" || !strings.HasSuffix(stdout, "[user]\nTry again\n\n[error]\n429 rate limited\n") {
+	if code, stdout, stderr := runCLI("show", "0a1-b", "--all"); code != 0 || stderr != "" || !strings.HasSuffix(stdout, "[user]\nTry again\n\n[assistant]\nLet me look.\n\n[error]\n429 rate limited\n") {
 		t.Fatalf("gripi show --all after a failed turn = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }
@@ -109,10 +110,11 @@ func TestShowHasNothingToPrintBeforeTheFirstReply(t *testing.T) {
 	_, stdout, _ := runCLI("new", t.TempDir(), "--json")
 	started := decodeSession(t, stdout)
 
-	for _, arguments := range [][]string{{"show", started.Path}, {"show", started.Path, "--all"}} {
-		if code, stdout, stderr := runCLI(arguments...); code != 0 || stdout != "" || !strings.Contains(stderr, "gripi show: ") {
-			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", arguments, code, stdout, stderr)
-		}
+	if code, stdout, stderr := runCLI("show", started.Path); code != 0 || stdout != "" || !strings.Contains(stderr, "no reply") {
+		t.Fatalf("gripi show = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if code, stdout, stderr := runCLI("show", started.Path, "--all"); code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("gripi show --all = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	for _, arguments := range [][]string{{"show", started.Path, "--json"}, {"show", started.Path, "--all", "--json"}} {
 		// Nothing but JSON is printed, so "2>&1 | jq" keeps working.
