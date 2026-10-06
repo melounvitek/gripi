@@ -127,17 +127,22 @@ func (app *application) sessionPalette(response http.ResponseWriter, request *ht
 			"busy": app.rpcClients.Busy(session.Path) || app.rpcClients.Compacting(session.Path),
 		})
 	}
-	payload := map[string]any{"sessions": entries}
+	writePackedJSON(response, request, map[string]any{"sessions": entries})
+}
+
+// writePackedJSON is for the large, repetitive payloads: the session list and conversation HTML. Packed, they are a fifth of the size or less, which a slow link shows.
+// The payload must not repeat text from the request. Another site can choose the URL a signed-in browser loads, and such text packed
+// next to a conversation would let someone watching the encrypted traffic guess the conversation from response sizes.
+func writePackedJSON(response http.ResponseWriter, request *http.Request, value any) {
 	if !strings.Contains(request.Header.Get("Accept-Encoding"), "gzip") {
-		writeJSON(response, payload)
+		writeJSON(response, value)
 		return
 	}
-	// Hundreds of sessions repeat most of their long paths. Packed, the list is a fifth of the size, which a slow link shows.
 	response.Header().Set("Content-Type", "application/json")
 	response.Header().Set("Content-Encoding", "gzip")
 	packed := gzip.NewWriter(response)
 	defer packed.Close()
-	_ = json.NewEncoder(packed).Encode(payload)
+	_ = json.NewEncoder(packed).Encode(value)
 }
 
 func (app *application) sessionFragment(response http.ResponseWriter, request *http.Request) {
@@ -170,7 +175,15 @@ func (app *application) sessionFragment(response http.ResponseWriter, request *h
 	if view.Selected != nil {
 		values["title"], values["session"] = view.Selected.DisplayName, view.Selected.Path
 	}
-	writeJSON(response, values)
+	// Packed only when the URL has nothing but these parameters: a session and a project are repeated only when they match existing ones.
+	// Anything else stays plain, because the sidebar repeats the search text, tag and session limit.
+	for name := range request.URL.Query() {
+		if name != "session" && name != "session_only" && name != "project" {
+			writeJSON(response, values)
+			return
+		}
+	}
+	writePackedJSON(response, request, values)
 }
 
 func sessionViewURL(view *pageView) string {
@@ -245,7 +258,7 @@ func (app *application) conversationOlder(response http.ResponseWriter, request 
 		next = window.StartIndex + len(window.Messages)
 		remaining = window.EndIndex - next
 	}
-	writeJSON(response, map[string]any{"html": html.String(), "next_cursor": next, "has_older_messages": remaining > 0, "older_message_count": max(remaining, 0)})
+	writePackedJSON(response, request, map[string]any{"html": html.String(), "next_cursor": next, "has_older_messages": remaining > 0, "older_message_count": max(remaining, 0)})
 }
 
 func boundedQueryInteger(value string) int {

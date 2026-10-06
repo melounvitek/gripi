@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -56,6 +57,45 @@ func TestSessionRoutesRejectMalformedGatewayStateWithoutRewritingIt(t *testing.T
 	}
 	if string(persisted) != string(malformed) {
 		t.Fatalf("malformed state was rewritten: %q", persisted)
+	}
+}
+
+func TestConversationRoutesPackTheirHTMLExceptNextToTextFromTheURL(t *testing.T) {
+	fixture := seedNativeFixture(t)
+	handler := fixtureHandler(t, fixture)
+	session := "?session=" + url.QueryEscape(fixture.markerPath)
+	get := func(target string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "http://app.test"+target, nil)
+		request.RemoteAddr = "127.0.0.1:1234"
+		request.Header.Set("Accept-Encoding", "gzip, deflate, br")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	for target, field := range map[string]string{"/session_fragment" + session: "conversation_html", "/conversation_older" + session + "&cursor=1000": "html"} {
+		response := get(target)
+		if response.Code != http.StatusOK || response.Header().Get("Content-Encoding") != "gzip" {
+			t.Fatalf("%s = %d, Content-Encoding = %q", target, response.Code, response.Header().Get("Content-Encoding"))
+		}
+		unpacked, err := gzip.NewReader(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(unpacked).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if html, _ := payload[field].(string); !strings.Contains(html, "Contract fixture marker") {
+			t.Fatalf("%s %s = %q", target, field, html)
+		}
+	}
+	// Another site can choose the URL, and the sidebar repeats its search text, tag and session limit. Packed next to the conversation,
+	// they would leak it through response sizes, so a parameter that is not known to be safe keeps the response plain.
+	for _, filter := range []string{"&session_search=Contract", "&tag=work", "&sidebar_sessions_limit=1234567890", "&unknown=1"} {
+		response := get("/session_fragment" + session + filter)
+		if response.Code != http.StatusOK || response.Header().Get("Content-Encoding") != "" || !strings.Contains(response.Body.String(), "Contract fixture marker") {
+			t.Fatalf("%s = %d, Content-Encoding = %q", filter, response.Code, response.Header().Get("Content-Encoding"))
+		}
 	}
 }
 

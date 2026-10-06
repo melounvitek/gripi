@@ -202,6 +202,50 @@ test("opens conversation find for a known session search match without trapping 
   await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBe(manualTop);
 });
 
+test("conversation find searches once while it sits open and while the conversation scrolls", async ({ page }) => {
+  await page.goto("/");
+  await searchSessions(page, "Persisted browser");
+  await page.getByRole("link", { name: new RegExp(sessions.history) }).click();
+  const active = page.locator("mark.current-session-find-match.is-active");
+  await expect(active).toHaveText("Persisted browser");
+  const scroll = page.locator("#conversation-scroll");
+  await scroll.evaluate((element) => {
+    const spacer = document.createElement("div");
+    spacer.style.height = "2000px";
+    element.querySelector("#live-output").before(spacer);
+    element.scrollTop = element.scrollHeight;
+  });
+
+  // Every search replaces the highlight, so one that outlives a few frames shows nothing searched again.
+  const frames = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))));
+  let highlight;
+  await expect(async () => {
+    highlight = await active.elementHandle();
+    await frames();
+    expect(await highlight.evaluate((element) => element.isConnected)).toBe(true);
+  }).toPass({ timeout: 3_000 });
+
+  await scroll.hover();
+  const top = await scroll.evaluate((element) => element.scrollTop);
+  await page.mouse.wheel(0, -300);
+  await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeLessThan(top);
+  await frames();
+  expect(await highlight.evaluate((element) => element.isConnected)).toBe(true);
+});
+
+test("conversation find leaves out the Copy buttons of code blocks", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.markdownFenceDesktop);
+  await sendPrompt(page, prompts.markdownFence);
+  await expectRunFinished(page);
+
+  await page.keyboard.press("Control+f");
+  const find = page.getByRole("searchbox", { name: "Find in conversation" });
+  await find.fill("Image fence");
+  // The text follows a Copy button, so the highlight lands on it only when the button's text is not counted.
+  await expect(page.locator("mark.current-session-find-match.is-active")).toHaveText("Image fence");
+});
+
 test("session initialization preserves focus when the user starts composing", async ({ page }) => {
   await page.goto("/");
   await searchSessions(page, "Persisted browser");
@@ -219,6 +263,40 @@ test("session initialization preserves focus when the user starts composing", as
   const prompt = "Keep this prompt in the composer";
   await page.keyboard.insertText(prompt);
   await expect(composer).toHaveValue(prompt);
+});
+
+test("starts loading a session when the mouse is pressed on it, and the click shows that copy", async ({ page }) => {
+  await page.goto("/");
+  const path = await page.locator('.session-row[data-current="false"]').first().getAttribute("data-session-path");
+  const row = page.locator(`.session-row[data-session-path="${path}"]`);
+  const loads = sessionLoads(page, path);
+
+  await row.locator("a.session").hover();
+  await page.mouse.down();
+  await expect.poll(() => loads.length).toBe(1);
+  await page.mouse.up();
+
+  await expect(row).toHaveAttribute("data-current", "true");
+  expect(loads).toHaveLength(1);
+});
+
+test("a press that ends away from a session does not hand its copy to a later switch", async ({ page }) => {
+  await page.goto("/");
+  const path = await page.locator('.session-row[data-current="false"]').first().getAttribute("data-session-path");
+  const row = page.locator(`.session-row[data-session-path="${path}"]`);
+  const loads = sessionLoads(page, path);
+
+  await row.locator("a.session").hover();
+  await page.mouse.down();
+  await expect.poll(() => loads.length).toBe(1);
+  await page.locator("#conversation-scroll").hover();
+  await page.mouse.up();
+
+  // Opening the session from the keyboard starts no new press, and by now the copy from the first one may be out of date.
+  await page.waitForTimeout(1100);
+  await row.locator("a.session").press("Enter");
+  await expect(row).toHaveAttribute("data-current", "true");
+  expect(loads).toHaveLength(2);
 });
 
 test("clears session filters without reloading the page", async ({ page }) => {
@@ -704,6 +782,16 @@ test("a newer session switch wins when fragment responses arrive out of order", 
   await expect.poll(() => eventSessions.at(-1)).toBe(newerSession);
   await expect(page.locator("#live-output")).toHaveAttribute("data-events-url", new RegExp(encodeURIComponent(newerSession)));
 });
+
+// The page also reloads the session it shows, so only loads of the given one count.
+function sessionLoads(page, path) {
+  const loads = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/session_fragment" && url.searchParams.get("session") === path) loads.push(request);
+  });
+  return loads;
+}
 
 async function searchSessions(page, query) {
   await page.getByRole("button", { name: "Search sessions" }).click();
