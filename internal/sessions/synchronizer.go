@@ -358,10 +358,6 @@ func (synchronizer *Synchronizer) inspectRecoveringAvailable(ctx context.Context
 
 func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string, includePosition bool) (SyncResult, error) {
 	state := synchronizer.state(path)
-	// A gateway that is shutting down has stopped its own Pi processes, so what they wrote last would pass for Pi CLI's.
-	if synchronizer.clients.Closed() {
-		return resultFor(state), nil
-	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return SyncResult{}, err
@@ -400,6 +396,10 @@ func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string
 		appended := snapshot.Size > state.Snapshot.Size || snapshot.AppendCursor != state.Snapshot.AppendCursor
 		if appended {
 			if !synchronizer.clients.Active(path) {
+				// A gateway that is shutting down has stopped its own Pi processes, so what they wrote last would pass for Pi CLI's.
+				if synchronizer.clients.Closed() {
+					return resultFor(state), nil
+				}
 				synchronizer.update(path, snapshot, SyncExternalFollow, "", "")
 				return resultFor(synchronizer.state(path)), nil
 			}

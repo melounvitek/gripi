@@ -141,7 +141,7 @@ func (registry *Registry) PathForClient(client RPCClient) string {
 }
 func (registry *Registry) Active(path string) bool { return registry.Client(path) != nil }
 
-// Closed reports whether the registry is draining or shut down, when it starts no client.
+// Closed reports whether the registry is draining or shut down, and so starts no client.
 func (registry *Registry) Closed() bool {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
