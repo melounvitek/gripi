@@ -265,6 +265,40 @@ test("session initialization preserves focus when the user starts composing", as
   await expect(composer).toHaveValue(prompt);
 });
 
+test("starts loading a session when the mouse is pressed on it, and the click shows that copy", async ({ page }) => {
+  await page.goto("/");
+  const path = await page.locator('.session-row[data-current="false"]').first().getAttribute("data-session-path");
+  const row = page.locator(`.session-row[data-session-path="${path}"]`);
+  const loads = sessionLoads(page, path);
+
+  await row.locator("a.session").hover();
+  await page.mouse.down();
+  await expect.poll(() => loads.length).toBe(1);
+  await page.mouse.up();
+
+  await expect(row).toHaveAttribute("data-current", "true");
+  expect(loads).toHaveLength(1);
+});
+
+test("a press that ends away from a session does not hand its copy to a later switch", async ({ page }) => {
+  await page.goto("/");
+  const path = await page.locator('.session-row[data-current="false"]').first().getAttribute("data-session-path");
+  const row = page.locator(`.session-row[data-session-path="${path}"]`);
+  const loads = sessionLoads(page, path);
+
+  await row.locator("a.session").hover();
+  await page.mouse.down();
+  await expect.poll(() => loads.length).toBe(1);
+  await page.locator("#conversation-scroll").hover();
+  await page.mouse.up();
+
+  // Opening the session from the keyboard starts no new press, and by now the copy from the first one may be out of date.
+  await page.waitForTimeout(1100);
+  await row.locator("a.session").press("Enter");
+  await expect(row).toHaveAttribute("data-current", "true");
+  expect(loads).toHaveLength(2);
+});
+
 test("clears session filters without reloading the page", async ({ page }) => {
   await page.goto("/");
 
@@ -748,6 +782,16 @@ test("a newer session switch wins when fragment responses arrive out of order", 
   await expect.poll(() => eventSessions.at(-1)).toBe(newerSession);
   await expect(page.locator("#live-output")).toHaveAttribute("data-events-url", new RegExp(encodeURIComponent(newerSession)));
 });
+
+// The page also reloads the session it shows, so only loads of the given one count.
+function sessionLoads(page, path) {
+  const loads = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/session_fragment" && url.searchParams.get("session") === path) loads.push(request);
+  });
+  return loads;
+}
 
 async function searchSessions(page, query) {
   await page.getByRole("button", { name: "Search sessions" }).click();

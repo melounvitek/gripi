@@ -247,6 +247,33 @@ test("do not highlight unopened sessions on coarse pointers", async ({ page }) =
   await expect(session).not.toHaveAttribute("aria-current", "page");
 });
 
+test("a touch that starts on a session loads nothing until it ends as a tap", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  const path = await page.locator('.session-row[data-current="false"]').first().getAttribute("data-session-path");
+  let loads = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/session_fragment" && url.searchParams.get("session") === path) loads += 1;
+  });
+  const session = page.locator(`.session-row[data-session-path="${path}"] a.session`);
+  // Wait for the drawer to stop moving before reading where the session is.
+  await session.tap({ trial: true });
+  const box = await session.boundingBox();
+  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+
+  // The touch may be the start of a scroll, and loading a session marks it read.
+  const touch = await page.context().newCDPSession(page);
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(loads).toBe(0);
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touch.detach();
+
+  await expect(session).toHaveAttribute("aria-current", "page");
+  expect(loads).toBe(1);
+});
+
 test("the notification bell fits a 320px drawer header and toggles on the first mobile tap", async ({ page }) => {
   await page.addInitScript(() => { window.gripiElectron = { showNotification: async () => {} }; });
   await page.setViewportSize({ width: 320, height: 568 });

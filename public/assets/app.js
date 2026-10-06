@@ -1,4 +1,4 @@
-import { ESCAPE_STOP_CONFIRMATION_WINDOW_MS, SESSION_SWITCH_TIMEOUT_MS, STALE_SESSION_REFRESH_AFTER_MS } from "./constants.js";
+import { ESCAPE_STOP_CONFIRMATION_WINDOW_MS, SESSION_PRELOAD_MAX_AGE_MS, SESSION_SWITCH_TIMEOUT_MS, STALE_SESSION_REFRESH_AFTER_MS } from "./constants.js";
 import { AsyncGeneration } from "./async_generation.js";
 import { parseNativeBash } from "./bash.js";
 import { downloadResponse } from "./downloads.js";
@@ -184,6 +184,7 @@ let emptyEventPollCount = 0;
 let sessionViewGeneration = 0;
 const sessionSwitchGeneration = new AsyncGeneration();
 let sessionSwitchAbortController = null;
+let sessionPreload = null;
 let sessionNavigationPending = false;
 let promptSubmissionGeneration = 0;
 let sessionStatusRequestVersion = 0;
@@ -2812,7 +2813,11 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   persistStoredComposerDraft();
   sidebarController.invalidate({ clearSessionsLimit: true });
   sessionSwitchAbortController?.abort();
-  const abortController = new AbortController();
+  // A press that did not end in a click right away leaves a copy that may be out of date.
+  const preload = sessionPreload?.url === url && performance.now() - sessionPreload.startedAt < SESSION_PRELOAD_MAX_AGE_MS ? sessionPreload : null;
+  if (!preload) sessionPreload?.abortController.abort();
+  sessionPreload = null;
+  const abortController = preload?.abortController || new AbortController();
   sessionSwitchAbortController = abortController;
   const switchGeneration = sessionSwitchGeneration.next();
   const refreshRequestVersion = sidebarController.refreshRequestVersion;
@@ -2822,7 +2827,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   eventPollTimer = null;
   abortEventPoll();
   try {
-    const response = await fetch(sessionFragmentUrl(url), { headers: { "Accept": "application/json" }, signal: abortController.signal });
+    const response = await (preload?.response || fetch(sessionFragmentUrl(url), { headers: { "Accept": "application/json" }, signal: abortController.signal }));
     if (!sessionSwitchGeneration.current(switchGeneration)) return false;
     if (!response.ok) throw new Error("Session fragment failed");
 
@@ -3411,6 +3416,18 @@ document.addEventListener("click", (event) => {
   if (!link || !normalLeftClick(event)) return;
 
   detachSession().catch(() => {});
+});
+
+// A press nearly always ends in a click, so the session starts loading that much sooner. A touch may only be starting a scroll, and loading a session marks it read.
+document.addEventListener("pointerdown", (event) => {
+  const link = event.target.closest(".session-sidebar a.session:not(.selected)");
+  if (!link || event.pointerType !== "mouse" || !normalLeftClick(event)) return;
+
+  sessionPreload?.abortController.abort();
+  const abortController = new AbortController();
+  const response = fetch(sessionFragmentUrl(link.href), { headers: { "Accept": "application/json" }, signal: abortController.signal });
+  response.catch(() => {});
+  sessionPreload = { url: link.href, startedAt: performance.now(), abortController, response };
 });
 
 document.addEventListener("click", async (event) => {
