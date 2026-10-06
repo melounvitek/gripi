@@ -38,6 +38,7 @@ func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sessions/new_at_cwd", app.newSessionAtCWD)
 	mux.HandleFunc("POST /sessions/pin", app.pinSession)
 	mux.HandleFunc("POST /sessions/tags", app.sessionTags)
+	mux.HandleFunc("POST /sessions/delete", app.deleteSession)
 	mux.HandleFunc("GET /tags", app.tags)
 }
 

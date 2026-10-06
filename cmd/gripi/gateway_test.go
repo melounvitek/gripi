@@ -285,3 +285,57 @@ func TestNewExplainsWhereItCannotStartASession(t *testing.T) {
 		t.Fatalf("gripi new in a missing directory = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }
+
+func TestDeleteRemovesASessionFromTheGateway(t *testing.T) {
+	alpha, beta := fakePiGateway(t)
+
+	code, stdout, stderr := runCLI("delete", "0a1-a", "--json")
+	// The printed session is the last trace of it, so it must say which one went.
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID != "0a1-alpha" || session.Path != alpha {
+		t.Fatalf("gripi delete = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if _, err := os.Stat(alpha); !os.IsNotExist(err) {
+		t.Fatalf("the session file is still there (%v)", err)
+	}
+	if _, listed, _ := runCLI("list", "--json"); strings.Contains(listed, "0a1-alpha") || !strings.Contains(listed, "0a1-beta") {
+		t.Fatalf("listing after gripi delete = %s", listed)
+	}
+
+	// A session from 'gripi new' has no file yet, only a Pi process to stop.
+	_, stdout, _ = runCLI("new", t.TempDir(), "--json")
+	started := decodeSession(t, stdout)
+	if code, stdout, stderr := runCLI("delete", started.Path); code != 0 || stderr != "" || !strings.Contains(stdout, "idle") {
+		t.Fatalf("gripi delete on a new session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, listed, _ := runCLI("list", "--json"); strings.Contains(listed, started.Path) || !strings.Contains(listed, beta) {
+		t.Fatalf("listing after deleting the new session = %s", listed)
+	}
+}
+
+func TestDeleteExplainsWhatItCannotDelete(t *testing.T) {
+	alpha, beta := fakePiGateway(t)
+	for _, usage := range [][]string{{"delete"}, {"delete", ""}, {"delete", "0a1-a", "0a1-b"}, {"delete", "0a1-a", "--bogus"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help delete") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
+	}
+	if code, stdout, stderr := runCLI("delete", "zzz"); code != 1 || stdout != "" || !strings.Contains(stderr, "gripi list") {
+		t.Fatalf("gripi delete on an unknown session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// A prefix that fits two sessions must delete neither.
+	if code, stdout, stderr := runCLI("delete", "0a1"); code != 1 || stdout != "" || !strings.Contains(stderr, "0a1-alpha") || !strings.Contains(stderr, "0a1-beta") {
+		t.Fatalf("gripi delete on an ambiguous session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+
+	if code, _, stderr := runCLI("send", "0a1-a", "Start the follow-up scenario"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	if code, stdout, stderr := runCLI("delete", "0a1-a"); code != 1 || stdout != "" || !strings.Contains(stderr, "running session") {
+		t.Fatalf("gripi delete on a working session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	for _, path := range []string{alpha, beta} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("a refused gripi delete removed %s (%v)", path, err)
+		}
+	}
+}
