@@ -106,9 +106,14 @@ export class CurrentSessionFindController {
     if (!element || !query) return [];
     const matches = [];
     element.querySelectorAll(".message").forEach((message) => {
-      if (this.conversation.focusedView && !this.focusedViewMessage(message)) return;
+      let roots = ".compact-summary, .message-body";
+      if (this.conversation.focusedView && !this.focusedViewMessage(message)) {
+        // In Brief view, a tool block with images shows only its summary line.
+        if (!message.matches(":is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images)")) return;
+        roots = ".compact-summary";
+      }
       if (this.conversationOnly?.checked && !this.conversationMessage(message)) return;
-      message.querySelectorAll(".compact-summary, .message-body").forEach((root) => {
+      message.querySelectorAll(roots).forEach((root) => {
         const source = this.source(root);
         this.ranges(source.text, query).forEach((range) => matches.push({ ...source, ...range, elements: [] }));
       });
