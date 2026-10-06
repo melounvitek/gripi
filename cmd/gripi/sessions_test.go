@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -97,6 +98,29 @@ func TestSendDoesNotWaitForATurnThatPiWillNotStart(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("gripi send waited %s for a turn to start", elapsed)
+	}
+}
+
+func TestNewNamesARelativeDirectoryInFullBecauseTheGatewayRunsElsewhere(t *testing.T) {
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, requested := socketPath(t), ""
+	server, err := startLocalServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/sessions/new_at_cwd" {
+			requested = request.FormValue("cwd")
+		}
+		json.NewEncoder(response).Encode(map[string]any{"session": "/sessions/00.jsonl", "sessions": cannedSessions(1)})
+	}), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { server.Close() })
+	t.Setenv("GRIPI_SOCKET_PATH", path)
+	t.Chdir(directory)
+	if code, _, stderr := runCLI("new", "."); code != 0 || requested != directory {
+		t.Fatalf("gripi new . = %d, stderr %q, asked for %q instead of %q", code, stderr, requested, directory)
 	}
 }
 

@@ -271,13 +271,6 @@ func TestNewStartsASessionThatTakesMessages(t *testing.T) {
 	if session := decodeSession(t, stdout); code != 0 || session.CWD != directory || session.LastReply != "Deterministic browser response complete." {
 		t.Fatalf("gripi wait on the new session = %d, stderr %q, session %+v", code, stderr, session)
 	}
-
-	// A relative directory is the caller's, not the gateway's.
-	t.Chdir(directory)
-	code, stdout, stderr = runCLI("new", ".")
-	if code != 0 || stderr != "" || !strings.Contains(stdout, filepath.Base(directory)) {
-		t.Fatalf("gripi new . = %d, stdout %q, stderr %q", code, stdout, stderr)
-	}
 }
 
 func TestNewExplainsWhereItCannotStartASession(t *testing.T) {

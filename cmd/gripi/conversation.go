@@ -17,8 +17,9 @@ import (
 const showHelp = `Usage:
   gripi show <session> [--all] [--json]
 
-Prints the latest reply of a session in full. Run it after 'gripi wait' to
-read what Pi answered.
+Prints Pi's reply to the latest message of a session, in full. Run it after
+'gripi wait' to read what Pi answered. It prints nothing when there is no
+such reply, for example because the turn ended in an error.
 
 With --all it prints the recent conversation instead: each message under its
 role, and each tool call on one line. A long conversation starts at a recent
@@ -36,10 +37,10 @@ Message fields:
              assistant  text that Pi replied with
              tool       a tool call; text has the tool's name or the shell
                         command, never the output
-             status     a compaction of the context
+             status     a compaction of the context; text only says so
              error      an error that ended a turn
              custom     a message that an extension shows
-  text       The whole message
+  text       The whole message, except for tool and status
   timestamp  Time the message was written
 
 Examples:
@@ -74,7 +75,11 @@ func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer)
 	if !*all {
 		messages = []gateway.LocalMessage{}
 		for _, message := range conversation.Messages {
-			if message.Role == "assistant" {
+			switch message.Role {
+			// A reply from before the latest message does not answer it.
+			case "user":
+				messages = []gateway.LocalMessage{}
+			case "assistant":
 				messages = []gateway.LocalMessage{message}
 			}
 		}
@@ -82,8 +87,12 @@ func showConversation(arguments []string, _ io.Reader, stdout, stderr io.Writer)
 	if *asJSON {
 		return printJSON(stdout, stderr, "show", messages)
 	}
-	if len(messages) == 0 {
-		fmt.Fprintln(stderr, "gripi show: the session has no reply yet")
+	switch {
+	case len(messages) > 0:
+	case *all:
+		fmt.Fprintln(stderr, "gripi show: the session has no messages yet")
+	default:
+		fmt.Fprintln(stderr, "gripi show: there is no reply to the latest message; 'gripi show --all' prints what happened")
 	}
 	for index, message := range messages {
 		switch {
@@ -109,8 +118,9 @@ and replaces itself with 'pi --session <path>', so it needs a terminal and
 does not return until Pi CLI exits.
 
 The gateway must not be running the session: its state has to be idle,
-external or conflict. Once Pi CLI has written to the session, the gateway only
-follows it (state external) until someone takes it over in the browser.
+external or conflict, and Pi must have replied in it at least once. Once Pi
+CLI has written to the session, the gateway only follows it (state external)
+until someone takes it over in the browser.
 
 Pi CLI starts as it does for any session. It does not get the environment
 variables saved in Gripi, and it asks before it trusts a project.
@@ -122,6 +132,7 @@ Example:
   gripi open 01a107aa
 
 Exit codes:
+  Pi CLI's own once it has started. Before that:
   1  the gateway cannot be reached, no single session matched, the gateway is
      running the session, there is no terminal, or pi is not on PATH
   2  usage error
@@ -150,8 +161,11 @@ func openSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	if err != nil {
 		return failure(stderr, "open", err)
 	}
-	switch session.State {
-	case "working", "compacting", "waiting":
+	switch {
+	// Until the first reply only the gateway's Pi process has the session; it has no file yet.
+	case session.ID == "":
+		return failure(stderr, "open", errors.New("the session has no reply yet, so Pi CLI has nothing to continue"))
+	case session.State != "idle" && session.State != "external" && session.State != "conflict":
 		return failure(stderr, "open", fmt.Errorf("the gateway is running the session (%s); Pi CLI can continue it once that has ended", session.State))
 	}
 	pi, err := exec.LookPath("pi")

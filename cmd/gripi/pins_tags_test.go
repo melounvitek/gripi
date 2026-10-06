@@ -136,4 +136,8 @@ func TestTagCommandsExplainWhatTheyCannotDo(t *testing.T) {
 	if code, stdout, stderr := runCLI(tooMany...); code != 1 || stdout != "" || !strings.Contains(stderr, "at most 32 tags") {
 		t.Fatalf("gripi tag past the limit = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
+	// As the help says, the tags before the refused one stay.
+	if tags := listedSession(t, "0a1-alpha").Tags; len(tags) != 32 {
+		t.Fatalf("%d tags after the refused one", len(tags))
+	}
 }

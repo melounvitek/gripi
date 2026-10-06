@@ -12,21 +12,19 @@ import (
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
-const sessionArgumentAndJSON = `
+const pinHelp = `Usage:
+  gripi pin <session> [--json]
+
+Pins a session, which keeps it at the top of the browser's sidebar, then
+prints the session. Pinning a pinned session changes nothing.
+
 Arguments:
   session  Session ID, a unique prefix of it, or the session file path
 
 Flags:
   --json  Print the session as a JSON object instead of a table
 
-` + sessionFields
-
-const pinHelp = `Usage:
-  gripi pin <session> [--json]
-
-Pins a session, which keeps it at the top of the browser's sidebar, then
-prints the session. Pinning a pinned session changes nothing.
-` + sessionArgumentAndJSON + `
+` + sessionFields + `
 Example:
   gripi pin 01a107aa
 
@@ -39,7 +37,14 @@ const unpinHelp = `Usage:
 Returns a pinned session to its place among the others in the browser's
 sidebar, then prints the session. Unpinning a session that is not pinned
 changes nothing.
-` + sessionArgumentAndJSON + `
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+
+Flags:
+  --json  Print the session as a JSON object instead of a table
+
+` + sessionFields + `
 Example:
   gripi unpin 01a107aa
 
@@ -61,11 +66,13 @@ func pinSession(name string, pinned bool) func([]string, io.Reader, io.Writer, i
 		if err != nil {
 			return failure(stderr, name, err)
 		}
-		form := url.Values{"session": {session.Path}, "pinned": {strconv.FormatBool(pinned)}}
-		// The answer carries the new "pinned", which lands on the session printed below.
-		if err := client.post("/sessions/pin", form, &session); err != nil {
+		var answer struct {
+			Pinned bool `json:"pinned"`
+		}
+		if err := client.post("/sessions/pin", url.Values{"session": {session.Path}, "pinned": {strconv.FormatBool(pinned)}}, &answer); err != nil {
 			return failure(stderr, name, err)
 		}
+		session.Pinned = answer.Pinned
 		return printSession(stdout, stderr, name, session, *asJSON)
 	}
 }
@@ -75,7 +82,8 @@ const tagHelp = `Usage:
 
 Adds tags to a session, then prints the session. A tag is lowercased and holds
 1 to 64 characters; a session has at most 32. Adding a tag that the session
-already has changes nothing.
+already has changes nothing. Tags are added in order: if the gateway refuses
+one, those before it stay.
 
 Arguments:
   session  Session ID, a unique prefix of it, or the session file path
@@ -134,11 +142,13 @@ func tagSession(name string, assigned bool) func([]string, io.Reader, io.Writer,
 			return failure(stderr, name, err)
 		}
 		for _, tag := range tags {
-			form := url.Values{"session": {session.Path}, "tag": {tag}, "assigned": {strconv.FormatBool(assigned)}}
-			// The answer carries the new "tags", which land on the session printed below.
-			if err := client.post("/sessions/tags", form, &session); err != nil {
+			var answer struct {
+				Tags []string `json:"tags"`
+			}
+			if err := client.post("/sessions/tags", url.Values{"session": {session.Path}, "tag": {tag}, "assigned": {strconv.FormatBool(assigned)}}, &answer); err != nil {
 				return failure(stderr, name, err)
 			}
+			session.Tags = answer.Tags
 		}
 		return printSession(stdout, stderr, name, session, *asJSON)
 	}
@@ -148,7 +158,7 @@ const tagsHelp = `Usage:
   gripi tags [session] [--json]
 
 Prints every tag with the number of sessions that have it. With a session, it
-prints only the tags of that session.
+prints only the tags of that session; the numbers still count all sessions.
 
 Arguments:
   session  Session ID, a unique prefix of it, or the session file path

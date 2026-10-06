@@ -246,7 +246,8 @@ const newHelp = `Usage:
   gripi new <directory> [--json]
 
 Starts a session in a project directory, then prints it. The session is empty
-until 'gripi send' gives it a first message.
+until 'gripi send' gives it a first message, and it keeps a Pi process running
+until then, so start one only to use it.
 
 A new session has no ID until Pi has replied once. Until then, refer to it by
 its path.
@@ -458,8 +459,8 @@ const waitHelp = `Usage:
 
 Blocks until the session is no longer working or compacting, then prints it.
 Without --timeout it waits as long as that takes. Run it after 'gripi send' to
-get the reply: last_reply has its first 180 characters, and the session file
-at path has the whole conversation.
+get the reply: last_reply has its first 180 characters, and 'gripi show' prints
+all of it.
 
 Check the printed state. idle means Pi finished. waiting, external and
 conflict also end the wait, because Pi will not continue until someone acts in
