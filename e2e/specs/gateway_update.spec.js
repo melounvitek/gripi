@@ -27,7 +27,7 @@ const available = { state: "available", targetSha: "abc12345", message: "1 updat
 
 test("blocks the page while the gateway updates and reloads it after the restart", async ({ page }) => {
   const gateway = await mockGateway(page, available);
-  gateway.started = { state: "updating", message: "Updating gateway…" };
+  gateway.started = { state: "updating", message: "Updating Gripi…" };
   await page.route(/\/session_fragment(?:\?|$)/, (route) => gateway.down ? route.abort() : route.continue());
   await page.goto("/");
   await selectSession(page, sessions.history);
@@ -36,7 +36,7 @@ test("blocks the page while the gateway updates and reloads it after the restart
   await startUpdate(page);
 
   await expect(overlay).toBeVisible();
-  await expect(overlay).toContainText("Updating gateway…");
+  await expect(overlay).toContainText("Updating Gripi…");
   await expect(page.getByLabel("Message to Pi").click({ timeout: 1000 })).rejects.toThrow();
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
@@ -46,7 +46,7 @@ test("blocks the page while the gateway updates and reloads it after the restart
   expect(await page.locator('[data-modal="new-session-modal"]').isVisible()).toBe(false);
 
   gateway.status = { state: "restarting", message: "Updated to abc12345" };
-  await expect(overlay).toContainText("Restarting gateway…");
+  await expect(overlay).toContainText("Restarting Gripi…");
 
   // Going back switches sessions; with the gateway down that must not leave for its error page.
   gateway.down = true;
@@ -73,13 +73,13 @@ test("leaves the page usable while waiting for active sessions and after a faile
   await startUpdate(page);
 
   // Only the gateway knows whether it has to wait, so nothing is blocked before it answers.
-  await expect(page.getByText("Starting gateway update…")).toBeVisible();
+  await expect(page.getByText("Starting Gripi update…")).toBeVisible();
   expect(await overlay.isVisible()).toBe(false);
   answerStart();
   await expect(page.getByText("Waiting for 1 active Pi session to finish…")).toBeVisible();
   await expect(overlay).toBeHidden();
 
-  gateway.status = { state: "updating", message: "Updating gateway…" };
+  gateway.status = { state: "updating", message: "Updating Gripi…" };
   await expect(overlay).toBeVisible();
 
   gateway.status = { state: "dependency_failed", message: "The new version did not build." };
@@ -88,7 +88,7 @@ test("leaves the page usable while waiting for active sessions and after a faile
 });
 
 test("joins an update started elsewhere and reloads once the restarted gateway serves the page", async ({ page }) => {
-  const gateway = await mockGateway(page, { state: "updating", message: "Updating gateway…" });
+  const gateway = await mockGateway(page, { state: "updating", message: "Updating Gripi…" });
   // Session-only windows have no sidebar, so they can only learn about the update this way.
   await page.goto("/?session_only=1");
   await expect(page.locator("[data-gateway-update-overlay]")).toBeVisible();

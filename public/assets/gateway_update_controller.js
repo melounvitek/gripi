@@ -45,7 +45,7 @@ export class GatewayUpdateController {
     this.state = payload;
     // Waiting for active sessions leaves the page usable so they can still be watched or aborted.
     const blocking = payload.state === "updating" || payload.state === "restarting";
-    const progressMessage = payload.state === "restarting" ? "Restarting gateway…" : "Updating gateway…";
+    const progressMessage = payload.state === "restarting" ? "Restarting Gripi…" : "Updating Gripi…";
     this.overlay.querySelector("[data-gateway-update-overlay-message]").textContent = progressMessage;
     if (blocking && !this.overlay.open) this.overlay.showModal();
     if (!blocking && this.overlay.open) this.overlay.close();
@@ -77,8 +77,8 @@ export class GatewayUpdateController {
     button.hidden = !(available || retryable);
     if (available || retryable) {
       button.textContent = retryable ? "Retry update" : `Update to ${payload.targetSha || "latest"}`;
-      button.title = payload.summary || payload.message || "Update gateway";
-      message.textContent = failure ? `Update to ${payload.targetSha} failed.` : payload.message || "Gateway update available";
+      button.title = payload.summary || payload.message || "Update Gripi";
+      message.textContent = failure ? `Update to ${payload.targetSha} failed.` : payload.message || "Gripi update available";
     } else {
       message.textContent = payload.message || progressMessage;
     }
@@ -90,7 +90,7 @@ export class GatewayUpdateController {
     // The poll must not hang on a restarting gateway.
     const signal = refresh ? undefined : AbortSignal.timeout(10000);
     const response = await fetch(url, { method, headers: { "Accept": "application/json" }, cache: "no-store", signal });
-    if (!response.ok) throw new Error("Could not check for gateway updates");
+    if (!response.ok) throw new Error("Could not check for Gripi updates");
     const payload = await response.json();
     if (payload.instanceId && payload.instanceId !== this.instanceId) {
       // Stop polling: navigating again would abandon a page load that takes longer than the poll.
@@ -107,15 +107,15 @@ export class GatewayUpdateController {
 
   async start() {
     const target = this.state?.targetSha || "the latest version";
-    if (!this.window.confirm(`Update gateway to ${target}? The gateway will wait for active Pi work before updating and restarting.`)) return;
+    if (!this.window.confirm(`Update Gripi to ${target}? Gripi will wait for active Pi work before updating and restarting.`)) return;
 
     this.inProgress = true;
     this.channel?.postMessage({ type: "updating" });
     // Shown as waiting, which does not block: only the gateway's answer tells whether the page is blocked.
-    this.apply({ ...this.state, state: "waiting", message: "Starting gateway update…" });
+    this.apply({ ...this.state, state: "waiting", message: "Starting Gripi update…" });
     try {
       const response = await fetch("/gateway-update", { method: "POST", headers: { "Accept": "application/json" } });
-      if (!response.ok) throw new Error("Could not start gateway update");
+      if (!response.ok) throw new Error("Could not start Gripi update");
       this.apply(await response.json());
       this.poll();
     } catch (error) {

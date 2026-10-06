@@ -164,7 +164,7 @@ func (updater *Updater) Update(ctx context.Context) Result {
 		return Result{State: "error", Status: precondition, Message: failure.Message}
 	}
 	if err := validateBinaryDestination(updater.BinaryPath); err != nil {
-		return Result{State: "error", Status: precondition, Message: "Unsafe gateway binary destination: " + err.Error()}
+		return Result{State: "error", Status: precondition, Message: "Unsafe Gripi binary destination: " + err.Error()}
 	}
 
 	stageParent := updater.StageParent
@@ -206,7 +206,7 @@ func (updater *Updater) Update(ctx context.Context) Result {
 		return Result{State: "dependency_failed", Status: precondition, Message: failure.Summary, Failure: failure}
 	}
 	if err := validateStagedBinary(stagedBinary); err != nil {
-		return Result{State: "dependency_failed", Status: precondition, Message: "Updated gateway build is invalid: " + err.Error()}
+		return Result{State: "dependency_failed", Status: precondition, Message: "Updated Gripi build is invalid: " + err.Error()}
 	}
 	unlock, err := updater.lockCheckout(ctx)
 	if err != nil {
@@ -229,7 +229,7 @@ func (updater *Updater) Update(ctx context.Context) Result {
 	}
 	pendingBinary, pendingDirectory, err := updater.preparePendingBinary(stagedBinary, precondition.TargetRevision)
 	if err != nil {
-		return Result{State: "error", Status: precondition, Message: "Could not prepare recoverable gateway cutover: " + err.Error()}
+		return Result{State: "error", Status: precondition, Message: "Could not prepare recoverable Gripi cutover: " + err.Error()}
 	}
 	defer os.RemoveAll(pendingDirectory)
 
@@ -392,7 +392,7 @@ func (updater *Updater) rollbackAfterFailure(status Status, revision string, upd
 	if !rollback.success {
 		return Result{State: "rollback_failed", Status: status, Message: updateErr.Error() + ". " + commandError("The checkout could not be rolled back", rollback)}
 	}
-	return Result{State: "dependency_failed", Status: status, RolledBack: true, Message: "Gateway update failed; restored " + status.CurrentSHA + ": " + updateErr.Error()}
+	return Result{State: "dependency_failed", Status: status, RolledBack: true, Message: "Gripi update failed; restored " + status.CurrentSHA + ": " + updateErr.Error()}
 }
 
 func (updater *Updater) confirmCleanCheckoutAt(ctx context.Context, expectedRevision string) error {
@@ -505,7 +505,7 @@ func installBinary(source, target string) error {
 		return err
 	}
 	if err := os.Rename(source, target); err != nil {
-		return fmt.Errorf("atomically install updated gateway: %w", err)
+		return fmt.Errorf("atomically install updated Gripi: %w", err)
 	}
 	if directory, err := os.Open(filepath.Dir(target)); err == nil {
 		_ = directory.Sync()

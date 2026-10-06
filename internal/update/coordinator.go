@@ -208,7 +208,7 @@ func (coordinator *Coordinator) performUpdate(ctx context.Context) {
 		return
 	}
 	coordinator.restartPending = true
-	coordinator.snapshot = Snapshot{State: "restarting", Message: stringPointer(nonempty(result.Message, "Restarting gateway…")), CurrentSHA: stringPointerOrNil(result.Status.CurrentSHA), TargetSHA: stringPointerOrNil(result.Status.TargetSHA), BehindCount: intPointer(result.Status.BehindCount), Summary: stringPointerOrNil(result.Status.Summary)}
+	coordinator.snapshot = Snapshot{State: "restarting", Message: stringPointer(nonempty(result.Message, "Restarting Gripi…")), CurrentSHA: stringPointerOrNil(result.Status.CurrentSHA), TargetSHA: stringPointerOrNil(result.Status.TargetSHA), BehindCount: intPointer(result.Status.BehindCount), Summary: stringPointerOrNil(result.Status.Summary)}
 	coordinator.mu.Unlock()
 	coordinator.performRestart(ctx)
 }
@@ -234,10 +234,10 @@ func (coordinator *Coordinator) checkStatus(ctx context.Context) (status Status)
 
 func statusContextError(err error) Status {
 	reason := "cancelled"
-	message := "Gateway update check cancelled: " + err.Error()
+	message := "Gripi update check cancelled: " + err.Error()
 	if err == context.DeadlineExceeded {
 		reason = "timeout"
-		message = "Gateway update check timed out: " + err.Error()
+		message = "Gripi update check timed out: " + err.Error()
 	}
 	return Status{State: "error", Reason: reason, Message: message}
 }
@@ -250,14 +250,14 @@ func (coordinator *Coordinator) runUpdate(ctx context.Context) Result {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if !coordinator.acquireOperation(ctx) {
-		return Result{State: "error", Message: "Gateway update cancelled: " + ctx.Err().Error()}
+		return Result{State: "error", Message: "Gripi update cancelled: " + ctx.Err().Error()}
 	}
 	defer coordinator.releaseOperation()
 	result := coordinator.updater.Update(ctx)
 	if err := ctx.Err(); err != nil && result.State != "updated" {
-		message := "Gateway update cancelled: " + err.Error()
+		message := "Gripi update cancelled: " + err.Error()
 		if err == context.DeadlineExceeded {
-			message = "Gateway update timed out: " + err.Error()
+			message = "Gripi update timed out: " + err.Error()
 		}
 		result = Result{State: "error", Status: result.Status, Message: message}
 	}
@@ -398,7 +398,7 @@ func (coordinator *Coordinator) finishFailure(err error, reason string) {
 func progressSnapshot(previous Snapshot) Snapshot {
 	previous.State = "updating"
 	previous.Reason = nil
-	previous.Message = stringPointer("Updating gateway…")
+	previous.Message = stringPointer("Updating Gripi…")
 	previous.ActiveSessionCount = nil
 	previous.Failure = nil
 	return previous
@@ -409,7 +409,7 @@ func restartingSnapshot(previous Snapshot) Snapshot {
 	previous.State = "restarting"
 	previous.Reason = nil
 	if !alreadyRestarting {
-		previous.Message = stringPointer("Restarting gateway…")
+		previous.Message = stringPointer("Restarting Gripi…")
 	}
 	previous.ActiveSessionCount = nil
 	return previous
@@ -437,7 +437,7 @@ func failureSnapshot(previous Snapshot, err error, reason string) Snapshot {
 }
 
 func closedSnapshot(previous Snapshot) Snapshot {
-	return failureSnapshot(previous, fmt.Errorf("gateway update coordinator is closed"), "closed")
+	return failureSnapshot(previous, fmt.Errorf("Gripi update coordinator is closed"), "closed")
 }
 
 func snapshotFromStatus(status Status) Snapshot {
