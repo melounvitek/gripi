@@ -10,6 +10,9 @@ import (
 	"os"
 )
 
+// FileSnapshot is saved to session-baselines.json. A baseline written before a field
+// changed its name or meaning would make every session look changed behind the
+// gateway's back, so such a change needs a new file name.
 type FileSnapshot struct {
 	Device          uint64
 	Inode           uint64

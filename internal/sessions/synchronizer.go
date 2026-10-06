@@ -48,6 +48,8 @@ type syncState struct {
 	Mode      SyncMode
 	RPCLeafID string
 	Error     string
+	// External outlives a conflict, which says nothing about Pi CLI being done with the session.
+	External bool
 }
 
 type Synchronizer struct {
@@ -57,7 +59,8 @@ type Synchronizer struct {
 	statesMu sync.Mutex
 	states   map[string]syncState
 	// externalPath is the file that lists the sessions in external follow.
-	externalPath string
+	externalPath  string
+	baselinesPath string
 }
 
 func NewSynchronizer(root, home string, cache *Cache, clients *rpc.Registry) *Synchronizer {
@@ -76,9 +79,51 @@ func (synchronizer *Synchronizer) PersistExternalFollow(path string) error {
 	defer synchronizer.statesMu.Unlock()
 	synchronizer.externalPath = path
 	for _, sessionPath := range external {
-		synchronizer.states[sessionPath] = syncState{Mode: SyncExternalFollow}
+		synchronizer.states[sessionPath] = syncState{Mode: SyncExternalFollow, External: true}
 	}
 	return nil
+}
+
+// RestoreBaselines restores how SaveBaselines last found the session files, so that the
+// first look at a session notices what Pi CLI appended while the gateway was down, or
+// while it ran with nothing looking at the session. Baselines are only a help, so a file
+// that cannot be used is skipped.
+func (synchronizer *Synchronizer) RestoreBaselines(path string) {
+	synchronizer.statesMu.Lock()
+	defer synchronizer.statesMu.Unlock()
+	synchronizer.baselinesPath = path
+	var baselines map[string]FileSnapshot
+	// A gateway killed before it saves must not leave baselines that predate its own Pi's writes.
+	if readJSON(path, &baselines) != nil || os.Remove(path) != nil {
+		return
+	}
+	for sessionPath, baseline := range baselines {
+		info, err := os.Stat(sessionPath)
+		if err != nil {
+			continue
+		}
+		// A reboot can renumber devices, which must not read as a replaced file.
+		if device, inode := fileIdentity(info); device == baseline.Device && inode == baseline.Inode {
+			synchronizer.states[sessionPath] = syncState{Snapshot: &baseline, Mode: SyncAvailable}
+		}
+	}
+}
+
+// SaveBaselines must run only after the gateway's own Pi processes have stopped.
+func (synchronizer *Synchronizer) SaveBaselines() error {
+	synchronizer.statesMu.Lock()
+	defer synchronizer.statesMu.Unlock()
+	if synchronizer.baselinesPath == "" {
+		return nil
+	}
+	baselines := map[string]FileSnapshot{}
+	for path, state := range synchronizer.states {
+		// The gateway's own Pi may have written past the snapshot of a managed session.
+		if state.Mode == SyncAvailable && state.Snapshot != nil {
+			baselines[path] = *state.Snapshot
+		}
+	}
+	return writeJSON(synchronizer.baselinesPath, baselines)
 }
 
 func (synchronizer *Synchronizer) Inspect(ctx context.Context, path string, includePosition bool) (SyncResult, error) {
@@ -117,7 +162,7 @@ func (synchronizer *Synchronizer) KnownBlocked(path string) *SyncResult {
 func (synchronizer *Synchronizer) Forget(path string) {
 	synchronizer.statesMu.Lock()
 	defer synchronizer.statesMu.Unlock()
-	wasExternal := synchronizer.states[path].Mode == SyncExternalFollow
+	wasExternal := synchronizer.states[path].External
 	delete(synchronizer.states, path)
 	if wasExternal {
 		synchronizer.saveExternalLocked()
@@ -351,6 +396,10 @@ func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string
 		appended := snapshot.Size > state.Snapshot.Size || snapshot.AppendCursor != state.Snapshot.AppendCursor
 		if appended {
 			if !synchronizer.clients.Active(path) {
+				// A gateway that is shutting down has stopped its own Pi processes, so what they wrote last would pass for Pi CLI's.
+				if synchronizer.clients.Closed() {
+					return resultFor(state), nil
+				}
 				synchronizer.update(path, snapshot, SyncExternalFollow, "", "")
 				return resultFor(synchronizer.state(path)), nil
 			}
@@ -526,9 +575,10 @@ func (synchronizer *Synchronizer) state(path string) syncState {
 func (synchronizer *Synchronizer) setState(path string, state syncState) {
 	synchronizer.statesMu.Lock()
 	defer synchronizer.statesMu.Unlock()
-	wasExternal := synchronizer.states[path].Mode == SyncExternalFollow
+	wasExternal := synchronizer.states[path].External
+	state.External = state.Mode == SyncExternalFollow || (state.Mode == SyncConflict && wasExternal)
 	synchronizer.states[path] = state
-	if wasExternal != (state.Mode == SyncExternalFollow) {
+	if wasExternal != state.External {
 		synchronizer.saveExternalLocked()
 	}
 }
@@ -538,7 +588,7 @@ func (synchronizer *Synchronizer) saveExternalLocked() {
 	}
 	external := []string{}
 	for path, state := range synchronizer.states {
-		if state.Mode == SyncExternalFollow {
+		if state.External {
 			external = append(external, path)
 		}
 	}

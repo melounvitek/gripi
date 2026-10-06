@@ -150,6 +150,11 @@ func (handler *Handler) Close(ctx context.Context) error {
 			return err
 		}
 	}
+	if handler.app.synchronizer != nil {
+		if err := handler.app.synchronizer.SaveBaselines(); err != nil {
+			logInternalError("save session baselines", err)
+		}
+	}
 	handler.closed = true
 	return nil
 }
@@ -260,7 +265,9 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	}
 	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, app.sessionCache, app.rpcClients)
 	if cfg.ReadStatePath != "" {
-		if err := app.synchronizer.PersistExternalFollow(filepath.Join(filepath.Dir(cfg.ReadStatePath), "external-sessions.json")); err != nil {
+		state := filepath.Dir(cfg.ReadStatePath)
+		app.synchronizer.RestoreBaselines(filepath.Join(state, "session-baselines.json"))
+		if err := app.synchronizer.PersistExternalFollow(filepath.Join(state, "external-sessions.json")); err != nil {
 			return nil, err
 		}
 	}
