@@ -82,7 +82,7 @@ test("leaves the page usable while waiting for active sessions and after a faile
   gateway.status = { state: "updating", message: "Updating gateway…" };
   await expect(overlay).toBeVisible();
 
-  gateway.status = { state: "dependency_failed", message: "Update validation failed before changing the live checkout" };
+  gateway.status = { state: "dependency_failed", message: "The new version did not build." };
   await expect(overlay).toBeHidden();
   await expect(page.getByRole("button", { name: "Retry update" })).toBeVisible();
 });
@@ -101,4 +101,59 @@ test("joins an update started elsewhere and reloads once the restarted gateway s
   const reloaded = page.waitForEvent("load");
   gateway.status = { state: "up_to_date", instanceId: "restarted-instance", currentSha: "abc12345" };
   await reloaded;
+});
+
+const failedStep = {
+  state: "dependency_failed",
+  currentSha: "old11111",
+  targetSha: "abc12345",
+  message: "The new version did not build.",
+  failure: { step: "Build", exitStatus: 2, timedOut: false, output: `$ mise exec -- go build -o /tmp/${"stage".repeat(40)}/gripi ./cmd/gripi\nundefined: rpc.Start` },
+};
+
+test.describe("with touch", () => {
+  test.use({ hasTouch: true });
+
+  test("keeps a failed update short in the sidebar and shows the failed step on the first tap", async ({ page, context }) => {
+    const gateway = await mockGateway(page, failedStep);
+    gateway.started = { state: "waiting", targetSha: "abc12345", message: "Waiting for 1 active Pi session to finish…" };
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto("/");
+    const control = page.locator("[data-gateway-update]");
+    const dialog = page.getByRole("dialog", { name: "Update failed" });
+
+    await expect(control).toContainText("Update to abc12345 failed.");
+    await expect(control).toContainText("Nothing was changed.");
+    await expect(control).not.toContainText("rpc.Start");
+
+    await control.getByRole("button", { name: "Show details" }).tap();
+    await expect(dialog).toContainText("The new version did not build.");
+    await expect(dialog).toContainText("Nothing was changed. Gripi is still running old11111.");
+    await expect(dialog).toContainText("Build · exit 2");
+    const output = dialog.locator("pre");
+    await expect(output).toHaveText(failedStep.failure.output);
+    // A long line scrolls inside the output instead of widening the dialog.
+    const [card, block] = [await dialog.boundingBox(), await output.boundingBox()];
+    expect(block.x + block.width).toBeLessThanOrEqual(card.x + card.width);
+
+    await dialog.getByRole("button", { name: "Copy details" }).tap();
+    await expect(dialog.getByRole("button", { name: "Copied" })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`Update to abc12345 failed\nThe new version did not build.\nBuild · exit 2\n${failedStep.failure.output}`);
+
+    page.once("dialog", (confirmation) => confirmation.accept());
+    await dialog.getByRole("button", { name: "Retry update" }).tap();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText("Waiting for 1 active Pi session to finish…")).toBeVisible();
+    await expect(control.getByRole("button", { name: "Show details" })).toBeHidden();
+  });
+});
+
+test("keeps the Retry button inside the sidebar under an error with a long unbroken path", async ({ page }) => {
+  await mockGateway(page, { state: "error", targetSha: "abc12345", message: `Could not fetch origin master: /srv/${"checkout".repeat(30)}` });
+  await page.goto("/");
+
+  const retry = page.getByRole("button", { name: "Retry update" });
+  await expect(retry).toBeVisible();
+  const [sidebar, button] = [await page.locator(".session-sidebar").boundingBox(), await retry.boundingBox()];
+  expect(button.x + button.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
 });

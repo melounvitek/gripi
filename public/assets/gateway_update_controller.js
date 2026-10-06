@@ -1,9 +1,12 @@
 const PROGRESS_STATES = ["waiting", "updating", "restarting"];
 
+const failedStep = (failure) => `${failure.step} · ${failure.timedOut ? "timed out" : `exit ${failure.exitStatus}`}`;
+
 export class GatewayUpdateController {
-  constructor(document, window, BroadcastChannelClass = globalThis.BroadcastChannel) {
+  constructor(document, window, callbacks, BroadcastChannelClass = globalThis.BroadcastChannel) {
     this.document = document;
     this.window = window;
+    this.callbacks = callbacks;
     this.instanceId = document.body.dataset.gatewayInstanceId;
     this.state = null;
     this.inProgress = false;
@@ -14,6 +17,8 @@ export class GatewayUpdateController {
 
     document.addEventListener("click", (event) => {
       if (event.target.closest("[data-gateway-update-button]")) this.start();
+      const copy = event.target.closest("[data-gateway-update-failure-copy]");
+      if (copy) this.copyFailure(copy);
     });
     // The open overlay makes the page inert, but shortcuts bound to the document would still act.
     // No preventDefault: browser shortcuts such as reload must keep working.
@@ -52,6 +57,19 @@ export class GatewayUpdateController {
     const available = payload.state === "available";
     const progressing = PROGRESS_STATES.includes(payload.state);
     const failed = ["error", "dependency_failed", "rollback_failed"].includes(payload.state);
+    // A retry keeps the old payload's failure until the gateway answers.
+    const failure = failed ? payload.failure : null;
+    control.querySelector("[data-gateway-update-note]").hidden = !failure;
+    control.querySelector("[data-gateway-update-details]").hidden = !failure;
+    const details = this.document.querySelector('[data-modal="gateway-update-failure-modal"]');
+    if (failure) {
+      details.querySelector("[data-gateway-update-failure-summary]").textContent = payload.message;
+      details.querySelector("[data-gateway-update-failure-note]").textContent = `Nothing was changed. Gripi is still running ${payload.currentSha}.`;
+      details.querySelector("[data-gateway-update-failure-step]").textContent = failedStep(failure);
+      details.querySelector("[data-gateway-update-failure-output]").textContent = failure.output;
+    } else if (!details.hidden) {
+      this.callbacks.closeModal(details);
+    }
     const retryable = failed && payload.state !== "rollback_failed";
     const blocked = payload.state === "blocked";
     control.hidden = !(available || progressing || failed || blocked);
@@ -60,7 +78,7 @@ export class GatewayUpdateController {
     if (available || retryable) {
       button.textContent = retryable ? "Retry update" : `Update to ${payload.targetSha || "latest"}`;
       button.title = payload.summary || payload.message || "Update gateway";
-      message.textContent = payload.message || "Gateway update available";
+      message.textContent = failure ? `Update to ${payload.targetSha} failed.` : payload.message || "Gateway update available";
     } else {
       message.textContent = payload.message || progressMessage;
     }
@@ -104,6 +122,13 @@ export class GatewayUpdateController {
       this.inProgress = false;
       this.apply({ state: "error", message: error.message });
     }
+  }
+
+  async copyFailure(button) {
+    const { targetSha, message, failure } = this.state;
+    const copied = await this.callbacks.copyText([`Update to ${targetSha} failed`, message, failedStep(failure), failure.output].join("\n")).catch(() => false);
+    button.textContent = copied ? "Copied" : "Copy failed";
+    setTimeout(() => { button.textContent = "Copy details"; }, 1200);
   }
 
   resume() {

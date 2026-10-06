@@ -261,8 +261,8 @@
     .sidebar-search-empty { margin: 0.85rem 0.5rem; }
     .pinned-sessions-blocked { margin: 0 0.5rem 0.6rem; line-height: 1.55; }
     .pinned-sessions-blocked span { color: var(--gold); }
-    .pinned-sessions-blocked button { padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: 0; text-decoration: underline var(--border-strong); text-transform: none; text-underline-offset: 2px; }
-    .pinned-sessions-blocked button:hover { background: none; color: var(--text); }
+    .pinned-sessions-blocked button, .sidebar-gateway-update-details { padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: 0; text-decoration: underline var(--border-strong); text-transform: none; text-underline-offset: 2px; }
+    .pinned-sessions-blocked button:hover, .sidebar-gateway-update-details:hover { background: none; color: var(--text); }
     .sessions-day { margin: 0.85rem 0.5rem 0.2rem; }
     .sessions-list > .sessions-day:first-child { margin-top: 0.25rem; }
     .cwd-header { display: flex; align-items: center; gap: 0.4rem; margin: 1.25rem 0 0.5rem; }
@@ -323,7 +323,7 @@
     .session-actions-separator { height: 1px; margin: 0.3rem 0.25rem; background: var(--border); }
     .session-action-modal form { display: grid; gap: 0.9rem; }
     .session-action-modal p { margin: 0; }
-    .session-delete-explanation { color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
+    .session-delete-explanation, .gateway-update-failure-note { color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
     .session-action-error { color: var(--danger); font-size: 0.85rem; }
     .session-row:has(a.session.selected) { background: var(--panel-softer); }
     a.session.unread .session-title { color: var(--text); font-weight: 700; }
@@ -345,11 +345,13 @@
     .sidebar-resource-usage { display: grid; gap: 0.2rem; margin-top: 1rem; padding: 0.75rem 0.5rem 0; border-top: 1px solid var(--border); color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-variant-numeric: tabular-nums; }
     .sidebar-resource-usage[hidden] { display: none; }
     .sidebar-resource-usage-breakdown { color: var(--muted); }
-    .sidebar-gateway-update { display: grid; gap: 0.35rem; margin-top: 1.25rem; }
+    .sidebar-gateway-update { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.35rem; margin-top: 1.25rem; }
     .sidebar-gateway-update[hidden], .sidebar-gateway-update-button[hidden] { display: none; }
     .sidebar-gateway-update-button { width: 100%; padding: 0.6rem 0.65rem; border-radius: 0.3rem; background: var(--accent); color: var(--button-text); font-size: 0.72rem; }
-    .sidebar-gateway-update-message { padding-inline: 0.5rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; line-height: 1.35; }
+    .sidebar-gateway-update-message, .sidebar-gateway-update-note, .sidebar-gateway-update-details { padding-inline: 0.5rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; line-height: 1.35; overflow-wrap: anywhere; }
     .sidebar-gateway-update.is-error .sidebar-gateway-update-message { color: var(--danger); }
+    .sidebar-gateway-update-note { margin-top: -0.3rem; }
+    .sidebar-gateway-update-details { justify-self: start; color: var(--copy); }
     .session-project { display: flex; align-items: center; gap: 0.45rem; max-width: 100%; margin-top: 0.32rem; color: var(--project-identity-fg, var(--muted)); font-family: var(--mono); font-size: 0.66rem; font-weight: 500; line-height: 1.25; }
     /* Two letters stand for a project; colours repeat once there are more projects than colours. */
     .project-monogram { flex: none; width: 2ch; color: var(--project-identity-fg, var(--muted)); font-weight: 600; }
@@ -426,7 +428,7 @@
     .tool-command { color: var(--text); font-weight: 600; }
     .tool-path { color: var(--accent); font-weight: 500; }
     .tool-range { color: var(--warning); font-weight: 600; }
-    .message--error, .message--tool-error { background: var(--danger-soft); color: #e8a9a9; }
+    .message--error, .message--tool-error, .gateway-update-failure-output { background: var(--danger-soft); color: #e8a9a9; }
     /* Every block shares one padding. */
     .message--user, .message--compact, .message--error, .message--tool-preparation, .message[data-role="custom"] { padding-block: 0.65rem; border-radius: 0.2rem; }
     .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after,
@@ -660,6 +662,11 @@
     .modal-field { display: grid; gap: 0.35rem; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
     .modal-field input, .modal-field select, .modal-field textarea { width: 100%; min-width: 0; letter-spacing: normal; text-transform: none; }
     .extension-ui-modal-card { width: min(40rem, 100%); }
+    .gateway-update-failure-card { width: min(42rem, 100%); }
+    .gateway-update-failure-card > div { min-width: 0; }
+    .gateway-update-failure-card p { margin: 0; line-height: 1.5; }
+    .gateway-update-failure-step { margin-bottom: 0.5rem; color: var(--danger); font-family: var(--mono); font-size: 0.76rem; font-weight: 600; }
+    .gateway-update-failure-output { max-height: 14rem; overflow: auto; padding: 0.65rem 0.8rem; border-radius: 0.2rem; font-family: var(--mono); font-size: 0.76rem; line-height: 1.125rem; white-space: pre; }
     .extension-ui-modal-card form { display: grid; gap: 0.75rem; }
     .extension-ui-message { margin: 0; color: var(--copy); white-space: pre-wrap; }
     .extension-ui-error { margin: 0; color: var(--danger); }

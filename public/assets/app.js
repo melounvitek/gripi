@@ -56,7 +56,7 @@ import { ImageViewerController } from "./image_viewer_controller.js";
 import { NotificationPresenceController } from "./notification_presence.js";
 import { WebPushController } from "./web_push.js";
 
-const gatewayUpdateController = new GatewayUpdateController(document, window);
+const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
 const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath);
 const webPushController = new WebPushController(window, navigator);
