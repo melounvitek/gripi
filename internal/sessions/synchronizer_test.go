@@ -324,6 +324,102 @@ func TestSynchronizerKeepsFollowingExternalSessionAcrossRestarts(t *testing.T) {
 	}
 }
 
+func TestSynchronizerKeepsFollowingExternalSessionAcrossRestartAfterConflict(t *testing.T) {
+	root, path := synchronizerSession(t)
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
+	statePath := filepath.Join(t.TempDir(), "external-sessions.json")
+	restart := func() *Synchronizer {
+		t.Helper()
+		synchronizer := NewSynchronizer(root, "", NewCache(), rpc.NewRegistry(nil, nil))
+		if err := synchronizer.PersistExternalFollow(statePath); err != nil {
+			t.Fatal(err)
+		}
+		return synchronizer
+	}
+	writeTail := func(text string) {
+		t.Helper()
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = file.WriteString(text)
+		if closeErr := file.Close(); err != nil || closeErr != nil {
+			t.Fatal(err, closeErr)
+		}
+	}
+
+	synchronizer := restart()
+	inspectSync(t, synchronizer, path, false)
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "pi-cli", "parentId": "old", "message": map[string]any{"role": "assistant", "content": []any{}}})
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow {
+		t.Fatalf("Pi CLI append = %#v", result)
+	}
+	// The gateway looks at the file while Pi CLI is halfway through its next entry.
+	writeTail(`{"type":"message","id":"later","parentId":"pi-cli",`)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncConflict {
+		t.Fatalf("half-written entry = %#v", result)
+	}
+	writeTail(`"message":{"role":"user","content":[]}}` + "\n")
+
+	if result := inspectSync(t, restart(), path, false); result.Mode != SyncExternalFollow {
+		t.Fatalf("restart handed a session Pi CLI is using back to the gateway: %#v", result)
+	}
+}
+
+func TestSynchronizerDropsBaselineOfFileWithAnotherIdentity(t *testing.T) {
+	root, path := synchronizerSession(t)
+	baselinesPath := filepath.Join(t.TempDir(), "session-baselines.json")
+	restart := func() *Synchronizer {
+		synchronizer := NewSynchronizer(root, "", NewCache(), rpc.NewRegistry(nil, nil))
+		synchronizer.RestoreBaselines(baselinesPath)
+		return synchronizer
+	}
+	synchronizer := restart()
+	inspectSync(t, synchronizer, path, false)
+	if err := synchronizer.SaveBaselines(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A reboot can renumber devices. A copy gives the file another identity the same way.
+	contents, err := os.ReadFile(path)
+	if err == nil {
+		err = os.WriteFile(path+".copy", contents, 0600)
+	}
+	if err == nil {
+		err = os.Rename(path+".copy", path)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := inspectSync(t, restart(), path, false); result.Mode != SyncAvailable {
+		t.Fatalf("unchanged session after a restart = %#v", result)
+	}
+}
+
+func TestSynchronizerDoesNotTakeItsOwnPiForPiCLIWhileShuttingDown(t *testing.T) {
+	root, path := synchronizerSession(t)
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
+	client := newSyncClient()
+	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
+	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, errors.New("unexpected start") }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncManaged {
+		t.Fatalf("initial result = %#v", result)
+	}
+
+	// The gateway's Pi replies, and the gateway stops it before looking at the file again.
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "reply", "parentId": "old", "message": map[string]any{"role": "assistant", "content": []any{}}})
+	if err := registry.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if result := inspectSync(t, synchronizer, path, false); result.Blocked() {
+		t.Fatalf("reply of the gateway's own Pi = %#v", result)
+	}
+}
+
 func TestSynchronizerDoesNotTurnRequestCancellationIntoConflict(t *testing.T) {
 	root, path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})

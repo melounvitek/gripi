@@ -10,6 +10,9 @@ import (
 	"os"
 )
 
+// FileSnapshot is saved to session-baselines.json. A baseline written before a field
+// changed its name or meaning would make every session look written to by Pi CLI, so
+// such a change needs a new file name.
 type FileSnapshot struct {
 	Device          uint64
 	Inode           uint64

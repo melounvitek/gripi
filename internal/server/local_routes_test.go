@@ -45,6 +45,12 @@ func TestLocalHandlerIsUnavailableInMultiUserMode(t *testing.T) {
 // fakePiGateway serves two idle sessions, "alpha" and the more recent "beta", backed by the fake Pi.
 func fakePiGateway(t *testing.T) (handler http.Handler, alpha, beta, project string) {
 	t.Helper()
+	cfg, alpha, beta, project := fakePiConfig(t)
+	return startGateway(t, cfg), alpha, beta, project
+}
+
+func fakePiConfig(t *testing.T) (cfg config.Config, alpha, beta, project string) {
+	t.Helper()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	sessionsRoot := filepath.Join(home, ".pi", "agent", "sessions")
@@ -60,18 +66,24 @@ func fakePiGateway(t *testing.T) (handler http.Handler, alpha, beta, project str
 	_, file, _, _ := runtime.Caller(0)
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
 	t.Setenv("GRIPI_E2E_FAKE_PI_LOG", filepath.Join(root, "fake-pi.log"))
-	handler, err := gateway.NewHandler(config.Config{
+	return config.Config{
 		Address: "127.0.0.1:4567", Environment: "test", Home: home,
 		SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(home, ".pi", "gripi", "attachments"),
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
 		PiCommand: []string{"node", filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_pi.mjs")},
-	}, gripi.WebFiles)
+	}, alpha, beta, project
+}
+
+// startGateway starts a gateway that is stopped with the test, unless the test stops it first.
+func startGateway(t *testing.T, cfg config.Config) http.Handler {
+	t.Helper()
+	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
-	return handler, alpha, beta, project
+	return handler
 }
 
 func writeLocalSession(t *testing.T, path, id, cwd, timestampPrefix string) {
