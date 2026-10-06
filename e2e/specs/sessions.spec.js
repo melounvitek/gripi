@@ -233,6 +233,19 @@ test("conversation find searches once while it sits open and while the conversat
   expect(await highlight.evaluate((element) => element.isConnected)).toBe(true);
 });
 
+test("conversation find leaves out the Copy buttons of code blocks", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.markdownFenceDesktop);
+  await sendPrompt(page, prompts.markdownFence);
+  await expectRunFinished(page);
+
+  await page.keyboard.press("Control+f");
+  const find = page.getByRole("searchbox", { name: "Find in conversation" });
+  await find.fill("Image fence");
+  // The text follows a Copy button, so the highlight lands on it only when the button's text is not counted.
+  await expect(page.locator("mark.current-session-find-match.is-active")).toHaveText("Image fence");
+});
+
 test("session initialization preserves focus when the user starts composing", async ({ page }) => {
   await page.goto("/");
   await searchSessions(page, "Persisted browser");

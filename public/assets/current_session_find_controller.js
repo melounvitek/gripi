@@ -1,6 +1,8 @@
 import { TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES } from "./constants.js";
 import { activateToolOutputRegion, deactivateToolOutputRegion } from "./dom.js";
 
+const CONTROLS = "button, input, select, textarea, [contenteditable]";
+
 export class CurrentSessionFindController {
   constructor(document, conversation) {
     this.document = document;
@@ -76,7 +78,7 @@ export class CurrentSessionFindController {
     const walker = this.document.createTreeWalker(root, nodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         if (!node.nodeValue) return nodeFilter.FILTER_REJECT;
-        if (node.parentElement?.closest("button, input, select, textarea, [contenteditable]")) return nodeFilter.FILTER_REJECT;
+        if (node.parentElement?.closest(CONTROLS)) return nodeFilter.FILTER_REJECT;
         return nodeFilter.FILTER_ACCEPT;
       }
     });
@@ -85,6 +87,8 @@ export class CurrentSessionFindController {
   }
 
   rootText(root) {
+    // `highlight` maps offsets through `textNodes`, so this must equal their joined text. Without a control it does, and the browser joins it many times faster.
+    if (root && !root.closest?.(CONTROLS) && !root.querySelector(CONTROLS)) return root.textContent;
     return this.textNodes(root).map((node) => node.nodeValue).join("");
   }
 
