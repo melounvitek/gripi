@@ -203,7 +203,10 @@ export class CurrentSessionFindController {
     if (!this.open || !this.conversation.element) return;
     if (!this.observer) {
       const MutationObserver = this.document.defaultView?.MutationObserver || globalThis.MutationObserver;
-      this.observer = new MutationObserver(() => this.scheduleRefresh());
+      // The find bar and the jump buttons sit inside the conversation, so writing the match count or a button label is not new content to search.
+      this.observer = new MutationObserver((records) => {
+        if (records.some((record) => !record.target.parentElement?.closest("[data-current-session-find], .jump-controls"))) this.scheduleRefresh();
+      });
     }
     this.observer.observe(this.conversation.element, { childList: true, subtree: true, characterData: true });
   }

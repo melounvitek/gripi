@@ -202,6 +202,37 @@ test("opens conversation find for a known session search match without trapping 
   await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBe(manualTop);
 });
 
+test("conversation find searches once while it sits open and while the conversation scrolls", async ({ page }) => {
+  await page.goto("/");
+  await searchSessions(page, "Persisted browser");
+  await page.getByRole("link", { name: new RegExp(sessions.history) }).click();
+  const active = page.locator("mark.current-session-find-match.is-active");
+  await expect(active).toHaveText("Persisted browser");
+  const scroll = page.locator("#conversation-scroll");
+  await scroll.evaluate((element) => {
+    const spacer = document.createElement("div");
+    spacer.style.height = "2000px";
+    element.querySelector("#live-output").before(spacer);
+    element.scrollTop = element.scrollHeight;
+  });
+
+  // Every search replaces the highlight, so one that outlives a few frames shows nothing searched again.
+  const frames = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))));
+  let highlight;
+  await expect(async () => {
+    highlight = await active.elementHandle();
+    await frames();
+    expect(await highlight.evaluate((element) => element.isConnected)).toBe(true);
+  }).toPass({ timeout: 3_000 });
+
+  await scroll.hover();
+  const top = await scroll.evaluate((element) => element.scrollTop);
+  await page.mouse.wheel(0, -300);
+  await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeLessThan(top);
+  await frames();
+  expect(await highlight.evaluate((element) => element.isConnected)).toBe(true);
+});
+
 test("session initialization preserves focus when the user starts composing", async ({ page }) => {
   await page.goto("/");
   await searchSessions(page, "Persisted browser");
