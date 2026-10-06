@@ -89,6 +89,10 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		writeText(response, http.StatusBadRequest, "Message cannot be empty")
 		return
 	}
+	if rpc.InternalCommand(message) {
+		app.writeRequestError(response, request, http.StatusBadRequest, strings.Fields(message)[0]+" is a command that Gripi uses itself, so it cannot be sent as a message")
+		return
+	}
 	path, releasePrompt, err := app.promptAdmissions.prompt(request.Context(), func() (string, error) {
 		resolved, _, err := app.resolveOwnedPendingPath(request, path)
 		return resolved, err

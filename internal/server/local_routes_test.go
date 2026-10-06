@@ -194,6 +194,35 @@ func TestPromptsReportWhatPiDidWithThem(t *testing.T) {
 	}
 }
 
+func TestPromptsRefuseTheGatewaysOwnExtensionCommands(t *testing.T) {
+	handler, alpha, _, _ := fakePiGateway(t)
+	prompt := func(target http.Handler, host string, fields url.Values) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "http://"+host+"/prompt", strings.NewReader(fields.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Accept", "application/json")
+		response := httptest.NewRecorder()
+		target.ServeHTTP(response, request)
+		return response
+	}
+	for host, target := range map[string]http.Handler{"127.0.0.1:4567": handler, "gripi": localHandler(t, handler)} {
+		for _, message := range []string{"/gripi_reload abc123 e30", "/gripi_tree_navigate abc123 e30", "/gripi_scoped_models"} {
+			for _, behavior := range []string{"", "steer", "follow_up"} {
+				response := prompt(target, host, url.Values{"session": {alpha}, "message": {message}, "streaming_behavior": {behavior}})
+				if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), strings.Fields(message)[0]) {
+					t.Fatalf("%q with behavior %q on %s = %d %s", message, behavior, host, response.Code, response.Body.String())
+				}
+			}
+		}
+	}
+	if _, err := os.Stat(os.Getenv("GRIPI_E2E_FAKE_PI_LOG")); !os.IsNotExist(err) {
+		t.Fatalf("Pi was started for a refused message (%v)", err)
+	}
+	// Only a message that Pi would run as the command is refused.
+	if response := prompt(handler, "127.0.0.1:4567", url.Values{"session": {alpha}, "message": {"What does /gripi_reload do?"}}); response.Code != http.StatusOK {
+		t.Fatalf("message that mentions a command = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestSessionListForCommandsIsNotServedToBrowsers(t *testing.T) {
 	response := httptest.NewRecorder()
 	newHandler(t, testConfig(t)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1:4567/sessions", nil))
