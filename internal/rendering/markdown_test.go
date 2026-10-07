@@ -58,6 +58,34 @@ func TestMarkdownDoesNotApplyApplicationClasses(t *testing.T) {
 	}
 }
 
+func TestMarkdownDoesNotApplyElementIDs(t *testing.T) {
+	for _, source := range []string{
+		"## Live output\n\nContent",
+		`<div id="live-output">Content</div>`,
+		// The sanitizer reads this differently from an HTML parser, which sees only a comment inside the SVG.
+		`<svg><style><!--</style><a id="command-list">Content</a>--></style></svg>`,
+	} {
+		t.Run(source, func(t *testing.T) {
+			rendered := NewMarkdown().Render(source)
+			if !strings.Contains(rendered, "Content") {
+				t.Fatalf("content was lost: %s", rendered)
+			}
+			if strings.Contains(rendered, "id=") {
+				t.Errorf("rendered markdown applies an element id: %s", rendered)
+			}
+		})
+	}
+}
+
+func TestMarkdownShowsTaskListMarkersAsText(t *testing.T) {
+	rendered := NewMarkdown().Render("- [x] done\n- [ ] open")
+	for _, expected := range []string{"<li>[x] done</li>", "<li>[ ] open</li>"} {
+		if !strings.Contains(rendered, expected) {
+			t.Errorf("rendered markdown does not contain %q: %s", expected, rendered)
+		}
+	}
+}
+
 func TestMarkdownPreservesSupportedHighlighting(t *testing.T) {
 	for language, normalized := range map[string]string{
 		"bash": "shell", "sh": "shell", "shell": "shell", "zsh": "shell",

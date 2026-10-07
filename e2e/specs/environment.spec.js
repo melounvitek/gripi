@@ -295,7 +295,7 @@ test("on a phone the first tap opens the dialog and a row, and every target is t
   }
 });
 
-test("Pi gets a saved variable from the next message", async ({ page, isMobile }) => {
+test("Pi gets a saved variable from the next message, without the gateway's own settings", async ({ page, isMobile }) => {
   test.skip(isMobile, "Not specific to touch");
   await page.goto("/");
   await selectSession(page, sessions.environment);
@@ -304,6 +304,13 @@ test("Pi gets a saved variable from the next message", async ({ page, isMobile }
   await expect(status(page)).toHaveText("Saved · used from your next message.");
   await page.keyboard.press("Escape");
 
+  const printed = (name) => page.locator('article[data-role="bashExecution"]').filter({ hasText: `$ printenv ${name}` });
   await sendPrompt(page, "!printenv E2E_ENVIRONMENT_TOKEN");
-  await expect(page.locator('article[data-role="bashExecution"]').filter({ hasText: "$ printenv E2E_ENVIRONMENT_TOKEN" })).toContainText("fake-token-for-pi");
+  await expect(printed("E2E_ENVIRONMENT_TOKEN")).toContainText("fake-token-for-pi");
+
+  await sendPrompt(page, "!printenv GRIPI_PORT");
+  await expect(printed("GRIPI_PORT")).toBeVisible();
+  // The status says "running" until the command ends.
+  await expect(printed("GRIPI_PORT").getByRole("status", { name: "Shell command status" })).toBeHidden();
+  await expect(printed("GRIPI_PORT").locator(".message-body")).toHaveText("");
 });

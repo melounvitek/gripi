@@ -63,7 +63,7 @@ Start the gateway:
 ~/.local/share/gripi/bin/start
 ```
 
-The gateway listens only on `127.0.0.1:4567` by default. Open <http://localhost:4567> and approve the browser with the admin password printed by the installer. It is saved as `GRIPI_ADMIN_PASSWORD` in `~/.config/gripi/env`.
+It runs in the foreground, and Ctrl+C stops it. The gateway listens only on `127.0.0.1:4567` by default. Open <http://localhost:4567> and approve the browser with the admin password printed by the installer. It is saved as `GRIPI_ADMIN_PASSWORD` in `~/.config/gripi/env`.
 
 To use the gateway from other devices, or keep it running with systemd, see [local and remote setups](docs/examples.md).
 
@@ -109,7 +109,7 @@ gripi wait 01a107aa --timeout 900 --json  # block until it stops working
 gripi show 01a107aa                       # print the reply
 ```
 
-Other commands start a session (`new`), continue one in Pi CLI (`open`), pin or tag sessions (`pin`, `unpin`, `tag`, `untag`, `tags`), and delete one (`delete`). `gripi help` describes every command, and all of these but `open` can print JSON. The gateway must be running, and not in [multi-user mode](docs/configuration.md#multi-user-mode).
+Other commands start a session (`new`), stop what one is working on (`stop`), continue one in Pi CLI (`open`), pin or tag sessions (`pin`, `unpin`, `tag`, `untag`, `tags`), and delete one (`delete`). `gripi help` describes every command, and all of these but `open` can print JSON. The gateway must be running, and not in [multi-user mode](docs/configuration.md#multi-user-mode).
 
 When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it links the command into `~/.local/bin`, unless something there is already named `gripi`. `~/.local/bin` must be on your `PATH`.
 

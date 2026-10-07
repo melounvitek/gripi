@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,6 +135,39 @@ func TestSendDeliversPromptsAndReturnsOnceTheSessionIsWorking(t *testing.T) {
 	}
 }
 
+func TestSendsAtTheSameMomentAllReachTheSession(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	failures := make([]string, 6)
+	var sends sync.WaitGroup
+	for index := range failures {
+		sends.Add(1)
+		go func() {
+			defer sends.Done()
+			if code, _, stderr := runCLI("send", "0a1-a", fmt.Sprintf("Message %d of a burst", index)); code != 0 {
+				failures[index] = stderr
+			}
+		}()
+	}
+	sends.Wait()
+	for index, failure := range failures {
+		if failure != "" {
+			t.Fatalf("send %d of the burst failed: %s", index, failure)
+		}
+	}
+	eventually(t, "0a1-alpha", func(session gateway.LocalSession) bool {
+		contents, err := os.ReadFile(alpha)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for index := range failures {
+			if !strings.Contains(string(contents), fmt.Sprintf(`"text":"Message %d of a burst"`, index)) {
+				return false
+			}
+		}
+		return session.State == "idle"
+	})
+}
+
 func TestSendNeverRunsItsTextAsAShellCommand(t *testing.T) {
 	_, beta := fakePiGateway(t)
 	if code, _, stderr := runCLI("send", "0a1-b", "!touch pwned"); code != 0 {
@@ -249,6 +285,154 @@ func TestWaitExplainsWhatItCannotWaitFor(t *testing.T) {
 	}
 	if code, stdout, stderr := runCLI("wait", "zzz"); code != 1 || stdout != "" || !strings.Contains(stderr, "gripi list") {
 		t.Fatalf("unknown session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+func TestStopEndsTheTurnSoThatTheNextMessageStartsAFreshOne(t *testing.T) {
+	fakePiGateway(t)
+	// Nothing runs in an idle session, so there is nothing to start Pi for.
+	if code, stdout, stderr := runCLI("stop", "0a1-b"); code != 0 || stderr != "" || !strings.Contains(stdout, "0a1-beta") || !strings.Contains(stdout, "idle") {
+		t.Fatalf("gripi stop on an idle session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, err := os.Stat(os.Getenv("GRIPI_E2E_FAKE_PI_LOG")); !os.IsNotExist(err) {
+		t.Fatalf("Pi was started to stop an idle session (%v)", err)
+	}
+
+	if code, _, stderr := runCLI("send", "0a1-a", "Start the follow-up scenario"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr := runCLI("stop", "0a1-a", "--json")
+	// No polling here: a following 'gripi send' must find the session free.
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID != "0a1-alpha" || session.State != "idle" {
+		t.Fatalf("gripi stop = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if code, _, stderr := runCLI("send", "0a1-a", "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send after the stop = %d, stderr %q", code, stderr)
+	}
+	_, stdout, _ = runCLI("wait", "0a1-a", "--json")
+	if session := decodeSession(t, stdout); session.State != "idle" || session.LastReply != "Deterministic browser response complete." {
+		t.Fatalf("the message after the stop did not get its own turn: %+v", session)
+	}
+}
+
+func TestStopHandsBackTheMessagesQueuedBehindTheTurn(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	for _, message := range []string{"Keep running while clearing the queue", "Queued behind the turn"} {
+		if code, _, stderr := runCLI("send", "0a1-a", message); code != 0 {
+			t.Fatalf("gripi send %q = %d, stderr %q", message, code, stderr)
+		}
+	}
+	code, stdout, stderr := runCLI("stop", "0a1-a", "--json")
+	// Like the browser, which puts them back in the composer, the command keeps them from being lost.
+	if session := decodeSession(t, stdout); code != 0 || !strings.Contains(stderr, "not sent") || !strings.Contains(stderr, "Queued behind the turn") || session.State != "idle" {
+		t.Fatalf("gripi stop = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if code, _, stderr := runCLI("send", "0a1-a", "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send after the stop = %d, stderr %q", code, stderr)
+	}
+	if code, _, stderr := runCLI("wait", "0a1-a"); code != 0 {
+		t.Fatalf("gripi wait = %d, stderr %q", code, stderr)
+	}
+	if contents, err := os.ReadFile(alpha); err != nil || strings.Contains(string(contents), "Queued behind the turn") {
+		t.Fatalf("Pi got the message that was queued behind the stopped turn (%v):\n%s", err, contents)
+	}
+}
+
+func TestStopEndsAShellCommandFromTheBrowserBeforeTheTurn(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	defer func(window time.Duration) { stopWindow = window }(stopWindow)
+	stopWindow = 300 * time.Millisecond
+	if code, _, stderr := runCLI("send", "0a1-a", "Start the follow-up scenario"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	// The browser's composer runs a message that starts with "!" as a shell command.
+	shell := make(chan error, 1)
+	go func() {
+		response, err := socketClient(os.Getenv("GRIPI_SOCKET_PATH")).PostForm("http://gripi/prompt", url.Values{"session": {alpha}, "message": {"!sleep 30 # e2e-cancel"}})
+		if err == nil {
+			response.Body.Close()
+		}
+		shell <- err
+	}()
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(fakePiLog(t), `"type":"bash"`); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the shell command never reached Pi:\n%s", fakePiLog(t))
+		}
+	}
+
+	// As in the browser, the first stop is for the shell command alone. The turn goes on, which is not success.
+	code, stdout, stderr := runCLI("stop", "0a1-a")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "still working") || !strings.Contains(stderr, "shell command") {
+		t.Fatalf("first gripi stop = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if err := <-shell; err != nil {
+		t.Fatalf("the shell command did not end: %v", err)
+	}
+	if log := fakePiLog(t); !strings.Contains(log, `"type":"abort_bash"`) || strings.Contains(log, `"type":"abort"`) {
+		t.Fatalf("the first stop did not end only the shell command:\n%s", log)
+	}
+	if code, stdout, stderr := runCLI("stop", "0a1-a"); code != 0 || stderr != "" || !strings.Contains(stdout, "idle") {
+		t.Fatalf("second gripi stop = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+func TestStopEndsATurnThatWaitsForAnAnswer(t *testing.T) {
+	fakePiGateway(t)
+	if code, _, stderr := runCLI("send", "0a1-b", "Ask me for release approval"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	_, stdout, _ := runCLI("wait", "0a1-b", "--timeout", "5", "--json")
+	if session := decodeSession(t, stdout); session.State != "waiting" {
+		t.Fatalf("session before the stop = %+v", session)
+	}
+	if code, _, stderr := runCLI("delete", "0a1-b"); code != 1 || !strings.Contains(stderr, "running session") {
+		t.Fatalf("gripi delete while the turn waits = %d, stderr %q", code, stderr)
+	}
+	if code, stdout, stderr := runCLI("stop", "0a1-b"); code != 0 || stderr != "" || !strings.Contains(stdout, "0a1-beta") {
+		t.Fatalf("gripi stop = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// Only a session whose turn has ended can be deleted.
+	if code, _, stderr := runCLI("delete", "0a1-b"); code != 0 {
+		t.Fatalf("gripi delete after the stop = %d, stderr %q", code, stderr)
+	}
+}
+
+func fakePiLog(t *testing.T) string {
+	t.Helper()
+	log, err := os.ReadFile(os.Getenv("GRIPI_E2E_FAKE_PI_LOG"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return string(log)
+}
+
+func TestStopExplainsWhatItCannotStop(t *testing.T) {
+	alpha, beta := fakePiGateway(t)
+	for _, usage := range [][]string{{"stop"}, {"stop", ""}, {"stop", "0a1-a", "0a1-b"}, {"stop", "0a1-a", "--bogus"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help stop") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
+	}
+	// Pi CLI appends to one session and rewrites the other, after the gateway has seen both; it can stop neither of them there.
+	runCLI("list")
+	appendSessionRecords(t, beta, map[string]any{"type": "message", "id": "external", "parentId": "assistant-1", "timestamp": "2026-01-02T00:00:09Z", "message": map[string]any{"role": "assistant", "stopReason": "stop", "content": []any{map[string]any{"type": "text", "text": "From Pi CLI"}}}})
+	contents, err := os.ReadFile(alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(alpha+".replacement", contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(alpha+".replacement", alpha); err != nil {
+		t.Fatal(err)
+	}
+	for id, state := range map[string]string{"0a1-beta": "external", "0a1-alpha": "conflict"} {
+		if listed := listedSession(t, id); listed.State != state {
+			t.Fatalf("%s before the stop = %+v", id, listed)
+		}
+		if code, stdout, stderr := runCLI("stop", id); code != 1 || stdout != "" || !strings.Contains(stderr, "the gateway answered 409") {
+			t.Fatalf("gripi stop on a session in state %s = %d, stdout %q, stderr %q", state, code, stdout, stderr)
+		}
 	}
 }
 

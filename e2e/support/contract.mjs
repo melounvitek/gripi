@@ -20,6 +20,7 @@ export const sessions = {
   markdownRawMobile: "E2E Markdown Raw Mobile",
   markdownFenceDesktop: "E2E Markdown Fence Desktop",
   markdownFenceMobile: "E2E Markdown Fence Mobile",
+  markdownHeadings: "E2E Markdown Headings Desktop",
   toolSummary: "E2E Tool Summary Desktop",
   toolReload: "E2E Tool Reload Desktop",
   markRead: "E2E Mark Read Desktop",
@@ -96,6 +97,7 @@ export const prompts = {
   markdownTable: "Show a detailed Markdown status table",
   markdownRaw: "Show raw HTML with application classes",
   markdownFence: "Show code fences with application class languages",
+  markdownHeadings: "Show headings named like application elements",
   extension: "Ask me for release approval",
   extensionRace: "Exercise queued extension requests",
   extensionKinds: "Ask with every extension dialog",
@@ -205,6 +207,7 @@ export const replies = {
   deltaText: "Answer started and completed.",
   markdownRaw: '<span class="modal-overlay">Raw span stays in conversation</span>\n\n<code class="image-viewer">Raw code stays in conversation</code>',
   markdownFence: '```modal-overlay\nModal fence stays in conversation\n```\n\n```image-viewer\nImage fence stays in conversation\n```\n\n```javascript\nconst safeValue = 42;\n```',
+  markdownHeadings: "## Live output\n\nHeadings stay in the conversation.\n\n## Command list\n\n## Abort form\n\n- [x] done task\n- [ ] open task",
   markdownTable: `| # | Revised status | What we can infer |
 |---:|---|---|
 | 9 | **Clear** | Table row nine remains readable alongside a detailed explanation. |

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"embed"
 	"flag"
@@ -8,9 +10,11 @@ import (
 	"html/template"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -305,7 +309,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		app.rpcMaintenance.Start(context.Background())
 	}
 	mux := http.NewServeMux()
-	assets := filesOnly(public, http.StripPrefix("/", http.FileServerFS(public)))
+	assets := filesOnly(public, gzipText(public, http.StripPrefix("/", http.FileServerFS(public))))
 	mux.Handle("GET /assets/", noStore(assets))
 	mux.Handle("GET /apple-touch-icon.png", noStore(assets))
 	app.registerBrowserAccessRoutes(mux)
@@ -395,6 +399,32 @@ func filesOnly(root fs.FS, next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(response, request)
+	})
+}
+
+// Packed, scripts and styles are about a quarter of the size. They are chosen by extension, not by MIME type, because the type of .js depends on the host's mime.types.
+// A request with Range is left to the file server, so its offsets still count bytes of the unpacked file.
+func gzipText(root fs.FS, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		extension := filepath.Ext(request.URL.Path)
+		if (extension != ".js" && extension != ".mjs" && extension != ".css") || request.Header.Get("Range") != "" || !strings.Contains(request.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(response, request)
+			return
+		}
+		contents, err := fs.ReadFile(root, strings.TrimPrefix(request.URL.Path, "/"))
+		if err != nil {
+			next.ServeHTTP(response, request)
+			return
+		}
+		var packed bytes.Buffer
+		writer := gzip.NewWriter(&packed)
+		_, _ = writer.Write(contents)
+		_ = writer.Close()
+		response.Header().Set("Content-Type", mime.TypeByExtension(extension))
+		response.Header().Set("Content-Encoding", "gzip")
+		response.Header().Set("Vary", "Accept-Encoding")
+		response.Header().Set("Content-Length", strconv.Itoa(packed.Len()))
+		_, _ = response.Write(packed.Bytes())
 	})
 }
 

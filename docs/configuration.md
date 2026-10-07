@@ -105,7 +105,9 @@ The session commands of the [`gripi` command](../README.md#command-line) are una
 
 ## Environment variables
 
-Gripi can save environment variables for Pi, for example your own [GitHub](#github) token on a shared gateway. Pi and every command it runs get them on top of the gateway’s own environment, and a saved variable replaces a gateway variable of the same name.
+Gripi can save environment variables for Pi, for example your own [GitHub](#github) token on a shared gateway. Pi and every command it runs get them on top of the gateway’s environment, and a saved variable replaces a gateway variable of the same name.
+
+The gateway’s own settings are not passed on. Pi gets no `APP_ENV` and no `GRIPI_*` variable from the gateway, so the projects it works on, and a gateway started from a session, do not inherit them. The exceptions are `GRIPI_SOCKET_PATH`, which the [`gripi` command](../README.md#command-line) needs to reach this gateway from inside a session, and the `GRIPI_E2E_*` variables of the [browser tests](testing.md#external-implementation). To give Pi an `APP_ENV` of its own, add it to the saved variables.
 
 Edit them in the Environment dialog, opened with the key icon in the sidebar header or **Environment…** in the Ctrl+K palette. The list shows names only; a value is shown only while its row is open for editing. Pasting several `NAME=value` lines adds them at once, and lines starting with `#` are ignored.
 

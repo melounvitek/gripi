@@ -66,11 +66,27 @@ else
 fi
 
 rm -f -- "$restart_path"
+# A trap runs only between foreground commands, so the gateway runs in the
+# background, where a signal sent to the launcher alone can be passed on.
+gateway=""
+stopped=""
+trap 'stopped=1; [[ -z "$gateway" ]] || kill "$gateway" 2>/dev/null || true' TERM INT HUP
+(cd "$root" && APP_ENV=production GRIPI_BIND_HOST="$host" exec "$binary" serve) &
+gateway=$!
+# The signal may have arrived before the gateway's PID was known.
+[[ -z "$stopped" ]] || kill "$gateway" 2>/dev/null || true
 set +e
-(cd "$root" && APP_ENV=production GRIPI_BIND_HOST="$host" "$binary" serve)
+wait "$gateway"
 status=$?
+# A trapped signal ends wait while the gateway is still shutting down.
+while [[ "$status" -gt 128 ]] && kill -0 "$gateway" 2>/dev/null; do
+  wait "$gateway"
+  status=$?
+done
+# From here a signal stops the launcher itself, so it cannot restart the gateway.
+trap - TERM INT HUP
 set -e
-if [[ -e "$restart_path" ]]; then
+if [[ -z "$stopped" && -e "$restart_path" ]]; then
   rm -- "$restart_path"
   exec "${BASH_SOURCE[0]}" "$@"
 fi

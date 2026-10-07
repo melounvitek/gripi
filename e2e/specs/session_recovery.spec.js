@@ -107,6 +107,36 @@ test("a failed poll stays silent until the next poll fails too", async ({ page }
   await expect(warning).toBeHidden();
 });
 
+test("an event that cannot be rendered is skipped without losing its batch or warning of a lost connection", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  let reported = 0;
+  page.on("console", (entry) => {
+    if (entry.type() === "error" && entry.text().startsWith("Could not render event")) reported += 1;
+  });
+  // The live renderer expects a subagent's messages to carry a list of content parts, not text.
+  const unrenderable = {
+    type: "tool_execution_update", toolCallId: "unrenderable", toolName: "subagent",
+    partialResult: { details: { mode: "single", results: [{ agent: "worker", exitCode: -1, messages: [{ role: "assistant", content: "text" }] }] } }
+  };
+  // Two polls in a row carry the event: enough to warn if they counted as failed polls.
+  const laterReplies = ["First reply behind an unrenderable event", "Second reply behind an unrenderable event"];
+  const batches = laterReplies.map((text) => {
+    const reply = { role: "assistant", content: [{ type: "text", text }] };
+    return [unrenderable, { type: "message_start", message: reply }, { type: "message_end", message: reply }];
+  });
+  await page.route(/\/events(?:\?|$)/, (route) => {
+    const after = Number(new URL(route.request().url()).searchParams.get("after"));
+    const events = batches.shift() || [];
+    return route.fulfill({ json: { events, last_seq: after + events.length, missed: false } });
+  });
+
+  for (const text of laterReplies) await expect(message(page, "assistant", text)).toBeVisible();
+  // Checked once, without retrying: the next poll would hide a warning that had shown.
+  expect(await page.getByText("Connection lost. Retrying…").isVisible()).toBe(false);
+  expect(reported).toBe(2);
+});
+
 test("failed polls are counted afresh once the browser is back online", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.history);

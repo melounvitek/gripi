@@ -614,6 +614,27 @@ test("a stalled stale-session refresh recovers without reloading the current vie
   releaseFragment();
 });
 
+test("switching sessions while Pi prepares a tool call does not reload the page", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  const message = { role: "assistant", content: [] };
+  const events = [
+    { type: "agent_start" },
+    { type: "message_start", message },
+    { type: "message_update", assistantMessageEvent: { type: "toolcall_delta", delta: "hidden" }, gatewayPartialMessage: message }
+  ];
+  await page.route(/\/events(?:\?|$)/, (route) => {
+    const after = Number(new URL(route.request().url()).searchParams.get("after"));
+    const batch = events.splice(0);
+    return route.fulfill({ json: { events: batch, last_seq: after + batch.length, missed: false } });
+  });
+  await expect(page.locator(".message--tool-preparation")).toBeVisible();
+  await page.evaluate(() => { window.__preparationSwitchSentinel = true; });
+
+  await selectSession(page, sessions.marker);
+  expect(await page.evaluate(() => window.__preparationSwitchSentinel)).toBe(true);
+});
+
 test("session switching blocks shortcuts from acting underneath the overlay", async ({ page }) => {
   await page.goto("/");
   await searchSessions(page, sessions.promptRetryCompact);

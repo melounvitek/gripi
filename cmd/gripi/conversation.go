@@ -41,7 +41,8 @@ Message fields:
              error      an error that ended a turn
              custom     a message that an extension shows
   text       The whole message, except for tool and status
-  timestamp  Time the message was written
+  timestamp  Time the message was written, in UTC with milliseconds, such
+             as 2026-10-06T18:47:02.725Z
 
 Examples:
   gripi send 01a107aa "Run the tests" && gripi wait 01a107aa && gripi show 01a107aa
@@ -129,9 +130,9 @@ Example:
 
 Exit codes:
   Pi CLI's own once it has started. Before that:
-  1  the gateway cannot be reached, no single session matched, the gateway is
-     running the session or it has no reply yet, there is no terminal, or pi
-     is not on PATH
+  1  the gateway cannot be reached or did not answer, no single session
+     matched, the gateway is running the session or it has no reply yet,
+     there is no terminal, or pi is not on PATH
   2  usage error
 `
 

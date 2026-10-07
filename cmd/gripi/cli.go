@@ -23,6 +23,7 @@ Session commands (need a running gateway on this machine):
   send      Send a message to a session
   wait      Wait until a session stops working
   show      Print the latest reply or the conversation of a session
+  stop      Stop what a session is working on
   open      Continue a session in Pi CLI
   pin       Pin a session in the browser's sidebar
   unpin     Unpin a session
@@ -53,6 +54,7 @@ var commands = []command{
 	{name: "send", summary: "Send a message to a session", run: sendMessage, help: sendHelp},
 	{name: "wait", summary: "Wait until a session stops working", run: waitForSession, help: waitHelp},
 	{name: "show", summary: "Print the latest reply or the conversation of a session", run: showConversation, help: showHelp},
+	{name: "stop", summary: "Stop what a session is working on", run: stopSession, help: stopHelp},
 	{name: "open", summary: "Continue a session in Pi CLI", run: openSession, help: openHelp},
 	{name: "pin", summary: "Pin a session in the browser's sidebar", run: pinSession("pin", true), help: pinHelp},
 	{name: "unpin", summary: "Unpin a session", run: pinSession("unpin", false), help: unpinHelp},

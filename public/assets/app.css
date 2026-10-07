@@ -990,6 +990,7 @@
       .session-header-tag-action::after { content: ""; position: absolute; inset: -3px; }
       .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle) { position: relative; }
       .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle)::after { content: ""; position: absolute; inset: -4px 0; }
+      .sidebar-session-search input { font-size: 16px; }
       .header-tags :is(.session-tag-icon, .tag-overflow) { min-width: 44px; min-height: 44px; }
       .tag-overflow { min-height: 44px; }
       .tag-picker { font-size: 0.95rem; }

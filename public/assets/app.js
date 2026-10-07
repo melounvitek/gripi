@@ -1832,14 +1832,18 @@ async function pollEvents() {
     emptyEventPollCount = payload.events.length > 0 ? 0 : emptyEventPollCount + 1;
     if (payload.events.length > 0 && composerState?.dataset.state === "running" && !waitingForOutputSince) startWaitingForOutput();
     updateWaitingForOutputStatus();
-    // Reconcile the final queue independently: a tool renderer can throw before
-    // reaching queue_update, after this batch's global cursor has advanced.
+    // Only the batch's final queue matters; last_seq orders it against a clear-queue response.
     const queueEvent = payload.events.findLast((event) => event.type === "queue_update");
     if (queueEvent && reconcileQueuedMessages(queueEvent, payload.last_seq)) showStatus(eventStatusText(queueEvent));
     payload.events.forEach((event) => {
       if (event.type === "queue_update") return;
-      updateStatusFromEvent(event);
-      renderEvent(event);
+      // The cursor is already past this batch, so one event that fails must not take the rest with it.
+      try {
+        updateStatusFromEvent(event);
+        renderEvent(event);
+      } catch (error) {
+        console.error("Could not render event", event, error);
+      }
     });
   } catch (_error) {
     pollSucceeded = false;

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { chmod, cp, mkdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const temporaryDirectories = [];
@@ -274,6 +276,31 @@ exit 29
   assert.equal(result.status, 29, result.stderr);
   assert.deepEqual((await readFile(fixture.calls, "utf8")).trim().split("\n"), ["run", "run"]);
 });
+
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+  test(`launcher stops the gateway on ${signal}, waits for it, and does not restart it`, async () => {
+    const fixture = await launcherFixture();
+    // The loop ends by itself, so a launcher that keeps the signal to itself leaves nothing running.
+    await executable(fixture.gateway, `#!/bin/sh
+if [ -e "$CALLS_PATH" ]; then printf 'restarted\n' >> "$CALLS_PATH"; exit 29; fi
+trap 'mkdir -p "$(dirname "$RESTART_PATH")"; touch "$RESTART_PATH"; printf "stopped\n" >> "$CALLS_PATH"; exit 37' TERM
+printf 'started\n' >> "$CALLS_PATH"
+count=0
+while [ "$count" -lt 100 ]; do sleep 0.05; count=$((count + 1)); done
+`);
+    const launcher = spawn(fixture.launcher, [], { cwd: fixture.project, env: fixture.env, stdio: "ignore" });
+    const exited = once(launcher, "exit");
+    try {
+      while (launcher.exitCode === null && !(await readFile(fixture.calls, "utf8").catch(() => "")).includes("\n")) await delay(10);
+      launcher.kill(signal);
+      const [status] = await Promise.race([exited, delay(10000, ["still running"], { ref: false })]);
+      assert.equal(status, 37);
+      assert.equal(await readFile(fixture.calls, "utf8"), "started\nstopped\n");
+    } finally {
+      launcher.kill("SIGKILL");
+    }
+  });
+}
 
 test("launcher atomically bootstraps a missing Go binary only once across restart", async () => {
   const fixture = await launcherFixture();
