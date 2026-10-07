@@ -1263,16 +1263,33 @@ func TestClientSnapshotsAndAnswersExtensionUIState(t *testing.T) {
 	}
 }
 
-func TestScrubbedEnvironmentRemovesGatewayPasswordAndPreservesRuntimeVariables(t *testing.T) {
-	environment := ScrubbedEnvironment([]string{"PATH=/bin", "GRIPI_ADMIN_PASSWORD=secret", "TOOL_RUNTIME_PATH=kept", "GRIPI_E2E_SESSIONS_ROOT=kept"})
-	joined := strings.Join(environment, "\n")
-	if strings.Contains(joined, "GRIPI_ADMIN_PASSWORD") {
-		t.Fatalf("environment retained gateway password: %q", joined)
+func TestScrubbedEnvironmentRemovesGatewaySettingsAndPreservesRuntimeVariables(t *testing.T) {
+	environment := ScrubbedEnvironment([]string{"PATH=/bin", "GRIPI_ADMIN_PASSWORD=secret", "APP_ENV=production", "GRIPI_PORT=4567", "TOOL_RUNTIME_PATH=kept", "GRIPI_SOCKET_PATH=/kept.sock", "GRIPI_E2E_SESSIONS_ROOT=kept"})
+	expected := []string{"PATH=/bin", "TOOL_RUNTIME_PATH=kept", "GRIPI_SOCKET_PATH=/kept.sock", "GRIPI_E2E_SESSIONS_ROOT=kept"}
+	if !slices.Equal(environment, expected) {
+		t.Fatalf("environment = %q, want %q", environment, expected)
 	}
-	for _, expected := range []string{"TOOL_RUNTIME_PATH=kept", "GRIPI_E2E_SESSIONS_ROOT=kept"} {
-		if !strings.Contains(joined, expected) {
-			t.Fatalf("environment = %q; missing %q", joined, expected)
-		}
+}
+
+func TestPiStartsWithoutGatewaySettingsAndASavedVariableWins(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("GRIPI_PORT", "4567")
+	dump := filepath.Join(t.TempDir(), "environment")
+	client, err := Start("unused.jsonl", []string{"/bin/sh", "-c", `env > "$0"`, dump}, "unused.ts", []string{"APP_ENV=saved"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	<-client.waitDone
+	contents, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := slices.DeleteFunc(strings.Split(string(contents), "\n"), func(line string) bool {
+		return !strings.HasPrefix(line, "APP_ENV=") && !strings.HasPrefix(line, "GRIPI_")
+	})
+	if !slices.Contains(settings, "APP_ENV=saved") || slices.Contains(settings, "GRIPI_PORT=4567") {
+		t.Fatalf("Pi got %q", settings)
 	}
 }
 
