@@ -112,6 +112,29 @@ func TestServeWarnsAtStartWhenTheConfiguredPiCannotBeFound(t *testing.T) {
 	}
 }
 
+func TestServeLogsTheURLToOpenOnALoopbackBind(t *testing.T) {
+	isolateSettings(t)
+
+	logged := startupLog(t)
+	if expected := "Gripi listening on http://localhost:" + os.Getenv("GRIPI_PORT") + "\n"; !strings.Contains(logged, expected) {
+		t.Fatalf("start-up log does not contain %q:\n%s", expected, logged)
+	}
+}
+
+func TestStartupAddressIsAURLOnlyWhereLocalhostReachesTheGateway(t *testing.T) {
+	for address, expected := range map[string]string{
+		"localhost:8080":  "http://localhost:8080",
+		"[::1]:4567":      "http://localhost:4567",
+		"100.64.0.1:4567": "100.64.0.1:4567",
+		"0.0.0.0:4567":    "0.0.0.0:4567",
+		"[::]:4567":       "[::]:4567",
+	} {
+		if actual := startupAddress(address); actual != expected {
+			t.Errorf("startupAddress(%q) = %q, expected %q", address, actual, expected)
+		}
+	}
+}
+
 func TestHTTPServerBoundsReadsAndIdleConnectionsWithoutBoundingResponses(t *testing.T) {
 	server := newHTTPServer(nil)
 	if server.ReadTimeout != 10*time.Minute || server.IdleTimeout != 2*time.Minute || server.ReadHeaderTimeout != 10*time.Second {

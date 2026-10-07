@@ -61,7 +61,7 @@ func serve() error {
 	defer stopSignals()
 	serveErrors := make(chan error, 1)
 	go func() {
-		log.Printf("Gripi listening on %s", cfg.Address)
+		log.Printf("Gripi listening on %s", startupAddress(cfg.Address))
 		serveErrors <- server.Serve(listener)
 	}()
 
@@ -106,6 +106,17 @@ func serve() error {
 		os.Exit(exitCode)
 	}
 	return nil
+}
+
+// startupAddress is the URL to open where localhost reaches the gateway. Other
+// binds keep host:port, because the gateway refuses remote plain HTTP and hosts
+// that are not permitted.
+func startupAddress(address string) string {
+	host, port, _ := net.SplitHostPort(address)
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return "http://localhost:" + port
+	}
+	return address
 }
 
 const (
