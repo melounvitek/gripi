@@ -63,7 +63,7 @@ Start the gateway:
 ~/.local/share/gripi/bin/start
 ```
 
-The gateway listens only on `127.0.0.1:4567` by default. Open <http://localhost:4567> and approve the browser with the admin password printed by the installer. It is saved as `GRIPI_ADMIN_PASSWORD` in `~/.config/gripi/env`.
+It runs in the foreground, and Ctrl+C stops it. The gateway listens only on `127.0.0.1:4567` by default. Open <http://localhost:4567> and approve the browser with the admin password printed by the installer. It is saved as `GRIPI_ADMIN_PASSWORD` in `~/.config/gripi/env`.
 
 To use the gateway from other devices, or keep it running with systemd, see [local and remote setups](docs/examples.md).
 
