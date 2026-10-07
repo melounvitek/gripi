@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { prompts, replies, sessions } from "../support/contract.mjs";
 import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
-test("a reply with headings named like application elements leaves the session working", async ({ page }) => {
+test("a reply's headings leave the app's elements alone and its task list keeps its markers", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.markdownHeadings);
   await sendPrompt(page, prompts.markdownHeadings);
@@ -16,6 +16,7 @@ test("a reply with headings named like application elements leaves the session w
       for (const name of ["Live output", "Command list", "Abort form"]) {
         await expect(response.getByRole("heading", { name })).toBeVisible();
       }
+      await expect(response.getByRole("listitem")).toHaveText(["[x] done task", "[ ] open task"]);
 
       await sendPrompt(page, prompts.standard);
       await expect(message(page, "assistant", replies.standard)).toHaveCount(index + 1);

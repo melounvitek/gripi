@@ -77,6 +77,15 @@ func TestMarkdownDoesNotApplyElementIDs(t *testing.T) {
 	}
 }
 
+func TestMarkdownShowsTaskListMarkersAsText(t *testing.T) {
+	rendered := NewMarkdown().Render("- [x] done\n- [ ] open")
+	for _, expected := range []string{"<li>[x] done</li>", "<li>[ ] open</li>"} {
+		if !strings.Contains(rendered, expected) {
+			t.Errorf("rendered markdown does not contain %q: %s", expected, rendered)
+		}
+	}
+}
+
 func TestMarkdownPreservesSupportedHighlighting(t *testing.T) {
 	for language, normalized := range map[string]string{
 		"bash": "shell", "sh": "shell", "shell": "shell", "zsh": "shell",

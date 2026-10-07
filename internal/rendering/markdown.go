@@ -54,7 +54,8 @@ func NewMarkdown() *Markdown {
 	policy.AddTargetBlankToFullyQualifiedLinks(true)
 	return &Markdown{
 		engine: goldmark.New(
-			goldmark.WithExtensions(extension.GFM),
+			// GFM without task lists, whose markers stay as text like in Pi CLI.
+			goldmark.WithExtensions(extension.Linkify, extension.Table, extension.Strikethrough),
 			goldmark.WithRendererOptions(goldhtml.WithHardWraps(), goldhtml.WithUnsafe(), extension.WithTableCellAlignMethod(extension.TableCellAlignAttribute), renderer.WithNodeRenderers(util.Prioritized(fencedCodeRenderer{}, 100))),
 		),
 		policy: policy,
