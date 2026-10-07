@@ -129,9 +129,9 @@ Example:
 
 Exit codes:
   Pi CLI's own once it has started. Before that:
-  1  the gateway cannot be reached, no single session matched, the gateway is
-     running the session or it has no reply yet, there is no terminal, or pi
-     is not on PATH
+  1  the gateway cannot be reached or did not answer, no single session
+     matched, the gateway is running the session or it has no reply yet,
+     there is no terminal, or pi is not on PATH
   2  usage error
 `
 

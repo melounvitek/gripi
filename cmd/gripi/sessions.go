@@ -43,8 +43,8 @@ const sessionFields = `Session fields:
 `
 
 const sessionExitCodes = `  0  success
-  1  the gateway cannot be reached, it refused the request, or no single
-     session matched
+  1  the gateway cannot be reached or did not answer, it refused the request,
+     or no single session matched
   2  usage error
 `
 
@@ -65,9 +65,19 @@ Examples:
 Exit codes:
 ` + sessionExitCodes
 
+// Tests shorten these.
+var (
+	readTimeout = 30 * time.Second
+	// The gateway gives Pi 30 seconds for each of the few requests that an action takes, and answers
+	// when one runs out. Giving up before that could report a delivered message as not sent.
+	actionTimeout = 5 * time.Minute
+)
+
 // gatewayClient reaches the running gateway through its private socket.
 type gatewayClient struct {
 	http *http.Client
+	// deadline is when 'gripi wait --timeout' gives up.
+	deadline time.Time
 }
 
 func newGatewayClient() (*gatewayClient, error) {
@@ -80,20 +90,26 @@ func newGatewayClient() (*gatewayClient, error) {
 	}}}}, nil
 }
 
-func (client *gatewayClient) do(request *http.Request, result any) error {
+func (client *gatewayClient) do(request *http.Request, timeout time.Duration, result any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	request = request.WithContext(ctx)
 	request.Header.Set("Accept", "application/json")
 	response, err := client.http.Do(request)
+	var body []byte
+	if err == nil {
+		defer response.Body.Close()
+		body, err = io.ReadAll(response.Body)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("the gateway did not answer within %s", timeout.Round(time.Second))
+	}
 	if err != nil {
 		var wrapped *url.Error
 		if errors.As(err, &wrapped) {
 			err = wrapped.Err
 		}
 		return fmt.Errorf("cannot reach the gateway (%w). Is it running? A gateway in multi-user mode accepts no commands", err)
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return err
 	}
 	if response.StatusCode != http.StatusOK {
 		var failure struct {
@@ -112,7 +128,12 @@ func (client *gatewayClient) get(route string, result any) error {
 	if err != nil {
 		return err
 	}
-	return client.do(request, result)
+	timeout := readTimeout
+	if !client.deadline.IsZero() {
+		// Even a poll at the deadline gets two seconds, so that a busy gateway is not taken for a silent one.
+		timeout = min(timeout, max(time.Until(client.deadline), 2*time.Second))
+	}
+	return client.do(request, timeout, result)
 }
 
 func (client *gatewayClient) post(route string, form url.Values, result any) error {
@@ -121,7 +142,7 @@ func (client *gatewayClient) post(route string, form url.Values, result any) err
 		return err
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	return client.do(request, result)
+	return client.do(request, actionTimeout, result)
 }
 
 // sessions lists every session, or just the one with the given path.
@@ -488,11 +509,18 @@ func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) i
 	if *timeout < 0 {
 		return usageError(stderr, "wait", "--timeout cannot be negative")
 	}
-	client, session, err := connect(positional[0])
+	client, err := newGatewayClient()
 	if err != nil {
 		return failure(stderr, "wait", err)
 	}
 	deadline := time.Now().Add(time.Duration(*timeout * float64(time.Second)))
+	if *timeout > 0 {
+		client.deadline = deadline
+	}
+	session, err := client.session(positional[0])
+	if err != nil {
+		return failure(stderr, "wait", err)
+	}
 	for settled := false; ; {
 		current, err := client.sessions(session.Path)
 		if err != nil {

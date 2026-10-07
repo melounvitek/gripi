@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -130,6 +131,62 @@ func TestSessionCommandsExplainAnUnreachableGateway(t *testing.T) {
 	// Suggesting 'gripi serve' here would have agents start a second gateway.
 	if code != 1 || stdout != "" || !strings.Contains(stderr, "cannot reach the gateway") || strings.Contains(stderr, "gripi serve") {
 		t.Fatalf("gripi list without a gateway = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+// stallingGateway answers the session listing with one working session the given number of
+// times. After that it accepts requests without answering them, as a paused gateway does.
+func stallingGateway(t *testing.T, answers int32) {
+	t.Helper()
+	path, stop := socketPath(t), make(chan struct{})
+	var remaining atomic.Int32
+	remaining.Store(answers)
+	server, err := startLocalServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		if remaining.Add(-1) < 0 {
+			<-stop
+			return
+		}
+		json.NewEncoder(response).Encode(map[string]any{"sessions": cannedSessions(1)})
+	}), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		close(stop)
+		server.Close()
+	})
+	t.Setenv("GRIPI_SOCKET_PATH", path)
+}
+
+func TestSessionCommandsGiveUpOnAGatewayThatDoesNotAnswer(t *testing.T) {
+	stallingGateway(t, 0)
+	defer func(read, action time.Duration) { readTimeout, actionTimeout = read, action }(readTimeout, actionTimeout)
+	readTimeout, actionTimeout = 200*time.Millisecond, 200*time.Millisecond
+	for _, arguments := range [][]string{{"list"}, {"new", t.TempDir()}} {
+		started := time.Now()
+		code, stdout, stderr := runCLI(arguments...)
+		if code != 1 || stdout != "" || !strings.Contains(stderr, "did not answer") {
+			t.Fatalf("gripi %s = %d, stdout %q, stderr %q", arguments[0], code, stdout, stderr)
+		}
+		if elapsed := time.Since(started); elapsed > 5*time.Second {
+			t.Fatalf("gripi %s gave up only after %s", arguments[0], elapsed)
+		}
+	}
+}
+
+func TestWaitKeepsItsTimeoutWhenTheGatewayStopsAnswering(t *testing.T) {
+	// The gateway stops before the command's first request, and once the wait has begun.
+	for _, answers := range []int32{0, 1} {
+		stallingGateway(t, answers)
+		started := time.Now()
+		code, stdout, stderr := runCLI("wait", "session-00", "--timeout", "0.5", "--json")
+		// Exit 3 would claim that the session is known to be still working.
+		if code != 1 || stdout != "" || !strings.Contains(stderr, "did not answer") {
+			t.Fatalf("gripi wait after %d answers = %d, stdout %q, stderr %q", answers, code, stdout, stderr)
+		}
+		if elapsed := time.Since(started); elapsed > 5*time.Second {
+			t.Fatalf("gripi wait --timeout 0.5 after %d answers took %s", answers, elapsed)
+		}
 	}
 }
 
