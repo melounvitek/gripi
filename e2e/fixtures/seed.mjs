@@ -186,6 +186,7 @@ export async function seedFixtures(root) {
   await writeSession(root, projects["controls-project"], "clear-queue", sessions.clearQueue, 0);
   await writeSession(root, projects["mobile-project"], "clear-queue-mobile", sessions.clearQueueMobile, 0);
   await writeSession(root, projects["prompt-project"], "assistant-error", sessions.assistantError, 0);
+  await writeSession(root, projects["prompt-project"], "idle-typing", sessions.idleTyping, 0);
   await writeSession(root, projects["mobile-project"], "parallel-subagents-mobile", sessions.parallelSubagentsMobile, 0);
   await writeSession(root, projects["controls-project"], "active-subagents", sessions.activeSubagents, 0);
   await writeSession(root, projects["mobile-project"], "active-subagents-mobile", sessions.activeSubagentsMobile, 0);

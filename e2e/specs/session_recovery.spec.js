@@ -45,6 +45,7 @@ test("polling after sleep restores completed compaction without a browser wake e
   await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
   await expect(page.locator(".pending-message--steering")).toHaveCount(0);
   await expect(page.getByLabel("Message to Pi")).toHaveValue(draft);
+  await expect(page.getByLabel("Message to Pi")).toBeFocused();
   await expect(page.getByText("Connection lost. Retrying…")).toBeHidden();
   await page.clock.runFor(2000);
   await expect.poll(() => conversation.evaluate((element) => element.scrollTop)).toBe(0);

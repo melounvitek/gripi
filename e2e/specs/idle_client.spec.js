@@ -69,6 +69,35 @@ test("retire an idle Pi client despite browser polling and restart it on demand"
   }).toBe(true);
 });
 
+test("typing goes on undisturbed while an idle Pi client retires", async ({ page }) => {
+  test.skip(!fakePiLog, "requires the managed fake Pi runtime");
+
+  await page.goto("/");
+  await selectSession(page, sessions.idleTyping);
+  await sendPrompt(page, prompts.standard);
+  await expectRunFinished(page);
+  // Loaded while the idle Pi is still alive, the page shows the session as managed by it.
+  await page.reload();
+  const liveOutput = page.locator("#live-output");
+  await expect(liveOutput).toHaveAttribute("data-session-sync-mode", "managed");
+  await page.evaluate(() => {
+    new MutationObserver(() => {
+      if (document.body.classList.contains("session-switching")) window.sawSessionSwitching = true;
+    }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  });
+
+  const composer = page.getByLabel("Message to Pi");
+  await composer.click();
+  await page.keyboard.type("Written before Pi goes idle");
+  // The managed E2E gateway retires idle Pi after 2s, and the page then catches up with the session file.
+  await expect(liveOutput).toHaveAttribute("data-session-sync-mode", "available");
+  await page.keyboard.type(", and after");
+
+  await expect(composer).toHaveValue("Written before Pi goes idle, and after");
+  await expect(composer).toBeFocused();
+  expect(await page.evaluate(() => window.sawSessionSwitching)).toBeUndefined();
+});
+
 async function fakePiRecords() {
   try {
     return (await readFile(fakePiLog, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
