@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"reflect"
@@ -99,6 +100,66 @@ func TestSendDoesNotWaitForATurnThatPiWillNotStart(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("gripi send waited %s for a turn to start", elapsed)
+	}
+}
+
+func TestSendRetriesOnlyARefusalThatWillPassInAMoment(t *testing.T) {
+	defer func(window time.Duration) { retryWindow = window }(retryWindow)
+	retryWindow = 500 * time.Millisecond
+	pending := `{"code":"session_operation_pending","error":"Another session operation is pending. Please retry."}`
+	for name, test := range map[string]struct {
+		status           int
+		retryAfter, body string
+		// refusals is how many prompts the gateway refuses before it accepts one.
+		refusals, code int32
+	}{
+		"another operation is pending":  {status: http.StatusConflict, body: pending, refusals: 2},
+		"Pi is restarting":              {status: http.StatusServiceUnavailable, retryAfter: "1", body: `{"error":"Pi RPC client is restarting"}`, refusals: 2},
+		"an operation stays pending":    {status: http.StatusConflict, body: pending, refusals: 1000, code: 1},
+		"the session tree is changing":  {status: http.StatusConflict, body: `{"code":"session_operation_pending","retryable":false,"error":"The session tree is changing."}`, refusals: 1, code: 1},
+		"Pi did not answer the gateway": {status: http.StatusGatewayTimeout, body: `{"error":"Pi RPC command timed out: prompt"}`, refusals: 1, code: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := socketPath(t)
+			var prompts atomic.Int32
+			server, err := startLocalServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				switch {
+				case request.URL.Path == "/sessions":
+					json.NewEncoder(response).Encode(map[string]any{"sessions": cannedSessions(2)})
+				case prompts.Add(1) > test.refusals:
+					json.NewEncoder(response).Encode(map[string]any{"session": request.FormValue("session"), "disposition": "handled"})
+				default:
+					if test.retryAfter != "" {
+						response.Header().Set("Retry-After", test.retryAfter)
+					}
+					response.WriteHeader(test.status)
+					io.WriteString(response, test.body)
+				}
+			}), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { server.Close() })
+			t.Setenv("GRIPI_SOCKET_PATH", path)
+
+			code, stdout, stderr := runCLI("send", "session-01", "message")
+			if int32(code) != test.code {
+				t.Fatalf("gripi send = %d, stdout %q, stderr %q", code, stdout, stderr)
+			}
+			if code == 0 {
+				// The refusals are not the caller's business once the message is delivered.
+				if stderr != "" || !strings.Contains(stdout, "session-01") || prompts.Load() != test.refusals+1 {
+					t.Fatalf("delivered after %d prompts, stdout %q, stderr %q", prompts.Load(), stdout, stderr)
+				}
+				return
+			}
+			if stdout != "" || !strings.Contains(stderr, fmt.Sprintf("the gateway answered %d: ", test.status)) {
+				t.Fatalf("refused send printed stdout %q, stderr %q", stdout, stderr)
+			}
+			if retried := prompts.Load() > 1; retried != (test.refusals > 1) {
+				t.Fatalf("the gateway got %d prompts", prompts.Load())
+			}
+		})
 	}
 }
 

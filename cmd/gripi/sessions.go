@@ -71,7 +71,12 @@ var (
 	// The gateway gives Pi 30 seconds for each of the few requests that an action takes, and answers
 	// when one runs out. Giving up before that could report a delivered message as not sent.
 	actionTimeout = 5 * time.Minute
+	retryWindow   = 5 * time.Second
 )
+
+// momentaryRefusal is an answer that the gateway would not give a moment later.
+// It had not begun the request, so asking again repeats nothing.
+type momentaryRefusal struct{ error }
 
 // gatewayClient reaches the running gateway through its private socket.
 type gatewayClient struct {
@@ -113,12 +118,21 @@ func (client *gatewayClient) do(request *http.Request, timeout time.Duration, re
 	}
 	if response.StatusCode != http.StatusOK {
 		var failure struct {
-			Error string `json:"error"`
+			Error     string `json:"error"`
+			Code      string `json:"code"`
+			Retryable *bool  `json:"retryable"`
 		}
 		if json.Unmarshal(body, &failure) != nil || failure.Error == "" {
 			failure.Error = strings.TrimSpace(string(body))
 		}
-		return fmt.Errorf("the gateway answered %d: %s", response.StatusCode, failure.Error)
+		err := fmt.Errorf("the gateway answered %d: %s", response.StatusCode, failure.Error)
+		// Another request for the session is being handled, or its Pi process is being replaced.
+		// retryable is false only while the session tree changes, after which the message may not fit.
+		pending := failure.Code == "session_operation_pending" && failure.Retryable == nil
+		if pending || response.Header.Get("Retry-After") != "" {
+			return momentaryRefusal{err}
+		}
+		return err
 	}
 	return json.Unmarshal(body, result)
 }
@@ -401,7 +415,13 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	}
 	// bash_mode keeps a leading "!" from being run as a shell command.
 	form := url.Values{"session": {session.Path}, "message": {message}, "streaming_behavior": {behavior}, "bash_mode": {"prompt"}}
-	if err := client.post("/prompt", form, &accepted); err != nil {
+	for deadline := time.Now().Add(retryWindow); ; time.Sleep(100 * time.Millisecond) {
+		err = client.post("/prompt", form, &accepted)
+		if !errors.As(err, new(momentaryRefusal)) || time.Now().After(deadline) {
+			break
+		}
+	}
+	if err != nil {
 		return failure(stderr, "send", err)
 	}
 

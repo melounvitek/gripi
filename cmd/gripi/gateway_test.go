@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -130,6 +132,39 @@ func TestSendDeliversPromptsAndReturnsOnceTheSessionIsWorking(t *testing.T) {
 			t.Fatalf("Pi did not receive %s:\n%s", sent, contents)
 		}
 	}
+}
+
+func TestSendsAtTheSameMomentAllReachTheSession(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	failures := make([]string, 6)
+	var sends sync.WaitGroup
+	for index := range failures {
+		sends.Add(1)
+		go func() {
+			defer sends.Done()
+			if code, _, stderr := runCLI("send", "0a1-a", fmt.Sprintf("Message %d of a burst", index)); code != 0 {
+				failures[index] = stderr
+			}
+		}()
+	}
+	sends.Wait()
+	for index, failure := range failures {
+		if failure != "" {
+			t.Fatalf("send %d of the burst failed: %s", index, failure)
+		}
+	}
+	eventually(t, "0a1-alpha", func(session gateway.LocalSession) bool {
+		contents, err := os.ReadFile(alpha)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for index := range failures {
+			if !strings.Contains(string(contents), fmt.Sprintf(`"text":"Message %d of a burst"`, index)) {
+				return false
+			}
+		}
+		return session.State == "idle"
+	})
 }
 
 func TestSendNeverRunsItsTextAsAShellCommand(t *testing.T) {
