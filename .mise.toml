@@ -46,6 +46,10 @@ run = "mkdir -p tmp && go build -o tmp/gripi ./cmd/gripi"
 description = "Measure the Go gateway under the seeded memory workload"
 run = "node scripts/benchmark_gateway_memory.mjs"
 
+[tasks.readme-screenshots]
+description = "Retake the README screenshots from invented sessions"
+run = "node scripts/readme_screenshots.mjs"
+
 [tasks.e2e]
 description = "Run the managed browser E2E contract suite"
 run = "npm run test:e2e"
