@@ -330,3 +330,100 @@ test("desktop shortcuts separate new sessions from server management", () => {
   assert.match(shell, /webview\.focus\(\);/);
   assert.match(shell, /window\.dispatchEvent\(new CustomEvent\("gripi:desktop-server-activated"\)\)/);
 });
+
+test("desktop shell gives the server view keyboard focus once it loads", async () => {
+  class FakeElement {
+    constructor(tagName) {
+      this.tagName = tagName.toUpperCase();
+      this.children = [];
+      this.parent = null;
+      this.listeners = {};
+      this.dataset = {};
+      this.hidden = false;
+      this.className = "";
+      this.classList = { toggle() {} };
+    }
+
+    append(...children) {
+      for (const child of children) {
+        child.parent = this;
+        this.children.push(child);
+      }
+    }
+
+    replaceChildren(...children) {
+      this.children = [];
+      this.append(...children);
+    }
+
+    remove() {
+      if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this);
+      this.parent = null;
+    }
+
+    addEventListener(type, listener) {
+      (this.listeners[type] ||= []).push(listener);
+    }
+
+    dispatch(type, event = {}) {
+      for (const listener of this.listeners[type] || []) listener(event);
+    }
+
+    querySelectorAll(selector) {
+      return this.children.filter((child) => `.${child.className}` === selector);
+    }
+
+    setAttribute() {}
+
+    executeJavaScript() {
+      return Promise.resolve(0);
+    }
+
+    focus() {
+      document.activeElement = this;
+    }
+  }
+
+  const document = {
+    body: new FakeElement("body"),
+    tabs: new FakeElement("nav"),
+    content: new FakeElement("main"),
+    createElement: (tagName) => new FakeElement(tagName),
+    getElementById(id) {
+      return this[id];
+    }
+  };
+  document.activeElement = document.body;
+  const gateway = { id: "home", name: "Home", url: "http://localhost:4567/" };
+  const context = vm.createContext({
+    console,
+    document,
+    window: {
+      addEventListener() {},
+      setInterval() {},
+      setTimeout() {},
+      gripiDesktop: {
+        getGatewayConfig: async () => ({ activeGatewayId: gateway.id, gateways: [gateway] }),
+        onAddGatewayRequested() {},
+        onFindInSessionRequested() {},
+        onFindInSessionNavigationRequested() {},
+        onGatewayActivationRequested() {},
+        onNewSessionRequested() {},
+        onNextGatewayRequested() {},
+        onRemoveGatewayRequested() {},
+        onRenameGatewayRequested() {},
+        onSearchSessionsRequested() {}
+      }
+    }
+  });
+
+  vm.runInContext(read("electron/shell.js"), context);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webview = document.content.children.find((child) => child.tagName === "WEBVIEW");
+  assert.ok(webview);
+
+  webview.dispatch("did-finish-load");
+
+  assert.equal(webview.hidden, false);
+  assert.equal(document.activeElement, webview);
+});

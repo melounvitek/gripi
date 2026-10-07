@@ -146,11 +146,16 @@ function renderContent() {
     return;
   }
 
-  webviews.get(gateway.id).hidden = false;
+  const webview = webviews.get(gateway.id);
+  webview.hidden = false;
 
   if (loadingGateways.has(gateway.id)) {
     content.append(messagePanel("Opening server", `Loading ${gateway.url}…`));
+    return;
   }
+
+  // Otherwise keys go to the shell, which has nothing to receive them, until the server view is clicked.
+  if (document.activeElement !== webview) webview.focus();
 }
 
 function ensureWebviews() {

@@ -597,7 +597,7 @@ test("a stalled stale-session refresh recovers without reloading the current vie
     await fragmentRelease;
     await route.abort().catch(() => {});
   });
-  await page.route(/\/events(?:\?|$)/, (route) => route.abort("connectionfailed"));
+  await page.route(/\/events(?:\?|$)/, (route) => route.fulfill({ json: { events: [], last_seq: 0, missed: false } }));
 
   const now = await page.evaluate(() => Date.now());
   await page.clock.install({ time: now });
@@ -605,7 +605,7 @@ test("a stalled stale-session refresh recovers without reloading the current vie
   await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
   await fragmentRequested;
 
-  await expect(page.locator("body")).toHaveClass(/session-switching/);
+  await expect(page.locator("body")).not.toHaveClass(/session-switching/);
   await page.clock.runFor(12_001);
 
   await expect(page.locator("body")).not.toHaveClass(/session-switching/);

@@ -142,7 +142,6 @@ let eventPollInFlight = false;
 let lastEventPollFailed = false;
 let eventPollAbortController = null;
 let eventPollResumeTimer = null;
-let staleSessionRefreshInFlight = false;
 let markReadInFlight = false;
 const markReadQueued = new Map();
 let markReadAfterVisible = null;
@@ -1675,31 +1674,16 @@ function restoreComposerDraft(draft) {
   if (draft.images.length > 0) addImageFiles(draft.images, { restore: true });
 }
 
-async function refreshCurrentSessionPreservingComposer({ fallbackNavigation = true } = {}) {
+async function refreshCurrentSessionPreservingComposer() {
   const draft = composerDraft();
 
-  const refreshed = await switchSession(window.location.href, { push: false, focus: false, preserveScroll: true, fallbackNavigation });
+  const refreshed = await switchSession(window.location.href, { push: false, focus: false, preserveScroll: true });
 
   if (refreshed) restoreComposerDraft(draft);
   return refreshed;
 }
 
-async function refreshStaleSessionAfterResume(hiddenDuration = 0) {
-  if (!liveOutput || document.hidden || sessionSwitching()) return false;
-  if (staleSessionRefreshInFlight) return true;
-
-  const pollingGap = Date.now() - lastSessionSyncAt;
-  if (hiddenDuration < STALE_SESSION_REFRESH_AFTER_MS && pollingGap < STALE_SESSION_REFRESH_AFTER_MS) return false;
-
-  staleSessionRefreshInFlight = true;
-  try {
-    return await refreshCurrentSessionPreservingComposer({ fallbackNavigation: false });
-  } finally {
-    staleSessionRefreshInFlight = false;
-  }
-}
-
-async function resumeEventPolling(hiddenDuration = 0) {
+function resumeEventPolling(hiddenDuration = 0) {
   if (!liveOutput) return;
 
   const resumeStartedAt = Date.now();
@@ -1707,7 +1691,8 @@ async function resumeEventPolling(hiddenDuration = 0) {
   clearTimeout(eventPollResumeTimer);
   abortEventPoll();
   resetEventPollBackoff();
-  if (await refreshStaleSessionAfterResume(hiddenDuration)) return;
+  // Polls slow down while the page is hidden, so after a long absence the next poll refreshes the session.
+  if (hiddenDuration >= STALE_SESSION_REFRESH_AFTER_MS) lastSessionSyncAt = 0;
   scheduleNextEventPoll(0);
   eventPollResumeTimer = setTimeout(() => {
     // An open modal pauses polling, so a missing sync says nothing about the connection.
@@ -1727,7 +1712,8 @@ function sessionSyncRefreshRequired(sync) {
     (renderedMode === "managed" && sync.mode === "available");
 }
 
-async function refreshExternalSession(controller, generation) {
+// Unlike switching sessions, this leaves the composer alone, so typing carries on while the conversation catches up.
+async function refreshSessionInBackground(controller, generation) {
   const session = currentSessionPath();
   const switchGeneration = sessionSwitchGeneration.capture();
   const current = () => !controller.signal.aborted && generation === sessionViewGeneration &&
@@ -1737,8 +1723,10 @@ async function refreshExternalSession(controller, generation) {
   });
   if (!response.ok) throw new Error("Session refresh failed");
   const payload = await response.json();
-  if (!current()) return;
-  if (payload.session !== session) throw new Error("Session changed during refresh");
+  // Whatever supersedes the refresh also aborts its poll, so failing here stays silent unless the poll timed out.
+  if (!current()) throw new Error("Session refresh superseded");
+  // A new session gets its own path once Pi saves it, which only a full refresh picks up.
+  if (payload.session !== session) return refreshCurrentSessionPreservingComposer();
   const template = document.createElement("template");
   template.innerHTML = payload.conversation_html;
   const snapshot = template.content.querySelector("#conversation-scroll");
@@ -1748,7 +1736,7 @@ async function refreshExternalSession(controller, generation) {
   enhanceMarkdownCodeBlocks(snapshot);
   enhanceMessageLinks(snapshot);
   await liveMessageRenderer.hydrateTerminalOutputs(snapshot, { notify: false });
-  if (!current()) return;
+  if (!current()) throw new Error("Session refresh superseded");
 
   // Capture interaction at apply time, not when the background request started.
   const scrollSnapshot = conversationScrollSnapshot();
@@ -1809,23 +1797,21 @@ async function pollEvents() {
 
     const payload = await response.json();
     if (!eventPollCurrent(generation, sessionViewGeneration)) return;
-    if (!document.hidden && Date.now() - lastSessionSyncAt >= STALE_SESSION_REFRESH_AFTER_MS) {
-      const refreshed = await refreshStaleSessionAfterResume();
-      if (!refreshed && eventPollCurrent(generation, sessionViewGeneration)) scheduleNextEventPoll(nextEventPollDelay(true));
-      return;
+    // Polling can resume after sleep without a wake event, and an empty batch then hides what the gap missed.
+    const stale = !document.hidden && Date.now() - lastSessionSyncAt >= STALE_SESSION_REFRESH_AFTER_MS;
+    const refreshRequired = stale || sessionSyncRefreshRequired(payload.session_sync) || payload.missed;
+    if (refreshRequired) {
+      pendingFinalAssistantReply = null;
+      // Unlike a failed poll, a failed refresh warns at once: the view may be missing what the refresh was for.
+      await refreshSessionInBackground(controller, generation).catch((error) => {
+        if (!controller.piSuppressedAbort) showReconnectBanner();
+        throw error;
+      });
     }
     lastSessionSyncAt = Date.now();
     pollSucceeded = true;
     hideReconnectBanner();
-    if (sessionSyncRefreshRequired(payload.session_sync) || payload.missed) {
-      pendingFinalAssistantReply = null;
-      if (sessionSyncBlocked() || ["external_follow", "conflict"].includes(payload.session_sync?.mode)) {
-        await refreshExternalSession(controller, generation);
-      } else {
-        await refreshCurrentSessionPreservingComposer();
-      }
-      return;
-    }
+    if (refreshRequired) return;
     if (Number.isInteger(payload.last_seq)) {
       lastEventSeq = payload.last_seq;
     }
@@ -2812,7 +2798,7 @@ function detachSession(paths = [currentSessionPath()]) {
   return switchSession(detachedSessionFallbackUrl(paths), { push: true, focus: true });
 }
 
-async function switchSession(url, { push = true, focus = true, preserveScroll = false, findQuery = null, fallbackNavigation = true } = {}) {
+async function switchSession(url, { push = true, focus = true, preserveScroll = false, findQuery = null } = {}) {
   const scrollSnapshot = preserveScroll ? conversationScrollSnapshot() : null;
   persistStoredComposerDraft();
   sidebarController.invalidate({ clearSessionsLimit: true });
@@ -2860,7 +2846,7 @@ async function switchSession(url, { push = true, focus = true, preserveScroll = 
   } catch (_error) {
     if (!sessionSwitchGeneration.current(switchGeneration)) return false;
     // A gateway that is restarting would answer the navigation with its proxy's error page.
-    if (fallbackNavigation && !gatewayUpdateController.overlay.open) {
+    if (!gatewayUpdateController.overlay.open) {
       sessionNavigationPending = true;
       window.location.href = url;
     } else {
@@ -3617,19 +3603,19 @@ window.addEventListener("visibilitychange", () => {
   const hiddenDuration = hiddenAt ? Date.now() - hiddenAt : 0;
   hiddenAt = null;
   if (hiddenDuration > 5000) {
-    resumeEventPolling(hiddenDuration).catch(() => {});
+    resumeEventPolling(hiddenDuration);
   } else {
     scheduleNextEventPoll(0);
   }
   if (markReadAfterVisible) markCurrentSessionReadAfterVisible();
   sidebarController.scheduleRefresh();
 });
-window.addEventListener("pageshow", () => resumeEventPolling().catch(() => {}));
+window.addEventListener("pageshow", () => resumeEventPolling());
 window.addEventListener("focus", () => {
   if (markReadAfterVisible) markCurrentSessionReadAfterVisible();
-  resumeEventPolling().catch(() => {});
+  resumeEventPolling();
 });
-window.addEventListener("online", () => resumeEventPolling().catch(() => {}));
+window.addEventListener("online", () => resumeEventPolling());
 window.addEventListener("popstate", () => switchSession(window.location.href, { push: false, focus: true }));
 
 function bootstrapPage() {
