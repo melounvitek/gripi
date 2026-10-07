@@ -4,6 +4,7 @@ import (
 	"bytes"
 	stdhtml "html"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -12,7 +13,6 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer"
 	goldhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/util"
@@ -55,7 +55,6 @@ func NewMarkdown() *Markdown {
 	return &Markdown{
 		engine: goldmark.New(
 			goldmark.WithExtensions(extension.GFM),
-			goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 			goldmark.WithRendererOptions(goldhtml.WithHardWraps(), goldhtml.WithUnsafe(), extension.WithTableCellAlignMethod(extension.TableCellAlignAttribute), renderer.WithNodeRenderers(util.Prioritized(fencedCodeRenderer{}, 100))),
 		),
 		policy: policy,
@@ -68,7 +67,20 @@ func (markdown *Markdown) Render(source string) string {
 	if err := markdown.engine.Convert([]byte(source), &rendered); err != nil {
 		return ""
 	}
-	return markdown.policy.Sanitize(continueOrderedLists(rendered.String()))
+	return removeIDs(markdown.policy.Sanitize(continueOrderedLists(rendered.String())))
+}
+
+// Element ids belong to the application, and the sanitizer's policy cannot refuse them.
+// They are removed after sanitizing: before it, an HTML parser can read as a comment what the sanitizer goes on to emit as an element with an id.
+func removeIDs(fragment string) string {
+	var output strings.Builder
+	tokenizer := nethtml.NewTokenizer(strings.NewReader(fragment))
+	for tokenizer.Next() != nethtml.ErrorToken {
+		token := tokenizer.Token()
+		token.Attr = slices.DeleteFunc(token.Attr, func(attribute nethtml.Attribute) bool { return attribute.Key == "id" })
+		output.WriteString(token.String())
+	}
+	return output.String()
 }
 
 type fencedCodeRenderer struct{}

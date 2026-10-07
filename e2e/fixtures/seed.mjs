@@ -194,6 +194,7 @@ export async function seedFixtures(root) {
   await writeSession(root, projects["mobile-project"], "markdown-raw-mobile", sessions.markdownRawMobile, 0);
   await writeSession(root, projects["prompt-project"], "markdown-fence-desktop", sessions.markdownFenceDesktop, 0);
   await writeSession(root, projects["mobile-project"], "markdown-fence-mobile", sessions.markdownFenceMobile, 0);
+  await writeSession(root, projects["prompt-project"], "markdown-headings", sessions.markdownHeadings, 0);
 
   await writeSession(root, projects["prompt-project"], "quote-history", sessions.quoteHistory, 0);
   await writeSession(root, projects["prompt-project"], "fork", sessions.fork, 0);

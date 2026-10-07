@@ -405,6 +405,7 @@ function acceptPrompt(command) {
   else if (command.message === prompts.markdownTable) reply = replies.markdownTable;
   else if (command.message === prompts.markdownRaw) reply = replies.markdownRaw;
   else if (command.message === prompts.markdownFence) reply = replies.markdownFence;
+  else if (command.message === prompts.markdownHeadings) reply = replies.markdownHeadings;
 
   if (command.message === prompts.imageRead) {
     schedule(120, () => completeWithImageRead(reply));
