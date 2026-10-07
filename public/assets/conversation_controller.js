@@ -1226,6 +1226,7 @@ export class ConversationController {
   }
 
   afterLiveOutputChange(shouldScroll, live = true, activityChanged = false) {
+    this.element?.querySelector(":scope > .empty")?.remove();
     if (activityChanged) this.scheduleFocusedActivityRefresh();
     if (shouldScroll && this.autoScrollEnabled) this.scheduleAutoScroll();
     else if (live) this.updateJumpControls();
