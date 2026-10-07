@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,14 @@ func serve() error {
 		if localServer, err = startLocalServer(local.Local(), cfg.SocketPath); err != nil {
 			log.Printf("gripi commands are unavailable: %v", err)
 		}
+	}
+	_, missingPi := exec.LookPath(cfg.PiCommand[0])
+	if missingPi == nil && len(cfg.PiCommand) > 1 && !strings.HasPrefix(cfg.PiCommand[1], "-") {
+		// With GRIPI_NODE and GRIPI_PI, Pi's script follows the Node executable.
+		_, missingPi = os.Stat(cfg.PiCommand[1])
+	}
+	if missingPi != nil {
+		log.Printf("Warning: Pi was not found (%v). Sessions cannot start until Pi is installed (https://pi.dev/).", missingPi)
 	}
 
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
