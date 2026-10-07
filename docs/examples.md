@@ -96,7 +96,7 @@ WantedBy=default.target
 
 If `command -v mise` reports a different path, use it in `ExecStart`. This unit suits Tailscale Serve; for a direct VPN connection, set `GRIPI_HOST` to the machine’s Tailscale address.
 
-`EnvironmentFile` passes the settings in `~/.config/gripi/env` to Pi as well, except the admin password, and they override the `Environment=` lines. systemd does not load your shell profile, so credentials and variables set only there do not reach Pi. If `command -v pi` reports a directory that is not in the `PATH` above, add it, or set a [custom Pi runtime](configuration.md#custom-pi-runtime).
+`EnvironmentFile` passes the variables in `~/.config/gripi/env` to Pi as well, except [Gripi’s own settings](configuration.md#environment-variables), and they override the `Environment=` lines. systemd does not load your shell profile, so credentials and variables set only there do not reach Pi. If `command -v pi` reports a directory that is not in the `PATH` above, add it, or set a [custom Pi runtime](configuration.md#custom-pi-runtime).
 
 Enable the service:
 
