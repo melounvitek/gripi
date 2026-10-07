@@ -10,6 +10,14 @@ import (
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
+// Timestamp is how gripi commands see a time: in UTC with milliseconds,
+// so that every one has the same width and they sort as text.
+type Timestamp struct{ time.Time }
+
+func (timestamp Timestamp) MarshalJSON() ([]byte, error) {
+	return []byte(timestamp.UTC().Format(`"2006-01-02T15:04:05.000Z"`)), nil
+}
+
 // LocalSession is how gripi commands see a session.
 type LocalSession struct {
 	ID        string    `json:"id"`
@@ -20,7 +28,7 @@ type LocalSession struct {
 	Unread    bool      `json:"unread"`
 	Pinned    bool      `json:"pinned"`
 	Tags      []string  `json:"tags"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedAt Timestamp `json:"updated_at"`
 	LastReply string    `json:"last_reply"`
 }
 
@@ -28,7 +36,7 @@ type LocalSession struct {
 type LocalMessage struct {
 	Role      string    `json:"role"`
 	Text      string    `json:"text"`
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp Timestamp `json:"timestamp"`
 }
 
 func (app *application) registerLocalRoutes(mux *http.ServeMux) {
@@ -68,7 +76,7 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 		result = append(result, LocalSession{
 			ID: session.ID, Path: session.Path, Name: session.DisplayName, CWD: session.CWD,
 			State: app.localSessionState(session.Path), Unread: view.Unread[session.Path], Pinned: view.Pinned[session.Path],
-			Tags: tags, UpdatedAt: session.ConversationActivityAt, LastReply: session.LatestAssistantResponsePreview,
+			Tags: tags, UpdatedAt: Timestamp{session.ConversationActivityAt}, LastReply: session.LatestAssistantResponsePreview,
 		})
 	}
 	writeJSON(response, map[string]any{"sessions": result})
@@ -89,7 +97,7 @@ func (app *application) localConversation(response http.ResponseWriter, request 
 	}
 	messages := []LocalMessage{}
 	for _, message := range window.Messages {
-		local := LocalMessage{Role: message.Role, Text: message.Text, Timestamp: message.Timestamp}
+		local := LocalMessage{Role: message.Role, Text: message.Text, Timestamp: Timestamp{message.Timestamp}}
 		switch {
 		case message.Thinking:
 			continue

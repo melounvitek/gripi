@@ -38,7 +38,8 @@ const sessionFields = `Session fields:
   unread      true when a reply finished that nobody has opened in the browser
   pinned      true when the session is pinned in the browser's sidebar
   tags        Tags of the session
-  updated_at  Time of the latest message
+  updated_at  Time of the latest message; in JSON it is in UTC with
+              milliseconds, such as 2026-10-06T18:47:02.725Z
   last_reply  First 180 characters of the latest assistant reply
 `
 
@@ -249,7 +250,7 @@ func printSessions(stdout io.Writer, sessions []gateway.LocalSession) {
 		if len(name) > 60 {
 			name = append(name[:59], '…')
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", session.ID, session.State, yesOrDash(session.Unread), yesOrDash(session.Pinned), age(time.Since(session.UpdatedAt)), filepath.Base(session.CWD), tags, string(name))
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", session.ID, session.State, yesOrDash(session.Unread), yesOrDash(session.Pinned), age(time.Since(session.UpdatedAt.Time)), filepath.Base(session.CWD), tags, string(name))
 	}
 	table.Flush()
 }

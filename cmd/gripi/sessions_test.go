@@ -42,7 +42,7 @@ func cannedSessions(count int) []gateway.LocalSession {
 	for index := range sessions {
 		sessions[index] = gateway.LocalSession{
 			ID: fmt.Sprintf("session-%02d", index), Path: fmt.Sprintf("/sessions/%02d.jsonl", index), Name: fmt.Sprintf("Task %02d", index),
-			CWD: fmt.Sprintf("/work/project-%02d", index), State: "idle", Tags: []string{}, UpdatedAt: time.Date(2026, 1, 1, 0, 0, index, 0, time.UTC),
+			CWD: fmt.Sprintf("/work/project-%02d", index), State: "idle", Tags: []string{}, UpdatedAt: gateway.Timestamp{Time: time.Date(2026, 1, 1, 0, 0, index, 0, time.UTC)},
 		}
 	}
 	sessions[0].State, sessions[0].Unread, sessions[0].Name = "working", true, "Fix the\nflaky   test"
@@ -88,6 +88,36 @@ func TestListPrintsJSONForPrograms(t *testing.T) {
 	}
 	if !reflect.DeepEqual(listed, sessions[:20]) {
 		t.Fatalf("listed %+v, expected %+v", listed, sessions[:20])
+	}
+}
+
+func TestJSONOutputHasOneTimestampFormatThatSortsAsText(t *testing.T) {
+	path := socketPath(t)
+	// The shapes that one listing used to mix: the source's zone, and only as many digits as it had.
+	server, err := startLocalServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/conversation" {
+			io.WriteString(response, `{"messages":[{"role":"user","text":"Hello","timestamp":"2026-10-06T20:47:02.72565778+02:00"}]}`)
+			return
+		}
+		io.WriteString(response, `{"sessions":[
+			{"id":"zoned","path":"/sessions/zoned.jsonl","updated_at":"2026-10-06T20:47:02.72565778+02:00"},
+			{"id":"short","path":"/sessions/short.jsonl","updated_at":"2026-10-06T18:54:46.11Z"},
+			{"id":"whole","path":"/sessions/whole.jsonl","updated_at":"2026-07-20T12:36:04Z"}]}`)
+	}), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { server.Close() })
+	t.Setenv("GRIPI_SOCKET_PATH", path)
+
+	_, listed, _ := runCLI("list", "--json")
+	for _, expected := range []string{`"updated_at": "2026-10-06T18:47:02.725Z"`, `"updated_at": "2026-10-06T18:54:46.110Z"`, `"updated_at": "2026-07-20T12:36:04.000Z"`} {
+		if !strings.Contains(listed, expected) {
+			t.Fatalf("gripi list --json has no %s:\n%s", expected, listed)
+		}
+	}
+	if _, shown, _ := runCLI("show", "zoned", "--all", "--json"); !strings.Contains(shown, `"timestamp": "2026-10-06T18:47:02.725Z"`) {
+		t.Fatalf("gripi show --all --json = %s", shown)
 	}
 }
 

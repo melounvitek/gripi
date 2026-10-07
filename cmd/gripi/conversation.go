@@ -41,7 +41,8 @@ Message fields:
              error      an error that ended a turn
              custom     a message that an extension shows
   text       The whole message, except for tool and status
-  timestamp  Time the message was written
+  timestamp  Time the message was written, in UTC with milliseconds, such
+             as 2026-10-06T18:47:02.725Z
 
 Examples:
   gripi send 01a107aa "Run the tests" && gripi wait 01a107aa && gripi show 01a107aa

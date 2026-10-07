@@ -155,8 +155,8 @@ func TestLocalSessionsReportFinishedRepliesWithoutMarkingThemRead(t *testing.T) 
 	if len(all) != 2 || all[0].Path != beta || all[1].Path != alpha {
 		t.Fatalf("sessions are not ordered by latest activity: %+v", all)
 	}
-	expected := gateway.LocalSession{ID: "alpha-0001", Path: alpha, Name: "Prompt for alpha-0001", CWD: project, State: "idle", Tags: []string{}, UpdatedAt: time.Date(2026, 1, 1, 0, 0, 2, 0, time.UTC), LastReply: "Answer from alpha-0001"}
-	if got := all[1]; got.ID != expected.ID || got.Name != expected.Name || got.CWD != expected.CWD || got.State != expected.State || got.Unread || got.Pinned || !got.UpdatedAt.Equal(expected.UpdatedAt) || got.LastReply != expected.LastReply {
+	expected := gateway.LocalSession{ID: "alpha-0001", Path: alpha, Name: "Prompt for alpha-0001", CWD: project, State: "idle", Tags: []string{}, UpdatedAt: gateway.Timestamp{Time: time.Date(2026, 1, 1, 0, 0, 2, 0, time.UTC)}, LastReply: "Answer from alpha-0001"}
+	if got := all[1]; got.ID != expected.ID || got.Name != expected.Name || got.CWD != expected.CWD || got.State != expected.State || got.Unread || got.Pinned || !got.UpdatedAt.Equal(expected.UpdatedAt.Time) || got.LastReply != expected.LastReply {
 		t.Fatalf("session = %+v, expected %+v", got, expected)
 	}
 	if missing := localSessions(t, local, "?session="+url.QueryEscape(filepath.Join(project, "missing.jsonl"))); len(missing) != 0 {
