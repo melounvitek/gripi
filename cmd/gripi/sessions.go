@@ -73,6 +73,8 @@ var (
 	// when one runs out. Giving up before that could report a delivered message as not sent.
 	actionTimeout = 5 * time.Minute
 	retryWindow   = 5 * time.Second
+	// The gateway gives Pi 10 seconds to stop before it ends the process.
+	stopWindow = 15 * time.Second
 )
 
 // momentaryRefusal is an answer that the gateway would not give a moment later.
@@ -82,7 +84,7 @@ type momentaryRefusal struct{ error }
 // gatewayClient reaches the running gateway through its private socket.
 type gatewayClient struct {
 	http *http.Client
-	// deadline is when 'gripi wait --timeout' gives up.
+	// deadline, when set, shortens reads and ends settled.
 	deadline time.Time
 }
 
@@ -117,7 +119,8 @@ func (client *gatewayClient) do(request *http.Request, timeout time.Duration, re
 		}
 		return fmt.Errorf("cannot reach the gateway (%w). Is it running? A gateway in multi-user mode accepts no commands", err)
 	}
-	if response.StatusCode != http.StatusOK {
+	// The gateway answers 202 to a stop that it has not finished yet.
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted {
 		var failure struct {
 			Error     string `json:"error"`
 			Code      string `json:"code"`
@@ -534,39 +537,129 @@ func waitForSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) i
 	if err != nil {
 		return failure(stderr, "wait", err)
 	}
-	deadline := time.Now().Add(time.Duration(*timeout * float64(time.Second)))
 	if *timeout > 0 {
-		client.deadline = deadline
+		client.deadline = time.Now().Add(time.Duration(*timeout * float64(time.Second)))
 	}
 	session, err := client.session(positional[0])
 	if err != nil {
 		return failure(stderr, "wait", err)
 	}
+	session, settled, err := client.settled(session)
+	if err != nil {
+		return failure(stderr, "wait", err)
+	}
+	if !settled {
+		fmt.Fprintf(stderr, "gripi wait: still working after %g seconds\n", *timeout)
+		printSession(stdout, stderr, "wait", session, *asJSON)
+		return exitTimeout
+	}
+	return printSession(stdout, stderr, "wait", session, *asJSON)
+}
+
+// settled polls the session until it is neither working nor compacting.
+// It reports false when the client's deadline passes first.
+func (client *gatewayClient) settled(session gateway.LocalSession) (gateway.LocalSession, bool, error) {
 	for settled := false; ; {
 		current, err := client.sessions(session.Path)
 		if err != nil {
-			return failure(stderr, "wait", err)
+			return session, false, err
 		}
 		if len(current) != 1 {
-			return failure(stderr, "wait", fmt.Errorf("session %s no longer exists", session.Path))
+			return session, false, fmt.Errorf("session %s no longer exists", session.Path)
 		}
 		session = current[0]
 		working := session.State == "working" || session.State == "compacting"
 		// The gateway does not re-read a busy session's file, so the listing that
 		// first shows a finished turn can still carry the reply before it.
 		if !working && settled {
-			return printSession(stdout, stderr, "wait", session, *asJSON)
+			return session, true, nil
 		}
 		if settled = !working; settled {
 			continue
 		}
-		if *timeout > 0 && time.Now().After(deadline) {
-			fmt.Fprintf(stderr, "gripi wait: still working after %g seconds\n", *timeout)
-			printSession(stdout, stderr, "wait", session, *asJSON)
-			return exitTimeout
+		if !client.deadline.IsZero() && time.Now().After(client.deadline) {
+			return session, false, nil
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+const stopHelp = `Usage:
+  gripi stop <session> [--json]
+
+Stops what the gateway is running in a session, as the Stop button in the
+browser does, then prints the session. It ends the turn or the compaction
+where it is. An idle session is left as it is.
+
+Messages queued behind the stopped turn are not sent to Pi. The command prints
+them on stderr instead, as the browser puts them back in the composer. Only in
+a session that has no reply yet do they stay queued, and Pi takes them up in
+its next turn.
+
+A shell command that someone started in the browser's composer is stopped
+before anything else. A turn that was running beside it goes on, so the
+command fails with the session still working; run it again to stop the turn.
+
+A question that Pi asked in the browser can stay open after the stop, and the
+session then reads as waiting until someone answers there. That state does
+not tell whether the turn has ended.
+
+The gateway cannot stop Pi CLI, so the command fails for a session in state
+external or conflict.
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+
+Flags:
+  --json  Print the session as a JSON object instead of a table
+
+` + sessionFields + `
+Example:
+  gripi stop 01a107aa && gripi send 01a107aa "Try the other approach"
+
+Exit codes:
+  0  the session is no longer working or compacting
+  1  the gateway cannot be reached or did not answer, it refused the request,
+     no single session matched, or the session is still working
+  2  usage error
+`
+
+func stopSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("stop", flag.ContinueOnError)
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "stop", err.Error())
+	}
+	if len(positional) != 1 || positional[0] == "" {
+		return usageError(stderr, "stop", "takes exactly one session")
+	}
+	client, session, err := connect(positional[0])
+	if err != nil {
+		return failure(stderr, "stop", err)
+	}
+	// The gateway would start Pi for an idle session only to tell it to stop.
+	if session.State != "idle" {
+		var stop struct {
+			EditorText string `json:"editorText"`
+		}
+		if err := client.post("/abort", url.Values{"session": {session.Path}}, &stop); err != nil {
+			return failure(stderr, "stop", err)
+		}
+		if stop.EditorText != "" {
+			fmt.Fprintf(stderr, "gripi stop: these messages were queued behind the stopped turn and were not sent:\n%s\n", stop.EditorText)
+		}
+		// The gateway may answer while it is still stopping the session.
+		client.deadline = time.Now().Add(stopWindow)
+		var stopped bool
+		if session, stopped, err = client.settled(session); err != nil {
+			return failure(stderr, "stop", err)
+		}
+		if !stopped {
+			return failure(stderr, "stop", fmt.Errorf("the session is still %s. If a shell command was running in it, only that was stopped; run 'gripi stop' again", session.State))
+		}
+	}
+	return printSession(stdout, stderr, "stop", session, *asJSON)
 }
 
 const deleteHelp = `Usage:
@@ -579,10 +672,11 @@ on the gateway's machine; otherwise it is deleted for good. The session's pin,
 its tags and the files attached to its messages are always deleted for good.
 
 The gateway refuses while Pi is running a turn in the session or compacting
-it; wait for it with 'gripi wait' first. A turn that asked a question (state
-waiting) keeps running until someone answers in the browser. The gateway does
-not know whether Pi CLI still has the session open, so a session in state
-external or conflict is deleted like any other.
+it; wait for it with 'gripi wait' or end it with 'gripi stop' first. A turn
+that asked a question (state waiting) keeps running until someone answers in
+the browser or stops it. The gateway does not know whether Pi CLI still has
+the session open, so a session in state external or conflict is deleted like
+any other.
 
 Arguments:
   session  Session ID, a unique prefix of it, or the session file path
