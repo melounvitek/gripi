@@ -467,6 +467,15 @@ test("keep native Tab order for coarse pointers", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Send" })).toBeFocused();
 });
 
+test("the sidebar search field is large enough that iPhones do not zoom into it", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  await page.getByRole("button", { name: "Search sessions" }).tap();
+  const search = page.getByRole("searchbox", { name: "Search sessions" });
+  // iOS zooms the page when a focused field's text is smaller than 16px.
+  expect(await search.evaluate((field) => Number.parseFloat(getComputedStyle(field).fontSize))).toBeGreaterThanOrEqual(16);
+});
+
 test("filter sessions while typing without closing the drawer or leaving the search field", async ({ page }) => {
   await page.goto("/");
 
