@@ -4,6 +4,7 @@ import (
 	"context"
 	"html/template"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -203,7 +204,9 @@ func TestSettledNotificationExternalFollowDoesNotPublishCompletion(t *testing.T)
 	if len(notifier.queue) != 0 || len(completions) != 0 {
 		t.Fatal("external completion queued or published")
 	}
-	view, err := app.preparePage(httptest.NewRequest("GET", "/sidebar?no_session=1", nil), false)
+	request := httptest.NewRequest("GET", "/sidebar?no_session=1", nil)
+	request.AddCookie(&http.Cookie{Name: cliSessionsCookie, Value: "1"})
+	view, err := app.preparePage(request, false)
 	if err != nil {
 		t.Fatal(err)
 	}

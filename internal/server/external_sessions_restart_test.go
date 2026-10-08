@@ -86,9 +86,11 @@ func stopGateway(t *testing.T, handler http.Handler) {
 	}
 }
 
-// followedAsExternal looks at the sessions as a sidebar poll does.
+// followedAsExternal looks at the sessions as a sidebar poll does in a browser that shows Pi CLI sessions.
 func followedAsExternal(handler http.Handler) bool {
-	response := serveAction(handler, getActionRequest("/sidebar?no_session=1"))
+	request := getActionRequest("/sidebar?no_session=1")
+	request.AddCookie(&http.Cookie{Name: "gripi_show_cli_sessions", Value: "1"})
+	response := serveAction(handler, request)
 	return response.Code == http.StatusOK && strings.Contains(response.Body.String(), `class="session-row is-external`)
 }
 
