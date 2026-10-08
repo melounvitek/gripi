@@ -6,6 +6,7 @@ export class SessionActionsController {
     this.target = null;
     this.pinOperationActive = false;
     this.blockedSessionPaths = [];
+    this.blockedSessionGroup = [];
     this.markedPaths = new Set();
     this.markAnchor = null;
     this.initialized = false;
@@ -27,6 +28,8 @@ export class SessionActionsController {
       if (event.ctrlKey || event.metaKey || event.shiftKey) {
         event.preventDefault();
         this.closeMenu();
+        // Escape clears the marks from a session, and Safari leaves a clicked link unfocused.
+        link.focus({ preventScroll: true });
         this.mark(link.closest(".session-row"), event.shiftKey);
         return;
       }

@@ -232,7 +232,7 @@ export class SidebarController {
     const previousSearchQuery = previousSearchInput?.value;
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
     const focusedControl = oldElement.contains(this.document.activeElement) ? this.document.activeElement : null;
-    const focusedControlSelector = ["[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]"].find((selector) => focusedControl?.matches(selector));
+    const focusedControlSelector = ["a.session", "[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]"].find((selector) => focusedControl?.matches(selector));
     const focusedSessionPath = focusedControl?.closest(".session-row")?.dataset.sessionPath;
     const focusedTag = focusedControl?.dataset.tagFilter;
     const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");

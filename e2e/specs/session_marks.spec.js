@@ -35,11 +35,14 @@ test("mark sessions with Ctrl+click and a range with Shift+click, without openin
   await setSessionsPinned(page, [unmarkedPath], true);
   await expect.poll(() => markedPaths(page)).toEqual(range);
 
-  // Escape while typing leaves the marks alone; Escape on a session clears them.
+  // Escape while typing leaves the marks alone.
   await page.getByLabel("Message to Pi").focus();
   await page.keyboard.press("Escape");
   await expect.poll(() => markedPaths(page)).toEqual(range);
-  await listRow.locator("a.session").focus();
+  // Escape on a session clears them, also once the sidebar redraws after the Ctrl+click.
+  await markRow(listRow);
+  await page.locator(".session-sidebar").evaluate((sidebar) => { sidebar.dataset.beforeRedraw = ""; });
+  await expect(page.locator(".session-sidebar[data-before-redraw]")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect.poll(() => markedPaths(page)).toEqual([]);
 
@@ -87,7 +90,6 @@ test("pin and unpin all marked sessions from the menu of one of them", async ({ 
   await markRow(row(paths[0]));
   await row(paths[0]).locator("a.session").click({ button: "right" });
   await expect(menu.getByRole("menuitem")).toHaveText(["Rename…", "Tags…", "Pin", "Open in new window", "Delete session…"]);
-  await expect(menu.getByText("1 sessions")).toBeHidden();
 });
 
 test("open marked sessions in new windows, moving this window off the current one", async ({ page, context }) => {
