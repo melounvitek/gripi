@@ -1013,9 +1013,9 @@
   const selectPaletteRow = (selected) => paletteRows().forEach((row) => row.setAttribute("aria-selected", String(row === selected)));
   let paletteRuns = new Map();
 
-  function paletteRow(mark, name, meta, run) {
+  function paletteRow(mark, name, meta, run, key = "") {
     const row = document.createElement("button"); row.type = "button"; row.className = "picker-row command-palette-row"; row.tabIndex = -1; row.setAttribute("role", "option");
-    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["project-monogram", mark, true], ["command-palette-name", name], ["command-palette-meta", meta]]) {
+    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["project-monogram", mark, true], ["command-palette-name", name], ["command-palette-meta", meta], ["command-palette-key", key, true]]) {
       const part = document.createElement("span"); part.className = className; part.textContent = text; if (decorative) part.setAttribute("aria-hidden", "true"); row.append(part);
     }
     paletteRuns.set(row, run);
@@ -1040,8 +1040,8 @@
     const matching = sessions.filter((other) => other.id !== currentId && matches(`${other.name}\n${other.project}`));
     if (!words.length) matching.sort((left, right) => (right.id === previousId) - (left.id === previousId));
     const shown = matching.slice(0, words.length ? 8 : 5);
-    paletteGroup(words.length ? "Sessions" : "Recent sessions", shown.map((other) => {
-      const row = paletteRow(other.project.slice(0, 2).toLowerCase(), other.name, other.age, () => switchSession(other.id));
+    paletteGroup(words.length ? "Sessions" : "Recent sessions", shown.map((other, index) => {
+      const row = paletteRow(other.project.slice(0, 2).toLowerCase(), other.name, other.age, () => switchSession(other.id), index + 1);
       applyIdentity(row.querySelector(".project-monogram"), other);
       return row;
     }));
@@ -1082,7 +1082,9 @@
   paletteInput.addEventListener("keydown", (event) => {
     const rows = paletteRows();
     const cursor = rows.findIndex((row) => row.getAttribute("aria-selected") === "true");
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") { if (rows.length) { const next = rows[(cursor + (event.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length]; selectPaletteRow(next); next.scrollIntoView({ block: "nearest" }); } }
+    const digit = event.ctrlKey && (/^[1-9]$/.test(event.key) ? event.key : event.code.match(/^(?:Digit|Numpad)([1-9])$/)?.[1]);
+    if (digit) activatePaletteRow(rows.filter((row) => row.querySelector(".command-palette-key").textContent)[digit - 1]);
+    else if (event.key === "ArrowDown" || event.key === "ArrowUp") { if (rows.length) { const next = rows[(cursor + (event.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length]; selectPaletteRow(next); next.scrollIntoView({ block: "nearest" }); } }
     else if (event.key === "Enter" && !event.isComposing) activatePaletteRow(rows[cursor]);
     // As in the real palette, the input is the only focus stop.
     else if (event.key !== "Tab") return;

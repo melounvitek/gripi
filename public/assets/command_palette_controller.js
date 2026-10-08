@@ -1,4 +1,5 @@
 import { pointPickerCursor } from "./dom.js";
+import { recentSessionShortcutFromEvent } from "./shortcuts.js";
 
 const RECENT_SESSIONS = 5;
 const MATCHING_SESSIONS = 8;
@@ -36,7 +37,7 @@ export class CommandPaletteController {
     this.input.value = "";
     // Rows appear only once the sessions arrive, so none moves under the cursor afterwards.
     this.sessions = null;
-    this.enterPending = false;
+    this.pending = null;
     this.render();
     this.callbacks.openModal(this.modal);
     let sessions = null;
@@ -49,20 +50,20 @@ export class CommandPaletteController {
     this.failed = !sessions;
     this.render();
     // Without the sessions the first row is a command, which a waiting Enter never meant.
-    if (this.enterPending && !this.failed) this.activate(this.options()[this.cursor]);
+    if (this.pending && !this.failed) this.activate(this.pending());
   }
 
   options() {
     return [...this.list.querySelectorAll('[role="option"]')];
   }
 
-  row(mark, name, meta, run) {
+  row(mark, name, meta, run, key = "") {
     const row = this.document.createElement("button");
     row.type = "button";
     row.className = "picker-row command-palette-row";
     row.tabIndex = -1;
     row.setAttribute("role", "option");
-    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["project-monogram", mark, true], ["command-palette-name", name], ["command-palette-meta", meta]]) {
+    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["project-monogram", mark, true], ["command-palette-name", name], ["command-palette-meta", meta], ["command-palette-key", key, true]]) {
       const part = this.document.createElement("span");
       part.className = className;
       part.textContent = text;
@@ -73,8 +74,8 @@ export class CommandPaletteController {
     return row;
   }
 
-  sessionRow(session) {
-    const row = this.row(session.monogram, session.name, session.age, () => this.callbacks.openSession(session.path));
+  sessionRow(session, key) {
+    const row = this.row(session.monogram, session.name, session.age, () => this.callbacks.openSession(session.path), key);
     row.title = session.project;
     if (session.unread) {
       row.classList.add("is-unread");
@@ -89,7 +90,7 @@ export class CommandPaletteController {
       working.className = "session-running-indicator";
       working.setAttribute("role", "img");
       working.setAttribute("aria-label", "Pi is working");
-      row.lastElementChild.replaceChildren(working);
+      row.querySelector(".command-palette-meta").replaceChildren(working);
     }
     return row;
   }
@@ -132,7 +133,8 @@ export class CommandPaletteController {
       if (!words.length) matching.sort((left, right) => (right.path === previous) - (left.path === previous));
       const shown = matching.slice(0, words.length ? MATCHING_SESSIONS : RECENT_SESSIONS);
       more = matching.length - shown.length;
-      this.group(words.length ? "Sessions" : "Recent sessions", shown.map((session) => this.sessionRow(session)));
+      this.numbered = shown.map((session, index) => this.sessionRow(session, index + 1));
+      this.group(words.length ? "Sessions" : "Recent sessions", this.numbered);
       for (const [title, commands] of this.callbacks.commands()) {
         this.group(title, commands.filter((command) => command && matches(`${command.label} ${command.detail || ""}`)).map((command) => this.commandRow(command)));
       }
@@ -164,14 +166,20 @@ export class CommandPaletteController {
 
   handleKeydown(event) {
     const count = this.options().length;
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const shortcut = event.ctrlKey && !event.altKey && !event.metaKey ? recentSessionShortcutFromEvent(event) : null;
+    if (shortcut) {
+      event.preventDefault();
+      if (event.repeat) return;
+      if (this.sessions) this.activate(this.numbered[shortcut - 1]);
+      else this.pending = () => this.numbered[shortcut - 1];
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (count) this.setCursor((this.cursor + (event.key === "ArrowDown" ? 1 : count - 1)) % count);
     } else if (event.key === "Enter" && !event.isComposing) {
       event.preventDefault();
       // Enter can beat the sessions: it then opens the first match once they arrive.
       if (this.sessions) this.activate(this.options()[this.cursor]);
-      else this.enterPending = true;
+      else this.pending = () => this.options()[this.cursor];
     }
   }
 }
