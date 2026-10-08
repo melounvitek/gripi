@@ -493,3 +493,46 @@ test("polling preserves focused chips and cancelled filtering leaves a newer edi
     await assign(page, current, tag, false);
   }
 });
+
+test("tag all marked sessions at once, with a tag only some have shown as mixed", async ({ page, isMobile }, testInfo) => {
+  test.skip(isMobile, "Marking sessions needs a keyboard and mouse.");
+  const { current, other } = await fixtureSessions(page);
+  const shared = `shared-${testInfo.project.name}`;
+  const created = `created-${testInfo.project.name}`;
+  await assign(page, other, shared);
+  try {
+    await page.goto(`/?show_all_sessions=1&session=${encodeURIComponent(current.path)}`);
+    const row = (session) => page.locator(".session-row").filter({ has: page.locator(".session-title", { hasText: session.name }) });
+    const rowTag = (session, tag) => row(session).getByRole("button", { name: `Filter sessions by ${tag}`, exact: true });
+    const headerTag = (tag) => page.locator(".header-tags").getByRole("button", { name: `Filter sessions by ${tag}`, exact: true });
+    await row(current).locator("a.session").click({ modifiers: ["ControlOrMeta"] });
+    await row(other).locator("a.session").click({ modifiers: ["ControlOrMeta"] });
+    await row(other).locator("a.session").click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Tags…" }).click();
+    const dialog = dialogFor(page);
+    await expect(dialog).toContainText("2 sessions");
+    const checkbox = dialog.getByRole("checkbox", { name: shared, exact: true });
+    await expect(checkbox).not.toBeChecked();
+    expect(await checkbox.evaluate((box) => box.indeterminate)).toBe(true);
+
+    await checkbox.click();
+    await expect(checkbox).toBeChecked();
+    for (const session of [current, other]) await expect(rowTag(session, shared)).toHaveCount(1);
+    await expect(headerTag(shared)).toBeVisible();
+
+    // No session has the tag any more, so it leaves the picker.
+    await checkbox.click();
+    await expect(checkbox).toHaveCount(0);
+    for (const session of [current, other]) await expect(rowTag(session, shared)).toHaveCount(0);
+    await expect(headerTag(shared)).toHaveCount(0);
+
+    await dialog.getByRole("searchbox", { name: "Find or create a tag" }).fill(created);
+    await dialog.getByRole("button", { name: `Create “${created}”` }).click();
+    await expect(dialog.getByRole("checkbox", { name: created, exact: true })).toBeChecked();
+    for (const session of [current, other]) await expect(rowTag(session, created)).toHaveCount(1);
+  } finally {
+    for (const session of [current, other]) {
+      for (const tag of [shared, created]) await assign(page, session, tag, false);
+    }
+  }
+});

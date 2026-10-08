@@ -226,13 +226,13 @@ export class SidebarController {
     const previousReplyIds = this.completedReplyIds(oldElement);
     const notificationToggle = oldElement.querySelector("[data-notification-toggle]");
     const resourceUsage = oldElement.querySelector("[data-resource-usage]");
-    const pinnedSessionsBlocked = oldElement.querySelector("[data-pinned-sessions-blocked]");
+    const blockedWindows = oldElement.querySelector("[data-blocked-windows]");
     const previousSearchForm = preserveSearch ? oldElement.querySelector(".sidebar-session-search") : null;
     const previousSearchInput = previousSearchForm?.querySelector('input[name="session_search"]');
     const previousSearchQuery = previousSearchInput?.value;
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
     const focusedControl = oldElement.contains(this.document.activeElement) ? this.document.activeElement : null;
-    const focusedControlSelector = ["[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]"].find((selector) => focusedControl?.matches(selector));
+    const focusedControlSelector = ["a.session", "[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]"].find((selector) => focusedControl?.matches(selector));
     const focusedSessionPath = focusedControl?.closest(".session-row")?.dataset.sessionPath;
     const focusedTag = focusedControl?.dataset.tagFilter;
     const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");
@@ -249,7 +249,7 @@ export class SidebarController {
     if (previousSearchOpen !== undefined) this.setSearchOpen(replacementSearchForm, replacementSearchButton, previousSearchOpen);
     if (notificationToggle) this.element.querySelector("[data-notification-toggle]")?.replaceWith(notificationToggle);
     if (resourceUsage) this.element.querySelector("[data-resource-usage]")?.replaceWith(resourceUsage);
-    if (pinnedSessionsBlocked) this.element.querySelector("[data-pinned-sessions-blocked]")?.replaceWith(pinnedSessionsBlocked);
+    if (blockedWindows) this.element.querySelector("[data-blocked-windows]")?.replaceWith(blockedWindows);
     if (focusedControlSelector) {
       const focusedRow = [...this.element.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === focusedSessionPath);
       const root = focusedSessionPath ? focusedRow : this.element;

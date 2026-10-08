@@ -6,6 +6,9 @@ export class SessionActionsController {
     this.target = null;
     this.pinOperationActive = false;
     this.blockedSessionPaths = [];
+    this.blockedSessionGroup = [];
+    this.markedPaths = new Set();
+    this.markAnchor = null;
     this.initialized = false;
   }
 
@@ -16,9 +19,23 @@ export class SessionActionsController {
     this.document.addEventListener("contextmenu", (event) => this.handleContextMenu(event));
     this.document.addEventListener("keydown", (event) => this.handleKeydown(event), true);
     this.document.addEventListener("submit", (event) => this.handleSubmit(event));
+    this.document.addEventListener("gripi:sidebar-tags", () => this.applyMarks());
   }
 
   handleClick(event) {
+    const link = event.target.closest?.(".session-sidebar a.session");
+    if (link && event.button === 0 && !event.altKey) {
+      if (event.ctrlKey || event.metaKey || event.shiftKey) {
+        event.preventDefault();
+        this.closeMenu();
+        // Escape clears the marks from a session, and Safari leaves a clicked link unfocused.
+        link.focus({ preventScroll: true });
+        this.mark(link.closest(".session-row"), event.shiftKey);
+        return;
+      }
+      this.clearMarks();
+    }
+
     const pinToggle = event.target.closest?.("[data-session-pin-toggle]");
     if (pinToggle) {
       const row = pinToggle.closest(".session-row");
@@ -40,10 +57,15 @@ export class SessionActionsController {
       return;
     }
 
-    const openPinned = event.target.closest?.("[data-open-pinned-sessions]");
-    if (openPinned) {
+    if (event.target.closest?.("[data-open-pinned-sessions]")) {
       this.closeMenu();
-      this.openPinnedSessions({ blockedOnly: openPinned.dataset.openPinnedSessions === "blocked" });
+      this.openSessionWindows(Array.from(this.document.querySelectorAll(".pinned-sessions-list .session-row"), (row) => row.dataset.sessionPath));
+      return;
+    }
+
+    if (event.target.closest?.("[data-open-blocked-windows]")) {
+      this.closeMenu();
+      this.openSessionWindows(this.blockedSessionPaths, this.blockedSessionGroup);
       return;
     }
 
@@ -72,6 +94,13 @@ export class SessionActionsController {
       this.closeMenu({ restoreFocus: true });
       return;
     }
+    // Only where the marks are, so Escape in the composer or on the page still stops a running task.
+    if (event.key === "Escape" && this.markedPaths.size && event.target.closest?.(".session-row")) {
+      event.preventDefault();
+      event.stopImmediatePropagation?.();
+      this.clearMarks();
+      return;
+    }
     if (!menu.hidden && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
       this.moveMenuFocus(event.key);
@@ -90,6 +119,35 @@ export class SessionActionsController {
     this.openMenu(row, { x: rect.left, y: rect.bottom });
   }
 
+  mark(row, range) {
+    const rows = Array.from(this.document.querySelectorAll(".session-sidebar .session-row"));
+    const index = rows.indexOf(row);
+    const anchor = rows.findIndex((candidate) => candidate.dataset.sessionPath === this.markAnchor);
+    const path = row.dataset.sessionPath;
+    if (range && anchor >= 0) {
+      rows.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).forEach((candidate) => this.markedPaths.add(candidate.dataset.sessionPath));
+    } else {
+      if (!range && this.markedPaths.has(path)) this.markedPaths.delete(path);
+      else this.markedPaths.add(path);
+      this.markAnchor = path;
+    }
+    this.applyMarks();
+  }
+
+  // Marks follow sessions across sidebar redraws, and drop those the sidebar no longer shows, so actions only touch visible sessions.
+  applyMarks() {
+    const rows = Array.from(this.document.querySelectorAll(".session-sidebar .session-row"));
+    const shown = new Set(rows.map((row) => row.dataset.sessionPath));
+    this.markedPaths.forEach((path) => { if (!shown.has(path)) this.markedPaths.delete(path); });
+    rows.forEach((row) => row.classList.toggle("is-marked", this.markedPaths.has(row.dataset.sessionPath)));
+  }
+
+  clearMarks() {
+    this.markedPaths.clear();
+    this.markAnchor = null;
+    this.applyMarks();
+  }
+
   moveMenuFocus(key) {
     // offsetParent is null for items hidden by CSS, such as "Open in new window" on touch devices.
     const items = Array.from(this.menu()?.querySelectorAll("button") || []).filter((button) => !button.disabled && button.offsetParent !== null);
@@ -106,6 +164,20 @@ export class SessionActionsController {
     if (!row || !menu) return false;
     this.closeMenu();
     this.target = this.targetFor(row);
+    const marked = Array.from(this.document.querySelectorAll(".session-sidebar .session-row.is-marked"));
+    const multiple = marked.length > 1 && marked.includes(row);
+    if (multiple) {
+      this.target.targets = marked.map((markedRow) => this.targetFor(markedRow));
+      this.target.pinned = this.target.targets.every((target) => target.pinned);
+    }
+    const heading = menu.querySelector("[data-session-actions-heading]");
+    if (heading) {
+      heading.textContent = `${marked.length} sessions`;
+      heading.hidden = !multiple;
+    }
+    menu.querySelectorAll('[data-session-action="rename"], [data-session-action="delete"], .session-actions-separator').forEach((item) => { item.hidden = multiple; });
+    const openWindow = menu.querySelector('[data-session-action="window"]');
+    if (openWindow) openWindow.textContent = multiple ? "Open in new windows" : "Open in new window";
     const pin = menu.querySelector("[data-session-action-pin]");
     if (pin) {
       pin.textContent = this.target.pinned ? "Unpin" : "Pin";
@@ -116,7 +188,7 @@ export class SessionActionsController {
     row.querySelector("[data-session-actions-toggle]")?.setAttribute("aria-expanded", "true");
     menu.hidden = false;
     this.positionMenu(menu, position);
-    menu.querySelector("button")?.focus();
+    menu.querySelector("button:not([hidden])")?.focus();
     return true;
   }
 
@@ -175,16 +247,18 @@ export class SessionActionsController {
     const target = this.target;
     if (!target || action === "delete" && (target.current || target.busy)) return;
     this.closeMenu();
+    if (target.targets) this.clearMarks();
     if (action === "tags") this.callbacks.editTags?.(target);
     if (action === "rename") this.openRename(target);
     if (action === "pin") {
       this.restoreFocus();
-      this.togglePin(target).catch(() => {});
+      // One at a time, because a pin change refuses to start while another is running.
+      const targets = (target.targets || [target]).filter((each) => each.pinned === target.pinned);
+      (async () => { for (const each of targets) await this.togglePin(each); })().catch(() => {});
     }
     if (action === "window") {
       this.restoreFocus();
-      this.openSessionWindow(target.path);
-      if (target.path === this.callbacks.currentSessionPath?.()) this.callbacks.detachSession?.();
+      this.openSessionWindows((target.targets || [target]).map((each) => each.path));
     }
     if (action === "delete") this.openDelete(target);
   }
@@ -193,9 +267,8 @@ export class SessionActionsController {
     return this.window.open(`/?${new URLSearchParams({ session: path, session_only: "1" })}`, "_blank", features);
   }
 
-  openPinnedSessions({ blockedOnly }) {
-    const pinned = Array.from(this.document.querySelectorAll(".pinned-sessions-list .session-row"), (row) => row.dataset.sessionPath);
-    const paths = blockedOnly ? this.blockedSessionPaths : pinned;
+  // The group is every session of the original request, also when only the windows the browser blocked are left to open.
+  openSessionWindows(paths, group = paths) {
     let blocked = [];
     if (paths.length < 2 || this.window.gripiElectron) {
       paths.forEach((path) => this.openSessionWindow(path));
@@ -214,12 +287,13 @@ export class SessionActionsController {
       }
     }
     this.blockedSessionPaths = blocked;
-    const note = this.document.querySelector("[data-pinned-sessions-blocked]");
-    note.querySelector("[data-pinned-sessions-blocked-count]").textContent = `Browser blocked ${blocked.length} ${blocked.length === 1 ? "window" : "windows"}.`;
+    this.blockedSessionGroup = group;
+    const note = this.document.querySelector("[data-blocked-windows]");
+    note.querySelector("[data-blocked-windows-count]").textContent = `Browser blocked ${blocked.length} ${blocked.length === 1 ? "window" : "windows"}.`;
     note.hidden = blocked.length === 0;
     const current = this.callbacks.currentSessionPath?.();
-    // Every pinned session gets its own window, so this one moves on to a session that is not pinned.
-    if (paths.includes(current) && !blocked.includes(current)) this.callbacks.detachSession?.(pinned);
+    // Every session in the group gets its own window, so this one moves on to a session outside it.
+    if (paths.includes(current) && !blocked.includes(current)) this.callbacks.detachSession?.(group);
   }
 
   openRename(target) {
