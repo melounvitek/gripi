@@ -1302,6 +1302,32 @@ func TestSessionMetadataCacheRequiresAnExactFileSignature(t *testing.T) {
 	}
 }
 
+func TestSessionsWhoseFolderIsGoneAreListedUntilItComesBack(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	path := filepath.Join(root, "session.jsonl")
+	writeSessionLines(t, path, []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Message")})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+	expect := func(missing bool) {
+		t.Helper()
+		listed, err := store.Sessions()
+		if err != nil || len(listed) != 1 || listed[0].Path != path || listed[0].FolderMissing != missing {
+			t.Fatalf("sessions = %#v, err = %v", listed, err)
+		}
+		session, found := store.Session(path)
+		if !found || session.FolderMissing != missing {
+			t.Fatalf("session = %#v, found = %v", session, found)
+		}
+	}
+
+	expect(true)
+	// The metadata is cached by now, so only a fresh check notices the folder.
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	expect(false)
+}
+
 func TestSessionMetadataCacheRetainsKnownInvalidOutcomes(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")

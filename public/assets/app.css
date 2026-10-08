@@ -358,6 +358,7 @@
     .session-activity strong { color: var(--copy); font-weight: 650; }
     .session-activity--running { color: var(--accent); font-weight: 600; }
     .session-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-folder-missing { color: var(--gold); }
     .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.5rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); line-height: 1; }
     .sidebar-icon-button:hover { background: #ffffff08; color: var(--text); }
     .sidebar-new-session-button, .sidebar-open-pinned-button { display: inline-flex; margin-left: auto; align-items: center; gap: 0.3rem; letter-spacing: 0; text-transform: none; }

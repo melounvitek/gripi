@@ -304,6 +304,9 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 				leafID, leafSupplied = state.PersistedLeafID, true
 			}
 		}
+		if selected.FolderMissing {
+			view.SessionSyncMode, view.SessionSyncBlocked = sessions.SyncFolderMissing, true
+		}
 		view.SessionSyncGatewayBusy = view.SessionSyncBlocked && app.rpcClients.Busy(selected.Path)
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)
 		window := sessions.Window{}
@@ -584,7 +587,12 @@ func knownCWDs(all []*sessions.Session, projects map[string]bool) ([]string, map
 }
 
 func (app *application) newSessionCWDs(view *pageView) []string {
-	values := append([]string{}, view.KnownCWDs...)
+	var values []string
+	for _, cwd := range view.KnownCWDs {
+		if stat, err := os.Stat(cwd); err == nil && stat.IsDir() {
+			values = append(values, cwd)
+		}
+	}
 	file, err := os.Open(app.config.SessionCwdsPath)
 	if err == nil {
 		defer file.Close()

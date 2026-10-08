@@ -691,6 +691,10 @@ func (app *application) newSession(response http.ResponseWriter, request *http.R
 		http.NotFound(response, request)
 		return
 	}
+	if app.sessionFolderMissing(path) {
+		app.writeActionRPCError(response, errSessionFolderMissing)
+		return
+	}
 	newPath, err := app.startNewSession(request, app.currentSessionCWD(path))
 	if err != nil {
 		app.writeActionRPCError(response, err)

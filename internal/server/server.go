@@ -82,6 +82,14 @@ type application struct {
 	releaseSession          func(*http.Request, string) error
 }
 
+var errSessionFolderMissing = &sessions.SyncBlockedError{Mode: sessions.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
+
+func (app *application) sessionFolderMissing(path string) bool {
+	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+	session, found := store.Session(path)
+	return found && session.FolderMissing
+}
+
 func logInternalError(operation string, err error) {
 	log.Printf("%s: %v", operation, err)
 }
@@ -238,6 +246,10 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	app.rpcDiagnostics = diagnostics
 	app.completionNotifications = newCompletionNotifier(app)
 	app.rpcClients = rpc.NewRegistry(func(sessionPath string) (rpc.RPCClient, error) {
+		// Pi exits at once when a session's folder is gone, so such a session stays read-only.
+		if app.sessionFolderMissing(sessionPath) {
+			return nil, errSessionFolderMissing
+		}
 		owner := ""
 		if cfg.MultiUserMode {
 			var err error
