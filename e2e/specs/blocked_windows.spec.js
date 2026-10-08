@@ -36,3 +36,24 @@ test("open pinned sessions one click at a time while the browser blocks pop-ups"
 
   await setSessionsPinned(page, paths, false);
 });
+
+test("open marked sessions one click at a time while the browser blocks pop-ups", async ({ page, context }) => {
+  await page.goto("/");
+  await expect(page.locator(".pinned-sessions-list .session-row")).toHaveCount(0);
+  const rows = page.locator('.sessions-list .session-row[data-current="false"]');
+  const paths = await rows.evaluateAll((rows) => rows.slice(0, 3).map((row) => row.dataset.sessionPath));
+  for (const index of [0, 1, 2]) await rows.nth(index).locator("a.session").click({ modifiers: ["ControlOrMeta"] });
+  const note = page.getByRole("status").filter({ hasText: "Allow pop-ups for this site" });
+
+  await rows.nth(0).locator("a.session").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Open in new windows" }).click();
+  await expect(note).toContainText("Browser blocked 2 windows.");
+  await expect.poll(() => context.pages().length).toBe(2);
+
+  await page.getByRole("button", { name: "open the rest" }).click();
+  await expect(note).toContainText("Browser blocked 1 window.");
+  await page.getByRole("button", { name: "open the rest" }).click();
+  await expect(note).toBeHidden();
+  await expect.poll(() => context.pages().length).toBe(4);
+  expect(context.pages().slice(1).map((sessionWindow) => new URL(sessionWindow.url()).searchParams.get("session")).sort()).toEqual([...paths].sort());
+});

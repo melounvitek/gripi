@@ -61,6 +61,54 @@ test("a plain click opens a session and clears the marks", async ({ page }) => {
   await expect.poll(() => markedPaths(page)).toEqual([]);
 });
 
+test("pin and unpin all marked sessions from the menu of one of them", async ({ page }) => {
+  await page.goto("/");
+  const rows = page.locator('.sessions-list .session-row[data-current="false"]');
+  const paths = [await rows.nth(0).getAttribute("data-session-path"), await rows.nth(1).getAttribute("data-session-path")];
+  const row = (path) => page.locator(`.session-sidebar .session-row[data-session-path="${path}"]`);
+  await markRow(row(paths[0]));
+  await markRow(row(paths[1]));
+
+  await row(paths[1]).locator("a.session").click({ button: "right" });
+  const menu = page.getByRole("menu");
+  await expect(menu).toContainText("2 sessions");
+  await expect(menu.getByRole("menuitem")).toHaveText(["Tags…", "Pin", "Open in new windows"]);
+  await menu.getByRole("menuitem", { name: "Pin" }).click();
+  for (const path of paths) await expect(row(path)).toHaveAttribute("data-pinned", "true");
+  await expect.poll(() => markedPaths(page)).toEqual([]);
+
+  await markRow(row(paths[0]));
+  await markRow(row(paths[1]));
+  await row(paths[0]).locator("a.session").click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "Unpin" }).click();
+  for (const path of paths) await expect(row(path)).toHaveAttribute("data-pinned", "false");
+
+  // With one marked session, its menu is the usual one.
+  await markRow(row(paths[0]));
+  await row(paths[0]).locator("a.session").click({ button: "right" });
+  await expect(menu.getByRole("menuitem")).toHaveText(["Rename…", "Tags…", "Pin", "Open in new window", "Delete session…"]);
+  await expect(menu.getByText("1 sessions")).toBeHidden();
+});
+
+test("open marked sessions in new windows, moving this window off the current one", async ({ page, context }) => {
+  await page.goto("/");
+  const currentRow = page.locator('.session-sidebar .session-row[data-current="true"]');
+  const otherRow = page.locator('.sessions-list .session-row[data-current="false"]').first();
+  const paths = [await currentRow.getAttribute("data-session-path"), await otherRow.getAttribute("data-session-path")];
+  await markRow(currentRow);
+  await markRow(otherRow);
+
+  await otherRow.locator("a.session").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Open in new windows" }).click();
+  await expect.poll(() => context.pages().length).toBe(3);
+  const sessionWindows = context.pages().slice(1);
+  for (const sessionWindow of sessionWindows) await expect(sessionWindow).toHaveURL(/session_only=1/);
+  expect(sessionWindows.map((sessionWindow) => new URL(sessionWindow.url()).searchParams.get("session")).sort()).toEqual([...paths].sort());
+  await expect(currentRow).toHaveCount(1);
+  expect(paths).not.toContain(await currentRow.getAttribute("data-session-path"));
+  await expect.poll(() => markedPaths(page)).toEqual([]);
+});
+
 test("right-clicking an unmarked session opens its own menu and keeps the marks", async ({ page }) => {
   await page.goto("/");
   const rows = page.locator('.sessions-list .session-row[data-current="false"]');
