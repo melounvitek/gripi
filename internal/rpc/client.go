@@ -1111,12 +1111,14 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 			default:
 			}
 		}
-	} else if id := stringValue(response["id"]); id != "" && client.pending[id] != nil {
+	} else if id := stringValue(response["id"]); typeName == "response" && id != "" && client.pending[id] != nil {
 		target := client.pending[id]
 		delete(client.pending, id)
 		target <- responseResult{value: response}
 	} else if typeName == "response" && stringValue(response["id"]) != "" {
 		// A response whose request timed out is intentionally discarded.
+	} else if typeName == "bash_execution_update" {
+		// Output chunks of a shell command repeat its ID. Gripi shows the output from the final response.
 	} else {
 		storeAsEvent = true
 	}
