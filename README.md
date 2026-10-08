@@ -164,6 +164,7 @@ Gripi uses Pi’s own runtime, sessions, tools, models, and configuration. The c
 - **Shell output appears when the command finishes.** `!command` adds its output to the model context, and `!!command` does not. Output is not streamed. If a shell command and Pi are both running, Stop cancels the shell command first; press it again to stop Pi.
 - **Extension UI is partial.** Select, confirm, input, editor, notify, title, and editor-prefill requests work. Extension status text is not shown in the footer, which shows only the model, thinking level, and context usage.
 - **There is no terminal UI.** For custom TUI components, terminal keybindings, or code that checks `ctx.mode === "tui"`, use Pi CLI.
+- **Sessions in use in Pi CLI are hidden from the sidebar** until you show them with the terminal button beside search. Each browser remembers the choice, and Ctrl+K still finds them.
 - **Saved environment variables stay in Gripi.** Pi CLI in a terminal does not get the [environment variables](docs/configuration.md#environment-variables) you save in Gripi, so a session continued there runs without them.
 
 ## Development
