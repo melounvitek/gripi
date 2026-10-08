@@ -232,8 +232,12 @@ func Start(sessionPath string, command []string, extensionPath string, variables
 	return startProcess("", command, args, variables, diagnostics, observer)
 }
 
-func StartInCWD(cwd string, command []string, extensionPath string, variables []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+// StartInCWD starts a new session in cwd, or a copy of the session file forkFrom when that is set.
+func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, variables []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath}
+	if forkFrom != "" {
+		args = append(args, "--fork", forkFrom)
+	}
 	return startProcess(cwd, command, args, variables, diagnostics, observer)
 }
 

@@ -41,8 +41,7 @@ for (const touch of [false, true]) {
       await expect(row.locator(".session-folder-missing")).toHaveAttribute("title", `Folder ${orphan.folder} no longer exists`);
 
       // The first tap opens it, and the in-page switch must leave the composer disabled.
-      const link = row.locator("a.session");
-      await (touch ? link.tap() : link.click());
+      await activate(row.locator("a.session"), touch);
       await expect(page.getByRole("heading", { level: 1, name: orphan.title })).toBeVisible();
       await expect(message(page, "assistant", "The external E2E target is disposable.")).toBeVisible();
       const banner = page.locator("[data-session-sync-banner]");
@@ -55,7 +54,40 @@ for (const touch of [false, true]) {
       await expect(banner).toBeVisible();
       await expectPaused(page);
     });
+
+    test("continuing in another folder forks the session there and keeps the original", async ({ page, orphan }) => {
+      await page.goto(`/?${new URLSearchParams({ session: orphan.file, show_all_sessions: "1" })}`);
+      await activate(page.getByRole("button", { name: "Continue in another folder" }), touch);
+      const dialog = page.getByRole("dialog", { name: "Continue in another folder" });
+      await expect(dialog.locator("[data-new-session-label]")).toHaveText("Folder:");
+      await expect(dialog).toContainText(`Pi forks “${orphan.title}” into the folder you pick. The original stays as it is.`);
+      if (!touch) await expect(dialog.locator("[data-new-session-hint]")).toHaveText("↑↓ navigate · enter continue · ctrl+1…9 continue directly · esc cancel");
+
+      const project = dialog.locator("[data-new-session-project]").first();
+      const cwd = await project.getAttribute("data-new-session-project");
+      // The dialog's number shortcuts carry on working here.
+      if (touch) await project.tap();
+      else await page.keyboard.press("Control+1");
+      await expect(page).not.toHaveURL(new RegExp(encodeURIComponent(orphan.file)));
+      const forked = new URL(page.url()).searchParams.get("session");
+      try {
+        await expect(page.getByRole("heading", { level: 1, name: orphan.title })).toBeVisible();
+        await expect(page.locator(".session-header-project-label")).toHaveText(path.basename(cwd));
+        await expect(message(page, "assistant", "The external E2E target is disposable.")).toBeVisible();
+        await expect(page.locator("[data-session-sync-banner]")).toHaveCount(0);
+        await expect(page.getByLabel("Message to Pi")).toBeEnabled();
+        await openSidebar(page, touch);
+        await expect(page.locator(`.session-row[data-session-path="${orphan.file}"] .session-folder-missing`)).toBeVisible();
+      } finally {
+        // Leftover sessions push seeded ones off the first sidebar page for later tests.
+        expect((await page.request.post("/sessions/delete", { form: { session: forked } })).ok()).toBe(true);
+      }
+    });
   });
+}
+
+function activate(control, touch) {
+  return touch ? control.tap() : control.click();
 }
 
 async function expectPaused(page) {

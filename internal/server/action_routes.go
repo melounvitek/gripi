@@ -695,7 +695,7 @@ func (app *application) newSession(response http.ResponseWriter, request *http.R
 		app.writeActionRPCError(response, errSessionFolderMissing)
 		return
 	}
-	newPath, err := app.startNewSession(request, app.currentSessionCWD(path))
+	newPath, err := app.startNewSession(request, app.currentSessionCWD(path), "")
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
@@ -716,8 +716,21 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		}
 		return
 	}
+	forkFrom := ""
+	if raw := request.FormValue("fork_from"); raw != "" {
+		// Pi CLI carries on in the same file with another folder, but Gripi leaves Pi's files alone, so Pi forks the session instead.
+		source, ok := app.persistedActionSession(response, request, raw)
+		if !ok {
+			return
+		}
+		if !source.FolderMissing {
+			app.writeRequestError(response, request, http.StatusConflict, "Only a session whose folder is gone continues in another folder")
+			return
+		}
+		forkFrom = source.Path
+	}
 	request.Form.Del("project")
-	newPath, err := app.startNewSession(request, cwd)
+	newPath, err := app.startNewSession(request, cwd, forkFrom)
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
@@ -1548,11 +1561,13 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 	http.Redirect(response, request, app.sessionRedirectPath(request, newPath), http.StatusSeeOther)
 }
 
-func (app *application) startNewSession(request *http.Request, cwd string) (string, error) {
+func (app *application) startNewSession(request *http.Request, cwd, forkFrom string) (string, error) {
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
-	factory := func(cwd string) (rpc.RPCClient, error) { return app.newRPCClient(cwd, app.environmentUser(request)) }
+	factory := func(cwd string) (rpc.RPCClient, error) {
+		return app.newRPCClient(cwd, app.environmentUser(request), forkFrom)
+	}
 	return rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, factory, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
 		path, ok := sessions.ConfiguredSessionPath(app.config.SessionsRoot, path)
 		if !ok {

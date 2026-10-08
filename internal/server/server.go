@@ -62,7 +62,7 @@ type application struct {
 	knownSessionHashes      map[string]bool
 	sessionHashesAt         time.Time
 	rpcClients              *rpc.Registry
-	newRPCClient            func(cwd, userID string) (rpc.RPCClient, error)
+	newRPCClient            func(cwd, userID, forkFrom string) (rpc.RPCClient, error)
 	rpcDiagnostics          *rpc.Diagnostics
 	pendingSessions         *rpc.PendingSessionRegistry
 	pendingRemapMu          sync.Mutex
@@ -268,7 +268,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		return rpc.Start(sessionPath, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
-	app.newRPCClient = func(cwd, userID string) (rpc.RPCClient, error) {
+	app.newRPCClient = func(cwd, userID, forkFrom string) (rpc.RPCClient, error) {
 		variables, err := app.piEnvironment(userID)
 		if err != nil {
 			return nil, err
@@ -277,7 +277,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		if err != nil {
 			return nil, err
 		}
-		return rpc.StartInCWD(cwd, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
+		return rpc.StartInCWD(cwd, forkFrom, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
 	}
 	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, app.sessionCache, app.rpcClients)
 	if cfg.ReadStatePath != "" {

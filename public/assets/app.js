@@ -2931,12 +2931,13 @@ function sessionShortcutsVisible() {
   return document.body.classList.contains("session-shortcuts-visible");
 }
 
-function openNewSessionModal() {
+// With fork, the dialog continues that session in another folder instead of starting a new one.
+function openNewSessionModal(fork = null) {
   if (sessionSwitching()) return;
 
   const modal = document.querySelector('[data-modal="new-session-modal"]');
   openModal(modal);
-  newSessionFormController.open(modal?.querySelector(".new-session-cwd-form"));
+  newSessionFormController.open(modal?.querySelector(".new-session-cwd-form"), fork);
 }
 
 function piModalIsOpen() {
@@ -3152,6 +3153,13 @@ document.addEventListener("click", (event) => {
       .finally(() => {
         hideSessionSwitching();
       });
+    return;
+  }
+
+  const continueButton = event.target.closest("[data-continue-in-folder]");
+  if (continueButton) {
+    event.preventDefault();
+    openNewSessionModal({ path: continueButton.dataset.continueInFolder, name: continueButton.dataset.sessionName });
     return;
   }
 
