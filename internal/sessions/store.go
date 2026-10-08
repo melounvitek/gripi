@@ -159,12 +159,11 @@ type generalSubagentProjection struct {
 }
 
 type indexedSessionData struct {
-	Role          string
-	Timestamp     string
-	Text          string
-	FinalText     string
-	HasFinalText  bool
-	MetadataKnown bool
+	Role         string
+	Timestamp    string
+	Text         string
+	FinalText    string
+	HasFinalText bool
 }
 
 type statusData struct {
@@ -182,17 +181,15 @@ type statusData struct {
 }
 
 type index struct {
-	path                     string
-	device                   uint64
-	inode                    uint64
-	size                     int64
-	mtime                    time.Time
-	entries                  []entry
-	byID                     map[string]int
-	session                  *Session
-	supported                bool
-	sessionMetadataSupported bool
-	bytes                    int64
+	path    string
+	device  uint64
+	inode   uint64
+	size    int64
+	mtime   time.Time
+	entries []entry
+	byID    map[string]int
+	session *Session
+	bytes   int64
 }
 
 type cacheItem struct {
@@ -372,7 +369,7 @@ func (cache *Cache) sessionMetadata(path string, stat os.FileInfo, stale bool) (
 }
 
 func sessionFromIndex(indexed *index) *Session {
-	if !indexed.supported || !indexed.sessionMetadataSupported || indexed.session == nil {
+	if indexed.session == nil {
 		return nil
 	}
 	copy := *indexed.session
@@ -475,7 +472,7 @@ func (store Store) Session(path string) (*Session, bool) {
 		return nil, false
 	}
 	indexed, err := store.Cache.Index(realPath)
-	if err != nil || !indexed.supported || !indexed.sessionMetadataSupported || indexed.session == nil || !filepath.IsAbs(indexed.session.CWD) {
+	if err != nil || indexed.session == nil || !filepath.IsAbs(indexed.session.CWD) {
 		return nil, false
 	}
 	if stat, err := os.Stat(indexed.session.CWD); err != nil || !stat.IsDir() {
@@ -517,9 +514,6 @@ func (store Store) windowOnce(path, leafID string, leafSupplied bool, cursor *in
 	indexed, err := store.Cache.Index(path)
 	if err != nil {
 		return Window{}, err
-	}
-	if !indexed.supported {
-		return Window{}, errors.New("session contains an entry larger than the bounded index supports")
 	}
 	effectiveLeaf := leafID
 	if !leafSupplied {
@@ -564,9 +558,6 @@ func (store Store) Status(path string) (Status, error) {
 	indexed, err := store.Cache.Index(path)
 	if err != nil {
 		return Status{}, err
-	}
-	if !indexed.supported {
-		return Status{}, errors.New("session contains an unsupported oversized entry")
 	}
 	return indexed.sessionStatus(), nil
 }
@@ -712,21 +703,17 @@ func buildIndexOnce(path string, stat os.FileInfo, beforeValidation func()) (*in
 	}
 	defer file.Close()
 	device, inode := fileIdentity(stat)
-	result := &index{path: path, device: device, inode: inode, size: stat.Size(), mtime: stat.ModTime(), byID: make(map[string]int), supported: true, sessionMetadataSupported: true, bytes: 256}
+	result := &index{path: path, device: device, inode: inode, size: stat.Size(), mtime: stat.ModTime(), byID: make(map[string]int), bytes: 256}
 	reader := bufio.NewReaderSize(io.LimitReader(file, stat.Size()), 64<<10)
 	var offset int64
 	for ordinal := 0; ; ordinal++ {
-		line, length, largeEntry, readErr := readIndexedLine(reader)
+		line, length, largeEntry, readErr := readIndexedLine(reader, file, offset)
 		if length == 0 && errors.Is(readErr, io.EOF) {
 			break
 		}
-		if errors.Is(readErr, errEntryTooLarge) || errors.Is(readErr, errEntryOverCap) {
-			result.supported = false
-			if result.bytes > maxBuiltIndexBytes {
-				return nil, errors.New("session index exceeds memory bound")
-			}
-			offset += length
-			continue
+		if errors.Is(readErr, errEntryOverCap) {
+			// Skipped like a malformed line.
+			readErr = nil
 		}
 		if largeEntry != nil {
 			largeEntry.Ordinal = ordinal
@@ -798,12 +785,13 @@ func indexSnapshotValid(indexed *index, stat os.FileInfo) bool {
 	return stat.Size() > indexed.size || stat.ModTime().Equal(indexed.mtime)
 }
 
-var (
-	errEntryTooLarge = errors.New("unsupported oversized JSONL entry")
-	errEntryOverCap  = errors.New("JSONL entry exceeds 64 MiB cap")
-)
+var errEntryOverCap = errors.New("JSONL entry exceeds 64 MiB cap")
 
-func readIndexedLine(reader *bufio.Reader) ([]byte, int64, *entry, error) {
+// readIndexedLine reads the line starting at offset in file. A line over
+// MaxIndexedEntryBytes is streamed through the bounded scanner and returned as
+// metadata. The scanner knows only the usual entry shapes, so any other line is
+// read again in full.
+func readIndexedLine(reader *bufio.Reader, file io.ReaderAt, offset int64) ([]byte, int64, *entry, error) {
 	var materialized []byte
 	var total int64
 	var scanner *indexJSONScanner
@@ -828,11 +816,14 @@ func readIndexedLine(reader *bufio.Reader) ([]byte, int64, *entry, error) {
 				return nil, total, nil, errEntryOverCap
 			}
 			if scanner != nil {
-				metadata, ok := scanner.finish()
-				if !ok {
-					return nil, total, nil, errEntryTooLarge
+				if metadata, ok := scanner.finish(); ok {
+					return nil, total, &metadata, nil
 				}
-				return nil, total, &metadata, nil
+				line := make([]byte, total)
+				if _, readErr := file.ReadAt(line, offset); readErr != nil && !errors.Is(readErr, io.EOF) {
+					return nil, total, nil, readErr
+				}
+				return withoutImageData(line), total, nil, err
 			}
 			return materialized, total, nil, err
 		}
@@ -1003,10 +994,6 @@ func (indexed *index) applyIndexedSessionMetadata(item entry) {
 	if indexed.session == nil || item.Type != "message" {
 		return
 	}
-	if !item.Session.MetadataKnown {
-		indexed.sessionMetadataSupported = false
-		return
-	}
 	role := item.Session.Role
 	if role != "toolResult" && role != "bashExecution" {
 		indexed.session.MessageCount++
@@ -1058,7 +1045,8 @@ func (indexed *index) applySessionMetadata(raw map[string]any, item entry, stat 
 	when := parseTime(stringValue(raw["timestamp"]))
 	if role == "user" {
 		if indexed.session.FirstUserMessage == "" {
-			indexed.session.FirstUserMessage = text
+			// A large entry the scanner rejected is read in full, so its text can be huge.
+			indexed.session.FirstUserMessage = strings.Clone(boundedUTF8Prefix(text, MaxIndexedEntryBytes))
 		}
 		if when.After(indexed.session.ConversationActivityAt) {
 			indexed.session.ConversationActivityAt = when

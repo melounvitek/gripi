@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestSavedCacheListsUnchangedSessionsWithoutReadingThem(t *testing.T) {
+func TestSavedCacheListsUnchangedSessionsWithoutReadingThemButRechecksHiddenOnes(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	valid := []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Saved question")}
 	writeSessionLines(t, path, valid)
@@ -28,7 +28,8 @@ func TestSavedCacheListsUnchangedSessionsWithoutReadingThem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Swap which file is readable, so any file read again changes the listing.
+	// Swap which file is readable: the listed session must come from the save,
+	// while the one saved as hidden is read again.
 	replaceKeepingFileSignature(t, path, strings.Repeat("x", len(becomesValid)))
 	replaceKeepingFileSignature(t, invalidPath, becomesValid)
 	if fresh, err := (Store{Root: root, Home: root, Cache: NewCache()}).Sessions(); err != nil || len(fresh) != 1 || fresh[0].Path != invalidPath {
@@ -37,11 +38,33 @@ func TestSavedCacheListsUnchangedSessionsWithoutReadingThem(t *testing.T) {
 
 	second := Store{Root: root, Home: root, Cache: LoadCache(cachePath)}
 	after, err := second.Sessions()
-	if err != nil || len(after) != 1 {
+	if err != nil || len(after) != 2 {
 		t.Fatalf("sessions after loading = %#v, err = %v", after, err)
 	}
-	if sessionInUTC(after[0]) != sessionInUTC(before[0]) {
-		t.Fatalf("loaded session = %#v, want %#v", after[0], before[0])
+	for _, session := range after {
+		if session.Path == path && sessionInUTC(session) != sessionInUTC(before[0]) {
+			t.Fatalf("loaded session = %#v, want %#v", session, before[0])
+		}
+	}
+}
+
+func TestSavedCacheIgnoresSessionsAnOlderGripiSavedAsHidden(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	writeSessionLines(t, path, []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Question")})
+	stat, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, inode := fileIdentity(stat)
+	cachePath := filepath.Join(t.TempDir(), "cache.json")
+	hidden := savedCacheItem{Path: path, Device: device, Inode: inode, Size: stat.Size(), MTime: stat.ModTime()}
+	if err := writeJSON(cachePath, savedCache{Version: savedCacheVersion, Items: []savedCacheItem{hidden}}); err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := (Store{Root: root, Home: root, Cache: LoadCache(cachePath)}).Sessions()
+	if err != nil || len(listed) != 1 || listed[0].Path != path {
+		t.Fatalf("sessions = %#v, err = %v", listed, err)
 	}
 }
 

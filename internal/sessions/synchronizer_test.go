@@ -126,6 +126,26 @@ func TestFileSnapshotStreamsLargeFinalEntryMetadata(t *testing.T) {
 	}
 }
 
+func TestAppendedEntryIDsIncludeLargeEntriesTheIndexScannerRejects(t *testing.T) {
+	root, path := synchronizerSession(t)
+	store := Store{Root: root, Cache: NewCache()}
+	previous, err := store.FileSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "large", "parentId": nil, "message": map[string]any{"role": "toolResult", "toolCallId": "tool", "toolName": "read", "content": []any{map[string]any{"type": "text", "text": strings.Repeat("x", 1<<20)}}, "unknownKey": true}})
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "after", "parentId": "large", "message": map[string]any{"role": "user", "content": "Next"}})
+	current, err := store.FileSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := store.AppendedEntryIDs(path, previous, current)
+	if err != nil || strings.Join(ids, ",") != "large,after" {
+		t.Fatalf("ids = %v, err = %v", ids, err)
+	}
+}
+
 func BenchmarkSynchronizerInspectUnchangedLargeTail(b *testing.B) {
 	root := b.TempDir()
 	path := filepath.Join(root, "session.jsonl")

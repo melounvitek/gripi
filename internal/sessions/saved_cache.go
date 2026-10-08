@@ -27,6 +27,8 @@ type savedCacheItem struct {
 
 // LoadCache returns a cache that starts with the session metadata saved at
 // path. A missing or unusable file is ignored: every entry can be rebuilt.
+// Hidden sessions are read again after each restart, since an update may
+// show them, so older saves that kept them are ignored too.
 func LoadCache(path string) *Cache {
 	cache := NewCache()
 	cache.path = path
@@ -41,7 +43,9 @@ func LoadCache(path string) *Cache {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	for _, item := range saved.Items {
-		cache.storeSessionMetadataLocked(item.Path, item.Session, item.Device, item.Inode, item.Size, item.MTime)
+		if item.Session != nil {
+			cache.storeSessionMetadataLocked(item.Path, item.Session, item.Device, item.Inode, item.Size, item.MTime)
+		}
 	}
 	return cache
 }
@@ -56,6 +60,9 @@ func (cache *Cache) Save() error {
 	for element := cache.metadataOrder.Front(); element != nil; element = element.Next() {
 		path := element.Value.(string)
 		item := cache.metadataItems[path]
+		if item.session == nil {
+			continue
+		}
 		saved.Items = append(saved.Items, savedCacheItem{Path: path, Session: item.session, Device: item.device, Inode: item.inode, Size: item.size, MTime: item.mtime})
 	}
 	cache.mu.Unlock()
