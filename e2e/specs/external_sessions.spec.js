@@ -33,8 +33,9 @@ for (const touch of [false, true]) {
     // Keep the mobile regression self-contained despite the mobile project's restricted testMatch.
     test.use(touch ? { viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true } : {});
 
-    test("unopened CLI sessions keep the normal row shape and stay quiet, with first-tap navigation and actions", async ({ page, context, copiedSession }, testInfo) => {
+    test("unopened CLI sessions keep the normal row shape and stay quiet, with first-tap navigation and actions", async ({ page, context, baseURL, copiedSession }, testInfo) => {
       test.setTimeout(45_000);
+      await showCLISessions(context, baseURL);
       await context.addInitScript(() => {
         window.replyNotifications = [];
         document.hasFocus = () => false;
@@ -97,6 +98,55 @@ for (const touch of [false, true]) {
       await expectNormalRowShape(link, touch);
       await expect(row).toHaveCSS("background-color", "rgb(58, 58, 74)");
       await page.screenshot({ path: testInfo.outputPath("compact-selected-session.png") });
+    });
+
+    test("CLI sessions stay hidden until the terminal button shows them, and the browser remembers the choice", async ({ page, copiedSession }, testInfo) => {
+      test.setTimeout(45_000);
+      const activate = (control) => touch ? control.tap() : control.click();
+      await page.goto(copiedSession.backgroundURL);
+      await openSidebar(page, touch);
+      const link = sessionLink(page, copiedSession.file);
+      await expect(link).toBeVisible();
+      await appendCLIReply(copiedSession.file, "Hidden CLI reply");
+      // The next sidebar refresh finds the session in use in Pi CLI.
+      await expect(link).toHaveCount(0, { timeout: 15_000 });
+      const toggle = page.locator("[data-sidebar-cli-toggle]");
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(toggle).toHaveAttribute("title", /^Show \d+ Pi CLI sessions?$/);
+      await expect(toggle.locator(".sidebar-tool-slash")).toBeVisible();
+      await expect(page.locator("[data-sidebar-filter-count]")).toHaveCount(0);
+      // It sits just left of the search button and matches its size.
+      const [toggleBox, searchBox] = await Promise.all([toggle, page.locator("[data-sidebar-search-toggle]")].map((control) => control.boundingBox()));
+      expect(toggleBox.width).toBeCloseTo(searchBox.width, 1);
+      expect(toggleBox.height).toBeCloseTo(searchBox.height, 1);
+      expect(searchBox.x - (toggleBox.x + toggleBox.width)).toBeGreaterThanOrEqual(0);
+      expect(searchBox.x - (toggleBox.x + toggleBox.width)).toBeLessThan(4);
+      await page.screenshot({ path: testInfo.outputPath("cli-sessions-hidden.png") });
+
+      await activate(toggle);
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await expect(toggle).toHaveAttribute("title", /^Hide \d+ Pi CLI sessions?$/);
+      await expect(toggle.locator(".sidebar-tool-slash")).toHaveCount(0);
+      await expectExternalIcon(link);
+      if (touch) await expect(page.locator("#mobile-session-toggle")).toBeChecked();
+      await page.screenshot({ path: testInfo.outputPath("cli-sessions-shown.png") });
+      await page.reload();
+      await openSidebar(page, touch);
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await expectExternalIcon(link);
+
+      if (touch) await activate(toggle);
+      else {
+        await toggle.focus();
+        await page.keyboard.press("Enter");
+      }
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(link).toHaveCount(0);
+      if (!touch) await expect(toggle).toBeFocused();
+      await page.reload();
+      await openSidebar(page, touch);
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(link).toHaveCount(0);
     });
 
     test("CLI updates leave controls, drafts, and the open sidebar intact", async ({ page, copiedSession }) => {
@@ -470,8 +520,9 @@ for (const touch of [false, true]) {
       }
     });
 
-    test("external CLI activity stays quiet in live and reloaded sidebars until takeover", async ({ page, context, copiedSession }, testInfo) => {
+    test("external CLI activity stays quiet in live and reloaded sidebars until takeover", async ({ page, context, baseURL, copiedSession }, testInfo) => {
       test.setTimeout(60_000);
+      await showCLISessions(context, baseURL);
       await context.addInitScript(() => {
         window.replyNotifications = [];
         document.hasFocus = () => false;
@@ -558,6 +609,10 @@ for (const touch of [false, true]) {
       await background.close();
     });
   });
+}
+
+async function showCLISessions(context, baseURL) {
+  await context.addCookies([{ name: "gripi_show_cli_sessions", value: "1", url: baseURL }]);
 }
 
 function sessionLink(page, file) {

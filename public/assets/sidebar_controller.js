@@ -3,6 +3,8 @@ import { newSessionModalUrl, sessionUrl } from "./urls.js";
 
 const DESKTOP_SIDEBAR_HIDDEN_KEY = "gripi:desktop-sidebar-hidden";
 const DESKTOP_SIDEBAR_MEDIA = "(min-width: 761px)";
+// The server reads it to leave Pi CLI sessions out of the sidebar unless this browser shows them.
+const CLI_SESSIONS_COOKIE = "gripi_show_cli_sessions";
 
 export class SidebarController {
   constructor(document, window, projectSelectController, gatewayUpdateController, notifyFinalReply) {
@@ -123,6 +125,14 @@ export class SidebarController {
         return;
       }
 
+      const cliToggle = event.target.closest?.("[data-sidebar-cli-toggle]");
+      if (cliToggle) {
+        const show = cliToggle.getAttribute("aria-pressed") !== "true";
+        this.document.cookie = `${CLI_SESSIONS_COOKIE}=1; path=/; max-age=${show ? 365 * 24 * 60 * 60 : 0}; samesite=lax`;
+        this.refresh({ force: true }).catch(() => {});
+        return;
+      }
+
       const searchButton = event.target.closest?.("[data-sidebar-search-toggle]");
       if (searchButton) this.toggleSearch(searchButton);
 
@@ -232,7 +242,7 @@ export class SidebarController {
     const previousSearchQuery = previousSearchInput?.value;
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
     const focusedControl = oldElement.contains(this.document.activeElement) ? this.document.activeElement : null;
-    const focusedControlSelector = ["a.session", "[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]"].find((selector) => focusedControl?.matches(selector));
+    const focusedControlSelector = ["a.session", "[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]", "[data-sidebar-cli-toggle]"].find((selector) => focusedControl?.matches(selector));
     const focusedSessionPath = focusedControl?.closest(".session-row")?.dataset.sessionPath;
     const focusedTag = focusedControl?.dataset.tagFilter;
     const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");
