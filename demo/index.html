@@ -150,6 +150,7 @@
     .conversation-panel.is-conversation-focused .conversation-scroll .message--tool-error,
     .conversation-panel.is-conversation-focused .conversation-scroll .message[data-role="status"]:not(.message--compaction),
     .conversation-panel.is-conversation-focused .conversation-scroll .message[data-role="system"] { display: none; }
+    .conversation-panel.is-conversation-focused .conversation-scroll .message--bash-execution { display: grid; }
     .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images) { display: grid; }
     .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images):not(.active-activity > .message) > .message-header,
     .conversation-panel.is-conversation-focused .conversation-scroll :is(.message--tool, .message--tool-call, .message--tool-transcript):has(> .message-images):not(.active-activity > .message) > .message-details > :not(.message-details-summary) { display: none; }

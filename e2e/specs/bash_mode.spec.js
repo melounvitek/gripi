@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { nativeBash, prompts, sessions } from "../support/contract.mjs";
-import { expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
+import { activityView, expectRunFinished, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
 test("automatically retries transient contention for native bash", async ({ page }) => {
   const command = "printf 'retried native bash'";
@@ -71,6 +71,28 @@ test("mark a double-bang command as excluded from model context", async ({ page 
   await expect(card).toHaveCount(1);
   await expect(card).toHaveClass(/message--bash-excluded/);
   await expect(card.getByRole("status", { name: "Shell command status" })).toContainText("excluded from model context");
+});
+
+test("show shell commands with their output in Brief view, live and after reload", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.bashRetry);
+  await activityView(page, "Brief").click();
+
+  const commands = [["!", "printf 'brief native bash'"], ["!!", "printf 'brief excluded bash'"]];
+  const output = (command) => bashCard(page, command).getByText(`Fake Pi completed: ${command}`);
+  for (const [prefix, command] of commands) {
+    await sendPrompt(page, prefix + command);
+    await expect(output(command)).toBeVisible();
+    await expectRunFinished(page);
+  }
+
+  await page.reload();
+  await expect(activityView(page, "Brief")).toHaveAttribute("aria-pressed", "true");
+  for (const [, command] of commands) await expect(output(command)).toBeVisible();
+  // Find in Brief view searches what the view shows.
+  await page.keyboard.press("Control+f");
+  await page.getByRole("searchbox", { name: "Find in conversation" }).fill("Fake Pi completed: printf 'brief");
+  await expect(page.locator("[data-current-session-find-count]")).toHaveText("1 / 2");
 });
 
 test("cancel a long-running bash command with one click", async ({ page }) => {
