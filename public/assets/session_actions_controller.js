@@ -6,6 +6,8 @@ export class SessionActionsController {
     this.target = null;
     this.pinOperationActive = false;
     this.blockedSessionPaths = [];
+    this.markedPaths = new Set();
+    this.markAnchor = null;
     this.initialized = false;
   }
 
@@ -16,9 +18,21 @@ export class SessionActionsController {
     this.document.addEventListener("contextmenu", (event) => this.handleContextMenu(event));
     this.document.addEventListener("keydown", (event) => this.handleKeydown(event), true);
     this.document.addEventListener("submit", (event) => this.handleSubmit(event));
+    this.document.addEventListener("gripi:sidebar-tags", () => this.applyMarks());
   }
 
   handleClick(event) {
+    const link = event.target.closest?.(".session-sidebar a.session");
+    if (link && event.button === 0 && !event.altKey) {
+      if (event.ctrlKey || event.metaKey || event.shiftKey) {
+        event.preventDefault();
+        this.closeMenu();
+        this.mark(link.closest(".session-row"), event.shiftKey);
+        return;
+      }
+      this.clearMarks();
+    }
+
     const pinToggle = event.target.closest?.("[data-session-pin-toggle]");
     if (pinToggle) {
       const row = pinToggle.closest(".session-row");
@@ -72,6 +86,13 @@ export class SessionActionsController {
       this.closeMenu({ restoreFocus: true });
       return;
     }
+    // Only where the marks are, so Escape in the composer or on the page still stops a running task.
+    if (event.key === "Escape" && this.markedPaths.size && event.target.closest?.(".session-row")) {
+      event.preventDefault();
+      event.stopImmediatePropagation?.();
+      this.clearMarks();
+      return;
+    }
     if (!menu.hidden && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
       this.moveMenuFocus(event.key);
@@ -88,6 +109,35 @@ export class SessionActionsController {
     event.preventDefault();
     const rect = row.getBoundingClientRect();
     this.openMenu(row, { x: rect.left, y: rect.bottom });
+  }
+
+  mark(row, range) {
+    const rows = Array.from(this.document.querySelectorAll(".session-sidebar .session-row"));
+    const index = rows.indexOf(row);
+    const anchor = rows.findIndex((candidate) => candidate.dataset.sessionPath === this.markAnchor);
+    const path = row.dataset.sessionPath;
+    if (range && anchor >= 0) {
+      rows.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).forEach((candidate) => this.markedPaths.add(candidate.dataset.sessionPath));
+    } else {
+      if (!range && this.markedPaths.has(path)) this.markedPaths.delete(path);
+      else this.markedPaths.add(path);
+      this.markAnchor = path;
+    }
+    this.applyMarks();
+  }
+
+  // Marks follow sessions across sidebar redraws, and drop those the sidebar no longer shows, so actions only touch visible sessions.
+  applyMarks() {
+    const rows = Array.from(this.document.querySelectorAll(".session-sidebar .session-row"));
+    const shown = new Set(rows.map((row) => row.dataset.sessionPath));
+    this.markedPaths.forEach((path) => { if (!shown.has(path)) this.markedPaths.delete(path); });
+    rows.forEach((row) => row.classList.toggle("is-marked", this.markedPaths.has(row.dataset.sessionPath)));
+  }
+
+  clearMarks() {
+    this.markedPaths.clear();
+    this.markAnchor = null;
+    this.applyMarks();
   }
 
   moveMenuFocus(key) {

@@ -326,6 +326,8 @@
     .session-delete-explanation, .gateway-update-failure-note { color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
     .session-action-error { color: var(--danger); font-size: 0.85rem; }
     .session-row:has(a.session.selected) { background: var(--panel-softer); }
+    .session-row.is-marked { background: var(--accent-tint-04); }
+    .session-row.is-marked::before { content: ""; position: absolute; top: 0.3rem; bottom: 0.3rem; left: 0; width: 2px; border-radius: 1px; background: var(--accent); }
     a.session.unread .session-title { color: var(--text); font-weight: 700; }
     .session-row:has(a.session.unread) .session-meta { color: var(--accent); font-weight: 600; }
     .session-content { flex: 1 1 auto; min-width: 0; }
