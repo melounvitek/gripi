@@ -2931,8 +2931,7 @@ function sessionShortcutsVisible() {
   return document.body.classList.contains("session-shortcuts-visible");
 }
 
-// With fork, the dialog continues that session in another folder instead of starting a new one.
-function openNewSessionModal(fork = null) {
+function openNewSessionModal(fork) {
   if (sessionSwitching()) return;
 
   const modal = document.querySelector('[data-modal="new-session-modal"]');

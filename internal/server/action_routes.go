@@ -691,10 +691,6 @@ func (app *application) newSession(response http.ResponseWriter, request *http.R
 		http.NotFound(response, request)
 		return
 	}
-	if app.sessionFolderMissing(path) {
-		app.writeActionRPCError(response, errSessionFolderMissing)
-		return
-	}
 	newPath, err := app.startNewSession(request, app.currentSessionCWD(path), "")
 	if err != nil {
 		app.writeActionRPCError(response, err)
@@ -718,13 +714,10 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 	}
 	forkFrom := ""
 	if raw := request.FormValue("fork_from"); raw != "" {
-		// Pi CLI carries on in the same file with another folder, but Gripi leaves Pi's files alone, so Pi forks the session instead.
+		// Pi CLI can carry on in the same file from another folder, which RPC mode cannot, so Pi forks the session into the
+		// folder as it does when told to open a session from another project.
 		source, ok := app.persistedActionSession(response, request, raw)
 		if !ok {
-			return
-		}
-		if !source.FolderMissing {
-			app.writeRequestError(response, request, http.StatusConflict, "Only a session whose folder is gone continues in another folder")
 			return
 		}
 		forkFrom = source.Path
@@ -1581,16 +1574,26 @@ func (app *application) startNewSession(request *http.Request, cwd, forkFrom str
 				return "", nil, err
 			}
 		}
-		var projectRollback func() error
+		var projectRollback, tagRollback func() error
 		rollback := func() error {
 			var rollbackErr error
 			if projectRollback != nil {
 				rollbackErr = projectRollback()
 			}
+			if tagRollback != nil {
+				rollbackErr = errors.Join(rollbackErr, tagRollback())
+			}
 			if claimed && app.releaseSession != nil {
 				rollbackErr = errors.Join(rollbackErr, app.releaseSession(request, path))
 			}
 			return rollbackErr
+		}
+		if app.gatewayState != nil && forkFrom != "" {
+			// Like a fork in Gripi, the copy keeps the original's tags.
+			tagRollback, err = app.gatewayState.CopyTags(forkFrom, path)
+			if err != nil {
+				return "", nil, errors.Join(err, rollback())
+			}
 		}
 		if app.gatewayState != nil {
 			projectRollback, err = app.gatewayState.RememberProject(cwd)

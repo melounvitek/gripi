@@ -76,8 +76,8 @@ for (const touch of [false, true]) {
         await expect(message(page, "assistant", "The external E2E target is disposable.")).toBeVisible();
         await expect(page.locator("[data-session-sync-banner]")).toHaveCount(0);
         await expect(page.getByLabel("Message to Pi")).toBeEnabled();
-        await openSidebar(page, touch);
-        await expect(page.locator(`.session-row[data-session-path="${orphan.file}"] .session-folder-missing`)).toBeVisible();
+        await page.goBack();
+        await expect(page.locator("[data-session-sync-banner]")).toContainText("This session’s folder no longer exists.");
       } finally {
         // Leftover sessions push seeded ones off the first sidebar page for later tests.
         expect((await page.request.post("/sessions/delete", { form: { session: forked } })).ok()).toBe(true);

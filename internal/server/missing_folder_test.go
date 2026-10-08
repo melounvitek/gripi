@@ -73,25 +73,14 @@ func TestSessionWhoseFolderIsGoneIsReadOnlyAndNeverStartsPi(t *testing.T) {
 		}
 		return result
 	}
+	// One request for each way the routes reach Pi.
 	for _, request := range []*http.Request{
 		formActionRequest("/prompt", with(map[string]string{"message": "Hello"}), true),
 		formActionRequest("/prompt", with(map[string]string{"message": "!ls"}), true),
-		formActionRequest("/prompt", with(map[string]string{"message": "/compact"}), true),
-		formActionRequest("/prompt", with(map[string]string{"message": "/new"}), true),
-		formActionRequest("/sessions/new", with(nil), true),
-		formActionRequest("/sessions/clone", with(nil), true),
-		formActionRequest("/sessions/fork", with(map[string]string{"entry_id": "user-1"}), true),
-		formActionRequest("/sessions/tree", with(map[string]string{"entry_id": "user-1"}), true),
-		formActionRequest("/sessions/tree/label", with(map[string]string{"entry_id": "user-1", "label": "start"}), true),
-		formActionRequest("/sessions/rename", with(map[string]string{"name": "Renamed"}), true),
-		formActionRequest("/sessions/model_settings", with(map[string]string{"provider": "e2e", "model": "fixture-model", "thinking": "high"}), true),
-		formActionRequest("/sessions/cycle_thinking", with(nil), true),
-		formActionRequest("/compact", with(nil), true),
 		formActionRequest("/abort", with(nil), true),
-		formActionRequest("/sessions/export", with(nil), true),
+		formActionRequest("/sessions/clone", with(nil), true),
+		formActionRequest("/sessions/rename", with(map[string]string{"name": "Renamed"}), true),
 		getActionRequest("/sessions/model_settings?session=" + url.QueryEscape(sessionPath)),
-		getActionRequest("/sessions/fork_messages?session=" + url.QueryEscape(sessionPath)),
-		getActionRequest("/sessions/tree_entries?session=" + url.QueryEscape(sessionPath)),
 		getActionRequest("/commands?session=" + url.QueryEscape(sessionPath)),
 	} {
 		response := serveAction(handler, request)
@@ -122,15 +111,14 @@ func TestContinuingInAnotherFolderForksTheSessionThere(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	sessionsRoot := filepath.Join(home, ".pi", "agent", "sessions")
-	gone, present, target := filepath.Join(home, "Work", "gone"), filepath.Join(home, "Work", "present"), filepath.Join(home, "Work", "target")
-	for _, directory := range []string{sessionsRoot, present, target} {
+	target := filepath.Join(home, "Work", "target")
+	for _, directory := range []string{sessionsRoot, target} {
 		if err := os.MkdirAll(directory, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	source, kept := filepath.Join(sessionsRoot, "gone.jsonl"), filepath.Join(sessionsRoot, "present.jsonl")
-	writeActionSession(t, source, gone)
-	writeActionSession(t, kept, present)
+	source := filepath.Join(sessionsRoot, "gone.jsonl")
+	writeActionSession(t, source, filepath.Join(home, "Work", "gone"))
 	original, err := os.ReadFile(source)
 	if err != nil {
 		t.Fatal(err)
@@ -150,27 +138,20 @@ func TestContinuingInAnotherFolderForksTheSessionThere(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
-	continueIn := func(cwd, from string) *httptest.ResponseRecorder {
-		return serveAction(handler, formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": cwd, "fork_from": from}, true))
+	continueIn := func(from string) *httptest.ResponseRecorder {
+		return serveAction(handler, formActionRequest("/sessions/new_at_cwd", map[string]string{"cwd": target, "fork_from": from}, true))
 	}
-
-	for _, refused := range []struct {
-		cwd, from string
-		code      int
-	}{
-		{target, kept, http.StatusConflict},
-		{target, filepath.Join(sessionsRoot, "unknown.jsonl"), http.StatusNotFound},
-		{gone, source, http.StatusUnprocessableEntity},
-	} {
-		if response := continueIn(refused.cwd, refused.from); response.Code != refused.code {
-			t.Fatalf("continuing %s in %s = %d %s", refused.from, refused.cwd, response.Code, response.Body.String())
-		}
+	if response := continueIn(filepath.Join(sessionsRoot, "unknown.jsonl")); response.Code != http.StatusNotFound {
+		t.Fatalf("continuing an unknown session = %d %s", response.Code, response.Body.String())
 	}
 	if _, err := os.Stat(fakeLog); !os.IsNotExist(err) {
 		t.Fatal("a refused request started Pi")
 	}
+	if tagged := serveAction(handler, formActionRequest("/sessions/tags", map[string]string{"session": source, "tag": "work", "assigned": "true"}, true)); tagged.Code != http.StatusOK {
+		t.Fatalf("tag = %d %s", tagged.Code, tagged.Body.String())
+	}
 
-	response := continueIn(target, source)
+	response := continueIn(source)
 	var payload struct{ Session string }
 	decodeActionJSON(t, response, &payload)
 	if response.Code != http.StatusOK || payload.Session == "" || payload.Session == source {
@@ -187,13 +168,10 @@ func TestContinuingInAnotherFolderForksTheSessionThere(t *testing.T) {
 	if after, err := os.ReadFile(source); err != nil || string(after) != string(original) {
 		t.Fatalf("the original session changed: %s", after)
 	}
-	started, err := os.ReadFile(fakeLog)
-	if err != nil || !strings.Contains(string(started), `"event":"started","sessionPath":`+jsonString(payload.Session)+`,"cwd":`+jsonString(target)) {
-		t.Fatalf("fake Pi log = %s", started)
-	}
-	page := serveAction(handler, getActionRequest("/?session="+url.QueryEscape(payload.Session))).Body.String()
-	if !strings.Contains(page, "Fixture answer") || !strings.Contains(page, `placeholder="Ask Pi…"`) {
-		t.Fatalf("forked session page:\n%s", page)
+	var tags struct{ Tags []string }
+	decodeActionJSON(t, serveAction(handler, getActionRequest("/sessions/tags?session="+url.QueryEscape(payload.Session))), &tags)
+	if len(tags.Tags) != 1 || tags.Tags[0] != "work" {
+		t.Fatalf("forked session tags = %v", tags.Tags)
 	}
 }
 

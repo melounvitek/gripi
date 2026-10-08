@@ -8,6 +8,7 @@ import { activeRecovery, footerModel, footerStatus, mobileSubagents, nativeBash,
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
+const forkSource = valueAfter("--fork");
 const sessionsRoot = process.env.GRIPI_E2E_SESSIONS_ROOT;
 let sessionPath = resumedPath || null;
 let header = null;
@@ -34,7 +35,7 @@ let heldPromptEvents = null;
 let recoveryMessage = null;
 
 if (sessionPath) loadSession(sessionPath);
-else if (valueAfter("--fork")) forkSession(valueAfter("--fork"));
+else if (forkSource) forkSession(forkSource);
 else prepareNewSession();
 log({ event: "started", sessionPath, cwd: process.cwd() });
 process.once("exit", () => log({ event: "stopped" }));

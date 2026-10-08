@@ -39,7 +39,7 @@ export class NewSessionFormController {
   }
 
   // fork is the { path, name } of a session whose folder is gone, which Pi forks into the folder picked here.
-  open(form, fork = null) {
+  open(form, fork) {
     if (!form?._newSessionFormState) return;
     Object.assign(form._newSessionFormState, { expanded: false, fork });
     form.querySelector("[data-new-session-fork-from]").value = fork?.path || "";
