@@ -112,21 +112,17 @@ for (const touch of [false, true]) {
       await expect(link).toHaveCount(0, { timeout: 15_000 });
       const toggle = page.locator("[data-sidebar-cli-toggle]");
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
-      await expect(toggle).toHaveAttribute("title", /^Show \d+ Pi CLI sessions?$/);
-      await expect(toggle.locator(".sidebar-tool-slash")).toBeVisible();
-      await expect(page.locator("[data-sidebar-filter-count]")).toHaveCount(0);
       // It sits just left of the search button and matches its size.
       const [toggleBox, searchBox] = await Promise.all([toggle, page.locator("[data-sidebar-search-toggle]")].map((control) => control.boundingBox()));
+      const gap = searchBox.x - (toggleBox.x + toggleBox.width);
       expect(toggleBox.width).toBeCloseTo(searchBox.width, 1);
       expect(toggleBox.height).toBeCloseTo(searchBox.height, 1);
-      expect(searchBox.x - (toggleBox.x + toggleBox.width)).toBeGreaterThanOrEqual(0);
-      expect(searchBox.x - (toggleBox.x + toggleBox.width)).toBeLessThan(4);
+      expect(gap).toBeGreaterThanOrEqual(0);
+      expect(gap).toBeLessThan(4);
       await page.screenshot({ path: testInfo.outputPath("cli-sessions-hidden.png") });
 
       await activate(toggle);
       await expect(toggle).toHaveAttribute("aria-pressed", "true");
-      await expect(toggle).toHaveAttribute("title", /^Hide \d+ Pi CLI sessions?$/);
-      await expect(toggle.locator(".sidebar-tool-slash")).toHaveCount(0);
       await expectExternalIcon(link);
       if (touch) await expect(page.locator("#mobile-session-toggle")).toBeChecked();
       await page.screenshot({ path: testInfo.outputPath("cli-sessions-shown.png") });

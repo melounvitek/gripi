@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -41,13 +40,11 @@ func TestSidebarHidesPiCLISessionsUntilTheBrowserShowsThem(t *testing.T) {
 
 	sidebar := func(t *testing.T, query url.Values, shown bool) (toggle, header, current, list string) {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodGet, "http://app.test/sidebar?"+query.Encode(), nil)
-		request.RemoteAddr = "127.0.0.1:1234"
+		request := getActionRequest("/sidebar?" + query.Encode())
 		if shown {
 			request.AddCookie(&http.Cookie{Name: "gripi_show_cli_sessions", Value: "1"})
 		}
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
+		response := serveAction(handler, request)
 		if response.Code != http.StatusOK {
 			t.Fatalf("sidebar = %d %s", response.Code, response.Body.String())
 		}
@@ -84,7 +81,7 @@ func TestSidebarHidesPiCLISessionsUntilTheBrowserShowsThem(t *testing.T) {
 		if !listed(list, cliAlpha) || !listed(list, cliOpen) || !listed(header, cliPinned) || listed(list, cliPinned) {
 			t.Fatal("Pi CLI sessions are not listed once shown")
 		}
-		for _, expected := range []string{`aria-pressed="true"`, `title="Hide 2 Pi CLI sessions"`} {
+		for _, expected := range []string{`aria-pressed="true"`, `title="Hide 2 Pi CLI sessions"`, `aria-label="Show 2 Pi CLI sessions"`} {
 			if !strings.Contains(toggle, expected) {
 				t.Errorf("toggle missing %s", expected)
 			}

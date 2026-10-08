@@ -527,7 +527,6 @@ func (view *pageView) prepareSidebar() {
 			view.PinnedSessions = append(view.PinnedSessions, session)
 		}
 	}
-	// Pi CLI sessions stay out of the list unless this browser chose to show them.
 	cookie, err := view.Request.Cookie(cliSessionsCookie)
 	view.CLISessionsShown = err == nil && cookie.Value == "1"
 	var pool []*sessions.Session
@@ -552,9 +551,10 @@ func (view *pageView) prepareSidebar() {
 		if view.ExternalFollow[session.Path] {
 			view.CLISessionCount++
 		}
-		if !hidden {
-			pool = append(pool, session)
+		if hidden {
+			continue
 		}
+		pool = append(pool, session)
 	}
 	limit, _ := strconv.Atoi(view.Params.Get("sidebar_sessions_limit"))
 	if limit < recentSessionLimit {
