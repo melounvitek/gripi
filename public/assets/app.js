@@ -2949,6 +2949,8 @@ function modalIsOpen() {
 function openModal(modal) {
   if (!modal) return;
   modal.hidden = false;
+  // A Ctrl held on into a dialog would otherwise keep the sidebar's numbers, and their digits, on behind it.
+  exitSessionShortcutMode();
   clearTimeout(eventPollTimer);
   sidebarController.pause();
   browserAccessController.pause();

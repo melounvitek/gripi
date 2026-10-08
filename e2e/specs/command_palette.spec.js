@@ -127,6 +127,41 @@ test("Enter pressed before the sessions arrive opens the first match once they d
   await expect(dialog(page)).toBeHidden();
 });
 
+test("Ctrl and a digit open that numbered session, and not the sidebar's while Ctrl is held on from Ctrl+K", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await page.goto("/?no_session=1");
+  // With the sidebar's first session open, and so missing from the palette, the two lists number other sessions.
+  await page.keyboard.press("Control+1");
+  await expect(page.locator('.session-row[data-current="true"] [data-session-shortcut="1"]')).toBeVisible();
+  const sidebarSecond = await page.locator(".session-row:has([data-session-shortcut='2'])").getAttribute("data-session-name");
+
+  await page.keyboard.down("Control");
+  await page.keyboard.press("k");
+  await expect(dialog(page).locator(".command-palette-key:visible")).toHaveText(["1", "2", "3", "4", "5"]);
+  const second = (await options(page).nth(1).locator(".command-palette-name").textContent()).replace(/^Unread: /, "");
+  expect(second).not.toBe(sidebarSecond);
+  await page.keyboard.press("2");
+  await page.keyboard.up("Control");
+  await expect(dialog(page)).toBeHidden();
+  // A second switch would cancel this one.
+  await expect(page.locator('.session-row[data-current="true"]')).toHaveAttribute("data-session-name", second);
+});
+
+test("Ctrl and a digit pressed before the sessions arrive open that row once they do", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  let second;
+  const release = await holdSessions(page, async (route) => {
+    const response = await route.fetch();
+    second = (await response.json()).sessions[1].name;
+    await route.fulfill({ response });
+  });
+  await page.keyboard.press("Control+2");
+  await expect(dialog(page)).toBeVisible();
+  release();
+  await expect(dialog(page)).toBeHidden();
+  await expect(page.locator('.session-row[data-current="true"]')).toHaveAttribute("data-session-name", second);
+});
+
 test("without the sessions the commands still run, but not from an Enter pressed while waiting", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
   const release = await holdSessions(page, (route) => route.fulfill({ status: 500 }));
