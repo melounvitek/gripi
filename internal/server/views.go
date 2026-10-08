@@ -548,10 +548,12 @@ func (view *pageView) prepareSidebar() {
 		limit = len(pool)
 	}
 	view.SessionsLimit, view.SessionPool, view.SessionPoolLength = limit, pool, len(pool)
-	if limit > len(pool) {
-		limit = len(pool)
+	// Unread sessions past the limit show too, in their place, so none waits out of sight.
+	for index, session := range pool {
+		if index < limit || view.Unread[session.Path] {
+			view.SidebarSessions = append(view.SidebarSessions, session)
+		}
 	}
-	view.SidebarSessions = pool[:limit]
 	if view.Selected != nil && !view.Pinned[view.Selected.Path] {
 		found := false
 		for _, session := range view.SidebarSessions {

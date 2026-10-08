@@ -8,6 +8,7 @@ const status = (page) => dialog(page).getByRole("status");
 const command = (page, name) => dialog(page).getByRole("option", { name, exact: true });
 const heading = (page, name) => page.getByRole("heading", { level: 1, name, exact: true });
 const composer = (page) => page.getByLabel("Message to Pi");
+const sessionNames = (page, group) => dialog(page).getByRole("group", { name: group, exact: true }).locator(".command-palette-name");
 
 // Starting with no session open keeps every seeded session on offer, whichever one earlier specs left most recent.
 async function open(page) {
@@ -22,6 +23,15 @@ async function openSession(page, query, name) {
   await input(page).fill(query);
   await page.keyboard.press("Enter");
   await expect(heading(page, name)).toBeVisible();
+}
+
+// Earlier specs can leave sessions unread, and those lead the list, so a test that relies on its order picks the one unread session, if any.
+async function serveUnread(page, pick = () => null) {
+  await page.route("**/sessions/palette", async (route) => {
+    const list = (await (await route.fetch()).json()).sessions;
+    const unread = pick(list);
+    await route.fulfill({ json: { sessions: list.map((session) => ({ ...session, unread: session === unread })) } });
+  });
 }
 
 // Holds the session list back until the returned function is called.
@@ -104,6 +114,7 @@ test("the first activation beside the card closes it, and of a row opens that se
 
 test("Ctrl+K then Enter flips between the last two sessions this tab had open", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
+  await serveUnread(page);
   await open(page);
   await openSession(page, "contract ready", sessions.marker);
   await page.keyboard.press("Control+k");
@@ -114,6 +125,31 @@ test("Ctrl+K then Enter flips between the last two sessions this tab had open", 
     await page.keyboard.press("Enter");
     await expect(heading(page, name)).toBeVisible();
   }
+});
+
+test("unread sessions lead, before the session this tab had open before and the newer ones", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  let list, unread;
+  // The oldest session, other than the two opened below.
+  await serveUnread(page, (sessionsList) => {
+    list = sessionsList;
+    unread = list.findLast((session) => ![sessions.marker, sessions.history].includes(session.name));
+    return unread;
+  });
+  const others = (...skipped) => list.filter((session) => session !== unread && !skipped.includes(session.name)).map((session) => session.name);
+  await open(page);
+  await expect(sessionNames(page, "Recent sessions")).toHaveText([`Unread: ${unread.name}`, ...others().slice(0, 4)]);
+
+  await openSession(page, "contract ready", sessions.marker);
+  await page.keyboard.press("Control+k");
+  await openSession(page, "history desktop", sessions.history);
+  await page.keyboard.press("Control+k");
+  await expect(sessionNames(page, "Recent sessions")).toHaveText([`Unread: ${unread.name}`, sessions.marker, ...others(sessions.marker, sessions.history).slice(0, 3)]);
+
+  // Typed words leave the previous session in its place.
+  await input(page).fill("e2e");
+  const matching = list.filter((session) => session !== unread && session.name !== sessions.history && `${session.name}\n${session.project}`.toLowerCase().includes("e2e"));
+  await expect(sessionNames(page, "Sessions")).toHaveText([`Unread: ${unread.name}`, ...matching.slice(0, 7).map((session) => session.name)]);
 });
 
 test("Enter pressed before the sessions arrive opens the first match once they do", async ({ page, isMobile }) => {
@@ -129,6 +165,7 @@ test("Enter pressed before the sessions arrive opens the first match once they d
 
 test("Ctrl and a digit open that numbered session, and not the sidebar's while Ctrl is held on from Ctrl+K", async ({ page, isMobile }) => {
   test.skip(isMobile, "Keyboard flow");
+  await serveUnread(page);
   await page.goto("/?no_session=1");
   // With the sidebar's first session open, and so missing from the palette, the two lists number other sessions.
   await page.keyboard.press("Control+1");
@@ -139,7 +176,7 @@ test("Ctrl and a digit open that numbered session, and not the sidebar's while C
   await page.keyboard.press("k");
   // The commands after the five sessions are numbered too.
   await expect(dialog(page).locator(".command-palette-key:visible")).toHaveText(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
-  const second = (await options(page).nth(1).locator(".command-palette-name").textContent()).replace(/^Unread: /, "");
+  const second = await options(page).nth(1).locator(".command-palette-name").textContent();
   expect(second).not.toBe(sidebarSecond);
   await page.keyboard.press("2");
   await page.keyboard.up("Control");
@@ -152,9 +189,10 @@ test("Ctrl and a digit pressed before the sessions arrive open that row once the
   test.skip(isMobile, "Keyboard flow");
   let second;
   const release = await holdSessions(page, async (route) => {
-    const response = await route.fetch();
-    second = (await response.json()).sessions[1].name;
-    await route.fulfill({ response });
+    // An unread session would lead the list.
+    const list = (await (await route.fetch()).json()).sessions.map((session) => ({ ...session, unread: false }));
+    second = list[1].name;
+    await route.fulfill({ json: { sessions: list } });
   });
   await page.keyboard.press("Control+2");
   await expect(dialog(page)).toBeVisible();

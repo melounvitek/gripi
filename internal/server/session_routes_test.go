@@ -241,6 +241,67 @@ func TestSidebarGroupsSessionsByActivityDay(t *testing.T) {
 	}
 }
 
+func TestSidebarAddsOlderUnreadSessionsInTheirPlace(t *testing.T) {
+	root := t.TempDir()
+	fixture := nativeFixture{root: root, home: filepath.Join(root, "home"), sessionsRoot: filepath.Join(root, "sessions"), attachmentsRoot: filepath.Join(root, "attachments"), configuredCWDs: filepath.Join(root, "cwds")}
+	alpha, beta := filepath.Join(root, "alpha"), filepath.Join(root, "beta")
+	for _, directory := range []string{fixture.home, filepath.Join(fixture.sessionsRoot, "project"), filepath.Join(root, "state"), fixture.attachmentsRoot, alpha, beta} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Twenty sessions fill the sidebar. Below them are alpha's unread session 20 and read session 21, and beta's unread session 22.
+	now := time.Now()
+	read := map[string]int{}
+	for index := range 23 {
+		activity, cwd := now.Add(-time.Duration(index)*time.Second), alpha
+		if index >= 20 {
+			activity = now.AddDate(0, 0, -index)
+		}
+		if index == 22 {
+			cwd = beta
+		}
+		timestamp := activity.UTC().Format(time.RFC3339Nano)
+		lines := fmt.Sprintf(`{"type":"session","version":3,"id":"s%[1]d","timestamp":%[2]q,"cwd":%[3]q}
+{"type":"message","id":"u%[1]d","parentId":null,"timestamp":%[2]q,"message":{"role":"user","content":[{"type":"text","text":"Session %[1]d"}]}}
+{"type":"message","id":"a%[1]d","parentId":"u%[1]d","timestamp":%[2]q,"message":{"role":"assistant","content":[{"type":"text","text":"Reply"}],"stopReason":"stop"}}
+`, index, timestamp, cwd)
+		path := filepath.Join(fixture.sessionsRoot, "project", fmt.Sprintf("s%d.jsonl", index))
+		if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if index == 20 || index == 22 {
+			// Marked read at zero replies, so its one reply is unread.
+			read[path] = 0
+		}
+	}
+	state, _ := json.Marshal(read)
+	if err := os.WriteFile(filepath.Join(root, "state", "read.json"), state, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := fixtureHandler(t, fixture)
+	row := func(index int) string { return fmt.Sprintf(`data-session-name="Session %d"`, index) }
+	// A project filter or a search hides beta's unread session like any session it filters out.
+	for filter, unread := range map[string][]int{"": {20, 22}, "?project=" + url.QueryEscape(alpha): {20}, "?session_search=alpha": {20}} {
+		list := strings.Split(serve(t, handler, http.MethodGet, "/sidebar"+filter, "").Body.String(), `<div class="sessions-list">`)[1]
+		if rows := strings.Count(list, "data-session-name="); rows != 20+len(unread) {
+			t.Fatalf("%q: sidebar lists %d sessions: %s", filter, rows, list)
+		}
+		order := []string{row(19), ">Earlier<"}
+		for _, index := range unread {
+			order = append(order, row(index))
+		}
+		position := -1
+		for _, marker := range append(order, "data-sidebar-load-more") {
+			if strings.Count(list, marker) != 1 || strings.Index(list, marker) < position {
+				t.Fatalf("%q: %q is missing or out of place: %s", filter, marker, list)
+			}
+			position = strings.Index(list, marker)
+		}
+	}
+}
+
 func TestRPCObservationRoutesUseFakePiAndPreserveJSONL(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	node, err := exec.LookPath("node")
