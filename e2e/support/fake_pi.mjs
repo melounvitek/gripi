@@ -652,8 +652,14 @@ function acceptBash(command) {
 
   const operation = { command, timer: null };
   activeBash = operation;
-  const delay = LONG_BASH_COMMANDS.has(command.command) ? 30_000 : 120;
-  operation.timer = setTimeout(() => completeBash(operation, bashResult(command.command)), delay);
+  if (LONG_BASH_COMMANDS.has(command.command)) {
+    operation.timer = setTimeout(() => completeBash(operation, bashResult(command.command)), 30_000);
+    return;
+  }
+  const result = bashResult(command.command);
+  // Like Pi, stream the output under the command's ID before the response.
+  send({ type: "bash_execution_update", id: command.id, delta: result.output });
+  operation.timer = setTimeout(() => completeBash(operation, result), 120);
 }
 
 function acceptBashAbort(command) {

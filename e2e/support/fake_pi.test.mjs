@@ -82,6 +82,7 @@ test("fake Pi keeps fresh bash history in memory until an assistant response per
   await assert.rejects(readFile(sessionPath), { code: "ENOENT" });
 
   child.stdin.write(`${JSON.stringify({ id: "bash-included", type: "bash", command: nativeBash.included.command })}\n`);
+  assert.deepEqual(await nextRecord(records), { type: "bash_execution_update", id: "bash-included", delta: nativeBash.included.output });
   const included = await nextRecord(records);
   assert.deepEqual(included, {
     id: "bash-included",
@@ -92,9 +93,10 @@ test("fake Pi keeps fresh bash history in memory until an assistant response per
   });
 
   child.stdin.write(`${JSON.stringify({ id: "bash-excluded", type: "bash", command: nativeBash.excluded.command, excludeFromContext: true })}\n`);
-  assert.equal((await nextRecord(records)).id, "bash-excluded");
+  const excluded = (await readRecords(records, 2)).at(-1);
+  assert.deepEqual([excluded.type, excluded.id], ["response", "bash-excluded"]);
   child.stdin.write(`${JSON.stringify({ id: "bash-nonzero", type: "bash", command: nativeBash.nonzero.command })}\n`);
-  const nonzero = await nextRecord(records);
+  const nonzero = (await readRecords(records, 2)).at(-1);
   assert.equal(nonzero.data.exitCode, nativeBash.nonzero.exitCode);
   assert.equal(nonzero.data.output, nativeBash.nonzero.output);
 

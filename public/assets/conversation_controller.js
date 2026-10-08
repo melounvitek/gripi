@@ -421,7 +421,8 @@ export class ConversationController {
   }
 
   focusedViewMessage(message) {
-    if (message.classList.contains("message--compaction")) return true;
+    // Shell commands the user ran with ! or !! are theirs, not Pi's activity.
+    if (message.classList.contains("message--compaction") || message.classList.contains("message--bash-execution")) return true;
     if (["message--thinking", "message--tool-preparation", "message--tool", "message--tool-call", "message--tool-transcript", "message--error", "message--tool-error"].some((name) => message.classList.contains(name))) return false;
     return !["system", "status", "tool", "toolResult", "error"].includes(message.dataset.role);
   }
