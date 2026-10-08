@@ -475,6 +475,21 @@ func TestOversizedAssistantSessionMetadataExcludesCommentaryAndUnicodeWhitespace
 	}
 }
 
+func TestOversizedAssistantWithALongCommentarySignatureKeepsTheSessionListed(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	signature := `{\"v\":1,\"id\":\"` + strings.Repeat("p", MaxIndexedEntryBytes) + `\",\"phase\":\"commentary\"}`
+	writeSessionLines(t, path, []string{
+		sessionLine(project),
+		userLine("user", "", "2026-01-01T00:00:01Z", "Question"),
+		`{"type":"message","id":"answer","parentId":"user","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"Internal note","textSignature":"` + signature + `"},{"type":"text","text":"Answer"}]}}`,
+	})
+
+	sessions, err := (Store{Root: root, Home: root, Cache: NewCache()}).Sessions()
+	if err != nil || len(sessions) != 1 || sessions[0].LatestAssistantResponsePreview != "Answer" {
+		t.Fatalf("sessions = %#v, err = %v", sessions, err)
+	}
+}
+
 func TestUnnamedSessionIsTitledByFirstUserMessageAfterSystemMessage(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	writeSessionLines(t, path, []string{
@@ -522,7 +537,7 @@ func TestOversizedNativeGeneralSubagentEntriesRemainDiscoverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !indexed.supported || len(indexed.entries) != 2 || indexed.entries[1].GeneralToolCount != toolCount {
+	if len(indexed.entries) != 2 || indexed.entries[1].GeneralToolCount != toolCount {
 		t.Fatalf("indexed = %#v", indexed)
 	}
 	if indexed.bytes > 1<<20 {
@@ -746,7 +761,7 @@ func TestSmallNativeGeneralSubagentRenderingRemainsUnchanged(t *testing.T) {
 	}
 }
 
-func TestOversizedNativeGeneralSubagentRejectsInvalidToolItems(t *testing.T) {
+func TestOversizedNativeGeneralSubagentWithInvalidToolItemsRendersInFull(t *testing.T) {
 	encodedOutput, err := json.Marshal(strings.Repeat("x", MaxIndexedEntryBytes))
 	if err != nil {
 		t.Fatal(err)
@@ -788,28 +803,17 @@ func TestOversizedNativeGeneralSubagentRejectsInvalidToolItems(t *testing.T) {
 			writeSessionLines(t, path, []string{sessionLine(project), line})
 
 			store := Store{Root: root, Home: root, Cache: NewCache()}
-			if _, err := store.Window(path, "", false, nil, nil); err == nil {
-				t.Fatal("invalid oversized general subagent tool was accepted")
+			window, err := store.Window(path, "", false, nil, nil)
+			if err != nil || len(window.Messages) != 1 {
+				t.Fatalf("window = %d messages, err = %v", len(window.Messages), err)
 			}
-			if _, ok := store.Session(path); ok {
-				t.Fatal("session with invalid oversized general subagent tool was discovered")
+			if text := window.Messages[0].Text; !strings.Contains(text, "✓ read") || !strings.Contains(text, "Review complete") {
+				t.Fatalf("general subagent text = %.200q", text)
+			}
+			if _, ok := store.Session(path); !ok {
+				t.Fatal("session with invalid oversized general subagent tool was not discovered")
 			}
 		})
-	}
-}
-
-func TestOversizedNativeGeneralSubagentMalformedToolsRemainRejected(t *testing.T) {
-	root, project, path := sessionFixture(t)
-	line := nativeGeneralSubagentLine(project, 400, strings.Repeat("output ", 160))
-	line = strings.Replace(line, `],"textItems"`, `,],"textItems"`, 1)
-	writeSessionLines(t, path, []string{sessionLine(project), line})
-
-	store := Store{Root: root, Home: root, Cache: NewCache()}
-	if _, err := store.Status(path); err == nil {
-		t.Fatal("malformed native general subagent entry was accepted")
-	}
-	if _, ok := store.Session(path); ok {
-		t.Fatal("malformed native general subagent session was discovered")
 	}
 }
 
@@ -856,6 +860,42 @@ func TestOversizedToolResultWithDurationKeepsTheSessionListed(t *testing.T) {
 	}
 	if len(window.Messages) != 1 || window.Messages[0].Text != "ok" {
 		t.Fatalf("messages = %#v", window.Messages)
+	}
+}
+
+func TestOversizedToolResultWithAnUnknownKeyIsListedAndRendered(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	output := strings.Repeat("o", MaxIndexedEntryBytes+1024)
+	writeSessionLines(t, path, []string{
+		sessionLine(project),
+		userLine("user", "", "2026-01-01T00:00:01Z", "Run it"),
+		`{"type":"message","id":"call","parentId":"user","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"bash-1","name":"bash","arguments":{"command":"echo ok"}}]}}`,
+		`{"type":"message","id":"result","parentId":"call","timestamp":"2026-01-01T00:00:03Z","message":{"role":"toolResult","toolCallId":"bash-1","toolName":"bash","content":[{"type":"text","text":"` + output + `"}],"isError":false,"unknownKey":true}}`,
+	})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	sessions, err := store.Sessions()
+	if err != nil || len(sessions) != 1 || sessions[0].DisplayName != "Run it" {
+		t.Fatalf("sessions = %#v, err = %v", sessions, err)
+	}
+	window, err := store.Window(path, "", false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window.Messages) != 2 || window.Messages[1].ToolName != "bash" || window.Messages[1].Text != output {
+		t.Fatalf("window = %d messages", len(window.Messages))
+	}
+}
+
+func TestOversizedFirstUserMessageReadInFullKeepsABoundedTitle(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	text := strings.Repeat("q", 2*MaxIndexedEntryBytes)
+	line := strings.Replace(userLine("user", "", "2026-01-01T00:00:01Z", text), `"role":"user"`, `"role":"user","unknownKey":true`, 1)
+	writeSessionLines(t, path, []string{sessionLine(project), line})
+
+	sessions, err := (Store{Root: root, Home: root, Cache: NewCache()}).Sessions()
+	if err != nil || len(sessions) != 1 || sessions[0].DisplayName != text[:MaxIndexedEntryBytes] {
+		t.Fatalf("sessions = %d, err = %v", len(sessions), err)
 	}
 }
 
@@ -946,54 +986,61 @@ func TestIndexAcceptsAWellFormedEntryAtThe64MiBCapWithoutCachingItsContent(t *te
 	}
 }
 
-func TestUnsupportedOversizedEntriesRejectStatusAndSessionMetadata(t *testing.T) {
+func TestOversizedEntryOfAnUnknownTypeKeepsTheSessionListed(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	writeSessionLines(t, path, []string{
 		sessionLine(project),
-		`{"type":"unknown","payload":"` + strings.Repeat("x", MaxIndexedEntryBytes+1) + `"}`,
+		userLine("user", "", "2026-01-01T00:00:01Z", "Question"),
+		`{"type":"unknown","id":"unknown","parentId":"user","payload":"` + strings.Repeat("x", MaxIndexedEntryBytes+1) + `"}`,
+		userLine("later", "unknown", "2026-01-01T00:00:02Z", "Later"),
 	})
 	store := Store{Root: root, Home: root, Cache: NewCache()}
-	if _, err := store.Status(path); err == nil {
-		t.Fatal("status returned partial metadata")
-	}
-	if _, ok := store.Session(path); ok {
-		t.Fatal("session returned partial metadata")
-	}
-	sessions, err := store.Sessions()
-	if err != nil {
+
+	if _, err := store.Status(path); err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 0 {
-		t.Fatalf("discovery returned partial sessions: %#v", sessions)
+	sessions, err := store.Sessions()
+	if err != nil || len(sessions) != 1 || sessions[0].DisplayName != "Question" || sessions[0].MessageCount != 2 {
+		t.Fatalf("sessions = %#v, err = %v", sessions, err)
+	}
+	window, err := store.Window(path, "later", true, nil, nil)
+	if err != nil || len(window.Messages) != 2 || window.Messages[0].Text != "Question" || window.Messages[1].Text != "Later" {
+		t.Fatalf("window = %#v, err = %v", window.Messages, err)
 	}
 }
 
-func TestWindowRejectsMalformedUnsupportedAndOverCapOversizedEntries(t *testing.T) {
+func TestUnreadableOversizedEntriesAreSkipped(t *testing.T) {
 	root, project, path := sessionFixture(t)
+	header := sessionLine(project) + "\n" + userLine("user", "", "2026-01-01T00:00:01Z", "Question")
+	later := userLine("later", "user", "2026-01-01T00:00:03Z", "Later")
 	tests := []struct {
-		name string
-		line string
+		name  string
+		write func(*testing.T)
 	}{
-		{"malformed", `{"type":"message","id":"bad","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":[{"type":"text","text":"` + strings.Repeat("x", MaxIndexedEntryBytes+1) + `"}],}}`},
-		{"unsupported", `{"type":"unknown","payload":"` + strings.Repeat("x", MaxIndexedEntryBytes+1) + `"}`},
-		{"excessive structure", `{"type":"compaction","id":"compact","parentId":null,"timestamp":"2026-01-01T00:00:01Z","summary":"ok","firstKeptEntryId":"","tokensBefore":1,"details":{"payload":"` + strings.Repeat("x", MaxIndexedEntryBytes+1) + `","items":[` + strings.Repeat(`{},`, indexMaxValues) + `{ }]}}`},
+		{"malformed", func(t *testing.T) {
+			malformed := `{"type":"message","id":"bad","parentId":"user","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"text","text":"` + strings.Repeat("x", MaxIndexedEntryBytes+1) + `"}],}}`
+			writeSessionLines(t, path, []string{header, malformed, later})
+		}},
+		{"over cap", func(t *testing.T) {
+			prefix := `{"type":"message","id":"too-large","parentId":"user","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"`
+			writeRepeatedSessionLine(t, path, header, prefix, 'x', MaxRenderedEntryBytes, `"}}`, []string{later})
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			writeSessionLines(t, path, []string{sessionLine(project), test.line})
-			_, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil)
-			if err == nil {
-				t.Fatal("unsupported oversized entry was accepted")
+			test.write(t)
+			store := Store{Root: root, Home: root, Cache: NewCache()}
+
+			sessions, err := store.Sessions()
+			if err != nil || len(sessions) != 1 || sessions[0].DisplayName != "Question" || sessions[0].MessageCount != 2 {
+				t.Fatalf("sessions = %#v, err = %v", sessions, err)
+			}
+			window, err := store.Window(path, "later", true, nil, nil)
+			if err != nil || len(window.Messages) != 2 || window.Messages[0].Text != "Question" || window.Messages[1].Text != "Later" {
+				t.Fatalf("window = %#v, err = %v", window.Messages, err)
 			}
 		})
 	}
-	t.Run("over cap", func(t *testing.T) {
-		prefix := `{"type":"message","id":"too-large","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"`
-		writeRepeatedSessionLine(t, path, sessionLine(project), prefix, 'x', MaxRenderedEntryBytes, `"}}`, nil)
-		if _, err := (Store{Root: root, Home: root, Cache: NewCache()}).Window(path, "", false, nil, nil); err == nil {
-			t.Fatal("over-cap entry was accepted")
-		}
-	})
 }
 
 func TestSymlinkedSessionsRootPreservesConfiguredPathIdentity(t *testing.T) {
@@ -1263,10 +1310,8 @@ func TestSessionMetadataCacheRetainsKnownInvalidOutcomes(t *testing.T) {
 	}
 	validPath := filepath.Join(root, "valid.jsonl")
 	malformedPath := filepath.Join(root, "malformed.jsonl")
-	unsupportedPath := filepath.Join(root, "unsupported.jsonl")
 	writeSessionLines(t, validPath, []string{sessionLine(project)})
 	writeSessionLines(t, malformedPath, []string{"not json"})
-	writeSessionLines(t, unsupportedPath, []string{sessionLine(project), `{"type":"unknown","payload":"` + strings.Repeat("x", MaxIndexedEntryBytes+1) + `"}`})
 	store := Store{Root: root, Home: root, Cache: NewCache()}
 
 	for scan := 0; scan < 2; scan++ {
@@ -1277,14 +1322,11 @@ func TestSessionMetadataCacheRetainsKnownInvalidOutcomes(t *testing.T) {
 	}
 	store.Cache.mu.Lock()
 	defer store.Cache.mu.Unlock()
-	if len(store.Cache.metadataItems) != 3 {
+	if len(store.Cache.metadataItems) != 2 {
 		t.Fatalf("metadata count = %d", len(store.Cache.metadataItems))
 	}
 	if item := store.Cache.metadataItems[malformedPath]; item == nil || item.session != nil {
 		t.Fatalf("malformed metadata outcome = %#v", item)
-	}
-	if item := store.Cache.metadataItems[unsupportedPath]; item == nil || item.session != nil {
-		t.Fatalf("unsupported metadata outcome = %#v", item)
 	}
 }
 
@@ -1292,7 +1334,7 @@ func TestSessionMetadataCacheIsBounded(t *testing.T) {
 	cache := NewCache()
 	for number := 0; number < 10_000; number++ {
 		path := fmt.Sprintf("/sessions/session-%05d.jsonl", number)
-		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), supported: true, sessionMetadataSupported: true, session: &Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
+		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), session: &Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
 		cache.mu.Lock()
 		cache.cacheSessionMetadataLocked(path, indexed)
 		cache.mu.Unlock()
@@ -1306,7 +1348,7 @@ func TestSessionMetadataCacheIsBounded(t *testing.T) {
 
 	for number := 10_000; number <= maxMetadataCacheEntries; number++ {
 		path := fmt.Sprintf("/sessions/session-%05d.jsonl", number)
-		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), supported: true, sessionMetadataSupported: true, session: &Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
+		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), session: &Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
 		cache.mu.Lock()
 		cache.cacheSessionMetadataLocked(path, indexed)
 		cache.mu.Unlock()
@@ -1319,7 +1361,7 @@ func TestSessionMetadataCacheIsBounded(t *testing.T) {
 	}
 
 	path := "/sessions/over-budget.jsonl"
-	indexed := &index{path: path, device: 1, inode: 99_999, size: 100, mtime: time.Unix(1, 0), supported: true, sessionMetadataSupported: true, session: &Session{Path: path, CWD: "/project", DisplayName: strings.Repeat("x", maxMetadataCacheBytes)}}
+	indexed := &index{path: path, device: 1, inode: 99_999, size: 100, mtime: time.Unix(1, 0), session: &Session{Path: path, CWD: "/project", DisplayName: strings.Repeat("x", maxMetadataCacheBytes)}}
 	cache.mu.Lock()
 	cache.cacheSessionMetadataLocked(path, indexed)
 	_, cached := cache.metadataItems[path]
@@ -1332,7 +1374,7 @@ func TestSessionMetadataCacheIsBounded(t *testing.T) {
 func TestMetadataIsCachedWhenTheConversationIndexExceedsItsCacheBudget(t *testing.T) {
 	cache := NewCache()
 	path := "/sessions/large-index.jsonl"
-	indexed := &index{path: path, device: 1, inode: 2, size: 100, mtime: time.Unix(1, 0), bytes: maxCacheBytes + 1, supported: true, sessionMetadataSupported: true, session: &Session{Path: path, CWD: "/project", DisplayName: "Large conversation"}}
+	indexed := &index{path: path, device: 1, inode: 2, size: 100, mtime: time.Unix(1, 0), bytes: maxCacheBytes + 1, session: &Session{Path: path, CWD: "/project", DisplayName: "Large conversation"}}
 	cache.cacheBuiltIndex(path, indexed)
 	cache.mu.Lock()
 	metadata := cache.metadataItems[path]
@@ -1351,7 +1393,6 @@ func TestSessionMetadataCacheDetachesRetainedStrings(t *testing.T) {
 	largeResponse := strings.Repeat("x", MaxIndexedEntryBytes)
 	indexed := &index{
 		path: "/sessions/detached.jsonl", device: 1, inode: 2, size: 100, mtime: time.Unix(1, 0),
-		supported: true, sessionMetadataSupported: true,
 		session: &Session{DisplayName: strings.TrimSpace(paddedName), LatestAssistantResponsePreview: largeResponse[len(largeResponse)-16:]},
 	}
 	cached := sessionFromIndex(indexed)

@@ -889,7 +889,6 @@ func (collector *indexCollector) messageMetadata() (entry, bool) {
 	}
 	result.Session.Role = role
 	result.Session.Timestamp, _ = collector.exact("timestamp")
-	result.Session.MetadataKnown = true
 	switch role {
 	case "assistant":
 		result.Segments, result.SubagentIDs, ok = assistantScanSegments(parts, collector.argumentBytes, collector.argumentCommands)
@@ -901,7 +900,10 @@ func (collector *indexCollector) messageMetadata() (entry, bool) {
 		if text := collector.stringStats("message", "errorMessage"); result.Status.StopReason == "error" && text != nil && text.nonTrimWhitespace > 0 {
 			result.Segments = append(result.Segments, segment{Role: "error", Minimum: int64(text.nonTrimWhitespace * 2)})
 		}
-		result.Session.FinalText, result.Session.HasFinalText, result.Session.MetadataKnown = finalScannedAssistantText(parts)
+		result.Session.FinalText, result.Session.HasFinalText, ok = finalScannedAssistantText(parts)
+		if !ok {
+			return entry{}, false
+		}
 	case "user":
 		if visibleScannedContent(parts) {
 			result.Segments = []segment{{Role: role, Minimum: userScannedMinimum(parts)}}

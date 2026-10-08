@@ -197,8 +197,10 @@ func (store Store) AppendedEntryIDs(path string, previous, current FileSnapshot)
 	}
 	reader := bufio.NewReader(io.LimitReader(file, length))
 	result := []string{}
+	offset := previous.Size
 	for {
-		line, lineLength, largeEntry, readErr := readIndexedLine(reader)
+		line, lineLength, largeEntry, readErr := readIndexedLine(reader, file, offset)
+		offset += lineLength
 		if lineLength == 0 && errors.Is(readErr, io.EOF) {
 			break
 		}
