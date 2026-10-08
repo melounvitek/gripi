@@ -62,7 +62,7 @@ type application struct {
 	knownSessionHashes      map[string]bool
 	sessionHashesAt         time.Time
 	rpcClients              *rpc.Registry
-	newRPCClient            func(cwd, userID string) (rpc.RPCClient, error)
+	newRPCClient            func(cwd, userID, forkFrom string) (rpc.RPCClient, error)
 	rpcDiagnostics          *rpc.Diagnostics
 	pendingSessions         *rpc.PendingSessionRegistry
 	pendingRemapMu          sync.Mutex
@@ -80,6 +80,14 @@ type application struct {
 	ownsSession             func(*http.Request, string) bool
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
+}
+
+var errSessionFolderMissing = &sessions.SyncBlockedError{Mode: sessions.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
+
+func (app *application) sessionFolderMissing(path string) bool {
+	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
+	session, found := store.Session(path)
+	return found && session.FolderMissing
 }
 
 func logInternalError(operation string, err error) {
@@ -238,6 +246,10 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	app.rpcDiagnostics = diagnostics
 	app.completionNotifications = newCompletionNotifier(app)
 	app.rpcClients = rpc.NewRegistry(func(sessionPath string) (rpc.RPCClient, error) {
+		// Pi exits at once when a session's folder is gone, so such a session stays read-only.
+		if app.sessionFolderMissing(sessionPath) {
+			return nil, errSessionFolderMissing
+		}
 		owner := ""
 		if cfg.MultiUserMode {
 			var err error
@@ -256,7 +268,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		return rpc.Start(sessionPath, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
-	app.newRPCClient = func(cwd, userID string) (rpc.RPCClient, error) {
+	app.newRPCClient = func(cwd, userID, forkFrom string) (rpc.RPCClient, error) {
 		variables, err := app.piEnvironment(userID)
 		if err != nil {
 			return nil, err
@@ -265,7 +277,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		if err != nil {
 			return nil, err
 		}
-		return rpc.StartInCWD(cwd, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
+		return rpc.StartInCWD(cwd, forkFrom, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
 	}
 	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, app.sessionCache, app.rpcClients)
 	if cfg.ReadStatePath != "" {

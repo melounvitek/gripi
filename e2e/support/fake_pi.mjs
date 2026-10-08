@@ -8,6 +8,7 @@ import { activeRecovery, footerModel, footerStatus, mobileSubagents, nativeBash,
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
+const forkSource = valueAfter("--fork");
 const sessionsRoot = process.env.GRIPI_E2E_SESSIONS_ROOT;
 let sessionPath = resumedPath || null;
 let header = null;
@@ -34,6 +35,7 @@ let heldPromptEvents = null;
 let recoveryMessage = null;
 
 if (sessionPath) loadSession(sessionPath);
+else if (forkSource) forkSession(forkSource);
 else prepareNewSession();
 log({ event: "started", sessionPath, cwd: process.cwd() });
 process.once("exit", () => log({ event: "stopped" }));
@@ -1012,6 +1014,18 @@ function replaceWithNewSession(command) {
   sessionPersisted = false;
   prepareNewSession();
   respond(command, true, { data: { cancelled: false } });
+}
+
+// Like Pi's SessionManager.forkFrom: a new file in the folder's session directory with every entry copied and a link back.
+function forkSession(sourcePath) {
+  loadSession(sourcePath);
+  const timestamp = new Date().toISOString();
+  const id = randomUUID();
+  const directory = path.join(sessionsRoot, `--${process.cwd().replace(/^\//, "").replace(/[/\\:]/g, "-")}--`);
+  sessionPath = path.join(directory, `${timestamp.replace(/[:.]/g, "-")}_${id}.jsonl`);
+  header = { type: "session", version: 3, id, timestamp, cwd: process.cwd(), parentSession: sourcePath };
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(sessionPath, `${[header, ...entries].map((record) => JSON.stringify(record)).join("\n")}\n`);
 }
 
 function prepareNewSession() {

@@ -359,6 +359,7 @@
     .session-activity strong { color: var(--copy); font-weight: 650; }
     .session-activity--running { color: var(--accent); font-weight: 600; }
     .session-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-folder-missing { color: var(--gold); }
     .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.5rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); line-height: 1; }
     .sidebar-icon-button:hover { background: #ffffff08; color: var(--text); }
     .sidebar-new-session-button, .sidebar-open-pinned-button { display: inline-flex; margin-left: auto; align-items: center; gap: 0.3rem; letter-spacing: 0; text-transform: none; }
@@ -709,6 +710,7 @@
       .tree-session-fold::after { content: ""; position: absolute; inset: -0.8rem -0.75rem; }
     }
     .new-session-cwd-form { display: grid; gap: 0.75rem; }
+    .new-session-fork-note { margin: 0; color: var(--muted); font-size: 0.74rem; }
     [data-new-session-label] { min-width: 0; overflow-wrap: anywhere; }
     .new-session-where { color: var(--text); }
     /* Rows share the list's columns: cursor, monogram, name, path, last activity and shortcut digit. Their height always fits a wrapped name, even when the list scrolls. */

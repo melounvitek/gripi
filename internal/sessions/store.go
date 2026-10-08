@@ -57,6 +57,8 @@ type Session struct {
 	CreatedAt                      time.Time
 	ModifiedAt                     time.Time
 	ConversationActivityAt         time.Time
+	// FolderMissing is checked on every read rather than cached, so a folder that comes back is noticed.
+	FolderMissing bool `json:"-"`
 }
 
 type Image struct {
@@ -438,11 +440,9 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*Ses
 		if session == nil || session.CWD == "" || !filepath.IsAbs(session.CWD) {
 			return nil
 		}
-		if stat, err := os.Stat(session.CWD); err != nil || !stat.IsDir() {
-			return nil
-		}
 		copy := *session
 		copy.Path = configuredPath
+		copy.FolderMissing = folderMissing(copy.CWD)
 		if copy.ParentSessionPath != "" {
 			if parent, ok := ConfiguredSessionPath(configuredRoot, copy.ParentSessionPath); ok {
 				copy.ParentSessionPath = parent
@@ -475,17 +475,20 @@ func (store Store) Session(path string) (*Session, bool) {
 	if err != nil || indexed.session == nil || !filepath.IsAbs(indexed.session.CWD) {
 		return nil, false
 	}
-	if stat, err := os.Stat(indexed.session.CWD); err != nil || !stat.IsDir() {
-		return nil, false
-	}
 	copy := *indexed.session
 	copy.Path = configuredPath
+	copy.FolderMissing = folderMissing(copy.CWD)
 	if copy.ParentSessionPath != "" {
 		if parent, ok := ConfiguredSessionPath(configuredRoot, copy.ParentSessionPath); ok {
 			copy.ParentSessionPath = parent
 		}
 	}
 	return &copy, true
+}
+
+func folderMissing(path string) bool {
+	info, err := os.Stat(path)
+	return err != nil || !info.IsDir()
 }
 
 func (store Store) Window(path, leafID string, leafSupplied bool, cursor *int, after *int) (Window, error) {

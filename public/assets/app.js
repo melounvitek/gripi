@@ -150,6 +150,7 @@ let lastSessionSyncAt = Date.now();
 let lastEventSeq = 0;
 let lastQueueSeq = 0;
 let queueViewGeneration = 0;
+const BLOCKED_SYNC_MODES = ["external_follow", "conflict", "folder_missing"];
 // Match Pi CLI's working indicator: default label and pi-tui Loader frames.
 const WORKING_LABEL = "Working";
 const COMPOSER_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -910,7 +911,7 @@ function stopWaitingForOutput() {
 }
 
 function sessionSyncBlocked() {
-  return ["external_follow", "conflict"].includes(liveOutput?.dataset.sessionSyncMode);
+  return BLOCKED_SYNC_MODES.includes(liveOutput?.dataset.sessionSyncMode);
 }
 
 function showCurrentActiveTask(idleState = "done", idleLabel = "Done") {
@@ -1704,8 +1705,8 @@ function sessionSyncRefreshRequired(sync) {
   if (!sync || !liveOutput) return false;
 
   const renderedMode = liveOutput.dataset.sessionSyncMode;
-  const incomingBlocked = ["external_follow", "conflict"].includes(sync.mode);
-  const renderedBlocked = ["external_follow", "conflict"].includes(renderedMode);
+  const incomingBlocked = BLOCKED_SYNC_MODES.includes(sync.mode);
+  const renderedBlocked = BLOCKED_SYNC_MODES.includes(renderedMode);
   return (incomingBlocked && (sync.mode !== renderedMode || sync.revision !== liveOutput.dataset.sessionSyncRevision)) ||
     (renderedBlocked && !incomingBlocked) ||
     (renderedBlocked && composerState?.dataset.state === "running" && sync.gateway_busy === false) ||
@@ -2930,12 +2931,12 @@ function sessionShortcutsVisible() {
   return document.body.classList.contains("session-shortcuts-visible");
 }
 
-function openNewSessionModal() {
+function openNewSessionModal(fork) {
   if (sessionSwitching()) return;
 
   const modal = document.querySelector('[data-modal="new-session-modal"]');
   openModal(modal);
-  newSessionFormController.open(modal?.querySelector(".new-session-cwd-form"));
+  newSessionFormController.open(modal?.querySelector(".new-session-cwd-form"), fork);
 }
 
 function piModalIsOpen() {
@@ -3151,6 +3152,13 @@ document.addEventListener("click", (event) => {
       .finally(() => {
         hideSessionSwitching();
       });
+    return;
+  }
+
+  const continueButton = event.target.closest("[data-continue-in-folder]");
+  if (continueButton) {
+    event.preventDefault();
+    openNewSessionModal({ path: continueButton.dataset.continueInFolder, name: continueButton.dataset.sessionName });
     return;
   }
 

@@ -19,6 +19,8 @@ const (
 	SyncManaged        SyncMode = "managed"
 	SyncExternalFollow SyncMode = "external_follow"
 	SyncConflict       SyncMode = "conflict"
+	// SyncFolderMissing is reported by the gateway, not the synchronizer: Pi cannot run in a folder that is gone.
+	SyncFolderMissing SyncMode = "folder_missing"
 )
 
 type SyncResult struct {

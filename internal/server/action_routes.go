@@ -691,7 +691,7 @@ func (app *application) newSession(response http.ResponseWriter, request *http.R
 		http.NotFound(response, request)
 		return
 	}
-	newPath, err := app.startNewSession(request, app.currentSessionCWD(path))
+	newPath, err := app.startNewSession(request, app.currentSessionCWD(path), "")
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
@@ -712,8 +712,18 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		}
 		return
 	}
+	forkFrom := ""
+	if raw := request.FormValue("fork_from"); raw != "" {
+		// Pi CLI can carry on in the same file from another folder, which RPC mode cannot, so Pi forks the session into the
+		// folder as it does when told to open a session from another project.
+		source, ok := app.persistedActionSession(response, request, raw)
+		if !ok {
+			return
+		}
+		forkFrom = source.Path
+	}
 	request.Form.Del("project")
-	newPath, err := app.startNewSession(request, cwd)
+	newPath, err := app.startNewSession(request, cwd, forkFrom)
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
@@ -1544,11 +1554,13 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 	http.Redirect(response, request, app.sessionRedirectPath(request, newPath), http.StatusSeeOther)
 }
 
-func (app *application) startNewSession(request *http.Request, cwd string) (string, error) {
+func (app *application) startNewSession(request *http.Request, cwd, forkFrom string) (string, error) {
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
-	factory := func(cwd string) (rpc.RPCClient, error) { return app.newRPCClient(cwd, app.environmentUser(request)) }
+	factory := func(cwd string) (rpc.RPCClient, error) {
+		return app.newRPCClient(cwd, app.environmentUser(request), forkFrom)
+	}
 	return rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, factory, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
 		path, ok := sessions.ConfiguredSessionPath(app.config.SessionsRoot, path)
 		if !ok {
@@ -1562,16 +1574,26 @@ func (app *application) startNewSession(request *http.Request, cwd string) (stri
 				return "", nil, err
 			}
 		}
-		var projectRollback func() error
+		var projectRollback, tagRollback func() error
 		rollback := func() error {
 			var rollbackErr error
 			if projectRollback != nil {
 				rollbackErr = projectRollback()
 			}
+			if tagRollback != nil {
+				rollbackErr = errors.Join(rollbackErr, tagRollback())
+			}
 			if claimed && app.releaseSession != nil {
 				rollbackErr = errors.Join(rollbackErr, app.releaseSession(request, path))
 			}
 			return rollbackErr
+		}
+		if app.gatewayState != nil && forkFrom != "" {
+			// Like a fork in Gripi, the copy keeps the original's tags.
+			tagRollback, err = app.gatewayState.CopyTags(forkFrom, path)
+			if err != nil {
+				return "", nil, errors.Join(err, rollback())
+			}
 		}
 		if app.gatewayState != nil {
 			projectRollback, err = app.gatewayState.RememberProject(cwd)

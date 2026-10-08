@@ -35,7 +35,11 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 	if _, err := os.Stat(path); err == nil {
 		state := app.synchronizer.InspectIfAvailable(request.Context(), path, false)
 		if state != nil {
-			payload["session_sync"] = map[string]any{"mode": state.Mode, "revision": nullableString(state.Revision), "error": nullableString(state.Error), "gateway_busy": app.rpcClients.Busy(path)}
+			mode := state.Mode
+			if app.sessionFolderMissing(path) {
+				mode = sessions.SyncFolderMissing
+			}
+			payload["session_sync"] = map[string]any{"mode": mode, "revision": nullableString(state.Revision), "error": nullableString(state.Error), "gateway_busy": app.rpcClients.Busy(path)}
 		}
 	} else {
 		payload["session_sync"] = map[string]any{"mode": sessions.SyncAvailable, "revision": nil, "error": nil, "gateway_busy": app.rpcClients.Busy(path)}
