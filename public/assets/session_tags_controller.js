@@ -150,23 +150,24 @@ export class SessionTagsController {
     }
   }
 
-  open(path, trigger) {
+  open(path, trigger, paths = path ? [path] : []) {
     this.hideTooltip();
     this.ingestHTMLColors();
     this.trigger = trigger;
     this.anchor = trigger?.getBoundingClientRect();
     this.triggerPath = path;
     this.triggerKind = trigger?.matches("[data-session-actions-toggle]") ? "actions" : path ? "edit" : "filter";
-    let state = path ? this.editors.get(path) : null;
+    const key = paths.join("\n");
+    let state = key ? this.editors.get(key) : null;
     if (!state) {
-      state = { path, tags: [], available: [], query: "", loading: false, pending: false, version: 0 };
-      if (path) this.editors.set(path, state);
+      state = { paths, tags: new Map(), available: [], query: "", loading: false, pending: false, version: 0 };
+      if (key) this.editors.set(key, state);
     }
     this.state = state;
     this.dialog.querySelector("h2").textContent = path ? "Session tags" : "Filter by tag";
     const context = this.dialog.querySelector("[data-tag-context]");
     const row = [...this.document.querySelectorAll(".session-row")].find((row) => row.dataset.sessionPath === path);
-    context.textContent = row?.dataset.sessionName || (this.document.querySelector("[data-tag-session]")?.dataset.tagSession === path ? this.document.querySelector(".session-header-name")?.textContent : "");
+    context.textContent = paths.length > 1 ? `${paths.length} sessions` : row?.dataset.sessionName || (this.document.querySelector("[data-tag-session]")?.dataset.tagSession === path ? this.document.querySelector(".session-header-name")?.textContent : "");
     context.hidden = !context.textContent || !path;
     const label = path ? "Find or create a tag" : "Find a tag";
     this.search.setAttribute("aria-label", label);
@@ -209,14 +210,14 @@ export class SessionTagsController {
     state.error = null;
     this.render();
     try {
-      const url = state.path ? `/sessions/tags?${new URLSearchParams({ session: state.path })}` : "/tags";
-      const payload = await this.request(url);
+      const urls = state.paths.length ? state.paths.map((path) => `/sessions/tags?${new URLSearchParams({ session: path })}`) : ["/tags"];
+      const payloads = await Promise.all(urls.map((url) => this.request(url)));
       if (version !== state.version) return;
-      state.available = state.path ? payload.available_tags : payload.tags;
-      if (state.path) {
-        state.tags = payload.tags;
-        this.updateHeader(state.path, payload.tags);
-      }
+      state.available = state.paths.length ? payloads[0].available_tags : payloads[0].tags;
+      state.paths.forEach((path, index) => {
+        state.tags.set(path, payloads[index].tags);
+        this.updateHeader(path, payloads[index].tags);
+      });
     } catch (error) {
       if (version === state.version) state.error = error.message;
     } finally {
@@ -234,12 +235,14 @@ export class SessionTagsController {
     this.callbacks.invalidate?.();
     this.render();
     try {
-      const body = new URLSearchParams({ session: state.path, tag, assigned: String(assigned) });
-      const payload = await this.request("/sessions/tags", { method: "POST", body });
-      state.tags = payload.tags;
-      state.available = payload.available_tags;
+      for (const path of state.paths) {
+        const body = new URLSearchParams({ session: path, tag, assigned: String(assigned) });
+        const payload = await this.request("/sessions/tags", { method: "POST", body });
+        state.tags.set(path, payload.tags);
+        state.available = payload.available_tags;
+        this.updateHeader(payload.session, payload.tags);
+      }
       state.retry = null;
-      this.updateHeader(payload.session, payload.tags);
       this.callbacks.refresh?.().catch(() => {});
     } catch (error) {
       state.error = error.message;
@@ -307,7 +310,7 @@ export class SessionTagsController {
     this.options.replaceChildren();
     if (state.loading) return;
     const query = state.query.trim().toLowerCase();
-    const editable = state.path;
+    const editable = state.paths.length > 0;
     if (!editable) this.addOption("All tags", "", null);
     for (const tag of state.available.filter((tag) => tag.name.includes(query))) {
       this.addOption(tag.name, tag.name, editable ? null : tag.count);
@@ -329,19 +332,24 @@ export class SessionTagsController {
 
   addOption(label, tag, count) {
     const state = this.state;
-    const option = this.document.createElement(state.path ? "label" : "button");
+    const option = this.document.createElement(state.paths.length ? "label" : "button");
     option.className = "tag-picker-option";
     if (tag) this.applyTagColors(option, tag);
-    if (state.path) {
+    if (state.paths.length) {
       const checkbox = this.document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.checked = state.tags.includes(tag);
+      // A tag that only some of the sessions have shows as mixed, and checking it gives it to all of them.
+      const checked = state.paths.every((path) => state.tags.get(path)?.includes(tag));
+      const mixed = !checked && state.paths.some((path) => state.tags.get(path)?.includes(tag));
+      checkbox.checked = checked;
+      checkbox.indeterminate = mixed;
       checkbox.disabled = state.pending;
       checkbox.dataset.tagOption = tag;
       checkbox.setAttribute("aria-label", tag);
       checkbox.addEventListener("change", () => {
         const assigned = checkbox.checked;
-        checkbox.checked = state.tags.includes(tag);
+        checkbox.checked = checked;
+        checkbox.indeterminate = mixed;
         this.mutate(state, tag, assigned);
       });
       option.append(checkbox);

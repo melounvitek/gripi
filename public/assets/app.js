@@ -84,7 +84,7 @@ const sessionTagsController = new SessionTagsController(document, window, {
   filter: (url) => sidebarController.applyFilters(url)
 });
 const sessionActionsController = new SessionActionsController(document, window, {
-  editTags: (target) => sessionTagsController.open(target.path, target.row.querySelector("[data-session-actions-toggle]")),
+  editTags: (target) => sessionTagsController.open(target.path, target.row.querySelector("[data-session-actions-toggle]"), target.targets?.map((each) => each.path)),
   currentSessionPath: () => currentSessionPath(),
   detachSession: (paths) => detachSession(paths).catch(() => {}),
   openModal: (modal) => openModal(modal),
