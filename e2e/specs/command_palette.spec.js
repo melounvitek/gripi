@@ -137,7 +137,8 @@ test("Ctrl and a digit open that numbered session, and not the sidebar's while C
 
   await page.keyboard.down("Control");
   await page.keyboard.press("k");
-  await expect(dialog(page).locator(".command-palette-key:visible")).toHaveText(["1", "2", "3", "4", "5"]);
+  // The commands after the five sessions are numbered too.
+  await expect(dialog(page).locator(".command-palette-key:visible")).toHaveText(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
   const second = (await options(page).nth(1).locator(".command-palette-name").textContent()).replace(/^Unread: /, "");
   expect(second).not.toBe(sidebarSecond);
   await page.keyboard.press("2");
@@ -198,6 +199,13 @@ test("commands open what their own controls open and leave a composer draft alon
   await page.keyboard.type("/tree");
   await expect(options(page)).toHaveText([/Session tree/]);
   await page.keyboard.press("Enter");
+  await expect(dialog(page)).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Session tree" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  // Its digit opens it as well.
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type("/tree");
+  await page.keyboard.press("Control+1");
   await expect(dialog(page)).toBeHidden();
   await expect(page.getByRole("dialog", { name: "Session tree" })).toBeVisible();
   await page.keyboard.press("Escape");

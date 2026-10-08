@@ -49,7 +49,7 @@ export class CommandPaletteController {
     this.sessions = sessions || [];
     this.failed = !sessions;
     this.render();
-    // Without the sessions the first row is a command, which a waiting Enter never meant.
+    // Without the sessions every row is a command, which a waiting Enter or digit never meant.
     if (this.pending && !this.failed) this.activate(this.pending());
   }
 
@@ -57,13 +57,13 @@ export class CommandPaletteController {
     return [...this.list.querySelectorAll('[role="option"]')];
   }
 
-  row(mark, name, meta, run, key = "") {
+  row(mark, name, meta, run) {
     const row = this.document.createElement("button");
     row.type = "button";
     row.className = "picker-row command-palette-row";
     row.tabIndex = -1;
     row.setAttribute("role", "option");
-    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["project-monogram", mark, true], ["command-palette-name", name], ["command-palette-meta", meta], ["command-palette-key", key, true]]) {
+    for (const [className, text, decorative] of [["picker-cursor", "→", true], ["project-monogram", mark, true], ["command-palette-name", name], ["command-palette-meta", meta], ["command-palette-key", "", true]]) {
       const part = this.document.createElement("span");
       part.className = className;
       part.textContent = text;
@@ -74,8 +74,8 @@ export class CommandPaletteController {
     return row;
   }
 
-  sessionRow(session, key) {
-    const row = this.row(session.monogram, session.name, session.age, () => this.callbacks.openSession(session.path), key);
+  sessionRow(session) {
+    const row = this.row(session.monogram, session.name, session.age, () => this.callbacks.openSession(session.path));
     row.title = session.project;
     if (session.unread) {
       row.classList.add("is-unread");
@@ -133,14 +133,16 @@ export class CommandPaletteController {
       if (!words.length) matching.sort((left, right) => (right.path === previous) - (left.path === previous));
       const shown = matching.slice(0, words.length ? MATCHING_SESSIONS : RECENT_SESSIONS);
       more = matching.length - shown.length;
-      this.numbered = shown.map((session, index) => this.sessionRow(session, index + 1));
-      this.group(words.length ? "Sessions" : "Recent sessions", this.numbered);
+      this.group(words.length ? "Sessions" : "Recent sessions", shown.map((session) => this.sessionRow(session)));
       for (const [title, commands] of this.callbacks.commands()) {
         this.group(title, commands.filter((command) => command && matches(`${command.label} ${command.detail || ""}`)).map((command) => this.commandRow(command)));
       }
     }
     const options = this.options();
-    options.forEach((option, index) => { option.id = `command-palette-option-${index}`; });
+    options.forEach((option, index) => {
+      option.id = `command-palette-option-${index}`;
+      option.querySelector(".command-palette-key").textContent = index < 9 ? index + 1 : "";
+    });
     this.setCursor(0);
 
     let status = "";
@@ -170,8 +172,8 @@ export class CommandPaletteController {
     if (shortcut) {
       event.preventDefault();
       if (event.repeat) return;
-      if (this.sessions) this.activate(this.numbered[shortcut - 1]);
-      else this.pending = () => this.numbered[shortcut - 1];
+      if (this.sessions) this.activate(this.options()[shortcut - 1]);
+      else this.pending = () => this.options()[shortcut - 1];
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (count) this.setCursor((this.cursor + (event.key === "ArrowDown" ? 1 : count - 1)) % count);
