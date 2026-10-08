@@ -31,6 +31,7 @@ const (
 	toolOutputMobileTailLines    = 12
 	toolOutputCollapseCharacters = 500
 	toolOutputTailCharacters     = 2000
+	cliSessionsCookie            = "gripi_show_cli_sessions"
 )
 
 var projectColors = []string{
@@ -98,6 +99,9 @@ type pageView struct {
 	SessionsLimit             int
 	SessionPool               []*sessions.Session
 	SessionPoolLength         int
+	SessionTotal              int
+	CLISessionsShown          bool
+	CLISessionCount           int
 	Window                    sessions.Window
 	Attachments               map[*sessions.Message]sessions.AttachmentMatch
 	SessionOnly               bool
@@ -523,11 +527,17 @@ func (view *pageView) prepareSidebar() {
 			view.PinnedSessions = append(view.PinnedSessions, session)
 		}
 	}
+	cookie, err := view.Request.Cookie(cliSessionsCookie)
+	view.CLISessionsShown = err == nil && cookie.Value == "1"
 	var pool []*sessions.Session
 	query := strings.ToLower(view.SearchQuery)
 	for _, session := range view.Sessions {
 		if view.Pinned[session.Path] {
 			continue
+		}
+		hidden := view.ExternalFollow[session.Path] && !view.CLISessionsShown
+		if !hidden {
+			view.SessionTotal++
 		}
 		if view.SelectedTag != "" && !slices.Contains(view.SessionTags[session.Path], view.SelectedTag) {
 			continue
@@ -536,6 +546,12 @@ func (view *pageView) prepareSidebar() {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{session.DisplayName, session.CWD, filepath.Base(session.CWD), session.FirstUserMessage}, "\n")), query) {
+			continue
+		}
+		if view.ExternalFollow[session.Path] {
+			view.CLISessionCount++
+		}
+		if hidden {
 			continue
 		}
 		pool = append(pool, session)
@@ -646,7 +662,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			}
 			return value.Local().Format("2006-01-02 15:04")
 		},
-		"sessionURL": sessionURL, "sessionClasses": sessionClasses, "unreadLabel": unreadLabel,
+		"sessionURL": sessionURL, "sessionClasses": sessionClasses, "unreadLabel": unreadLabel, "plural": plural,
 		"sessionData": func(view *pageView, session *sessions.Session, shortcut int) sidebarSessionData {
 			return sidebarSessionData{view, session, shortcut}
 		},

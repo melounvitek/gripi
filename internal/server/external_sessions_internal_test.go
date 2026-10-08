@@ -26,7 +26,9 @@ func TestUnopenedExternalSessionIsReadAcrossPageAndSidebarViews(t *testing.T) {
 			if target == "/?session=" {
 				target += url.QueryEscape(path)
 			}
-			view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test"+target, nil), !strings.HasPrefix(target, "/sidebar"))
+			request := httptest.NewRequest(http.MethodGet, "http://app.test"+target, nil)
+			request.AddCookie(&http.Cookie{Name: cliSessionsCookie, Value: "1"})
+			view, err := app.preparePage(request, !strings.HasPrefix(target, "/sidebar"))
 			if err != nil {
 				t.Fatal(err)
 			}

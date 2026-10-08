@@ -200,7 +200,7 @@
     .sidebar-tools { display: flex; align-items: center; gap: 0.15rem; height: 2.4rem; margin-left: auto; }
     .sidebar-tool { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 2.25rem; height: 2.25rem; padding: 0; background: transparent; color: var(--muted); }
     .sidebar-tool:hover { background: transparent; }
-    .sidebar-tool svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .sidebar-tool svg, .sidebar-cli-toggle svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     /* The first line is drawn in the background colour to cut the icon under the visible one. */
     .sidebar-tool-slash path:first-child { stroke: var(--sidebar); stroke-width: 5; }
     @media (hover: hover) and (pointer: fine) { .sidebar-tool:hover { background: #ffffff08; color: var(--text); } }
@@ -216,16 +216,17 @@
     .sidebar-session-search.is-open { display: flex; }
     .sidebar-session-search input { flex: 1 1 auto; min-width: 0; padding: 0.5rem calc(0.5rem - 1px); color: var(--text); font-size: 0.8rem; background: var(--bg); }
     .sidebar-search-toggle { min-width: 1.65rem; padding: 0.2rem 0.45rem; font-size: 1rem; }
-    .sidebar-search-toggle.is-active { color: var(--accent); }
+    .sidebar-search-toggle.is-active, .sidebar-cli-toggle[aria-pressed="true"] { color: var(--accent); }
     .sidebar-project-filter-form { margin: 0; }
     .sidebar-filter-row { position: relative; display: flex; align-items: center; gap: 0.15rem; }
-    .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle) { height: 2.25rem; min-height: 0; padding-block: 0; }
-    .sidebar-filter-row .sidebar-search-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; margin-left: auto; padding: 0; }
+    .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-cli-toggle, .sidebar-search-toggle) { height: 2.25rem; min-height: 0; padding-block: 0; }
+    .sidebar-filter-row :is(.sidebar-cli-toggle, .sidebar-search-toggle) { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; margin-left: auto; padding: 0; }
+    .sidebar-filter-row .sidebar-cli-toggle + .sidebar-search-toggle { margin-left: 0; }
     .sidebar-filter-row .project-select-trigger { grid-template-columns: 2ch minmax(0, 1fr) auto; padding-inline: 0.5rem 0.4rem; border: 0; border-radius: 0.25rem; background: transparent; font-size: 0.74rem; }
     .sidebar-filter-row .project-select:has(option[value=""]:checked) .project-select-trigger { grid-template-columns: minmax(0, 1fr) auto; color: var(--muted); }
     .sidebar-filter-row .project-select:has(option[value=""]:checked) .project-monogram { display: none; }
     .sidebar-filter-row :is(.project-select-trigger:is(:hover, [aria-expanded="true"]), .tag-filter-toggle:hover) { background: #ffffff08; }
-    .sidebar-filter-row :is(.project-select-trigger, .sidebar-search-toggle, .tag-filter-toggle):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; box-shadow: none; }
+    .sidebar-filter-row :is(.project-select-trigger, .sidebar-cli-toggle, .sidebar-search-toggle, .tag-filter-toggle):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; box-shadow: none; }
     .sidebar-project-filter { flex: 1 1 auto; min-width: 0; padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.8rem; font-weight: 500; background: var(--bg); }
     /* The spinner takes the search button's place only when a filter is slow, so fast typing does not flicker. */
     .sidebar-filter-spinner { position: absolute; top: calc(50% - 0.45rem); right: 0.675rem; width: 0.9rem; height: 0.9rem; border: 2px solid var(--accent-tint-14); border-top-color: var(--accent); border-radius: 999px; opacity: 0; pointer-events: none; }
@@ -992,8 +993,8 @@
     @media (max-width: 760px), (pointer: coarse) {
       .session-header-tag-action { position: relative; min-width: 2.4rem; min-height: 2.4rem; }
       .session-header-tag-action::after { content: ""; position: absolute; inset: -3px; }
-      .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle) { position: relative; }
-      .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-search-toggle)::after { content: ""; position: absolute; inset: -4px 0; }
+      .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-cli-toggle, .sidebar-search-toggle) { position: relative; }
+      .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-cli-toggle, .sidebar-search-toggle)::after { content: ""; position: absolute; inset: -4px 0; }
       .sidebar-session-search input { font-size: 16px; }
       .header-tags :is(.session-tag-icon, .tag-overflow) { min-width: 44px; min-height: 44px; }
       .tag-overflow { min-height: 44px; }
