@@ -1158,7 +1158,7 @@ func (collector *indexCollector) canonicalMessage(role string) bool {
 	case "user":
 		return equalStrings(keys, []string{"role", "content"}) || equalStrings(keys, []string{"role", "content", "timestamp"})
 	case "toolResult":
-		expected := []string{"role", "toolCallId", "toolName", "content", "details", "addedToolNames", "isError", "timestamp"}
+		expected := []string{"role", "toolCallId", "toolName", "content", "details", "addedToolNames", "isError", "durationMs", "timestamp"}
 		return orderedSubset(keys, expected) && len(keys) >= 4 && equalStrings(keys[:4], expected[:4]) && contains(keys, "isError")
 	case "assistant":
 		if equalStrings(keys, []string{"role", "content"}) {

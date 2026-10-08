@@ -833,6 +833,32 @@ func TestOversizedIgnoredToolResultDetailsDoNotPushSmallPairedOutputOutOfTheWind
 	}
 }
 
+func TestOversizedToolResultWithDurationKeepsTheSessionListed(t *testing.T) {
+	root, project, path := sessionFixture(t)
+	ignored := strings.Repeat("i", MaxIndexedEntryBytes+1024)
+	writeSessionLines(t, path, []string{
+		sessionLine(project),
+		`{"type":"message","id":"call","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"bash-1","name":"bash","arguments":{"command":"echo ok"}}]}}`,
+		`{"type":"message","id":"result","parentId":"call","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"bash-1","toolName":"bash","content":[{"type":"text","text":"ok"}],"details":{"ignored":"` + ignored + `"},"isError":false,"durationMs":1234,"timestamp":1767225602000}}`,
+	})
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+
+	sessions, err := store.Sessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Path != path {
+		t.Fatalf("sessions = %#v", sessions)
+	}
+	window, err := store.Window(path, "", false, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window.Messages) != 1 || window.Messages[0].Text != "ok" {
+		t.Fatalf("messages = %#v", window.Messages)
+	}
+}
+
 func TestOversizedCanonicalCompactionBranchAndCustomMessageShapesRender(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	ignored := strings.Repeat("i", MaxIndexedEntryBytes+1024)
