@@ -755,9 +755,10 @@ function startRecoveryAssistant(phase, transport) {
   update({ type: "text_delta", contentIndex: 1, delta: activeRecovery.text });
   update({ type: "text_end", contentIndex: 1, content: activeRecovery.text });
   if (phase === "thinking") {
+    const thinking = `${activeRecovery.thinking}\n\n`;
     update({ type: "thinking_start", contentIndex: 2 });
-    recoveryMessage.content.push({ type: "thinking", thinking: activeRecovery.thinking });
-    update({ type: "thinking_delta", contentIndex: 2, delta: activeRecovery.thinking });
+    recoveryMessage.content.push({ type: "thinking", thinking });
+    update({ type: "thinking_delta", contentIndex: 2, delta: thinking });
   } else {
     update({ type: "toolcall_start", contentIndex: 2 });
     update({ type: "toolcall_delta", contentIndex: 2, delta: '{"path":"recovery' });

@@ -127,7 +127,7 @@ test("activity height holds through a run and starts fresh for the next run", as
 test("a step taller than the view does not hold later steps out of view", async ({ page }) => {
   const deliver = await liveEvents(page);
   const group = activeGroup(page);
-  const thinking = { type: "thinking", thinking: Array.from({ length: 30 }, (_, index) => `Long reasoning paragraph ${index + 1}.`).join("\n\n") };
+  const thinking = { type: "thinking", thinking: Array.from({ length: 30 }, (_, index) => `Long reasoning paragraph ${index + 1}.\n\n`).join("") };
   const update = (type) => ({ type: "message_update", message: assistant([thinking]), assistantMessageEvent: { type, contentIndex: 0 } });
   await deliver({ type: "agent_start" }, update("thinking_delta"));
   await expect(group).toContainText("Long reasoning paragraph 30.");
@@ -190,7 +190,7 @@ test("the next step cannot move a finished card during its first Expand tap", as
 
 test("discarded thinking is not kept as the finished step", async ({ page }) => {
   const deliver = await liveEvents(page);
-  const thinking = { type: "thinking", thinking: "Tentative reasoning that was removed." };
+  const thinking = { type: "thinking", thinking: "Tentative reasoning that was removed.\n\n" };
   await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([thinking]), assistantMessageEvent: { type: "thinking_delta", contentIndex: 0 } });
   const group = activeGroup(page);
   await expect(group).toContainText(thinking.thinking);
@@ -212,7 +212,7 @@ test("a reply takes the place of the finished step", async ({ page }) => {
   await expect(group).toContainText("1 running");
   await deliver(end("before-reply", "bash", output));
   await expect(group.locator(".active-activity-count")).toHaveText("Done");
-  const text = "Here is what the inspection found.";
+  const text = "Here is what the inspection found.\n\n";
   await deliver({ type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   const reply = page.locator(".message--assistant").filter({ hasText: text });
   await expect(reply).toBeVisible();
@@ -284,7 +284,7 @@ test("keeps a summary separate when text follows it", async ({ page }) => {
 
 test("text-only runs do not create an activity group", async ({ page }) => {
   const deliver = await liveEvents(page);
-  await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([{ type: "text", text: "Answer without tools." }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([{ type: "text", text: "Answer without tools.\n\n" }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   await expect(page.locator(".message").filter({ hasText: "Answer without tools." })).toBeVisible();
   await expect(activeGroup(page)).toHaveCount(0);
 });
@@ -302,7 +302,7 @@ test("groups parallel cards, summarizes each completion and restores original or
   const read = page.locator('[data-tool-call-id="active-read"]');
   await bash.evaluate((card) => { window.originalActivityCard = card; });
   // A normal assistant message must not be swallowed by the group.
-  await deliver({ type: "message_update", message: assistant([...tools, { type: "text", text: "Both checks are underway." }]), assistantMessageEvent: { type: "text_delta", contentIndex: 2 } });
+  await deliver({ type: "message_update", message: assistant([...tools, { type: "text", text: "Both checks are underway.\n\n" }]), assistantMessageEvent: { type: "text_delta", contentIndex: 2 } });
   await expect(page.locator(".message").filter({ hasText: "Both checks are underway." })).toBeVisible();
   await expect(group).not.toContainText("Both checks are underway.");
   await activityView(page, "Full").tap();
@@ -342,7 +342,7 @@ test("groups parallel cards, summarizes each completion and restores original or
 for (const transport of ["message", "gatewayPartialMessage"]) {
   test(`${transport} shows only current thinking and preparation`, async ({ page }) => {
     const deliver = await liveEvents(page);
-    const thinking = { type: "thinking", thinking: "Checking the visibility rules." };
+    const thinking = { type: "thinking", thinking: "Checking the visibility rules.\n\n" };
     const update = (type, content, index = 0) => ({ type: "message_update", assistantMessageEvent: { type, contentIndex: index }, [transport]: assistant(content) });
     await deliver({ type: "agent_start" }, update("thinking_delta", [thinking]));
     const group = activeGroup(page);
@@ -374,13 +374,13 @@ test("focused activity does not scroll past the beginning of an oversized answer
   await expect(activeGroup(page)).toBeVisible();
   await deliver(end("before-answer", "bash"));
   await expect(activeGroup(page).locator(".active-activity-count")).toHaveText("Done");
-  const short = "Here are the findings.";
+  const short = "Here are the findings.\n\n";
   await deliver({ type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "text", text: short }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   const card = page.locator('.message--assistant').filter({ hasText: short });
   await expect(card).toBeVisible();
   // Let the short answer's initial auto-follow settle before it grows.
   await page.waitForTimeout(350);
-  const text = short + "\n\n" + Array.from({ length: 80 }, (_, index) => `Finding ${index + 1}: keep the start of this answer visible.`).join("\n\n");
+  const text = short + Array.from({ length: 80 }, (_, index) => `Finding ${index + 1}: keep the start of this answer visible.\n\n`).join("");
   await deliver({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   await expect(card).toContainText("Finding 80:");
   await expect.poll(() => card.evaluate((element) => Math.abs(element.getBoundingClientRect().top - document.querySelector('#conversation-scroll').getBoundingClientRect().top))).toBeLessThan(40);
@@ -434,7 +434,7 @@ async function streamingReplyAtBottom(page) {
   const earlier = Array.from({ length: 40 }, (_, index) => `Earlier paragraph ${index + 1}.`).join("\n\n");
   await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([{ type: "text", text: earlier }]) }, { type: "agent_end" });
   await expect(page.locator(".message--assistant").filter({ hasText: "Earlier paragraph 40." })).toBeVisible();
-  let text = "Streaming reply.";
+  let text = "Streaming reply.\n\n";
   const update = () => deliver({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) });
   await update();
@@ -450,9 +450,9 @@ async function streamingReplyAtBottom(page) {
         await page.waitForTimeout(150);
         return before === await fromBottom();
       }).toBe(true);
-      text += " More.";
+      text += "More.\n\n";
       await update();
-      await expect(page.locator(".message--assistant").filter({ hasText: text })).toHaveCount(1);
+      await expect(page.locator(".message--assistant").filter({ hasText: "More." })).toHaveCount(1);
       // Leave time for the follow scroll that must not happen.
       await page.waitForTimeout(500);
       expect(await fromBottom()).toBeGreaterThan(120);
@@ -502,7 +502,7 @@ test("the bottom jump button waits for the reader to scroll into a long answer",
   const scroller = page.locator("#conversation-scroll");
   const jump = page.locator(".jump-to-latest");
   const fromBottom = () => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
-  const paragraphs = (name) => Array.from({ length: 60 }, (_, index) => `${name} paragraph ${index + 1}.`).join("\n\n");
+  const paragraphs = (name) => Array.from({ length: 60 }, (_, index) => `${name} paragraph ${index + 1}.\n\n`).join("");
   await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([{ type: "text", text: paragraphs("Earlier") }]) }, { type: "agent_end" });
   await expect(page.locator(".message--assistant").filter({ hasText: "Earlier paragraph 60." })).toBeVisible();
   await expect.poll(fromBottom).toBeLessThan(2);
