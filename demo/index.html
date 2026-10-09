@@ -236,7 +236,7 @@
     .sidebar-session-search.is-open { display: flex; }
     .sidebar-session-search input { flex: 1 1 auto; min-width: 0; padding: 0.5rem calc(0.5rem - 1px); color: var(--text); font-size: 0.8rem; background: var(--bg); }
     .sidebar-search-toggle { min-width: 1.65rem; padding: 0.2rem 0.45rem; font-size: 1rem; }
-    .sidebar-search-toggle.is-active, .sidebar-cli-toggle[aria-pressed="true"] { color: var(--accent); }
+    .sidebar-search-toggle.is-active { color: var(--accent); }
     .sidebar-project-filter-form { margin: 0; }
     .sidebar-filter-row { position: relative; display: flex; align-items: center; gap: 0.15rem; }
     .sidebar-filter-row :is(.project-select-trigger, .tag-filter-toggle, .sidebar-cli-toggle, .sidebar-search-toggle) { height: 2.25rem; min-height: 0; padding-block: 0; }
@@ -381,6 +381,8 @@
     .session-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-folder-missing { color: var(--gold); }
     .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.5rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); line-height: 1; }
+    /* Touch screens keep :hover after a tap, so the buttons keep neither this nor the page-wide button hover. */
+    .sidebar-icon-button:hover { background: transparent; }
     @media (hover: hover) and (pointer: fine) { .sidebar-icon-button:hover { background: #ffffff08; color: var(--text); } }
     .sidebar-new-session-button, .sidebar-open-pinned-button { display: inline-flex; margin-left: auto; align-items: center; gap: 0.3rem; letter-spacing: 0; text-transform: none; }
     .sidebar-new-session-button { color: var(--accent); }
