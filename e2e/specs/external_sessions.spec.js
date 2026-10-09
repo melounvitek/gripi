@@ -112,6 +112,7 @@ for (const touch of [false, true]) {
       await expect(link).toHaveCount(0, { timeout: 15_000 });
       const toggle = page.locator("[data-sidebar-cli-toggle]");
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(toggle.locator(".sidebar-tool-slash")).toBeVisible();
       // It sits just left of the search button and matches its size.
       const [toggleBox, searchBox] = await Promise.all([toggle, page.locator("[data-sidebar-search-toggle]")].map((control) => control.boundingBox()));
       const gap = searchBox.x - (toggleBox.x + toggleBox.width);
@@ -121,8 +122,20 @@ for (const touch of [false, true]) {
       expect(gap).toBeLessThan(4);
       await page.screenshot({ path: testInfo.outputPath("cli-sessions-hidden.png") });
 
+      // The button answers the tap at once, without waiting for the sidebar.
+      let releaseSidebar;
+      const sidebarHeld = new Promise((resolve) => { releaseSidebar = resolve; });
+      const isSidebar = (url) => url.pathname === "/sidebar";
+      await page.route(isSidebar, async (route) => { await sidebarHeld; await route.continue(); });
       await activate(toggle);
       await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await expect(toggle.locator(".sidebar-tool-slash")).toBeHidden();
+      // Only the slash tells the state apart; a tap leaves no hover or accent colour.
+      if (touch) {
+        await expect(toggle).toHaveCSS("color", "rgb(128, 128, 128)");
+        await expect(toggle).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      }
+      releaseSidebar();
       await expectExternalIcon(link);
       if (touch) await expect(page.locator("#mobile-session-toggle")).toBeChecked();
       await page.screenshot({ path: testInfo.outputPath("cli-sessions-shown.png") });

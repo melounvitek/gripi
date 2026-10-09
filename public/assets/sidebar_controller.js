@@ -128,6 +128,8 @@ export class SidebarController {
       const cliToggle = event.target.closest?.("[data-sidebar-cli-toggle]");
       if (cliToggle) {
         const show = cliToggle.getAttribute("aria-pressed") !== "true";
+        // Answer the tap at once; the sidebar refresh that lists or hides the sessions can take a while.
+        cliToggle.setAttribute("aria-pressed", String(show));
         this.document.cookie = `${CLI_SESSIONS_COOKIE}=1; path=/; max-age=${show ? 365 * 24 * 60 * 60 : 0}; samesite=lax`;
         this.refresh({ force: true }).catch(() => {});
         return;
