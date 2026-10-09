@@ -387,6 +387,24 @@ test("focused activity does not scroll past the beginning of an oversized answer
 });
 
 for (const view of ["Full", "Brief"]) {
+  test(`${view} follows thinking down to its rendered paragraph`, async ({ page }) => {
+    const deliver = await liveEvents(page);
+    await activityView(page, view).tap();
+    const scroller = page.locator("#conversation-scroll");
+    const earlier = Array.from({ length: 40 }, (_, index) => `Earlier paragraph ${index + 1}.`).join("\n\n");
+    await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([{ type: "text", text: earlier }]) }, { type: "agent_end" });
+    await expect(page.locator(".message--assistant").filter({ hasText: "Earlier paragraph 40." })).toBeVisible();
+    const paragraph = Array.from({ length: 8 }, () => "This finished reasoning paragraph wraps over several lines.").join(" ");
+    // No later event follows, so only the paragraph's own render can bring it into view.
+    await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "thinking", thinking: `${paragraph}\n\n` }]), assistantMessageEvent: { type: "thinking_delta", contentIndex: 0 } });
+    const thinking = page.locator(".message--thinking").filter({ hasText: "This finished reasoning paragraph" });
+    await expect(thinking).toBeVisible();
+    await expect.poll(() => thinking.evaluate((element) => element.getBoundingClientRect().bottom - document.querySelector("#conversation-scroll").getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
+    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
+  });
+}
+
+for (const view of ["Full", "Brief"]) {
   const answer = (text) => ({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   const finding = (index) => `Finding ${index}: keep the start of this answer visible while it streams.\n\n`;
   const topOffset = (card) => card.evaluate((element) => Math.abs(element.getBoundingClientRect().top - document.querySelector("#conversation-scroll").getBoundingClientRect().top));

@@ -1233,6 +1233,11 @@ export class ConversationController {
     else if (live) this.updateJumpControls();
   }
 
+  // Markdown renders land after the follow scroll for their update, so follow again once the new height is known.
+  afterMarkdownRender() {
+    this.scheduleAutoScroll();
+  }
+
   stopAutoFollow() {
     this.autoScrollEnabled = false;
     this.forceBottomAutoScroll = false;

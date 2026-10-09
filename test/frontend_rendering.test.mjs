@@ -336,7 +336,7 @@ test("Markdown binding aborts stale work and newer text waits for the render in 
     return request.promise;
   };
   try {
-    const renderer = new ServerMarkdownRenderer({}, { autoScrollEnabled: false });
+    const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
     const staleBody = markdownBody();
     renderer.render(staleBody, "old", 0);
     await settle(() => requests.length === 1);
@@ -375,7 +375,7 @@ test("unchanged Markdown keeps pending work and completed DOM intact", async () 
     requests.push(options);
     return response.promise;
   };
-  const renderer = new ServerMarkdownRenderer({}, { autoScrollEnabled: false });
+  const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
   try {
     const body = markdownBody();
     let replacements = 0;
@@ -410,7 +410,7 @@ test("Markdown binding allows canceled identical text to restart", async () => {
     return response.promise;
   };
   try {
-    const renderer = new ServerMarkdownRenderer({}, { autoScrollEnabled: false });
+    const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
     const body = markdownBody();
     renderer.render(body, "Same text", 0);
     await settle(() => requests.length === 1);

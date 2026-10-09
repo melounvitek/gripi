@@ -43,9 +43,7 @@ export class ServerMarkdownRenderer {
 
       job.body.innerHTML = payload.html;
       enhanceMarkdownCodeBlocks(job.body, this.document);
-      if (this.conversationController.autoScrollEnabled && job.body.closest(".message") === this.conversationController.latestReadableAssistantMessage()) {
-        this.conversationController.scheduleAutoScroll();
-      }
+      this.conversationController.afterMarkdownRender();
       if (job.body.dataset.plainText !== text) return this.request(job);
       delete job.body.dataset.rendering;
       this.jobs.delete(job.body);
