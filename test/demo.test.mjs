@@ -71,8 +71,12 @@ test("demo scripted responses finish, cancel, and include visible stages", async
   assert.deepEqual(cancelled, []);
 
   const response = demo.responseScript("How does this work?");
-  assert.deepEqual([...new Set(response.map(({ type }) => type))], ["status", "thinking", "tool_start", "tool_end", "assistant_start", "delta", "done"]);
-  assert.match(response.filter(({ type }) => type === "delta").map(({ text }) => text).join(""), /Pi coding-agent harness/);
+  assert.deepEqual([...new Set(response.map(({ type }) => type))], ["status", "thinking", "tool_start", "tool_end", "paragraph", "done"]);
+  const paragraphs = response.filter(({ type }) => type === "paragraph");
+  assert.match(paragraphs.map(({ text }) => text).join("\n\n"), /^This is a prerecorded response to “How does this work\?”\. .*Pi coding-agent harness.*\n\nThe static demo still mirrors .*while it is streaming\.$/s);
+  assert.equal(response.some(({ text }) => text?.includes("\n\n")), false);
+  // Each paragraph lands whole once its words would have streamed.
+  for (const { text, delay } of paragraphs) assert.ok(delay >= 42 * text.split(/\s+/).length, text);
 });
 
 test("demo compact tool and inline-code markup follows production semantics", () => {
