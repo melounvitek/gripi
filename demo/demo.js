@@ -185,7 +185,8 @@
   }
 
   function responseScript(prompt) {
-    const safePrompt = String(prompt || "your question").trim() || "your question";
+    // The prompt is quoted inside a sentence, so its line breaks must not split the reply into paragraphs.
+    const safePrompt = String(prompt || "your question").replace(/\s+/g, " ").trim() || "your question";
     const answer = `This is a prerecorded response to “${safePrompt}”. In a real Gripi session, the Pi coding-agent harness would now continue with full access to the selected project and its tools.\n\nThe static demo still mirrors the experience: messages appear live, tool activity is visible, and you can stop a response while it is streaming.`;
     // Like Gripi, the reply lands one finished paragraph at a time, once its words would have streamed.
     const paragraphs = answer.split("\n\n").map((text) => ({ type: "paragraph", text, delay: text.split(/\s+/).reduce((delay) => delay + 42 + Math.floor(Math.random() * 45), 0) }));

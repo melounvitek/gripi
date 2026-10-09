@@ -77,6 +77,10 @@ test("demo scripted responses finish, cancel, and include visible stages", async
   assert.equal(response.some(({ text }) => text?.includes("\n\n")), false);
   // Each paragraph lands whole once its words would have streamed.
   for (const { text, delay } of paragraphs) assert.ok(delay >= 42 * text.split(/\s+/).length, text);
+  // A quoted prompt with blank lines stays inside its sentence instead of splitting the reply.
+  const quoted = demo.responseScript("First line\n\n  Second line").filter(({ type }) => type === "paragraph");
+  assert.equal(quoted.length, 2);
+  assert.match(quoted[0].text, /“First line Second line”/);
 });
 
 test("demo compact tool and inline-code markup follows production semantics", () => {
