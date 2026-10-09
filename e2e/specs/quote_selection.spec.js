@@ -204,7 +204,7 @@ test("dismisses a selected streaming passage when its source is replaced", async
   await expect(body).toHaveText(replies.deltaText);
   await selectText(body);
   await quote.click();
-  await expect(page.getByLabel("Message to Pi")).toHaveValue(`> ${replies.deltaText}\n\n`);
+  await expect(page.getByLabel("Message to Pi")).toHaveValue(replies.deltaText.split("\n").map((line) => `> ${line}`).join("\n") + "\n\n");
 });
 
 test("cleans up selections across session switches and does not duplicate handlers", async ({ page }) => {

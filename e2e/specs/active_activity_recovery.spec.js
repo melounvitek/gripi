@@ -177,12 +177,14 @@ for (const transport of ["cumulative", "delta"]) {
       const current = phase === "thinking" ? ".message--thinking" : ".message--tool-preparation";
       const text = phase === "thinking" ? activeRecovery.thinking : "Preparing tool call…";
       await expect(page.locator(current).filter({ hasText: text })).toBeVisible();
+      // Exact text: the unfinished thinking after this paragraph must stay hidden.
+      await expect(page.locator(current).filter({ hasText: text }).locator(".message-body")).toHaveText(text);
       await page.reload();
       await focusActivity(page);
       const group = activeGroup(page);
       await expect(group).toBeVisible();
       await expect(group.locator(".message")).toHaveCount(1);
-      await expect(group.locator(current)).toContainText(text);
+      await expect(group.locator(`${current} .message-body`)).toHaveText(text);
       await expect(group).not.toContainText(activeRecovery.previousThinking);
       await expect(group).not.toContainText(activeRecovery.text);
       await expect(message(page, "assistant", activeRecovery.text)).toBeVisible();

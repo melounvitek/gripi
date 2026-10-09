@@ -755,9 +755,10 @@ function startRecoveryAssistant(phase, transport) {
   update({ type: "text_delta", contentIndex: 1, delta: activeRecovery.text });
   update({ type: "text_end", contentIndex: 1, content: activeRecovery.text });
   if (phase === "thinking") {
+    const thinking = `${activeRecovery.thinking}\n\n${activeRecovery.unfinishedThinking}`;
     update({ type: "thinking_start", contentIndex: 2 });
-    recoveryMessage.content.push({ type: "thinking", thinking: activeRecovery.thinking });
-    update({ type: "thinking_delta", contentIndex: 2, delta: activeRecovery.thinking });
+    recoveryMessage.content.push({ type: "thinking", thinking });
+    update({ type: "thinking_delta", contentIndex: 2, delta: thinking });
   } else {
     update({ type: "toolcall_start", contentIndex: 2 });
     update({ type: "toolcall_delta", contentIndex: 2, delta: '{"path":"recovery' });
@@ -975,21 +976,27 @@ function completeAssistant(reply, priorMessages = []) {
 function completeDeltaAssistant() {
   const timestamp = Date.now();
   const started = assistantMessage([], "stop", timestamp);
+  const thinking = `${replies.deltaThinking}\n\n${replies.deltaThinkingMore}`;
+  const unfinishedText = `${replies.deltaTextStart}\n\nAnswer comp`;
   const completed = assistantMessage([
-    { type: "thinking", thinking: replies.deltaThinking },
+    { type: "thinking", thinking },
     { type: "text", text: replies.deltaText }
   ], "stop", timestamp);
   emit({ type: "message_start", message: started });
   emit({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } });
   emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: replies.deltaThinking } });
-  schedule(700, () => {
-    emit({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 } });
-    emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: replies.deltaTextStart } });
-    schedule(2000, () => {
-      emit({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: replies.deltaThinking } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: replies.deltaText.slice(replies.deltaTextStart.length) } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 1, content: replies.deltaText } });
-      finishAssistant(completed);
+  schedule(1000, () => {
+    emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: thinking.slice(replies.deltaThinking.length) } });
+    schedule(1000, () => {
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 } });
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: unfinishedText } });
+      // Long enough for the quote test to select the reply before it finishes.
+      schedule(2000, () => {
+        emit({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: thinking } });
+        emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: replies.deltaText.slice(unfinishedText.length) } });
+        emit({ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 1, content: replies.deltaText } });
+        finishAssistant(completed);
+      });
     });
   });
 }

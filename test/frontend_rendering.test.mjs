@@ -193,6 +193,92 @@ test("live thinking follows the bound Pi display setting through streaming updat
   assert.equal(visible.body.textContent, "Visible reasoning");
 });
 
+function streamingRenderer({ hideThinkingBlock = false } = {}) {
+  const document = new FakeDocument();
+  const output = new FakeElement("section");
+  output.dataset.hideThinkingBlock = String(hideThinkingBlock);
+  document.getElementById = () => output;
+  const conversation = { element: output, followLiveOutput: () => false, afterLiveOutputChange() {}, resetOversizedFollow() {} };
+  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser(), {
+    bind() {},
+    render(body, text) { body.textContent = text; },
+  });
+  renderer.bind();
+  const update = (type, contentIndex, content) => renderer.renderMessageEvent({ type: "message_update", assistantMessageEvent: { type, contentIndex }, message: { role: "assistant", content } });
+  const bodies = () => output.querySelectorAll(".message-body--markdown").map((body) => body.textContent.trim());
+  return { renderer, output, update, bodies };
+}
+
+test("a streaming reply appears only once its first block is finished, then grows by finished blocks", () => {
+  const { renderer, output, update, bodies } = streamingRenderer();
+  renderer.renderMessageEvent({ type: "message_start", message: { role: "assistant", content: [] } });
+  update("text_start", 0, [{ type: "text", text: "" }]);
+  update("text_delta", 0, [{ type: "text", text: "First paragr" }]);
+  assert.equal(output.querySelectorAll("article").length, 0);
+
+  update("text_delta", 0, [{ type: "text", text: "First paragraph.\n\nSecond paragr" }]);
+  assert.deepEqual(bodies(), ["First paragraph."]);
+  update("text_delta", 0, [{ type: "text", text: "First paragraph.\n\nSecond paragraph.\n\nThi" }]);
+  assert.deepEqual(bodies(), ["First paragraph.\n\nSecond paragraph."]);
+});
+
+test("streaming thinking keeps its placeholder until its first paragraph is finished, in the same article", () => {
+  const { output, update, bodies } = streamingRenderer();
+  update("thinking_start", 0, [{ type: "thinking", thinking: "" }]);
+  assert.deepEqual(bodies(), ["Thinking…"]);
+  const article = output.querySelector("article");
+  update("thinking_delta", 0, [{ type: "thinking", thinking: "Comparing the opt" }]);
+  assert.deepEqual(bodies(), ["Thinking…"]);
+
+  update("thinking_delta", 0, [{ type: "thinking", thinking: "Comparing the options.\n\nThe second one" }]);
+  assert.deepEqual(bodies(), ["Comparing the options."]);
+  assert.deepEqual(output.querySelectorAll("article"), [article]);
+});
+
+test("a streaming part shows its full text once it ends or later content starts", () => {
+  const thinking = { type: "thinking", thinking: "Plan.\n\nUnfinished pl" };
+  const text = { type: "text", text: "Answer.\n\nUnfinished ans" };
+  const cases = [
+    [{ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0 }, message: { role: "assistant", content: [thinking] } }, "Plan.\n\nUnfinished pl"],
+    [{ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 }, message: { role: "assistant", content: [thinking, { type: "text", text: "" }] } }, "Plan.\n\nUnfinished pl"],
+    [{ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 0 }, message: { role: "assistant", content: [text] } }, "Answer.\n\nUnfinished ans"],
+    [{ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 1 }, message: { role: "assistant", content: [text, { type: "toolCall", id: "call", name: "read", arguments: { path: "notes.md" } }] } }, "Answer.\n\nUnfinished ans"],
+    [{ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 1 }, message: { role: "assistant", content: [text] } }, "Answer.\n\nUnfinished ans"],
+    [{ type: "message_update", message: { role: "assistant", content: [text] } }, "Answer.\n\nUnfinished ans"],
+    [{ type: "message_end", message: { role: "assistant", content: [text] } }, "Answer.\n\nUnfinished ans"],
+  ];
+  for (const [event, expected] of cases) {
+    const { renderer, bodies } = streamingRenderer();
+    renderer.renderMessageEvent(event);
+    assert.deepEqual(bodies(), [expected], JSON.stringify(event.assistantMessageEvent || event.type));
+  }
+});
+
+test("a finished text part stays whole while the text part after it streams", () => {
+  const { update, bodies } = streamingRenderer();
+  const finished = { type: "text", text: "Commentary without a blank line" };
+  update("text_delta", 1, [finished, { type: "text", text: "Final answ" }]);
+  assert.deepEqual(bodies(), ["Commentary without a blank line"]);
+  update("text_delta", 1, [finished, { type: "text", text: "Final answer.\n\nMore" }]);
+  assert.deepEqual(bodies(), ["Commentary without a blank line\nFinal answer."]);
+});
+
+test("hidden thinking always shows its placeholder while it streams", () => {
+  const { update, bodies } = streamingRenderer({ hideThinkingBlock: true });
+  for (const [type, thinking] of [["thinking_start", ""], ["thinking_delta", "Private"], ["thinking_delta", "Private reasoning.\n\nMore"], ["thinking_end", "Private reasoning.\n\nMore private reasoning."]]) {
+    update(type, 0, [{ type: "thinking", thinking }]);
+    assert.deepEqual(bodies(), ["Thinking..."], `${type} ${JSON.stringify(thinking)}`);
+  }
+});
+
+test("streaming thinking with a bold title waits for the paragraph below it", () => {
+  const { update, bodies } = streamingRenderer();
+  update("thinking_delta", 0, [{ type: "thinking", thinking: "**Checking the tests**\n\nThe second sui" }]);
+  assert.deepEqual(bodies(), ["Thinking…"]);
+  update("thinking_delta", 0, [{ type: "thinking", thinking: "**Checking the tests**\n\nThe second suite fails.\n\nIts fixt" }]);
+  assert.deepEqual(bodies(), ["The second suite fails."]);
+});
+
 test("live message times use the short label with the full date as a tooltip", () => {
   const document = new FakeDocument();
   const conversation = { followLiveOutput: () => false, afterLiveOutputChange() {} };
@@ -250,7 +336,7 @@ test("Markdown binding aborts stale work and newer text waits for the render in 
     return request.promise;
   };
   try {
-    const renderer = new ServerMarkdownRenderer({}, { autoScrollEnabled: false });
+    const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
     const staleBody = markdownBody();
     renderer.render(staleBody, "old", 0);
     await settle(() => requests.length === 1);
@@ -289,7 +375,7 @@ test("unchanged Markdown keeps pending work and completed DOM intact", async () 
     requests.push(options);
     return response.promise;
   };
-  const renderer = new ServerMarkdownRenderer({}, { autoScrollEnabled: false });
+  const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
   try {
     const body = markdownBody();
     let replacements = 0;
@@ -324,7 +410,7 @@ test("Markdown binding allows canceled identical text to restart", async () => {
     return response.promise;
   };
   try {
-    const renderer = new ServerMarkdownRenderer({}, { autoScrollEnabled: false });
+    const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
     const body = markdownBody();
     renderer.render(body, "Same text", 0);
     await settle(() => requests.length === 1);

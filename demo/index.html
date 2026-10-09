@@ -863,6 +863,9 @@
     @keyframes stop-button-pulse { 0% { transform: scale(0.82); opacity: 0.9; } 70%, 100% { transform: scale(1.28); opacity: 0; } }
     @keyframes progress-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
     @keyframes streaming-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+    /* revealGrowth in dom.js wipes newly streamed blocks in from the top by animating this soft edge. */
+    @property --reveal-edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
+    .message-body--revealing { -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); }
     @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (max-width: 760px), (pointer: coarse) {
       /* Touch rows: one line with the leading slot, title, tags, time and the 44px actions button, whose menu holds Pin. */

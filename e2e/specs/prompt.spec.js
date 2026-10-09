@@ -417,16 +417,19 @@ test("renders readable Markdown tables live and after reload", async ({ page }) 
   await expectReadableMarkdownTable(persistedResponse.getByRole("table"));
 });
 
-test("stream delta-only thinking and text before the assistant message ends", async ({ page }) => {
+test("stream delta-only thinking and text by finished paragraph before the assistant message ends", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.deltaStreaming);
   await sendPrompt(page, prompts.deltaStreaming);
 
-  await expect(page.locator(".message--thinking")).toContainText(replies.deltaThinking);
-  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
-  await expect(message(page, "assistant", replies.deltaTextStart)).toBeVisible();
-  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
-  await expect(message(page, "assistant", replies.deltaText)).toBeVisible();
+  // Each step checks every live thinking and reply body, so unfinished text showing early fails it.
+  const bodies = page.locator("#live-output .message--assistant .message-body");
+  const thinking = `${replies.deltaThinking}\n\n${replies.deltaThinkingMore}`;
+  await expect(bodies).toHaveText(["Thinking…"]);
+  await expect(bodies).toHaveText([replies.deltaThinking]);
+  // The thinking is complete once the reply starts, before its thinking_end.
+  await expect(bodies).toHaveText([thinking, replies.deltaTextStart]);
+  await expect(bodies).toHaveText([thinking, replies.deltaText]);
   await expectRunFinished(page);
 });
 

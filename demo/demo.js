@@ -185,16 +185,17 @@
   }
 
   function responseScript(prompt) {
-    const safePrompt = String(prompt || "your question").trim() || "your question";
+    // The prompt is quoted inside a sentence, so its line breaks must not split the reply into paragraphs.
+    const safePrompt = String(prompt || "your question").replace(/\s+/g, " ").trim() || "your question";
     const answer = `This is a prerecorded response to “${safePrompt}”. In a real Gripi session, the Pi coding-agent harness would now continue with full access to the selected project and its tools.\n\nThe static demo still mirrors the experience: messages appear live, tool activity is visible, and you can stop a response while it is streaming.`;
-    const words = answer.match(/\S+\s*/g) || [answer];
+    // Like Gripi, the reply lands one finished paragraph at a time, once its words would have streamed.
+    const paragraphs = answer.split("\n\n").map((text) => ({ type: "paragraph", text, delay: text.split(/\s+/).reduce((delay) => delay + 42 + Math.floor(Math.random() * 45), 0) }));
     return [
       { type: "status", text: "Pi is thinking…", delay: 180 },
       { type: "thinking", text: "I’ll inspect the request and prepare a concise response.", delay: 500 },
       { type: "tool_start", title: "read demo/project-context.md", delay: 350 },
       { type: "tool_end", text: "Loaded representative project context for the interactive demo.", delay: 650 },
-      { type: "assistant_start", delay: 280 },
-      ...words.map((text) => ({ type: "delta", text, delay: 42 + Math.floor(Math.random() * 45) })),
+      ...paragraphs,
       { type: "done", delay: 120 }
     ];
   }
@@ -705,17 +706,26 @@
   function scrollLatest(force = false) {
     if (!autoScrollEnabled && !force) return;
     if (force) autoScrollEnabled = true;
-    programmaticScrollTo({ top: element.scroll.scrollHeight, behavior: "smooth" });
+    programmaticScrollTo({ top: element.scroll.scrollHeight, behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
+
+  // Like revealGrowth in public/assets/dom.js. Demo paragraphs land further apart than a wipe lasts, so none needs continuing.
+  function revealGrowth(body, previousHeight) {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const from = previousHeight + 32;
+    const height = body.offsetHeight;
+    body.classList.add("message-body--revealing");
+    const animation = body.animate([{ "--reveal-edge": `${from}px` }, { "--reveal-edge": `${height + 32}px` }], { duration: Math.min(700, Math.max(280, (height - from) * 1.1)), easing: "cubic-bezier(0.25, 0.6, 0.35, 1)", fill: "forwards" });
+    animation.finished.then(() => {
+      body.classList.remove("message-body--revealing");
+      animation.cancel();
+    }, () => {});
   }
 
   function cancelStream() {
     if (!streamController) return;
     streamController.abort(); streamController = null;
     streamingEntry?.article.classList.remove("message--streaming");
-    if (streamingEntry && !streamingEntry.message.text) {
-      streamingEntry.session.messages = streamingEntry.session.messages.filter((message) => message !== streamingEntry.message);
-      streamingEntry.article.remove();
-    }
     if (activeToolEntry) {
       activeToolEntry.article.classList.remove("message--live");
       if (activeToolEntry.message.text === "Running…") activeToolEntry.message.text = "Stopped before the simulated tool completed.";
@@ -729,23 +739,25 @@
   function appendStreamEvent(event, session) {
     if (event.type === "status") setRunning(true, event.text);
     if (event.type === "thinking") {
-      const message = { role: "thinking", text: event.text, time: timeLabel() }; session.messages.push(message); element.live.append(messageArticle(message, true));
+      const message = { role: "thinking", text: event.text, time: timeLabel() }; session.messages.push(message);
+      const article = messageArticle(message, true); element.live.append(article); revealGrowth(article.messageBody, 0);
     }
     if (event.type === "tool_start") {
       const message = { role: "tool", title: event.title, text: "Running…", time: timeLabel() }; session.messages.push(message);
       const article = messageArticle(message, true); article.classList.add("message--live"); element.live.append(article); activeToolEntry = { article, message }; setRunning(true, "Using tools…");
     }
     if (event.type === "tool_end" && activeToolEntry) { activeToolEntry.message.text = event.text; activeToolEntry.article.classList.remove("message--live"); setRunning(true, "Pi is responding…"); }
-    if (event.type === "assistant_start") {
-      const message = { role: "assistant", text: "", time: timeLabel(), completed: false }; session.messages.push(message);
-      const article = messageArticle(message, true); article.classList.add("message--streaming"); element.live.append(article);
-      streamingEntry = { article, body: article.messageBody, message, session };
-    }
-    if (event.type === "delta" && streamingEntry) {
-      streamingEntry.message.text += event.text;
-      let paragraph = streamingEntry.body.lastElementChild;
-      if (!paragraph) { paragraph = document.createElement("p"); streamingEntry.body.append(paragraph); }
-      paragraph.textContent += event.text;
+    if (event.type === "paragraph") {
+      const previousHeight = streamingEntry ? streamingEntry.body.offsetHeight : 0;
+      if (streamingEntry) {
+        streamingEntry.message.text += `\n\n${event.text}`;
+        const paragraph = document.createElement("p"); appendInlineCode(paragraph, event.text); streamingEntry.body.append(paragraph);
+      } else {
+        const message = { role: "assistant", text: event.text, time: timeLabel(), completed: false }; session.messages.push(message);
+        const article = messageArticle(message, true); article.classList.add("message--streaming"); element.live.append(article);
+        streamingEntry = { article, body: article.messageBody, message, session };
+      }
+      revealGrowth(streamingEntry.body, previousHeight);
     }
     if (event.type === "done") {
       if (streamingEntry) {
@@ -754,7 +766,7 @@
       }
       streamingEntry?.article.classList.remove("message--streaming"); streamController = null; streamingEntry = null; activeToolEntry = null; setRunning(false); persist();
     }
-    if (["thinking", "tool_start", "assistant_start", "done"].includes(event.type)) refreshFocusedActivity();
+    if (["thinking", "tool_start", "paragraph", "done"].includes(event.type)) refreshFocusedActivity();
     refreshOpenFind();
     scrollLatest();
   }

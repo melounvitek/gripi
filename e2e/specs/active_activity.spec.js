@@ -127,7 +127,7 @@ test("activity height holds through a run and starts fresh for the next run", as
 test("a step taller than the view does not hold later steps out of view", async ({ page }) => {
   const deliver = await liveEvents(page);
   const group = activeGroup(page);
-  const thinking = { type: "thinking", thinking: Array.from({ length: 30 }, (_, index) => `Long reasoning paragraph ${index + 1}.`).join("\n\n") };
+  const thinking = { type: "thinking", thinking: Array.from({ length: 30 }, (_, index) => `Long reasoning paragraph ${index + 1}.\n\n`).join("") };
   const update = (type) => ({ type: "message_update", message: assistant([thinking]), assistantMessageEvent: { type, contentIndex: 0 } });
   await deliver({ type: "agent_start" }, update("thinking_delta"));
   await expect(group).toContainText("Long reasoning paragraph 30.");
@@ -190,7 +190,7 @@ test("the next step cannot move a finished card during its first Expand tap", as
 
 test("discarded thinking is not kept as the finished step", async ({ page }) => {
   const deliver = await liveEvents(page);
-  const thinking = { type: "thinking", thinking: "Tentative reasoning that was removed." };
+  const thinking = { type: "thinking", thinking: "Tentative reasoning that was removed.\n\n" };
   await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([thinking]), assistantMessageEvent: { type: "thinking_delta", contentIndex: 0 } });
   const group = activeGroup(page);
   await expect(group).toContainText(thinking.thinking);
@@ -212,7 +212,7 @@ test("a reply takes the place of the finished step", async ({ page }) => {
   await expect(group).toContainText("1 running");
   await deliver(end("before-reply", "bash", output));
   await expect(group.locator(".active-activity-count")).toHaveText("Done");
-  const text = "Here is what the inspection found.";
+  const text = "Here is what the inspection found.\n\n";
   await deliver({ type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   const reply = page.locator(".message--assistant").filter({ hasText: text });
   await expect(reply).toBeVisible();
@@ -284,7 +284,7 @@ test("keeps a summary separate when text follows it", async ({ page }) => {
 
 test("text-only runs do not create an activity group", async ({ page }) => {
   const deliver = await liveEvents(page);
-  await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([{ type: "text", text: "Answer without tools." }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  await deliver({ type: "agent_start" }, { type: "message_update", message: assistant([{ type: "text", text: "Answer without tools.\n\n" }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   await expect(page.locator(".message").filter({ hasText: "Answer without tools." })).toBeVisible();
   await expect(activeGroup(page)).toHaveCount(0);
 });
@@ -302,7 +302,7 @@ test("groups parallel cards, summarizes each completion and restores original or
   const read = page.locator('[data-tool-call-id="active-read"]');
   await bash.evaluate((card) => { window.originalActivityCard = card; });
   // A normal assistant message must not be swallowed by the group.
-  await deliver({ type: "message_update", message: assistant([...tools, { type: "text", text: "Both checks are underway." }]), assistantMessageEvent: { type: "text_delta", contentIndex: 2 } });
+  await deliver({ type: "message_update", message: assistant([...tools, { type: "text", text: "Both checks are underway.\n\n" }]), assistantMessageEvent: { type: "text_delta", contentIndex: 2 } });
   await expect(page.locator(".message").filter({ hasText: "Both checks are underway." })).toBeVisible();
   await expect(group).not.toContainText("Both checks are underway.");
   await activityView(page, "Full").tap();
@@ -342,7 +342,7 @@ test("groups parallel cards, summarizes each completion and restores original or
 for (const transport of ["message", "gatewayPartialMessage"]) {
   test(`${transport} shows only current thinking and preparation`, async ({ page }) => {
     const deliver = await liveEvents(page);
-    const thinking = { type: "thinking", thinking: "Checking the visibility rules." };
+    const thinking = { type: "thinking", thinking: "Checking the visibility rules.\n\n" };
     const update = (type, content, index = 0) => ({ type: "message_update", assistantMessageEvent: { type, contentIndex: index }, [transport]: assistant(content) });
     await deliver({ type: "agent_start" }, update("thinking_delta", [thinking]));
     const group = activeGroup(page);
@@ -374,17 +374,35 @@ test("focused activity does not scroll past the beginning of an oversized answer
   await expect(activeGroup(page)).toBeVisible();
   await deliver(end("before-answer", "bash"));
   await expect(activeGroup(page).locator(".active-activity-count")).toHaveText("Done");
-  const short = "Here are the findings.";
+  const short = "Here are the findings.\n\n";
   await deliver({ type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "text", text: short }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   const card = page.locator('.message--assistant').filter({ hasText: short });
   await expect(card).toBeVisible();
   // Let the short answer's initial auto-follow settle before it grows.
   await page.waitForTimeout(350);
-  const text = short + "\n\n" + Array.from({ length: 80 }, (_, index) => `Finding ${index + 1}: keep the start of this answer visible.`).join("\n\n");
+  const text = short + Array.from({ length: 80 }, (_, index) => `Finding ${index + 1}: keep the start of this answer visible.\n\n`).join("");
   await deliver({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   await expect(card).toContainText("Finding 80:");
   await expect.poll(() => card.evaluate((element) => Math.abs(element.getBoundingClientRect().top - document.querySelector('#conversation-scroll').getBoundingClientRect().top))).toBeLessThan(40);
 });
+
+for (const view of ["Full", "Brief"]) {
+  test(`${view} follows thinking down to its rendered paragraph`, async ({ page }) => {
+    const deliver = await liveEvents(page);
+    await activityView(page, view).tap();
+    const scroller = page.locator("#conversation-scroll");
+    const earlier = Array.from({ length: 40 }, (_, index) => `Earlier paragraph ${index + 1}.`).join("\n\n");
+    await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([{ type: "text", text: earlier }]) }, { type: "agent_end" });
+    await expect(page.locator(".message--assistant").filter({ hasText: "Earlier paragraph 40." })).toBeVisible();
+    const paragraph = Array.from({ length: 8 }, () => "This finished reasoning paragraph wraps over several lines.").join(" ");
+    // No later event follows, so only the paragraph's own render can bring it into view.
+    await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, { type: "message_update", message: assistant([{ type: "thinking", thinking: `${paragraph}\n\n` }]), assistantMessageEvent: { type: "thinking_delta", contentIndex: 0 } });
+    const thinking = page.locator(".message--thinking").filter({ hasText: "This finished reasoning paragraph" });
+    await expect(thinking).toBeVisible();
+    await expect.poll(() => thinking.evaluate((element) => element.getBoundingClientRect().bottom - document.querySelector("#conversation-scroll").getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
+    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
+  });
+}
 
 for (const view of ["Full", "Brief"]) {
   const answer = (text) => ({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
@@ -434,15 +452,21 @@ async function streamingReplyAtBottom(page) {
   const earlier = Array.from({ length: 40 }, (_, index) => `Earlier paragraph ${index + 1}.`).join("\n\n");
   await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([{ type: "text", text: earlier }]) }, { type: "agent_end" });
   await expect(page.locator(".message--assistant").filter({ hasText: "Earlier paragraph 40." })).toBeVisible();
-  let text = "Streaming reply.";
+  let text = "Streaming reply.\n\n";
   const update = () => deliver({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
   await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) });
   await update();
   const fromBottom = () => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
   await expect.poll(fromBottom).toBeLessThan(2);
+  const addBlock = (block) => {
+    text += block;
+    return update();
+  };
   return {
     box: await scroller.boundingBox(),
+    deliver,
     fromBottom,
+    addBlock,
     async expectNotFollowing() {
       // Let a fling finish first, or it could hide a wrong follow scroll.
       await expect.poll(async () => {
@@ -450,9 +474,8 @@ async function streamingReplyAtBottom(page) {
         await page.waitForTimeout(150);
         return before === await fromBottom();
       }).toBe(true);
-      text += " More.";
-      await update();
-      await expect(page.locator(".message--assistant").filter({ hasText: text })).toHaveCount(1);
+      await addBlock("More.\n\n");
+      await expect(page.locator(".message--assistant").filter({ hasText: "More." })).toHaveCount(1);
       // Leave time for the follow scroll that must not happen.
       await page.waitForTimeout(500);
       expect(await fromBottom()).toBeGreaterThan(120);
@@ -496,13 +519,315 @@ test("a text selection that scrolls the view stops following a streaming reply",
   await expectNotFollowing();
 });
 
+// One-line paragraphs keep these replies shorter than the view, so following keeps them at the bottom instead of pinning their top.
+const block = (name, paragraphs = 3) => Array.from({ length: paragraphs }, (_, index) => `${name} paragraph ${index + 1} lands in one piece.\n\n`).join("");
+const replyBody = (page) => page.locator("#live-output .message--assistant:not(.message--thinking) .message-body").last();
+
+// Records the scroll position and the latest reply's wipe on every frame until read.
+async function recordFrames(page) {
+  await page.evaluate(() => {
+    const scroller = document.querySelector("#conversation-scroll");
+    const frames = window.recordedFrames = [];
+    const record = () => {
+      const body = [...document.querySelectorAll("#live-output .message--assistant:not(.message--thinking) .message-body")].at(-1);
+      frames.push({
+        time: performance.now(),
+        top: scroller.scrollTop,
+        fromBottom: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight,
+        revealing: body?.classList.contains("message-body--revealing") ?? false,
+        edge: parseFloat(body ? getComputedStyle(body).getPropertyValue("--reveal-edge") : ""),
+        height: body?.offsetHeight ?? 0,
+        bottomButton: document.querySelector(".jump-to-latest")?.classList.contains("is-visible") ?? false,
+      });
+      if (window.recordedFrames === frames) requestAnimationFrame(record);
+    };
+    requestAnimationFrame(record);
+  });
+  // Two more frames, so a scroll made in the last frame after its record is recorded too.
+  return () => page.evaluate(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return window.recordedFrames.splice(0);
+  });
+}
+
+// Holds Markdown renders until released, so each block lands at a chosen moment.
+async function holdMarkdown(page) {
+  const held = [];
+  await page.route("**/markdown", async (route) => {
+    const response = await route.fetch();
+    held.push(() => route.fulfill({ response }));
+  });
+  return {
+    pending: () => held.length,
+    async release() {
+      await expect.poll(() => held.length).toBeGreaterThan(0);
+      await held.shift()();
+    }
+  };
+}
+
+// Holds Markdown renders in the page with their responses already read, so a released render lands within the task that releases it.
+function holdRendersInPage(page) {
+  return page.evaluate(() => {
+    const originalFetch = window.fetch;
+    window.heldRenders = [];
+    window.stopHoldingRenders = () => { window.fetch = originalFetch; };
+    window.fetch = async (url, options) => {
+      const response = await originalFetch(url, options);
+      if (!String(url).endsWith("/markdown")) return response;
+      const payload = await response.json();
+      return new Promise((resolve) => window.heldRenders.push(() => resolve({ ok: true, json: async () => payload })));
+    };
+  });
+}
+
+const revealing = (page) => page.locator(".message-body--revealing");
+const rising = (values) => values.every((value, index) => index === 0 || value >= values[index - 1]);
+const movesEndAtBottom = (frames) => frames.every((frame, index) => index === 0 || frame.top === frames[index - 1].top || frame.fromBottom < 2);
+
+test("a streamed block wipes in from the old bottom while the view glides down to it", async ({ page }) => {
+  const { addBlock, fromBottom } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  const markdown = await holdMarkdown(page);
+  const oldHeight = await replyBody(page).evaluate((element) => element.offsetHeight);
+  await addBlock(block("Second", 6));
+  const frames = await recordFrames(page);
+  await markdown.release();
+  await expect(replyBody(page)).toContainText("Second paragraph 6");
+  await expect(revealing(page)).toHaveCount(0);
+  await expect.poll(fromBottom).toBeLessThan(2);
+  const newHeight = await replyBody(page).evaluate((element) => element.offsetHeight);
+  const recorded = await frames();
+  const edges = recorded.filter((frame) => frame.revealing).map((frame) => frame.edge);
+  expect(edges.length).toBeGreaterThan(2);
+  expect(edges[0]).toBeGreaterThanOrEqual(oldHeight - 1);
+  expect(edges[0]).toBeLessThan(oldHeight + (newHeight - oldHeight) / 2);
+  expect(edges.at(-1)).toBeGreaterThanOrEqual(newHeight - 1);
+  expect(rising(edges)).toBe(true);
+  const tops = recorded.map((frame) => frame.top);
+  expect(rising(tops)).toBe(true);
+  expect(new Set(tops).size).toBeGreaterThanOrEqual(4);
+});
+
+test("a block that lands mid-wipe continues the wipe without the edge dropping", async ({ page }) => {
+  const { addBlock } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  const markdown = await holdMarkdown(page);
+  await addBlock(block("Second", 7));
+  await expect.poll(markdown.pending).toBe(1);
+  // The renderer asks for this text as soon as the held render lands.
+  await addBlock(block("Third"));
+  const frames = await recordFrames(page);
+  await markdown.release();
+  await page.waitForFunction(() => window.recordedFrames.filter((frame) => frame.revealing).length >= 3, null, { polling: "raf" });
+  await markdown.release();
+  await expect(replyBody(page)).toContainText("Third paragraph 3");
+  await expect(revealing(page)).toHaveCount(0);
+  const recorded = await frames();
+  const first = recorded.findIndex((frame) => frame.revealing);
+  const last = recorded.findLastIndex((frame) => frame.revealing);
+  const wipe = recorded.slice(first, last + 1);
+  // One unbroken wipe across both renders.
+  expect(wipe.every((frame) => frame.revealing)).toBe(true);
+  expect(new Set(wipe.map((frame) => frame.height)).size).toBe(2);
+  expect(rising(wipe.map((frame) => frame.edge))).toBe(true);
+  expect(wipe.at(-1).edge).toBeGreaterThanOrEqual(wipe.at(-1).height - 1);
+});
+
+test("a reply taller than the view stays pinned without wiping in blocks below the view", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const findings = (count) => Array.from({ length: count }, (_, index) => `Finding ${index + 1}: keep the start of this answer visible while it streams.\n\n`).join("");
+  const answer = (text) => ({ type: "message_update", message: assistant([{ type: "text", text }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, answer(findings(60)));
+  const card = page.locator(".message--assistant").filter({ hasText: "Finding 1:" });
+  const topOffset = () => card.evaluate((element) => Math.abs(element.getBoundingClientRect().top - document.querySelector("#conversation-scroll").getBoundingClientRect().top));
+  await expect(card).toContainText("Finding 60:");
+  await expect.poll(topOffset).toBeLessThan(40);
+  await expect(revealing(page)).toHaveCount(0);
+  const frames = await recordFrames(page);
+  await deliver(answer(findings(80)));
+  await expect(card).toContainText("Finding 80:");
+  // Leave time for a wipe or scroll that must not happen.
+  await page.waitForTimeout(500);
+  const recorded = await frames();
+  expect(recorded.some((frame) => frame.revealing)).toBe(false);
+  expect(new Set(recorded.map((frame) => frame.top)).size).toBe(1);
+  expect(await topOffset()).toBeLessThan(40);
+});
+
+test("tool output that arrives while following still scrolls in one step", async ({ page }) => {
+  const { deliver, fromBottom } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  const frames = await recordFrames(page);
+  const output = Array.from({ length: 30 }, (_, index) => `Output line ${index + 1}`).join("\n");
+  await deliver(start("after-reveal", "bash", { command: "npm test" }), { type: "tool_execution_update", toolCallId: "after-reveal", toolName: "bash", partialResult: { content: [{ type: "text", text: output }] } });
+  await expect(page.locator('[data-tool-call-id="after-reveal"]')).toContainText("Output line 30");
+  await expect.poll(fromBottom).toBeLessThan(2);
+  const recorded = await frames();
+  expect(recorded.some((frame, index) => index > 0 && frame.top !== recorded[index - 1].top)).toBe(true);
+  expect(movesEndAtBottom(recorded)).toBe(true);
+});
+
+test("reduced motion turned on mid-session scrolls blocks in at once, and turning it off brings the wipe back", async ({ page }) => {
+  const { addBlock, fromBottom } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const frames = await recordFrames(page);
+  await addBlock(block("Still", 4));
+  await expect(replyBody(page)).toContainText("Still paragraph 4");
+  await expect.poll(fromBottom).toBeLessThan(2);
+  // Leave time for a wipe that must not start.
+  await page.waitForTimeout(300);
+  let recorded = await frames();
+  expect(recorded.some((frame) => frame.revealing)).toBe(false);
+  expect(movesEndAtBottom(recorded)).toBe(true);
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await addBlock(block("Moving", 4));
+  await expect(replyBody(page)).toContainText("Moving paragraph 4");
+  await expect(revealing(page)).toHaveCount(0);
+  await expect.poll(fromBottom).toBeLessThan(2);
+  recorded = await frames();
+  expect(recorded.some((frame) => frame.revealing)).toBe(true);
+  expect(movesEndAtBottom(recorded)).toBe(false);
+});
+
+test("reduced motion turned on mid-glide makes the following scrolls instant while blocks keep landing", async ({ page }) => {
+  const { addBlock, fromBottom } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  await holdRendersInPage(page);
+  const startTop = await page.locator("#conversation-scroll").evaluate((element) => element.scrollTop);
+  await addBlock(block("Gliding", 8));
+  await expect.poll(() => page.evaluate(() => window.heldRenders.length)).toBe(1);
+  // The renderer asks for this text as soon as the held render lands.
+  await addBlock(block("Reduced", 1));
+  await page.evaluate(() => window.heldRenders.shift()());
+  await midGlide(page, startTop, 1);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const frames = await recordFrames(page);
+  // From a frame callback, so the recorder has recorded the height before the block.
+  await page.evaluate(() => requestAnimationFrame(() => {
+    window.stopHoldingRenders();
+    window.heldRenders.shift()();
+  }));
+  await expect(replyBody(page)).toContainText("Reduced paragraph 1");
+  for (const name of ["Later", "Last"]) {
+    await page.waitForTimeout(250);
+    await addBlock(block(name, 1));
+  }
+  await expect(replyBody(page)).toContainText("Last paragraph 1");
+  await expect.poll(fromBottom).toBeLessThan(2);
+  const recorded = await frames();
+  const landed = recorded.findIndex((frame) => frame.height > recorded[0].height);
+  // The block landed while the earlier glide was still under way.
+  expect(recorded[landed - 1].fromBottom).toBeGreaterThan(2);
+  const followed = recorded.findIndex((frame, index) => index >= landed && frame.fromBottom < 2);
+  expect(followed - landed).toBeLessThanOrEqual(4);
+  expect(movesEndAtBottom(recorded.slice(followed))).toBe(true);
+});
+
+// Waits until a glide is under way, with the view still well above the bottom and the given number of renders held in the page.
+function midGlide(page, startTop, heldRenders = 0) {
+  return page.waitForFunction(([top, held]) => {
+    const scroller = document.querySelector("#conversation-scroll");
+    return (window.heldRenders?.length ?? 0) === held && scroller.scrollTop > top + 4 && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 40;
+  }, [startTop, heldRenders], { polling: "raf" });
+}
+
+test("a wheel during a glide stops following", async ({ page, isMobile }) => {
+  test.skip(isMobile, "A mouse wheel is a desktop interaction");
+  const { box, addBlock, fromBottom, expectNotFollowing } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const startTop = await page.locator("#conversation-scroll").evaluate((element) => element.scrollTop);
+  await addBlock(block("Gliding", 10));
+  await midGlide(page, startTop);
+  await page.mouse.wheel(0, -600);
+  await expect.poll(fromBottom).toBeGreaterThan(120);
+  await expectNotFollowing();
+});
+
+test("a block that lands between a wheel and its scroll does not pull the reader back", async ({ page, isMobile }) => {
+  test.skip(isMobile, "A mouse wheel is a desktop interaction");
+  const { box, addBlock, fromBottom, expectNotFollowing } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  await holdRendersInPage(page);
+  // Registered after the page's own listener, so the render lands after the wheel's input and before its scroll.
+  await page.evaluate(() => document.querySelector("#conversation-scroll").addEventListener("wheel", () => {
+    window.stopHoldingRenders();
+    window.heldRenders.shift()();
+  }, { once: true, passive: true }));
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const startTop = await page.locator("#conversation-scroll").evaluate((element) => element.scrollTop);
+  await addBlock(block("Gliding", 10));
+  await expect.poll(() => page.evaluate(() => window.heldRenders.length)).toBe(1);
+  // The renderer asks for this text as soon as the held render lands.
+  await addBlock(block("Landing"));
+  await page.evaluate(() => window.heldRenders.shift()());
+  await midGlide(page, startTop, 1);
+  await page.mouse.wheel(0, -600);
+  await expect(replyBody(page)).toContainText("Landing paragraph 3");
+  await expect.poll(fromBottom).toBeGreaterThan(120);
+  // Leave time for the follow scroll that must not happen.
+  await page.waitForTimeout(800);
+  expect(await fromBottom()).toBeGreaterThan(120);
+  await expectNotFollowing();
+});
+
+test("a touch drag during a glide stops following", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "A touch drag is a phone interaction");
+  const { box, addBlock, fromBottom, expectNotFollowing } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  const startTop = await page.locator("#conversation-scroll").evaluate((element) => element.scrollTop);
+  await addBlock(block("Gliding", 10));
+  await midGlide(page, startTop);
+  const touch = await page.context().newCDPSession(page);
+  const x = box.x + box.width / 2;
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y: box.y + 100 }] });
+  for (let step = 1; step <= 5; step += 1) await touch.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: box.y + 100 + step * 60 }] });
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touch.detach();
+  await expect.poll(fromBottom).toBeGreaterThan(120);
+  await expectNotFollowing();
+});
+
+test("a click just before a block lands does not stop following through its glide", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Clicking with a mouse is a desktop interaction");
+  const { box, addBlock, fromBottom } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  const markdown = await holdMarkdown(page);
+  await addBlock(block("Clicked", 5));
+  await expect.poll(markdown.pending).toBe(1);
+  // The renderer asks for this text as soon as the held render lands.
+  await addBlock(block("Following", 5));
+  const frames = await recordFrames(page);
+  await page.evaluate(() => document.addEventListener("pointerdown", () => { window.clickedAt = performance.now(); }, { once: true }));
+  await page.mouse.click(box.x + 60, box.y + box.height / 2);
+  await markdown.release();
+  // The second block lands while the view is still gliding to the first.
+  await expect(replyBody(page)).toContainText("Clicked paragraph 5");
+  await markdown.release();
+  await page.unroute("**/markdown");
+  await expect(replyBody(page)).toContainText("Following paragraph 5");
+  await expect(revealing(page)).toHaveCount(0);
+  await expect.poll(fromBottom).toBeLessThan(2);
+  const recorded = await frames();
+  // The first block landed within the window in which scrolling counts as the click's.
+  const clickedAt = await page.evaluate(() => window.clickedAt);
+  expect(recorded.find((frame) => frame.height > recorded[0].height).time - clickedAt).toBeLessThan(250);
+  expect(recorded.some((frame) => frame.bottomButton)).toBe(false);
+  await addBlock(block("After", 1));
+  await expect(replyBody(page)).toContainText("After paragraph 1");
+  await expect.poll(fromBottom).toBeLessThan(2);
+});
+
 test("the bottom jump button waits for the reader to scroll into a long answer", async ({ page, isMobile }) => {
   test.skip(isMobile, "Narrow screens only show the jump buttons while the reader scrolls");
   const deliver = await liveEvents(page);
   const scroller = page.locator("#conversation-scroll");
   const jump = page.locator(".jump-to-latest");
   const fromBottom = () => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
-  const paragraphs = (name) => Array.from({ length: 60 }, (_, index) => `${name} paragraph ${index + 1}.`).join("\n\n");
+  const paragraphs = (name) => Array.from({ length: 60 }, (_, index) => `${name} paragraph ${index + 1}.\n\n`).join("");
   await deliver({ type: "agent_start" }, { type: "message_end", message: assistant([{ type: "text", text: paragraphs("Earlier") }]) }, { type: "agent_end" });
   await expect(page.locator(".message--assistant").filter({ hasText: "Earlier paragraph 60." })).toBeVisible();
   await expect.poll(fromBottom).toBeLessThan(2);
