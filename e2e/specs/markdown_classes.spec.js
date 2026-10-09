@@ -18,6 +18,12 @@ for (const scenario of [
         if (stage === "reloaded history") await page.reload();
         const response = message(page, "assistant", scenario.texts[0]);
         await expect(response).toBeVisible();
+        // The last block may still be wiping in while the view glides to it, which would move the reply between measurements.
+        await page.waitForFunction(() => new Promise((resolve) => {
+          const scroller = document.getElementById("conversation-scroll");
+          const top = scroller.scrollTop;
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(scroller.scrollTop === top && !document.querySelector(".message-body--revealing"))));
+        }));
         const conversation = await page.locator("#conversation-scroll").boundingBox();
         const article = await response.boundingBox();
 
