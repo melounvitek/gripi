@@ -161,6 +161,7 @@ Gripi uses Pi’s own runtime, sessions, tools, models, and configuration. The c
 
 - **Project resources load automatically.** Gripi starts Pi with `--approve`, so project settings, extensions, skills, prompts, themes, system prompts, and packages work without first trusting the directory in Pi CLI. As a result, opening a project can run its extensions or package installation scripts. Only open projects you trust, or [turn this off](docs/configuration.md#project-resource-approval).
 - **The send button steers by default.** Use its menu to queue a follow-up instead. Prompt templates and skills use the selected mode, extension commands run immediately, and built-in commands sent in Steer mode run as controls rather than messages.
+- **Replies appear a block at a time.** Pi CLI shows text as it arrives, while Gripi shows replies and thinking a finished paragraph, list item or code block at a time.
 - **Shell output appears when the command finishes.** `!command` adds its output to the model context, and `!!command` does not. Output is not streamed. If a shell command and Pi are both running, Stop cancels the shell command first; press it again to stop Pi.
 - **Extension UI is partial.** Select, confirm, input, editor, notify, title, and editor-prefill requests work. Extension status text is not shown in the footer, which shows only the model, thinking level, and context usage.
 - **There is no terminal UI.** For custom TUI components, terminal keybindings, or code that checks `ctx.mode === "tui"`, use Pi CLI.

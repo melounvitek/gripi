@@ -25,7 +25,7 @@ Conversation messages have two rendering paths:
 - `internal/server/templates/message.html` renders persisted history.
 - `LiveMessageParser` and `LiveMessageRenderer` render newly received events.
 
-Changes to message presentation or supported Pi event shapes must check both paths. Shared CSS classes and server-rendered semantics are covered by Go rendering tests; native Node tests exercise representative live shapes and persisted-message deduplication; the browser contract checks the integrated paths. Intentional live-only state includes streaming, optimistic, and temporary tool progress markers.
+Changes to message presentation or supported Pi event shapes must check both paths. Shared CSS classes and server-rendered semantics are covered by Go rendering tests; native Node tests exercise representative live shapes and persisted-message deduplication; the browser contract checks the integrated paths. Intentional live-only state includes streaming, optimistic, and temporary tool progress markers. While a reply or its thinking streams, `LiveMessageRenderer` shows only its finished Markdown blocks (see `paragraph_streaming.js`), and `ConversationController` wipes each new block in and glides the view down to it.
 
 ## Testing
 
