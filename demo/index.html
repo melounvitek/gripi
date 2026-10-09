@@ -381,7 +381,7 @@
     .session-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-folder-missing { color: var(--gold); }
     .sidebar-icon-button { flex: 0 0 auto; min-height: 1.65rem; padding: 0.2rem 0.5rem; border: 0; border-radius: 0.25rem; background: transparent; color: var(--muted); line-height: 1; }
-    .sidebar-icon-button:hover { background: #ffffff08; color: var(--text); }
+    @media (hover: hover) and (pointer: fine) { .sidebar-icon-button:hover { background: #ffffff08; color: var(--text); } }
     .sidebar-new-session-button, .sidebar-open-pinned-button { display: inline-flex; margin-left: auto; align-items: center; gap: 0.3rem; letter-spacing: 0; text-transform: none; }
     .sidebar-new-session-button { color: var(--accent); }
     .sidebar-new-session-button span, .sidebar-open-pinned-button span { font-size: 0.9rem; line-height: 1; }

@@ -130,6 +130,8 @@ for (const touch of [false, true]) {
       await activate(toggle);
       await expect(toggle).toHaveAttribute("aria-pressed", "true");
       await expect(toggle.locator(".sidebar-tool-slash")).toBeHidden();
+      // A tap leaves no hover colour over the pressed one.
+      if (touch) await expect(toggle).toHaveCSS("color", "rgb(255, 90, 31)");
       releaseSidebar();
       await expectExternalIcon(link);
       if (touch) await expect(page.locator("#mobile-session-toggle")).toBeChecked();
