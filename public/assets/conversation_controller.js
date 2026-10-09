@@ -804,7 +804,11 @@ export class ConversationController {
     this.scrollInputAt = Date.now();
     this.programmaticScrollTop = null;
     // The browser's smooth scroll would override the user's, such as a wheel, so input stops a glide where it is.
-    if (this.glideTop !== null) this.element.scrollTo({ top: this.element.scrollTop });
+    // It stops following too, or a render landing before the input's own scroll would start another glide.
+    if (this.glideTop !== null) {
+      this.element.scrollTo({ top: this.element.scrollTop });
+      this.stopAutoFollow();
+    }
     this.glideTop = null;
     if (intent !== "keyboard") this.messageJumpTargetsSuppressed = false;
   }

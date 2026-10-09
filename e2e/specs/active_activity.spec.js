@@ -698,6 +698,46 @@ test("a wheel during a glide stops following", async ({ page, isMobile }) => {
   await expectNotFollowing();
 });
 
+test("a block that lands between a wheel and its scroll does not pull the reader back", async ({ page, isMobile }) => {
+  test.skip(isMobile, "A mouse wheel is a desktop interaction");
+  const { box, addBlock, fromBottom, expectNotFollowing } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  // Renders are held in the page, so the wheel's own listener can land one after its input and before its scroll.
+  await page.evaluate(() => {
+    const originalFetch = window.fetch;
+    window.heldRenders = [];
+    window.fetch = async (url, options) => {
+      const response = await originalFetch(url, options);
+      if (!String(url).endsWith("/markdown")) return response;
+      const payload = await response.json();
+      // Already read, so a released render lands within the task that releases it.
+      return new Promise((resolve) => window.heldRenders.push(() => resolve({ ok: true, json: async () => payload })));
+    };
+    document.querySelector("#conversation-scroll").addEventListener("wheel", () => {
+      window.fetch = originalFetch;
+      window.heldRenders.shift()();
+    }, { once: true, passive: true });
+  });
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const startTop = await page.locator("#conversation-scroll").evaluate((element) => element.scrollTop);
+  await addBlock(block("Gliding", 10));
+  await expect.poll(() => page.evaluate(() => window.heldRenders.length)).toBe(1);
+  // The renderer asks for this text as soon as the held render lands.
+  await addBlock(block("Landing"));
+  await page.evaluate(() => window.heldRenders.shift()());
+  await page.waitForFunction((top) => {
+    const scroller = document.querySelector("#conversation-scroll");
+    return window.heldRenders.length === 1 && scroller.scrollTop > top + 4 && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 40;
+  }, startTop, { polling: "raf" });
+  await page.mouse.wheel(0, -600);
+  await expect(replyBody(page)).toContainText("Landing paragraph 3");
+  await expect.poll(fromBottom).toBeGreaterThan(120);
+  // Leave time for the follow scroll that must not happen.
+  await page.waitForTimeout(800);
+  expect(await fromBottom()).toBeGreaterThan(120);
+  await expectNotFollowing();
+});
+
 test("a touch drag during a glide stops following", async ({ page, isMobile }) => {
   test.skip(!isMobile, "A touch drag is a phone interaction");
   const { box, addBlock, fromBottom, expectNotFollowing } = await streamingReplyAtBottom(page);
