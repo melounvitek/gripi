@@ -1,6 +1,7 @@
 import { PAIRED_TOOL_NAMES, TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES, TOOL_OUTPUT_TAIL_CHARACTERS } from "./constants.js";
 import { renderTextWithLinks } from "./dom.js";
 import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimeLabel, messageTimestampKey, normalizedMessageText, stableTextHash } from "./formatting.js";
+import { finishedMarkdownBlocks } from "./paragraph_streaming.js";
 import { hasTerminalControls, renderTerminalOutput } from "./terminal_output_renderer.js";
 
 const TERMINAL_OUTPUT_EXCLUDED_TOOLS = new Set(["read", "edit", "write"]);
@@ -1165,10 +1166,16 @@ export class LiveMessageRenderer {
   }
 
   renderMessageEvent(event) {
-    const message = this.parser.eventMessage(event);
+    const update = event.assistantMessageEvent || {};
+    let message = this.parser.eventMessage(event);
+    const streamingPart = message?.content?.[update.contentIndex];
+    // Text still streaming shows only finished Markdown blocks, so a block doesn't reflow as it arrives.
+    if (["text_start", "text_delta", "thinking_start", "thinking_delta"].includes(update.type) && ["text", "thinking"].includes(streamingPart?.type)) {
+      const finishedText = finishedMarkdownBlocks(streamingPart[streamingPart.type] || "");
+      message = { ...message, content: message.content.map((part) => part === streamingPart ? { ...part, [part.type]: finishedText } : part) };
+    }
     let segments = message?.content ? this.parser.contentSegments(message.content, message) : [{ text: this.parser.messageText(message), compact: false, summary: "", startIndex: 0, endIndex: 0, finalAssistantResponse: true, images: [] }].filter((segment) => segment.text);
     const roleName = this.parser.liveEventRole(event, message);
-    const update = event.assistantMessageEvent || {};
     const thinking = roleName === "assistant" && event.type !== "message_end" && ["thinking_start", "thinking_delta"].includes(update.type);
     if (thinking && !segments.some((segment) => segment.thinking && segment.startIndex === update.contentIndex)) {
       const index = update.contentIndex ?? 0;

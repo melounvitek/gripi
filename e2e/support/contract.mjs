@@ -130,6 +130,7 @@ export const activeRecovery = {
   previousThinking: "Finished recovery reasoning.",
   text: "Recovery work is underway.",
   thinking: "Still considering the recovery result.",
+  unfinishedThinking: "Weighing whether to retry",
   tools: [
     { id: "recovery-bash", name: "bash", arguments: { command: "sleep 300 # recovery" } },
     { id: "recovery-read", name: "read", arguments: { path: "recovery-input.txt" } },
@@ -203,9 +204,10 @@ export const tool = {
 
 export const replies = {
   standard: "Deterministic browser response complete.",
-  deltaThinking: "Reasoning is already visible",
-  deltaTextStart: "Answer started",
-  deltaText: "Answer started and completed.",
+  deltaThinking: "Reasoning paragraph one.",
+  deltaThinkingMore: "Reasoning paragraph two.",
+  deltaTextStart: "Answer started.",
+  deltaText: "Answer started.\n\nAnswer completed.",
   markdownRaw: '<span class="modal-overlay">Raw span stays in conversation</span>\n\n<code class="image-viewer">Raw code stays in conversation</code>',
   markdownFence: '```modal-overlay\nModal fence stays in conversation\n```\n\n```image-viewer\nImage fence stays in conversation\n```\n\n```javascript\nconst safeValue = 42;\n```',
   markdownHeadings: "## Live output\n\nHeadings stay in the conversation.\n\n## Command list\n\n## Abort form\n\n- [x] done task\n- [ ] open task",

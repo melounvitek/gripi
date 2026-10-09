@@ -54,7 +54,15 @@ export class FakeElement extends FakeEventTarget {
   getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
   removeAttribute(name) { this.attributes.delete(name); }
   hasAttribute(name) { return this.attributes.has(name); }
-  append(...children) { children.forEach((child) => { child.remove(); child.parentElement = this; this.children.push(child); }); }
+  toggleAttribute(name, force = !this.hasAttribute(name)) { if (force) this.setAttribute(name, ""); else this.removeAttribute(name); return force; }
+  append(...children) {
+    children.forEach((child) => {
+      if (typeof child === "string") child = new FakeTextNode(child);
+      child.remove();
+      child.parentElement = this;
+      this.children.push(child);
+    });
+  }
   replaceChildren(...children) { this.children.forEach((child) => { child.parentElement = null; }); this.children = []; this.append(...children); }
   remove() {
     if (!this.parentElement) return;
