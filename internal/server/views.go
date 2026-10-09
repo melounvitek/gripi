@@ -538,7 +538,9 @@ func (view *pageView) prepareSidebar() {
 		if view.Pinned[session.Path] {
 			continue
 		}
-		hidden := view.ExternalFollow[session.Path] && !view.CLISessionsShown
+		// Tags, like pins, keep a Pi CLI session listed.
+		hideable := view.ExternalFollow[session.Path] && len(view.SessionTags[session.Path]) == 0
+		hidden := hideable && !view.CLISessionsShown
 		if !hidden {
 			view.SessionTotal++
 		}
@@ -551,7 +553,7 @@ func (view *pageView) prepareSidebar() {
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{session.DisplayName, session.CWD, filepath.Base(session.CWD), session.FirstUserMessage}, "\n")), query) {
 			continue
 		}
-		if view.ExternalFollow[session.Path] {
+		if hideable {
 			view.CLISessionCount++
 		}
 		if hidden {
