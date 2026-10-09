@@ -206,7 +206,7 @@
     .sidebar-tool-slash path:first-child { stroke: var(--sidebar); stroke-width: 5; }
     @media (hover: hover) and (pointer: fine) { .sidebar-tool:hover { background: #ffffff08; color: var(--text); } }
     .sidebar-tool.is-enabled { color: var(--accent); }
-    .sidebar-tool.is-enabled .sidebar-tool-slash { display: none; }
+    :is(.sidebar-tool.is-enabled, .sidebar-cli-toggle[aria-pressed="true"]) .sidebar-tool-slash { display: none; }
     .sidebar-tool.is-blocked { color: var(--danger); }
     @media (max-width: 760px), (pointer: coarse) {
       .sidebar-tool { width: 2.75rem; height: 2.75rem; }

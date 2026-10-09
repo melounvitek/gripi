@@ -60,7 +60,7 @@ func TestSidebarHidesPiCLISessionsUntilTheBrowserShowsThem(t *testing.T) {
 		if listed(list, cliAlpha) || listed(list, cliOpen) || !listed(header, cliPinned) {
 			t.Fatal("Pi CLI sessions are listed, or the pinned one is not")
 		}
-		for _, expected := range []string{`aria-pressed="false"`, `title="Show 2 Pi CLI sessions"`, `aria-label="Show 2 Pi CLI sessions"`, `class="sidebar-tool-slash"`} {
+		for _, expected := range []string{`aria-pressed="false"`, `title="Show 2 Pi CLI sessions"`, `aria-label="Show 2 Pi CLI sessions"`} {
 			if !strings.Contains(toggle, expected) {
 				t.Errorf("toggle missing %s", expected)
 			}
@@ -85,9 +85,6 @@ func TestSidebarHidesPiCLISessionsUntilTheBrowserShowsThem(t *testing.T) {
 			if !strings.Contains(toggle, expected) {
 				t.Errorf("toggle missing %s", expected)
 			}
-		}
-		if strings.Contains(toggle, "sidebar-tool-slash") {
-			t.Error("shown toggle is slashed")
 		}
 		if !strings.Contains(list, "Load 4 more") {
 			t.Error("pagination does not count the shown Pi CLI sessions")
