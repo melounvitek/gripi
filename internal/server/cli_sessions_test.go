@@ -129,4 +129,20 @@ func TestSidebarHidesPiCLISessionsUntilTheBrowserShowsThem(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("tagged ones are always listed", func(t *testing.T) {
+		if response := serve(t, handler, http.MethodPost, "/sessions/tags", url.Values{"session": {cliAlpha}, "tag": {"worker"}, "assigned": {"true"}}.Encode()); response.Code != http.StatusOK {
+			t.Fatalf("tag = %d %s", response.Code, response.Body.String())
+		}
+		toggle, _, _, list := sidebar(t, url.Values{"no_session": {"1"}}, false)
+		if !listed(list, cliAlpha) || listed(list, cliOpen) {
+			t.Fatal("the tagged Pi CLI session is hidden, or the untagged one is listed")
+		}
+		if !strings.Contains(toggle, `title="Show 1 Pi CLI session"`) {
+			t.Error("the toggle counts the tagged Pi CLI session")
+		}
+		if toggle, _, _, list := sidebar(t, url.Values{"no_session": {"1"}, "tag": {"worker"}}, false); !listed(list, cliAlpha) || toggle != "" {
+			t.Error("the tag filter hides the tagged Pi CLI session or shows the toggle")
+		}
+	})
 }
