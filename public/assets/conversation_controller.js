@@ -1,4 +1,4 @@
-import { enhanceMarkdownCodeBlocks, enhanceMessageLinks } from "./dom.js";
+import { enhanceMarkdownCodeBlocks, enhanceMessageLinks, revealGrowth } from "./dom.js";
 
 const FOCUSED_ACTIVITY_ITEM_LIMIT = 10;
 const USER_SCROLL_WINDOW_MS = 250;
@@ -30,6 +30,7 @@ export class ConversationController {
     this.forceBottomAutoScroll = false;
     this.followOversizedMessageBottom = false;
     this.programmaticScrollTop = null;
+    this.glideTop = null;
     this.scrollInputAt = 0;
     this.pointerHeld = false;
     this.lastScrollTop = 0;
@@ -226,6 +227,7 @@ export class ConversationController {
     this.messageJumpSuppressionGeneration += 1;
     this.messageJumpTargetsSuppressed = false;
     this.pointerHeld = false;
+    this.glideTop = null;
     this.document.body.classList.remove("is-conversation-scrolling");
   }
 
@@ -801,12 +803,17 @@ export class ConversationController {
     this.scrollIntent = intent;
     this.scrollInputAt = Date.now();
     this.programmaticScrollTop = null;
+    // The browser's smooth scroll would override the user's, such as a wheel, so input stops a glide where it is.
+    if (this.glideTop !== null) this.element.scrollTo({ top: this.element.scrollTop });
+    this.glideTop = null;
     if (intent !== "keyboard") this.messageJumpTargetsSuppressed = false;
   }
 
   handleScroll() {
     const currentScrollTop = this.element.scrollTop;
-    const ownScroll = this.programmaticScrollTop !== null && Math.abs(currentScrollTop - this.programmaticScrollTop) < 1;
+    // A glide passes through many positions, so every scroll until it ends or the user's input is its own.
+    const ownScroll = this.glideTop !== null || (this.programmaticScrollTop !== null && Math.abs(currentScrollTop - this.programmaticScrollTop) < 1);
+    if (this.glideTop !== null && Math.abs(currentScrollTop - this.glideTop) < 1) this.glideTop = null;
     // Only scrolls that follow the user's input change following, not the browser's adjustments after layout changes.
     if (!ownScroll && (this.pointerHeld || Date.now() - this.scrollInputAt < USER_SCROLL_WINDOW_MS)) {
       // Drags, flings and smooth scrolls keep scrolling after the input that started them.
@@ -1110,16 +1117,26 @@ export class ConversationController {
     return shared;
   }
 
+  // Following keeps the latest reply's top in view while it is taller than the view, and otherwise the bottom.
+  autoScrollTop() {
+    const latestAssistant = this.latestReadableAssistantMessage();
+    if (!this.forceBottomAutoScroll && !this.followOversizedMessageBottom && latestAssistant && latestAssistant === this.latestMessageElement() && latestAssistant.offsetHeight > this.element.clientHeight) {
+      return this.element.scrollTop + latestAssistant.getBoundingClientRect().top - this.element.getBoundingClientRect().top;
+    }
+    return this.element.scrollHeight - this.element.clientHeight;
+  }
+
   applyAutoScroll(behavior = "auto") {
     if (!this.element || !this.autoScrollEnabled || this.focusedActivityTouchActive || this.quoteSelection) return;
-    this.withProgrammaticScroll(() => {
-      const latestAssistant = this.latestReadableAssistantMessage();
-      if (!this.forceBottomAutoScroll && !this.followOversizedMessageBottom && latestAssistant && latestAssistant === this.latestMessageElement() && latestAssistant.offsetHeight > this.element.clientHeight) {
-        this.scrollElementTopIntoView(latestAssistant, behavior);
-      } else {
-        this.element.scrollTo({ top: this.element.scrollHeight, behavior });
-      }
-    });
+    const top = this.autoScrollTop();
+    if (Math.abs(this.element.scrollTop - top) < 1) this.glideTop = null;
+    if (this.glideTop === null) {
+      this.withProgrammaticScroll(() => this.element.scrollTo({ top, behavior }));
+    } else {
+      // Anything that moves the target mid-glide, such as a new tool card, retargets the glide.
+      this.glideTop = top;
+      this.element.scrollTo({ top, behavior: "smooth" });
+    }
     this.updateJumpControls();
   }
 
@@ -1234,7 +1251,19 @@ export class ConversationController {
   }
 
   // Markdown renders land after the follow scroll for their update, so follow again once the new height is known.
-  afterMarkdownRender() {
+  // Blocks that land in view wipe in, and a following view glides down to them.
+  afterMarkdownRender(body, previousHeight) {
+    const growth = body.offsetHeight - previousHeight;
+    if (this.element && growth > 0 && !this.window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      // Where the view will be once it has followed, or where it stays.
+      const viewTop = this.autoScrollEnabled ? this.autoScrollTop() : this.element.scrollTop;
+      const addedTop = this.element.scrollTop + body.getBoundingClientRect().top - this.element.getBoundingClientRect().top + previousHeight;
+      if (addedTop < viewTop + this.element.clientHeight && addedTop + growth > viewTop) {
+        revealGrowth(body, previousHeight);
+        // The scrolls of a held pointer must stay the user's.
+        if (this.autoScrollEnabled && !this.pointerHeld) this.glideTop = viewTop;
+      }
+    }
     this.scheduleAutoScroll();
   }
 

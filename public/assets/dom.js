@@ -98,6 +98,30 @@ export function enhanceMarkdownCodeBlocks(root, document = root?.ownerDocument |
   });
 }
 
+// The soft edge of .message-body--revealing in app.css.
+const REVEAL_EDGE_PIXELS = 32;
+const reveals = new WeakMap();
+
+// Wipes in the part of a Markdown body below previousHeight, where a streaming reply's new blocks land.
+export function revealGrowth(body, previousHeight) {
+  const running = reveals.get(body);
+  // A block that lands mid-wipe continues from the edge so far, so nothing above it pops in.
+  const edge = running ? parseFloat(body.ownerDocument.defaultView.getComputedStyle(body).getPropertyValue("--reveal-edge")) : Infinity;
+  const from = Math.min(edge, previousHeight + REVEAL_EDGE_PIXELS);
+  const height = body.offsetHeight;
+  running?.cancel();
+  body.classList.add("message-body--revealing");
+  const duration = Math.min(700, Math.max(280, (height - from) * 1.1));
+  const animation = body.animate([{ "--reveal-edge": `${from}px` }, { "--reveal-edge": `${height + REVEAL_EDGE_PIXELS}px` }], { duration, easing: "cubic-bezier(0.25, 0.6, 0.35, 1)", fill: "forwards" });
+  reveals.set(body, animation);
+  animation.finished.then(() => {
+    if (reveals.get(body) !== animation) return;
+    reveals.delete(body);
+    body.classList.remove("message-body--revealing");
+    animation.cancel();
+  }, () => {});
+}
+
 // Pi-style option lists keep the cursor and the keyboard focus on the same row.
 export function movePickerCursor(list, index) {
   const rows = [...list.querySelectorAll('[role="option"]')];

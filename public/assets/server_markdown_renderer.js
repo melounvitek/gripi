@@ -41,9 +41,10 @@ export class ServerMarkdownRenderer {
       const payload = await response.json();
       if (!this.current(job)) return;
 
+      const previousHeight = job.body.offsetHeight;
       job.body.innerHTML = payload.html;
       enhanceMarkdownCodeBlocks(job.body, this.document);
-      this.conversationController.afterMarkdownRender();
+      this.conversationController.afterMarkdownRender(job.body, previousHeight);
       if (job.body.dataset.plainText !== text) return this.request(job);
       delete job.body.dataset.rendering;
       this.jobs.delete(job.body);
