@@ -1134,6 +1134,8 @@ export class ConversationController {
     if (!this.element || !this.autoScrollEnabled || this.focusedActivityTouchActive || this.quoteSelection) return;
     const top = this.autoScrollTop();
     if (Math.abs(this.element.scrollTop - top) < 1) this.glideTop = null;
+    // Growth keeps retargeting a glide, so reduced motion switched on mid-glide ends it here.
+    if (this.glideTop !== null && this.window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) this.glideTop = null;
     if (this.glideTop === null) {
       this.withProgrammaticScroll(() => this.element.scrollTo({ top, behavior }));
     } else {

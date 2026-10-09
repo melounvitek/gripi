@@ -566,6 +566,21 @@ async function holdMarkdown(page) {
   };
 }
 
+// Holds Markdown renders in the page with their responses already read, so a released render lands within the task that releases it.
+function holdRendersInPage(page) {
+  return page.evaluate(() => {
+    const originalFetch = window.fetch;
+    window.heldRenders = [];
+    window.stopHoldingRenders = () => { window.fetch = originalFetch; };
+    window.fetch = async (url, options) => {
+      const response = await originalFetch(url, options);
+      if (!String(url).endsWith("/markdown")) return response;
+      const payload = await response.json();
+      return new Promise((resolve) => window.heldRenders.push(() => resolve({ ok: true, json: async () => payload })));
+    };
+  });
+}
+
 const revealing = (page) => page.locator(".message-body--revealing");
 const rising = (values) => values.every((value, index) => index === 0 || value >= values[index - 1]);
 const movesEndAtBottom = (frames) => frames.every((frame, index) => index === 0 || frame.top === frames[index - 1].top || frame.fromBottom < 2);
@@ -677,12 +692,46 @@ test("reduced motion turned on mid-session scrolls blocks in at once, and turnin
   expect(movesEndAtBottom(recorded)).toBe(false);
 });
 
-// Waits until a glide is under way, with the view still well above the bottom.
-function midGlide(page, startTop) {
-  return page.waitForFunction((top) => {
+test("reduced motion turned on mid-glide makes the following scrolls instant while blocks keep landing", async ({ page }) => {
+  const { addBlock, fromBottom } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  await holdRendersInPage(page);
+  const startTop = await page.locator("#conversation-scroll").evaluate((element) => element.scrollTop);
+  await addBlock(block("Gliding", 8));
+  await expect.poll(() => page.evaluate(() => window.heldRenders.length)).toBe(1);
+  // The renderer asks for this text as soon as the held render lands.
+  await addBlock(block("Reduced", 1));
+  await page.evaluate(() => window.heldRenders.shift()());
+  await midGlide(page, startTop, 1);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const frames = await recordFrames(page);
+  // From a frame callback, so the recorder has recorded the height before the block.
+  await page.evaluate(() => requestAnimationFrame(() => {
+    window.stopHoldingRenders();
+    window.heldRenders.shift()();
+  }));
+  await expect(replyBody(page)).toContainText("Reduced paragraph 1");
+  for (const name of ["Later", "Last"]) {
+    await page.waitForTimeout(250);
+    await addBlock(block(name, 1));
+  }
+  await expect(replyBody(page)).toContainText("Last paragraph 1");
+  await expect.poll(fromBottom).toBeLessThan(2);
+  const recorded = await frames();
+  const landed = recorded.findIndex((frame) => frame.height > recorded[0].height);
+  // The block landed while the earlier glide was still under way.
+  expect(recorded[landed - 1].fromBottom).toBeGreaterThan(2);
+  const followed = recorded.findIndex((frame, index) => index >= landed && frame.fromBottom < 2);
+  expect(followed - landed).toBeLessThanOrEqual(4);
+  expect(movesEndAtBottom(recorded.slice(followed))).toBe(true);
+});
+
+// Waits until a glide is under way, with the view still well above the bottom and the given number of renders held in the page.
+function midGlide(page, startTop, heldRenders = 0) {
+  return page.waitForFunction(([top, held]) => {
     const scroller = document.querySelector("#conversation-scroll");
-    return scroller.scrollTop > top + 4 && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 40;
-  }, startTop, { polling: "raf" });
+    return (window.heldRenders?.length ?? 0) === held && scroller.scrollTop > top + 4 && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 40;
+  }, [startTop, heldRenders], { polling: "raf" });
 }
 
 test("a wheel during a glide stops following", async ({ page, isMobile }) => {
@@ -702,22 +751,12 @@ test("a block that lands between a wheel and its scroll does not pull the reader
   test.skip(isMobile, "A mouse wheel is a desktop interaction");
   const { box, addBlock, fromBottom, expectNotFollowing } = await streamingReplyAtBottom(page);
   await expect(revealing(page)).toHaveCount(0);
-  // Renders are held in the page, so the wheel's own listener can land one after its input and before its scroll.
-  await page.evaluate(() => {
-    const originalFetch = window.fetch;
-    window.heldRenders = [];
-    window.fetch = async (url, options) => {
-      const response = await originalFetch(url, options);
-      if (!String(url).endsWith("/markdown")) return response;
-      const payload = await response.json();
-      // Already read, so a released render lands within the task that releases it.
-      return new Promise((resolve) => window.heldRenders.push(() => resolve({ ok: true, json: async () => payload })));
-    };
-    document.querySelector("#conversation-scroll").addEventListener("wheel", () => {
-      window.fetch = originalFetch;
-      window.heldRenders.shift()();
-    }, { once: true, passive: true });
-  });
+  await holdRendersInPage(page);
+  // Registered after the page's own listener, so the render lands after the wheel's input and before its scroll.
+  await page.evaluate(() => document.querySelector("#conversation-scroll").addEventListener("wheel", () => {
+    window.stopHoldingRenders();
+    window.heldRenders.shift()();
+  }, { once: true, passive: true }));
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   const startTop = await page.locator("#conversation-scroll").evaluate((element) => element.scrollTop);
   await addBlock(block("Gliding", 10));
@@ -725,10 +764,7 @@ test("a block that lands between a wheel and its scroll does not pull the reader
   // The renderer asks for this text as soon as the held render lands.
   await addBlock(block("Landing"));
   await page.evaluate(() => window.heldRenders.shift()());
-  await page.waitForFunction((top) => {
-    const scroller = document.querySelector("#conversation-scroll");
-    return window.heldRenders.length === 1 && scroller.scrollTop > top + 4 && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 40;
-  }, startTop, { polling: "raf" });
+  await midGlide(page, startTop, 1);
   await page.mouse.wheel(0, -600);
   await expect(replyBody(page)).toContainText("Landing paragraph 3");
   await expect.poll(fromBottom).toBeGreaterThan(120);
