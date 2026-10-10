@@ -530,9 +530,28 @@ func TestRegistryClosesSettledClientWithOnlyObservers(t *testing.T) {
 	}
 }
 
+func TestCloseClientIfStartedBeforeKeepsAClientDeferringCompactionPrompts(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	client := newRegistryClient()
+	client.deferring = true
+	registry := NewRegistry(nil, func() time.Time { return now })
+	if err := registry.Register("/session", client); err != nil {
+		t.Fatal(err)
+	}
+
+	if closed, err := registry.CloseClientIfStartedBefore("/session", now); err != nil || closed || client.closed() {
+		t.Fatalf("deferring client: retired=%v closed=%v err=%v", closed, client.closed(), err)
+	}
+	client.deferring = false
+	if closed, err := registry.CloseClientIfStartedBefore("/session", now); err != nil || !closed || !client.closed() {
+		t.Fatalf("settled client: retired=%v closed=%v err=%v", closed, client.closed(), err)
+	}
+}
+
 type registryClient struct {
 	mu           sync.Mutex
 	isBusy       bool
+	deferring    bool
 	settled      *time.Time
 	isClosed     bool
 	closeErr     error
@@ -591,6 +610,7 @@ func (client *registryClient) EventsAfter(int64) EventBatch {
 func (client *registryClient) LiveSnapshot() LiveSnapshot {
 	return LiveSnapshot{ActiveToolEvents: []map[string]any{}}
 }
+func (client *registryClient) DeferringCompactionPrompts() bool { return client.deferring }
 func (client *registryClient) QueuedMessagesForStop() (map[string][]string, bool) {
 	return client.queued, len(client.queued["steering"]) > 0 || len(client.queued["followUp"]) > 0
 }
