@@ -200,7 +200,7 @@ func (registry *Registry) Compacting(path string) bool {
 }
 func (registry *Registry) DeferringCompactionPrompts(path string) bool {
 	client := registry.Client(path)
-	if state, ok := client.(interface{ DeferringCompactionPrompts() bool }); ok {
+	if state, ok := client.(CompactionPromptDeferrer); ok {
 		return state.DeferringCompactionPrompts()
 	}
 	return client != nil && client.Compacting()
@@ -599,9 +599,7 @@ func (registry *Registry) RetireQueuedClient(path string, client Client) (bool, 
 		if entry.client != client || entry.activeRequests > entry.observers {
 			return false
 		}
-		candidate, ok := entry.client.(interface {
-			QueuedMessagesForStop() (map[string][]string, bool)
-		})
+		candidate, ok := entry.client.(QueueRestorer)
 		if !ok {
 			return false
 		}
@@ -624,7 +622,7 @@ func (registry *Registry) CloseClientIfExpired(path string, idle time.Duration, 
 func (registry *Registry) CloseClientIfStartedBefore(path string, moment time.Time) (bool, error) {
 	return registry.closeIdleWhen(path, func(entry *clientEntry) bool {
 		// Prompts deferred during a compaction exist only in the process until they are delivered.
-		state, ok := entry.client.(interface{ DeferringCompactionPrompts() bool })
+		state, ok := entry.client.(CompactionPromptDeferrer)
 		return !entry.startedAt.After(moment) && !(ok && state.DeferringCompactionPrompts())
 	}, nil)
 }

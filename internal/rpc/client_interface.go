@@ -3,6 +3,17 @@ package rpc
 import (
 	"context"
 	"fmt"
+
+	"github.com/melounvitek/gripi/internal/agent"
+)
+
+// Callers find the optional interfaces by type assertion and fall back without them, so check them at compile time.
+var (
+	_ agent.Client                   = (*Client)(nil)
+	_ agent.CompactionPromptDeferrer = (*Client)(nil)
+	_ agent.QueueRestorer            = (*Client)(nil)
+	_ agent.QueueClearer             = (*Client)(nil)
+	_ SessionEntriesReader           = (*Client)(nil)
 )
 
 // SessionEntriesReader reads Pi's session entries, which only the session synchronizer compares with the file.

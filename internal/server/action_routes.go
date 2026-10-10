@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/prompts"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -258,7 +259,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 					nativeBehavior = "followUp"
 				}
 				deferringCompactionPrompts := client.Compacting()
-				if state, valid := client.(interface{ DeferringCompactionPrompts() bool }); valid {
+				if state, valid := client.(agent.CompactionPromptDeferrer); valid {
 					deferringCompactionPrompts = state.DeferringCompactionPrompts()
 				}
 				extensionSlashCommand := (deferringCompactionPrompts || len(imageFiles) > 0) && app.extensionSlashCommand(request, client, rpcMessage)

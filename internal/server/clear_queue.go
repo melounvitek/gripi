@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
@@ -78,9 +79,7 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 	found, supported := false, false
 	err = app.rpcClients.WithExistingInterruptClient(request.Context(), path, func(client rpc.RPCClient) error {
 		found = true
-		clearer, ok := client.(interface {
-			ClearQueue(context.Context) (map[string]any, error)
-		})
+		clearer, ok := client.(agent.QueueClearer)
 		supported = ok
 		if ok {
 			result, clearErr = clearer.ClearQueue(request.Context())

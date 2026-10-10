@@ -21,6 +21,20 @@ type Client interface {
 	GetCommands(context.Context) (map[string]any, error)
 }
 
+// CompactionPromptDeferrer is a client that holds prompts back during a compaction and delivers them after it.
+type CompactionPromptDeferrer interface {
+	DeferringCompactionPrompts() bool
+}
+
+// QueueRestorer is a client that hands back its queued messages when a stop retires it.
+type QueueRestorer interface {
+	QueuedMessagesForStop() (map[string][]string, bool)
+}
+
+type QueueClearer interface {
+	ClearQueue(context.Context) (map[string]any, error)
+}
+
 type PromptImage struct {
 	Path     string
 	MIMEType string
