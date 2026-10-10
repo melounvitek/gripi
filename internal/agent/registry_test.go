@@ -1,4 +1,4 @@
-package rpc
+package agent
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ func TestRegisterKeepsCommittedReplacementWhenDisplacedCloseFails(t *testing.T) 
 	old.closeErr = errors.New("close failed")
 	replacement := newRegistryClient()
 	var diagnostics bytes.Buffer
-	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected factory") }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected factory") }, nil)
 	registry.SetDiagnostics(&Diagnostics{Enabled: true, Writer: &diagnostics})
 	if err := registry.Register("/session", old); err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestRegisterDoesNotReplaceBusyClient(t *testing.T) {
 	old := newRegistryClient()
 	old.isBusy = true
 	replacement := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected factory") }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected factory") }, nil)
 	if err := registry.Register("/session", old); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestRegisterDoesNotReplaceBusyClient(t *testing.T) {
 }
 
 func TestDrainIfIdleAtomicallyStopsNewWork(t *testing.T) {
-	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected factory") }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected factory") }, nil)
 	if err := registry.Register("/session", newRegistryClient()); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestDrainIfIdleAtomicallyStopsNewWork(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- registry.WithClient(context.Background(), "/session", func(RPCClient) error {
+		done <- registry.WithClient(context.Background(), "/session", func(Client) error {
 			close(started)
 			<-release
 			return nil
@@ -75,13 +75,13 @@ func TestDrainIfIdleAtomicallyStopsNewWork(t *testing.T) {
 	if !registry.DrainIfIdle() {
 		t.Fatal("idle registry did not start draining")
 	}
-	if err := registry.WithClient(context.Background(), "/session", func(RPCClient) error { return nil }); !errors.Is(err, ErrClientRetiring) {
+	if err := registry.WithClient(context.Background(), "/session", func(Client) error { return nil }); !errors.Is(err, ErrClientRetiring) {
 		t.Fatalf("new work after drain = %v", err)
 	}
 	if !registry.ResumeAfterFailedShutdown() {
 		t.Fatal("failed restart did not reopen admission")
 	}
-	if err := registry.WithClient(context.Background(), "/session", func(RPCClient) error { return nil }); err != nil {
+	if err := registry.WithClient(context.Background(), "/session", func(Client) error { return nil }); err != nil {
 		t.Fatalf("work after failed restart = %v", err)
 	}
 }
@@ -92,7 +92,7 @@ func TestFailedShutdownResumesAdmissionAfterTimedOutCleanupFinishes(t *testing.T
 	client := newRegistryClient()
 	client.closeStarted = closeStarted
 	client.releaseClose = releaseClose
-	registry := NewRegistry(func(string) (RPCClient, error) { return newRegistryClient(), nil }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return newRegistryClient(), nil }, nil)
 	if err := registry.Register("/session", client); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestFailedShutdownResumesAdmissionAfterTimedOutCleanupFinishes(t *testing.T
 	close(releaseClose)
 	deadline := time.Now().Add(time.Second)
 	for {
-		err := registry.WithClient(context.Background(), "/new-session", func(RPCClient) error { return nil })
+		err := registry.WithClient(context.Background(), "/new-session", func(Client) error { return nil })
 		if err == nil {
 			break
 		}
@@ -126,7 +126,7 @@ func TestRegistryCreationLanesAndRetirementAreRaceSafe(t *testing.T) {
 	creationStarted := make(chan struct{})
 	releaseCreation := make(chan struct{})
 	created := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { close(creationStarted); <-releaseCreation; return created, nil }, nil)
+	registry := NewRegistry(func(string) (Client, error) { close(creationStarted); <-releaseCreation; return created, nil }, nil)
 	createdResult := make(chan error, 1)
 	go func() { _, err := registry.EnsureClient("/session"); createdResult <- err }()
 	<-creationStarted
@@ -148,16 +148,16 @@ func TestRegistryCreationLanesAndRetirementAreRaceSafe(t *testing.T) {
 	releaseOperation := make(chan struct{})
 	operationDone := make(chan error, 1)
 	go func() {
-		operationDone <- registry.WithClient(context.Background(), "/session", func(RPCClient) error { close(operationStarted); <-releaseOperation; return nil })
+		operationDone <- registry.WithClient(context.Background(), "/session", func(Client) error { close(operationStarted); <-releaseOperation; return nil })
 	}()
 	<-operationStarted
-	if err := registry.WithClient(context.Background(), "/session", func(RPCClient) error { return nil }); !errors.Is(err, ErrOperationPending) {
+	if err := registry.WithClient(context.Background(), "/session", func(Client) error { return nil }); !errors.Is(err, ErrOperationPending) {
 		t.Fatalf("operation error = %v", err)
 	}
-	if err := registry.WithInterruptClient(context.Background(), "/session", func(RPCClient) error { return nil }); err != nil {
+	if err := registry.WithInterruptClient(context.Background(), "/session", func(Client) error { return nil }); err != nil {
 		t.Fatalf("interrupt lane: %v", err)
 	}
-	if err := registry.WithBashClient(context.Background(), "/session", func(RPCClient) error { return nil }); err != nil {
+	if err := registry.WithBashClient(context.Background(), "/session", func(Client) error { return nil }); err != nil {
 		t.Fatalf("bash lane: %v", err)
 	}
 	close(releaseOperation)
@@ -171,7 +171,7 @@ func TestRegistryCreationLanesAndRetirementAreRaceSafe(t *testing.T) {
 	created.releaseClose = releaseClose
 	failureDone := make(chan error, 1)
 	go func() {
-		failureDone <- registry.WithClient(context.Background(), "/session", func(RPCClient) error { return ErrProcessExited })
+		failureDone <- registry.WithClient(context.Background(), "/session", func(Client) error { return ErrProcessExited })
 	}()
 	<-closeStarted
 	if _, err := registry.EnsureClient("/session"); !errors.Is(err, ErrClientRetiring) {
@@ -196,7 +196,7 @@ func TestRegistryCloseAllCancelsPendingInstallation(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	client := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { close(started); <-release; return client, nil }, nil)
+	registry := NewRegistry(func(string) (Client, error) { close(started); <-release; return client, nil }, nil)
 	result := make(chan error, 1)
 	go func() { _, err := registry.EnsureClient("/session"); result <- err }()
 	<-started
@@ -214,7 +214,7 @@ func TestRegistryCloseAllCancelsPendingInstallation(t *testing.T) {
 
 func TestRegistryMovePreparationHidesBothPathsAndRollsBack(t *testing.T) {
 	client := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { return newRegistryClient(), nil }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return newRegistryClient(), nil }, nil)
 	if err := registry.Register("/pending", client); err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestRegistryMovePreparationHidesBothPathsAndRollsBack(t *testing.T) {
 }
 
 func TestRegistryMoveCommitsMetadataWhenSourceClientAlreadyDisappeared(t *testing.T) {
-	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected") }, nil)
 	prepared, committed := false, false
 	err := registry.MoveWithCommit("/pending", "/real", func() (func() error, error) {
 		prepared = true
@@ -255,7 +255,7 @@ func TestRegistryMoveCommitsMetadataWhenSourceClientAlreadyDisappeared(t *testin
 func TestRegistryMoveReplacesAndClosesIdleDestination(t *testing.T) {
 	source := newRegistryClient()
 	destination := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected") }, nil)
 	if err := registry.Register("/pending", source); err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestRegistryMoveRejectsBusyDestination(t *testing.T) {
 	source := newRegistryClient()
 	destination := newRegistryClient()
 	destination.isBusy = true
-	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected") }, nil)
 	if err := registry.Register("/pending", source); err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestRegistryMoveRejectsBusyDestination(t *testing.T) {
 
 func TestRegistryMoveRollsBackPreparationWhenShutdownCancelsCommit(t *testing.T) {
 	client := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { return client, nil }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return client, nil }, nil)
 	if err := registry.Register("/pending", client); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestRegistryShutdownWaitsForCreationAndPermanentlyRejectsClients(t *testing
 	started := make(chan struct{})
 	release := make(chan struct{})
 	client := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { close(started); <-release; return client, nil }, nil)
+	registry := NewRegistry(func(string) (Client, error) { close(started); <-release; return client, nil }, nil)
 	creation := make(chan error, 1)
 	go func() { _, err := registry.EnsureClient("/session"); creation <- err }()
 	<-started
@@ -365,7 +365,7 @@ func TestRegistryShutdownCanBeAwaitedAgainAfterContextTimeout(t *testing.T) {
 	client := newRegistryClient()
 	client.closeStarted = make(chan struct{})
 	client.releaseClose = make(chan struct{})
-	registry := NewRegistry(func(string) (RPCClient, error) { return client, nil }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return client, nil }, nil)
 	if err := registry.Register("/session", client); err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestRegistryShutdownCanBeAwaitedAgainAfterContextTimeout(t *testing.T) {
 func TestRegistryUsesSettlementAndFiveMinuteIdleBoundary(t *testing.T) {
 	now := time.Unix(1_000, 0)
 	client := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { return client, nil }, func() time.Time { return now })
+	registry := NewRegistry(func(string) (Client, error) { return client, nil }, func() time.Time { return now })
 	if _, err := registry.EnsureClient("/session"); err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +452,7 @@ func TestRegistryFindsAClientAtItsCurrentPathAfterMove(t *testing.T) {
 
 func TestRegistryObserverAllowsMoveButPreventsRetirement(t *testing.T) {
 	client := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected") }, nil)
 	if err := registry.Register("/pending", client); err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestRegistryObserverAllowsMoveButPreventsRetirement(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- registry.WithObservingClient(context.Background(), "/pending", false, func(RPCClient) error { close(started); <-release; return nil })
+		done <- registry.WithObservingClient(context.Background(), "/pending", false, func(Client) error { close(started); <-release; return nil })
 	}()
 	<-started
 	if err := registry.Move("/pending", "/real"); err != nil {
@@ -481,7 +481,7 @@ func TestRegistryObserverAllowsMoveButPreventsRetirement(t *testing.T) {
 func TestRetireQueuedClientDoesNotInterruptAnActiveOperation(t *testing.T) {
 	client := newRegistryClient()
 	client.queued = map[string][]string{"steering": {"adjust"}}
-	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected") }, nil)
 	if err := registry.Register("/session", client); err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func TestRetireQueuedClientDoesNotInterruptAnActiveOperation(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- registry.WithClient(context.Background(), "/session", func(RPCClient) error {
+		done <- registry.WithClient(context.Background(), "/session", func(Client) error {
 			close(started)
 			<-release
 			return nil
@@ -510,7 +510,7 @@ func TestRetireQueuedClientDoesNotInterruptAnActiveOperation(t *testing.T) {
 
 func TestRegistryClosesSettledClientWithOnlyObservers(t *testing.T) {
 	client := newRegistryClient()
-	registry := NewRegistry(func(string) (RPCClient, error) { return nil, errors.New("unexpected") }, nil)
+	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected") }, nil)
 	if err := registry.Register("/session", client); err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +518,7 @@ func TestRegistryClosesSettledClientWithOnlyObservers(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- registry.WithObservingClient(context.Background(), "/session", false, func(RPCClient) error { close(started); <-release; return nil })
+		done <- registry.WithObservingClient(context.Background(), "/session", false, func(Client) error { close(started); <-release; return nil })
 	}()
 	<-started
 	if closed, err := registry.CloseClientWithoutOperations("/session"); err != nil || !closed {
@@ -599,9 +599,3 @@ func (client *registryClient) GetSessionStats(context.Context) (map[string]any, 
 	return nil, nil
 }
 func (client *registryClient) GetCommands(context.Context) (map[string]any, error) { return nil, nil }
-func (client *registryClient) SessionPosition(context.Context, string) (SessionEntries, error) {
-	return SessionEntries{Known: true}, nil
-}
-func (client *registryClient) SessionEntriesAfter(context.Context, string) (SessionEntries, error) {
-	return SessionEntries{Known: true}, nil
-}

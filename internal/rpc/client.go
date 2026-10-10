@@ -55,18 +55,9 @@ const (
 var nativeToolUpdatePrefix = regexp.MustCompile(`^\{"type":"tool_execution_update","toolCallId":"((?:\\.|[^"\\])*)"`)
 
 var (
-	ErrProcessExited      = errors.New("Pi RPC process exited")
-	ErrStartFailed        = errors.New("Pi could not start")
 	ErrRPCLineTooLarge    = fmt.Errorf("%w: RPC response exceeds the compatibility limit", ErrProcessExited)
 	ErrBashAlreadyRunning = errors.New("a bash command is already running for this Pi RPC client")
 )
-
-type RequestTimeoutError struct {
-	Command  string
-	Accepted bool
-}
-
-func (err *RequestTimeoutError) Error() string { return "Pi RPC command timed out: " + err.Command }
 
 type BashRequestError struct {
 	BashID string
@@ -75,29 +66,6 @@ type BashRequestError struct {
 
 func (err *BashRequestError) Error() string { return err.Err.Error() }
 func (err *BashRequestError) Unwrap() error { return err.Err }
-
-type EventBatch struct {
-	Events  []map[string]any `json:"events"`
-	LastSeq int64            `json:"last_seq"`
-	Missed  bool             `json:"missed"`
-}
-
-type LiveSnapshot struct {
-	EventSequence        int64               `json:"event_sequence"`
-	EventReplayCursor    int64               `json:"event_replay_cursor"`
-	ActiveToolEvents     []map[string]any    `json:"active_tool_events"`
-	ActiveAssistantEvent map[string]any      `json:"active_assistant_event,omitempty"`
-	Busy                 bool                `json:"busy,omitempty"`
-	BusySince            *time.Time          `json:"busy_since,omitempty"`
-	AgentBusySince       *time.Time          `json:"agent_busy_since,omitempty"`
-	AgentRunning         bool                `json:"agent_running,omitempty"`
-	ActiveBash           map[string]any      `json:"active_bash,omitempty"`
-	CompletedBashEvents  []map[string]any    `json:"completed_bash_events,omitempty"`
-	Compacting           bool                `json:"compacting,omitempty"`
-	CompactingSince      *time.Time          `json:"compacting_since,omitempty"`
-	QueuedMessages       map[string][]string `json:"queued_messages,omitempty"`
-	ExtensionUI          map[string]any      `json:"extension_ui,omitempty"`
-}
 
 type SessionEntries struct {
 	Known   bool

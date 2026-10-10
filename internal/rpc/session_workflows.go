@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -18,7 +17,7 @@ type SessionClientMover interface {
 }
 
 func StartNewSession(ctx context.Context, cwd, sessionsRoot string, factory ClientFactory, clients *Registry, pending *PendingSessionRegistry, prepare func(string) (string, func() error, error)) (string, error) {
-	startedAt := clients.clock()
+	startedAt := clients.Now()
 	client, err := factory(cwd)
 	if err != nil {
 		return "", err
@@ -47,7 +46,7 @@ func StartNewSession(ctx context.Context, cwd, sessionsRoot string, factory Clie
 			return "", err
 		}
 	}
-	if err := clients.registerStartedAt(path, client, startedAt); err != nil {
+	if err := clients.RegisterStartedAt(path, client, startedAt); err != nil {
 		if rollback != nil {
 			return "", errors.Join(err, rollback())
 		}
@@ -106,25 +105,6 @@ func responseCancelled(response map[string]any) bool {
 		data = nested
 	}
 	return data["cancelled"] == true
-}
-
-type StopResult struct {
-	Forced   bool
-	Stopping bool
-}
-
-func StopResultFor(err error) (StopResult, error) {
-	if err == nil {
-		return StopResult{}, nil
-	}
-	if errors.Is(err, ErrInterruptPending) || errors.Is(err, ErrClientRetiring) || errors.Is(err, ErrClientStarting) {
-		return StopResult{Stopping: true}, nil
-	}
-	var timeout *RequestTimeoutError
-	if errors.As(err, &timeout) || errors.Is(err, ErrProcessExited) || errors.Is(err, io.ErrClosedPipe) {
-		return StopResult{Forced: true}, nil
-	}
-	return StopResult{}, err
 }
 
 func sessionFileFromResponse(response map[string]any) string {

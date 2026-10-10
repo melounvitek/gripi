@@ -296,7 +296,7 @@ func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string, bef
 	}
 	succeeded := false
 	err = synchronizer.clients.WithClient(ctx, path, func(client rpc.RPCClient) error {
-		position, err := client.SessionPosition(ctx, before.AppendCursor)
+		position, err := rpc.SessionPosition(ctx, client, before.AppendCursor)
 		if err != nil {
 			return err
 		}
@@ -408,7 +408,7 @@ func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string
 			var reconciliation rpc.SessionEntries
 			err = synchronizer.clients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error {
 				var callErr error
-				reconciliation, callErr = client.SessionEntriesAfter(ctx, state.Snapshot.AppendCursor)
+				reconciliation, callErr = rpc.SessionEntriesAfter(ctx, client, state.Snapshot.AppendCursor)
 				return callErr
 			})
 			if err != nil {
@@ -430,7 +430,7 @@ func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string
 		var position rpc.SessionEntries
 		err = synchronizer.clients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error {
 			var callErr error
-			position, callErr = client.SessionPosition(ctx, snapshot.AppendCursor)
+			position, callErr = rpc.SessionPosition(ctx, client, snapshot.AppendCursor)
 			return callErr
 		})
 		if err != nil {
@@ -459,7 +459,7 @@ func (synchronizer *Synchronizer) verificationSnapshot(ctx context.Context, path
 	return *state.Snapshot, nil
 }
 func (synchronizer *Synchronizer) verifyClient(ctx context.Context, path string, before FileSnapshot, client rpc.RPCClient) error {
-	position, err := client.SessionPosition(ctx, before.AppendCursor)
+	position, err := rpc.SessionPosition(ctx, client, before.AppendCursor)
 	if err != nil {
 		return err
 	}
@@ -471,7 +471,7 @@ func (synchronizer *Synchronizer) verifyClient(ctx context.Context, path string,
 		return err
 	}
 	if before.Revision() != after.Revision() {
-		reconciliation, err := client.SessionEntriesAfter(ctx, before.AppendCursor)
+		reconciliation, err := rpc.SessionEntriesAfter(ctx, client, before.AppendCursor)
 		if err != nil {
 			return err
 		}

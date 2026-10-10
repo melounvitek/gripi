@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestStartNewSessionRegistersAndTracksAPathBeforeItExists(t *testing.T) {
@@ -186,17 +188,6 @@ func TestBranchSessionFetchesPostSwitchStateInsideTheOriginalLaneAndDoesNotFallB
 	}
 }
 
-func TestStopResultClassifiesInterruptAndTerminalFailures(t *testing.T) {
-	stopping, err := StopResultFor(ErrInterruptPending)
-	if err != nil || !stopping.Stopping || stopping.Forced {
-		t.Fatalf("stopping = %#v, %v", stopping, err)
-	}
-	forced, err := StopResultFor(&RequestTimeoutError{Command: "abort"})
-	if err != nil || !forced.Forced || forced.Stopping {
-		t.Fatalf("forced = %#v, %v", forced, err)
-	}
-}
-
 type workflowClient struct {
 	*registryClient
 	state    map[string]any
@@ -206,3 +197,40 @@ type workflowClient struct {
 func (client *workflowClient) GetState(context.Context) (map[string]any, error) {
 	return client.state, client.stateErr
 }
+
+type registryClient struct {
+	mu       sync.Mutex
+	isClosed bool
+	closeErr error
+}
+
+func newRegistryClient() *registryClient { return &registryClient{} }
+func (client *registryClient) Close() error {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	client.isClosed = true
+	return client.closeErr
+}
+func (client *registryClient) closed() bool {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.isClosed
+}
+func (client *registryClient) Busy() bool               { return false }
+func (client *registryClient) BusySince() *time.Time    { return nil }
+func (client *registryClient) SettledAt() *time.Time    { return nil }
+func (client *registryClient) AgentRunning() bool       { return false }
+func (client *registryClient) Compacting() bool         { return false }
+func (client *registryClient) EventSequence() int64     { return 0 }
+func (client *registryClient) EventReplayCursor() int64 { return 0 }
+func (client *registryClient) EventsAfter(int64) EventBatch {
+	return EventBatch{Events: []map[string]any{}}
+}
+func (client *registryClient) LiveSnapshot() LiveSnapshot {
+	return LiveSnapshot{ActiveToolEvents: []map[string]any{}}
+}
+func (client *registryClient) GetState(context.Context) (map[string]any, error) { return nil, nil }
+func (client *registryClient) GetSessionStats(context.Context) (map[string]any, error) {
+	return nil, nil
+}
+func (client *registryClient) GetCommands(context.Context) (map[string]any, error) { return nil, nil }

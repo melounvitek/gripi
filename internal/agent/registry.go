@@ -1,4 +1,4 @@
-package rpc
+package agent
 
 import (
 	"context"
@@ -8,16 +8,8 @@ import (
 	"time"
 )
 
-var (
-	ErrOperationPending = errors.New("another operation is already pending for this session")
-	ErrInterruptPending = errors.New("another interrupt is already pending for this session")
-	ErrBashPending      = errors.New("another bash is already pending for this session")
-	ErrClientRetiring   = errors.New("Pi RPC client is restarting")
-	ErrClientStarting   = errors.New("Pi RPC client is starting")
-)
-
 type clientEntry struct {
-	client         RPCClient
+	client         Client
 	lastUsedAt     time.Time
 	activeRequests int
 	observers      int
@@ -32,7 +24,7 @@ type clientEntry struct {
 }
 
 type Registry struct {
-	factory          func(string) (RPCClient, error)
+	factory          func(string) (Client, error)
 	clock            func() time.Time
 	diagnostics      *Diagnostics
 	mu               sync.Mutex
@@ -49,12 +41,15 @@ type Registry struct {
 	retiredSequences map[string]int64
 }
 
-func NewRegistry(factory func(string) (RPCClient, error), clock func() time.Time) *Registry {
+func NewRegistry(factory func(string) (Client, error), clock func() time.Time) *Registry {
 	if clock == nil {
 		clock = time.Now
 	}
 	return &Registry{factory: factory, clock: clock, clients: make(map[string]*clientEntry), creating: make(map[string]uint64), retiredSequences: make(map[string]int64)}
 }
+
+// Now reads the registry's clock.
+func (registry *Registry) Now() time.Time { return registry.clock() }
 
 func (registry *Registry) SetDiagnostics(diagnostics *Diagnostics) {
 	registry.mu.Lock()
@@ -62,7 +57,7 @@ func (registry *Registry) SetDiagnostics(diagnostics *Diagnostics) {
 	registry.mu.Unlock()
 }
 
-func newClientEntry(client RPCClient, startedAt, now time.Time) *clientEntry {
+func newClientEntry(client Client, startedAt, now time.Time) *clientEntry {
 	entry := &clientEntry{client: client, startedAt: startedAt, lastUsedAt: now, operationLane: make(chan struct{}, 1), interruptLane: make(chan struct{}, 1), bashLane: make(chan struct{}, 1)}
 	entry.operationLane <- struct{}{}
 	entry.interruptLane <- struct{}{}
@@ -70,7 +65,7 @@ func newClientEntry(client RPCClient, startedAt, now time.Time) *clientEntry {
 	return entry
 }
 
-func (registry *Registry) EnsureClient(path string) (RPCClient, error) {
+func (registry *Registry) EnsureClient(path string) (Client, error) {
 	entry, err := registry.acquire(path, true, true, false)
 	if err != nil || entry == nil {
 		return nil, err
@@ -79,12 +74,13 @@ func (registry *Registry) EnsureClient(path string) (RPCClient, error) {
 	return entry.client, nil
 }
 
-func (registry *Registry) Register(path string, client RPCClient) error {
-	return registry.registerStartedAt(path, client, registry.clock())
+func (registry *Registry) Register(path string, client Client) error {
+	return registry.RegisterStartedAt(path, client, registry.clock())
 }
 
-func (registry *Registry) registerStartedAt(path string, client RPCClient, startedAt time.Time) error {
-	var old RPCClient
+// RegisterStartedAt registers a client whose factory started at startedAt, read from Now before it ran.
+func (registry *Registry) RegisterStartedAt(path string, client Client, startedAt time.Time) error {
+	var old Client
 	registry.mu.Lock()
 	if registry.closed {
 		registry.mu.Unlock()
@@ -120,7 +116,7 @@ func (registry *Registry) registerStartedAt(path string, client RPCClient, start
 	return nil
 }
 
-func (registry *Registry) Client(path string) RPCClient {
+func (registry *Registry) Client(path string) Client {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	entry := registry.clients[path]
@@ -129,7 +125,7 @@ func (registry *Registry) Client(path string) RPCClient {
 	}
 	return nil
 }
-func (registry *Registry) PathForClient(client RPCClient) string {
+func (registry *Registry) PathForClient(client Client) string {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	for path, entry := range registry.clients {
@@ -218,7 +214,7 @@ func (registry *Registry) LiveSnapshot(path string) LiveSnapshot {
 
 func (registry *Registry) BusySessionCount() int {
 	registry.mu.Lock()
-	clients := make([]RPCClient, 0, len(registry.clients))
+	clients := make([]Client, 0, len(registry.clients))
 	for _, entry := range registry.clients {
 		if !entry.retiring {
 			clients = append(clients, entry.client)
@@ -243,29 +239,29 @@ const (
 	laneBash
 )
 
-func (registry *Registry) WithClient(ctx context.Context, path string, call func(RPCClient) error) error {
+func (registry *Registry) WithClient(ctx context.Context, path string, call func(Client) error) error {
 	return registry.with(ctx, path, laneOperation, true, true, false, call)
 }
-func (registry *Registry) WithExistingClient(ctx context.Context, path string, touch bool, call func(RPCClient) error) error {
+func (registry *Registry) WithExistingClient(ctx context.Context, path string, touch bool, call func(Client) error) error {
 	return registry.with(ctx, path, laneOperation, false, touch, false, call)
 }
-func (registry *Registry) WithInterruptClient(ctx context.Context, path string, call func(RPCClient) error) error {
+func (registry *Registry) WithInterruptClient(ctx context.Context, path string, call func(Client) error) error {
 	return registry.with(ctx, path, laneInterrupt, true, true, false, call)
 }
-func (registry *Registry) WithExistingInterruptClient(ctx context.Context, path string, call func(RPCClient) error) error {
+func (registry *Registry) WithExistingInterruptClient(ctx context.Context, path string, call func(Client) error) error {
 	return registry.with(ctx, path, laneInterrupt, false, true, false, call)
 }
-func (registry *Registry) WithBashClient(ctx context.Context, path string, call func(RPCClient) error) error {
+func (registry *Registry) WithBashClient(ctx context.Context, path string, call func(Client) error) error {
 	return registry.with(ctx, path, laneBash, true, true, false, call)
 }
-func (registry *Registry) WithActiveClient(ctx context.Context, path string, touch bool, call func(RPCClient) error) error {
+func (registry *Registry) WithActiveClient(ctx context.Context, path string, touch bool, call func(Client) error) error {
 	return registry.with(ctx, path, laneNone, false, touch, false, call)
 }
-func (registry *Registry) WithObservingClient(ctx context.Context, path string, touch bool, call func(RPCClient) error) error {
+func (registry *Registry) WithObservingClient(ctx context.Context, path string, touch bool, call func(Client) error) error {
 	return registry.with(ctx, path, laneNone, false, touch, true, call)
 }
 
-func (registry *Registry) with(ctx context.Context, path string, serial lane, create, touch, observer bool, call func(RPCClient) error) error {
+func (registry *Registry) with(ctx context.Context, path string, serial lane, create, touch, observer bool, call func(Client) error) error {
 	entry, err := registry.acquire(path, create, touch, observer)
 	if err != nil || entry == nil {
 		return err
@@ -359,7 +355,7 @@ func (registry *Registry) acquire(path string, create, touch, observer bool) (*c
 		return nil, ErrClientRetiring
 	}
 	entry := existing
-	unused := RPCClient(nil)
+	unused := Client(nil)
 	if entry == nil {
 		entry = newClientEntry(client, startedAt, registry.clock())
 		entry.replacedSequence = registry.retiredSequences[path]
@@ -407,7 +403,7 @@ func (registry *Registry) MoveWithCommit(oldPath, newPath string, prepare func()
 	return registry.moveWithCommit(oldPath, newPath, prepare, commit, nil)
 }
 
-func (registry *Registry) WithClientMove(ctx context.Context, oldPath string, touch bool, call func(RPCClient) (string, error), prepare func(string, string) (func() error, error), commit func(string, string)) (string, error) {
+func (registry *Registry) WithClientMove(ctx context.Context, oldPath string, touch bool, call func(Client) (string, error), prepare func(string, string) (func() error, error), commit func(string, string)) (string, error) {
 	entry, err := registry.acquire(oldPath, true, touch, false)
 	if err != nil || entry == nil {
 		return oldPath, err
@@ -597,7 +593,7 @@ func (registry *Registry) EventsAfter(path string, after int64) EventBatch {
 	return EventBatch{Events: []map[string]any{}, Missed: after > 0 && !(ok && after == retired)}
 }
 
-func (registry *Registry) RetireQueuedClient(path string, client RPCClient) (bool, map[string][]string, error) {
+func (registry *Registry) RetireQueuedClient(path string, client Client) (bool, map[string][]string, error) {
 	var queued map[string][]string
 	retired, err := registry.closeWhen(path, func(entry *clientEntry) bool {
 		if entry.client != client || entry.activeRequests > entry.observers {

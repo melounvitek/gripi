@@ -2,31 +2,38 @@ package rpc
 
 import (
 	"context"
-	"time"
+	"fmt"
 )
 
-type RPCClient interface {
-	Close() error
-	Busy() bool
-	BusySince() *time.Time
-	SettledAt() *time.Time
-	AgentRunning() bool
-	Compacting() bool
-	EventSequence() int64
-	EventReplayCursor() int64
-	EventsAfter(int64) EventBatch
-	LiveSnapshot() LiveSnapshot
-	GetState(context.Context) (map[string]any, error)
-	GetSessionStats(context.Context) (map[string]any, error)
-	GetCommands(context.Context) (map[string]any, error)
+// SessionEntriesReader reads Pi's session entries, which only the session synchronizer compares with the file.
+type SessionEntriesReader interface {
 	SessionPosition(context.Context, string) (SessionEntries, error)
 	SessionEntriesAfter(context.Context, string) (SessionEntries, error)
 }
 
-type PromptImage struct {
-	Path     string
-	MIMEType string
-	Size     int64
+// SessionPosition and SessionEntriesAfter read the entries through a client from the registry, which has the core type.
+func SessionPosition(ctx context.Context, client RPCClient, cursor string) (SessionEntries, error) {
+	reader, err := sessionEntriesReader(client)
+	if err != nil {
+		return SessionEntries{}, err
+	}
+	return reader.SessionPosition(ctx, cursor)
+}
+
+func SessionEntriesAfter(ctx context.Context, client RPCClient, cursor string) (SessionEntries, error) {
+	reader, err := sessionEntriesReader(client)
+	if err != nil {
+		return SessionEntries{}, err
+	}
+	return reader.SessionEntriesAfter(ctx, cursor)
+}
+
+func sessionEntriesReader(client RPCClient) (SessionEntriesReader, error) {
+	reader, ok := client.(SessionEntriesReader)
+	if !ok {
+		return nil, fmt.Errorf("%T cannot read Pi session entries", client)
+	}
+	return reader, nil
 }
 
 type ActionClient interface {
