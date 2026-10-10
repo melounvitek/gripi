@@ -3,6 +3,8 @@ package sessions
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -323,4 +325,15 @@ func (store AttachmentStore) read(sessionPath string) []Attachment {
 		}
 	}
 	return result
+}
+
+func SessionHash(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(sum[:])
+}
+
+func MessageHash(text string) string {
+	normalized := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n"))
+	sum := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(sum[:])
 }

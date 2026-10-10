@@ -4,9 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"container/list"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2080,15 +2078,6 @@ func subagentPrompt(value any) string {
 	return ""
 }
 
-func SessionHash(path string) string {
-	sum := sha256.Sum256([]byte(path))
-	return hex.EncodeToString(sum[:])
-}
-func MessageHash(text string) string {
-	normalized := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n"))
-	sum := sha256.Sum256([]byte(normalized))
-	return hex.EncodeToString(sum[:])
-}
 func fileIdentity(stat os.FileInfo) (uint64, uint64) {
 	device, inode, _ := nativeFileIdentity(stat)
 	return device, inode
