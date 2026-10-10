@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -46,8 +46,8 @@ func TestDeletePendingSession(t *testing.T) {
 				remapClient: &remapClient{state: map[string]any{"success": true, "data": data}},
 				onState:     func() {},
 			}
-			registry := rpc.NewRegistry(nil, nil)
-			pending := rpc.NewPendingSessionRegistry(nil)
+			registry := agent.NewRegistry(nil, nil)
+			pending := agent.NewPendingSessionRegistry(nil)
 			if test.name != "unknown" {
 				pending.Remember(path, root, "")
 			}

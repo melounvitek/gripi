@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -105,7 +106,7 @@ func TestSidebarResolvesOwnedPendingAliasesBeforeObservingDiskSessions(t *testin
 			app, path, client := externalSessionTestApplication(t)
 			pending := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
 			now := time.Now()
-			app.rpcClients = rpc.NewRegistry(nil, func() time.Time { return now })
+			app.rpcClients = agent.NewRegistry(nil, func() time.Time { return now })
 			app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, app.sessionCache, app.rpcClients)
 			app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 			if err := app.rpcClients.Register(pending, client); err != nil {
@@ -138,9 +139,9 @@ func TestSidebarResolvesOwnedPendingAliasesBeforeObservingDiskSessions(t *testin
 				var err error
 				switch unavailable {
 				case "rpc lane busy":
-					err = app.rpcClients.WithExistingClient(context.Background(), pending, false, func(rpc.RPCClient) error { return poll() })
+					err = app.rpcClients.WithExistingClient(context.Background(), pending, false, func(agent.Client) error { return poll() })
 				case "remap busy":
-					err = app.rpcClients.WithActiveClient(context.Background(), pending, false, func(rpc.RPCClient) error { return poll() })
+					err = app.rpcClients.WithActiveClient(context.Background(), pending, false, func(agent.Client) error { return poll() })
 				default:
 					err = poll()
 				}
@@ -361,7 +362,7 @@ func externalSessionTestApplication(t *testing.T) (*application, string, *remapC
 	path := writeNotificationSession(t, root, "External session")
 	app := notificationTestApplication(t, root, false, true, &recordingPushNotifier{})
 	client := &remapClient{}
-	app.rpcClients = rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
 	var err error
 	app.templates, err = template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")

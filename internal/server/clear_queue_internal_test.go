@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -68,7 +68,7 @@ func TestClearQueueReturnsAuthoritativeSnapshotAfterClearing(t *testing.T) {
 				want["followUp"] = []any{"queued after clear"}
 			}
 			f.client.onClear = func() {
-				f.client.live = rpc.LiveSnapshot{EventSequence: 27, QueuedMessages: queues}
+				f.client.live = agent.LiveSnapshot{EventSequence: 27, QueuedMessages: queues}
 			}
 			payload := clearQueuePayload(t, f.serve(context.Background(), f.path), http.StatusOK)
 			if payload["event_sequence"] != float64(27) || !reflect.DeepEqual(payload["queued_messages"], want) {
@@ -126,8 +126,8 @@ func TestClearQueueSurfacesFailuresWithoutRetiringOrResettingQueues(t *testing.T
 	}{
 		{"native", map[string]any{"success": false, "error": "native clear rejected"}, nil, 422, "native clear rejected"},
 		{"invalid_response", nil, nil, 422, ""},
-		{"timeout", nil, &rpc.RequestTimeoutError{Command: "clear_queue", Accepted: true}, 504, "clear_queue"},
-		{"not_accepted_timeout", nil, &rpc.RequestTimeoutError{Command: "clear_queue"}, 504, "clear_queue"},
+		{"timeout", nil, &agent.RequestTimeoutError{Command: "clear_queue", Accepted: true}, 504, "clear_queue"},
+		{"not_accepted_timeout", nil, &agent.RequestTimeoutError{Command: "clear_queue"}, 504, "clear_queue"},
 		{"disconnected", nil, io.ErrClosedPipe, 502, ""},
 		{"other", nil, errors.New("native transport failed"), 502, "native transport failed"},
 		{"canceled", nil, context.Canceled, 408, ""},
@@ -156,7 +156,7 @@ func TestClearQueueInterruptsCompactionWithoutTakingOperationOrSyncLane(t *testi
 	defer release()
 	var operationErr error
 	done := idleRetirementRun(t, func() {
-		operationErr = f.app.synchronizer.WithMutableClient(context.Background(), f.path, func(rpc.RPCClient) error {
+		operationErr = f.app.synchronizer.WithMutableClient(context.Background(), f.path, func(agent.Client) error {
 			block()
 			return nil
 		})
@@ -442,7 +442,7 @@ type clearQueueFixture struct {
 func newClearQueueFixture(t *testing.T) *clearQueueFixture {
 	t.Helper()
 	f := &clearQueueFixture{idleRetirementFixture: newIdleRetirementFixture(t), client: &clearQueueClient{result: map[string]any{"success": true, "data": map[string]any{"editorText": "must not restore"}}}}
-	f.client.live = rpc.LiveSnapshot{EventSequence: 23, QueuedMessages: map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}}
+	f.client.live = agent.LiveSnapshot{EventSequence: 23, QueuedMessages: map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}}
 	if err := f.app.rpcClients.Register(f.path, f.client); err != nil {
 		t.Fatal(err)
 	}

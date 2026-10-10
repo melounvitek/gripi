@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/rpc"
 )
 
@@ -44,7 +45,7 @@ func TestSynchronizerReconcilesRPCAppendAndDetectsForeignEntries(t *testing.T) {
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, errors.New("unexpected start") }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, errors.New("unexpected start") }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func TestRetireManagedClientPreservesExternalFollowState(t *testing.T) {
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, errors.New("unexpected start") }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, errors.New("unexpected start") }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func TestRetireManagedClientPreservesExternalFollowState(t *testing.T) {
 }
 
 func TestRetireManagedClientDoesNotWaitForAnotherSessionOperation(t *testing.T) {
-	synchronizer := NewSynchronizer(t.TempDir(), "", NewCache(), rpc.NewRegistry(nil, nil))
+	synchronizer := NewSynchronizer(t.TempDir(), "", NewCache(), agent.NewRegistry(nil, nil))
 	unlock := synchronizer.locks.Lock("/session")
 	defer unlock()
 	called := false
@@ -154,7 +155,7 @@ func BenchmarkSynchronizerInspectUnchangedLargeTail(b *testing.B) {
 	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 		b.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), rpc.NewRegistry(nil, nil))
+	synchronizer := NewSynchronizer(root, "", NewCache(), agent.NewRegistry(nil, nil))
 	if _, err := synchronizer.Inspect(context.Background(), path, false); err != nil {
 		b.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func TestSynchronizerChecksRPCPositionWhenFileIsUnchanged(t *testing.T) {
 	root, path := synchronizerSession(t)
 	client := newSyncClient()
 	client.positions[""] = rpc.SessionEntries{Known: true, LeafID: "first"}
-	registry := rpc.NewRegistry(nil, nil)
+	registry := agent.NewRegistry(nil, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +188,7 @@ func TestSynchronizerChecksRPCPositionWhenFileIsUnchanged(t *testing.T) {
 
 func TestSynchronizerRejectsReplacementWithMatchingSizeAndMtime(t *testing.T) {
 	root, path := synchronizerSession(t)
-	synchronizer := NewSynchronizer(root, "", NewCache(), rpc.NewRegistry(nil, nil))
+	synchronizer := NewSynchronizer(root, "", NewCache(), agent.NewRegistry(nil, nil))
 	_ = inspectSync(t, synchronizer, path, false)
 	info, err := os.Stat(path)
 	if err != nil {
@@ -217,7 +218,7 @@ func TestSynchronizerRejectsSameSizeInPlaceRewrite(t *testing.T) {
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestSynchronizerFailsClosedForAppendedEntryWithoutID(t *testing.T) {
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +273,7 @@ func TestSynchronizerTakeoverDetectsConcurrentPiCLIWrite(t *testing.T) {
 		appendSyncEntry(t, path, map[string]any{"type": "message", "id": "later", "parentId": "external", "message": map[string]any{"role": "assistant", "content": []any{}}})
 	}
 	fresh.positions["external"] = rpc.SessionEntries{Known: true, LeafID: "external"}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return fresh, nil }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return fresh, nil }, nil)
 	if err := registry.Register(path, stale); err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +308,7 @@ func TestSynchronizerKeepsFollowingExternalSessionAcrossRestarts(t *testing.T) {
 			appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 			client := newSyncClient()
 			client.positions["pi-cli"] = rpc.SessionEntries{Known: true, LeafID: "pi-cli"}
-			registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+			registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 			statePath := filepath.Join(t.TempDir(), "external-sessions.json")
 			restart := func() *Synchronizer {
 				t.Helper()
@@ -350,7 +351,7 @@ func TestSynchronizerKeepsFollowingExternalSessionAcrossRestartAfterConflict(t *
 	statePath := filepath.Join(t.TempDir(), "external-sessions.json")
 	restart := func() *Synchronizer {
 		t.Helper()
-		synchronizer := NewSynchronizer(root, "", NewCache(), rpc.NewRegistry(nil, nil))
+		synchronizer := NewSynchronizer(root, "", NewCache(), agent.NewRegistry(nil, nil))
 		if err := synchronizer.PersistExternalFollow(statePath); err != nil {
 			t.Fatal(err)
 		}
@@ -390,7 +391,7 @@ func TestSynchronizerDropsBaselineOfFileWithAnotherIdentity(t *testing.T) {
 	root, path := synchronizerSession(t)
 	baselinesPath := filepath.Join(t.TempDir(), "session-baselines.json")
 	restart := func() *Synchronizer {
-		synchronizer := NewSynchronizer(root, "", NewCache(), rpc.NewRegistry(nil, nil))
+		synchronizer := NewSynchronizer(root, "", NewCache(), agent.NewRegistry(nil, nil))
 		synchronizer.RestoreBaselines(baselinesPath)
 		return synchronizer
 	}
@@ -421,7 +422,7 @@ func TestSynchronizerDoesNotTakeItsOwnPiForPiCLIWhileShuttingDown(t *testing.T) 
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, errors.New("unexpected start") }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, errors.New("unexpected start") }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +446,7 @@ func TestSynchronizerDoesNotTurnRequestCancellationIntoConflict(t *testing.T) {
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positionErr = context.Canceled
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +467,7 @@ func TestSynchronizerLifecycleIsSafeDuringConcurrentObservation(t *testing.T) {
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
@@ -567,11 +568,11 @@ func (client *syncClient) AgentRunning() bool       { return false }
 func (client *syncClient) Compacting() bool         { return false }
 func (client *syncClient) EventSequence() int64     { return 0 }
 func (client *syncClient) EventReplayCursor() int64 { return 0 }
-func (client *syncClient) EventsAfter(int64) rpc.EventBatch {
-	return rpc.EventBatch{Events: []map[string]any{}}
+func (client *syncClient) EventsAfter(int64) agent.EventBatch {
+	return agent.EventBatch{Events: []map[string]any{}}
 }
-func (client *syncClient) LiveSnapshot() rpc.LiveSnapshot {
-	return rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{}}
+func (client *syncClient) LiveSnapshot() agent.LiveSnapshot {
+	return agent.LiveSnapshot{ActiveToolEvents: []map[string]any{}}
 }
 func (client *syncClient) GetState(context.Context) (map[string]any, error)        { return nil, nil }
 func (client *syncClient) GetSessionStats(context.Context) (map[string]any, error) { return nil, nil }

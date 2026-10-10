@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
@@ -62,7 +63,7 @@ func (app *application) liveSessionStatus(response http.ResponseWriter, request 
 		return
 	}
 	live := app.readLiveStatus(request.Context(), path)
-	var status sessions.Status
+	var status agent.Status
 	if live == nil || !live.diskIndependent {
 		if _, err := os.Stat(path); err == nil {
 			store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
@@ -105,7 +106,7 @@ func (app *application) commands(response http.ResponseWriter, request *http.Req
 	}
 	app.rpcDiagnostics.Log("request_operation", map[string]any{"path": request.URL.Path, "session": path, "lane": "operation"})
 	var rpcResponse map[string]any
-	err = app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		var requestErr error
 		rpcResponse, requestErr = client.GetCommands(request.Context())
 		return requestErr
@@ -156,7 +157,7 @@ type liveStatus struct {
 
 func (app *application) readLiveStatus(ctx context.Context, path string) *liveStatus {
 	var stateResponse, statsResponse map[string]any
-	err := app.rpcClients.WithObservingClient(ctx, path, false, func(client rpc.RPCClient) error {
+	err := app.rpcClients.WithObservingClient(ctx, path, false, func(client agent.Client) error {
 		var err error
 		stateResponse, err = client.GetState(ctx)
 		if err != nil {
@@ -183,7 +184,7 @@ func (app *application) readLiveStatus(ctx context.Context, path string) *liveSt
 	return result
 }
 
-func applyLiveStatus(status *sessions.Status, live *liveStatus) {
+func applyLiveStatus(status *agent.Status, live *liveStatus) {
 	if live.provider != "" {
 		status.Provider = live.provider
 	}
@@ -217,7 +218,7 @@ func applyLiveStatus(status *sessions.Status, live *liveStatus) {
 	}
 }
 
-func (app *application) withSynchronizedClient(request *http.Request, path string, call func(rpc.RPCClient) error) error {
+func (app *application) withSynchronizedClient(request *http.Request, path string, call func(agent.Client) error) error {
 	resolved, _, err := app.resolveOwnedPendingPath(request, path)
 	if err != nil {
 		return err
@@ -232,7 +233,7 @@ func (app *application) withSynchronizedClient(request *http.Request, path strin
 
 func (app *application) writeRPCError(response http.ResponseWriter, err error) bool {
 	var blocked *sessions.SyncBlockedError
-	var timeout *rpc.RequestTimeoutError
+	var timeout *agent.RequestTimeoutError
 	switch {
 	case errors.As(err, &blocked):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": blocked.Error(), "session_sync_mode": blocked.Mode})
@@ -240,10 +241,10 @@ func (app *application) writeRPCError(response http.ResponseWriter, err error) b
 	case errors.Is(err, errSessionNavigating):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"code": "session_operation_pending", "retryable": false, "error": err.Error()})
 		return true
-	case errors.Is(err, sessions.ErrSyncBusy), errors.Is(err, rpc.ErrOperationPending):
+	case errors.Is(err, sessions.ErrSyncBusy), errors.Is(err, agent.ErrOperationPending):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"code": "session_operation_pending", "error": "Another session operation is pending. Please retry."})
 		return true
-	case errors.Is(err, rpc.ErrClientRetiring):
+	case errors.Is(err, agent.ErrClientRetiring):
 		response.Header().Set("Retry-After", "1")
 		writeJSONStatus(response, http.StatusServiceUnavailable, map[string]any{"error": "Pi RPC client is restarting"})
 		return true
@@ -298,7 +299,7 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 	}
 	if cwd, ok := app.pendingSessions.CWD(path); ok && app.rpcClients.Active(path) {
 		var state map[string]any
-		if app.rpcClients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error { var err error; state, err = client.GetState(ctx); return err }) == nil {
+		if app.rpcClients.WithExistingClient(ctx, path, false, func(client agent.Client) error { var err error; state, err = client.GetState(ctx); return err }) == nil {
 			reported := sessionFileFrom(state)
 			if reported != "" {
 				if session, ok := store.Session(reported); ok && session.CWD == cwd {
@@ -326,7 +327,7 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 			continue
 		}
 		var state map[string]any
-		err := app.rpcClients.WithExistingClient(ctx, pending.Path, false, func(client rpc.RPCClient) error {
+		err := app.rpcClients.WithExistingClient(ctx, pending.Path, false, func(client agent.Client) error {
 			var requestErr error
 			state, requestErr = client.GetState(ctx)
 			return requestErr
@@ -648,7 +649,7 @@ func numericValue(value any) (float64, bool) {
 func stringFromAny(value any) string  { result, _ := value.(string); return result }
 func nonemptyString(value any) string { return stringFromAny(value) }
 func commandCatalogFallbackError(err error) bool {
-	return errors.Is(err, rpc.ErrOperationPending) || errors.Is(err, rpc.ErrClientRetiring) || errors.Is(err, rpc.ErrClientStarting) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, rpc.ErrProcessExited)
+	return errors.Is(err, agent.ErrOperationPending) || errors.Is(err, agent.ErrClientRetiring) || errors.Is(err, agent.ErrClientStarting) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, agent.ErrProcessExited)
 }
 
 func nullableString(value string) any {

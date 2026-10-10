@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -38,7 +37,7 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 			fail(http.StatusRequestTimeout, err.Error())
 		case errors.Is(err, context.DeadlineExceeded):
 			fail(http.StatusGatewayTimeout, err.Error())
-		case errors.Is(err, rpc.ErrInterruptPending):
+		case errors.Is(err, agent.ErrInterruptPending):
 			fail(http.StatusConflict, err.Error())
 		default:
 			if !app.writeRPCError(response, err) {
@@ -74,10 +73,10 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		}
 	}
 	var result map[string]any
-	var snapshot rpc.LiveSnapshot
+	var snapshot agent.LiveSnapshot
 	var clearErr error
 	found, supported := false, false
-	err = app.rpcClients.WithExistingInterruptClient(request.Context(), path, func(client rpc.RPCClient) error {
+	err = app.rpcClients.WithExistingInterruptClient(request.Context(), path, func(client agent.Client) error {
 		found = true
 		clearer, ok := client.(agent.QueueClearer)
 		supported = ok

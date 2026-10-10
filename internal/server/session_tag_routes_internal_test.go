@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -29,12 +29,12 @@ func TestSessionTagsResolveSymlinksAndPendingAliasesWithoutRPC(t *testing.T) {
 	physicalPath := filepath.Join(physical, "persisted.jsonl")
 	configuredPath := filepath.Join(configured, "persisted.jsonl")
 	writeSessionRecords(t, physicalPath, []map[string]any{{"type": "session", "version": 3, "id": "persisted", "cwd": root}})
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pendingPath := filepath.Join(configured, "pending.jsonl")
 	alias := filepath.Join(configured, "old-pending.jsonl")
 	pending.Remember(pendingPath, root, "")
 	pending.Remap(alias, configuredPath)
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { t.Error("tag request started RPC"); return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { t.Error("tag request started RPC"); return nil, os.ErrNotExist }, nil)
 	app := &application{config: config.Config{SessionsRoot: configured, Home: root}, sessionCache: sessions.NewCache(), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), configured), pendingSessions: pending, rpcClients: registry}
 	mux := http.NewServeMux()
 	app.registerSessionRoutes(mux)

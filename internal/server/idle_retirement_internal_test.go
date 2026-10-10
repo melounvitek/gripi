@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -232,7 +233,7 @@ func newIdleRetirementFixture(t *testing.T) *idleRetirementFixture {
 	fixture := &idleRetirementFixture{old: &idleRetirementClient{}, replacement: &idleRetirementClient{}}
 	// Requests may touch the entry, but it remains expired relative to the
 	// real time used by cleanupIdleRPCClients, without sleeps or clock races.
-	registry := rpc.NewRegistry(func(path string) (rpc.RPCClient, error) {
+	registry := agent.NewRegistry(func(path string) (agent.Client, error) {
 		fixture.created.Add(1)
 		if path != fixture.path {
 			return nil, errors.New("unexpected factory session: " + path)
@@ -244,7 +245,7 @@ func newIdleRetirementFixture(t *testing.T) *idleRetirementFixture {
 		config:          config.Config{SessionsRoot: root, Home: root, RPCIdleTimeout: time.Second},
 		sessionCache:    cache,
 		rpcClients:      registry,
-		pendingSessions: rpc.NewPendingSessionRegistry(nil),
+		pendingSessions: agent.NewPendingSessionRegistry(nil),
 		synchronizer:    sessions.NewSynchronizer(root, root, cache, registry),
 	}
 	fixture.path = fixture.session(t, "idle")
@@ -295,7 +296,7 @@ type idleRetirementClient struct {
 	calls            []idleRetirementCall
 }
 
-var _ rpc.RPCClient = (*idleRetirementClient)(nil)
+var _ agent.Client = (*idleRetirementClient)(nil)
 var _ rpc.ActionClient = (*idleRetirementClient)(nil)
 
 func (client *idleRetirementClient) Close() error {
@@ -306,20 +307,20 @@ func (client *idleRetirementClient) Close() error {
 	return nil
 }
 
-func (client *idleRetirementClient) Prompt(_ context.Context, message string, images []rpc.PromptImage) (map[string]any, error) {
+func (client *idleRetirementClient) Prompt(_ context.Context, message string, images []agent.PromptImage) (map[string]any, error) {
 	return client.dispatch(message, images, "")
 }
 
-func (client *idleRetirementClient) PromptWithBehavior(_ context.Context, message string, images []rpc.PromptImage, behavior string) (map[string]any, error) {
+func (client *idleRetirementClient) PromptWithBehavior(_ context.Context, message string, images []agent.PromptImage, behavior string) (map[string]any, error) {
 	return client.dispatch(message, images, behavior)
 }
 
-func (client *idleRetirementClient) QueueCompactionPrompt(context.Context, string, []rpc.PromptImage, string) (map[string]any, bool, error) {
+func (client *idleRetirementClient) QueueCompactionPrompt(context.Context, string, []agent.PromptImage, string) (map[string]any, bool, error) {
 	client.queues.Add(1)
 	return nil, false, nil
 }
 
-func (client *idleRetirementClient) dispatch(message string, images []rpc.PromptImage, behavior string) (map[string]any, error) {
+func (client *idleRetirementClient) dispatch(message string, images []agent.PromptImage, behavior string) (map[string]any, error) {
 	client.mu.Lock()
 	client.calls = append(client.calls, idleRetirementCall{message, behavior, len(images)})
 	client.mu.Unlock()

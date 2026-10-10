@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
@@ -23,7 +24,7 @@ const (
 )
 
 type completedReply struct {
-	client         rpc.RPCClient
+	client         agent.Client
 	path           string
 	text           string
 	id             string
@@ -135,7 +136,7 @@ func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string
 			}
 		}
 		if ready != nil {
-			published, err := notifier.app.gatewayState.Complete(path, sessions.Completion{ID: ready.id, Preview: sessions.NotificationPreview(ready.text), ResponseCount: notifier.responseCount(path, state.responseCount)})
+			published, err := notifier.app.gatewayState.Complete(path, sessions.Completion{ID: ready.id, Preview: agent.NotificationPreview(ready.text), ResponseCount: notifier.responseCount(path, state.responseCount)})
 			if err != nil {
 				log.Printf("save session completion: %v", err)
 			}
@@ -335,12 +336,12 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	title := "current session"
 	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
 	if session, found := store.Session(path); found && strings.TrimSpace(session.DisplayName) != "" {
-		title = sessions.NotificationPreview(session.DisplayName)
+		title = agent.NotificationPreview(session.DisplayName)
 	}
 	payload, err := json.Marshal(map[string]string{
 		"type":  "gripi-notification",
 		"title": title,
-		"body":  sessions.NotificationPreview(reply.text),
+		"body":  agent.NotificationPreview(reply.text),
 		"tag":   completedReplyTag(path, reply.id),
 		"url":   completedReplyURL(path),
 	})

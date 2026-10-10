@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -56,9 +56,9 @@ func (deferringClient) DeferringCompactionPrompts() bool { return true }
 
 func TestLocalSessionsKeepCompactingUntilQueuedPromptsAreDelivered(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
-	app.rpcClients = rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return deferringClient{client}, nil }, nil)
+	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return deferringClient{client}, nil }, nil)
 	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, app.sessionCache, app.rpcClients)
-	if err := app.rpcClients.WithClient(context.Background(), path, func(rpc.RPCClient) error { return nil }); err != nil {
+	if err := app.rpcClients.WithClient(context.Background(), path, func(agent.Client) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	// Reporting idle here would end 'gripi wait' before the queued prompt runs.

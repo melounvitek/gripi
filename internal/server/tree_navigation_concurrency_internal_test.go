@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -354,7 +354,7 @@ func (client *treeNavigationClient) NavigateTree(ctx context.Context, entry, sum
 	return map[string]any{"success": true, "data": map[string]any{"editorText": "branch draft", "cancelled": client.cancelled}}, nil
 }
 
-func (client *treeNavigationClient) QueueCompactionPrompt(_ context.Context, message string, images []rpc.PromptImage, behavior string) (map[string]any, bool, error) {
+func (client *treeNavigationClient) QueueCompactionPrompt(_ context.Context, message string, images []agent.PromptImage, behavior string) (map[string]any, bool, error) {
 	client.queues.Add(1)
 	if message != "hello" || len(images) != 0 || behavior != "steer" && behavior != "followUp" {
 		return nil, false, errors.New("unexpected compaction prompt arguments")
@@ -394,7 +394,7 @@ func newTreeNavigationFixture(t *testing.T) *treeNavigationFixture {
 	fixture.a.state, fixture.b.state = treeNavigationState(false), treeNavigationState(false)
 	// LiveSnapshot initializes this slice lazily; make concurrent reads read-only.
 	fixture.a.live.ActiveToolEvents, fixture.b.live.ActiveToolEvents = []map[string]any{}, []map[string]any{}
-	registry := rpc.NewRegistry(func(path string) (rpc.RPCClient, error) {
+	registry := agent.NewRegistry(func(path string) (agent.Client, error) {
 		fixture.created.Add(1)
 		record("Create(B)")
 		if path != fixture.path {

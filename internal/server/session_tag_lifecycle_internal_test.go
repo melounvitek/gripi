@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -93,11 +94,11 @@ func TestPendingTagMigrationFailureRollsBackMetadataAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := rpc.NewRegistry(nil, nil)
+	registry := agent.NewRegistry(nil, nil)
 	if err := registry.Register(from, &remapClient{}); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(from, root, "")
 	attachments := filepath.Join(root, "attachments")
 	if err := os.Mkdir(attachments, 0700); err != nil {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -85,7 +86,7 @@ func TestNewSessionProjectStorageFailureRollsBackCreation(t *testing.T) {
 				}
 			}
 			newPath := filepath.Join(app.config.SessionsRoot, "pending-new.jsonl")
-			app.newRPCClient = func(string, string, string) (rpc.RPCClient, error) {
+			app.newRPCClient = func(string, string, string) (agent.Client, error) {
 				return &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": newPath}}}, nil
 			}
 			claimed, released := false, false
@@ -122,12 +123,12 @@ func TestNewSessionRegistrationFailureRollsBackCreation(t *testing.T) {
 			if native {
 				client.state = map[string]any{"data": map[string]any{"sessionFile": filepath.Join(root, "native.jsonl")}}
 			}
-			registry := rpc.NewRegistry(nil, nil)
+			registry := agent.NewRegistry(nil, nil)
 			if err := registry.Shutdown(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			owned := map[string]bool{}
-			app := &application{config: config.Config{SessionsRoot: root}, gatewayState: state, rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), newRPCClient: func(string, string, string) (rpc.RPCClient, error) { return client, nil }, claimSession: func(_ *http.Request, path string) (bool, error) { owned[path] = true; return true, nil }, releaseSession: func(_ *http.Request, path string) error { delete(owned, path); return nil }}
+			app := &application{config: config.Config{SessionsRoot: root}, gatewayState: state, rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), newRPCClient: func(string, string, string) (agent.Client, error) { return client, nil }, claimSession: func(_ *http.Request, path string) (bool, error) { owned[path] = true; return true, nil }, releaseSession: func(_ *http.Request, path string) error { delete(owned, path); return nil }}
 			if _, err := app.startNewSession(tagLifecycleRequest("/sessions/new_at_cwd"), root, ""); err == nil {
 				t.Fatal("registration succeeded")
 			}

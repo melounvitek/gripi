@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/keyedlock"
 	"github.com/melounvitek/gripi/internal/rpc"
 )
@@ -56,7 +57,7 @@ type syncState struct {
 
 type Synchronizer struct {
 	store    Store
-	clients  *rpc.Registry
+	clients  *agent.Registry
 	locks    keyedlock.Mutexes
 	statesMu sync.Mutex
 	states   map[string]syncState
@@ -65,7 +66,7 @@ type Synchronizer struct {
 	baselinesPath string
 }
 
-func NewSynchronizer(root, home string, cache *Cache, clients *rpc.Registry) *Synchronizer {
+func NewSynchronizer(root, home string, cache *Cache, clients *agent.Registry) *Synchronizer {
 	return &Synchronizer{store: Store{Root: root, Home: home, Cache: cache}, clients: clients, states: make(map[string]syncState)}
 }
 
@@ -197,7 +198,7 @@ func (synchronizer *Synchronizer) WithExclusiveOperation(path string, call func(
 	return call()
 }
 
-func (synchronizer *Synchronizer) WithMutableClient(ctx context.Context, path string, call func(rpc.RPCClient) error) error {
+func (synchronizer *Synchronizer) WithMutableClient(ctx context.Context, path string, call func(agent.Client) error) error {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {
 		return ErrSyncBusy
@@ -207,14 +208,14 @@ func (synchronizer *Synchronizer) WithMutableClient(ctx context.Context, path st
 	if resultErr != nil {
 		return resultErr
 	}
-	return synchronizer.clients.WithClient(ctx, path, func(client rpc.RPCClient) error {
+	return synchronizer.clients.WithClient(ctx, path, func(client agent.Client) error {
 		if err := synchronizer.verifyClient(ctx, path, before, client); err != nil {
 			return err
 		}
 		return call(client)
 	})
 }
-func (synchronizer *Synchronizer) WithClientMove(ctx context.Context, path string, touch bool, call func(rpc.RPCClient) (string, error), prepare func(string, string) (func() error, error), commit func(string, string)) (string, error) {
+func (synchronizer *Synchronizer) WithClientMove(ctx context.Context, path string, touch bool, call func(agent.Client) (string, error), prepare func(string, string) (func() error, error), commit func(string, string)) (string, error) {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {
 		return path, ErrSyncBusy
@@ -224,7 +225,7 @@ func (synchronizer *Synchronizer) WithClientMove(ctx context.Context, path strin
 	if err != nil {
 		return path, err
 	}
-	return synchronizer.clients.WithClientMove(ctx, path, touch, func(client rpc.RPCClient) (string, error) {
+	return synchronizer.clients.WithClientMove(ctx, path, touch, func(client agent.Client) (string, error) {
 		if err := synchronizer.verifyClient(ctx, path, before, client); err != nil {
 			return path, err
 		}
@@ -232,7 +233,7 @@ func (synchronizer *Synchronizer) WithClientMove(ctx context.Context, path strin
 	}, prepare, commit)
 }
 
-func (synchronizer *Synchronizer) WithBashClient(ctx context.Context, path string, call func(rpc.RPCClient) error) error {
+func (synchronizer *Synchronizer) WithBashClient(ctx context.Context, path string, call func(agent.Client) error) error {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {
 		return ErrSyncBusy
@@ -246,7 +247,7 @@ func (synchronizer *Synchronizer) WithBashClient(ctx context.Context, path strin
 	if err != nil {
 		return err
 	}
-	return synchronizer.clients.WithBashClient(ctx, path, func(client rpc.RPCClient) error {
+	return synchronizer.clients.WithBashClient(ctx, path, func(client agent.Client) error {
 		if err := synchronizer.verifyClient(ctx, path, before, client); err != nil {
 			return err
 		}
@@ -255,7 +256,7 @@ func (synchronizer *Synchronizer) WithBashClient(ctx context.Context, path strin
 		return call(client)
 	})
 }
-func (synchronizer *Synchronizer) WithInterruptClient(ctx context.Context, path string, call func(rpc.RPCClient) error) error {
+func (synchronizer *Synchronizer) WithInterruptClient(ctx context.Context, path string, call func(agent.Client) error) error {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {
 		return synchronizer.clients.WithExistingInterruptClient(ctx, path, call)
@@ -268,13 +269,13 @@ func (synchronizer *Synchronizer) WithInterruptClient(ctx context.Context, path 
 	if err != nil {
 		return err
 	}
-	err = synchronizer.clients.WithInterruptClient(ctx, path, func(client rpc.RPCClient) error {
+	err = synchronizer.clients.WithInterruptClient(ctx, path, func(client agent.Client) error {
 		if err := synchronizer.verifyClient(ctx, path, before, client); err != nil {
 			return err
 		}
 		return call(client)
 	})
-	if errors.Is(err, rpc.ErrOperationPending) {
+	if errors.Is(err, agent.ErrOperationPending) {
 		return synchronizer.clients.WithExistingInterruptClient(ctx, path, call)
 	}
 	return err
@@ -295,7 +296,7 @@ func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string, bef
 		return SyncResult{}, &SyncBlockedError{Mode: SyncConflict, Message: "The session file has an incomplete entry."}
 	}
 	succeeded := false
-	err = synchronizer.clients.WithClient(ctx, path, func(client rpc.RPCClient) error {
+	err = synchronizer.clients.WithClient(ctx, path, func(client agent.Client) error {
 		position, err := rpc.SessionPosition(ctx, client, before.AppendCursor)
 		if err != nil {
 			return err
@@ -337,7 +338,7 @@ func (synchronizer *Synchronizer) inspectRecovering(ctx context.Context, path st
 	if terminalSyncRPCError(err) {
 		return synchronizer.recoverRPCExit(path), nil
 	}
-	if errors.Is(err, rpc.ErrOperationPending) || errors.Is(err, rpc.ErrClientRetiring) || errors.Is(err, rpc.ErrClientStarting) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, agent.ErrOperationPending) || errors.Is(err, agent.ErrClientRetiring) || errors.Is(err, agent.ErrClientStarting) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return SyncResult{}, err
 	}
 	return synchronizer.conflict(path, "Session file could not be read: "+err.Error()), nil
@@ -347,7 +348,7 @@ func (synchronizer *Synchronizer) inspectRecoveringAvailable(ctx context.Context
 	if err == nil {
 		return &result
 	}
-	if errors.Is(err, rpc.ErrOperationPending) || errors.Is(err, rpc.ErrClientRetiring) || errors.Is(err, rpc.ErrClientStarting) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, agent.ErrOperationPending) || errors.Is(err, agent.ErrClientRetiring) || errors.Is(err, agent.ErrClientStarting) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
 	if terminalSyncRPCError(err) {
@@ -406,7 +407,7 @@ func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string
 				return resultFor(synchronizer.state(path)), nil
 			}
 			var reconciliation rpc.SessionEntries
-			err = synchronizer.clients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error {
+			err = synchronizer.clients.WithExistingClient(ctx, path, false, func(client agent.Client) error {
 				var callErr error
 				reconciliation, callErr = rpc.SessionEntriesAfter(ctx, client, state.Snapshot.AppendCursor)
 				return callErr
@@ -428,7 +429,7 @@ func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string
 			synchronizer.update(path, snapshot, firstMode(state.Mode), state.RPCLeafID, state.Error)
 		}
 		var position rpc.SessionEntries
-		err = synchronizer.clients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error {
+		err = synchronizer.clients.WithExistingClient(ctx, path, false, func(client agent.Client) error {
 			var callErr error
 			position, callErr = rpc.SessionPosition(ctx, client, snapshot.AppendCursor)
 			return callErr
@@ -458,7 +459,7 @@ func (synchronizer *Synchronizer) verificationSnapshot(ctx context.Context, path
 	}
 	return *state.Snapshot, nil
 }
-func (synchronizer *Synchronizer) verifyClient(ctx context.Context, path string, before FileSnapshot, client rpc.RPCClient) error {
+func (synchronizer *Synchronizer) verifyClient(ctx context.Context, path string, before FileSnapshot, client agent.Client) error {
 	position, err := rpc.SessionPosition(ctx, client, before.AppendCursor)
 	if err != nil {
 		return err
@@ -644,6 +645,6 @@ func stringFromMap(value map[string]any, key string) string {
 	return result
 }
 func terminalSyncRPCError(err error) bool {
-	var timeout *rpc.RequestTimeoutError
-	return errors.As(err, &timeout) || errors.Is(err, rpc.ErrProcessExited)
+	var timeout *agent.RequestTimeoutError
+	return errors.As(err, &timeout) || errors.Is(err, agent.ErrProcessExited)
 }

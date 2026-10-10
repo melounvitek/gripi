@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/rendering"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestCompactRelativeTime(t *testing.T) {
@@ -74,7 +74,7 @@ func TestMessageTimeLabel(t *testing.T) {
 
 func TestMessageTemplateShowsShortTimeWithFullTitle(t *testing.T) {
 	timestamp := time.Now().Add(-time.Minute)
-	message := &sessions.Message{Role: "user", Text: "hello", Timestamp: timestamp}
+	message := &agent.Message{Role: "user", Text: "hello", Timestamp: timestamp}
 	templates, err := template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestMessageTemplateShowsShortTimeWithFullTitle(t *testing.T) {
 }
 
 func TestMessageTemplateCollapsesLongSingleLineToolOutput(t *testing.T) {
-	message := &sessions.Message{
+	message := &agent.Message{
 		Role:     "toolResult",
 		Text:     "oldest-output-" + strings.Repeat("x", 2500) + "-latest-output",
 		Compact:  true,
@@ -124,7 +124,7 @@ func TestMessageTemplateCollapsesLongSingleLineToolOutput(t *testing.T) {
 }
 
 func TestMessageTemplateIdentifiesPersistedPairedToolResults(t *testing.T) {
-	message := &sessions.Message{
+	message := &agent.Message{
 		Role:                "assistant",
 		Text:                "done",
 		Compact:             true,
@@ -148,7 +148,7 @@ func TestMessageTemplateIdentifiesPersistedPairedToolResults(t *testing.T) {
 }
 
 func TestMessageClassMarksToolCallsWithoutResultsPending(t *testing.T) {
-	call := &sessions.Message{Role: "assistant", Compact: true, ToolCallID: "bash-1", ToolName: "bash", ToolPending: true}
+	call := &agent.Message{Role: "assistant", Compact: true, ToolCallID: "bash-1", ToolName: "bash", ToolPending: true}
 	if got := messageClass(call); !strings.Contains(got, "message--tool-pending") {
 		t.Fatalf("pending call class = %q", got)
 	}
@@ -164,7 +164,7 @@ func TestMessageTemplatePreservesLongDiffTail(t *testing.T) {
 		lines[index] = "context"
 	}
 	lines = append(lines, "+diff-start-"+strings.Repeat("x", 2500)+"-diff-end")
-	message := &sessions.Message{
+	message := &agent.Message{
 		Role:           "toolResult",
 		Text:           strings.Join(lines, "\n"),
 		Compact:        true,

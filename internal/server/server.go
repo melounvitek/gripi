@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/access"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/environment"
 	"github.com/melounvitek/gripi/internal/keyedlock"
@@ -61,16 +62,16 @@ type application struct {
 	sessionHashesMu         sync.Mutex
 	knownSessionHashes      map[string]bool
 	sessionHashesAt         time.Time
-	rpcClients              *rpc.Registry
-	newRPCClient            func(cwd, userID, forkFrom string) (rpc.RPCClient, error)
-	rpcDiagnostics          *rpc.Diagnostics
-	pendingSessions         *rpc.PendingSessionRegistry
+	rpcClients              *agent.Registry
+	newRPCClient            func(cwd, userID, forkFrom string) (agent.Client, error)
+	rpcDiagnostics          *agent.Diagnostics
+	pendingSessions         *agent.PendingSessionRegistry
 	pendingRemapMu          sync.Mutex
 	imagePromptLocks        keyedlock.Mutexes
 	promptAdmissions        sessionAdmissions
 	sessionMutationLocks    keyedlock.Mutexes
 	synchronizer            *sessions.Synchronizer
-	rpcMaintenance          *rpc.Maintenance
+	rpcMaintenance          *agent.Maintenance
 	completionNotifications *completionNotifier
 	resourceMonitor         resourceMonitor
 	updateCoordinator       updateCoordinator
@@ -226,7 +227,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		fdRequests:           make(chan struct{}, 4),
 		unknownBodySpools:    make(chan struct{}, unknownBodySpoolLimit),
 		knownSessionHashes:   make(map[string]bool),
-		pendingSessions:      rpc.NewPendingSessionRegistry(nil),
+		pendingSessions:      agent.NewPendingSessionRegistry(nil),
 	}
 	if cfg.ReadStatePath != "" {
 		app.sessionCache = sessions.LoadCache(filepath.Join(filepath.Dir(cfg.ReadStatePath), "session-metadata-cache.json"))
@@ -242,10 +243,10 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 			return nil, err
 		}
 	}
-	diagnostics := &rpc.Diagnostics{Enabled: cfg.RPCDiagnosticsEnabled, Writer: os.Stderr}
+	diagnostics := &agent.Diagnostics{Enabled: cfg.RPCDiagnosticsEnabled, Writer: os.Stderr}
 	app.rpcDiagnostics = diagnostics
 	app.completionNotifications = newCompletionNotifier(app)
-	app.rpcClients = rpc.NewRegistry(func(sessionPath string) (rpc.RPCClient, error) {
+	app.rpcClients = agent.NewRegistry(func(sessionPath string) (agent.Client, error) {
 		// Pi exits at once when a session's folder is gone, so such a session stays read-only.
 		if app.sessionFolderMissing(sessionPath) {
 			return nil, errSessionFolderMissing
@@ -268,7 +269,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		return rpc.Start(sessionPath, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
-	app.newRPCClient = func(cwd, userID, forkFrom string) (rpc.RPCClient, error) {
+	app.newRPCClient = func(cwd, userID, forkFrom string) (agent.Client, error) {
 		variables, err := app.piEnvironment(userID)
 		if err != nil {
 			return nil, err
@@ -317,7 +318,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	updater.ResumeCutover = func() { app.rpcClients.ResumeAfterFailedShutdown() }
 	app.updateCoordinator = update.NewCoordinator(updater, app.requestGatewayRestart, app.rpcClients.BusySessionCount, app.rpcClients.DrainIfIdle)
 	if cfg.RPCIdleTimeout > 0 && cfg.RPCIdleSweep > 0 {
-		app.rpcMaintenance, _ = rpc.NewMaintenance(cfg.RPCIdleSweep, app.cleanupIdleRPCClients, rpc.LogMaintenanceError(os.Stderr))
+		app.rpcMaintenance, _ = agent.NewMaintenance(cfg.RPCIdleSweep, app.cleanupIdleRPCClients, agent.LogMaintenanceError(os.Stderr))
 		app.rpcMaintenance.Start(context.Background())
 	}
 	mux := http.NewServeMux()

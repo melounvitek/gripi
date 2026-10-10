@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 var errSessionNavigating = errors.New("The session tree is changing. Review the selected branch before sending again.")
@@ -71,7 +71,7 @@ func (admissions *sessionAdmissions) tryPrompt(path string) (func(), error) {
 			return nil, errSessionNavigating
 		}
 		if entry.idleDone != nil {
-			return nil, rpc.ErrOperationPending
+			return nil, agent.ErrOperationPending
 		}
 	}
 	return admissions.addPromptLocked(path), nil
@@ -126,7 +126,7 @@ func (admissions *sessionAdmissions) navigate(resolve func() (string, error)) (s
 		if entry.navigating {
 			return "", nil, errSessionNavigating
 		}
-		return "", nil, rpc.ErrOperationPending
+		return "", nil, agent.ErrOperationPending
 	}
 	if admissions.sessions == nil {
 		admissions.sessions = make(map[string]*sessionAdmission)

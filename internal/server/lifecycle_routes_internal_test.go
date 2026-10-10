@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -41,12 +42,12 @@ func TestLifecycleDecisionsFailClosed(t *testing.T) {
 					t.Fatal(err)
 				}
 				client := &lifecycleStateClient{remapClient: &remapClient{state: test.state, busy: test.cachedBusy}, stateErr: test.err}
-				registry := rpc.NewRegistry(nil, nil)
+				registry := agent.NewRegistry(nil, nil)
 				if err := registry.Register(path, client); err != nil {
 					t.Fatal(err)
 				}
 				cache := sessions.NewCache()
-				app := &application{config: config.Config{SessionsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil)}
+				app := &application{config: config.Config{SessionsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
 				app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
 				queried := false
 				client.onState = func() {

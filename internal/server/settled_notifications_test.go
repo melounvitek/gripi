@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -158,7 +159,7 @@ func TestSidebarCompletionMetadataChangesOnlyOnEligibleSettledReply(t *testing.T
 	assertMetadata("", "")
 	notifier.Observe(client, map[string]any{"type": "agent_settled"})
 	id := completedReplyID(map[string]any{"message": final})
-	preview := sessions.NotificationPreview("**Done** <safe>")
+	preview := agent.NotificationPreview("**Done** <safe>")
 	assertMetadata(id, preview)
 	notifier.Observe(client, map[string]any{"type": "agent_start"})
 	appendExternalSessionReply(t, path, "more-progress", "progress")
@@ -228,7 +229,7 @@ func TestSettledNotificationPreservesReadBeforeAgentEnd(t *testing.T) {
 			final := notificationMessage("final", "Already read", "stop")
 			notifier.Observe(client, map[string]any{"type": "agent_start"})
 			notifier.Observe(client, map[string]any{"type": "message_end", "message": final})
-			if _, _, err := app.gatewayState.ReadAndObserve([]*sessions.Session{{Path: path, AssistantResponseCount: 1}}, &sessions.Session{Path: path, AssistantResponseCount: 1}, true, nil); err != nil {
+			if _, _, err := app.gatewayState.ReadAndObserve([]*agent.Session{{Path: path, AssistantResponseCount: 1}}, &agent.Session{Path: path, AssistantResponseCount: 1}, true, nil); err != nil {
 				t.Fatal(err)
 			}
 			if role != "" {

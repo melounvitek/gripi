@@ -19,8 +19,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/pi"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -42,16 +42,16 @@ var projectColors = []string{
 type sidebarActivity struct{ Busy, Compacting bool }
 type sidebarSessionData struct {
 	View     *pageView
-	Session  *sessions.Session
+	Session  *agent.Session
 	Shortcut int
 }
 type messageData struct {
 	View    *pageView
-	Message *sessions.Message
+	Message *agent.Message
 }
 type relationData struct {
 	View             *pageView
-	Session, Current *sessions.Session
+	Session, Current *agent.Session
 }
 
 type liveOutputData struct {
@@ -77,11 +77,11 @@ type pageView struct {
 	Nonce                     string
 	ServerOrigin              string
 	Params                    url.Values
-	Sessions                  []*sessions.Session
-	Selected                  *sessions.Session
-	SidebarSessions           []*sessions.Session
-	PinnedSessions            []*sessions.Session
-	SeparateCurrent           *sessions.Session
+	Sessions                  []*agent.Session
+	Selected                  *agent.Session
+	SidebarSessions           []*agent.Session
+	PinnedSessions            []*agent.Session
+	SeparateCurrent           *agent.Session
 	KnownCWDs                 []string
 	NewSessionCWDs            []string
 	ProjectActivity           map[string]time.Time
@@ -97,13 +97,13 @@ type pageView struct {
 	Pinned                    map[string]bool
 	UnreadCount               int
 	SessionsLimit             int
-	SessionPool               []*sessions.Session
+	SessionPool               []*agent.Session
 	SessionPoolLength         int
 	SessionTotal              int
 	CLISessionsShown          bool
 	CLISessionCount           int
-	Window                    sessions.Window
-	Attachments               map[*sessions.Message]sessions.AttachmentMatch
+	Window                    agent.Window
+	Attachments               map[*agent.Message]sessions.AttachmentMatch
 	SessionOnly               bool
 	GatewayInstanceID         string
 	Home                      string
@@ -129,8 +129,8 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			continue
 		}
 		if _, err := app.canonicalRPCSessionPath(request, pending.Path); err != nil &&
-			!errors.Is(err, rpc.ErrOperationPending) && !errors.Is(err, rpc.ErrClientRetiring) &&
-			!errors.Is(err, rpc.ErrClientStarting) && !errors.Is(err, errSessionNavigating) {
+			!errors.Is(err, agent.ErrOperationPending) && !errors.Is(err, agent.ErrClientRetiring) &&
+			!errors.Is(err, agent.ErrClientStarting) && !errors.Is(err, errSessionNavigating) {
 			return nil, err
 		}
 	}
@@ -170,7 +170,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		if knownPaths[pending.Path] {
 			continue
 		}
-		all = append(all, &sessions.Session{Path: pending.Path, ID: pending.ID, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt})
+		all = append(all, &agent.Session{Path: pending.Path, ID: pending.ID, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt})
 	}
 	sort.SliceStable(all, func(left, right int) bool {
 		return all[left].ConversationActivityAt.After(all[right].ConversationActivityAt)
@@ -208,7 +208,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if !knownProjects[selectedProject] {
 		selectedProject = ""
 	}
-	var selected *sessions.Session
+	var selected *agent.Session
 	if params.Get("no_session") != "1" {
 		for _, session := range all {
 			if session.Path == params.Get("session") {
@@ -277,7 +277,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))
 	view.prepareSidebar()
-	renderedSessions := make([]*sessions.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)
+	renderedSessions := make([]*agent.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)
 	renderedSessions = append(renderedSessions, view.PinnedSessions...)
 	renderedSessions = append(renderedSessions, view.SidebarSessions...)
 	if view.SeparateCurrent != nil {
@@ -313,7 +313,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		}
 		view.SessionSyncGatewayBusy = view.SessionSyncBlocked && app.rpcClients.Busy(selected.Path)
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)
-		window := sessions.Window{}
+		window := agent.Window{}
 		if statErr == nil {
 			var err error
 			window, err = store.Window(selected.Path, leafID, leafSupplied, nil, nil)
@@ -322,7 +322,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			}
 		}
 		view.Window = window
-		view.Attachments = make(map[*sessions.Message]sessions.AttachmentMatch)
+		view.Attachments = make(map[*agent.Message]sessions.AttachmentMatch)
 		if statErr == nil {
 			view.Attachments = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}).Match(selected.Path, window.Messages)
 			view.SessionGeneration = store.Generation(selected.Path)
@@ -333,7 +333,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 				activeToolIDs = append(activeToolIDs, id)
 			}
 		}
-		toolContext := map[string]sessions.ToolCallContext(nil)
+		toolContext := map[string]agent.ToolCallContext(nil)
 		if statErr == nil {
 			toolContext = store.SubagentToolCallContext(selected.Path, window.TreeLeafID, activeToolIDs)
 		}
@@ -350,7 +350,7 @@ func (app *application) piDisplaySettings(cwd string) pi.DisplaySettings {
 	return (pi.SettingsResolver{AgentDir: agentDir, AutoApproveProjects: app.config.AutoApproveProjects}).DisplaySettings(cwd)
 }
 
-func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, home string, toolContext map[string]sessions.ToolCallContext) liveOutputData {
+func liveOutputFrom(snapshot agent.LiveSnapshot, messages []*agent.Message, home string, toolContext map[string]agent.ToolCallContext) liveOutputData {
 	activeTools := snapshot.ActiveToolEvents
 	if activeTools == nil {
 		activeTools = []map[string]any{}
@@ -438,12 +438,12 @@ func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, hom
 	}
 }
 
-func activeBashPersisted(active map[string]any, messages []*sessions.Message, home string) bool {
+func activeBashPersisted(active map[string]any, messages []*agent.Message, home string) bool {
 	started, ok := timeFromAny(active["started_at"])
 	if !ok {
 		return false
 	}
-	summary := "$ " + sessions.DisplayHomePath(stringFromAny(active["command"]), home)
+	summary := "$ " + agent.DisplayHomePath(stringFromAny(active["command"]), home)
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
 		if message.Role == "bashExecution" && message.Summary == summary && !message.Timestamp.IsZero() && !message.Timestamp.Before(started) {
@@ -453,7 +453,7 @@ func activeBashPersisted(active map[string]any, messages []*sessions.Message, ho
 	return false
 }
 
-func completedBashPersisted(event map[string]any, messages []*sessions.Message, home string) bool {
+func completedBashPersisted(event map[string]any, messages []*agent.Message, home string) bool {
 	if event["type"] != "bash_end" {
 		return false
 	}
@@ -465,7 +465,7 @@ func completedBashPersisted(event map[string]any, messages []*sessions.Message, 
 	if !ok {
 		return false
 	}
-	summary := "$ " + sessions.DisplayHomePath(stringFromAny(event["command"]), home)
+	summary := "$ " + agent.DisplayHomePath(stringFromAny(event["command"]), home)
 	for _, message := range messages {
 		if message.Role != "bashExecution" || message.Summary != summary || message.Text != stringFromAny(result["output"]) || message.BashCancelled != (result["cancelled"] == true) || message.BashTruncated != (result["truncated"] == true) || message.BashExcludedFromContext != (event["excludeFromContext"] == true) || message.BashRecordedAt.IsZero() || message.BashRecordedAt.UnixMilli() < int64(startedMilliseconds) {
 			continue
@@ -502,7 +502,7 @@ func millisecondsString(value *time.Time) string {
 	return strconv.FormatInt(value.UnixMilli(), 10)
 }
 
-func (app *application) rememberSessionHashes(all []*sessions.Session) {
+func (app *application) rememberSessionHashes(all []*agent.Session) {
 	values := make(map[string]bool, len(all))
 	for _, session := range all {
 		aliases := sessions.SessionPathAliases(app.config.SessionsRoot, session.Path)
@@ -532,7 +532,7 @@ func (view *pageView) prepareSidebar() {
 	}
 	cookie, err := view.Request.Cookie(cliSessionsCookie)
 	view.CLISessionsShown = err == nil && cookie.Value == "1"
-	var pool []*sessions.Session
+	var pool []*agent.Session
 	query := strings.ToLower(view.SearchQuery)
 	for _, session := range view.Sessions {
 		if view.Pinned[session.Path] {
@@ -586,7 +586,7 @@ func (view *pageView) prepareSidebar() {
 	}
 }
 
-func knownCWDs(all []*sessions.Session, projects map[string]bool) ([]string, map[string]time.Time) {
+func knownCWDs(all []*agent.Session, projects map[string]bool) ([]string, map[string]time.Time) {
 	latest := make(map[string]time.Time)
 	for _, session := range all {
 		if projects[session.CWD] && session.ConversationActivityAt.After(latest[session.CWD]) {
@@ -673,17 +673,17 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return value.Local().Format("2006-01-02 15:04")
 		},
 		"sessionURL": sessionURL, "sessionClasses": sessionClasses, "unreadLabel": unreadLabel, "plural": plural,
-		"sessionData": func(view *pageView, session *sessions.Session, shortcut int) sidebarSessionData {
+		"sessionData": func(view *pageView, session *agent.Session, shortcut int) sidebarSessionData {
 			return sidebarSessionData{view, session, shortcut}
 		},
 		"sessionParent": sessionParent, "sessionChildren": sessionChildren, "sessionRoot": sessionRoot,
-		"relationData": func(view *pageView, session, current *sessions.Session) relationData {
+		"relationData": func(view *pageView, session, current *agent.Session) relationData {
 			return relationData{view, session, current}
 		},
-		"messageData":    func(view *pageView, message *sessions.Message) messageData { return messageData{view, message} },
+		"messageData":    func(view *pageView, message *agent.Message) messageData { return messageData{view, message} },
 		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL,
 		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
-		"messageBody": func(message *sessions.Message) template.HTML {
+		"messageBody": func(message *agent.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
 				return template.HTML(markdownRenderer.Render(message.Text))
 			}
@@ -693,7 +693,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 		"imageSource": imageSource,
 		"statusItems": statusItems, "bashStatusItems": bashStatusItems, "attachmentLabel": attachmentLabel,
 		"visibleImages": visibleImages, "attachmentCount": attachmentCount, "collapsible": collapsible, "toolOutputHiddenLabel": toolOutputHiddenLabel,
-		"terminalOutput": terminalOutput, "terminalSource": terminalSource, "terminalTruncated": func(message *sessions.Message) bool { return len(message.Text) > 262144 },
+		"terminalOutput": terminalOutput, "terminalSource": terminalSource, "terminalTruncated": func(message *agent.Message) bool { return len(message.Text) > 262144 },
 		"conversationSearch": conversationSearch, "tildePath": tildePath,
 	}
 }
@@ -780,7 +780,7 @@ func plural(value int) string {
 	}
 	return "s"
 }
-func sessionURL(view *pageView, session *sessions.Session) string {
+func sessionURL(view *pageView, session *agent.Session) string {
 	values := url.Values{"session": {session.Path}}
 	if view.SelectedTag != "" {
 		values.Set("tag", view.SelectedTag)
@@ -800,7 +800,7 @@ func sessionURL(view *pageView, session *sessions.Session) string {
 	}
 	return "/?" + values.Encode()
 }
-func sessionParent(view *pageView, session *sessions.Session) *sessions.Session {
+func sessionParent(view *pageView, session *agent.Session) *agent.Session {
 	if session == nil || session.ParentSessionPath == "" {
 		return nil
 	}
@@ -812,11 +812,11 @@ func sessionParent(view *pageView, session *sessions.Session) *sessions.Session 
 	}
 	return nil
 }
-func sessionChildren(view *pageView, session *sessions.Session) []*sessions.Session {
+func sessionChildren(view *pageView, session *agent.Session) []*agent.Session {
 	if session == nil {
 		return nil
 	}
-	var result []*sessions.Session
+	var result []*agent.Session
 	target := filepath.Clean(session.Path)
 	for _, candidate := range view.Sessions {
 		if candidate.ParentSessionPath != "" && filepath.Clean(candidate.ParentSessionPath) == target {
@@ -826,7 +826,7 @@ func sessionChildren(view *pageView, session *sessions.Session) []*sessions.Sess
 	sort.SliceStable(result, func(i, j int) bool { return result[i].ModifiedAt.After(result[j].ModifiedAt) })
 	return result
 }
-func sessionRoot(view *pageView, session *sessions.Session) *sessions.Session {
+func sessionRoot(view *pageView, session *agent.Session) *agent.Session {
 	seen := make(map[string]bool)
 	current := session
 	for current != nil && !seen[current.Path] {
@@ -863,7 +863,7 @@ func filtersClearURL(view *pageView) string {
 	}
 	return "/?" + values.Encode()
 }
-func retainedSessionsLimit(view *pageView, session *sessions.Session) string {
+func retainedSessionsLimit(view *pageView, session *agent.Session) string {
 	if view.SessionsLimit <= recentSessionLimit || session == nil {
 		return ""
 	}
@@ -874,7 +874,7 @@ func retainedSessionsLimit(view *pageView, session *sessions.Session) string {
 	}
 	return ""
 }
-func sessionClasses(view *pageView, session *sessions.Session) string {
+func sessionClasses(view *pageView, session *agent.Session) string {
 	values := []string{"session", "recent-session"}
 	if view.Selected != nil && view.Selected.Path == session.Path {
 		values = append(values, "selected")
@@ -893,7 +893,7 @@ func unreadLabel(count int) string {
 	}
 	return strconv.Itoa(count)
 }
-func conversationSearch(view *pageView, session *sessions.Session) string {
+func conversationSearch(view *pageView, session *agent.Session) string {
 	if len(view.SearchQuery) >= 3 && strings.Contains(strings.ToLower(session.FirstUserMessage), strings.ToLower(view.SearchQuery)) {
 		return view.SearchQuery
 	}
@@ -920,7 +920,7 @@ func messageRoleKey(role string) string {
 		return "status"
 	}
 }
-func messageClass(message *sessions.Message) string {
+func messageClass(message *agent.Message) string {
 	values := []string{"message", "message--" + messageRoleKey(message.Role)}
 	if message.Compact {
 		values = append(values, "message--compact")
@@ -957,7 +957,7 @@ func messageClass(message *sessions.Message) string {
 	}
 	return strings.Join(values, " ")
 }
-func messageRoleLabel(message *sessions.Message) string {
+func messageRoleLabel(message *agent.Message) string {
 	if message.Compact && message.Role == "assistant" && message.ToolName != "" {
 		return "tool"
 	}
@@ -977,7 +977,7 @@ func messageRoleLabel(message *sessions.Message) string {
 		return message.Role
 	}
 }
-func messageFingerprint(message *sessions.Message) string {
+func messageFingerprint(message *agent.Message) string {
 	if message.Timestamp.IsZero() {
 		return ""
 	}
@@ -988,10 +988,10 @@ func messageFingerprint(message *sessions.Message) string {
 	}
 	return fmt.Sprintf("%s:%d:%x", messageRoleKey(message.Role), message.Timestamp.Unix(), hash)
 }
-func compactBody(view *pageView, message *sessions.Message) template.HTML {
+func compactBody(view *pageView, message *agent.Message) template.HTML {
 	return renderCompactLines(message, strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n"), 0, view.Home)
 }
-func compactTail(view *pageView, message *sessions.Message) template.HTML {
+func compactTail(view *pageView, message *agent.Message) template.HTML {
 	lines := compactTailLines(message.Text, !message.ToolTranscript)
 
 	return renderCompactLines(message, lines, max(len(lines)-toolOutputMobileTailLines, 0), view.Home)
@@ -1016,7 +1016,7 @@ func compactTailLines(text string, trimCharacters bool) []string {
 
 	return lines
 }
-func renderCompactLines(message *sessions.Message, lines []string, desktop int, home string) template.HTML {
+func renderCompactLines(message *agent.Message, lines []string, desktop int, home string) template.HTML {
 	diff := message.ToolTranscript && (message.ToolName == "edit" || message.ToolName == "write")
 	var output strings.Builder
 	class := "tool-output-content"
@@ -1026,7 +1026,7 @@ func renderCompactLines(message *sessions.Message, lines []string, desktop int, 
 	output.WriteString(`<span class="` + class + `">`)
 	for index, line := range lines {
 		if !message.ToolPreview {
-			line = sessions.DisplayHomePath(line, home)
+			line = agent.DisplayHomePath(line, home)
 		}
 		lineClass := "tool-output-line"
 		if diff {
@@ -1049,7 +1049,7 @@ func renderCompactLines(message *sessions.Message, lines []string, desktop int, 
 	output.WriteString(`</span>`)
 	return template.HTML(output.String())
 }
-func statusItems(status sessions.Status) [][2]string {
+func statusItems(status agent.Status) [][2]string {
 	var result [][2]string
 	if status.HasContextTokens || status.HasContextLimit {
 		value := ""
@@ -1085,7 +1085,7 @@ func compactNumber(value float64) string {
 	}
 	return strconv.FormatFloat(value/1e6, 'f', 1, 64) + "M"
 }
-func bashStatusItems(message *sessions.Message) []string {
+func bashStatusItems(message *agent.Message) []string {
 	var values []string
 	if message.BashExcludedFromContext {
 		values = append(values, "excluded from model context")
@@ -1107,30 +1107,30 @@ func bashStatusItems(message *sessions.Message) []string {
 func attachmentLabel(count int) string {
 	return fmt.Sprintf("📎 %d image attachment%s", count, plural(count))
 }
-func imageSource(view *pageView, image sessions.Image) string {
+func imageSource(view *pageView, image agent.Image) string {
 	if image.Src != "" {
 		return image.Src
 	}
 	// The extension keeps the image viewer's download filename meaningful.
 	return "/session_images/" + url.PathEscape(image.EntryID) + "/" + strconv.Itoa(image.Index) + "." + strings.TrimPrefix(image.MIMEType, "image/") + "?session=" + url.QueryEscape(view.Selected.Path)
 }
-func visibleImages(view *pageView, message *sessions.Message) []sessions.Image {
+func visibleImages(view *pageView, message *agent.Message) []agent.Image {
 	if len(message.Images) > 0 {
 		return message.Images
 	}
 	return view.Attachments[message].Images
 }
-func attachmentCount(view *pageView, message *sessions.Message) int {
+func attachmentCount(view *pageView, message *agent.Message) int {
 	return view.Attachments[message].Count
 }
-func collapsible(message *sessions.Message) bool {
+func collapsible(message *agent.Message) bool {
 	lines := strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n")
 	longOutput := !message.ToolTranscript && utf8.RuneCountInString(message.Text) > toolOutputCollapseCharacters
 
 	return message.Compact && !message.Thinking && !message.FinalAssistantResponse && (len(lines) > toolOutputDesktopTailLines || longOutput)
 }
 
-func toolOutputHiddenLabel(message *sessions.Message, tailLines int) string {
+func toolOutputHiddenLabel(message *agent.Message, tailLines int) string {
 	if !message.ToolTranscript && utf8.RuneCountInString(message.Text) > toolOutputCollapseCharacters {
 		return "… (earlier output)"
 	}
@@ -1139,13 +1139,13 @@ func toolOutputHiddenLabel(message *sessions.Message, tailLines int) string {
 
 	return fmt.Sprintf("… (%d earlier lines)", lines-tailLines)
 }
-func terminalOutput(message *sessions.Message) bool {
+func terminalOutput(message *agent.Message) bool {
 	if !message.Compact || message.ToolName == "read" || message.ToolName == "edit" || message.ToolName == "write" {
 		return false
 	}
 	return strings.ContainsAny(message.Text, "\b\x1b") || strings.Contains(message.Text, "\r")
 }
-func terminalSource(message *sessions.Message) string {
+func terminalSource(message *agent.Message) string {
 	value := message.Text
 	if len(value) > 262144 {
 		if latest := strings.LastIndex(value, "\x1b[2J"); latest >= 0 && len(value)-latest <= 262144 {

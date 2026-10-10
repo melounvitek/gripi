@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/access"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/push"
 	"github.com/melounvitek/gripi/internal/rpc"
@@ -249,7 +250,7 @@ func TestCompletionNotifierWorkerRetriesUnavailableInspection(t *testing.T) {
 				if lock == "sync operation" {
 					err = app.synchronizer.WithExclusiveOperation(path, whileLocked)
 				} else {
-					err = app.rpcClients.WithExistingClient(context.Background(), path, false, func(rpc.RPCClient) error { return whileLocked() })
+					err = app.rpcClients.WithExistingClient(context.Background(), path, false, func(agent.Client) error { return whileLocked() })
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -293,7 +294,7 @@ func TestCompletionNotifierInspectionRetryHonorsDeliveryDeadline(t *testing.T) {
 			if lock == "sync operation" {
 				err = app.synchronizer.WithExclusiveOperation(path, deliver)
 			} else {
-				err = app.rpcClients.WithExistingClient(ctx, path, false, func(rpc.RPCClient) error { return deliver() })
+				err = app.rpcClients.WithExistingClient(ctx, path, false, func(agent.Client) error { return deliver() })
 			}
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("delivery error = %v, want deadline exceeded", err)
@@ -430,7 +431,7 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	fake := &recordingPushNotifier{}
 	app := notificationTestApplication(t, root, false, true, fake)
 	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "external"}}
-	app.rpcClients = rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
 	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
 		t.Fatal(err)
@@ -824,8 +825,8 @@ func notificationTestApplication(t *testing.T, root string, multiUser, authDisab
 		gatewayState:         sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root),
 		notificationPresence: newNotificationPresence(time.Now),
 		sessionCache:         sessions.NewCache(),
-		pendingSessions:      rpc.NewPendingSessionRegistry(nil),
-		rpcClients:           rpc.NewRegistry(nil, nil),
+		pendingSessions:      agent.NewPendingSessionRegistry(nil),
+		rpcClients:           agent.NewRegistry(nil, nil),
 	}
 	return app
 }

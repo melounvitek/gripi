@@ -161,7 +161,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	var rpcResponse map[string]any
 	var rpcMessage = message
 	var extensionCommandWithImages, handledSlashCommand, compactingAfterHandledCommand, runningAfterHandledCommand bool
-	var rpcImages []rpc.PromptImage
+	var rpcImages []agent.PromptImage
 	var attachmentPaths, mimeTypes []string
 	cleanupImages := func() error { return nil }
 	keepImages, cleanupPending := false, true
@@ -187,7 +187,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 			request.MultipartForm = nil
 		}
 		for _, image := range images {
-			rpcImages = append(rpcImages, rpc.PromptImage{Path: image.Path, MIMEType: image.MIMEType, Size: image.Size})
+			rpcImages = append(rpcImages, agent.PromptImage{Path: image.Path, MIMEType: image.MIMEType, Size: image.Size})
 			attachmentPaths = append(attachmentPaths, image.Path)
 			mimeTypes = append(mimeTypes, image.MIMEType)
 		}
@@ -203,7 +203,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		}
 		return nil
 	}
-	call := func(client rpc.RPCClient) error {
+	call := func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -249,7 +249,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 			if !ok {
 				return
 			}
-			err = app.rpcClients.WithActiveClient(request.Context(), path, true, func(client rpc.RPCClient) error {
+			err = app.rpcClients.WithActiveClient(request.Context(), path, true, func(client agent.Client) error {
 				actions, actionErr := checkedActionClient(client)
 				if actionErr != nil {
 					return actionErr
@@ -334,7 +334,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	}
 	if command.Type == "" && strings.HasPrefix(strings.TrimSpace(message), "/") && !strings.ContainsAny(message, "\r\n") {
 		var state map[string]any
-		if app.rpcClients.WithExistingClient(request.Context(), path, true, func(client rpc.RPCClient) error {
+		if app.rpcClients.WithExistingClient(request.Context(), path, true, func(client agent.Client) error {
 			var stateErr error
 			state, stateErr = client.GetState(request.Context())
 			return stateErr
@@ -353,7 +353,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	app.writePromptResult(response, request, path, payload)
 }
 
-func (app *application) extensionSlashCommand(request *http.Request, client rpc.RPCClient, message string) bool {
+func (app *application) extensionSlashCommand(request *http.Request, client agent.Client, message string) bool {
 	if !strings.HasPrefix(message, "/") {
 		return false
 	}
@@ -372,7 +372,7 @@ func (app *application) extensionSlashCommand(request *http.Request, client rpc.
 
 var errUnsupportedActionClient = errors.New("Pi RPC client does not support actions")
 
-func checkedActionClient(client rpc.RPCClient) (rpc.ActionClient, error) {
+func checkedActionClient(client agent.Client) (rpc.ActionClient, error) {
 	actions, ok := client.(rpc.ActionClient)
 	if !ok {
 		return nil, errUnsupportedActionClient
@@ -382,7 +382,7 @@ func checkedActionClient(client rpc.RPCClient) (rpc.ActionClient, error) {
 
 func (app *application) runBash(response http.ResponseWriter, request *http.Request, path, command string, excluded bool) {
 	var result map[string]any
-	err := app.withSynchronizedBashClient(request, path, func(client rpc.RPCClient) error {
+	err := app.withSynchronizedBashClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -433,7 +433,7 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 	}
 	requested = canonical
 	path := requested
-	result := rpc.StopResult{}
+	result := agent.StopResult{}
 	queuedText := ""
 	stoppedQueuedRun := false
 	if _, statErr := os.Stat(requested); statErr == nil {
@@ -461,7 +461,7 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 			}
 		}
 	}
-	abortClient := func(client rpc.RPCClient) error {
+	abortClient := func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -486,7 +486,7 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 				err = app.withSynchronizedInterruptClient(request, requested, abortClient)
 			}
 		}
-		result, err = rpc.StopResultFor(err)
+		result, err = agent.StopResultFor(err)
 	}
 	if err != nil && app.writeActionRPCError(response, err) {
 		return
@@ -521,7 +521,7 @@ func (app *application) compactSession(response http.ResponseWriter, request *ht
 		return
 	}
 	var result map[string]any
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -543,7 +543,7 @@ func (app *application) modelSettings(response http.ResponseWriter, request *htt
 		return
 	}
 	var stateResponse, modelsResponse, scopedResponse map[string]any
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -605,7 +605,7 @@ func (app *application) setModelSettings(response http.ResponseWriter, request *
 		return
 	}
 	var stateResponse map[string]any
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -649,7 +649,7 @@ func (app *application) cycleThinking(response http.ResponseWriter, request *htt
 		return
 	}
 	var result map[string]any
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -759,7 +759,7 @@ func (app *application) renameSession(response http.ResponseWriter, request *htt
 func (app *application) setSessionName(request *http.Request, path, name string) error {
 	wasActive := app.rpcClients.Active(path)
 	var result map[string]any
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -825,7 +825,7 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 	writeJSON(response, map[string]any{"session": path, "deleted": true, "method": method})
 }
 
-func (app *application) persistedActionSession(response http.ResponseWriter, request *http.Request, raw string) (*sessions.Session, bool) {
+func (app *application) persistedActionSession(response http.ResponseWriter, request *http.Request, raw string) (*agent.Session, bool) {
 	path, ok := app.actionSessionPath(response, request, raw, true)
 	if !ok {
 		return nil, false
@@ -859,7 +859,7 @@ func (app *application) closeDeleteSessionClient(ctx context.Context, path strin
 	}
 	// Prompt acceptance can precede agent_start delivery. The caller holds both
 	// admission exclusion and the operation lock through check, close, and deletion.
-	err := app.rpcClients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error {
+	err := app.rpcClients.WithExistingClient(ctx, path, false, func(client agent.Client) error {
 		state, err := client.GetState(ctx)
 		if err != nil {
 			return err
@@ -963,7 +963,7 @@ func (app *application) forkMessages(response http.ResponseWriter, request *http
 		return
 	}
 	var result map[string]any
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -993,7 +993,7 @@ func (app *application) treeEntries(response http.ResponseWriter, request *http.
 		return
 	}
 	var result map[string]any
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -1072,7 +1072,7 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 	}
 	restoredQueuedText := ""
 	abortedRun := false
-	err = app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		state, err := client.GetState(request.Context())
 		if err != nil {
 			return err
@@ -1121,7 +1121,7 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 		}
 	}
 	var result map[string]any
-	err = app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -1183,7 +1183,7 @@ func (app *application) setTreeLabel(response http.ResponseWriter, request *http
 		return
 	}
 	var result map[string]any
-	err := app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -1266,7 +1266,7 @@ func (app *application) exportSession(response http.ResponseWriter, request *htt
 	defer os.Remove(temporaryPath)
 
 	var result map[string]any
-	err = app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -1362,7 +1362,7 @@ func (app *application) extensionUIResponse(response http.ResponseWriter, reques
 	if !ok {
 		return
 	}
-	err := app.rpcClients.WithExistingClient(request.Context(), path, true, func(client rpc.RPCClient) error {
+	err := app.rpcClients.WithExistingClient(request.Context(), path, true, func(client agent.Client) error {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return err
@@ -1440,7 +1440,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 	if _, err := os.Stat(previous); err == nil {
 		mover = app.synchronizer
 	}
-	newPath, actionResponse, err := rpc.BranchSession(request.Context(), previous, cwd, mover, app.pendingSessions, func(client rpc.RPCClient) (map[string]any, error) {
+	newPath, actionResponse, err := rpc.BranchSession(request.Context(), previous, cwd, mover, app.pendingSessions, func(client agent.Client) (map[string]any, error) {
 		actions, err := checkedActionClient(client)
 		if err != nil {
 			return nil, err
@@ -1559,7 +1559,7 @@ func (app *application) startNewSession(request *http.Request, cwd, forkFrom str
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
-	factory := func(cwd string) (rpc.RPCClient, error) {
+	factory := func(cwd string) (agent.Client, error) {
 		return app.newRPCClient(cwd, app.environmentUser(request), forkFrom)
 	}
 	return rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, factory, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
@@ -1689,7 +1689,7 @@ func (app *application) currentSessionCWD(path string) string {
 	return filepath.Dir(path)
 }
 
-func (app *application) withSynchronizedBashClient(request *http.Request, path string, call func(rpc.RPCClient) error) error {
+func (app *application) withSynchronizedBashClient(request *http.Request, path string, call func(agent.Client) error) error {
 	resolved, _, err := app.resolveOwnedPendingPath(request, path)
 	if err != nil {
 		return err
@@ -1702,7 +1702,7 @@ func (app *application) withSynchronizedBashClient(request *http.Request, path s
 	return app.rpcClients.WithBashClient(ctx, path, call)
 }
 
-func (app *application) withSynchronizedInterruptClient(request *http.Request, path string, call func(rpc.RPCClient) error) error {
+func (app *application) withSynchronizedInterruptClient(request *http.Request, path string, call func(agent.Client) error) error {
 	resolved, _, err := app.resolveOwnedPendingPath(request, path)
 	if err != nil {
 		return err
@@ -1715,7 +1715,7 @@ func (app *application) withSynchronizedInterruptClient(request *http.Request, p
 	return app.rpcClients.WithInterruptClient(ctx, path, call)
 }
 
-func (app *application) abortMatchingPending(request *http.Request, requested string, abort func(rpc.RPCClient) error) (string, error) {
+func (app *application) abortMatchingPending(request *http.Request, requested string, abort func(agent.Client) error) (string, error) {
 	ctx := request.Context()
 	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
 	session, known := store.Session(requested)
@@ -1731,7 +1731,7 @@ func (app *application) abortMatchingPending(request *http.Request, requested st
 			continue
 		}
 		matched := false
-		err := app.rpcClients.WithExistingInterruptClient(ctx, pending.Path, func(client rpc.RPCClient) error {
+		err := app.rpcClients.WithExistingInterruptClient(ctx, pending.Path, func(client agent.Client) error {
 			actions, actionErr := checkedActionClient(client)
 			if actionErr != nil {
 				return actionErr
@@ -1801,18 +1801,18 @@ func (app *application) writeActionRPCError(response http.ResponseWriter, err er
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": pending.Error()})
 		return true
 	}
-	if errors.Is(err, rpc.ErrBashPending) || errors.Is(err, rpc.ErrBashAlreadyRunning) {
+	if errors.Is(err, agent.ErrBashPending) || errors.Is(err, rpc.ErrBashAlreadyRunning) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "A bash command is already running for this session"})
 		return true
 	}
 	if app.writeRPCError(response, err) {
 		return true
 	}
-	if errors.Is(err, rpc.ErrStartFailed) {
+	if errors.Is(err, agent.ErrStartFailed) {
 		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return true
 	}
-	if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, rpc.ErrProcessExited) {
+	if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, agent.ErrProcessExited) {
 		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Pi RPC client disconnected"})
 		return true
 	}

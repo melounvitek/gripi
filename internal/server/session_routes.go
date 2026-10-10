@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -249,7 +250,7 @@ func (app *application) conversationOlder(response http.ResponseWriter, request 
 	for _, message := range window.Messages {
 		_ = app.templates.ExecuteTemplate(&html, "message", struct {
 			View    *pageView
-			Message *sessions.Message
+			Message *agent.Message
 		}{view, message})
 	}
 	next := window.StartIndex

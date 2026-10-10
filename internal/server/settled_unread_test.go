@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -264,7 +265,7 @@ func TestUnresolvedPendingSidebarDoesNotExposeProgressOrReadIt(t *testing.T) {
 				notifier.Observe(client, map[string]any{"type": "message_end", "message": notificationMessage(id, id, "stop")})
 				var err error
 				if unavailable == "rpc lane busy" {
-					err = app.rpcClients.WithExistingClient(context.Background(), pending, false, func(rpc.RPCClient) error { return poll() })
+					err = app.rpcClients.WithExistingClient(context.Background(), pending, false, func(agent.Client) error { return poll() })
 				} else {
 					err = poll()
 				}

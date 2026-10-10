@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -33,11 +34,11 @@ func TestAbortRefusesToGuessWhichPendingSessionToStop(t *testing.T) {
 	writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "requested", "cwd": project}})
 	pendingPath := filepath.Join(root, "pending.jsonl")
 	client := unidentifiedPendingClient{&followUpRaceClient{Client: (*rpc.Client)(nil)}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(pendingPath, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
 	cache := sessions.NewCache()
 	app := &application{config: config.Config{SessionsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
