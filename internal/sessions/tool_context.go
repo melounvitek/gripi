@@ -6,14 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
-	"time"
 )
-
-type ToolCallContext struct {
-	Prompt          string
-	Timestamp       time.Time
-	ResultPersisted bool
-}
 
 func (store Store) SubagentToolCallContext(path, leafID string, ids []string) map[string]ToolCallContext {
 	requested := make(map[string]bool, len(ids))

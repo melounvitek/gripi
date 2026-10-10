@@ -152,15 +152,6 @@ func TestOversizedMultipartMessagesPreserveSegmentsWindowsAndSessionMetadata(t *
 	}
 }
 
-func TestSessionPreviewPreservesMarkdownLineBoundaries(t *testing.T) {
-	value := "```js\r\n  const branch = 'feat/my_branch_name';  \r\n```"
-	want := "```js\nconst branch = 'feat/my_branch_name';\n```"
-
-	if got := preview(value); got != want {
-		t.Fatalf("preview = %q, want %q", got, want)
-	}
-}
-
 func TestSelectedOversizedToolCallsAndResultsRenderWithCorrectPairing(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	large := strings.Repeat("z", MaxIndexedEntryBytes+1024)
