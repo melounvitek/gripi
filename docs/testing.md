@@ -46,7 +46,7 @@ Run the managed suite:
 mise run e2e
 ```
 
-The runner builds and starts a separate gateway with a temporary home, sessions, state, and port, then removes them. It does not touch `gripi.service` or your own Gripi and Pi data.
+The runner builds and starts a separate gateway with a temporary home, sessions, state, and port, then removes them. It does not touch `gripi.service` or your own Gripi and Pi data. It then does the same for the `hermes` and `hermes-touch` projects with a second gateway that also runs a fake Hermes Agent (`node e2e/support/managed_server.mjs --hermes`), so the other projects keep testing a gateway without Hermes.
 
 A desktop Chromium project covers the main flows; a mobile Chromium project covers the session drawer and a complete prompt. Traces and screenshots are kept only for failed tests.
 
