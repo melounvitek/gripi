@@ -892,7 +892,7 @@ func TestAbortRetiresAQueuedRunAndRestoresItsMessages(t *testing.T) {
 	}
 	app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
 	app.guard = sessions.NewSynchronizer(root, root, nil, registry)
-	if state, err := app.guard.Inspect(context.Background(), path, true); err != nil || state.Mode != sessions.SyncManaged {
+	if state, err := inspectGuard(app.guard, context.Background(), path, true); err != nil || state.Mode != sessions.SyncManaged {
 		t.Fatalf("initial synchronization = %#v, %v", state, err)
 	}
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
@@ -912,7 +912,7 @@ func TestAbortRetiresAQueuedRunAndRestoresItsMessages(t *testing.T) {
 	if !client.closed || client.aborted || registry.Active(path) {
 		t.Fatalf("closed=%v aborted=%v active=%v", client.closed, client.aborted, registry.Active(path))
 	}
-	state, err := app.guard.Inspect(context.Background(), path, false)
+	state, err := inspectGuard(app.guard, context.Background(), path, false)
 	if err != nil || state.Mode != sessions.SyncAvailable {
 		t.Fatalf("synchronization after stop = %#v, %v", state, err)
 	}

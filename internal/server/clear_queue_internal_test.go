@@ -403,7 +403,7 @@ func TestClearQueueRespectsKnownSynchronizationBlock(t *testing.T) {
 			if _, err := f.app.rpcClients.CloseClientIfIdle(f.path); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.app.guard.Inspect(context.Background(), f.path, false); err != nil {
+			if _, err := inspectGuard(f.app.guard, context.Background(), f.path, false); err != nil {
 				t.Fatal(err)
 			}
 			file, err := os.OpenFile(f.path, os.O_APPEND|os.O_WRONLY, 0600)
@@ -419,7 +419,7 @@ func TestClearQueueRespectsKnownSynchronizationBlock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := f.app.guard.Inspect(context.Background(), f.path, false)
+			result, err := inspectGuard(f.app.guard, context.Background(), f.path, false)
 			if err != nil || result.Mode != mode {
 				t.Fatalf("inspect = %+v, %v", result, err)
 			}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"path/filepath"
@@ -34,4 +35,11 @@ func newPiHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string
 // NewPiStore returns the Pi adapter's store for the sessions under sessionsRoot.
 func NewPiStore(sessionsRoot, home string) agent.Store {
 	return agentpi.New(agentpi.Options{SessionsRoot: sessionsRoot, Home: home}).Store()
+}
+
+// inspectGuard runs the Pi guard's full inspection, which the gateway's own code reaches only through Guard.
+func inspectGuard(guard agent.Guard, ctx context.Context, key string, includePosition bool) (agent.SyncResult, error) {
+	return guard.(interface {
+		Inspect(context.Context, string, bool) (agent.SyncResult, error)
+	}).Inspect(ctx, key, includePosition)
 }

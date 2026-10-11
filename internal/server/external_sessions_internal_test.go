@@ -253,7 +253,7 @@ func TestSidebarDoesNotQueryUnownedPendingAliases(t *testing.T) {
 func TestTakeoverClearsUnobservedExternalRepliesButNewRepliesBecomeUnread(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	appendExternalSessionReply(t, path, "external", "")
-	if _, err := app.guard.Inspect(context.Background(), path, false); err != nil {
+	if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
 	// This reply arrives after the last sidebar observation, before takeover.
@@ -306,7 +306,7 @@ func TestTakeoverClearsUnobservedExternalRepliesButNewRepliesBecomeUnread(t *tes
 func TestTakeoverKeepsQueuedNotificationsQuietWhileSavingTheReadBoundary(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	appendExternalSessionReply(t, path, "external", "")
-	if _, err := app.guard.Inspect(context.Background(), path, false); err != nil {
+	if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
 	client.position = rpc.SessionEntries{Known: true, LeafID: "external"}
@@ -336,7 +336,7 @@ func TestTakeoverKeepsQueuedNotificationsQuietWhileSavingTheReadBoundary(t *test
 func TestTakeoverReadStateFailureKeepsExternalFollow(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	appendExternalSessionReply(t, path, "external", "")
-	if _, err := app.guard.Inspect(context.Background(), path, false); err != nil {
+	if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
 	// Force persistence to fail after Pi has successfully loaded the external leaf.

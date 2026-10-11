@@ -9,10 +9,8 @@ import (
 // that the gateway also runs. While someone else writes a session, the gateway follows it read-only until the
 // user takes it over. An agent whose sessions nobody else writes would pass every call through to the registry.
 type Guard interface {
-	// Inspect looks for outside writes to a saved session. With includePosition it also asks a running client
-	// where it is in the session.
-	Inspect(ctx context.Context, key string, includePosition bool) (SyncResult, error)
-	// InspectIfAvailable inspects like Inspect, unless another operation holds the session: then it returns nil.
+	// InspectIfAvailable looks for outside writes to a saved session, unless another operation holds the session:
+	// then it returns nil. With includePosition it also asks a running client where it is in the session.
 	InspectIfAvailable(ctx context.Context, key string, includePosition bool) *SyncResult
 	// ReconcileIfAvailable inspects like InspectIfAvailable, and calls after while it still holds the session.
 	ReconcileIfAvailable(ctx context.Context, key string, includePosition bool, after func(SyncResult)) *SyncResult

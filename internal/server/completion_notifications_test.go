@@ -136,7 +136,7 @@ func TestCompletionNotifierRefreshesSyncBeforeDelivery(t *testing.T) {
 				t.Fatal(err)
 			}
 			app.guard = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
-			if _, err := app.guard.Inspect(context.Background(), path, false); err != nil {
+			if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 				t.Fatal(err)
 			}
 			file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
@@ -404,7 +404,7 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "external"}}
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	app.guard = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
-	if _, err := app.guard.Inspect(context.Background(), path, false); err != nil {
+	if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
@@ -416,7 +416,7 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state, err := app.guard.Inspect(context.Background(), path, false); err != nil || state.Mode != sessions.SyncExternalFollow {
+	if state, err := inspectGuard(app.guard, context.Background(), path, false); err != nil || state.Mode != sessions.SyncExternalFollow {
 		t.Fatalf("external sync = %#v, %v", state, err)
 	}
 

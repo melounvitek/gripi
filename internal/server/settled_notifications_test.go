@@ -201,7 +201,7 @@ func TestSidebarCompletionMetadataChangesOnlyOnEligibleSettledReply(t *testing.T
 func TestSettledNotificationExternalFollowDoesNotPublishCompletion(t *testing.T) {
 	app, path, _ := externalSessionTestApplication(t)
 	appendExternalSessionReply(t, path, "external", "")
-	if state, err := app.guard.Inspect(context.Background(), path, false); err != nil || state.Mode != sessions.SyncExternalFollow {
+	if state, err := inspectGuard(app.guard, context.Background(), path, false); err != nil || state.Mode != sessions.SyncExternalFollow {
 		t.Fatalf("external sync = %#v, %v", state, err)
 	}
 	client := notificationRPCClient(t, app, path)

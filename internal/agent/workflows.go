@@ -18,7 +18,7 @@ var errOutsideStore = errors.New("the agent reported a session outside its store
 // pending key until the agent names the session. prepare readies the gateway's state for the key and returns how to
 // undo that if the client cannot be registered.
 func StartNewSession(ctx context.Context, cwd string, start func(cwd string) (Client, error), store Store, clients *Registry, pending *PendingSessionRegistry, prepare func(key string) (func() error, error)) (string, error) {
-	startedAt := clients.Now()
+	startedAt := clients.clock()
 	client, err := start(cwd)
 	if err != nil {
 		return "", err
@@ -56,7 +56,7 @@ func StartNewSession(ctx context.Context, cwd string, start func(cwd string) (Cl
 			return "", err
 		}
 	}
-	if err := clients.RegisterStartedAt(key, client, startedAt); err != nil {
+	if err := clients.registerStartedAt(key, client, startedAt); err != nil {
 		if rollback != nil {
 			return "", errors.Join(err, rollback())
 		}

@@ -26,7 +26,8 @@ type Client interface {
 	LiveStatus(context.Context) (LiveStatus, error)
 	// Commands lists the agent's own commands, without those the gateway runs itself.
 	Commands(context.Context) ([]Command, error)
-	// Prompt returns once the agent has accepted the prompt, without waiting for the run it starts.
+	// Prompt returns once the adapter has accepted the prompt, without waiting for the run it starts. Not every agent
+	// confirms a prompt before its run ends, so acceptance need not come from the agent.
 	Prompt(context.Context, Prompt) (PromptResult, error)
 	// Cancel stops the agent's run.
 	Cancel(context.Context) error

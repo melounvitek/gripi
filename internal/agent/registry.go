@@ -49,9 +49,6 @@ func NewRegistry(factory func(string) (Client, error), clock func() time.Time) *
 	return &Registry{factory: factory, clock: clock, clients: make(map[string]*clientEntry), creating: make(map[string]uint64), retiredSequences: make(map[string]int64)}
 }
 
-// Now reads the registry's clock.
-func (registry *Registry) Now() time.Time { return registry.clock() }
-
 func (registry *Registry) SetDiagnostics(diagnostics *Diagnostics) {
 	registry.mu.Lock()
 	registry.diagnostics = diagnostics
@@ -76,11 +73,11 @@ func (registry *Registry) EnsureClient(path string) (Client, error) {
 }
 
 func (registry *Registry) Register(path string, client Client) error {
-	return registry.RegisterStartedAt(path, client, registry.clock())
+	return registry.registerStartedAt(path, client, registry.clock())
 }
 
-// RegisterStartedAt registers a client whose factory started at startedAt, read from Now before it ran.
-func (registry *Registry) RegisterStartedAt(path string, client Client, startedAt time.Time) error {
+// registerStartedAt registers a client whose factory started at startedAt, read from the clock before it ran.
+func (registry *Registry) registerStartedAt(path string, client Client, startedAt time.Time) error {
 	var old Client
 	registry.mu.Lock()
 	if registry.closed {
