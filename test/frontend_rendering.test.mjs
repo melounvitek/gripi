@@ -130,12 +130,16 @@ test("delta-only updates use the gateway partial message and its timestamp", () 
   assert.equal(eventTimestamp(event), gatewayPartialMessage.timestamp);
 });
 
+// The renderer parses each render into a detached element and moves its nodes into the body. Here the HTML is the only node.
+const markdownDocument = { createElement: () => ({ set innerHTML(html) { this.childNodes = [html]; }, querySelectorAll: () => [] }) };
+
 function markdownBody() {
   return {
     dataset: {},
     innerHTML: "",
     textContent: "",
     closest() { return null; },
+    replaceChildren(...nodes) { this.innerHTML = nodes.join(""); },
   };
 }
 
@@ -336,7 +340,7 @@ test("Markdown binding aborts stale work and newer text waits for the render in 
     return request.promise;
   };
   try {
-    const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
+    const renderer = new ServerMarkdownRenderer(markdownDocument, { afterMarkdownRender() {} });
     const staleBody = markdownBody();
     renderer.render(staleBody, "old", 0);
     await settle(() => requests.length === 1);
@@ -375,7 +379,7 @@ test("unchanged Markdown keeps pending work and completed DOM intact", async () 
     requests.push(options);
     return response.promise;
   };
-  const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
+  const renderer = new ServerMarkdownRenderer(markdownDocument, { afterMarkdownRender() {} });
   try {
     const body = markdownBody();
     let replacements = 0;
@@ -410,7 +414,7 @@ test("Markdown binding allows canceled identical text to restart", async () => {
     return response.promise;
   };
   try {
-    const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
+    const renderer = new ServerMarkdownRenderer(markdownDocument, { afterMarkdownRender() {} });
     const body = markdownBody();
     renderer.render(body, "Same text", 0);
     await settle(() => requests.length === 1);

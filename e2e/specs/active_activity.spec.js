@@ -537,6 +537,7 @@ async function recordFrames(page, bodies = "#live-output .message--assistant:not
         revealing: body?.classList.contains("message-body--revealing") ?? false,
         edge: parseFloat(body ? getComputedStyle(body).getPropertyValue("--reveal-edge") : ""),
         height: body?.offsetHeight ?? 0,
+        images: [...(body?.querySelectorAll("img") ?? [])].map((image) => image.naturalHeight > 0),
         bottomButton: document.querySelector(".jump-to-latest")?.classList.contains("is-visible") ?? false,
       });
       if (window.recordedFrames === frames) requestAnimationFrame(record);
@@ -636,6 +637,30 @@ for (const [name, part, placeholder] of [["thinking", "thinking", "Thinking…"]
     expect(edges[0] - 32).toBeLessThan(placeholderHeight / 2);
   });
 }
+
+test("a streamed image lands with its block already loaded, and a following view scrolls to it", async ({ page }) => {
+  const { addBlock, fromBottom } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  const image = await page.screenshot({ clip: { x: 0, y: 0, width: 320, height: 240 }, scale: "css" });
+  // Replies can only show the gateway's own images, which it serves like this.
+  await page.route("**/e2e-streamed-image.png", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.fulfill({ body: image, contentType: "image/png", headers: { "Cache-Control": "private, no-store" } });
+  });
+  const frames = await recordFrames(page);
+  await addBlock("![Streamed diagram](/e2e-streamed-image.png)\n\n");
+  await expect(replyBody(page).getByRole("img", { name: "Streamed diagram" })).toBeVisible();
+  await expect(revealing(page)).toHaveCount(0);
+  await expect.poll(fromBottom).toBeLessThan(2);
+  // The next block renders the reply again, image and all.
+  await addBlock(block("After", 1));
+  await expect(replyBody(page)).toContainText("After paragraph 1");
+  await expect(revealing(page)).toHaveCount(0);
+  const recorded = (await frames()).filter((frame) => frame.images.length > 0);
+  // Never in view unloaded, so it wipes in with its block and nothing below it moves later.
+  expect(recorded.length).toBeGreaterThan(0);
+  expect(recorded.every((frame) => frame.images.every(Boolean))).toBe(true);
+});
 
 test("a block that lands mid-wipe continues the wipe without the edge dropping", async ({ page }) => {
   const { addBlock } = await streamingReplyAtBottom(page);

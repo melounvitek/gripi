@@ -1,6 +1,9 @@
 import { THINKING_PLACEHOLDER } from "./constants.js";
 import { enhanceMarkdownCodeBlocks } from "./dom.js";
 
+// How long a render waits for its images before it lands without them.
+const IMAGE_WAIT_MS = 1000;
+
 export class ServerMarkdownRenderer {
   constructor(document, conversationController) {
     this.document = document;
@@ -41,10 +44,18 @@ export class ServerMarkdownRenderer {
       if (!this.current(job)) return;
       const payload = await response.json();
       if (!this.current(job)) return;
+      // A block lands once its images have loaded, so it wipes in with them and a following view scrolls to its end.
+      const rendered = this.document.createElement("div");
+      rendered.innerHTML = payload.html;
+      const loading = [...rendered.querySelectorAll("img")].filter((image) => !image.complete);
+      if (loading.length > 0) {
+        await Promise.race([Promise.all(loading.map((image) => image.decode().catch(() => {}))), new Promise((resolve) => setTimeout(resolve, IMAGE_WAIT_MS))]);
+        if (!this.current(job)) return;
+      }
 
       // A placeholder gives way to the text, which then wipes in whole: the "…" of an empty body while it loads, or "Thinking…".
       const previousHeight = !job.body.firstChild || job.body.textContent.trim() === THINKING_PLACEHOLDER ? 0 : job.body.offsetHeight;
-      job.body.innerHTML = payload.html;
+      job.body.replaceChildren(...rendered.childNodes);
       enhanceMarkdownCodeBlocks(job.body, this.document);
       this.conversationController.afterMarkdownRender(job.body, previousHeight);
       if (job.body.dataset.plainText !== text) return this.request(job);
