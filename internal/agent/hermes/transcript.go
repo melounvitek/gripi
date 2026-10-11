@@ -2,6 +2,7 @@ package hermes
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/melounvitek/gripi/internal/agent"
@@ -35,6 +36,8 @@ type transcript struct {
 	// messageID is the ACP message that the open message shows.
 	messageID string
 	tools     map[string]*agent.Message
+	// media are the image files that the replies share, by the reply's index.
+	media map[int][]string
 }
 
 func (transcript *transcript) apply(value update) {
@@ -82,12 +85,26 @@ func (transcript *transcript) addUser(text string) {
 	transcript.add(&agent.Message{Role: "user", Text: text})
 }
 
-// commit ends the open message.
+// commit ends the open message. A reply shows the images it shares in place of their tags.
 func (transcript *transcript) commit() {
-	if transcript.open != nil {
-		transcript.add(transcript.open)
-		transcript.open = nil
+	open := transcript.open
+	if open == nil {
+		return
 	}
+	transcript.open = nil
+	if open.FinalAssistantResponse {
+		var images []mediaImage
+		open.Text, images = mediaImages(open.Text)
+		entry := len(transcript.messages)
+		for index, image := range images {
+			open.Images = append(open.Images, agent.Image{MIMEType: image.mimeType, EntryID: strconv.Itoa(entry), Index: index})
+			if transcript.media == nil {
+				transcript.media = make(map[int][]string)
+			}
+			transcript.media[entry] = append(transcript.media[entry], image.path)
+		}
+	}
+	transcript.add(open)
 }
 
 func (transcript *transcript) add(message *agent.Message) {

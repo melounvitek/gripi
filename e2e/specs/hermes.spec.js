@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { hermes } from "../support/contract.mjs";
 import { expectRunFinished, liveMessage, message, selectSession, sendPrompt } from "../support/ui.mjs";
@@ -51,6 +54,25 @@ test("an attached image reaches Hermes and stays after a reload", async ({ page 
 
   await page.reload();
   await expect(message(page, "user", prompt).locator(".message-image")).toBeVisible();
+});
+
+test("an image Hermes shares shows in its reply and stays after a reload", async ({ page }) => {
+  const image = join(await mkdtemp(join(tmpdir(), "gripi-hermes-share-")), "shot.png");
+  await writeFile(image, await page.screenshot());
+  // The fake Hermes repeats the prompt in its reply.
+  const prompt = "Here is the screenshot:";
+  await sendPrompt(page, `${prompt} MEDIA:${image}`);
+
+  const reply = `${hermes.run.replyPrefix}${prompt}`;
+  await expect(liveMessage(page, "assistant", reply).locator(".message-image")).toBeVisible();
+  await expect(liveMessage(page, "assistant", reply)).not.toContainText("MEDIA:");
+  await expectRunFinished(page);
+
+  await page.reload();
+  const saved = message(page, "assistant", reply);
+  await expect(saved.locator(".message-image")).toBeVisible();
+  await expect(saved.locator(".message-image")).toHaveJSProperty("complete", true);
+  expect(await saved.locator(".message-image").evaluate((element) => element.naturalWidth)).toBeGreaterThan(0);
 });
 
 test("stopping Hermes ends its run", async ({ page }) => {
