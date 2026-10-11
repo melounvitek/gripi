@@ -348,6 +348,8 @@ export const hermes = {
   // Its first paragraph streams while the turn holds until stopped.
   stopThought: "Waiting until stopped.",
   exitPrompt: "Exit now",
+  // Streams many small pieces of thinking, then holds like stopPrompt.
+  longPrompt: "Think at length, then wait for stop",
   // Hermes asks before it runs the command of this prompt, and runs it only if allowed.
   permission: {
     prompt: "Delete the build folder",

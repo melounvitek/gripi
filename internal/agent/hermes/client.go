@@ -29,14 +29,16 @@ type client struct {
 	settling  bool
 	busySince *time.Time
 	settledAt *time.Time
-	// reply is the assistant message that streams, in Pi's format, and replyID the ACP message it shows.
+	// reply is the assistant message that streams, in Pi's format, and replyID the ACP message it shows. The buffer
+	// keeps only its latest update, which carries the whole reply when delivered.
 	reply   *piMessage
 	replyID string
+	update  int64
 	// tools are the calls that run, in the order they started, with their latest event and output.
 	tools []runningTool
 	// questions are Hermes's permission requests that wait for the user, in the order Hermes asked them.
 	questions []question
-	// lastReply is the run's last reply that ended normally with text, and lastMessage that reply in Pi's format.
+	// lastReply is the run's last reply with text, and lastMessage that reply in Pi's format when it is final.
 	lastReply   agent.Reply
 	lastMessage *piMessage
 }
@@ -168,23 +170,16 @@ func (client *client) EventReplayCursor() int64 {
 	return client.events.floor
 }
 
-// EventsAfter adds the reply as it streams so far to each of its updates, as Pi's client does, because an update
-// carries only the text it adds.
+// EventsAfter adds the reply as it streams so far to its update, as Pi's client does, because the update carries
+// only the text it adds.
 func (client *client) EventsAfter(after int64) agent.EventBatch {
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	batch := client.events.after(after)
-	if client.reply == nil {
-		return batch
+	var partial json.RawMessage
+	if client.reply != nil {
+		partial, _ = json.Marshal(client.reply)
 	}
-	for index, event := range batch.Events {
-		var fields map[string]any
-		if json.Unmarshal(event, &fields) == nil && fields["type"] == "message_update" && fields["message"] == nil {
-			fields["gatewayPartialMessage"] = client.reply
-			batch.Events[index], _ = json.Marshal(fields)
-		}
-	}
-	return batch
+	return client.events.after(after, client.update, partial)
 }
 
 func (client *client) ContinueEventsAfter(sequence int64) {
@@ -196,9 +191,10 @@ func (client *client) ContinueEventsAfter(sequence int64) {
 func (client *client) LiveSnapshot() agent.LiveSnapshot {
 	client.mu.Lock()
 	defer client.mu.Unlock()
+	busy := client.running || client.settling
 	snapshot := agent.LiveSnapshot{
 		EventSequence: client.events.sequence, EventReplayCursor: client.events.floor,
-		Busy: client.running, BusySince: client.busySince, AgentBusySince: client.busySince, AgentRunning: client.running,
+		Busy: busy, BusySince: client.busySince, AgentBusySince: client.busySince, AgentRunning: busy,
 	}
 	for _, tool := range client.tools {
 		snapshot.ActiveTools = append(snapshot.ActiveTools, agent.ActiveTool{ID: tool.id, Data: tool.event})
@@ -382,7 +378,7 @@ func (client *client) apply(value update) {
 	case "tool_call":
 		ended = client.endReply("toolUse")
 		event := client.emit(map[string]any{"type": "tool_execution_start", "toolCallId": value.ToolCallID, "toolName": value.Title, "args": map[string]any{}})
-		client.tools = append(client.tools, runningTool{id: value.ToolCallID, name: value.Title, event: event})
+		client.tools = append(client.tools, runningTool{id: value.ToolCallID, name: value.Title, output: contentText(value.Content), event: event})
 	case "tool_call_update":
 		client.updateTool(value)
 	}
@@ -426,10 +422,17 @@ func (client *client) updateTool(value update) {
 func (client *client) finish(stopReason string, err error) {
 	client.mu.Lock()
 	stop := "stop"
-	if stopReason == "cancelled" {
+	switch {
+	case err != nil:
+		stop = "error"
+	case stopReason == "cancelled":
 		stop = "aborted"
 	}
 	ended := client.endReply(stop)
+	// A run that failed or stopped has no finished reply to tell the user about.
+	if stop != "stop" {
+		client.lastReply.Final, client.lastMessage = false, nil
+	}
 	for _, tool := range client.tools {
 		client.emit(map[string]any{"type": "tool_execution_end", "toolCallId": tool.id, "toolName": tool.name, "result": map[string]any{"content": []any{}}, "isError": true})
 	}
@@ -482,15 +485,16 @@ func (client *client) endReply(stopReason string) *agent.Reply {
 	}
 	message := client.reply
 	message.StopReason = stopReason
-	client.reply, client.replyID = nil, ""
+	client.reply, client.replyID, client.update = nil, "", 0
 	client.emit(map[string]any{"type": "message_end", "message": message})
 	text := message.text()
 	if text == "" {
 		return nil
 	}
 	reply := agent.Reply{Text: text, Final: stopReason == "stop", ID: randomID()}
+	client.lastReply, client.lastMessage = reply, nil
 	if reply.Final {
-		client.lastReply, client.lastMessage = reply, message
+		client.lastMessage = message
 	}
 	client.adapter.countReply(client.session.id)
 	return &reply
@@ -507,12 +511,16 @@ func (client *client) emit(event map[string]any) json.RawMessage {
 	return client.events.add(encodeEvent(event))
 }
 
+// emitDelta adds an update of the reply in place of its previous one, which the whole reply delivered with it
+// supersedes. The caller holds client.mu.
 func (client *client) emitDelta(kind, delta string) {
 	event := map[string]any{"type": kind, "contentIndex": len(client.reply.Content) - 1}
 	if strings.HasSuffix(kind, "_delta") {
 		event["delta"] = delta
 	}
+	client.events.remove(client.update)
 	client.emit(map[string]any{"type": "message_update", "assistantMessageEvent": event})
+	client.update = client.events.sequence
 }
 
 func encodeEvent(event map[string]any) json.RawMessage {
@@ -558,17 +566,33 @@ func (events *events) add(event json.RawMessage) json.RawMessage {
 	return event
 }
 
-func (events *events) after(after int64) agent.EventBatch {
+// after returns the events after a cursor, with partial added to the event numbered update.
+func (events *events) after(after, update int64, partial json.RawMessage) agent.EventBatch {
 	batch := agent.EventBatch{Events: []json.RawMessage{}, LastSeq: events.sequence, Missed: after < events.floor || after > events.sequence}
 	if batch.Missed {
 		return batch
 	}
 	for _, entry := range events.list {
-		if entry.sequence > after {
-			batch.Events = append(batch.Events, entry.event)
+		if entry.sequence <= after {
+			continue
 		}
+		event := entry.event
+		if entry.sequence == update && partial != nil {
+			// The event is a JSON object, which the field extends before its closing brace.
+			event = slices.Concat(event[:len(event)-1], []byte(`,"gatewayPartialMessage":`), partial, []byte("}"))
+		}
+		batch.Events = append(batch.Events, event)
 	}
 	return batch
+}
+
+// remove drops the event numbered sequence, if the buffer still has it.
+func (events *events) remove(sequence int64) {
+	index := slices.IndexFunc(events.list, func(entry numberedEvent) bool { return entry.sequence == sequence })
+	if index >= 0 {
+		events.bytes -= len(events.list[index].event)
+		events.list = slices.Delete(events.list, index, index+1)
+	}
 }
 
 // continueAfter numbers the events after the last one of the client that this one replaces.

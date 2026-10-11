@@ -144,10 +144,29 @@ type liveEvent struct {
 	ToolName              string   `json:"toolName"`
 	IsError               bool     `json:"isError"`
 	Message               any      `json:"message"`
+	Messages              []any    `json:"messages"`
 	AssistantMessageEvent struct {
 		Type  string `json:"type"`
 		Delta string `json:"delta"`
 	} `json:"assistantMessageEvent"`
+}
+
+// repliedText joins the thinking and the text of the replies that ended among the events.
+func repliedText(events []liveEvent) (thinking, text string) {
+	for _, event := range events {
+		message, _ := event.Message.(map[string]any)
+		if event.Type != "message_end" || message["role"] != "assistant" {
+			continue
+		}
+		for _, part := range message["content"].([]any) {
+			part := part.(map[string]any)
+			thought, _ := part["thinking"].(string)
+			said, _ := part["text"].(string)
+			thinking += thought
+			text += said
+		}
+	}
+	return thinking, text
 }
 
 // eventsUntil polls the session's live events from the start until one of the given type arrives.
@@ -195,23 +214,16 @@ func TestAHermesSessionRunsAPromptLive(t *testing.T) {
 	}
 
 	events := eventsUntil(t, handler, key, "agent_settled")
-	var thinking, text strings.Builder
 	var toolEnd *liveEvent
 	types := []string{}
 	for index, event := range events {
 		types = append(types, event.Type)
-		switch event.AssistantMessageEvent.Type {
-		case "thinking_delta":
-			thinking.WriteString(event.AssistantMessageEvent.Delta)
-		case "text_delta":
-			text.WriteString(event.AssistantMessageEvent.Delta)
-		}
 		if event.Type == "tool_execution_end" {
 			toolEnd = &events[index]
 		}
 	}
-	if types[0] != "agent_start" || thinking.String() != "Planning the answer." || text.String() != "Checking the files.Hermes says: List the files" {
-		t.Fatalf("events %v streamed thinking %q and text %q", types, thinking.String(), text.String())
+	if thinking, text := repliedText(events); types[0] != "agent_start" || thinking != "Planning the answer." || text != "Checking the files.Hermes says: List the files" {
+		t.Fatalf("events %v streamed thinking %q and text %q", types, thinking, text)
 	}
 	if toolEnd == nil || toolEnd.ToolCallID != "tc-1" || toolEnd.ToolName != "terminal: ls" || toolEnd.IsError {
 		t.Fatalf("tool end = %+v", toolEnd)
@@ -434,8 +446,12 @@ func TestAHermesThatExitsIsReplacedForTheNextMessage(t *testing.T) {
 	_, cursor := eventsAfterUntil(t, handler, key, 0, "agent_settled")
 	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Exit now"}})
 	events, _ := eventsAfterUntil(t, handler, key, cursor, "agent_settled")
-	if settled := events[len(events)-1]; settled.Type != "agent_settled" {
-		t.Fatalf("events after Hermes exited = %+v", events)
+	for _, event := range events {
+		message, _ := event.Message.(map[string]any)
+		// The partial reply of a run that failed is no finished reply to tell the user about.
+		if event.Type == "message_end" && message["role"] == "assistant" && message["stopReason"] != "error" || event.Type == "agent_end" && len(event.Messages) > 0 {
+			t.Fatalf("the failed run ended %+v", event)
+		}
 	}
 
 	// As after every run, the browser asks for the session's status, which finds Hermes gone.
@@ -444,14 +460,70 @@ func TestAHermesThatExitsIsReplacedForTheNextMessage(t *testing.T) {
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files again"}}); code != http.StatusOK {
 		t.Fatalf("prompt after Hermes exited = %d %v", code, payload)
 	}
-	var text strings.Builder
 	events, _ = eventsAfterUntil(t, handler, key, 0, "agent_settled")
-	for _, event := range events {
-		if event.AssistantMessageEvent.Type == "text_delta" {
-			text.WriteString(event.AssistantMessageEvent.Delta)
+	if _, text := repliedText(events); !strings.HasSuffix(text, "Hermes says: List the files again") {
+		t.Fatalf("the restarted Hermes streamed %q", text)
+	}
+}
+
+func TestAStreamingReplyIsDeliveredOnceHoweverLateThePageAsks(t *testing.T) {
+	t.Setenv("FAKE_HERMES_STEP_MS", "1")
+	handler := hermesHandler(t)
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Think at length, then wait for stop"}})
+
+	var batch struct {
+		Events []map[string]any `json:"events"`
+	}
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if err := json.Unmarshal([]byte(getPage(t, handler, "/events?after=0&session="+url.QueryEscape(key))), &batch); err != nil {
+			t.Fatal(err)
+		}
+		if update := batch.Events[len(batch.Events)-1]; update["gatewayPartialMessage"] != nil && strings.Contains(fmt.Sprint(update["gatewayPartialMessage"]), "piece 199") {
+			break
 		}
 	}
-	if !strings.HasSuffix(text.String(), "Hermes says: List the files again") {
-		t.Fatalf("the restarted Hermes streamed %q", text.String())
+	updates := 0
+	for _, event := range batch.Events {
+		if event["type"] == "message_update" {
+			updates++
+		}
+	}
+	// One update stands for the 200 pieces, with all of them in the reply it carries.
+	if reply := fmt.Sprint(batch.Events[len(batch.Events)-1]["gatewayPartialMessage"]); updates != 1 || !strings.Contains(reply, "piece 0 piece 1 ") || !strings.Contains(reply, "piece 199") {
+		t.Fatalf("a late page got %d updates: %v", updates, batch.Events[len(batch.Events)-1])
+	}
+	postJSON(t, handler, "/abort", url.Values{"session": {key}})
+	eventsUntil(t, handler, key, "agent_settled")
+}
+
+func TestAHermesSessionReadBeforeARestartTurnsUnreadWithItsNextReply(t *testing.T) {
+	project := t.TempDir()
+	cfg := hermesConfig(t)
+	start := func() http.Handler {
+		handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return handler
+	}
+	handler := start()
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}})
+	eventsUntil(t, handler, key, "agent_settled")
+	getPage(t, handler, "/?session="+url.QueryEscape(key))
+	if err := handler.(interface{ Close(context.Context) error }).Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	handler = start()
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files again"}})
+	eventsUntil(t, handler, key, "agent_settled")
+	// The sidebar as a poll sees it, which marks no session read.
+	if page := getPage(t, handler, "/sidebar?no_session=1"); !strings.Contains(page, `class="session recent-session unread"`) {
+		t.Fatal("the new reply did not mark the session unread")
 	}
 }

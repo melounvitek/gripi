@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/state"
 )
 
 type Options struct {
@@ -54,7 +55,7 @@ type Adapter struct {
 	sessions   map[string]*session
 
 	repliesMu   sync.Mutex
-	repliesPath string
+	repliesFile *state.File
 	// replies counts the replies of each session that ended in the gateway, which is all a page compares to mark the
 	// session read: Hermes doesn't list how many replies a session has.
 	replies map[string]int
@@ -74,9 +75,13 @@ const (
 func New(options Options) *Adapter {
 	adapter := &Adapter{path: options.Path, home: options.Home, idleTimeout: options.IdleTimeout, replies: make(map[string]int)}
 	if options.StateDir != "" {
-		adapter.repliesPath = filepath.Join(options.StateDir, "hermes-replies.json")
-		if contents, err := os.ReadFile(adapter.repliesPath); err == nil {
-			_ = json.Unmarshal(contents, &adapter.replies)
+		adapter.repliesFile = state.NewFile(filepath.Join(options.StateDir, "hermes-replies.json"))
+		contents, found, err := adapter.repliesFile.Read()
+		if err == nil && found {
+			err = json.Unmarshal(contents, &adapter.replies)
+		}
+		if err != nil {
+			log.Printf("read Hermes reply counts: %v", err)
 		}
 	}
 	return adapter
@@ -233,11 +238,11 @@ func (adapter *Adapter) countReply(id string) {
 	adapter.repliesMu.Lock()
 	defer adapter.repliesMu.Unlock()
 	adapter.replies[id]++
-	if adapter.repliesPath == "" {
+	if adapter.repliesFile == nil {
 		return
 	}
 	encoded, _ := json.Marshal(adapter.replies)
-	if err := os.WriteFile(adapter.repliesPath, encoded, 0600); err != nil {
+	if err := adapter.repliesFile.Write(encoded); err != nil {
 		log.Printf("save Hermes reply counts: %v", err)
 	}
 }

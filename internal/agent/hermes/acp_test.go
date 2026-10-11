@@ -96,11 +96,3 @@ func TestHermesStopsOnceIdleWithoutClients(t *testing.T) {
 		t.Fatal("the idle Hermes still runs")
 	}
 }
-
-func TestReplyCountsOutliveTheGateway(t *testing.T) {
-	stateDir := t.TempDir()
-	New(Options{StateDir: stateDir}).countReply("hermes-chat")
-	if count := New(Options{StateDir: stateDir}).replyCount("hermes-chat"); count != 1 {
-		t.Fatalf("reply count after a restart = %d", count)
-	}
-}

@@ -84,7 +84,10 @@ function requestPermission(sessionId, toolCall, options, timeout) {
 function scenario(prompt, turn, sessionId) {
   const { permission } = hermes;
   if (prompt === hermes.exitPrompt) {
-    return [text("agent_thought_chunk", "Exiting.", `thought-${turn}`), () => process.exit(3)];
+    return [text("agent_message_chunk", "Partial reply before exiting.", `reply-${turn}`), () => process.exit(3)];
+  }
+  if (prompt === hermes.longPrompt) {
+    return [...Array.from({ length: 200 }, (_, index) => text("agent_thought_chunk", `piece ${index} `, `thought-${turn}`)), "hold"];
   }
   if (prompt === permission.prompt || prompt === permission.expiringPrompt) {
     const id = `tc-${turn}`;
