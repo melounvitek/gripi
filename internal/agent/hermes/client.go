@@ -15,11 +15,12 @@ import (
 
 // client serves one session of the running Hermes. Its live events take the shapes of Pi's, which the browser renders.
 type client struct {
-	adapter *Adapter
-	session *session
-	conn    *connection
-	key     string
-	observe func(agent.Client, agent.Lifecycle)
+	adapter   *Adapter
+	session   *session
+	conn      *connection
+	key       string
+	observe   func(agent.Client, agent.Lifecycle)
+	closeOnce sync.Once
 
 	mu        sync.Mutex
 	events    events
@@ -98,16 +99,25 @@ func (adapter *Adapter) newClient(session *session, conn *connection, options ag
 	session.mu.Lock()
 	session.client = client
 	session.mu.Unlock()
+	adapter.mu.Lock()
+	adapter.clients++
+	adapter.mu.Unlock()
 	return client
 }
 
 // Close lets go of the session, which stays loaded in Hermes.
 func (client *client) Close() error {
-	client.session.mu.Lock()
-	if client.session.client == client {
-		client.session.client = nil
-	}
-	client.session.mu.Unlock()
+	client.closeOnce.Do(func() {
+		client.session.mu.Lock()
+		if client.session.client == client {
+			client.session.client = nil
+		}
+		client.session.mu.Unlock()
+		client.adapter.mu.Lock()
+		client.adapter.clients--
+		client.adapter.usedAt = time.Now()
+		client.adapter.mu.Unlock()
+	})
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,15 +19,24 @@ type Options struct {
 	Path string
 	// Home is the folder of a session whose own folder the gateway cannot find.
 	Home string
+	// IdleTimeout stops Hermes once it has served nothing for that long, which frees the sessions it loaded.
+	// Zero keeps it running.
+	IdleTimeout time.Duration
 }
 
 // Adapter runs Hermes sessions in one `hermes acp` process, which ACP lets serve many sessions.
 type Adapter struct {
-	path string
-	home string
+	path        string
+	home        string
+	idleTimeout time.Duration
 
 	mu   sync.Mutex
 	conn *connection
+	// env holds the user's variables for Hermes, which it gets when it starts.
+	env []string
+	// clients counts the clients that serve sessions, which keep Hermes running.
+	clients int
+	usedAt  time.Time
 	// failure is why Hermes last failed to start, which the adapter answers until retryAfter has passed.
 	failure  error
 	failedAt time.Time
@@ -51,11 +61,12 @@ const (
 )
 
 func New(options Options) *Adapter {
-	return &Adapter{path: options.Path, home: options.Home}
+	return &Adapter{path: options.Path, home: options.Home, idleTimeout: options.IdleTimeout}
 }
 
 // Start serves a session that Hermes has saved, or one that the running Hermes started and hasn't saved yet.
 func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Client, error) {
+	adapter.useVariables(options.Env)
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
 	if listed, ok := adapter.find(key); ok {
@@ -81,6 +92,7 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 	if forkFrom != "" {
 		return nil, &agent.RequestError{Message: "Gripi cannot continue a session in Hermes."}
 	}
+	adapter.useVariables(options.Env)
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
 	conn, err := adapter.connected(ctx)
@@ -128,10 +140,26 @@ func (adapter *Adapter) Close() error {
 	return nil
 }
 
+// useVariables gives Hermes the user's variables. Once they have changed, Hermes restarts with them when no client
+// holds a session, which then loads again. Until then, Hermes keeps the variables it started with.
+func (adapter *Adapter) useVariables(env []string) {
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if slices.Equal(env, adapter.env) || adapter.clients > 0 {
+		return
+	}
+	adapter.env = env
+	if adapter.conn != nil {
+		_ = adapter.conn.Close()
+		adapter.conn = nil
+	}
+}
+
 // connected returns the connection to the running Hermes, and starts Hermes when it doesn't run.
 func (adapter *Adapter) connected(ctx context.Context) (*connection, error) {
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
+	adapter.usedAt = time.Now()
 	if adapter.conn != nil && !adapter.conn.hasExited() {
 		return adapter.conn, nil
 	}
@@ -142,7 +170,7 @@ func (adapter *Adapter) connected(ctx context.Context) (*connection, error) {
 	if adapter.failure != nil && time.Since(adapter.failedAt) < retryAfter {
 		return nil, adapter.failure
 	}
-	conn, err := start(adapter.path, environment(os.Environ()), adapter)
+	conn, err := start(adapter.path, append(environment(os.Environ()), adapter.env...), adapter)
 	if err == nil {
 		if err = conn.initialize(ctx); err != nil {
 			_ = conn.Close()
@@ -154,5 +182,28 @@ func (adapter *Adapter) connected(ctx context.Context) (*connection, error) {
 		return nil, err
 	}
 	adapter.conn, adapter.failure = conn, nil
+	if adapter.idleTimeout > 0 {
+		go adapter.stopWhenIdle(conn)
+	}
 	return conn, nil
+}
+
+func (adapter *Adapter) stopWhenIdle(conn *connection) {
+	for {
+		select {
+		case <-conn.exited:
+			return
+		case <-time.After(max(adapter.idleTimeout/4, 10*time.Millisecond)):
+		}
+		adapter.mu.Lock()
+		idle := adapter.conn == conn && adapter.clients == 0 && time.Since(adapter.usedAt) >= adapter.idleTimeout
+		if idle {
+			adapter.conn = nil
+		}
+		adapter.mu.Unlock()
+		if idle {
+			_ = conn.Close()
+			return
+		}
+	}
 }

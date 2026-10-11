@@ -54,7 +54,7 @@ func NewHandlerWithHermes(cfg config.Config, files fs.FS) (http.Handler, error) 
 	piAdapter := agentpi.New(agentpi.Options{Command: cfg.PiCommand, Extension: extension, SessionsRoot: cfg.SessionsRoot, Home: cfg.Home})
 	router := agent.NewRouter(
 		agent.RoutedAgent{Name: "pi", Adapter: piAdapter},
-		agent.RoutedAgent{Name: "hermes", Adapter: agenthermes.New(agenthermes.Options{Path: cfg.HermesPath, Home: cfg.Home})},
+		agent.RoutedAgent{Name: "hermes", Adapter: agenthermes.New(agenthermes.Options{Path: cfg.HermesPath, Home: cfg.Home, IdleTimeout: cfg.RPCIdleTimeout})},
 	)
 	return newHandler(cfg, files, router, randomBrowserToken)
 }

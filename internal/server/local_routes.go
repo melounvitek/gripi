@@ -30,6 +30,8 @@ type LocalSession struct {
 	Tags      []string  `json:"tags"`
 	UpdatedAt Timestamp `json:"updated_at"`
 	LastReply string    `json:"last_reply"`
+	// Agent names the session's agent when the gateway runs several.
+	Agent string `json:"agent,omitempty"`
 }
 
 // LocalMessage is how gripi commands see one message of a conversation.
@@ -78,6 +80,7 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 			ID: session.ID, Path: session.Path, Name: session.DisplayName, CWD: session.CWD,
 			State: app.localSessionState(session.Path), Unread: view.Unread[session.Path], Pinned: view.Pinned[session.Path],
 			Tags: tags, UpdatedAt: Timestamp{session.ConversationActivityAt}, LastReply: session.LatestAssistantResponsePreview,
+			Agent: session.Agent,
 		})
 	}
 	writeJSON(response, map[string]any{"sessions": result})

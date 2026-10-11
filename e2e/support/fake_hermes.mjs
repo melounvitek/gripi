@@ -17,6 +17,7 @@ function log(record) {
 log({
   argv: process.argv.slice(2),
   sessionSource: process.env.HERMES_SESSION_SOURCE ?? null,
+  probe: process.env.FAKE_HERMES_PROBE ?? null,
   gripiSettings: Object.keys(process.env).filter((key) => key.startsWith("GRIPI_") && !key.startsWith("GRIPI_E2E_")).sort()
 });
 // Hermes logs its startup on standard error, and the gateway must keep reading it.

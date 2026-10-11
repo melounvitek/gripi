@@ -77,3 +77,22 @@ func TestCloseStopsAHermesThatKeepsRunningAndWhatItStarted(t *testing.T) {
 		t.Fatalf("request after Close = %v", err)
 	}
 }
+
+func TestHermesStopsOnceIdleWithoutClients(t *testing.T) {
+	adapter := New(Options{Path: fakeHermesPath(), IdleTimeout: 100 * time.Millisecond})
+	defer adapter.Close()
+	if _, err := adapter.Store().Sessions(); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	conn := adapter.conn
+	adapter.mu.Unlock()
+	if conn == nil {
+		t.Fatal("Hermes did not start to list its sessions")
+	}
+	select {
+	case <-conn.exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the idle Hermes still runs")
+	}
+}

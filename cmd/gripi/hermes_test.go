@@ -240,3 +240,38 @@ func TestHermesSessionsAreListedWithPisSessions(t *testing.T) {
 		t.Fatalf("gripi wait = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }
+
+func TestGripiListNamesTheAgentOnlyWithHermes(t *testing.T) {
+	fakePiGateway(t)
+	if _, stdout, _ := runCLI("list", "--json"); strings.Contains(stdout, `"agent"`) {
+		t.Fatalf("gripi list without Hermes names agents:\n%s", stdout)
+	}
+	if _, stdout, _ := runCLI("list"); strings.Contains(stdout, "AGENT") {
+		t.Fatalf("gripi list without Hermes has an agent column:\n%s", stdout)
+	}
+}
+
+func TestGripiListsSendsToAndShowsHermesSessions(t *testing.T) {
+	hermesGateway(t, fakeHermesSession{SessionID: "hermes-e2e", CWD: t.TempDir(), Title: "A Hermes session", UpdatedAt: "2026-03-01T10:00:00Z"})
+
+	sessions := listedSessions(t)
+	if sessions[0].ID != "hermes-e2e" || sessions[0].Agent != "hermes" || sessions[1].Agent != "pi" {
+		t.Fatalf("listed sessions = %+v", sessions)
+	}
+	if _, stdout, _ := runCLI("list"); !strings.HasPrefix(stdout, "ID") || !strings.Contains(stdout, "AGENT") || !strings.Contains(stdout, "hermes") {
+		t.Fatalf("gripi list = %q", stdout)
+	}
+	if code, _, stderr := runCLI("send", "hermes-e2e", "List the files"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	if code, stdout, stderr := runCLI("wait", "hermes-e2e", "--json"); code != 0 || decodeSession(t, stdout).LastReply != "Hermes says: List the files" {
+		t.Fatalf("gripi wait = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if code, stdout, stderr := runCLI("show", "hermes-e2e"); code != 0 || !strings.Contains(stdout, "Hermes says: List the files") {
+		t.Fatalf("gripi show = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// Hermes's CLI would write the session next to the gateway's Hermes, with nothing to keep them apart.
+	if code, _, stderr := runCLI("open", "hermes-e2e"); code == 0 || !strings.Contains(stderr, "Pi sessions only") {
+		t.Fatalf("gripi open = %d, stderr %q", code, stderr)
+	}
+}

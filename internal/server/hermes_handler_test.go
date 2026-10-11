@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +41,7 @@ func hermesHandler(t *testing.T, sessions ...map[string]any) http.Handler {
 		SessionsRoot: filepath.Join(root, "sessions"), AttachmentsRoot: filepath.Join(root, "attachments"),
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true, PermittedHosts: []string{"example.com"},
+		EnvironmentPath: filepath.Join(root, "environment.json"), RPCIdleTimeout: time.Hour,
 		PiCommand: []string{"node", filepath.Join(support, "fake_pi.mjs")}, HermesPath: filepath.Join(support, "fake_hermes.mjs"),
 	}, gripi.WebFiles)
 	if err != nil {
@@ -144,23 +146,32 @@ type liveEvent struct {
 // eventsUntil polls the session's live events from the start until one of the given type arrives.
 func eventsUntil(t *testing.T, handler http.Handler, key, last string) []liveEvent {
 	t.Helper()
+	events, _ := eventsAfterUntil(t, handler, key, 0, last)
+	return events
+}
+
+// eventsAfterUntil polls the session's live events after a cursor until one of the given type arrives, and returns
+// them with the cursor after them.
+func eventsAfterUntil(t *testing.T, handler http.Handler, key string, after int64, last string) ([]liveEvent, int64) {
+	t.Helper()
 	var events []liveEvent
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		var batch struct {
-			Events []liveEvent `json:"events"`
+			Events  []liveEvent `json:"events"`
+			LastSeq int64       `json:"last_seq"`
 		}
-		if err := json.Unmarshal([]byte(getPage(t, handler, "/events?after=0&session="+url.QueryEscape(key))), &batch); err != nil {
+		if err := json.Unmarshal([]byte(getPage(t, handler, fmt.Sprintf("/events?after=%d&session=%s", after, url.QueryEscape(key)))), &batch); err != nil {
 			t.Fatal(err)
 		}
 		events = batch.Events
 		for _, event := range events {
 			if event.Type == last {
-				return events
+				return events, batch.LastSeq
 			}
 		}
 	}
 	t.Fatalf("no %s event among %+v", last, events)
-	return nil
+	return nil, 0
 }
 
 func TestAHermesSessionRunsAPromptLive(t *testing.T) {
@@ -277,5 +288,54 @@ func TestHermesAsksBeforeADangerousCommandInADialog(t *testing.T) {
 	}
 	if !strings.Contains(string(contents), `"method":"session/set_mode","params":{"modeId":"dont_ask"`) {
 		t.Fatalf("Gripi did not set Hermes's edit approval mode:\n%s", contents)
+	}
+}
+
+// hermesStarts reads the fake Hermes's log for how each of its processes started.
+func hermesStarts(t *testing.T, log string) []map[string]any {
+	t.Helper()
+	contents, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var starts []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+		var record map[string]any
+		if json.Unmarshal([]byte(line), &record) == nil && record["argv"] != nil {
+			starts = append(starts, record)
+		}
+	}
+	return starts
+}
+
+func TestSavedVariablesReachHermesBeforeItsNextMessage(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "hermes.log")
+	t.Setenv("FAKE_HERMES_LOG", log)
+	project := t.TempDir()
+	handler := hermesHandler(t)
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}})
+	_, cursor := eventsAfterUntil(t, handler, key, 0, "agent_settled")
+
+	if code, payload := postJSON(t, handler, "/environment/variable", url.Values{"name": {"FAKE_HERMES_PROBE"}, "value": {"saved in Gripi"}}); code != http.StatusOK {
+		t.Fatalf("save variable = %d %v", code, payload)
+	}
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files again"}}); code != http.StatusOK {
+		t.Fatalf("prompt after saving a variable = %d %v", code, payload)
+	}
+	events, _ := eventsAfterUntil(t, handler, key, cursor, "agent_settled")
+
+	starts := hermesStarts(t, log)
+	if len(starts) != 2 || starts[0]["probe"] != nil || starts[1]["probe"] != "saved in Gripi" {
+		t.Fatalf("Hermes started %v", starts)
+	}
+	// The browser's cursor from before the restart still reads the new run.
+	if events[0].Type != "agent_start" {
+		t.Fatalf("events after the restart = %+v", events)
+	}
+	// The session reloaded in the new Hermes keeps its conversation.
+	if page := getPage(t, handler, "/?session="+url.QueryEscape(key)); !strings.Contains(page, "Hermes says: List the files again") || !strings.Contains(page, "Checking the files.") {
+		t.Fatal("the conversation is missing after the restart")
 	}
 }
