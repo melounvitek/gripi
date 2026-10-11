@@ -1,3 +1,4 @@
+import { THINKING_PLACEHOLDER } from "./constants.js";
 import { enhanceMarkdownCodeBlocks } from "./dom.js";
 
 export class ServerMarkdownRenderer {
@@ -41,7 +42,8 @@ export class ServerMarkdownRenderer {
       const payload = await response.json();
       if (!this.current(job)) return;
 
-      const previousHeight = job.body.offsetHeight;
+      // A placeholder gives way to the text, which then wipes in whole: the "…" of an empty body while it loads, or "Thinking…".
+      const previousHeight = !job.body.firstChild || job.body.textContent.trim() === THINKING_PLACEHOLDER ? 0 : job.body.offsetHeight;
       job.body.innerHTML = payload.html;
       enhanceMarkdownCodeBlocks(job.body, this.document);
       this.conversationController.afterMarkdownRender(job.body, previousHeight);

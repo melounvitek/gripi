@@ -1,4 +1,4 @@
-import { PAIRED_TOOL_NAMES, TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES, TOOL_OUTPUT_TAIL_CHARACTERS } from "./constants.js";
+import { PAIRED_TOOL_NAMES, THINKING_PLACEHOLDER, TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES, TOOL_OUTPUT_TAIL_CHARACTERS } from "./constants.js";
 import { renderTextWithLinks } from "./dom.js";
 import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimeLabel, messageTimestampKey, normalizedMessageText, stableTextHash } from "./formatting.js";
 import { finishedMarkdownBlocks } from "./paragraph_streaming.js";
@@ -1179,7 +1179,7 @@ export class LiveMessageRenderer {
     const thinking = roleName === "assistant" && event.type !== "message_end" && ["thinking_start", "thinking_delta"].includes(update.type);
     if (thinking && !segments.some((segment) => segment.thinking && segment.startIndex === update.contentIndex)) {
       const index = update.contentIndex ?? 0;
-      segments = [...segments, { text: "Thinking…", thinking: true, compact: false, startIndex: index, endIndex: index }];
+      segments = [...segments, { text: THINKING_PLACEHOLDER, thinking: true, compact: false, startIndex: index, endIndex: index }];
     }
     if (roleName === "assistant") {
       this.liveAssistantSegments.forEach((entry) => {

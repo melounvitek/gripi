@@ -524,12 +524,12 @@ const block = (name, paragraphs = 3) => Array.from({ length: paragraphs }, (_, i
 const replyBody = (page) => page.locator("#live-output .message--assistant:not(.message--thinking) .message-body").last();
 
 // Records the scroll position and the latest reply's wipe on every frame until read.
-async function recordFrames(page) {
-  await page.evaluate(() => {
+async function recordFrames(page, bodies = "#live-output .message--assistant:not(.message--thinking) .message-body") {
+  await page.evaluate((bodies) => {
     const scroller = document.querySelector("#conversation-scroll");
     const frames = window.recordedFrames = [];
     const record = () => {
-      const body = [...document.querySelectorAll("#live-output .message--assistant:not(.message--thinking) .message-body")].at(-1);
+      const body = [...document.querySelectorAll(bodies)].at(-1);
       frames.push({
         time: performance.now(),
         top: scroller.scrollTop,
@@ -542,7 +542,7 @@ async function recordFrames(page) {
       if (window.recordedFrames === frames) requestAnimationFrame(record);
     };
     requestAnimationFrame(record);
-  });
+  }, bodies);
   // Two more frames, so a scroll made in the last frame after its record is recorded too.
   return () => page.evaluate(async () => {
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -608,6 +608,34 @@ test("a streamed block wipes in from the old bottom while the view glides down t
   expect(rising(tops)).toBe(true);
   expect(new Set(tops).size).toBeGreaterThanOrEqual(4);
 });
+
+for (const [name, part, placeholder] of [["thinking", "thinking", "Thinking…"], ["a reply", "text", ""]]) {
+  test(`the first block of ${name} wipes in from the top over its placeholder`, async ({ page }) => {
+    const deliver = await liveEvents(page);
+    const update = (text) => ({ type: "message_update", message: assistant([{ type: part, [part]: text }]), assistantMessageEvent: { type: `${part}_delta`, contentIndex: 0 } });
+    const body = page.locator(`#live-output .message--assistant${part === "thinking" ? ".message--thinking" : ":not(.message--thinking)"} .message-body`);
+    const markdown = await holdMarkdown(page);
+    await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, update("Comparing"));
+    if (placeholder) {
+      await markdown.release();
+      await expect(body).toHaveText(placeholder);
+      await expect(revealing(page)).toHaveCount(0);
+    }
+    const paragraph = Array.from({ length: 6 }, () => "Comparing the two options before choosing one.").join(" ");
+    await deliver(update(`${paragraph}\n\nThe sec`));
+    // While its first render loads, a reply shows a "…" placeholder.
+    await expect.poll(markdown.pending).toBe(1);
+    const placeholderHeight = await body.evaluate((element) => element.offsetHeight);
+    expect(placeholderHeight).toBeGreaterThan(10);
+    const frames = await recordFrames(page, "#live-output .message--assistant .message-body");
+    await markdown.release();
+    await expect(body).toHaveText(paragraph);
+    await expect(revealing(page)).toHaveCount(0);
+    const edges = (await frames()).filter((frame) => frame.revealing).map((frame) => frame.edge);
+    // The edge is soft over 32px above it, so the first line starts hidden instead of replacing the placeholder at once.
+    expect(edges[0] - 32).toBeLessThan(placeholderHeight / 2);
+  });
+}
 
 test("a block that lands mid-wipe continues the wipe without the edge dropping", async ({ page }) => {
   const { addBlock } = await streamingReplyAtBottom(page);
