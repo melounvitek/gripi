@@ -20,7 +20,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/pi"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -295,7 +294,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		return nil, err
 	}
 	if includeConversation && selected != nil {
-		view.HideThinkingBlock = app.piDisplaySettings(selected.CWD).HideThinkingBlock
+		view.HideThinkingBlock = app.adapter.DisplaySettings(selected.CWD).HideThinkingBlock
 		leafID, leafSupplied := "", false
 		view.SessionSyncMode = sessions.SyncAvailable
 		_, statErr := os.Stat(selected.Path)
@@ -340,14 +339,6 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, toolContext)
 	}
 	return view, nil
-}
-
-func (app *application) piDisplaySettings(cwd string) pi.DisplaySettings {
-	agentDir := app.config.PiAgentDir
-	if agentDir == "" {
-		agentDir = filepath.Join(app.config.Home, ".pi", "agent")
-	}
-	return (pi.SettingsResolver{AgentDir: agentDir, AutoApproveProjects: app.config.AutoApproveProjects}).DisplaySettings(cwd)
 }
 
 func liveOutputFrom(snapshot agent.LiveSnapshot, messages []*agent.Message, home string, toolContext map[string]agent.ToolCallContext) liveOutputData {

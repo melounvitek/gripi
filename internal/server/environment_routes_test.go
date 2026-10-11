@@ -422,7 +422,7 @@ func newEnvironmentFixture(t *testing.T, multiUser bool) *environmentFixture {
 		}
 	}
 	fixture.cfg = cfg
-	fixture.handler, err = server.NewHandler(cfg, gripi.WebFiles)
+	fixture.handler, err = server.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -53,7 +52,7 @@ type completionNotifier struct {
 	mu          sync.Mutex
 	started     bool
 	closed      bool
-	clients     map[*rpc.Client]*clientCompletionState
+	clients     map[agent.Client]*clientCompletionState
 }
 
 func newCompletionNotifier(app *application) *completionNotifier {
@@ -62,11 +61,11 @@ func newCompletionNotifier(app *application) *completionNotifier {
 		app: app, ctx: ctx, cancel: cancel,
 		queue: make(chan completedReply, completionNotificationQueueSize), done: make(chan struct{}),
 		now: time.Now, waitUntil: waitUntilNotificationDeadline, gracePeriod: completionNotificationGracePeriod,
-		clients: make(map[*rpc.Client]*clientCompletionState),
+		clients: make(map[agent.Client]*clientCompletionState),
 	}
 }
 
-func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string]any) {
+func (notifier *completionNotifier) Observe(client agent.Client, event map[string]any) {
 	switch event["type"] {
 	case "agent_start", "message_end", "agent_end", "agent_settled":
 	default:

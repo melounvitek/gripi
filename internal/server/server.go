@@ -27,7 +27,6 @@ import (
 	"github.com/melounvitek/gripi/internal/push"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/resource"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 	"github.com/melounvitek/gripi/internal/update"
 )
@@ -37,7 +36,7 @@ var templateFiles embed.FS
 
 type application struct {
 	config                  config.Config
-	files                   fs.FS
+	adapter                 agent.Adapter
 	templates               *template.Template
 	browserStore            *access.BrowserStore
 	workspaceStore          *access.WorkspaceStore
@@ -75,9 +74,6 @@ type application struct {
 	completionNotifications *completionNotifier
 	resourceMonitor         resourceMonitor
 	updateCoordinator       updateCoordinator
-	extensionMu             sync.Mutex
-	extensionPath           string
-	extensionRoot           string
 	ownsSession             func(*http.Request, string) bool
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
@@ -158,8 +154,8 @@ func (handler *Handler) Close(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
-	if handler.app.extensionRoot != "" {
-		if err := os.RemoveAll(handler.app.extensionRoot); err != nil {
+	if handler.app.adapter != nil {
+		if err := handler.app.adapter.Close(); err != nil {
 			return err
 		}
 	}
@@ -172,11 +168,11 @@ func (handler *Handler) Close(ctx context.Context) error {
 	return nil
 }
 
-func NewHandler(cfg config.Config, files fs.FS) (http.Handler, error) {
-	return newHandler(cfg, files, randomBrowserToken)
+func NewHandler(cfg config.Config, files fs.FS, adapter agent.Adapter) (http.Handler, error) {
+	return newHandler(cfg, files, adapter, randomBrowserToken)
 }
 
-func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, error)) (http.Handler, error) {
+func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowserToken func() (string, error)) (http.Handler, error) {
 	public, err := fs.Sub(files, "public")
 	if err != nil {
 		return nil, fmt.Errorf("open embedded public files: %w", err)
@@ -204,7 +200,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 
 	app := &application{
 		config:               cfg,
-		files:                files,
+		adapter:              adapter,
 		templates:            templates,
 		browserStore:         access.NewBrowserStore(cfg.BrowserAccessPath),
 		workspaceStore:       access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
@@ -262,11 +258,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		if err != nil {
 			return nil, err
 		}
-		extensionPath, err := app.rpcExtensionPath()
-		if err != nil {
-			return nil, err
-		}
-		return rpc.Start(sessionPath, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
+		return adapter.Start(sessionPath, agent.StartOptions{Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
 	app.newRPCClient = func(cwd, userID, forkFrom string) (agent.Client, error) {
@@ -274,11 +266,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		if err != nil {
 			return nil, err
 		}
-		extensionPath, err := app.rpcExtensionPath()
-		if err != nil {
-			return nil, err
-		}
-		return rpc.StartInCWD(cwd, forkFrom, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
+		return adapter.StartInCWD(cwd, forkFrom, agent.StartOptions{Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
 	}
 	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, app.sessionCache, app.rpcClients)
 	if cfg.ReadStatePath != "" {
@@ -379,29 +367,6 @@ func requestGatewayRestart(ctx context.Context, path string, registry restartReg
 		registry.ResumeAfterFailedShutdown()
 	}
 	return err
-}
-
-func (app *application) rpcExtensionPath() (string, error) {
-	app.extensionMu.Lock()
-	defer app.extensionMu.Unlock()
-	if app.extensionPath != "" {
-		return app.extensionPath, nil
-	}
-	contents, err := fs.ReadFile(app.files, "pi_extensions/gripi-tree.ts")
-	if err != nil {
-		return "", fmt.Errorf("read embedded Pi extension: %w", err)
-	}
-	root, err := os.MkdirTemp("", "gripi-rpc-")
-	if err != nil {
-		return "", fmt.Errorf("create Pi extension directory: %w", err)
-	}
-	path := filepath.Join(root, "gripi-tree.ts")
-	if err := os.WriteFile(path, contents, 0600); err != nil {
-		_ = os.RemoveAll(root)
-		return "", fmt.Errorf("write Pi extension: %w", err)
-	}
-	app.extensionRoot, app.extensionPath = root, path
-	return path, nil
 }
 
 func filesOnly(root fs.FS, next http.Handler) http.Handler {

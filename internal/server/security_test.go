@@ -551,7 +551,7 @@ func testConfig(t *testing.T) config.Config {
 
 func newHandler(t *testing.T, cfg config.Config) http.Handler {
 	t.Helper()
-	handler, err := server.NewHandler(cfg, gripi.WebFiles)
+	handler, err := server.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}

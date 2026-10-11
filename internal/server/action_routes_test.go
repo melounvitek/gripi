@@ -48,7 +48,7 @@ func TestGoGatewayMutationRoutesUseNativeFakePiContracts(t *testing.T) {
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
 		PiCommand: []string{"node", fakePi}, RPCIdleTimeout: 0,
 	}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestGoGatewayRejectsInvalidMutationValuesBeforeStartingPi(t *testing.T) {
 	path := filepath.Join(sessionsRoot, "session.jsonl")
 	writeActionSession(t, path, project)
 	cfg := config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: root, SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(root, "attachments"), ReadStatePath: filepath.Join(root, "read"), PinnedSessionsPath: filepath.Join(root, "pinned"), SessionTagsPath: filepath.Join(root, "tags.json"), BrowserAccessPath: filepath.Join(root, "browser"), BrowserAuthDisabled: true, PiCommand: []string{"false"}}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestGoGatewayRejectsForgedSessionPathsWithoutStartingPi(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: root, SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(root, "attachments"), BrowserAccessPath: filepath.Join(root, "browser"), BrowserAuthDisabled: true, PiCommand: []string{script}}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func TestGoGatewayValidatesAndBrowsesNewSessionDirectories(t *testing.T) {
 		}
 	}
 	cfg := config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: root, SessionsRoot: filepath.Join(root, "sessions"), AttachmentsRoot: filepath.Join(root, "attachments"), BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true, PiCommand: []string{"false"}}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestSessionRenameAndDeleteUseNativePiSemantics(t *testing.T) {
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
 		PiCommand: []string{"node", fakePi}, RPCIdleTimeout: time.Hour,
 	}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}

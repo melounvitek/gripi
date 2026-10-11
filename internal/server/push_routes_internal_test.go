@@ -251,7 +251,7 @@ func newPushTestHandler(t *testing.T, multiUser, authDisabled bool) *Handler {
 		RestartPath:            filepath.Join(root, "restart-request"),
 		PermittedHosts:         []string{"example.com"},
 	}
-	result, err := newHandler(cfg, gripi.WebFiles, randomBrowserToken)
+	result, err := newPiHandler(cfg, gripi.WebFiles, randomBrowserToken)
 	if err != nil {
 		t.Fatal(err)
 	}

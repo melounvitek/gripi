@@ -23,7 +23,7 @@ func TestNewCLIProjectsStayOutOfSelectorsUntilTakeoverAcrossRestarts(t *testing.
 	writeNotificationSession(t, root, "Existing project")
 	cfg := config.Config{Home: root, SessionsRoot: root, ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pins.json"), SessionTagsPath: filepath.Join(root, "tags.json"), BrowserAuthDisabled: true}
 	start := func() *Handler {
-		handler, err := NewHandler(cfg, gripi.WebFiles)
+		handler, err := NewPiHandler(cfg, gripi.WebFiles)
 		if err != nil {
 			t.Fatal(err)
 		}

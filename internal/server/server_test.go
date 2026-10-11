@@ -16,7 +16,7 @@ import (
 )
 
 func TestHandlerServesEmbeddedFrontendAssets(t *testing.T) {
-	handler, err := server.NewHandler(config.Config{}, gripi.WebFiles)
+	handler, err := server.NewPiHandler(config.Config{}, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestHandlerServesEmbeddedFrontendAssets(t *testing.T) {
 }
 
 func TestHandlerPacksTextAssetsForClientsThatAcceptGzip(t *testing.T) {
-	handler, err := server.NewHandler(config.Config{}, gripi.WebFiles)
+	handler, err := server.NewPiHandler(config.Config{}, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestHandlerPacksTextAssetsForClientsThatAcceptGzip(t *testing.T) {
 }
 
 func TestHandlerDoesNotListAssetDirectories(t *testing.T) {
-	handler, err := server.NewHandler(config.Config{}, gripi.WebFiles)
+	handler, err := server.NewPiHandler(config.Config{}, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestHandlerDoesNotListAssetDirectories(t *testing.T) {
 
 func TestMultiUserModeFailsClosedForApplicationRoutesButServesStaticAssets(t *testing.T) {
 	root := t.TempDir()
-	handler, err := server.NewHandler(config.Config{MultiUserMode: true, BrowserAuthDisabled: true, WorkspaceSecretPath: root + "/secret", WorkspaceAccessPath: root + "/access.json", WorkspaceOwnershipPath: root + "/owners.json"}, gripi.WebFiles)
+	handler, err := server.NewPiHandler(config.Config{MultiUserMode: true, BrowserAuthDisabled: true, WorkspaceSecretPath: root + "/secret", WorkspaceAccessPath: root + "/access.json", WorkspaceOwnershipPath: root + "/owners.json"}, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestMultiUserModeFailsClosedForApplicationRoutesButServesStaticAssets(t *te
 }
 
 func TestHandlerDoesNotTreatUnknownPathsAsStaticFiles(t *testing.T) {
-	handler, err := server.NewHandler(config.Config{}, gripi.WebFiles)
+	handler, err := server.NewPiHandler(config.Config{}, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}

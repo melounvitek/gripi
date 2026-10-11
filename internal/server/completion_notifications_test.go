@@ -16,6 +16,7 @@ import (
 
 	"github.com/melounvitek/gripi/internal/access"
 	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/push"
 	"github.com/melounvitek/gripi/internal/rpc"
@@ -817,6 +818,7 @@ func notificationTestApplication(t *testing.T, root string, multiUser, authDisab
 	}
 	app := &application{
 		config:               cfg,
+		adapter:              agentpi.New(agentpi.Options{}),
 		browserStore:         access.NewBrowserStore(cfg.BrowserAccessPath),
 		workspaceStore:       access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
 		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),

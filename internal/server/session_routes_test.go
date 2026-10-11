@@ -321,7 +321,7 @@ func TestRPCObservationRoutesUseFakePiAndPreserveJSONL(t *testing.T) {
 		PinnedSessionsPath: filepath.Join(fixture.root, "state", "pinned.json"), SessionTagsPath: filepath.Join(fixture.root, "state", "tags.json"), BrowserAccessPath: filepath.Join(fixture.root, "state", "browser.json"),
 		BrowserAuthDisabled: true, PiCommand: []string{node, filepath.Join(repoRoot, "e2e", "support", "fake_pi.mjs")},
 	}
-	handler, err := server.NewHandler(cfg, gripi.WebFiles)
+	handler, err := server.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestRPCMaintenanceRetiresIdleFakePiClientAndShutdownIsIdempotent(t *testing
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", fixture.sessionsRoot)
 	t.Setenv("GRIPI_E2E_FAKE_PI_LOG", logPath)
 	cfg := config.Config{Home: fixture.home, SessionsRoot: fixture.sessionsRoot, AttachmentsRoot: fixture.attachmentsRoot, ReadStatePath: filepath.Join(fixture.root, "state", "read.json"), PinnedSessionsPath: filepath.Join(fixture.root, "state", "pinned.json"), SessionTagsPath: filepath.Join(fixture.root, "state", "tags.json"), BrowserAccessPath: filepath.Join(fixture.root, "state", "browser.json"), BrowserAuthDisabled: true, PiCommand: []string{node, filepath.Join(repoRoot, "e2e", "support", "fake_pi.mjs")}, RPCIdleTimeout: 50 * time.Millisecond, RPCIdleSweep: 10 * time.Millisecond}
-	handler, err := server.NewHandler(cfg, gripi.WebFiles)
+	handler, err := server.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -834,7 +834,7 @@ func seedNativeFixture(t *testing.T) nativeFixture {
 func fixtureHandler(t *testing.T, fixture nativeFixture) http.Handler {
 	t.Helper()
 	cfg := config.Config{Address: "127.0.0.1:4567", Environment: "test", Home: fixture.home, PiAgentDir: filepath.Join(fixture.home, ".pi", "agent"), SessionsRoot: fixture.sessionsRoot, AttachmentsRoot: fixture.attachmentsRoot, SessionCwdsPath: fixture.configuredCWDs, ReadStatePath: filepath.Join(fixture.root, "state", "read.json"), PinnedSessionsPath: filepath.Join(fixture.root, "state", "pinned.json"), SessionTagsPath: filepath.Join(fixture.root, "state", "tags.json"), BrowserAccessPath: filepath.Join(fixture.root, "state", "browser.json"), BrowserAuthDisabled: true}
-	handler, err := server.NewHandler(cfg, gripi.WebFiles)
+	handler, err := server.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}

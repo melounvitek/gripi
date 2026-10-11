@@ -19,6 +19,7 @@ import (
 	"time"
 
 	gripi "github.com/melounvitek/gripi"
+	"github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
@@ -32,7 +33,11 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+	adapter, err := newPiAdapter(cfg)
+	if err != nil {
+		return err
+	}
+	handler, err := gateway.NewHandler(cfg, gripi.WebFiles, adapter)
 	if err != nil {
 		return err
 	}
@@ -106,6 +111,14 @@ func serve() error {
 		os.Exit(exitCode)
 	}
 	return nil
+}
+
+func newPiAdapter(cfg config.Config) (*pi.Adapter, error) {
+	extension, err := fs.ReadFile(gripi.WebFiles, "pi_extensions/gripi-tree.ts")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
+	}
+	return pi.New(pi.Options{Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension}), nil
 }
 
 // startupAddress is the URL to open where localhost reaches the gateway. Other

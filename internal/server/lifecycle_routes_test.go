@@ -32,7 +32,7 @@ func TestLifecycleDecisionsBeforePromptEventsArrive(t *testing.T) {
 			t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
 			t.Setenv("GRIPI_E2E_FAKE_PI_LOG", fakeLog)
 			t.Setenv("GRIPI_E2E_HOLD_PROMPT_EVENTS", "1")
-			handler, err := gateway.NewHandler(config.Config{
+			handler, err := gateway.NewPiHandler(config.Config{
 				Address: "127.0.0.1:4567", Environment: "test", Home: root,
 				SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(root, "attachments"),
 				ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
