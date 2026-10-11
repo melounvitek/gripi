@@ -37,7 +37,7 @@ func TestRPCSettledReplyFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) 
 		delivered <- notification
 		return nil
 	}))
-	app.guard = sessionfile.NewSynchronizer(root, root, nil, app.rpcClients)
+	app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 	notifier := newCompletionNotifier(app)
 	notifier.gracePeriod = 0
 	t.Cleanup(func() {
@@ -136,7 +136,7 @@ func TestCompletionNotifierRefreshesSyncBeforeDelivery(t *testing.T) {
 			if err := app.rpcClients.Register(path, client); err != nil {
 				t.Fatal(err)
 			}
-			app.guard = sessionfile.NewSynchronizer(root, root, nil, app.rpcClients)
+			app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 			if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 				t.Fatal(err)
 			}
@@ -186,7 +186,7 @@ func TestCompletionNotifierWorkerRetriesUnavailableInspection(t *testing.T) {
 				if err := app.rpcClients.Register(path, client); err != nil {
 					t.Fatal(err)
 				}
-				app.guard = sessionfile.NewSynchronizer(root, root, nil, app.rpcClients)
+				app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 				notifier := newCompletionNotifier(app)
 				started := make(chan struct{})
 				notifier.waitUntil = func(context.Context, time.Time) bool {
@@ -256,7 +256,7 @@ func TestCompletionNotifierInspectionRetryHonorsDeliveryDeadline(t *testing.T) {
 			if err := app.rpcClients.Register(path, client); err != nil {
 				t.Fatal(err)
 			}
-			app.guard = sessionfile.NewSynchronizer(root, root, nil, app.rpcClients)
+			app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 			notifier := newCompletionNotifier(app)
 			reply := completedReply{client: client, path: path, text: "done", id: "reply"}
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -404,7 +404,7 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	app := notificationTestApplication(t, root, false, true, fake)
 	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "external"}}
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
-	app.guard = sessionfile.NewSynchronizer(root, root, nil, app.rpcClients)
+	app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 	if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state, err := inspectGuard(app.guard, context.Background(), path, false); err != nil || state.Mode != sessions.SyncExternalFollow {
+	if state, err := inspectGuard(app.guard, context.Background(), path, false); err != nil || state.Mode != agent.SyncExternalFollow {
 		t.Fatalf("external sync = %#v, %v", state, err)
 	}
 

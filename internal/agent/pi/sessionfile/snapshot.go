@@ -31,7 +31,7 @@ func (snapshot FileSnapshot) Revision() string {
 	return fmt.Sprintf("%d:%d:%d:%d:%s:%s:%d", snapshot.Device, snapshot.Inode, snapshot.Size, snapshot.MTimeNS, snapshot.AppendCursor, snapshot.PersistedLeafID, complete)
 }
 
-func (store Store) FileSnapshot(path string) (FileSnapshot, error) {
+func readFileSnapshot(path string) (FileSnapshot, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		file, err := os.Open(path)
 		if err != nil {
@@ -174,7 +174,7 @@ func appendCursorFromLine(line []byte) (cursor, leaf string, found, valid bool) 
 	return id, leaf, true, true
 }
 
-func (store Store) AppendedEntryIDs(path string, previous, current FileSnapshot) ([]string, error) {
+func appendedEntryIDs(path string, previous, current FileSnapshot) ([]string, error) {
 	length := current.Size - previous.Size
 	if length <= 0 {
 		return nil, nil

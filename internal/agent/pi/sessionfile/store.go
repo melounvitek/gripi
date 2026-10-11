@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 const (
@@ -109,7 +111,7 @@ type index struct {
 	mtime   time.Time
 	entries []entry
 	byID    map[string]int
-	session *Session
+	session *agent.Session
 	bytes   int64
 }
 
@@ -119,7 +121,7 @@ type cacheItem struct {
 }
 
 type metadataCacheItem struct {
-	session *Session
+	session *agent.Session
 	device  uint64
 	inode   uint64
 	size    int64
@@ -219,7 +221,7 @@ func (cache *Cache) cacheBuiltIndex(path string, built *index) {
 	}
 }
 
-func (cache *Cache) cacheSessionMetadataLocked(path string, indexed *index) *Session {
+func (cache *Cache) cacheSessionMetadataLocked(path string, indexed *index) *agent.Session {
 	if old := cache.metadataItems[path]; old != nil && old.device == indexed.device && old.inode == indexed.inode && old.size == indexed.size && old.mtime.Equal(indexed.mtime) {
 		cache.metadataOrder.MoveToBack(old.element)
 		return old.session
@@ -229,7 +231,7 @@ func (cache *Cache) cacheSessionMetadataLocked(path string, indexed *index) *Ses
 	return session
 }
 
-func (cache *Cache) storeSessionMetadataLocked(path string, session *Session, device, inode uint64, size int64, mtime time.Time) {
+func (cache *Cache) storeSessionMetadataLocked(path string, session *agent.Session, device, inode uint64, size int64, mtime time.Time) {
 	bytes := estimatedSessionMetadataBytes(path, session)
 	if old := cache.metadataItems[path]; old != nil {
 		cache.metadataBytes -= old.bytes
@@ -256,7 +258,7 @@ func (cache *Cache) storeSessionMetadataLocked(path string, session *Session, de
 	}
 }
 
-func estimatedSessionMetadataBytes(path string, session *Session) int64 {
+func estimatedSessionMetadataBytes(path string, session *agent.Session) int64 {
 	bytes := metadataCacheItemOverhead + len(path)
 	if session != nil {
 		bytes += sessionMetadataOverhead + len(session.Path) + len(session.CWD) + len(session.ID) + len(session.DisplayName) + len(session.FirstUserMessage) + len(session.LatestAssistantResponsePreview) + len(session.ParentSessionPath)
@@ -264,7 +266,7 @@ func estimatedSessionMetadataBytes(path string, session *Session) int64 {
 	return int64(bytes)
 }
 
-func (cache *Cache) sessionMetadata(path string, stat os.FileInfo, stale bool) (*Session, bool) {
+func (cache *Cache) sessionMetadata(path string, stat os.FileInfo, stale bool) (*agent.Session, bool) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	item := cache.metadataItems[path]
@@ -289,7 +291,7 @@ func (cache *Cache) sessionMetadata(path string, stat os.FileInfo, stale bool) (
 	return nil, false
 }
 
-func sessionFromIndex(indexed *index) *Session {
+func sessionFromIndex(indexed *index) *agent.Session {
 	if indexed.session == nil {
 		return nil
 	}
@@ -310,12 +312,12 @@ type Store struct {
 	Cache *Cache
 }
 
-func (store Store) Sessions() ([]*Session, error) {
+func (store Store) Sessions() ([]*agent.Session, error) {
 	result, _, err := store.SessionsDeferringMetadata(nil)
 	return result, err
 }
 
-func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*Session, bool, error) {
+func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*agent.Session, bool, error) {
 	configuredRoot, root, err := store.sessionRoots()
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
@@ -323,7 +325,7 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*Ses
 	if err != nil {
 		return nil, false, err
 	}
-	var result []*Session
+	var result []*agent.Session
 	deferred := false
 	err = filepath.WalkDir(root, func(path string, item os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -379,7 +381,7 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*Ses
 	return result, deferred, nil
 }
 
-func (store Store) Session(path string) (*Session, bool) {
+func (store Store) Session(path string) (*agent.Session, bool) {
 	path = filepath.Clean(path)
 	configuredRoot, root, err := store.sessionRoots()
 	if err != nil {
@@ -410,14 +412,14 @@ func folderMissing(path string) bool {
 	return err != nil || !info.IsDir()
 }
 
-func (store Store) Window(path, leafID string, leafSupplied bool, cursor *int, after *int) (Window, error) {
+func (store Store) Window(path, leafID string, leafSupplied bool, cursor *int, after *int) (agent.Window, error) {
 	return store.windowWithValidationHook(path, leafID, leafSupplied, cursor, after, nil)
 }
 
-func (store Store) windowWithValidationHook(path, leafID string, leafSupplied bool, cursor *int, after *int, beforeValidation func(int)) (Window, error) {
+func (store Store) windowWithValidationHook(path, leafID string, leafSupplied bool, cursor *int, after *int, beforeValidation func(int)) (agent.Window, error) {
 	canonical, ok := store.canonicalSessionPath(path)
 	if !ok {
-		return Window{}, os.ErrNotExist
+		return agent.Window{}, os.ErrNotExist
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		window, err := store.windowOnce(canonical, leafID, leafSupplied, cursor, after, func() {
@@ -429,13 +431,13 @@ func (store Store) windowWithValidationHook(path, leafID string, leafSupplied bo
 			return window, err
 		}
 	}
-	return Window{}, errSessionChanged
+	return agent.Window{}, errSessionChanged
 }
 
-func (store Store) windowOnce(path, leafID string, leafSupplied bool, cursor *int, after *int, beforeValidation func()) (Window, error) {
+func (store Store) windowOnce(path, leafID string, leafSupplied bool, cursor *int, after *int, beforeValidation func()) (agent.Window, error) {
 	indexed, err := store.Cache.Index(path)
 	if err != nil {
-		return Window{}, err
+		return agent.Window{}, err
 	}
 	effectiveLeaf := leafID
 	if !leafSupplied {
@@ -443,11 +445,11 @@ func (store Store) windowOnce(path, leafID string, leafSupplied bool, cursor *in
 	}
 	branch, ok := indexed.entriesForLeaf(effectiveLeaf, true)
 	if !ok {
-		return Window{}, os.ErrNotExist
+		return agent.Window{}, os.ErrNotExist
 	}
 	units, projectionOK := projectedUnits(branch)
 	if !projectionOK {
-		return Window{}, errors.New("session contains mismatched tool call metadata")
+		return agent.Window{}, errors.New("session contains mismatched tool call metadata")
 	}
 	end := len(units)
 	if cursor != nil {
@@ -455,31 +457,31 @@ func (store Store) windowOnce(path, leafID string, leafSupplied bool, cursor *in
 	}
 	messages, start, err := renderWindow(path, indexed, units, end, after, store.Home)
 	if err != nil {
-		return Window{}, err
+		return agent.Window{}, err
 	}
 	if beforeValidation != nil {
 		beforeValidation()
 	}
 	stat, err := os.Stat(path)
 	if err != nil || !indexSnapshotValid(indexed, stat) {
-		return Window{}, errSessionChanged
+		return agent.Window{}, errSessionChanged
 	}
-	return Window{
+	return agent.Window{
 		Messages: messages, StartIndex: start, EndIndex: end, TotalMessageCount: len(units), TreeLeafID: effectiveLeaf,
 		LatestStableLeafID: indexed.stableLeafID(indexed.latestLeafID()), CurrentStableLeafID: indexed.stableLeafID(leafID),
 		Status: indexed.sessionStatus(),
 	}, nil
 }
 
-func (store Store) Status(path string) (Status, error) {
+func (store Store) Status(path string) (agent.Status, error) {
 	canonical, ok := store.canonicalSessionPath(path)
 	if !ok {
-		return Status{}, os.ErrNotExist
+		return agent.Status{}, os.ErrNotExist
 	}
 	path = canonical
 	indexed, err := store.Cache.Index(path)
 	if err != nil {
-		return Status{}, err
+		return agent.Status{}, err
 	}
 	return indexed.sessionStatus(), nil
 }
@@ -931,7 +933,7 @@ func (indexed *index) applyIndexedSessionMetadata(item entry) {
 	}
 	if role == "assistant" && item.Session.HasFinalText {
 		indexed.session.AssistantResponseCount++
-		indexed.session.LatestAssistantResponsePreview = NotificationPreview(item.Session.FinalText)
+		indexed.session.LatestAssistantResponsePreview = agent.NotificationPreview(item.Session.FinalText)
 		if item.Status.StopReason == "" || item.Status.StopReason == "stop" || item.Status.StopReason == "length" {
 			if when.After(indexed.session.ConversationActivityAt) {
 				indexed.session.ConversationActivityAt = when
@@ -946,7 +948,7 @@ func (indexed *index) applySessionMetadata(raw map[string]any, item entry, stat 
 		if created.IsZero() {
 			created = stat.ModTime()
 		}
-		indexed.session = &Session{Path: indexed.path, CWD: stringValue(raw["cwd"]), ID: stringValue(raw["id"]), ParentSessionPath: stringValue(raw["parentSession"]), CreatedAt: created, ModifiedAt: stat.ModTime(), ConversationActivityAt: created}
+		indexed.session = &agent.Session{Path: indexed.path, CWD: stringValue(raw["cwd"]), ID: stringValue(raw["id"]), ParentSessionPath: stringValue(raw["parentSession"]), CreatedAt: created, ModifiedAt: stat.ModTime(), ConversationActivityAt: created}
 	}
 	if indexed.session == nil {
 		return
@@ -978,7 +980,7 @@ func (indexed *index) applySessionMetadata(raw map[string]any, item entry, stat 
 		answer := finalAssistantText(message["content"])
 		if strings.TrimSpace(answer) != "" {
 			indexed.session.AssistantResponseCount++
-			indexed.session.LatestAssistantResponsePreview = NotificationPreview(answer)
+			indexed.session.LatestAssistantResponsePreview = agent.NotificationPreview(answer)
 			if stop := stringValue(message["stopReason"]); stop == "" || stop == "stop" || stop == "length" {
 				if when.After(indexed.session.ConversationActivityAt) {
 					indexed.session.ConversationActivityAt = when
@@ -1056,8 +1058,8 @@ func (indexed *index) stableLeafID(leaf string) string {
 	return leaf
 }
 
-func (indexed *index) sessionStatus() Status {
-	var result Status
+func (indexed *index) sessionStatus() agent.Status {
+	var result agent.Status
 	latestUsageOrdinal := -1
 	latestCompactionOrdinal := -1
 	for ordinal, item := range indexed.entries {
@@ -1112,7 +1114,7 @@ func (indexed *index) sessionStatus() Status {
 	return result
 }
 
-func (indexed *index) applyCompactionEstimate(status *Status, ordinal int) {
+func (indexed *index) applyCompactionEstimate(status *agent.Status, ordinal int) {
 	compaction := indexed.entries[ordinal]
 	start := ordinal
 	if position, ok := indexed.byID[compaction.Status.FirstKeptID]; ok {
@@ -1198,7 +1200,7 @@ func projectedUnits(entries []entry) ([]unit, bool) {
 	return result, true
 }
 
-func renderWindow(path string, indexed *index, units []unit, end int, after *int, home string) ([]*Message, int, error) {
+func renderWindow(path string, indexed *index, units []unit, end int, after *int, home string) ([]*agent.Message, int, error) {
 	start := 0
 	forward := after != nil
 	if forward {
@@ -1210,7 +1212,7 @@ func renderWindow(path string, indexed *index, units []unit, end int, after *int
 		position = start
 		step = 1
 	}
-	var messages []*Message
+	var messages []*agent.Message
 	var bytesUsed int64
 	var retainedBytes int64
 	hasUser := false
@@ -1254,7 +1256,7 @@ func renderWindow(path string, indexed *index, units []unit, end int, after *int
 	return messages, start, nil
 }
 
-func retainedMessageBytes(message *Message) int64 {
+func retainedMessageBytes(message *agent.Message) int64 {
 	value := len(message.Role) + len(message.Text) + len(message.Summary) + len(message.ToolCallID) + len(message.ToolName) +
 		len(message.ToolSummaryHTML) + len(message.ToolPrompt) + len(message.EntryID) + len(message.CustomType) + len(message.BashFullOutputPath)
 	for _, image := range message.Images {
@@ -1263,11 +1265,11 @@ func retainedMessageBytes(message *Message) int64 {
 	return int64(value)
 }
 
-func renderedMessageBytes(message *Message) int64 {
+func renderedMessageBytes(message *agent.Message) int64 {
 	return int64((len(message.Role) + len(message.Text) + len(message.Summary)) * 2)
 }
 
-func renderUnits(path string, indexed *index, selected []unit, home string) ([]*Message, error) {
+func renderUnits(path string, indexed *index, selected []unit, home string) ([]*agent.Message, error) {
 	if len(selected) == 0 {
 		return nil, nil
 	}
@@ -1290,7 +1292,7 @@ func renderUnits(path string, indexed *index, selected []unit, home string) ([]*
 		return nil, err
 	}
 	defer file.Close()
-	var messages []*Message
+	var messages []*agent.Message
 	type subagentContext struct {
 		prompt    string
 		timestamp time.Time
@@ -1411,12 +1413,12 @@ func retainedSubagentPrompts(item entry) bool {
 	return true
 }
 
-func historicalGeneralSubagentMessage(item entry) *Message {
+func historicalGeneralSubagentMessage(item entry) *agent.Message {
 	part := segment{Role: "toolResult", ToolCallID: item.ID, ToolName: "subagent"}
 	if len(item.Segments) > 0 {
 		part = item.Segments[0]
 	}
-	return &Message{
+	return &agent.Message{
 		Role:           "toolResult",
 		Text:           generalSubagentHistoricalText(item.General),
 		Timestamp:      parseTime(item.Session.Timestamp),
@@ -1452,7 +1454,7 @@ func generalSubagentHistoricalText(projection *generalSubagentProjection) string
 	return strings.Join(lines, "\n")
 }
 
-func messagesFromRaw(raw map[string]any, home string) []*Message {
+func messagesFromRaw(raw map[string]any, home string) []*agent.Message {
 	typeName := stringValue(raw["type"])
 	when := parseTime(stringValue(raw["timestamp"]))
 	if typeName == "compaction" {
@@ -1461,17 +1463,17 @@ func messagesFromRaw(raw map[string]any, home string) []*Message {
 			encoded, _ := json.MarshalIndent(raw, "", "  ")
 			text = string(encoded)
 		}
-		return []*Message{{Role: "status", Text: text, Timestamp: when, Compact: true, Summary: "Conversation compacted", Compaction: true}}
+		return []*agent.Message{{Role: "status", Text: text, Timestamp: when, Compact: true, Summary: "Conversation compacted", Compaction: true}}
 	}
 	if typeName == "custom_message" {
 		if displayed, _ := raw["display"].(bool); !displayed {
 			return nil
 		}
-		return []*Message{{Role: "custom", Text: contentText(raw["content"]), Timestamp: when, EntryID: stringValue(raw["id"]), Images: contentImages(raw["content"], stringValue(raw["id"])), CustomType: stringValue(raw["customType"])}}
+		return []*agent.Message{{Role: "custom", Text: contentText(raw["content"]), Timestamp: when, EntryID: stringValue(raw["id"]), Images: contentImages(raw["content"], stringValue(raw["id"])), CustomType: stringValue(raw["customType"])}}
 	}
 	if typeName == "error" || raw["error"] != nil || raw["finalError"] != nil {
 		if text := errorText(raw); text != "" {
-			return []*Message{{Role: "error", Text: text, Timestamp: when, Error: true}}
+			return []*agent.Message{{Role: "error", Text: text, Timestamp: when, Error: true}}
 		}
 	}
 	if typeName != "message" {
@@ -1483,13 +1485,13 @@ func messagesFromRaw(raw map[string]any, home string) []*Message {
 		return nil
 	}
 	if role == "bashExecution" && validBashExecution(message) {
-		command := DisplayHomePath(stringValue(message["command"]), home)
+		command := agent.DisplayHomePath(stringValue(message["command"]), home)
 		var exitCode *int
 		if number, ok := message["exitCode"].(float64); ok {
 			value := int(number)
 			exitCode = &value
 		}
-		return []*Message{{Role: role, Text: stringValue(message["output"]), Timestamp: when, EntryID: stringValue(raw["id"]), Compact: true, Summary: "$ " + command, Error: exitCode != nil && *exitCode != 0, ToolName: "bash", ToolTranscript: true, BashExitCode: exitCode, BashCancelled: boolValue(message["cancelled"]), BashTruncated: boolValue(message["truncated"]), BashExcludedFromContext: boolValue(message["excludeFromContext"]), BashFullOutputPath: DisplayHomePath(stringValue(message["fullOutputPath"]), home), BashRecordedAt: time.UnixMilli(int64(numberValue(message["timestamp"])))}}
+		return []*agent.Message{{Role: role, Text: stringValue(message["output"]), Timestamp: when, EntryID: stringValue(raw["id"]), Compact: true, Summary: "$ " + command, Error: exitCode != nil && *exitCode != 0, ToolName: "bash", ToolTranscript: true, BashExitCode: exitCode, BashCancelled: boolValue(message["cancelled"]), BashTruncated: boolValue(message["truncated"]), BashExcludedFromContext: boolValue(message["excludeFromContext"]), BashFullOutputPath: agent.DisplayHomePath(stringValue(message["fullOutputPath"]), home), BashRecordedAt: time.UnixMilli(int64(numberValue(message["timestamp"])))}}
 	}
 	if role != "assistant" {
 		generalSubagent := isGeneralSubagent(message)
@@ -1514,16 +1516,16 @@ func messagesFromRaw(raw map[string]any, home string) []*Message {
 		if generalSubagent {
 			summary = "subagent general"
 		}
-		return []*Message{{Role: role, Text: text, Timestamp: when, EntryID: stringValue(raw["id"]), Compact: role == "toolResult", Summary: summary, Error: boolValue(message["isError"]), ToolCallID: stringValue(message["toolCallId"]), ToolName: toolName, Images: images, ToolTranscript: generalSubagent || transcriptTool(toolName), ToolPrompt: subagentPrompt(message["details"])}}
+		return []*agent.Message{{Role: role, Text: text, Timestamp: when, EntryID: stringValue(raw["id"]), Compact: role == "toolResult", Summary: summary, Error: boolValue(message["isError"]), ToolCallID: stringValue(message["toolCallId"]), ToolName: toolName, Images: images, ToolTranscript: generalSubagent || transcriptTool(toolName), ToolPrompt: subagentPrompt(message["details"])}}
 	}
 	messages := assistantMessages(message, when, home)
 	if text := strings.TrimSpace(stringValue(message["errorMessage"])); stringValue(message["stopReason"]) == "error" && text != "" {
-		messages = append(messages, &Message{Role: "error", Text: text, Timestamp: when, Error: true})
+		messages = append(messages, &agent.Message{Role: "error", Text: text, Timestamp: when, Error: true})
 	}
 	return messages
 }
 
-func assistantMessages(message map[string]any, when time.Time, home string) []*Message {
+func assistantMessages(message map[string]any, when time.Time, home string) []*agent.Message {
 	parts := arrayValue(message["content"])
 	type group struct {
 		compact bool
@@ -1544,7 +1546,7 @@ func assistantMessages(message map[string]any, when time.Time, home string) []*M
 			groups[len(groups)-1].parts = append(groups[len(groups)-1].parts, part)
 		}
 	}
-	var result []*Message
+	var result []*agent.Message
 	for _, group := range groups {
 		text := contentText(group.parts)
 		if text == "" && !group.compact {
@@ -1566,7 +1568,7 @@ func assistantMessages(message map[string]any, when time.Time, home string) []*M
 			summary = compactSummary(group.parts, home)
 			if transcriptTool(toolName) {
 				arguments := asMap(toolCall["arguments"])
-				path := DisplayHomePath(stringValue(arguments["path"]), home)
+				path := agent.DisplayHomePath(stringValue(arguments["path"]), home)
 				toolHTML = `<span class="tool-command">` + escapeHTML(toolName) + `</span>`
 				if path != "" {
 					toolHTML += ` <span class="tool-path">` + escapeHTML(path) + `</span>`
@@ -1579,14 +1581,14 @@ func assistantMessages(message map[string]any, when time.Time, home string) []*M
 			}
 			toolPreview = toolName == "edit"
 		}
-		result = append(result, &Message{Role: "assistant", Text: text, Timestamp: when, Compact: group.compact, Summary: summary, ToolCallID: stringValue(toolCall["id"]), ToolName: toolName, Thinking: thinking, ToolSummaryHTML: toolHTML, ToolTranscript: transcriptTool(toolName), ToolPreview: toolPreview, FinalAssistantResponse: finalAssistantText(group.parts) != ""})
+		result = append(result, &agent.Message{Role: "assistant", Text: text, Timestamp: when, Compact: group.compact, Summary: summary, ToolCallID: stringValue(toolCall["id"]), ToolName: toolName, Thinking: thinking, ToolSummaryHTML: toolHTML, ToolTranscript: transcriptTool(toolName), ToolPreview: toolPreview, FinalAssistantResponse: finalAssistantText(group.parts) != ""})
 	}
 	return result
 }
 
-func pairMessages(messages []*Message) []*Message {
-	pending := make(map[string]*Message)
-	result := make([]*Message, 0, len(messages))
+func pairMessages(messages []*agent.Message) []*agent.Message {
+	pending := make(map[string]*agent.Message)
+	result := make([]*agent.Message, 0, len(messages))
 	for _, message := range messages {
 		if message.Role == "toolResult" {
 			if call := pending[message.ToolCallID]; call != nil {
@@ -1673,10 +1675,10 @@ func contentText(content any) string {
 	return strings.Join(values, "\n")
 }
 
-func contentImages(content any, entryID string) []Image {
-	var result []Image
+func contentImages(content any, entryID string) []agent.Image {
+	var result []agent.Image
 	for index, part := range inlineImageParts(content) {
-		result = append(result, Image{MIMEType: stringValue(part["mimeType"]), EntryID: entryID, Index: index})
+		result = append(result, agent.Image{MIMEType: stringValue(part["mimeType"]), EntryID: entryID, Index: index})
 	}
 	return result
 }
@@ -1778,7 +1780,7 @@ func compactSummary(parts []any, home string) string {
 				if args["timeout"] != nil {
 					suffix = " (timeout " + fmt.Sprint(args["timeout"]) + "s)"
 				}
-				labels = append(labels, "$ "+DisplayHomePath(stringValue(args["command"]), home)+suffix)
+				labels = append(labels, "$ "+agent.DisplayHomePath(stringValue(args["command"]), home)+suffix)
 			} else {
 				labels = append(labels, name)
 			}

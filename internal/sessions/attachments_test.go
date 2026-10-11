@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 func TestAttachmentMatchReadsMetadataStoredForThePhysicalSessionPath(t *testing.T) {
@@ -36,11 +38,11 @@ func TestAttachmentMatchReadsMetadataStoredForThePhysicalSessionPath(t *testing.
 	if err := os.WriteFile(filepath.Join(attachmentsRoot, physicalHash+".jsonl"), append(metadata, '\n'), 0600); err != nil {
 		t.Fatal(err)
 	}
-	first := &Message{Role: "user", Text: "prompt"}
-	second := &Message{Role: "user", Text: "prompt"}
+	first := &agent.Message{Role: "user", Text: "prompt"}
+	second := &agent.Message{Role: "user", Text: "prompt"}
 
-	matches := (AttachmentStore{Root: attachmentsRoot, Keys: rootKeys(configuredRoot)}).Match(configuredPath, []*Message{first, second})
-	for _, message := range []*Message{first, second} {
+	matches := (AttachmentStore{Root: attachmentsRoot, Keys: rootKeys(configuredRoot)}).Match(configuredPath, []*agent.Message{first, second})
+	for _, message := range []*agent.Message{first, second} {
 		match, ok := matches[message]
 		if !ok || len(match.Images) != 1 || match.Images[0].Src != "/attachments/"+physicalHash+"/image.png" {
 			t.Fatalf("match = %#v, %v", match, ok)

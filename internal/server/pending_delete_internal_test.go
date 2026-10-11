@@ -61,7 +61,7 @@ func TestDeletePendingSession(t *testing.T) {
 			app := &application{
 				config:       config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")},
 				sessionStore: NewPiStore(root, root), gatewayState: state, rpcClients: registry, pendingSessions: pending,
-				guard:       sessionfile.NewSynchronizer(root, root, nil, registry),
+				guard:       sessionfile.NewSynchronizer(registry),
 				ownsSession: func(*http.Request, string) bool { return test.name != "unowned" },
 			}
 			released := ""

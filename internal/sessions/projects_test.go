@@ -5,15 +5,17 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 func TestProjectsPreserveExistingDirectoriesWithoutImportingLaterCLISessions(t *testing.T) {
 	for _, test := range []struct {
 		name     string
-		existing []*Session
+		existing []*agent.Session
 	}{
 		{name: "empty gateway"},
-		{name: "existing projects", existing: []*Session{{CWD: "/existing"}, {CWD: "/existing"}}},
+		{name: "existing projects", existing: []*agent.Session{{CWD: "/existing"}, {CWD: "/existing"}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -26,7 +28,7 @@ func TestProjectsPreserveExistingDirectoriesWithoutImportingLaterCLISessions(t *
 			if err != nil || projects["/existing"] != (len(existing) > 0) {
 				t.Fatalf("initial projects = %v, %v", projects, err)
 			}
-			all := append(append([]*Session{}, existing...), &Session{CWD: "/cli-only"})
+			all := append(append([]*agent.Session{}, existing...), &agent.Session{CWD: "/cli-only"})
 			projects, err = newState().ProjectCWDs(all)
 			if err != nil || projects["/cli-only"] {
 				t.Fatalf("restart imported CLI project: %v, %v", projects, err)
@@ -83,7 +85,7 @@ func TestProjectsDoNotReplaceMalformedStateWithDiscoveredDirectories(t *testing.
 		t.Fatal(err)
 	}
 	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), rootKeys(root))
-	if _, err := state.ProjectCWDs([]*Session{{CWD: "/cli-only"}}); err == nil {
+	if _, err := state.ProjectCWDs([]*agent.Session{{CWD: "/cli-only"}}); err == nil {
 		t.Fatal("malformed project state was ignored")
 	}
 	if _, err := state.RememberProject("/gateway"); err == nil {

@@ -14,7 +14,6 @@ import (
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestLifecycleDecisionsFailClosed(t *testing.T) {
@@ -47,11 +46,11 @@ func TestLifecycleDecisionsFailClosed(t *testing.T) {
 					t.Fatal(err)
 				}
 				app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
-				app.guard = sessionfile.NewSynchronizer(root, root, nil, registry)
+				app.guard = sessionfile.NewSynchronizer(registry)
 				queried := false
 				client.onState = func() {
 					queried = true
-					if err := app.guard.WithExclusiveOperation(path, func() error { return nil }); !errors.Is(err, sessions.ErrSyncBusy) {
+					if err := app.guard.WithExclusiveOperation(path, func() error { return nil }); !errors.Is(err, agent.ErrSyncBusy) {
 						t.Errorf("state query was not serialized with mutations: %v", err)
 					}
 				}

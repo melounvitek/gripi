@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 const (
@@ -55,7 +57,7 @@ const (
 var nativeToolUpdatePrefix = regexp.MustCompile(`^\{"type":"tool_execution_update","toolCallId":"((?:\\.|[^"\\])*)"`)
 
 var (
-	ErrRPCLineTooLarge    = fmt.Errorf("%w: RPC response exceeds the compatibility limit", ErrProcessExited)
+	ErrRPCLineTooLarge    = fmt.Errorf("%w: RPC response exceeds the compatibility limit", agent.ErrProcessExited)
 	ErrBashAlreadyRunning = errors.New("a bash command is already running for this Pi RPC client")
 )
 
@@ -111,7 +113,7 @@ type ClientOptions struct {
 	FallbackRPCLineBytes              int
 	Clock                             func() time.Time
 	Now                               func() time.Time
-	Diagnostics                       *Diagnostics
+	Diagnostics                       *agent.Diagnostics
 	EventObserver                     func(*Client, map[string]any)
 }
 
@@ -158,7 +160,7 @@ type Client struct {
 	treeBridgeTimeout    time.Duration
 	clock                func() time.Time
 	now                  func() time.Time
-	diagnostics          *Diagnostics
+	diagnostics          *agent.Diagnostics
 	eventObserver        func(*Client, map[string]any)
 
 	writeLane  chan struct{}
@@ -220,13 +222,13 @@ type Client struct {
 }
 
 // Start runs Pi with the gateway's scrubbed environment and the given NAME=value variables on top.
-func Start(sessionPath string, command []string, extensionPath string, variables []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+func Start(sessionPath string, command []string, extensionPath string, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath, "--session", sessionPath}
 	return startProcess("", command, args, variables, diagnostics, observer)
 }
 
 // StartInCWD starts a new session in cwd, or a copy of the session file forkFrom when that is set.
-func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, variables []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath}
 	if forkFrom != "" {
 		args = append(args, "--fork", forkFrom)
@@ -234,7 +236,7 @@ func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, va
 	return startProcess(cwd, command, args, variables, diagnostics, observer)
 }
 
-func startProcess(cwd string, command, args, variables []string, diagnostics *Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+func startProcess(cwd string, command, args, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	if len(command) == 0 {
 		return nil, errors.New("Pi RPC command is empty")
 	}
@@ -261,7 +263,7 @@ func startProcess(cwd string, command, args, variables []string, diagnostics *Di
 		_ = stdin.Close()
 		_ = stdout.Close()
 		_ = stderr.Close()
-		return nil, fmt.Errorf("%w: %w", ErrStartFailed, err)
+		return nil, fmt.Errorf("%w: %w", agent.ErrStartFailed, err)
 	}
 	group, err := attachProcessGroup(cmd)
 	if err != nil {
@@ -437,7 +439,7 @@ func (client *Client) SetThinkingLevel(ctx context.Context, level string) (map[s
 func (client *Client) CycleThinkingLevel(ctx context.Context) (map[string]any, error) {
 	return client.request(ctx, "cycle_thinking_level", client.nextID("cycle_thinking_level"), nil, client.requestTimeout, nil)
 }
-func (client *Client) Prompt(ctx context.Context, message string, images []PromptImage) (map[string]any, error) {
+func (client *Client) Prompt(ctx context.Context, message string, images []agent.PromptImage) (map[string]any, error) {
 	deadline := client.now().Add(client.requestTimeout)
 	if err := client.waitForCompactionFlush(ctx, deadline); err != nil {
 		return nil, err
@@ -445,34 +447,34 @@ func (client *Client) Prompt(ctx context.Context, message string, images []Promp
 	payload := promptPayload(message, images)
 	remaining := deadline.Sub(client.now())
 	if remaining <= 0 {
-		return nil, &RequestTimeoutError{Command: "prompt"}
+		return nil, &agent.RequestTimeoutError{Command: "prompt"}
 	}
 	return client.request(ctx, "prompt", client.nextID("prompt"), payload, remaining, nil)
 }
-func (client *Client) PromptWithBehavior(ctx context.Context, message string, images []PromptImage, behavior string) (map[string]any, error) {
+func (client *Client) PromptWithBehavior(ctx context.Context, message string, images []agent.PromptImage, behavior string) (map[string]any, error) {
 	payload := promptPayload(message, images)
 	payload["streamingBehavior"] = behavior
 	return client.request(ctx, "prompt", client.nextID("prompt"), payload, client.requestTimeout, nil)
 }
-func (client *Client) Steer(ctx context.Context, message string, images []PromptImage) (map[string]any, error) {
+func (client *Client) Steer(ctx context.Context, message string, images []agent.PromptImage) (map[string]any, error) {
 	payload := map[string]any{"message": message}
 	if len(images) > 0 {
 		payload["images"] = images
 	}
 	return client.request(ctx, "steer", client.nextID("steer"), payload, client.requestTimeout, nil)
 }
-func (client *Client) FollowUp(ctx context.Context, message string, images []PromptImage) (map[string]any, error) {
+func (client *Client) FollowUp(ctx context.Context, message string, images []agent.PromptImage) (map[string]any, error) {
 	if response, queued, err := client.QueueCompactionFollowUp(ctx, message, images); err != nil || queued {
 		return response, err
 	}
 	return client.request(ctx, "follow_up", client.nextID("follow_up"), promptPayload(message, images), client.requestTimeout, nil)
 }
 
-func (client *Client) QueueCompactionFollowUp(ctx context.Context, message string, images []PromptImage) (map[string]any, bool, error) {
+func (client *Client) QueueCompactionFollowUp(ctx context.Context, message string, images []agent.PromptImage) (map[string]any, bool, error) {
 	return client.QueueCompactionPrompt(ctx, message, images, "followUp")
 }
 
-func (client *Client) QueueCompactionPrompt(_ context.Context, message string, images []PromptImage, behavior string) (map[string]any, bool, error) {
+func (client *Client) QueueCompactionPrompt(_ context.Context, message string, images []agent.PromptImage, behavior string) (map[string]any, bool, error) {
 	payload := promptPayload(message, images)
 	payload["streamingBehavior"] = behavior
 	size := promptPayloadSize(payload)
@@ -491,7 +493,7 @@ func (client *Client) QueueCompactionPrompt(_ context.Context, message string, i
 	return map[string]any{"type": "response", "command": "prompt", "success": true, "queued": true, "compacting": true}, true, nil
 }
 
-func promptPayload(message string, images []PromptImage) map[string]any {
+func promptPayload(message string, images []agent.PromptImage) map[string]any {
 	payload := map[string]any{"message": message}
 	if len(images) > 0 {
 		payload["images"] = images
@@ -520,7 +522,7 @@ func (client *Client) ClearQueue(ctx context.Context) (map[string]any, error) {
 	client.mu.Unlock()
 	remaining := deadline.Sub(client.now())
 	if remaining <= 0 {
-		return nil, &RequestTimeoutError{Command: "clear_queue"}
+		return nil, &agent.RequestTimeoutError{Command: "clear_queue"}
 	}
 	return client.request(ctx, "clear_queue", client.nextID("clear_queue"), nil, remaining, nil)
 }
@@ -536,7 +538,7 @@ func (client *Client) acquireQueueLane(ctx context.Context, deadline time.Time, 
 	}
 	remaining := deadline.Sub(client.now())
 	if remaining <= 0 {
-		return &RequestTimeoutError{Command: command}
+		return &agent.RequestTimeoutError{Command: command}
 	}
 	timer := time.NewTimer(remaining)
 	defer timer.Stop()
@@ -546,7 +548,7 @@ func (client *Client) acquireQueueLane(ctx context.Context, deadline time.Time, 
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-timer.C:
-		return &RequestTimeoutError{Command: command}
+		return &agent.RequestTimeoutError{Command: command}
 	case <-client.readerDone:
 		return client.readerFailure("before accepting command")
 	}
@@ -748,7 +750,7 @@ func (client *Client) request(ctx context.Context, command, id string, payload m
 	case <-timer:
 		client.removePending(id)
 		client.diagnostics.Log("command_timed_out", map[string]any{"command": command, "rpc_id": id, "stage": "response"})
-		return nil, &RequestTimeoutError{Command: command, Accepted: true}
+		return nil, &agent.RequestTimeoutError{Command: command, Accepted: true}
 	case <-client.readerDone:
 		select {
 		case result := <-pending:
@@ -774,7 +776,7 @@ func (client *Client) readerFailure(stage string) error {
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("%w %s", ErrProcessExited, stage)
+	return fmt.Errorf("%w %s", agent.ErrProcessExited, stage)
 }
 
 func (client *Client) writeCommand(ctx context.Context, value map[string]any, command string, deadline time.Time) error {
@@ -793,7 +795,7 @@ func (client *Client) writeCommand(ctx context.Context, value map[string]any, co
 	case <-client.writeLane:
 		defer func() { client.writeLane <- struct{}{} }()
 	case <-timer:
-		return &RequestTimeoutError{Command: command}
+		return &agent.RequestTimeoutError{Command: command}
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-client.readerDone:
@@ -814,7 +816,7 @@ func (client *Client) writeCommandUnlocked(value map[string]any, command string,
 		}
 	}
 	writer := &commandWriter{destination: client.stdin, command: command}
-	if images, ok := value["images"].([]PromptImage); ok && len(images) > 0 {
+	if images, ok := value["images"].([]agent.PromptImage); ok && len(images) > 0 {
 		return writeImageCommand(writer, value, images)
 	}
 	encoded, err := marshalJSON(value)
@@ -838,18 +840,18 @@ func (writer *commandWriter) Write(value []byte) (int, error) {
 		value = value[count:]
 		if err != nil {
 			if isNetTimeout(err) {
-				return written, &RequestTimeoutError{Command: writer.command}
+				return written, &agent.RequestTimeoutError{Command: writer.command}
 			}
-			return written, fmt.Errorf("%w before accepting command: %v", ErrProcessExited, err)
+			return written, fmt.Errorf("%w before accepting command: %v", agent.ErrProcessExited, err)
 		}
 		if count == 0 {
-			return written, fmt.Errorf("%w before accepting command: short write", ErrProcessExited)
+			return written, fmt.Errorf("%w before accepting command: short write", agent.ErrProcessExited)
 		}
 	}
 	return written, nil
 }
 
-func writeImageCommand(writer io.Writer, value map[string]any, images []PromptImage) error {
+func writeImageCommand(writer io.Writer, value map[string]any, images []agent.PromptImage) error {
 	files := make([]*os.File, 0, len(images))
 	for _, image := range images {
 		file, err := os.Open(image.Path)
@@ -926,7 +928,7 @@ func writeImageCommand(writer io.Writer, value map[string]any, images []PromptIm
 		}
 		if copied != image.Size {
 			_ = encoder.Close()
-			return fmt.Errorf("%w before accepting command: persisted prompt image size changed", ErrProcessExited)
+			return fmt.Errorf("%w before accepting command: persisted prompt image size changed", agent.ErrProcessExited)
 		}
 		if err := encoder.Close(); err != nil {
 			return err
@@ -2177,7 +2179,7 @@ func (client *Client) Bash(ctx context.Context, command string, exclude bool) (r
 	client.mu.Lock()
 	if client.reloading {
 		client.mu.Unlock()
-		return nil, ErrOperationPending
+		return nil, agent.ErrOperationPending
 	}
 	if client.activeBashToken != nil {
 		client.mu.Unlock()
@@ -2284,7 +2286,7 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 		}
 		remaining := deadline.Sub(client.now())
 		if remaining <= 0 {
-			return &RequestTimeoutError{Command: "prompt"}
+			return &agent.RequestTimeoutError{Command: "prompt"}
 		}
 		timer := time.NewTimer(remaining)
 		select {
@@ -2293,9 +2295,9 @@ func (client *Client) waitForCompactionFlush(ctx context.Context, deadline time.
 			return ctx.Err()
 		case <-client.readerDone:
 			timer.Stop()
-			return ErrProcessExited
+			return agent.ErrProcessExited
 		case <-timer.C:
-			return &RequestTimeoutError{Command: "prompt"}
+			return &agent.RequestTimeoutError{Command: "prompt"}
 		case <-ticker.C:
 			timer.Stop()
 		}
@@ -2347,9 +2349,9 @@ func (client *Client) flushCompactionPrompts(compactionWillRetry bool) {
 		if remaining := deadline.Sub(client.now()); remaining > 0 {
 			response, err = client.request(context.Background(), command, client.nextID(command), value, remaining, nil)
 		} else {
-			err = &RequestTimeoutError{Command: command}
+			err = &agent.RequestTimeoutError{Command: command}
 		}
-		var timeout *RequestTimeoutError
+		var timeout *agent.RequestTimeoutError
 		drop := (err == nil && response["success"] == true) || (errors.As(err, &timeout) && timeout.Accepted)
 		client.mu.Lock()
 		// readerStopped may already have discarded the queue and its counters.
@@ -2456,7 +2458,7 @@ func (client *Client) extensionRequest(ctx context.Context, command string, payl
 	deadline := client.now().Add(timeout)
 	response, err := client.request(ctx, "prompt", client.nextID("prompt"), map[string]any{"message": message}, timeout, nil)
 	if err != nil {
-		var timeoutErr *RequestTimeoutError
+		var timeoutErr *agent.RequestTimeoutError
 		if errors.As(err, &timeoutErr) {
 			return map[string]any{"success": false, "error": timeoutMessage}, nil
 		}
@@ -2491,11 +2493,11 @@ func (client *Client) extensionRequest(ctx context.Context, command string, payl
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-client.readerDone:
-		return nil, ErrProcessExited
+		return nil, agent.ErrProcessExited
 	}
 }
 
-func isTimeout(err error) bool { var target *RequestTimeoutError; return errors.As(err, &target) }
+func isTimeout(err error) bool { var target *agent.RequestTimeoutError; return errors.As(err, &target) }
 func isNetTimeout(err error) bool {
 	type timeout interface{ Timeout() bool }
 	var target timeout
@@ -2512,7 +2514,7 @@ func marshalJSON(value any) ([]byte, error) {
 }
 func jsonSize(value any) int { encoded, _ := marshalJSON(value); return len(encoded) }
 func promptPayloadSize(payload map[string]any) int {
-	images, _ := payload["images"].([]PromptImage)
+	images, _ := payload["images"].([]agent.PromptImage)
 	if len(images) == 0 {
 		return jsonSize(payload)
 	}

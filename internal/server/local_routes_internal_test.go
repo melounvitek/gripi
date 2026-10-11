@@ -60,7 +60,7 @@ func (deferringClient) DeferPrompt(context.Context, agent.Prompt) (agent.PromptR
 func TestLocalSessionsKeepCompactingUntilQueuedPromptsAreDelivered(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return deferringClient{client}, nil }, nil)
-	app.guard = sessionfile.NewSynchronizer(app.config.SessionsRoot, app.config.Home, nil, app.rpcClients)
+	app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 	if err := app.rpcClients.WithClient(context.Background(), path, func(agent.Client) error { return nil }); err != nil {
 		t.Fatal(err)
 	}

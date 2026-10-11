@@ -15,7 +15,7 @@ import (
 
 type syncState struct {
 	Snapshot  *FileSnapshot
-	Mode      SyncMode
+	Mode      agent.SyncMode
 	RPCLeafID string
 	Error     string
 	// External outlives a conflict, which says nothing about Pi CLI being done with the session.
@@ -23,7 +23,6 @@ type syncState struct {
 }
 
 type Synchronizer struct {
-	store    Store
 	clients  *agent.Registry
 	locks    keyedlock.Mutexes
 	statesMu sync.Mutex
@@ -33,8 +32,8 @@ type Synchronizer struct {
 	baselinesPath string
 }
 
-func NewSynchronizer(root, home string, cache *Cache, clients *agent.Registry) *Synchronizer {
-	return &Synchronizer{store: Store{Root: root, Home: home, Cache: cache}, clients: clients, states: make(map[string]syncState)}
+func NewSynchronizer(clients *agent.Registry) *Synchronizer {
+	return &Synchronizer{clients: clients, states: make(map[string]syncState)}
 }
 
 // PersistExternalFollow restores the sessions Pi CLI was using when the gateway last ran
@@ -49,7 +48,7 @@ func (synchronizer *Synchronizer) PersistExternalFollow(path string) error {
 	defer synchronizer.statesMu.Unlock()
 	synchronizer.externalPath = path
 	for _, sessionPath := range external {
-		synchronizer.states[sessionPath] = syncState{Mode: SyncExternalFollow, External: true}
+		synchronizer.states[sessionPath] = syncState{Mode: agent.SyncExternalFollow, External: true}
 	}
 	return nil
 }
@@ -74,7 +73,7 @@ func (synchronizer *Synchronizer) RestoreBaselines(path string) {
 		}
 		// A reboot can renumber devices, which must not read as a replaced file.
 		if device, inode := fileIdentity(info); device == baseline.Device && inode == baseline.Inode {
-			synchronizer.states[sessionPath] = syncState{Snapshot: &baseline, Mode: SyncAvailable}
+			synchronizer.states[sessionPath] = syncState{Snapshot: &baseline, Mode: agent.SyncAvailable}
 		}
 	}
 }
@@ -89,20 +88,20 @@ func (synchronizer *Synchronizer) SaveBaselines() error {
 	baselines := map[string]FileSnapshot{}
 	for path, state := range synchronizer.states {
 		// The gateway's own Pi may have written past the snapshot of a managed session.
-		if state.Mode == SyncAvailable && state.Snapshot != nil {
+		if state.Mode == agent.SyncAvailable && state.Snapshot != nil {
 			baselines[path] = *state.Snapshot
 		}
 	}
 	return writeJSON(synchronizer.baselinesPath, baselines)
 }
 
-func (synchronizer *Synchronizer) Inspect(ctx context.Context, path string, includePosition bool) (SyncResult, error) {
+func (synchronizer *Synchronizer) Inspect(ctx context.Context, path string, includePosition bool) (agent.SyncResult, error) {
 	unlock := synchronizer.locks.Lock(path)
 	defer unlock()
 	return synchronizer.inspectRecovering(ctx, path, includePosition)
 }
 
-func (synchronizer *Synchronizer) InspectIfAvailable(ctx context.Context, path string, includePosition bool) *SyncResult {
+func (synchronizer *Synchronizer) InspectIfAvailable(ctx context.Context, path string, includePosition bool) *agent.SyncResult {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {
 		return nil
@@ -112,7 +111,7 @@ func (synchronizer *Synchronizer) InspectIfAvailable(ctx context.Context, path s
 	return result
 }
 
-func (synchronizer *Synchronizer) ReconcileIfAvailable(ctx context.Context, path string, includePosition bool, after func(SyncResult)) *SyncResult {
+func (synchronizer *Synchronizer) ReconcileIfAvailable(ctx context.Context, path string, includePosition bool, after func(agent.SyncResult)) *agent.SyncResult {
 	result := synchronizer.InspectIfAvailable(ctx, path, includePosition)
 	if result != nil && after != nil {
 		after(*result)
@@ -120,10 +119,10 @@ func (synchronizer *Synchronizer) ReconcileIfAvailable(ctx context.Context, path
 	return result
 }
 
-func (synchronizer *Synchronizer) KnownBlocked(path string) *SyncResult {
+func (synchronizer *Synchronizer) KnownBlocked(path string) *agent.SyncResult {
 	state := synchronizer.state(path)
 	// A session restored after a restart has no snapshot until it is first inspected.
-	if state.Mode == SyncExternalFollow || (state.Mode == SyncConflict && state.Snapshot != nil) {
+	if state.Mode == agent.SyncExternalFollow || (state.Mode == agent.SyncConflict && state.Snapshot != nil) {
 		result := resultFor(state)
 		return &result
 	}
@@ -145,21 +144,21 @@ func (synchronizer *Synchronizer) RetireManagedClientIfAvailable(path string, re
 	}
 	defer unlock()
 	state := synchronizer.state(path)
-	blocked := state.Mode == SyncExternalFollow || state.Mode == SyncConflict
+	blocked := state.Mode == agent.SyncExternalFollow || state.Mode == agent.SyncConflict
 	retired, err := retire()
 	if retired && !blocked {
 		synchronizer.Forget(path)
 	}
 	return retired, err
 }
-func (synchronizer *Synchronizer) Message(result SyncResult) string {
+func (synchronizer *Synchronizer) Message(result agent.SyncResult) string {
 	return blockedMessage(result.Mode, result.Error)
 }
 
 func (synchronizer *Synchronizer) WithExclusiveOperation(path string, call func() error) error {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {
-		return ErrSyncBusy
+		return agent.ErrSyncBusy
 	}
 	defer unlock()
 	return call()
@@ -168,7 +167,7 @@ func (synchronizer *Synchronizer) WithExclusiveOperation(path string, call func(
 func (synchronizer *Synchronizer) WithMutableClient(ctx context.Context, path string, call func(agent.Client) error) error {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {
-		return ErrSyncBusy
+		return agent.ErrSyncBusy
 	}
 	defer unlock()
 	before, resultErr := synchronizer.verificationSnapshot(ctx, path)
@@ -185,7 +184,7 @@ func (synchronizer *Synchronizer) WithMutableClient(ctx context.Context, path st
 func (synchronizer *Synchronizer) WithClientMove(ctx context.Context, path string, touch bool, call func(agent.Client) (string, error), prepare func(string, string) (func() error, error), commit func(string, string)) (string, error) {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {
-		return path, ErrSyncBusy
+		return path, agent.ErrSyncBusy
 	}
 	defer unlock()
 	before, err := synchronizer.verificationSnapshot(ctx, path)
@@ -203,7 +202,7 @@ func (synchronizer *Synchronizer) WithClientMove(ctx context.Context, path strin
 func (synchronizer *Synchronizer) WithBashClient(ctx context.Context, path string, call func(agent.Client) error) error {
 	unlock, locked := synchronizer.locks.TryLock(path)
 	if !locked {
-		return ErrSyncBusy
+		return agent.ErrSyncBusy
 	}
 	defer func() {
 		if locked {
@@ -248,43 +247,47 @@ func (synchronizer *Synchronizer) WithInterruptClient(ctx context.Context, path 
 	return err
 }
 
-func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string, beforeManaged func() error) (SyncResult, error) {
+func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string, beforeManaged func() error) (agent.SyncResult, error) {
 	unlock := synchronizer.locks.Lock(path)
 	defer unlock()
 	if synchronizer.clients.Busy(path) {
-		return SyncResult{}, fmt.Errorf("%w: wait for the gateway task to finish before taking over", ErrSyncBusy)
+		return agent.SyncResult{}, fmt.Errorf("%w: wait for the gateway task to finish before taking over", agent.ErrSyncBusy)
 	}
 	_, _ = synchronizer.clients.CloseClientIfIdle(path)
-	before, err := synchronizer.store.FileSnapshot(path)
+	before, err := readFileSnapshot(path)
 	if err != nil {
-		return SyncResult{}, err
+		return agent.SyncResult{}, err
 	}
 	if !before.Complete {
-		return SyncResult{}, &SyncBlockedError{Mode: SyncConflict, Message: "The session file has an incomplete entry."}
+		return agent.SyncResult{}, &agent.SyncBlockedError{Mode: agent.SyncConflict, Message: "The session file has an incomplete entry."}
 	}
 	succeeded := false
 	err = synchronizer.clients.WithClient(ctx, path, func(client agent.Client) error {
-		position, err := rpc.SessionPosition(ctx, client, before.AppendCursor)
+		reader, err := entriesReader(client)
+		if err != nil {
+			return err
+		}
+		position, err := reader.SessionPosition(ctx, before.AppendCursor)
 		if err != nil {
 			return err
 		}
 		if err := synchronizer.blockForPosition(path, before, position); err != nil {
 			return err
 		}
-		after, err := synchronizer.store.FileSnapshot(path)
+		after, err := readFileSnapshot(path)
 		if err != nil {
 			return err
 		}
 		if before.Revision() != after.Revision() || position.LeafID != before.PersistedLeafID {
-			synchronizer.update(path, after, SyncExternalFollow, "", "")
-			return &SyncBlockedError{Mode: SyncExternalFollow, Message: "The session was updated again during the takeover. Try again once you’re done in Pi CLI."}
+			synchronizer.update(path, after, agent.SyncExternalFollow, "", "")
+			return &agent.SyncBlockedError{Mode: agent.SyncExternalFollow, Message: "The session was updated again during the takeover. Try again once you’re done in Pi CLI."}
 		}
 		if beforeManaged != nil {
 			if err := beforeManaged(); err != nil {
 				return err
 			}
 		}
-		synchronizer.update(path, after, SyncManaged, position.LeafID, "")
+		synchronizer.update(path, after, agent.SyncManaged, position.LeafID, "")
 		succeeded = true
 		return nil
 	})
@@ -292,12 +295,12 @@ func (synchronizer *Synchronizer) TakeOver(ctx context.Context, path string, bef
 		_, _ = synchronizer.clients.CloseClientIfIdle(path)
 	}
 	if err != nil {
-		return SyncResult{}, err
+		return agent.SyncResult{}, err
 	}
 	return resultFor(synchronizer.state(path)), nil
 }
 
-func (synchronizer *Synchronizer) inspectRecovering(ctx context.Context, path string, include bool) (SyncResult, error) {
+func (synchronizer *Synchronizer) inspectRecovering(ctx context.Context, path string, include bool) (agent.SyncResult, error) {
 	result, err := synchronizer.inspectLocked(ctx, path, include)
 	if err == nil {
 		return result, nil
@@ -306,11 +309,11 @@ func (synchronizer *Synchronizer) inspectRecovering(ctx context.Context, path st
 		return synchronizer.recoverRPCExit(path), nil
 	}
 	if errors.Is(err, agent.ErrOperationPending) || errors.Is(err, agent.ErrClientRetiring) || errors.Is(err, agent.ErrClientStarting) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return SyncResult{}, err
+		return agent.SyncResult{}, err
 	}
 	return synchronizer.conflict(path, "Session file could not be read: "+err.Error()), nil
 }
-func (synchronizer *Synchronizer) inspectRecoveringAvailable(ctx context.Context, path string, include bool) *SyncResult {
+func (synchronizer *Synchronizer) inspectRecoveringAvailable(ctx context.Context, path string, include bool) *agent.SyncResult {
 	result, err := synchronizer.inspectLocked(ctx, path, include)
 	if err == nil {
 		return &result
@@ -326,11 +329,11 @@ func (synchronizer *Synchronizer) inspectRecoveringAvailable(ctx context.Context
 	return &value
 }
 
-func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string, includePosition bool) (SyncResult, error) {
+func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string, includePosition bool) (agent.SyncResult, error) {
 	state := synchronizer.state(path)
 	info, err := os.Stat(path)
 	if err != nil {
-		return SyncResult{}, err
+		return agent.SyncResult{}, err
 	}
 	device, inode := fileIdentity(info)
 	var snapshot FileSnapshot
@@ -338,17 +341,17 @@ func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string
 		// Sidebar polling must not reparse large, unchanged tool-result tails.
 		snapshot = *previous
 	} else {
-		snapshot, err = synchronizer.store.FileSnapshot(path)
+		snapshot, err = readFileSnapshot(path)
 		if err != nil {
-			return SyncResult{}, err
+			return agent.SyncResult{}, err
 		}
 	}
 	if !snapshot.Complete {
-		synchronizer.update(path, snapshot, SyncConflict, "", "Session file has an incomplete JSONL entry.")
+		synchronizer.update(path, snapshot, agent.SyncConflict, "", "Session file has an incomplete JSONL entry.")
 		_, err = synchronizer.clients.CloseClientIfIdle(path)
 		return resultFor(synchronizer.state(path)), err
 	}
-	if state.Mode == SyncExternalFollow || state.Mode == SyncConflict {
+	if state.Mode == agent.SyncExternalFollow || state.Mode == agent.SyncConflict {
 		if state.Snapshot == nil || state.Snapshot.Revision() != snapshot.Revision() {
 			synchronizer.update(path, snapshot, state.Mode, "", state.Error)
 		}
@@ -358,7 +361,7 @@ func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string
 	changed := state.Snapshot != nil && state.Snapshot.Revision() != snapshot.Revision()
 	if changed {
 		mode, message := externalOrConflict(*state.Snapshot, snapshot)
-		if mode == SyncConflict {
+		if mode == agent.SyncConflict {
 			synchronizer.update(path, snapshot, mode, "", message)
 			_, err = synchronizer.clients.CloseClientIfIdle(path)
 			return resultFor(synchronizer.state(path)), err
@@ -370,44 +373,50 @@ func (synchronizer *Synchronizer) inspectLocked(ctx context.Context, path string
 				if synchronizer.clients.Closed() {
 					return resultFor(state), nil
 				}
-				synchronizer.update(path, snapshot, SyncExternalFollow, "", "")
+				synchronizer.update(path, snapshot, agent.SyncExternalFollow, "", "")
 				return resultFor(synchronizer.state(path)), nil
 			}
 			var reconciliation rpc.SessionEntries
 			err = synchronizer.clients.WithExistingClient(ctx, path, false, func(client agent.Client) error {
-				var callErr error
-				reconciliation, callErr = rpc.SessionEntriesAfter(ctx, client, state.Snapshot.AppendCursor)
+				reader, callErr := entriesReader(client)
+				if callErr != nil {
+					return callErr
+				}
+				reconciliation, callErr = reader.SessionEntriesAfter(ctx, state.Snapshot.AppendCursor)
 				return callErr
 			})
 			if err != nil {
-				return SyncResult{}, err
+				return agent.SyncResult{}, err
 			}
 			return synchronizer.applyReconciliation(path, *state.Snapshot, snapshot, reconciliation)
 		}
 		mode = state.Mode
 		if mode == "" {
-			mode = SyncAvailable
+			mode = agent.SyncAvailable
 		}
 		synchronizer.update(path, snapshot, mode, state.RPCLeafID, "")
 	}
 	state = synchronizer.state(path)
-	if synchronizer.clients.Active(path) && (includePosition || state.Mode != SyncManaged) {
+	if synchronizer.clients.Active(path) && (includePosition || state.Mode != agent.SyncManaged) {
 		if state.Snapshot == nil {
 			synchronizer.update(path, snapshot, firstMode(state.Mode), state.RPCLeafID, state.Error)
 		}
 		var position rpc.SessionEntries
 		err = synchronizer.clients.WithExistingClient(ctx, path, false, func(client agent.Client) error {
-			var callErr error
-			position, callErr = rpc.SessionPosition(ctx, client, snapshot.AppendCursor)
+			reader, callErr := entriesReader(client)
+			if callErr != nil {
+				return callErr
+			}
+			position, callErr = reader.SessionPosition(ctx, snapshot.AppendCursor)
 			return callErr
 		})
 		if err != nil {
-			return SyncResult{}, err
+			return agent.SyncResult{}, err
 		}
 		return synchronizer.applyPosition(path, snapshot, position)
 	}
 	if !synchronizer.clients.Active(path) {
-		synchronizer.update(path, snapshot, SyncAvailable, "", "")
+		synchronizer.update(path, snapshot, agent.SyncAvailable, "", "")
 	}
 	return resultFor(synchronizer.state(path)), nil
 }
@@ -418,7 +427,7 @@ func (synchronizer *Synchronizer) verificationSnapshot(ctx context.Context, path
 		return FileSnapshot{}, err
 	}
 	if result.Blocked() {
-		return FileSnapshot{}, &SyncBlockedError{Mode: result.Mode, Message: blockedMessage(result.Mode, result.Error)}
+		return FileSnapshot{}, &agent.SyncBlockedError{Mode: result.Mode, Message: blockedMessage(result.Mode, result.Error)}
 	}
 	state := synchronizer.state(path)
 	if state.Snapshot == nil {
@@ -427,19 +436,23 @@ func (synchronizer *Synchronizer) verificationSnapshot(ctx context.Context, path
 	return *state.Snapshot, nil
 }
 func (synchronizer *Synchronizer) verifyClient(ctx context.Context, path string, before FileSnapshot, client agent.Client) error {
-	position, err := rpc.SessionPosition(ctx, client, before.AppendCursor)
+	reader, err := entriesReader(client)
+	if err != nil {
+		return err
+	}
+	position, err := reader.SessionPosition(ctx, before.AppendCursor)
 	if err != nil {
 		return err
 	}
 	if err = synchronizer.blockForPosition(path, before, position); err != nil {
 		return err
 	}
-	after, err := synchronizer.store.FileSnapshot(path)
+	after, err := readFileSnapshot(path)
 	if err != nil {
 		return err
 	}
 	if before.Revision() != after.Revision() {
-		reconciliation, err := rpc.SessionEntriesAfter(ctx, client, before.AppendCursor)
+		reconciliation, err := reader.SessionEntriesAfter(ctx, before.AppendCursor)
 		if err != nil {
 			return err
 		}
@@ -448,39 +461,39 @@ func (synchronizer *Synchronizer) verifyClient(ctx context.Context, path string,
 			return err
 		}
 		if result.Blocked() {
-			return &SyncBlockedError{Mode: result.Mode, Message: blockedMessage(result.Mode, result.Error)}
+			return &agent.SyncBlockedError{Mode: result.Mode, Message: blockedMessage(result.Mode, result.Error)}
 		}
 		return nil
 	}
-	synchronizer.update(path, after, SyncManaged, position.LeafID, "")
+	synchronizer.update(path, after, agent.SyncManaged, position.LeafID, "")
 	return nil
 }
 func (synchronizer *Synchronizer) blockForPosition(path string, snapshot FileSnapshot, position rpc.SessionEntries) error {
 	if position.Error != "" {
-		synchronizer.update(path, snapshot, SyncConflict, "", position.Error)
-		return &SyncBlockedError{Mode: SyncConflict, Message: blockedMessage(SyncConflict, position.Error)}
+		synchronizer.update(path, snapshot, agent.SyncConflict, "", position.Error)
+		return &agent.SyncBlockedError{Mode: agent.SyncConflict, Message: blockedMessage(agent.SyncConflict, position.Error)}
 	}
 	if !position.Known {
-		synchronizer.update(path, snapshot, SyncExternalFollow, "", "")
-		return &SyncBlockedError{Mode: SyncExternalFollow, Message: blockedMessage(SyncExternalFollow, "")}
+		synchronizer.update(path, snapshot, agent.SyncExternalFollow, "", "")
+		return &agent.SyncBlockedError{Mode: agent.SyncExternalFollow, Message: blockedMessage(agent.SyncExternalFollow, "")}
 	}
 	return nil
 }
-func (synchronizer *Synchronizer) applyReconciliation(path string, previous, current FileSnapshot, reconciliation rpc.SessionEntries) (SyncResult, error) {
+func (synchronizer *Synchronizer) applyReconciliation(path string, previous, current FileSnapshot, reconciliation rpc.SessionEntries) (agent.SyncResult, error) {
 	if reconciliation.Error != "" {
-		synchronizer.update(path, current, SyncConflict, "", reconciliation.Error)
+		synchronizer.update(path, current, agent.SyncConflict, "", reconciliation.Error)
 		_, err := synchronizer.clients.CloseClientIfIdle(path)
 		return resultFor(synchronizer.state(path)), err
 	}
 	if !reconciliation.Known {
-		synchronizer.update(path, current, SyncExternalFollow, "", "")
+		synchronizer.update(path, current, agent.SyncExternalFollow, "", "")
 		_, err := synchronizer.clients.CloseClientIfIdle(path)
 		return resultFor(synchronizer.state(path)), err
 	}
-	diskIDs, err := synchronizer.store.AppendedEntryIDs(path, previous, current)
+	diskIDs, err := appendedEntryIDs(path, previous, current)
 	if err != nil {
 		message := "Session append reconciliation failed: " + err.Error()
-		synchronizer.update(path, current, SyncConflict, "", message)
+		synchronizer.update(path, current, agent.SyncConflict, "", message)
 		_, closeErr := synchronizer.clients.CloseClientIfIdle(path)
 		if closeErr != nil {
 			return resultFor(synchronizer.state(path)), closeErr
@@ -488,51 +501,51 @@ func (synchronizer *Synchronizer) applyReconciliation(path string, previous, cur
 		return resultFor(synchronizer.state(path)), nil
 	}
 	if len(reconciliation.Entries) < len(diskIDs) {
-		synchronizer.update(path, current, SyncExternalFollow, "", "")
+		synchronizer.update(path, current, agent.SyncExternalFollow, "", "")
 		_, err = synchronizer.clients.CloseClientIfIdle(path)
 		return resultFor(synchronizer.state(path)), err
 	}
 	for index, id := range diskIDs {
 		if stringFromMap(reconciliation.Entries[index], "id") != id {
-			synchronizer.update(path, current, SyncExternalFollow, "", "")
+			synchronizer.update(path, current, agent.SyncExternalFollow, "", "")
 			_, err = synchronizer.clients.CloseClientIfIdle(path)
 			return resultFor(synchronizer.state(path)), err
 		}
 	}
-	synchronizer.update(path, current, SyncManaged, reconciliation.LeafID, "")
+	synchronizer.update(path, current, agent.SyncManaged, reconciliation.LeafID, "")
 	return resultFor(synchronizer.state(path)), nil
 }
-func (synchronizer *Synchronizer) applyPosition(path string, snapshot FileSnapshot, position rpc.SessionEntries) (SyncResult, error) {
+func (synchronizer *Synchronizer) applyPosition(path string, snapshot FileSnapshot, position rpc.SessionEntries) (agent.SyncResult, error) {
 	if position.Error != "" {
-		synchronizer.update(path, snapshot, SyncConflict, "", position.Error)
+		synchronizer.update(path, snapshot, agent.SyncConflict, "", position.Error)
 		_, err := synchronizer.clients.CloseClientIfIdle(path)
 		return resultFor(synchronizer.state(path)), err
 	}
 	if !position.Known {
-		synchronizer.update(path, snapshot, SyncExternalFollow, "", "")
+		synchronizer.update(path, snapshot, agent.SyncExternalFollow, "", "")
 		_, err := synchronizer.clients.CloseClientIfIdle(path)
 		return resultFor(synchronizer.state(path)), err
 	}
-	synchronizer.update(path, snapshot, SyncManaged, position.LeafID, "")
+	synchronizer.update(path, snapshot, agent.SyncManaged, position.LeafID, "")
 	return resultFor(synchronizer.state(path)), nil
 }
 
-func (synchronizer *Synchronizer) recoverRPCExit(path string) SyncResult {
-	snapshot, err := synchronizer.store.FileSnapshot(path)
+func (synchronizer *Synchronizer) recoverRPCExit(path string) agent.SyncResult {
+	snapshot, err := readFileSnapshot(path)
 	if err != nil {
 		return synchronizer.conflict(path, "Session file could not be read: "+err.Error())
 	}
 	state := synchronizer.state(path)
-	mode := SyncAvailable
+	mode := agent.SyncAvailable
 	if state.Snapshot != nil && state.Snapshot.Revision() != snapshot.Revision() {
-		mode = SyncExternalFollow
+		mode = agent.SyncExternalFollow
 	}
 	synchronizer.update(path, snapshot, mode, "", "")
 	return resultFor(synchronizer.state(path))
 }
-func (synchronizer *Synchronizer) conflict(path, message string) SyncResult {
+func (synchronizer *Synchronizer) conflict(path, message string) agent.SyncResult {
 	state := synchronizer.state(path)
-	state.Mode = SyncConflict
+	state.Mode = agent.SyncConflict
 	state.Error = message
 	synchronizer.setState(path, state)
 	return resultFor(state)
@@ -546,7 +559,7 @@ func (synchronizer *Synchronizer) setState(path string, state syncState) {
 	synchronizer.statesMu.Lock()
 	defer synchronizer.statesMu.Unlock()
 	wasExternal := synchronizer.states[path].External
-	state.External = state.Mode == SyncExternalFollow || (state.Mode == SyncConflict && wasExternal)
+	state.External = state.Mode == agent.SyncExternalFollow || (state.Mode == agent.SyncConflict && wasExternal)
 	synchronizer.states[path] = state
 	if wasExternal != state.External {
 		synchronizer.saveExternalLocked()
@@ -567,14 +580,14 @@ func (synchronizer *Synchronizer) saveExternalLocked() {
 		log.Printf("save external sessions state: %v", err)
 	}
 }
-func (synchronizer *Synchronizer) update(path string, snapshot FileSnapshot, mode SyncMode, leaf, message string) {
+func (synchronizer *Synchronizer) update(path string, snapshot FileSnapshot, mode agent.SyncMode, leaf, message string) {
 	copy := snapshot
 	synchronizer.setState(path, syncState{Snapshot: &copy, Mode: mode, RPCLeafID: leaf, Error: message})
 }
-func resultFor(state syncState) SyncResult {
-	result := SyncResult{Mode: state.Mode, RPCLeafID: state.RPCLeafID, Error: state.Error}
+func resultFor(state syncState) agent.SyncResult {
+	result := agent.SyncResult{Mode: state.Mode, RPCLeafID: state.RPCLeafID, Error: state.Error}
 	if result.Mode == "" {
-		result.Mode = SyncAvailable
+		result.Mode = agent.SyncAvailable
 	}
 	if state.Snapshot != nil {
 		result.Revision = state.Snapshot.Revision()
@@ -583,27 +596,27 @@ func resultFor(state syncState) SyncResult {
 	}
 	return result
 }
-func externalOrConflict(previous, current FileSnapshot) (SyncMode, string) {
+func externalOrConflict(previous, current FileSnapshot) (agent.SyncMode, string) {
 	if previous.Device != current.Device || previous.Inode != current.Inode || current.Size < previous.Size {
-		return SyncConflict, "Session file was replaced or truncated."
+		return agent.SyncConflict, "Session file was replaced or truncated."
 	}
 	if current.Size > previous.Size && current.AppendCursor == previous.AppendCursor {
-		return SyncConflict, "Session file changed without a complete appended entry."
+		return agent.SyncConflict, "Session file changed without a complete appended entry."
 	}
 	if current.Size == previous.Size && current.AppendCursor != previous.AppendCursor {
-		return SyncConflict, "Session file changed without an append."
+		return agent.SyncConflict, "Session file changed without an append."
 	}
-	return SyncExternalFollow, ""
+	return agent.SyncExternalFollow, ""
 }
-func blockedMessage(mode SyncMode, message string) string {
-	if mode == SyncConflict {
+func blockedMessage(mode agent.SyncMode, message string) string {
+	if mode == agent.SyncConflict {
 		return "Session synchronization failed: " + message
 	}
 	return "This session was updated in Pi CLI. Take over once you’re done there."
 }
-func firstMode(mode SyncMode) SyncMode {
+func firstMode(mode agent.SyncMode) agent.SyncMode {
 	if mode == "" {
-		return SyncAvailable
+		return agent.SyncAvailable
 	}
 	return mode
 }
@@ -614,4 +627,13 @@ func stringFromMap(value map[string]any, key string) string {
 func terminalSyncRPCError(err error) bool {
 	var timeout *agent.RequestTimeoutError
 	return errors.As(err, &timeout) || errors.Is(err, agent.ErrProcessExited)
+}
+
+// entriesReader reads Pi's session entries through a client from the registry, which has the core type.
+func entriesReader(client agent.Client) (rpc.SessionEntriesReader, error) {
+	reader, ok := client.(rpc.SessionEntriesReader)
+	if !ok {
+		return nil, fmt.Errorf("%T cannot read Pi session entries", client)
+	}
+	return reader, nil
 }

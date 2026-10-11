@@ -246,7 +246,7 @@ func newIdleRetirementFixture(t *testing.T) *idleRetirementFixture {
 		sessionStore:    NewPiStore(root, root),
 		rpcClients:      registry,
 		pendingSessions: agent.NewPendingSessionRegistry(nil),
-		guard:           sessionfile.NewSynchronizer(root, root, nil, registry),
+		guard:           sessionfile.NewSynchronizer(registry),
 	}
 	fixture.path = fixture.session(t, "idle")
 	if err := registry.Register(fixture.path, fixture.old); err != nil {

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 func TestSavedCacheListsUnchangedSessionsWithoutReadingThemButRechecksHiddenOnes(t *testing.T) {
@@ -163,7 +165,7 @@ func replaceKeepingFileSignature(t *testing.T, path, content string) {
 	}
 }
 
-func sessionInUTC(session *Session) Session {
+func sessionInUTC(session *agent.Session) agent.Session {
 	result := *session
 	result.CreatedAt, result.ModifiedAt, result.ConversationActivityAt = result.CreatedAt.UTC(), result.ModifiedAt.UTC(), result.ConversationActivityAt.UTC()
 	return result

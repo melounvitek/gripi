@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 func TestClientUsesNativeFakePiRPCWithoutRewritingSessionOnReads(t *testing.T) {
@@ -432,7 +434,7 @@ func TestImageCommandStreamsPersistedBytesWithoutLargeWrites(t *testing.T) {
 	writer := &boundedWriteCloser{}
 	client := NewClient(writer, io.NopCloser(strings.NewReader("")), nil, ClientOptions{})
 	<-client.readerDone
-	value := map[string]any{"id": "prompt-1", "type": "prompt", "message": "hello", "streamingBehavior": "steer", "images": []PromptImage{{Path: imagePath, MIMEType: "image/png", Size: int64(len(contents))}}}
+	value := map[string]any{"id": "prompt-1", "type": "prompt", "message": "hello", "streamingBehavior": "steer", "images": []agent.PromptImage{{Path: imagePath, MIMEType: "image/png", Size: int64(len(contents))}}}
 	if err := client.writeCommandUnlocked(value, "prompt", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
@@ -1151,7 +1153,7 @@ func TestClientRejectsBashDuringReload(t *testing.T) {
 	client.reloading = true
 	client.mu.Unlock()
 
-	if _, err := client.Bash(context.Background(), "sleep 1", false); !errors.Is(err, ErrOperationPending) {
+	if _, err := client.Bash(context.Background(), "sleep 1", false); !errors.Is(err, agent.ErrOperationPending) {
 		t.Fatalf("bash error = %v", err)
 	}
 }
@@ -1168,7 +1170,7 @@ func TestClientTimesOutResponsesAndDiscardsLateRPCReplies(t *testing.T) {
 		commandRead <- command
 	}()
 	_, err := client.GetState(context.Background())
-	var timeout *RequestTimeoutError
+	var timeout *agent.RequestTimeoutError
 	if !errors.As(err, &timeout) || timeout.Command != "get_state" {
 		t.Fatalf("timeout = %v", err)
 	}
@@ -1217,7 +1219,7 @@ func TestClientTimesOutBlockedPipeWritesWithoutLeakingRequest(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
 	started := time.Now()
 	_, err = client.Prompt(context.Background(), strings.Repeat("blocked", 1<<20), nil)
-	var timeout *RequestTimeoutError
+	var timeout *agent.RequestTimeoutError
 	if !errors.As(err, &timeout) || time.Since(started) > time.Second {
 		t.Fatalf("blocked write = %v after %s", err, time.Since(started))
 	}

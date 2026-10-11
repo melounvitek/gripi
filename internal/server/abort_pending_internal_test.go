@@ -41,7 +41,7 @@ func TestAbortRefusesToGuessWhichPendingSessionToStop(t *testing.T) {
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
 	app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: pending}
-	app.guard = sessionfile.NewSynchronizer(root, root, nil, registry)
+	app.guard = sessionfile.NewSynchronizer(registry)
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")

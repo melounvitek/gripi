@@ -6,16 +6,18 @@ import (
 	"errors"
 	"io"
 	"os"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
-func (store Store) SubagentToolCallContext(path, leafID string, ids []string) map[string]ToolCallContext {
+func (store Store) SubagentToolCallContext(path, leafID string, ids []string) map[string]agent.ToolCallContext {
 	requested := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		if id != "" {
 			requested[id] = true
 		}
 	}
-	result := make(map[string]ToolCallContext)
+	result := make(map[string]agent.ToolCallContext)
 	if len(requested) == 0 {
 		return result
 	}
@@ -81,7 +83,7 @@ func (store Store) SubagentToolCallContext(path, leafID string, ids []string) ma
 	}
 	stat, err := os.Stat(canonical)
 	if err != nil || !indexSnapshotValid(indexed, stat) {
-		return map[string]ToolCallContext{}
+		return map[string]agent.ToolCallContext{}
 	}
 	return result
 }

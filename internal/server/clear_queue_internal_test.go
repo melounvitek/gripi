@@ -20,7 +20,6 @@ import (
 	"github.com/melounvitek/gripi/internal/agent"
 	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestClearQueueUsesOnlyExistingClientAndRecordedAliases(t *testing.T) {
@@ -396,7 +395,7 @@ func TestClearQueueFollowsAliasCommittedBeforeAdmission(t *testing.T) {
 }
 
 func TestClearQueueRespectsKnownSynchronizationBlock(t *testing.T) {
-	for _, mode := range []sessions.SyncMode{sessions.SyncConflict, sessions.SyncExternalFollow} {
+	for _, mode := range []agent.SyncMode{agent.SyncConflict, agent.SyncExternalFollow} {
 		t.Run(string(mode), func(t *testing.T) {
 			f := newClearQueueFixture(t)
 			// Establish external changes without a client, then register one.
@@ -410,7 +409,7 @@ func TestClearQueueRespectsKnownSynchronizationBlock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if mode == sessions.SyncConflict {
+			if mode == agent.SyncConflict {
 				_, err = file.WriteString(`{"type":`)
 			} else {
 				err = json.NewEncoder(file).Encode(map[string]any{"type": "message", "id": "external", "parentId": nil, "message": map[string]any{"role": "user", "content": "external"}})

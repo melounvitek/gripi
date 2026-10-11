@@ -67,7 +67,7 @@ func (adapter *Adapter) Store() agent.Store {
 // Guard keeps the gateway's Pi and Pi CLI from both writing a session file. It restores what the previous run
 // knew about the files, so it must be called only once.
 func (adapter *Adapter) Guard(clients *agent.Registry) (agent.Guard, error) {
-	synchronizer := sessionfile.NewSynchronizer(adapter.store.Root, adapter.store.Home, adapter.store.Cache, clients)
+	synchronizer := sessionfile.NewSynchronizer(clients)
 	if adapter.stateDir != "" {
 		synchronizer.RestoreBaselines(filepath.Join(adapter.stateDir, "session-baselines.json"))
 		if err := synchronizer.PersistExternalFollow(filepath.Join(adapter.stateDir, "external-sessions.json")); err != nil {

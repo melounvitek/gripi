@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 // savedCacheVersion must change whenever the metadata derived from a session
@@ -18,7 +20,7 @@ type savedCache struct {
 
 type savedCacheItem struct {
 	Path    string
-	Session *Session
+	Session *agent.Session
 	Device  uint64
 	Inode   uint64
 	Size    int64

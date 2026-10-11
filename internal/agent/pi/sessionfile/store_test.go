@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 func TestWindowIndexesLargeNativeEntriesWithoutMaterializingThemIntoTheConversation(t *testing.T) {
@@ -1325,7 +1327,7 @@ func TestSessionMetadataCacheIsBounded(t *testing.T) {
 	cache := NewCache()
 	for number := 0; number < 10_000; number++ {
 		path := fmt.Sprintf("/sessions/session-%05d.jsonl", number)
-		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), session: &Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
+		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), session: &agent.Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
 		cache.mu.Lock()
 		cache.cacheSessionMetadataLocked(path, indexed)
 		cache.mu.Unlock()
@@ -1339,7 +1341,7 @@ func TestSessionMetadataCacheIsBounded(t *testing.T) {
 
 	for number := 10_000; number <= maxMetadataCacheEntries; number++ {
 		path := fmt.Sprintf("/sessions/session-%05d.jsonl", number)
-		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), session: &Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
+		indexed := &index{path: path, device: 1, inode: uint64(number + 1), size: 100, mtime: time.Unix(1, 0), session: &agent.Session{Path: path, CWD: "/project", ID: fmt.Sprintf("session-%d", number), DisplayName: "Ordinary session"}}
 		cache.mu.Lock()
 		cache.cacheSessionMetadataLocked(path, indexed)
 		cache.mu.Unlock()
@@ -1352,7 +1354,7 @@ func TestSessionMetadataCacheIsBounded(t *testing.T) {
 	}
 
 	path := "/sessions/over-budget.jsonl"
-	indexed := &index{path: path, device: 1, inode: 99_999, size: 100, mtime: time.Unix(1, 0), session: &Session{Path: path, CWD: "/project", DisplayName: strings.Repeat("x", maxMetadataCacheBytes)}}
+	indexed := &index{path: path, device: 1, inode: 99_999, size: 100, mtime: time.Unix(1, 0), session: &agent.Session{Path: path, CWD: "/project", DisplayName: strings.Repeat("x", maxMetadataCacheBytes)}}
 	cache.mu.Lock()
 	cache.cacheSessionMetadataLocked(path, indexed)
 	_, cached := cache.metadataItems[path]
@@ -1365,7 +1367,7 @@ func TestSessionMetadataCacheIsBounded(t *testing.T) {
 func TestMetadataIsCachedWhenTheConversationIndexExceedsItsCacheBudget(t *testing.T) {
 	cache := NewCache()
 	path := "/sessions/large-index.jsonl"
-	indexed := &index{path: path, device: 1, inode: 2, size: 100, mtime: time.Unix(1, 0), bytes: maxCacheBytes + 1, session: &Session{Path: path, CWD: "/project", DisplayName: "Large conversation"}}
+	indexed := &index{path: path, device: 1, inode: 2, size: 100, mtime: time.Unix(1, 0), bytes: maxCacheBytes + 1, session: &agent.Session{Path: path, CWD: "/project", DisplayName: "Large conversation"}}
 	cache.cacheBuiltIndex(path, indexed)
 	cache.mu.Lock()
 	metadata := cache.metadataItems[path]
@@ -1384,7 +1386,7 @@ func TestSessionMetadataCacheDetachesRetainedStrings(t *testing.T) {
 	largeResponse := strings.Repeat("x", MaxIndexedEntryBytes)
 	indexed := &index{
 		path: "/sessions/detached.jsonl", device: 1, inode: 2, size: 100, mtime: time.Unix(1, 0),
-		session: &Session{DisplayName: strings.TrimSpace(paddedName), LatestAssistantResponsePreview: largeResponse[len(largeResponse)-16:]},
+		session: &agent.Session{DisplayName: strings.TrimSpace(paddedName), LatestAssistantResponsePreview: largeResponse[len(largeResponse)-16:]},
 	}
 	cached := sessionFromIndex(indexed)
 	if cached == nil || cached.DisplayName != "name" || cached.LatestAssistantResponsePreview != strings.Repeat("x", 16) {

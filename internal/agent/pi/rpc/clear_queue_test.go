@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 type clearQueueResult struct {
@@ -245,7 +247,7 @@ func TestClearQueueRefreshesExpiredCompactionFlush(t *testing.T) {
 				if scenario.clearOutcome == "timeout" {
 					time.Sleep(time.Second)
 					synctest.Wait()
-					var timeout *RequestTimeoutError
+					var timeout *agent.RequestTimeoutError
 					if got := awaitClearQueue(t, result); !errors.As(got.err, &timeout) || !timeout.Accepted {
 						t.Fatalf("clear timeout = %#v, %v", got.response, got.err)
 					}
@@ -346,7 +348,7 @@ func TestClearQueueWaitIsCancellableAndBounded(t *testing.T) {
 					t.Fatalf("cancelled wait = %v", got.err)
 				}
 			} else {
-				var timeout *RequestTimeoutError
+				var timeout *agent.RequestTimeoutError
 				if !errors.As(got.err, &timeout) || timeout.Command != "clear_queue" || timeout.Accepted {
 					t.Fatalf("queue gate timeout = %v", got.err)
 				}
@@ -383,7 +385,7 @@ func TestClearQueuePreservesNativeFailureAndTimeout(t *testing.T) {
 					t.Fatalf("failure = %#v, %v", got.response, got.err)
 				}
 			} else {
-				var timeout *RequestTimeoutError
+				var timeout *agent.RequestTimeoutError
 				if !errors.As(got.err, &timeout) || timeout.Command != "clear_queue" || !timeout.Accepted {
 					t.Fatalf("timeout = %v", got.err)
 				}

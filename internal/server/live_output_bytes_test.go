@@ -31,7 +31,7 @@ func TestLiveOutputAndEventsKeepTheirBytes(t *testing.T) {
 		sessionStore:    NewPiStore(root, root),
 		rpcClients:      registry,
 		pendingSessions: agent.NewPendingSessionRegistry(nil),
-		guard:           sessionfile.NewSynchronizer(root, root, nil, registry),
+		guard:           sessionfile.NewSynchronizer(registry),
 	}
 	started := time.Date(2026, 1, 2, 3, 4, 5, 6_000_000, time.UTC)
 	clock := func() time.Time { return started }

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 func completionState(t *testing.T) *GatewayState {
@@ -80,7 +82,7 @@ func TestMalformedCompletionsAreNotRewritten(t *testing.T) {
 	if _, err := state.Complete("session", Completion{ID: "reply"}); err == nil {
 		t.Fatal("complete accepted malformed state")
 	}
-	if _, _, err := state.ReadAndObserve([]*Session{{Path: "session", AssistantResponseCount: 1}}, nil, false, nil); err == nil {
+	if _, _, err := state.ReadAndObserve([]*agent.Session{{Path: "session", AssistantResponseCount: 1}}, nil, false, nil); err == nil {
 		t.Fatal("sidebar accepted malformed state")
 	}
 	contents, err := os.ReadFile(state.completionsPath)
@@ -103,8 +105,8 @@ func TestCompletionBoundaryPreservesExternalTakeoverReadCount(t *testing.T) {
 	if err := state.BeginCompletion("session", 4); err != nil {
 		t.Fatal(err)
 	}
-	session := &Session{Path: "session", AssistantResponseCount: 5}
-	unread, _, err := state.ReadAndObserve([]*Session{session}, nil, false, nil)
+	session := &agent.Session{Path: "session", AssistantResponseCount: 5}
+	unread, _, err := state.ReadAndObserve([]*agent.Session{session}, nil, false, nil)
 	if err != nil || unread[session.Path] {
 		t.Fatalf("progress after takeover unread=%v, %v", unread, err)
 	}
@@ -114,7 +116,7 @@ func TestCompletionBoundaryPreservesExternalTakeoverReadCount(t *testing.T) {
 	if _, err := state.Complete("session", Completion{ID: "new", ResponseCount: 5}); err != nil {
 		t.Fatal(err)
 	}
-	unread, _, err = state.ReadAndObserve([]*Session{session}, nil, false, nil)
+	unread, _, err = state.ReadAndObserve([]*agent.Session{session}, nil, false, nil)
 	if err != nil || !unread[session.Path] {
 		t.Fatalf("settled after takeover unread=%v, %v", unread, err)
 	}

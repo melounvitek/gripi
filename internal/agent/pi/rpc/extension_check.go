@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 // CheckExtension starts Pi with the gateway's extension and reports why the
@@ -47,7 +49,7 @@ func CheckExtension(ctx context.Context, command []string, extension []byte) err
 		return err
 	}
 	if err := process.Start(); err != nil {
-		return fmt.Errorf("%w: %w", ErrStartFailed, err)
+		return fmt.Errorf("%w: %w", agent.ErrStartFailed, err)
 	}
 	// Pi shuts down when its input ends, without finishing the request, so the input stays open until it answers.
 	_, _ = io.WriteString(stdin, `{"id":"check","type":"get_commands"}`+"\n")

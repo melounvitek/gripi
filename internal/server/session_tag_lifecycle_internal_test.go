@@ -147,7 +147,7 @@ func TestBackgroundCompletionDoesNotMigrateTagsAfterConcurrentBranch(t *testing.
 			parent := filepath.Join(root, "pending.jsonl")
 			app := notificationTestApplication(t, root, false, true, &recordingPushNotifier{})
 			app.config.AttachmentsRoot = filepath.Join(root, "attachments")
-			app.guard = sessionfile.NewSynchronizer(root, root, nil, app.rpcClients)
+			app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 			client := &branchCompletionClient{remapClient: &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": child}}}, observed: make(chan struct{}), branched: make(chan struct{})}
 			if err := app.rpcClients.Register(parent, client); err != nil {
 				t.Fatal(err)

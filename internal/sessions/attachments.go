@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 const attachmentMatchWindow = 5 * time.Minute
@@ -27,7 +29,7 @@ type Attachment struct {
 
 type AttachmentMatch struct {
 	Count  int
-	Images []Image
+	Images []agent.Image
 }
 
 type AttachmentStore struct {
@@ -240,9 +242,9 @@ func replaceFile(path string, contents []byte) error {
 	return os.Rename(temporaryPath, path)
 }
 
-func (store AttachmentStore) Match(sessionPath string, messages []*Message) map[*Message]AttachmentMatch {
+func (store AttachmentStore) Match(sessionPath string, messages []*agent.Message) map[*agent.Message]AttachmentMatch {
 	attachments := store.read(sessionPath)
-	matches := make(map[*Message]AttachmentMatch)
+	matches := make(map[*agent.Message]AttachmentMatch)
 	used := make(map[int]bool)
 	for _, message := range messages {
 		if message.Role != "user" {
@@ -285,7 +287,7 @@ func (store AttachmentStore) Match(sessionPath string, messages []*Message) map[
 			if err != nil || relative == ".." || len(relative) >= 3 && relative[:3] == ".."+string(filepath.Separator) {
 				continue
 			}
-			match.Images = append(match.Images, Image{Src: "/attachments/" + filepath.ToSlash(relative), MIMEType: mimeType})
+			match.Images = append(match.Images, agent.Image{Src: "/attachments/" + filepath.ToSlash(relative), MIMEType: mimeType})
 		}
 		matches[message] = match
 	}

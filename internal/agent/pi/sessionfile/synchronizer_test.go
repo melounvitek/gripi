@@ -17,7 +17,7 @@ import (
 )
 
 func TestSynchronizerExclusiveOperationRejectsConcurrentMutation(t *testing.T) {
-	synchronizer := NewSynchronizer(t.TempDir(), t.TempDir(), NewCache(), nil)
+	synchronizer := NewSynchronizer(nil)
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan error, 1)
@@ -31,7 +31,7 @@ func TestSynchronizerExclusiveOperationRejectsConcurrentMutation(t *testing.T) {
 	<-entered
 
 	err := synchronizer.WithExclusiveOperation("session", func() error { return nil })
-	if !errors.Is(err, ErrSyncBusy) {
+	if !errors.Is(err, agent.ErrSyncBusy) {
 		t.Fatalf("concurrent operation error = %v", err)
 	}
 	close(release)
@@ -41,7 +41,7 @@ func TestSynchronizerExclusiveOperationRejectsConcurrentMutation(t *testing.T) {
 }
 
 func TestSynchronizerReconcilesRPCAppendAndDetectsForeignEntries(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
@@ -49,8 +49,8 @@ func TestSynchronizerReconcilesRPCAppendAndDetectsForeignEntries(t *testing.T) {
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
-	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncManaged {
+	synchronizer := NewSynchronizer(registry)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncManaged {
 		t.Fatalf("initial result = %#v", result)
 	}
 
@@ -58,7 +58,7 @@ func TestSynchronizerReconcilesRPCAppendAndDetectsForeignEntries(t *testing.T) {
 	client.mu.Lock()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "gateway", Entries: []map[string]any{{"id": "gateway"}}}
 	client.mu.Unlock()
-	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncManaged || result.RPCLeafID != "gateway" {
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncManaged || result.RPCLeafID != "gateway" {
 		t.Fatalf("gateway append = %#v", result)
 	}
 
@@ -68,13 +68,13 @@ func TestSynchronizerReconcilesRPCAppendAndDetectsForeignEntries(t *testing.T) {
 	client.positions["gateway"] = rpc.SessionEntries{Known: true, LeafID: "known-tail", Entries: []map[string]any{{"id": "known-tail"}}}
 	client.mu.Unlock()
 	result := inspectSync(t, synchronizer, path, false)
-	if result.Mode != SyncExternalFollow || !client.closedValue() {
+	if result.Mode != agent.SyncExternalFollow || !client.closedValue() {
 		t.Fatalf("foreign append = %#v, closed=%v", result, client.closedValue())
 	}
 }
 
 func TestRetireManagedClientPreservesExternalFollowState(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
@@ -82,25 +82,25 @@ func TestRetireManagedClientPreservesExternalFollowState(t *testing.T) {
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
-	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncManaged {
+	synchronizer := NewSynchronizer(registry)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncManaged {
 		t.Fatalf("initial result = %#v", result)
 	}
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "external", "parentId": "old", "message": map[string]any{"role": "user", "content": []any{}}})
-	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow {
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncExternalFollow {
 		t.Fatalf("external result = %#v", result)
 	}
 
 	retired, err := synchronizer.RetireManagedClientIfAvailable(path, func() (bool, error) { return true, nil })
 
 	blocked := synchronizer.KnownBlocked(path)
-	if err != nil || !retired || blocked == nil || blocked.Mode != SyncExternalFollow {
+	if err != nil || !retired || blocked == nil || blocked.Mode != agent.SyncExternalFollow {
 		t.Fatalf("retired=%v blocked=%#v err=%v", retired, blocked, err)
 	}
 }
 
 func TestRetireManagedClientDoesNotWaitForAnotherSessionOperation(t *testing.T) {
-	synchronizer := NewSynchronizer(t.TempDir(), "", NewCache(), agent.NewRegistry(nil, nil))
+	synchronizer := NewSynchronizer(agent.NewRegistry(nil, nil))
 	unlock := synchronizer.locks.Lock("/session")
 	defer unlock()
 	called := false
@@ -116,9 +116,9 @@ func TestRetireManagedClientDoesNotWaitForAnotherSessionOperation(t *testing.T) 
 }
 
 func TestFileSnapshotStreamsLargeFinalEntryMetadata(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "large", "parentId": nil, "message": map[string]any{"role": "toolResult", "toolCallId": "tool", "toolName": "read", "content": []any{map[string]any{"type": "text", "text": strings.Repeat("x", 1<<20)}}}})
-	snapshot, err := (Store{Root: root, Cache: NewCache()}).FileSnapshot(path)
+	snapshot, err := readFileSnapshot(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,20 +128,19 @@ func TestFileSnapshotStreamsLargeFinalEntryMetadata(t *testing.T) {
 }
 
 func TestAppendedEntryIDsIncludeLargeEntriesTheIndexScannerRejects(t *testing.T) {
-	root, path := synchronizerSession(t)
-	store := Store{Root: root, Cache: NewCache()}
-	previous, err := store.FileSnapshot(path)
+	path := synchronizerSession(t)
+	previous, err := readFileSnapshot(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "large", "parentId": nil, "message": map[string]any{"role": "toolResult", "toolCallId": "tool", "toolName": "read", "content": []any{map[string]any{"type": "text", "text": strings.Repeat("x", 1<<20)}}, "unknownKey": true}})
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "after", "parentId": "large", "message": map[string]any{"role": "user", "content": "Next"}})
-	current, err := store.FileSnapshot(path)
+	current, err := readFileSnapshot(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	ids, err := store.AppendedEntryIDs(path, previous, current)
+	ids, err := appendedEntryIDs(path, previous, current)
 	if err != nil || strings.Join(ids, ",") != "large,after" {
 		t.Fatalf("ids = %v, err = %v", ids, err)
 	}
@@ -155,28 +154,28 @@ func BenchmarkSynchronizerInspectUnchangedLargeTail(b *testing.B) {
 	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 		b.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), agent.NewRegistry(nil, nil))
+	synchronizer := NewSynchronizer(agent.NewRegistry(nil, nil))
 	if _, err := synchronizer.Inspect(context.Background(), path, false); err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		if result := synchronizer.InspectIfAvailable(context.Background(), path, false); result == nil || result.Mode != SyncAvailable {
+		if result := synchronizer.InspectIfAvailable(context.Background(), path, false); result == nil || result.Mode != agent.SyncAvailable {
 			b.Fatalf("inspection = %#v", result)
 		}
 	}
 }
 
 func TestSynchronizerChecksRPCPositionWhenFileIsUnchanged(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	client := newSyncClient()
 	client.positions[""] = rpc.SessionEntries{Known: true, LeafID: "first"}
 	registry := agent.NewRegistry(nil, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+	synchronizer := NewSynchronizer(registry)
 	if result := inspectSync(t, synchronizer, path, true); result.RPCLeafID != "first" {
 		t.Fatalf("initial position = %#v", result)
 	}
@@ -187,8 +186,8 @@ func TestSynchronizerChecksRPCPositionWhenFileIsUnchanged(t *testing.T) {
 }
 
 func TestSynchronizerRejectsReplacementWithMatchingSizeAndMtime(t *testing.T) {
-	root, path := synchronizerSession(t)
-	synchronizer := NewSynchronizer(root, "", NewCache(), agent.NewRegistry(nil, nil))
+	path := synchronizerSession(t)
+	synchronizer := NewSynchronizer(agent.NewRegistry(nil, nil))
 	_ = inspectSync(t, synchronizer, path, false)
 	info, err := os.Stat(path)
 	if err != nil {
@@ -208,13 +207,13 @@ func TestSynchronizerRejectsReplacementWithMatchingSizeAndMtime(t *testing.T) {
 	if err := os.Rename(replacement, path); err != nil {
 		t.Fatal(err)
 	}
-	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncConflict {
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncConflict {
 		t.Fatalf("replacement was not detected: %#v", result)
 	}
 }
 
 func TestSynchronizerRejectsSameSizeInPlaceRewrite(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
@@ -222,7 +221,7 @@ func TestSynchronizerRejectsSameSizeInPlaceRewrite(t *testing.T) {
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+	synchronizer := NewSynchronizer(registry)
 	_ = inspectSync(t, synchronizer, path, false)
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -236,13 +235,13 @@ func TestSynchronizerRejectsSameSizeInPlaceRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := inspectSync(t, synchronizer, path, false)
-	if result.Mode != SyncConflict || !strings.Contains(result.Error, "without an append") {
+	if result.Mode != agent.SyncConflict || !strings.Contains(result.Error, "without an append") {
 		t.Fatalf("result = %#v", result)
 	}
 }
 
 func TestSynchronizerFailsClosedForAppendedEntryWithoutID(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
@@ -250,7 +249,7 @@ func TestSynchronizerFailsClosedForAppendedEntryWithoutID(t *testing.T) {
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+	synchronizer := NewSynchronizer(registry)
 	_ = inspectSync(t, synchronizer, path, false)
 	appendSyncEntry(t, path, map[string]any{"type": "custom"})
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "gateway", "parentId": "old", "message": map[string]any{"role": "assistant", "content": []any{}}})
@@ -258,13 +257,13 @@ func TestSynchronizerFailsClosedForAppendedEntryWithoutID(t *testing.T) {
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "gateway", Entries: []map[string]any{{"id": "gateway"}}}
 	client.mu.Unlock()
 	result := inspectSync(t, synchronizer, path, false)
-	if result.Mode != SyncConflict || !strings.Contains(result.Error, "missing a string id") {
+	if result.Mode != agent.SyncConflict || !strings.Contains(result.Error, "missing a string id") {
 		t.Fatalf("result = %#v", result)
 	}
 }
 
 func TestSynchronizerTakeoverDetectsConcurrentPiCLIWrite(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "external", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	stale := newSyncClient()
 	stale.positions["external"] = rpc.SessionEntries{Known: false}
@@ -277,13 +276,13 @@ func TestSynchronizerTakeoverDetectsConcurrentPiCLIWrite(t *testing.T) {
 	if err := registry.Register(path, stale); err != nil {
 		t.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
-	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow {
+	synchronizer := NewSynchronizer(registry)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncExternalFollow {
 		t.Fatalf("stale result = %#v", result)
 	}
 	_, err := synchronizer.TakeOver(context.Background(), path, nil)
-	var blocked *SyncBlockedError
-	if !errors.As(err, &blocked) || blocked.Mode != SyncExternalFollow {
+	var blocked *agent.SyncBlockedError
+	if !errors.As(err, &blocked) || blocked.Mode != agent.SyncExternalFollow {
 		t.Fatalf("takeover error = %v", err)
 	}
 	if !fresh.closedValue() {
@@ -304,7 +303,7 @@ func TestSynchronizerKeepsFollowingExternalSessionAcrossRestarts(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			root, path := synchronizerSession(t)
+			path := synchronizerSession(t)
 			appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 			client := newSyncClient()
 			client.positions["pi-cli"] = rpc.SessionEntries{Known: true, LeafID: "pi-cli"}
@@ -312,7 +311,7 @@ func TestSynchronizerKeepsFollowingExternalSessionAcrossRestarts(t *testing.T) {
 			statePath := filepath.Join(t.TempDir(), "external-sessions.json")
 			restart := func() *Synchronizer {
 				t.Helper()
-				synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+				synchronizer := NewSynchronizer(registry)
 				if err := synchronizer.PersistExternalFollow(statePath); err != nil {
 					t.Fatal(err)
 				}
@@ -322,16 +321,16 @@ func TestSynchronizerKeepsFollowingExternalSessionAcrossRestarts(t *testing.T) {
 			synchronizer := restart()
 			inspectSync(t, synchronizer, path, false)
 			appendSyncEntry(t, path, map[string]any{"type": "message", "id": "pi-cli", "parentId": "old", "message": map[string]any{"role": "assistant", "content": []any{}}})
-			if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow {
+			if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncExternalFollow {
 				t.Fatalf("Pi CLI append = %#v", result)
 			}
 
 			synchronizer = restart()
 			// Sending must stay paused even before anything looks at the session file again.
-			if blocked := synchronizer.KnownBlocked(path); blocked == nil || blocked.Mode != SyncExternalFollow {
+			if blocked := synchronizer.KnownBlocked(path); blocked == nil || blocked.Mode != agent.SyncExternalFollow {
 				t.Fatalf("restart forgot that Pi CLI is using the session: %#v", blocked)
 			}
-			if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow || result.PersistedLeafID != "pi-cli" {
+			if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncExternalFollow || result.PersistedLeafID != "pi-cli" {
 				t.Fatalf("inspection after restart = %#v", result)
 			}
 
@@ -346,12 +345,12 @@ func TestSynchronizerKeepsFollowingExternalSessionAcrossRestarts(t *testing.T) {
 }
 
 func TestSynchronizerKeepsFollowingExternalSessionAcrossRestartAfterConflict(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	statePath := filepath.Join(t.TempDir(), "external-sessions.json")
 	restart := func() *Synchronizer {
 		t.Helper()
-		synchronizer := NewSynchronizer(root, "", NewCache(), agent.NewRegistry(nil, nil))
+		synchronizer := NewSynchronizer(agent.NewRegistry(nil, nil))
 		if err := synchronizer.PersistExternalFollow(statePath); err != nil {
 			t.Fatal(err)
 		}
@@ -372,26 +371,26 @@ func TestSynchronizerKeepsFollowingExternalSessionAcrossRestartAfterConflict(t *
 	synchronizer := restart()
 	inspectSync(t, synchronizer, path, false)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "pi-cli", "parentId": "old", "message": map[string]any{"role": "assistant", "content": []any{}}})
-	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncExternalFollow {
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncExternalFollow {
 		t.Fatalf("Pi CLI append = %#v", result)
 	}
 	// The gateway looks at the file while Pi CLI is halfway through its next entry.
 	writeTail(`{"type":"message","id":"later","parentId":"pi-cli",`)
-	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncConflict {
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncConflict {
 		t.Fatalf("half-written entry = %#v", result)
 	}
 	writeTail(`"message":{"role":"user","content":[]}}` + "\n")
 
-	if result := inspectSync(t, restart(), path, false); result.Mode != SyncExternalFollow {
+	if result := inspectSync(t, restart(), path, false); result.Mode != agent.SyncExternalFollow {
 		t.Fatalf("restart handed a session Pi CLI is using back to the gateway: %#v", result)
 	}
 }
 
 func TestSynchronizerDropsBaselineOfFileWithAnotherIdentity(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	baselinesPath := filepath.Join(t.TempDir(), "session-baselines.json")
 	restart := func() *Synchronizer {
-		synchronizer := NewSynchronizer(root, "", NewCache(), agent.NewRegistry(nil, nil))
+		synchronizer := NewSynchronizer(agent.NewRegistry(nil, nil))
 		synchronizer.RestoreBaselines(baselinesPath)
 		return synchronizer
 	}
@@ -412,13 +411,13 @@ func TestSynchronizerDropsBaselineOfFileWithAnotherIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result := inspectSync(t, restart(), path, false); result.Mode != SyncAvailable {
+	if result := inspectSync(t, restart(), path, false); result.Mode != agent.SyncAvailable {
 		t.Fatalf("unchanged session after a restart = %#v", result)
 	}
 }
 
 func TestSynchronizerDoesNotTakeItsOwnPiForPiCLIWhileShuttingDown(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
@@ -426,8 +425,8 @@ func TestSynchronizerDoesNotTakeItsOwnPiForPiCLIWhileShuttingDown(t *testing.T) 
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
-	if result := inspectSync(t, synchronizer, path, false); result.Mode != SyncManaged {
+	synchronizer := NewSynchronizer(registry)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncManaged {
 		t.Fatalf("initial result = %#v", result)
 	}
 
@@ -442,7 +441,7 @@ func TestSynchronizerDoesNotTakeItsOwnPiForPiCLIWhileShuttingDown(t *testing.T) 
 }
 
 func TestSynchronizerDoesNotTurnRequestCancellationIntoConflict(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positionErr = context.Canceled
@@ -450,7 +449,7 @@ func TestSynchronizerDoesNotTurnRequestCancellationIntoConflict(t *testing.T) {
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+	synchronizer := NewSynchronizer(registry)
 	if _, err := synchronizer.Inspect(context.Background(), path, true); !errors.Is(err, context.Canceled) {
 		t.Fatalf("inspect error = %v", err)
 	}
@@ -463,7 +462,7 @@ func TestSynchronizerDoesNotTurnRequestCancellationIntoConflict(t *testing.T) {
 }
 
 func TestSynchronizerLifecycleIsSafeDuringConcurrentObservation(t *testing.T) {
-	root, path := synchronizerSession(t)
+	path := synchronizerSession(t)
 	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
 	client := newSyncClient()
 	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
@@ -471,7 +470,7 @@ func TestSynchronizerLifecycleIsSafeDuringConcurrentObservation(t *testing.T) {
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	synchronizer := NewSynchronizer(root, "", NewCache(), registry)
+	synchronizer := NewSynchronizer(registry)
 	const workers = 12
 	var group sync.WaitGroup
 	for worker := 0; worker < workers; worker++ {
@@ -491,7 +490,7 @@ func TestSynchronizerLifecycleIsSafeDuringConcurrentObservation(t *testing.T) {
 		t.Fatalf("session lock entries after concurrent observation = %d", synchronizer.locks.Len())
 	}
 	result := inspectSync(t, synchronizer, path, true)
-	if result.Mode != SyncManaged {
+	if result.Mode != agent.SyncManaged {
 		t.Fatalf("final result = %#v", result)
 	}
 	if synchronizer.locks.Len() != 0 {
@@ -502,7 +501,7 @@ func TestSynchronizerLifecycleIsSafeDuringConcurrentObservation(t *testing.T) {
 	}
 }
 
-func inspectSync(t *testing.T, synchronizer *Synchronizer, path string, includePosition bool) SyncResult {
+func inspectSync(t *testing.T, synchronizer *Synchronizer, path string, includePosition bool) agent.SyncResult {
 	t.Helper()
 	result, err := synchronizer.Inspect(context.Background(), path, includePosition)
 	if err != nil {
@@ -511,7 +510,7 @@ func inspectSync(t *testing.T, synchronizer *Synchronizer, path string, includeP
 	return result
 }
 
-func synchronizerSession(t *testing.T) (string, string) {
+func synchronizerSession(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
@@ -520,7 +519,7 @@ func synchronizerSession(t *testing.T) (string, string) {
 	}
 	path := filepath.Join(root, "session.jsonl")
 	appendSyncEntry(t, path, map[string]any{"type": "session", "version": 3, "id": "session", "cwd": project})
-	return root, path
+	return path
 }
 func appendSyncEntry(t *testing.T, path string, entry map[string]any) {
 	t.Helper()

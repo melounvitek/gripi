@@ -17,7 +17,6 @@ import (
 	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/rendering"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestUnopenedExternalSessionIsReadAcrossPageAndSidebarViews(t *testing.T) {
@@ -108,7 +107,7 @@ func TestSidebarResolvesOwnedPendingAliasesBeforeObservingDiskSessions(t *testin
 			pending := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
 			now := time.Now()
 			app.rpcClients = agent.NewRegistry(nil, func() time.Time { return now })
-			app.guard = sessionfile.NewSynchronizer(app.config.SessionsRoot, app.config.Home, nil, app.rpcClients)
+			app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 			app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 			if err := app.rpcClients.Register(pending, client); err != nil {
 				t.Fatal(err)
@@ -352,7 +351,7 @@ func TestTakeoverReadStateFailureKeepsExternalFollow(t *testing.T) {
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("takeover with broken read state = %d", response.Code)
 	}
-	if state := app.guard.KnownBlocked(path); state == nil || state.Mode != sessions.SyncExternalFollow {
+	if state := app.guard.KnownBlocked(path); state == nil || state.Mode != agent.SyncExternalFollow {
 		t.Fatalf("failed takeover enabled the session: %#v", state)
 	}
 }
@@ -364,7 +363,7 @@ func externalSessionTestApplication(t *testing.T) (*application, string, *remapC
 	app := notificationTestApplication(t, root, false, true, &recordingPushNotifier{})
 	client := &remapClient{}
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
-	app.guard = sessionfile.NewSynchronizer(root, root, nil, app.rpcClients)
+	app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 	var err error
 	app.templates, err = template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
 	if err != nil {

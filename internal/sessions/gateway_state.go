@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 type GatewayState struct {
@@ -43,14 +45,14 @@ func NewGatewayState(readPath, pinnedPath, tagsPath string, keys SessionKeys) *G
 	return &GatewayState{readPath: readPath, completionsPath: filepath.Join(filepath.Dir(readPath), "completions.json"), projectsPath: filepath.Join(filepath.Dir(readPath), "projects.json"), projectChanges: make(map[string]uint64), pinnedPath: pinnedPath, tagsPath: tagsPath, keys: keys, externalResponseCounts: make(map[string]int)}
 }
 
-func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool, externalFollow map[string]bool) (map[string]bool, map[string]bool, error) {
+func (state *GatewayState) ReadAndObserve(all []*agent.Session, selected *agent.Session, markSelected bool, externalFollow map[string]bool) (map[string]bool, map[string]bool, error) {
 	return state.ReadAndObservePending(all, selected, markSelected, externalFollow, nil)
 }
 
 // ReadAndObservePending leaves newly discovered rows unobserved until an owned
 // pending client in their CWD can be identified and its completion boundary moved.
 // Existing read state is still observed, preserving older unread replies.
-func (state *GatewayState) ReadAndObservePending(all []*Session, selected *Session, markSelected bool, externalFollow, pendingCWDs map[string]bool) (map[string]bool, map[string]bool, error) {
+func (state *GatewayState) ReadAndObservePending(all []*agent.Session, selected *agent.Session, markSelected bool, externalFollow, pendingCWDs map[string]bool) (map[string]bool, map[string]bool, error) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	counts := map[string]int{}
