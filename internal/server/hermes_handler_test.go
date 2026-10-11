@@ -347,8 +347,8 @@ func TestAnImageHermesSharesShowsInPlaceOfItsTag(t *testing.T) {
 		"sessionId": "hermes-shot", "cwd": t.TempDir(), "title": "Screenshot the page", "updatedAt": "2026-03-01T10:00:00Z",
 		"history": []any{
 			textUpdate("user_message_chunk", "Screenshot the page"),
-			reply("reply-1", "Here it is: `"+tag+"`\n\nYou can share one too:\n````\n```\n"+tag+"\n```\n````\n\nMy notes: MEDIA:"+notImage+"\n\nA pipe: MEDIA:"+pipe),
-			reply("reply-2", tag),
+			reply("reply-1", "```shot```\n\nHere it is: `"+tag+"`\n\nYou can share one too:\n````\n```\n"+tag+"\n```\n````\n\nMy notes: MEDIA:"+notImage+"\n\nA pipe: MEDIA:"+pipe),
+			reply("reply-2", "```"+tag+"```"),
 		},
 	})
 

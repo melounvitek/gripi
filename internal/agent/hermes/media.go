@@ -32,12 +32,15 @@ func mediaImages(text string) (string, []mediaImage) {
 	fence := ""
 	for index, line := range lines {
 		if match := codeFence.FindStringSubmatch(strings.TrimRight(line, "\r\n")); match != nil {
-			if fence == "" {
+			// A line of backticks with another one after them is inline code, not a fence.
+			if fence == "" && !(match[1][0] == '`' && strings.Contains(match[2], "`")) {
 				fence = match[1]
-			} else if match[1][0] == fence[0] && len(match[1]) >= len(fence) && strings.TrimSpace(match[2]) == "" {
-				fence = ""
+				continue
 			}
-			continue
+			if fence != "" && match[1][0] == fence[0] && len(match[1]) >= len(fence) && strings.TrimSpace(match[2]) == "" {
+				fence = ""
+				continue
+			}
 		}
 		if fence != "" || strings.HasPrefix(strings.TrimSpace(line), ">") {
 			continue
