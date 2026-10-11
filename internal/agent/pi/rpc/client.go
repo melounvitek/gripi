@@ -1542,7 +1542,7 @@ func boundedExtensionUIEvent(response map[string]any) map[string]any {
 			result[key] = boundedText(value, limit)
 		}
 	}
-	for _, key := range []string{"id", "statusKey", "widgetKey"} {
+	for _, key := range []string{"id", "statusKey", "widgetKey", "widgetPlacement"} {
 		copyString(key, 512)
 	}
 	for _, key := range []string{"title", "message", "placeholder", "value", "statusText"} {

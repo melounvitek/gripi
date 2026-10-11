@@ -1370,12 +1370,15 @@ func TestClientSnapshotsAndAnswersExtensionUIState(t *testing.T) {
 	writeRecord(t, stdoutWriter, map[string]any{"type": "queue_update", "steering": []any{"adjust"}, "followUp": []any{"next"}})
 	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "id": "confirm-1", "method": "confirm", "title": "Approve?", "timeout": 10000})
 	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setStatus", "statusKey": "release", "statusText": "waiting"})
-	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setWidget", "widgetKey": "release", "widgetLines": []any{"one"}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setWidget", "widgetKey": "release", "widgetLines": []any{"one"}, "widgetPlacement": "belowEditor"})
 	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setTitle", "title": "Release"})
 	waitSequence(t, client, 5)
 	snapshot := client.LiveSnapshot()
 	if snapshot.QueuedMessages["steering"][0] != "adjust" || snapshot.ExtensionUI == nil {
 		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if widgets := snapshot.ExtensionUI["widgets"].([]map[string]any); len(widgets) != 1 || widgets[0]["widgetPlacement"] != "belowEditor" {
+		t.Fatalf("widgets = %#v", widgets)
 	}
 	pending, _ := snapshot.ExtensionUI["pending_dialogs"].([]map[string]any)
 	if len(pending) != 1 || pending[0]["id"] != "confirm-1" {
