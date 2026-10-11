@@ -3,11 +3,18 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/config"
+	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
 // answeringPi is a configured Pi that passes gripi check.
@@ -35,6 +42,43 @@ func fakeHermes(t *testing.T) string {
 	t.Setenv("GRIPI_HERMES", filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_hermes.mjs"))
 	t.Setenv("FAKE_HERMES_LOG", log)
 	return log
+}
+
+// fakeHermesSession is a session saved in the fake Hermes's state, as session/list reports it.
+type fakeHermesSession struct {
+	SessionID string `json:"sessionId"`
+	CWD       string `json:"cwd"`
+	Title     string `json:"title"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+// hermesGateway runs fakePiGateway's gateway with the fake Hermes enabled, which has saved the given sessions.
+func hermesGateway(t *testing.T, sessions ...fakeHermesSession) (alpha, beta string) {
+	t.Helper()
+	fakeHermes(t)
+	state := filepath.Join(t.TempDir(), "hermes-state.json")
+	encoded, err := json.Marshal(map[string]any{"sessions": sessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(state, encoded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_HERMES_STATE", state)
+	return fakePiGateway(t, func(cfg *config.Config) { cfg.HermesPath = os.Getenv("GRIPI_HERMES") })
+}
+
+func listedSessions(t *testing.T) []gateway.LocalSession {
+	t.Helper()
+	code, stdout, stderr := runCLI("list", "--all", "--json")
+	if code != 0 {
+		t.Fatalf("gripi list = %d, stderr %q", code, stderr)
+	}
+	var sessions []gateway.LocalSession
+	if err := json.Unmarshal([]byte(stdout), &sessions); err != nil {
+		t.Fatal(err)
+	}
+	return sessions
 }
 
 // configuredHermes makes a shell script the gateway's Hermes.
@@ -143,5 +187,56 @@ func TestCheckStillChecksPiWhenHermesIsConfigured(t *testing.T) {
 
 	if code, _, stderr := runCLI("check"); code != 1 || !strings.Contains(stderr, "Pi exited with status 3") {
 		t.Fatalf("gripi check = %d, stderr %q", code, stderr)
+	}
+}
+
+func TestTheGatewayGetsPiAloneWithoutGripiHermes(t *testing.T) {
+	adapter, err := newAdapter(config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := adapter.(*pi.Adapter); !ok {
+		t.Fatalf("adapter = %T", adapter)
+	}
+
+	adapter, err = newAdapter(config.Config{HermesPath: "/opt/hermes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := adapter.(*agent.Router); !ok {
+		t.Fatalf("adapter with Hermes = %T", adapter)
+	}
+}
+
+func TestHermesSessionsAreListedWithPisSessions(t *testing.T) {
+	project := t.TempDir()
+	var saved []fakeHermesSession
+	// More than one page of Hermes's list, all more recent than the Pi sessions.
+	for index := range 60 {
+		saved = append(saved, fakeHermesSession{SessionID: fmt.Sprintf("hermes-%02d", index), CWD: project, Title: fmt.Sprintf("Hermes session %02d", index), UpdatedAt: fmt.Sprintf("2026-03-01T10:%02d:00Z", index)})
+	}
+	alpha, _ := hermesGateway(t, saved...)
+
+	sessions := listedSessions(t)
+	if len(sessions) != 62 {
+		t.Fatalf("listed %d sessions", len(sessions))
+	}
+	newest := sessions[0]
+	if newest.Path != "hermes:hermes-59" || newest.ID != "hermes-59" || newest.Name != "Hermes session 59" || newest.CWD != project || newest.State != "idle" {
+		t.Fatalf("newest session = %+v", newest)
+	}
+	if !newest.UpdatedAt.Equal(time.Date(2026, 3, 1, 10, 59, 0, 0, time.UTC)) {
+		t.Fatalf("newest session updated at %s", newest.UpdatedAt.Time)
+	}
+	if sessions[59].Path != "hermes:hermes-00" || sessions[60].Path != filepath.Join(filepath.Dir(alpha), "beta.jsonl") || sessions[61].Path != alpha {
+		t.Fatalf("sessions are not ordered by activity: %+v", sessions[58:])
+	}
+
+	// Pi sessions still run with Pi.
+	if code, _, stderr := runCLI("send", "0a1-a", "Show the deterministic browser response"); code != 0 {
+		t.Fatalf("gripi send = %d, stderr %q", code, stderr)
+	}
+	if code, stdout, stderr := runCLI("wait", "0a1-a", "--json"); code != 0 || decodeSession(t, stdout).LastReply != "Deterministic browser response complete." {
+		t.Fatalf("gripi wait = %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }

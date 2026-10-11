@@ -134,6 +134,15 @@ func (conn *connection) finish(exit error) {
 	close(conn.exited)
 }
 
+func (conn *connection) hasExited() bool {
+	select {
+	case <-conn.exited:
+		return true
+	default:
+		return false
+	}
+}
+
 // request sends a request to Hermes and decodes its result into result, unless result is nil.
 func (conn *connection) request(ctx context.Context, method string, params, result any) error {
 	reply := make(chan message, 1)

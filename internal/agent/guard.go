@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+
+	"github.com/melounvitek/gripi/internal/keyedlock"
 )
 
 // Guard protects sessions against writers outside the gateway, such as the agent's own CLI working on a session
@@ -69,3 +71,100 @@ type SyncBlockedError struct {
 func (err *SyncBlockedError) Error() string { return err.Message }
 
 var ErrSyncBusy = errors.New("another session operation is pending")
+
+// OpenGuard is the guard of an agent whose sessions nobody else writes. It only keeps two operations from holding
+// a session at once, like the guards that also check for writers outside the gateway.
+func OpenGuard(clients *Registry) Guard {
+	return &openGuard{clients: clients}
+}
+
+type openGuard struct {
+	clients *Registry
+	locks   keyedlock.Mutexes
+}
+
+func (guard *openGuard) result(key string) *SyncResult {
+	if guard.clients.Registered(key) {
+		return &SyncResult{Mode: SyncManaged}
+	}
+	return &SyncResult{Mode: SyncAvailable}
+}
+
+func (guard *openGuard) InspectIfAvailable(_ context.Context, key string, _ bool) *SyncResult {
+	unlock, locked := guard.locks.TryLock(key)
+	if !locked {
+		return nil
+	}
+	defer unlock()
+	return guard.result(key)
+}
+
+func (guard *openGuard) ReconcileIfAvailable(_ context.Context, key string, _ bool, after func(SyncResult)) *SyncResult {
+	unlock, locked := guard.locks.TryLock(key)
+	if !locked {
+		return nil
+	}
+	defer unlock()
+	result := guard.result(key)
+	if after != nil {
+		after(*result)
+	}
+	return result
+}
+
+func (guard *openGuard) KnownBlocked(string) *SyncResult { return nil }
+
+func (guard *openGuard) Forget(string) {}
+
+func (guard *openGuard) TakeOver(_ context.Context, key string, beforeManaged func() error) (SyncResult, error) {
+	unlock := guard.locks.Lock(key)
+	defer unlock()
+	if beforeManaged != nil {
+		if err := beforeManaged(); err != nil {
+			return SyncResult{}, err
+		}
+	}
+	return SyncResult{Mode: SyncManaged}, nil
+}
+
+func (guard *openGuard) Message(SyncResult) string { return "" }
+
+func (guard *openGuard) WithExclusiveOperation(key string, call func() error) error {
+	unlock, locked := guard.locks.TryLock(key)
+	if !locked {
+		return ErrSyncBusy
+	}
+	defer unlock()
+	return call()
+}
+
+func (guard *openGuard) WithMutableClient(ctx context.Context, key string, call func(Client) error) error {
+	return guard.WithExclusiveOperation(key, func() error { return guard.clients.WithClient(ctx, key, call) })
+}
+
+func (guard *openGuard) WithInterruptClient(ctx context.Context, key string, call func(Client) error) error {
+	// A stop must reach a session that another operation holds, such as the prompt it stops.
+	return guard.clients.WithInterruptClient(ctx, key, call)
+}
+
+func (guard *openGuard) WithBashClient(ctx context.Context, key string, call func(Client) error) error {
+	return guard.clients.WithBashClient(ctx, key, call)
+}
+
+func (guard *openGuard) WithClientMove(ctx context.Context, key string, touch bool, call func(Client) (string, error), prepare func(string, string) (func() error, error), commit func(string, string)) (string, error) {
+	unlock, locked := guard.locks.TryLock(key)
+	if !locked {
+		return key, ErrSyncBusy
+	}
+	defer unlock()
+	return guard.clients.WithClientMove(ctx, key, touch, call, prepare, commit)
+}
+
+func (guard *openGuard) RetireManagedClientIfAvailable(key string, retire func() (bool, error)) (bool, error) {
+	unlock, locked := guard.locks.TryLock(key)
+	if !locked {
+		return false, nil
+	}
+	defer unlock()
+	return retire()
+}

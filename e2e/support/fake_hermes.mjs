@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Stands in for `hermes acp` in tests: answers the Agent Client Protocol on standard input and output like Hermes Agent.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 if (process.argv[2] !== "acp") {
@@ -25,8 +25,23 @@ const capabilities = process.env.FAKE_HERMES_CAPABILITIES
   ? JSON.parse(process.env.FAKE_HERMES_CAPABILITIES)
   : { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: { fork: {}, list: {}, resume: {} } };
 
+// FAKE_HERMES_STATE names a JSON file of saved sessions: {"sessions": [{"sessionId", "cwd", "title", "updatedAt"}]}.
+function savedSessions() {
+  const path = process.env.FAKE_HERMES_STATE;
+  return path && existsSync(path) ? JSON.parse(readFileSync(path, "utf8")).sessions : [];
+}
+
+const PAGE_SIZE = 50;
+
 const methods = {
-  initialize: () => ({ protocolVersion: 1, agentCapabilities: capabilities, agentInfo: { name: "hermes-agent", version: "0.0.0-fake" }, authMethods: [] })
+  initialize: () => ({ protocolVersion: 1, agentCapabilities: capabilities, agentInfo: { name: "hermes-agent", version: "0.0.0-fake" }, authMethods: [] }),
+  // Like Hermes: the most recently updated first, in pages that continue after the cursor's session.
+  "session/list": ({ cursor } = {}) => {
+    const sessions = savedSessions().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const start = cursor ? sessions.findIndex((session) => session.sessionId === cursor) + 1 : 0;
+    const page = sessions.slice(start, start + PAGE_SIZE).map(({ sessionId, cwd, title, updatedAt }) => ({ sessionId, cwd, title, updatedAt }));
+    return start + PAGE_SIZE < sessions.length ? { sessions: page, nextCursor: page.at(-1).sessionId } : { sessions: page };
+  }
 };
 
 function send(message) {

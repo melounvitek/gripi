@@ -19,6 +19,8 @@ type Adapter interface {
 }
 
 type StartOptions struct {
+	// Agent names the agent of a new session for a Router. The first agent starts it when Agent is empty.
+	Agent string
 	// CWD is the folder of a session that the agent has not saved yet, which starts there empty.
 	CWD string
 	// Env holds extra NAME=value variables for the agent.
