@@ -28,5 +28,3 @@ Features that only some agents have, such as the prompt queue, shell commands, t
 - The browser still reads Pi's formats: live events and snapshots, model settings, fork messages and session trees. The adapter returns them as opaque JSON that the core and server pass through without reading; only what the server itself reads is typed. Server-rendered history uses the core's `Message`, whose vocabulary is still Pi's.
 - Some core error texts and the diagnostics component still name Pi, because users and logs see them.
 - Every `Client` must switch its session in place for a new session (`NewSession`), and a branch whose client keeps serving the old session fails on purpose. `Cancel` doesn't report the prompts it dropped.
-
-`TODO.md` lists what another agent, such as one speaking ACP, needs first.
