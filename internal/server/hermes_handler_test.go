@@ -347,7 +347,7 @@ func TestAnImageHermesSharesShowsInPlaceOfItsTag(t *testing.T) {
 		"sessionId": "hermes-shot", "cwd": t.TempDir(), "title": "Screenshot the page", "updatedAt": "2026-03-01T10:00:00Z",
 		"history": []any{
 			textUpdate("user_message_chunk", "Screenshot the page"),
-			reply("reply-1", "Here it is: `"+tag+"`\n\nYou can share one too:\n```\n"+tag+"\n```\n\nMy notes: MEDIA:"+notImage+"\n\nA pipe: MEDIA:"+pipe),
+			reply("reply-1", "Here it is: `"+tag+"`\n\nYou can share one too:\n````\n```\n"+tag+"\n```\n````\n\nMy notes: MEDIA:"+notImage+"\n\nA pipe: MEDIA:"+pipe),
 			reply("reply-2", tag),
 		},
 	})
@@ -357,7 +357,7 @@ func TestAnImageHermesSharesShowsInPlaceOfItsTag(t *testing.T) {
 		t.Error("the page doesn't show the image in place of its tag")
 	}
 	// Like Hermes, the gateway leaves an example in code, and the tag of a file that the browser can't show as an image.
-	if !strings.Contains(page, "<code>"+tag) || !strings.Contains(page, "MEDIA:"+notImage) || !strings.Contains(page, "MEDIA:"+pipe) {
+	if !strings.Contains(page, "<code>```\n"+tag) || !strings.Contains(page, "MEDIA:"+notImage) || !strings.Contains(page, "MEDIA:"+pipe) {
 		t.Error("the page lacks the tags that share no image")
 	}
 	// A reply of only an image keeps its tag as its text.

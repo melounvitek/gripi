@@ -16,6 +16,9 @@ import (
 // desktop app send as an attachment. Models often wrap the tag in Markdown code or emphasis.
 var mediaTag = regexp.MustCompile("[`*_]{0,3}MEDIA:[ \t]*(`[^`\n]+`|\"[^\"\n]+\"|\\S+)[`*_]{0,3}")
 
+// codeFence is a line that opens or closes a Markdown code block, with the fence and what follows it.
+var codeFence = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})(.*)$")
+
 // mediaImage is an image file that a reply shares.
 type mediaImage struct{ path, mimeType string }
 
@@ -25,14 +28,18 @@ type mediaImage struct{ path, mimeType string }
 func mediaImages(text string) (string, []mediaImage) {
 	var images []mediaImage
 	lines := strings.SplitAfter(text, "\n")
-	fenced := false
+	// fence opened the code block that the line is in. Only a fence of its character, at least as long, closes it.
+	fence := ""
 	for index, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		fence := strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
-		if fence {
-			fenced = !fenced
+		if match := codeFence.FindStringSubmatch(strings.TrimRight(line, "\r\n")); match != nil {
+			if fence == "" {
+				fence = match[1]
+			} else if match[1][0] == fence[0] && len(match[1]) >= len(fence) && strings.TrimSpace(match[2]) == "" {
+				fence = ""
+			}
+			continue
 		}
-		if fence || fenced || strings.HasPrefix(trimmed, ">") {
+		if fence != "" || strings.HasPrefix(strings.TrimSpace(line), ">") {
 			continue
 		}
 		lines[index] = mediaTag.ReplaceAllStringFunc(line, func(tag string) string {

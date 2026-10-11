@@ -218,7 +218,7 @@ What to expect:
 - All Hermes sessions run in one Hermes process, which stops once nothing has used it for the [Pi process lifetime](#pi-process-lifetime).
 - While Hermes works, the composer waits: Stop is the only action. Gripi doesn't choose Hermes's model, rename, delete, fork or tree its sessions yet, and `gripi open` refuses them.
 - A message to Hermes takes up to about 36 MB of images, which Hermes reads encoded on one line of at most 50 MB.
-- Hermes shares a file by writing `MEDIA:` and the file's absolute path in its reply. Gripi shows a PNG, JPEG, GIF or WebP image of up to 10 MB in place of the tag, for as long as the file exists, and leaves the tags of other files as they are. Hermes tells its model about the tag only in its screenshot tool, unless `~/.hermes/config.yaml` does so for every ACP client, which editors then show as plain text:
+- Hermes shares a file by writing `MEDIA:` and the file's absolute path in its reply. Gripi shows a PNG, JPEG, GIF or WebP image of up to 10 MB in place of the tag, for as long as the file exists. It leaves tags in code blocks and quotes, tags of other files, and the tags of a reply that has nothing else to say as they are. Hermes tells its model about the tag only in its screenshot tool, unless `~/.hermes/config.yaml` does so for every ACP client, which editors then show as plain text:
 
   ```yaml
   platform_hints:
