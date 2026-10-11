@@ -50,6 +50,29 @@ func TestStartedClientsNameThemselvesInTheirEvents(t *testing.T) {
 	}
 }
 
+func TestStepsReportedBeforeStartReturnsCanUseTheClient(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	t.Cleanup(func() { _ = stdinReader.Close(); _ = stdoutWriter.Close() })
+	observed := make(chan int64, 1)
+	client, err := start(func(client agent.Client, _ agent.Lifecycle) { observed <- client.EventSequence() }, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
+		rpcClient := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: observer})
+		if _, err := io.WriteString(stdoutWriter, `{"type":"agent_start"}`+"\n"); err != nil {
+			return nil, err
+		}
+		select {
+		case <-observed:
+		case <-time.After(time.Second):
+			return nil, errors.New("event was not observed before start returned")
+		}
+		return rpcClient, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+}
+
 func TestPassedOnAnswersEncodeAsTheServerEncodedThem(t *testing.T) {
 	var value any
 	if err := json.Unmarshal([]byte(`{"z":1,"a":"<b>&\u2028","n":1e21,"list":[{"y":true,"b":null}]}`), &value); err != nil {

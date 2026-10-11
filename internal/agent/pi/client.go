@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/rpc"
@@ -39,9 +40,12 @@ var (
 // start runs a Pi RPC client whose run steps name the Client that serves it, even those Pi sends before run returns.
 func start(observe func(agent.Client, agent.Lifecycle), run func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error)) (agent.Client, error) {
 	client := &Client{}
+	// Pi can report a step before run returns, so whichever comes first sets the RPC client the observer may use.
+	var bind sync.Once
 	var observer func(*rpc.Client, map[string]any)
 	if observe != nil {
-		observer = func(_ *rpc.Client, event map[string]any) {
+		observer = func(rpcClient *rpc.Client, event map[string]any) {
+			bind.Do(func() { client.Client = rpcClient })
 			if lifecycle, ok := Lifecycle(event); ok {
 				observe(client, lifecycle)
 			}
@@ -51,7 +55,7 @@ func start(observe func(agent.Client, agent.Lifecycle), run func(observer func(*
 	if err != nil {
 		return nil, err
 	}
-	client.Client = rpcClient
+	bind.Do(func() { client.Client = rpcClient })
 	return client, nil
 }
 
