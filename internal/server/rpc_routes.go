@@ -103,7 +103,7 @@ func (app *application) commands(response http.ResponseWriter, request *http.Req
 		return
 	}
 	app.rpcDiagnostics.Log("request_operation", map[string]any{"path": request.URL.Path, "session": path, "lane": "operation"})
-	composer := app.adapter.Composer()
+	composer := app.adapter.Composer(path)
 	var agentCommands []agent.Command
 	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		var requestErr error

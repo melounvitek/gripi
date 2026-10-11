@@ -88,7 +88,7 @@ func TestNewSessionProjectStorageFailureRollsBackCreation(t *testing.T) {
 				}
 			}
 			newPath := filepath.Join(app.config.SessionsRoot, "pending-new.jsonl")
-			app.newRPCClient = func(string, string, string) (agent.Client, error) {
+			app.newRPCClient = func(string, string, string, string) (agent.Client, error) {
 				return &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": newPath}}}, nil
 			}
 			claimed, released := false, false
@@ -100,7 +100,7 @@ func TestNewSessionProjectStorageFailureRollsBackCreation(t *testing.T) {
 				released = true
 				return nil
 			}
-			if _, err := app.startNewSession(tagLifecycleRequest("/sessions/new_at_cwd"), app.config.Home, ""); err == nil {
+			if _, err := app.startNewSession(tagLifecycleRequest("/sessions/new_at_cwd"), app.config.Home, "", ""); err == nil {
 				t.Fatal("creation accepted broken project storage")
 			}
 			if app.rpcClients.Active(newPath) {
@@ -130,8 +130,8 @@ func TestNewSessionRegistrationFailureRollsBackCreation(t *testing.T) {
 				t.Fatal(err)
 			}
 			owned := map[string]bool{}
-			app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), gatewayState: state, rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), newRPCClient: func(string, string, string) (agent.Client, error) { return client, nil }, claimSession: func(_ *http.Request, path string) (bool, error) { owned[path] = true; return true, nil }, releaseSession: func(_ *http.Request, path string) error { delete(owned, path); return nil }}
-			if _, err := app.startNewSession(tagLifecycleRequest("/sessions/new_at_cwd"), root, ""); err == nil {
+			app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), gatewayState: state, rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), newRPCClient: func(string, string, string, string) (agent.Client, error) { return client, nil }, claimSession: func(_ *http.Request, path string) (bool, error) { owned[path] = true; return true, nil }, releaseSession: func(_ *http.Request, path string) error { delete(owned, path); return nil }}
+			if _, err := app.startNewSession(tagLifecycleRequest("/sessions/new_at_cwd"), root, "", ""); err == nil {
 				t.Fatal("registration succeeded")
 			}
 			if len(owned) != 0 {

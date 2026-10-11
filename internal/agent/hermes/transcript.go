@@ -18,15 +18,21 @@ type update struct {
 	Kind       string          `json:"kind"`
 	Status     string          `json:"status"`
 	// Size and Used are a usage update's context window and how much of it the session fills.
-	Size float64 `json:"size"`
-	Used float64 `json:"used"`
+	Size              float64 `json:"size"`
+	Used              float64 `json:"used"`
+	AvailableCommands []struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	} `json:"availableCommands"`
 }
 
 // transcript projects a session's updates onto the gateway's messages, the same way for a replayed history and a
-// live run.
+// live run. Like a saved Pi session, it holds a message once it has ended: text or thinking that still streams stays
+// open until something else follows it.
 type transcript struct {
 	messages []*agent.Message
-	// messageID is the ACP message that the last message continues.
+	open     *agent.Message
+	// messageID is the ACP message that the open message shows.
 	messageID string
 	tools     map[string]*agent.Message
 }
@@ -40,9 +46,10 @@ func (transcript *transcript) apply(value update) {
 	case "agent_thought_chunk":
 		transcript.appendText(value, "assistant", true)
 	case "tool_call":
+		transcript.commit()
 		message := &agent.Message{Role: "assistant", Compact: true, ToolCallID: value.ToolCallID, ToolName: toolName(value), Summary: value.Title, ToolPending: true}
 		transcript.updateTool(message, value)
-		transcript.add(message, "")
+		transcript.add(message)
 		if transcript.tools == nil {
 			transcript.tools = make(map[string]*agent.Message)
 		}
@@ -56,27 +63,57 @@ func (transcript *transcript) apply(value update) {
 }
 
 func (transcript *transcript) appendText(value update, role string, thinking bool) {
+	text := chunkText(value)
+	if text == "" {
+		return
+	}
+	if open := transcript.open; open != nil && open.Role == role && open.Thinking == thinking && value.MessageID == transcript.messageID {
+		open.Text += text
+		return
+	}
+	transcript.commit()
+	transcript.open = &agent.Message{Role: role, Text: text, Thinking: thinking, FinalAssistantResponse: role == "assistant" && !thinking}
+	transcript.messageID = value.MessageID
+}
+
+// addUser adds a prompt, which Hermes doesn't repeat as it runs it.
+func (transcript *transcript) addUser(text string) {
+	transcript.commit()
+	transcript.add(&agent.Message{Role: "user", Text: text})
+}
+
+// commit ends the open message.
+func (transcript *transcript) commit() {
+	if transcript.open != nil {
+		transcript.add(transcript.open)
+		transcript.open = nil
+	}
+}
+
+func (transcript *transcript) add(message *agent.Message) {
+	message.Key = [2]int{len(transcript.messages), 0}
+	transcript.messages = append(transcript.messages, message)
+}
+
+// lastReply is the text of the latest reply that has ended.
+func (transcript *transcript) lastReply() string {
+	for index := len(transcript.messages) - 1; index >= 0; index-- {
+		if message := transcript.messages[index]; message.FinalAssistantResponse {
+			return message.Text
+		}
+	}
+	return ""
+}
+
+func chunkText(value update) string {
 	var block struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	}
-	if json.Unmarshal(value.Content, &block) != nil || block.Type != "text" || block.Text == "" {
-		return
+	if json.Unmarshal(value.Content, &block) != nil || block.Type != "text" {
+		return ""
 	}
-	if count := len(transcript.messages); count > 0 {
-		last := transcript.messages[count-1]
-		if last.Role == role && last.Thinking == thinking && !last.Compact && value.MessageID == transcript.messageID {
-			last.Text += block.Text
-			return
-		}
-	}
-	transcript.add(&agent.Message{Role: role, Text: block.Text, Thinking: thinking, FinalAssistantResponse: role == "assistant" && !thinking}, value.MessageID)
-}
-
-func (transcript *transcript) add(message *agent.Message, messageID string) {
-	message.Key = [2]int{len(transcript.messages), 0}
-	transcript.messages = append(transcript.messages, message)
-	transcript.messageID = messageID
+	return block.Text
 }
 
 func (transcript *transcript) updateTool(message *agent.Message, value update) {

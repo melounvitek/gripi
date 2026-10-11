@@ -57,6 +57,13 @@ func (adapter *Adapter) listing() []listedSession {
 	return listed
 }
 
+// relist has the next listing ask Hermes again, such as once it saves a session as a run starts, or renames it after.
+func (adapter *Adapter) relist() {
+	adapter.listMu.Lock()
+	defer adapter.listMu.Unlock()
+	adapter.listedAt = time.Time{}
+}
+
 func (adapter *Adapter) list(ctx context.Context) ([]listedSession, error) {
 	conn, err := adapter.connected(ctx)
 	if err != nil {
@@ -104,7 +111,7 @@ func (store store) Sessions() ([]*agent.Session, error) {
 	listing := store.adapter.listing()
 	sessions := make([]*agent.Session, 0, len(listing))
 	for _, listed := range listing {
-		sessions = append(sessions, listed.session())
+		sessions = append(sessions, store.adapter.described(listed))
 	}
 	return sessions, nil
 }
@@ -119,7 +126,22 @@ func (store store) Session(key string) (*agent.Session, bool) {
 	if !ok {
 		return nil, false
 	}
-	return listed.session(), true
+	return store.adapter.described(listed), true
+}
+
+// described adds what the adapter has followed of a session to what Hermes lists.
+func (adapter *Adapter) described(listed listedSession) *agent.Session {
+	result := listed.session()
+	adapter.sessionsMu.Lock()
+	session := adapter.sessions[listed.SessionID]
+	adapter.sessionsMu.Unlock()
+	if session != nil {
+		session.mu.Lock()
+		result.AssistantResponseCount = session.replies
+		result.LatestAssistantResponsePreview = agent.NotificationPreview(session.transcript.lastReply())
+		session.mu.Unlock()
+	}
+	return result
 }
 
 // Window pages the conversation that Hermes replays as it loads the session. Hermes keeps no branches, so the leaf

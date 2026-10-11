@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	gripi "github.com/melounvitek/gripi"
 	"github.com/melounvitek/gripi/internal/config"
@@ -108,5 +109,120 @@ func TestAHermesSessionShowsItsSavedConversation(t *testing.T) {
 	}
 	if !strings.Contains(page, `data-tool-call-id="tc-1"`) {
 		t.Errorf("page lacks the tool call's block")
+	}
+}
+
+func postJSON(t *testing.T, handler http.Handler, target string, values url.Values) (int, map[string]any) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, target, strings.NewReader(values.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Origin", "http://example.com")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	var payload map[string]any
+	_ = json.Unmarshal(recorder.Body.Bytes(), &payload)
+	return recorder.Code, payload
+}
+
+type liveEvent struct {
+	Type                  string         `json:"type"`
+	ToolCallID            string         `json:"toolCallId"`
+	ToolName              string         `json:"toolName"`
+	IsError               bool           `json:"isError"`
+	Message               map[string]any `json:"message"`
+	AssistantMessageEvent struct {
+		Type  string `json:"type"`
+		Delta string `json:"delta"`
+	} `json:"assistantMessageEvent"`
+}
+
+// eventsUntil polls the session's live events from the start until one of the given type arrives.
+func eventsUntil(t *testing.T, handler http.Handler, key, last string) []liveEvent {
+	t.Helper()
+	var events []liveEvent
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		var batch struct {
+			Events []liveEvent `json:"events"`
+		}
+		if err := json.Unmarshal([]byte(getPage(t, handler, "/events?after=0&session="+url.QueryEscape(key))), &batch); err != nil {
+			t.Fatal(err)
+		}
+		events = batch.Events
+		for _, event := range events {
+			if event.Type == last {
+				return events
+			}
+		}
+	}
+	t.Fatalf("no %s event among %+v", last, events)
+	return nil
+}
+
+func TestAHermesSessionRunsAPromptLive(t *testing.T) {
+	project := t.TempDir()
+	handler := hermesHandler(t)
+
+	code, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	key, _ := payload["session"].(string)
+	if code != http.StatusOK || !strings.HasPrefix(key, "hermes:") {
+		t.Fatalf("new Hermes session = %d %v", code, payload)
+	}
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+
+	events := eventsUntil(t, handler, key, "agent_settled")
+	var thinking, text strings.Builder
+	var toolEnd *liveEvent
+	types := []string{}
+	for index, event := range events {
+		types = append(types, event.Type)
+		switch event.AssistantMessageEvent.Type {
+		case "thinking_delta":
+			thinking.WriteString(event.AssistantMessageEvent.Delta)
+		case "text_delta":
+			text.WriteString(event.AssistantMessageEvent.Delta)
+		}
+		if event.Type == "tool_execution_end" {
+			toolEnd = &events[index]
+		}
+	}
+	if types[0] != "agent_start" || thinking.String() != "Planning the answer." || text.String() != "Checking the files.Hermes says: List the files" {
+		t.Fatalf("events %v streamed thinking %q and text %q", types, thinking.String(), text.String())
+	}
+	if toolEnd == nil || toolEnd.ToolCallID != "tc-1" || toolEnd.ToolName != "terminal: ls" || toolEnd.IsError {
+		t.Fatalf("tool end = %+v", toolEnd)
+	}
+
+	// After the run, the page shows the same conversation from the saved session.
+	page := getPage(t, handler, "/?session="+url.QueryEscape(key))
+	for _, expected := range []string{"List the files", "Planning the answer.", "Checking the files.", "terminal: ls", "README.md", "Hermes says: List the files"} {
+		if !strings.Contains(page, expected) {
+			t.Errorf("page after the run lacks %q", expected)
+		}
+	}
+}
+
+func TestStopEndsAHermesRunAndRefusesMessagesWhileItRuns(t *testing.T) {
+	project := t.TempDir()
+	handler := hermesHandler(t)
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Wait for stop"}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+	eventsUntil(t, handler, key, "agent_start")
+
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Also do this"}, "streaming_behavior": {"steer"}}); code == http.StatusOK || !strings.Contains(payload["error"].(string), "Hermes is working") {
+		t.Fatalf("steer while Hermes runs = %d %v", code, payload)
+	}
+	if code, payload := postJSON(t, handler, "/abort", url.Values{"session": {key}}); code != http.StatusOK {
+		t.Fatalf("abort = %d %v", code, payload)
+	}
+	eventsUntil(t, handler, key, "agent_settled")
+
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}}); code != http.StatusOK {
+		t.Fatalf("prompt after stop = %d %v", code, payload)
 	}
 }

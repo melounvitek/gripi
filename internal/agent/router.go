@@ -62,8 +62,8 @@ func (router *Router) DisplaySettings(cwd string) DisplaySettings {
 	return router.agents[0].Adapter.DisplaySettings(cwd)
 }
 
-func (router *Router) Composer() Composer {
-	return router.agents[0].Adapter.Composer()
+func (router *Router) Composer(key string) Composer {
+	return router.agents[max(router.owner(key), 0)].Adapter.Composer(key)
 }
 
 func (router *Router) Store() Store {
@@ -92,6 +92,14 @@ func (router *Router) Close() error {
 
 type routerStore struct{ router *Router }
 
+// named tells the router's sessions apart by their agent.
+func named(sessions []*Session, name string) []*Session {
+	for _, session := range sessions {
+		session.Agent = name
+	}
+	return sessions
+}
+
 func (store routerStore) of(key string) (Store, bool) {
 	index := store.router.owner(key)
 	if index < 0 {
@@ -113,7 +121,7 @@ func (store routerStore) SessionsDeferringMetadata(deferFor func(key string) boo
 		if err != nil {
 			return nil, false, err
 		}
-		all = append(all, sessions...)
+		all = append(all, named(sessions, routed.Name)...)
 		deferred = deferred || deferredHere
 	}
 	sort.SliceStable(all, func(left, right int) bool {
@@ -123,10 +131,15 @@ func (store routerStore) SessionsDeferringMetadata(deferFor func(key string) boo
 }
 
 func (store routerStore) Session(key string) (*Session, bool) {
-	if owner, ok := store.of(key); ok {
-		return owner.Session(key)
+	index := store.router.owner(key)
+	if index < 0 {
+		return nil, false
 	}
-	return nil, false
+	session, ok := store.router.agents[index].Adapter.Store().Session(key)
+	if ok {
+		session.Agent = store.router.agents[index].Name
+	}
+	return session, ok
 }
 
 func (store routerStore) Window(key, leafID string, leafSupplied bool, cursor, after *int) (Window, error) {

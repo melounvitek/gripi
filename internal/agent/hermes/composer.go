@@ -10,6 +10,9 @@ func (composer) InternalCommand(string) bool                    { return false }
 func (composer) ShellCommand(string) (agent.ShellCommand, bool) { return agent.ShellCommand{}, false }
 func (composer) SlashCommand(string) agent.SlashCommand         { return agent.SlashCommand{} }
 func (composer) Commands() []agent.Command                      { return nil }
-func (composer) CommandGroups() []string                        { return nil }
+func (composer) CommandGroups() []string                        { return []string{commandGroup} }
 func (composer) ThinkingLevels() []string                       { return nil }
 func (composer) TreeFilters() []string                          { return nil }
+
+// commandGroup holds Hermes's own commands in the command palette.
+const commandGroup = "Hermes"

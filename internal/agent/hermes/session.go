@@ -21,6 +21,11 @@ type session struct {
 	model       string
 	contextUsed float64
 	contextSize float64
+	commands    []agent.Command
+	// replies counts the replies that ended in this gateway, which is all a page compares to mark the session read.
+	replies int
+	// client serves the session while the gateway runs it, and turns its updates into live events.
+	client *client
 }
 
 func (adapter *Adapter) session(id string) *session {
@@ -52,12 +57,28 @@ func (adapter *Adapter) notified(method string, params json.RawMessage) {
 
 func (session *session) apply(value update) {
 	session.mu.Lock()
-	defer session.mu.Unlock()
-	if value.SessionUpdate == "usage_update" {
+	switch value.SessionUpdate {
+	case "usage_update":
 		session.contextUsed, session.contextSize = value.Used, value.Size
-		return
+	case "available_commands_update":
+		session.commands = session.commands[:0]
+		for _, command := range value.AvailableCommands {
+			session.commands = append(session.commands, agent.Command{Name: command.Name, Description: command.Description, Group: commandGroup})
+		}
+	default:
+		session.transcript.apply(value)
 	}
-	session.transcript.apply(value)
+	client := session.client
+	session.mu.Unlock()
+	if client != nil {
+		client.apply(value)
+	}
+}
+
+func (session *session) countReply() {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	session.replies++
 }
 
 // load has the running Hermes load the session, unless it has already, which replays the session's transcript.
@@ -85,6 +106,7 @@ func (adapter *Adapter) load(ctx context.Context, listed listedSession) (*sessio
 		return nil, err
 	}
 	session.mu.Lock()
+	session.transcript.commit()
 	session.model = answer.Models.CurrentModelID
 	session.mu.Unlock()
 	session.conn = conn

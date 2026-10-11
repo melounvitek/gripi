@@ -3,8 +3,10 @@ package hermes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,19 +54,61 @@ func New(options Options) *Adapter {
 	return &Adapter{path: options.Path, home: options.Home}
 }
 
-var errNotRunnable = errors.New("Hermes sessions cannot run in Gripi yet")
-
-func (adapter *Adapter) Start(string, agent.StartOptions) (agent.Client, error) {
-	return nil, errNotRunnable
+// Start serves a session that Hermes has saved, or one that the running Hermes started and hasn't saved yet.
+func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+	defer cancel()
+	if listed, ok := adapter.find(key); ok {
+		session, err := adapter.load(ctx, listed)
+		if err != nil {
+			return nil, err
+		}
+		return adapter.newClient(session, session.conn, options), nil
+	}
+	conn, err := adapter.connected(ctx)
+	if err != nil {
+		return nil, err
+	}
+	session := adapter.session(strings.TrimPrefix(key, keyPrefix))
+	if session.conn != conn {
+		return nil, fmt.Errorf("Hermes has no session %s", key)
+	}
+	return adapter.newClient(session, conn, options), nil
 }
 
-func (adapter *Adapter) StartInCWD(string, string, agent.StartOptions) (agent.Client, error) {
-	return nil, errNotRunnable
+// StartInCWD starts a new session in cwd. Hermes saves it once it has a message.
+func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOptions) (agent.Client, error) {
+	if forkFrom != "" {
+		return nil, &agent.RequestError{Message: "Gripi cannot continue a session in Hermes."}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+	defer cancel()
+	conn, err := adapter.connected(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var answer struct {
+		SessionID string `json:"sessionId"`
+		Models    struct {
+			CurrentModelID string `json:"currentModelId"`
+		} `json:"models"`
+	}
+	if err := conn.request(ctx, "session/new", map[string]any{"cwd": cwd, "mcpServers": []any{}}, &answer); err != nil {
+		return nil, err
+	}
+	if answer.SessionID == "" {
+		return nil, errors.New("Hermes started no session")
+	}
+	session := adapter.session(answer.SessionID)
+	session.mu.Lock()
+	session.conn, session.model = conn, answer.Models.CurrentModelID
+	session.mu.Unlock()
+	return adapter.newClient(session, conn, options), nil
 }
 
 func (adapter *Adapter) DisplaySettings(string) agent.DisplaySettings { return agent.DisplaySettings{} }
 
-func (adapter *Adapter) Composer() agent.Composer { return composer{} }
+func (adapter *Adapter) Composer(string) agent.Composer { return composer{} }
 
 func (adapter *Adapter) Store() agent.Store { return store{adapter} }
 

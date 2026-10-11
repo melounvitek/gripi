@@ -98,7 +98,7 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 	})
 }
 
-func (adapter *Adapter) Composer() agent.Composer {
+func (adapter *Adapter) Composer(string) agent.Composer {
 	return Composer{}
 }
 

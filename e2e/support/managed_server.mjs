@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 
 import { closeSync, openSync, rmSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ADMIN_PASSWORD } from "./contract.mjs";
+import { ADMIN_PASSWORD, hermes } from "./contract.mjs";
 import { seedFixtures } from "../fixtures/seed.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const runnerArgs = process.argv.slice(2);
 const realPi = runnerArgs.includes("--real-pi");
-const playwrightArgs = runnerArgs.filter((argument) => argument !== "--real-pi");
+// With --hermes, the gateway also runs the fake Hermes, for the specs of the hermes projects.
+const withHermes = runnerArgs.includes("--hermes");
+const playwrightArgs = runnerArgs.filter((argument) => argument !== "--real-pi" && argument !== "--hermes");
 const realAgentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "gripi-e2e-"));
 process.once("exit", () => {
@@ -27,6 +29,9 @@ const fakeLogPath = path.join(runtimeRoot, "fake-pi.log");
 const authStatePath = path.join(runtimeRoot, "browser-state.json");
 const serverLog = openSync(serverLogPath, "a");
 const fakePiPath = path.join(repoRoot, "e2e", "support", "fake_pi.mjs");
+const fakeHermesLogPath = path.join(runtimeRoot, "fake-hermes.log");
+const fakeHermesStatePath = path.join(runtimeRoot, "fake-hermes-state.json");
+if (withHermes) await writeFile(fakeHermesStatePath, JSON.stringify({ sessions: [savedHermesSession(fixture.projects["prompt-project"])] }));
 let serverSpawnError = null;
 let stopping = false;
 let serverLogClosed = false;
@@ -60,7 +65,8 @@ const serverEnv = {
   GRIPI_RPC_IDLE_SWEEP_SECONDS: process.env.GRIPI_E2E_RPC_IDLE_SWEEP_SECONDS || (realPi ? "30" : "0.1"),
   GRIPI_NODE: realPi ? "" : process.execPath,
   GRIPI_PI: realPi ? "" : fakePiPath,
-  GRIPI_HERMES: "",
+  GRIPI_HERMES: withHermes ? path.join(repoRoot, "e2e", "support", "fake_hermes.mjs") : "",
+  ...(withHermes ? { FAKE_HERMES_STATE: fakeHermesStatePath, FAKE_HERMES_LOG: fakeHermesLogPath } : {}),
   GRIPI_E2E_SESSIONS_ROOT: fixture.sessionsRoot,
   GRIPI_E2E_FAKE_PI_LOG: fakeLogPath,
   ...(realPi ? {
@@ -95,7 +101,8 @@ let exitCode = 1;
 try {
   await waitForServer(baseURL, server);
   const playwright = path.join(repoRoot, "node_modules", "@playwright", "test", "cli.js");
-  const args = ["test", ...(playwrightArgs.length ? playwrightArgs : ["--project=desktop", "--project=mobile", "--project=iphone"])];
+  const defaultProjects = withHermes ? ["--project=hermes"] : ["--project=desktop", "--project=mobile", "--project=iphone"];
+  const args = ["test", ...(playwrightArgs.length ? playwrightArgs : defaultProjects)];
   const tests = spawn(process.execPath, [playwright, ...args], {
     cwd: repoRoot,
     env: {
@@ -116,10 +123,28 @@ try {
   if (exitCode !== 0) {
     console.error(`\nManaged Gripi log (${serverLogPath}):\n${await readableLog(serverLogPath)}`);
     console.error(`\nFake Pi log (${fakeLogPath}):\n${await readableLog(fakeLogPath)}`);
+    if (withHermes) console.error(`\nFake Hermes log (${fakeHermesLogPath}):\n${await readableLog(fakeHermesLogPath)}`);
   }
   await stop();
 }
 process.exit(exitCode);
+
+// The saved Hermes session that the fake Hermes lists and replays, in the fake's state format.
+function savedHermesSession(cwd) {
+  const { saved } = hermes;
+  const text = (sessionUpdate, value) => ({ sessionUpdate, content: { type: "text", text: value } });
+  const toolContent = (value) => [{ type: "content", content: { type: "text", text: value } }];
+  return {
+    sessionId: saved.id, cwd, title: saved.title, updatedAt: "2026-01-01T00:00:00Z",
+    history: [
+      text("user_message_chunk", saved.prompt),
+      text("agent_thought_chunk", saved.thought),
+      { sessionUpdate: "tool_call", toolCallId: "tc-saved", title: saved.tool, kind: "read", content: toolContent("README.md") },
+      { sessionUpdate: "tool_call_update", toolCallId: "tc-saved", kind: "read", status: "completed", content: toolContent(saved.toolOutput) },
+      text("agent_message_chunk", saved.reply)
+    ]
+  };
+}
 
 async function availablePort() {
   const listener = createServer();

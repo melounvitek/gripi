@@ -325,3 +325,24 @@ export const live = {
     reply: "Thinking characterization complete."
   }
 };
+
+// The fake Hermes's saved session, and what it streams for a prompt. Only the gateway that runs with Hermes has them.
+export const hermes = {
+  saved: {
+    id: "e2e-hermes-saved",
+    title: "E2E Hermes Saved",
+    prompt: "Summarize the fixture project",
+    thought: "Reading the README first.",
+    tool: "read_file: README.md",
+    toolOutput: "# Fixture project",
+    reply: "The fixture project holds the browser suite's sessions."
+  },
+  run: {
+    thought: "Planning the answer.",
+    intro: "Checking the files.",
+    tool: "terminal: ls",
+    toolOutput: "README.md",
+    replyPrefix: "Hermes says: "
+  },
+  stopPrompt: "Wait for stop"
+};

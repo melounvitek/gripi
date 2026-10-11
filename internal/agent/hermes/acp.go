@@ -145,9 +145,15 @@ func (conn *connection) finish(exit error) {
 	if detail := conn.stderr.String(); detail != "" {
 		status += ":\n" + detail
 	}
-	conn.exitErr = errors.New(status)
+	conn.exitErr = &exitError{status}
 	close(conn.exited)
 }
+
+// exitError says that Hermes exited, which the registry recognizes as agent.ErrProcessExited, whose text names Pi.
+type exitError struct{ status string }
+
+func (err *exitError) Error() string        { return err.status }
+func (err *exitError) Is(target error) bool { return target == agent.ErrProcessExited }
 
 func (conn *connection) hasExited() bool {
 	select {
@@ -156,6 +162,23 @@ func (conn *connection) hasExited() bool {
 	default:
 		return false
 	}
+}
+
+// send sends a notification, which Hermes doesn't answer.
+func (conn *connection) send(method string, params any) error {
+	encoded, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+	if err != nil {
+		return err
+	}
+	conn.writing.Lock()
+	defer conn.writing.Unlock()
+	if _, err := conn.stdin.Write(append(encoded, '\n')); err != nil {
+		if conn.hasExited() {
+			return conn.exitErr
+		}
+		return err
+	}
+	return nil
 }
 
 // request sends a request to Hermes and decodes its result into result, unless result is nil.

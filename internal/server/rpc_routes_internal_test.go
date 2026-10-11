@@ -221,13 +221,13 @@ func TestStartNewSessionNormalizesANotYetExistingNativePath(t *testing.T) {
 	app := &application{
 		config:          config.Config{SessionsRoot: configuredRoot},
 		sessionStore:    NewPiStore(configuredRoot, ""),
-		newRPCClient:    func(string, string, string) (agent.Client, error) { return client, nil },
+		newRPCClient:    func(string, string, string, string) (agent.Client, error) { return client, nil },
 		rpcClients:      registry,
 		pendingSessions: agent.NewPendingSessionRegistry(nil),
 		claimSession:    func(_ *http.Request, path string) (bool, error) { claimed = path; return true, nil },
 	}
 
-	result, err := app.startNewSession(httptest.NewRequest(http.MethodPost, "http://app.test/sessions/new", nil), project, "")
+	result, err := app.startNewSession(httptest.NewRequest(http.MethodPost, "http://app.test/sessions/new", nil), project, "", "")
 	if err != nil || result != configuredPath || claimed != configuredPath {
 		t.Fatalf("result = %q, claimed = %q, err = %v", result, claimed, err)
 	}

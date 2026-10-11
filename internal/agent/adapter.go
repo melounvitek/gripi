@@ -8,8 +8,8 @@ type Adapter interface {
 	StartInCWD(cwd, forkFrom string, options StartOptions) (Client, error)
 	// DisplaySettings returns the agent's display preferences for a project.
 	DisplaySettings(cwd string) DisplaySettings
-	// Composer describes how the agent reads what the user types.
-	Composer() Composer
+	// Composer describes how the agent of the session key reads what the user types.
+	Composer(key string) Composer
 	// Store returns the agent's catalog of saved sessions.
 	Store() Store
 	// Guard returns the guard for the sessions that clients run. The gateway calls it once, after creating clients.
@@ -19,7 +19,8 @@ type Adapter interface {
 }
 
 type StartOptions struct {
-	// Agent names the agent of a new session for a Router. The first agent starts it when Agent is empty.
+	// Agent names the agent of a new session for a Router, as Session.Agent does. The first agent starts it when
+	// Agent is empty.
 	Agent string
 	// CWD is the folder of a session that the agent has not saved yet, which starts there empty.
 	CWD string
