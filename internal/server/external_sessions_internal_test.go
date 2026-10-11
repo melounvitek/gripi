@@ -107,7 +107,7 @@ func TestSidebarResolvesOwnedPendingAliasesBeforeObservingDiskSessions(t *testin
 			pending := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
 			now := time.Now()
 			app.rpcClients = agent.NewRegistry(nil, func() time.Time { return now })
-			app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, app.sessionCache, app.rpcClients)
+			app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, nil, app.rpcClients)
 			app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 			if err := app.rpcClients.Register(pending, client); err != nil {
 				t.Fatal(err)
@@ -363,7 +363,7 @@ func externalSessionTestApplication(t *testing.T) (*application, string, *remapC
 	app := notificationTestApplication(t, root, false, true, &recordingPushNotifier{})
 	client := &remapClient{}
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
-	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+	app.synchronizer = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
 	var err error
 	app.templates, err = template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
 	if err != nil {

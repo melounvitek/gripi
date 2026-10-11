@@ -9,7 +9,7 @@ import (
 func completionState(t *testing.T) *GatewayState {
 	t.Helper()
 	root := t.TempDir()
-	return NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), "")
+	return NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), nil)
 }
 
 func TestCompletionMigrationRollbackPreservesNewerReads(t *testing.T) {
@@ -131,7 +131,7 @@ func TestForgetRemovesCompletionAcrossRestart(t *testing.T) {
 	if err := state.Forget("session"); err != nil {
 		t.Fatal(err)
 	}
-	state = NewGatewayState(state.readPath, state.pinnedPath, state.tagsPath, "")
+	state = NewGatewayState(state.readPath, state.pinnedPath, state.tagsPath, nil)
 	values, err := state.Completions()
 	if err != nil || len(values) != 0 {
 		t.Fatalf("forgotten completion returned: %v, %v", values, err)

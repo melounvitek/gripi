@@ -39,7 +39,7 @@ func TestAttachmentMatchReadsMetadataStoredForThePhysicalSessionPath(t *testing.
 	first := &Message{Role: "user", Text: "prompt"}
 	second := &Message{Role: "user", Text: "prompt"}
 
-	matches := (AttachmentStore{Root: attachmentsRoot, SessionsRoot: configuredRoot}).Match(configuredPath, []*Message{first, second})
+	matches := (AttachmentStore{Root: attachmentsRoot, Keys: rootKeys(configuredRoot)}).Match(configuredPath, []*Message{first, second})
 	for _, message := range []*Message{first, second} {
 		match, ok := matches[message]
 		if !ok || len(match.Images) != 1 || match.Images[0].Src != "/attachments/"+physicalHash+"/image.png" {

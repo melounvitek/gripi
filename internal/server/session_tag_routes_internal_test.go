@@ -35,7 +35,7 @@ func TestSessionTagsResolveSymlinksAndPendingAliasesWithoutRPC(t *testing.T) {
 	pending.Remember(pendingPath, root, "")
 	pending.Remap(alias, configuredPath)
 	registry := agent.NewRegistry(func(string) (agent.Client, error) { t.Error("tag request started RPC"); return nil, os.ErrNotExist }, nil)
-	app := &application{config: config.Config{SessionsRoot: configured, Home: root}, sessionCache: sessions.NewCache(), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), configured), pendingSessions: pending, rpcClients: registry}
+	app := &application{config: config.Config{SessionsRoot: configured, Home: root}, sessionStore: NewPiStore(configured, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), NewPiStore(configured, "")), pendingSessions: pending, rpcClients: registry}
 	mux := http.NewServeMux()
 	app.registerSessionRoutes(mux)
 	for _, test := range []struct{ input, expected string }{{physicalPath, configuredPath}, {pendingPath, pendingPath}, {alias, configuredPath}} {

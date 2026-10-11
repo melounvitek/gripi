@@ -11,7 +11,6 @@ import (
 	"regexp"
 
 	"github.com/melounvitek/gripi/internal/push"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 const (
@@ -120,7 +119,7 @@ func (app *application) updateNotificationPresence(response http.ResponseWriter,
 		response.WriteHeader(http.StatusNoContent)
 		return
 	}
-	path, valid := sessions.ConfiguredSessionPath(app.config.SessionsRoot, input.Session)
+	path, valid := app.sessionStore.Canonical(input.Session)
 	if !valid {
 		writeText(response, http.StatusBadRequest, "Invalid notification presence")
 		return

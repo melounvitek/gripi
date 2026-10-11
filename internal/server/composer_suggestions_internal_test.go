@@ -30,7 +30,7 @@ func TestComposerPathSuggestionsUseSessionCWD(t *testing.T) {
 			path := filepath.Join(sessionsRoot, "session.jsonl")
 			app := &application{
 				config:          config.Config{Home: root, SessionsRoot: sessionsRoot},
-				sessionCache:    sessions.NewCache(),
+				sessionStore:    NewPiStore(sessionsRoot, root),
 				pendingSessions: agent.NewPendingSessionRegistry(nil),
 				ownsSession:     func(*http.Request, string) bool { return state != "unowned pending" },
 			}

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 )
 
 func TestWorkspaceStorePreservesMalformedState(t *testing.T) {
@@ -77,7 +79,7 @@ func TestWorkspaceStoresPreserveExistingStateFormats(t *testing.T) {
 	if err := os.WriteFile(ownersPath, []byte(ownersJSON), 0600); err != nil {
 		t.Fatal(err)
 	}
-	owners := NewWorkspaceOwnershipStore(ownersPath, "")
+	owners := NewWorkspaceOwnershipStore(ownersPath, nil)
 	owned, err := owners.OwnedBy(session, "workspace-a")
 	if err != nil || !owned {
 		t.Fatalf("owned = %v, %v", owned, err)
@@ -128,7 +130,7 @@ func TestWorkspaceOwnershipNormalizesPersistedPhysicalSessionPaths(t *testing.T)
 	if err := os.WriteFile(ownersPath, []byte(contents), 0600); err != nil {
 		t.Fatal(err)
 	}
-	store := NewWorkspaceOwnershipStore(ownersPath, configuredRoot)
+	store := NewWorkspaceOwnershipStore(ownersPath, agentpi.New(agentpi.Options{SessionsRoot: configuredRoot}).Store())
 
 	owned, err := store.OwnedBy(configuredPath, "workspace-a")
 	if err != nil || !owned {
@@ -161,7 +163,7 @@ func TestWorkspaceOwnershipNormalizesPersistedPhysicalSessionPaths(t *testing.T)
 }
 
 func TestWorkspaceOwnershipCannotBeClaimedByAnotherWorkspace(t *testing.T) {
-	store := NewWorkspaceOwnershipStore(filepath.Join(t.TempDir(), "owners.json"), "")
+	store := NewWorkspaceOwnershipStore(filepath.Join(t.TempDir(), "owners.json"), nil)
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	created, err := store.Claim(path, "workspace-a")
 	if err != nil || !created {
@@ -186,7 +188,7 @@ func TestWorkspaceOwnershipFailsClosedWhenStateIsMalformed(t *testing.T) {
 	if err := os.WriteFile(path, contents, 0600); err != nil {
 		t.Fatal(err)
 	}
-	store := NewWorkspaceOwnershipStore(path, "")
+	store := NewWorkspaceOwnershipStore(path, nil)
 
 	if _, err := store.Claim("/tmp/session.jsonl", "workspace"); err == nil {
 		t.Fatal("claim succeeded with malformed ownership state")
@@ -227,7 +229,7 @@ func TestWorkspaceSecretAndOwnershipAreRaceSafe(t *testing.T) {
 			t.Fatalf("secret mismatch %q != %q", value, first)
 		}
 	}
-	owners := NewWorkspaceOwnershipStore(filepath.Join(root, "owners.json"), "")
+	owners := NewWorkspaceOwnershipStore(filepath.Join(root, "owners.json"), nil)
 	done := make(chan error, 20)
 	for index := range 20 {
 		go func() {

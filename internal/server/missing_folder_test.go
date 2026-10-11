@@ -189,7 +189,7 @@ func TestOnlyTheOwnerContinuesASessionInAnotherFolder(t *testing.T) {
 	if err := access.NewWorkspaceStore(cfg.WorkspaceAccessPath).ApproveWorkspace("workspace-a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot).Claim(source, "workspace-b"); err != nil {
+	if _, err := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, gateway.NewPiStore(cfg.SessionsRoot, "")).Claim(source, "workspace-b"); err != nil {
 		t.Fatal(err)
 	}
 

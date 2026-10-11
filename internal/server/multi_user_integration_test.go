@@ -110,7 +110,7 @@ func TestMultiUserFiltersListingsReadsActionsAndAttachments(t *testing.T) {
 		t.Fatalf("session paths = %v", paths)
 	}
 	own, other := paths[0], paths[1]
-	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot)
+	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, server.NewPiStore(cfg.SessionsRoot, ""))
 	if _, err := owners.Claim(own, workspace); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestMultiUserListsSessionsThroughASymlinkedSessionsRoot(t *testing.T) {
 	if !strings.HasPrefix(path, configuredRoot+string(filepath.Separator)) {
 		t.Fatalf("session path = %q", path)
 	}
-	if _, err := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot).Claim(path, workspace); err != nil {
+	if _, err := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, server.NewPiStore(cfg.SessionsRoot, "")).Claim(path, workspace); err != nil {
 		t.Fatal(err)
 	}
 	cookie := "gripi_workspace=" + workspace

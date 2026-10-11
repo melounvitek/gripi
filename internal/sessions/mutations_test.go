@@ -86,7 +86,7 @@ func TestDeleteSessionFileFallsBackToUnlink(t *testing.T) {
 func TestAttachmentStoreDeleteRemovesSessionMetadataAndImages(t *testing.T) {
 	root := t.TempDir()
 	sessionPath := filepath.Join(root, "sessions", "session.jsonl")
-	store := AttachmentStore{Root: filepath.Join(root, "attachments"), SessionsRoot: filepath.Join(root, "sessions")}
+	store := AttachmentStore{Root: filepath.Join(root, "attachments"), Keys: rootKeys(filepath.Join(root, "sessions"))}
 	metadataPath := filepath.Join(store.Root, SessionHash(sessionPath)+".jsonl")
 	imagesPath := filepath.Join(store.Root, SessionHash(sessionPath))
 	if err := os.MkdirAll(imagesPath, 0700); err != nil {

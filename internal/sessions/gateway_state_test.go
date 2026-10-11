@@ -7,11 +7,23 @@ import (
 	"testing"
 )
 
+// rootKeys relates session keys as the Pi adapter's store does for sessions under a root.
+type rootKeys string
+
+func (root rootKeys) Exists(key string) bool {
+	_, err := os.Stat(key)
+	return err == nil
+}
+func (root rootKeys) Canonical(key string) (string, bool) {
+	return ConfiguredSessionPath(string(root), key)
+}
+func (root rootKeys) Aliases(key string) []string { return SessionPathAliases(string(root), key) }
+
 func TestGatewayStateStaleObservationCannotUndoTakeover(t *testing.T) {
 	for _, selected := range []bool{false, true} {
 		for _, external := range []bool{false, true} {
 			root := t.TempDir()
-			state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(root, "tags.json"), root)
+			state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(root, "tags.json"), rootKeys(root))
 			path := filepath.Join(root, "session.jsonl")
 			stale := &Session{Path: path, AssistantResponseCount: 2}
 			var current *Session
@@ -47,7 +59,7 @@ func TestGatewayStatePreservesMalformedReadState(t *testing.T) {
 	if err := os.WriteFile(path, malformed, 0600); err != nil {
 		t.Fatal(err)
 	}
-	state := NewGatewayState(path, filepath.Join(t.TempDir(), "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
+	state := NewGatewayState(path, filepath.Join(t.TempDir(), "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), nil)
 	session := &Session{Path: "/session", AssistantResponseCount: 1}
 
 	if _, _, err := state.ReadAndObserve([]*Session{session}, session, true, nil); err == nil {
@@ -64,7 +76,7 @@ func TestGatewayStatePreservesMalformedReadState(t *testing.T) {
 
 func TestGatewayStateReportsThePersistedReadCount(t *testing.T) {
 	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root)
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), rootKeys(root))
 	path := filepath.Join(root, "session.jsonl")
 	if err := state.MarkRead(path, 3); err != nil {
 		t.Fatal(err)
@@ -82,7 +94,7 @@ func TestGatewayStatePreservesMalformedPinnedState(t *testing.T) {
 	if err := os.WriteFile(path, malformed, 0600); err != nil {
 		t.Fatal(err)
 	}
-	state := NewGatewayState(filepath.Join(t.TempDir(), "read.json"), path, filepath.Join(t.TempDir(), "tags.json"), "")
+	state := NewGatewayState(filepath.Join(t.TempDir(), "read.json"), path, filepath.Join(t.TempDir(), "tags.json"), nil)
 
 	if _, _, err := state.ReadAndObserve(nil, nil, false, nil); err == nil {
 		t.Fatal("ReadAndObserve() succeeded")
@@ -115,7 +127,7 @@ func TestGatewayStateNormalizesPhysicalReadAndPinnedPaths(t *testing.T) {
 	if err := os.WriteFile(pinnedPath, pinnedPaths, 0600); err != nil {
 		t.Fatal(err)
 	}
-	state := NewGatewayState(readPath, pinnedPath, filepath.Join(t.TempDir(), "tags.json"), configuredRoot)
+	state := NewGatewayState(readPath, pinnedPath, filepath.Join(t.TempDir(), "tags.json"), rootKeys(configuredRoot))
 	session := &Session{Path: configuredPath, AssistantResponseCount: 2}
 
 	unread, pinned, err := state.ReadAndObserve([]*Session{session}, nil, false, nil)
@@ -139,7 +151,7 @@ func TestGatewayStateNormalizesPhysicalReadAndPinnedPaths(t *testing.T) {
 
 func TestGatewayStatePinnedMigrationRollbackPreservesNewerChanges(t *testing.T) {
 	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), nil)
 	if err := state.SetPinned("/pending", true); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +188,7 @@ func TestGatewayStatePinnedMigrationRollbackPreservesNewerDestinationChange(t *t
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
+			state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), nil)
 			if err := state.SetPinned("/pending", true); err != nil {
 				t.Fatal(err)
 			}
@@ -208,7 +220,7 @@ func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
 	readPath := filepath.Join(root, "read.json")
 	pinnedPath := filepath.Join(root, "pinned.json")
 	sessionPath := filepath.Join(root, "sessions", "session.jsonl")
-	state := NewGatewayState(readPath, pinnedPath, filepath.Join(t.TempDir(), "tags.json"), filepath.Join(root, "sessions"))
+	state := NewGatewayState(readPath, pinnedPath, filepath.Join(t.TempDir(), "tags.json"), rootKeys(filepath.Join(root, "sessions")))
 
 	if err := state.MarkRead(sessionPath, 3); err != nil {
 		t.Fatal(err)
@@ -241,7 +253,7 @@ func TestGatewayStateForgetRemovesReadAndPinnedState(t *testing.T) {
 func TestGatewayStateTracksForgottenSessionWhenCleanupStateIsMalformed(t *testing.T) {
 	root := t.TempDir()
 	readPath := filepath.Join(root, "read.json")
-	state := NewGatewayState(readPath, filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
+	state := NewGatewayState(readPath, filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), nil)
 	if err := os.WriteFile(readPath, []byte("{"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +268,7 @@ func TestGatewayStateTracksForgottenSessionWhenCleanupStateIsMalformed(t *testin
 
 func TestGatewayStateTreatsMissingFilesAsEmpty(t *testing.T) {
 	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), nil)
 	session := &Session{Path: "/session", AssistantResponseCount: 1}
 
 	unread, pinned, err := state.ReadAndObserve([]*Session{session}, nil, false, nil)

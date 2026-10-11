@@ -66,7 +66,7 @@ func TestNewCLIProjectsStayOutOfSelectorsUntilTakeoverAcrossRestarts(t *testing.
 	app := handler.app
 	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "external"}}
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
-	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+	app.synchronizer = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
 	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,7 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 	after, _ := strconv.ParseInt(request.URL.Query().Get("after"), 10, 64)
 	batch := app.rpcClients.EventsAfter(path, after)
 	payload := map[string]any{"events": batch.Events, "last_seq": batch.LastSeq, "missed": batch.Missed}
-	if _, err := os.Stat(path); err == nil {
+	if app.sessionStore.Exists(path) {
 		state := app.synchronizer.InspectIfAvailable(request.Context(), path, false)
 		if state != nil {
 			mode := state.Mode
@@ -65,9 +65,8 @@ func (app *application) liveSessionStatus(response http.ResponseWriter, request 
 	live := app.readLiveStatus(request.Context(), path)
 	var status agent.Status
 	if live == nil || !live.diskIndependent {
-		if _, err := os.Stat(path); err == nil {
-			store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-			persisted, err := store.Status(path)
+		if app.sessionStore.Exists(path) {
+			persisted, err := app.sessionStore.Status(path)
 			if err != nil {
 				http.NotFound(response, request)
 				return
@@ -225,7 +224,7 @@ func (app *application) withSynchronizedClient(request *http.Request, path strin
 	}
 	path = resolved
 	ctx := request.Context()
-	if _, err := os.Stat(path); err == nil {
+	if app.sessionStore.Exists(path) {
 		return app.synchronizer.WithMutableClient(ctx, path, call)
 	}
 	return app.rpcClients.WithClient(ctx, path, call)
@@ -280,8 +279,7 @@ func (app *application) commandSessionAvailable(path string) bool {
 	if app.rpcClients.Active(path) {
 		return true
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	_, ok := store.Session(path)
+	_, ok := app.sessionStore.Session(path)
 	return ok
 }
 
@@ -292,8 +290,7 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 	} else if remapped {
 		return resolved, nil
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, known := store.Session(path)
+	session, known := app.sessionStore.Session(path)
 	if known {
 		path = session.Path
 	}
@@ -302,7 +299,7 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 		if app.rpcClients.WithExistingClient(ctx, path, false, func(client agent.Client) error { var err error; state, err = client.GetState(ctx); return err }) == nil {
 			reported := sessionFileFrom(state)
 			if reported != "" {
-				if session, ok := store.Session(reported); ok && session.CWD == cwd {
+				if session, ok := app.sessionStore.Session(reported); ok && session.CWD == cwd {
 					if err := app.movePendingRPCClient(request, path, session.Path); err != nil {
 						return path, err
 					}
@@ -333,7 +330,7 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 			return requestErr
 		})
 		if err == nil {
-			reported, found := store.Session(sessionFileFrom(state))
+			reported, found := app.sessionStore.Session(sessionFileFrom(state))
 			if found && reported.Path == session.Path {
 				if err := app.movePendingRPCClient(request, pending.Path, session.Path); err != nil {
 					return path, err
@@ -585,7 +582,7 @@ func (app *application) retireStaleRPCClient(request *http.Request, path string)
 func (app *application) retireRPCClient(ctx context.Context, path string, close func() (bool, error)) error {
 	var closed bool
 	var err error
-	if _, statErr := os.Stat(path); statErr == nil {
+	if app.sessionStore.Exists(path) {
 		app.synchronizer.ReconcileIfAvailable(ctx, path, false, func(sessions.SyncResult) {
 			closed, err = close()
 			if closed {

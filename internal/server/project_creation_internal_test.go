@@ -118,7 +118,7 @@ func TestNewSessionRegistrationFailureRollsBackCreation(t *testing.T) {
 	for _, native := range []bool{false, true} {
 		t.Run(fmt.Sprint(native), func(t *testing.T) {
 			root := t.TempDir()
-			state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), root)
+			state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), NewPiStore(root, ""))
 			client := &remapClient{state: map[string]any{"data": map[string]any{}}}
 			if native {
 				client.state = map[string]any{"data": map[string]any{"sessionFile": filepath.Join(root, "native.jsonl")}}
@@ -128,7 +128,7 @@ func TestNewSessionRegistrationFailureRollsBackCreation(t *testing.T) {
 				t.Fatal(err)
 			}
 			owned := map[string]bool{}
-			app := &application{config: config.Config{SessionsRoot: root}, gatewayState: state, rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), newRPCClient: func(string, string, string) (agent.Client, error) { return client, nil }, claimSession: func(_ *http.Request, path string) (bool, error) { owned[path] = true; return true, nil }, releaseSession: func(_ *http.Request, path string) error { delete(owned, path); return nil }}
+			app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), gatewayState: state, rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), newRPCClient: func(string, string, string) (agent.Client, error) { return client, nil }, claimSession: func(_ *http.Request, path string) (bool, error) { owned[path] = true; return true, nil }, releaseSession: func(_ *http.Request, path string) error { delete(owned, path); return nil }}
 			if _, err := app.startNewSession(tagLifecycleRequest("/sessions/new_at_cwd"), root, ""); err == nil {
 				t.Fatal("registration succeeded")
 			}

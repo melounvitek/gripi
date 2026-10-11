@@ -57,7 +57,7 @@ func (deferringClient) DeferringCompactionPrompts() bool { return true }
 func TestLocalSessionsKeepCompactingUntilQueuedPromptsAreDelivered(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return deferringClient{client}, nil }, nil)
-	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, app.sessionCache, app.rpcClients)
+	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, nil, app.rpcClients)
 	if err := app.rpcClients.WithClient(context.Background(), path, func(agent.Client) error { return nil }); err != nil {
 		t.Fatal(err)
 	}

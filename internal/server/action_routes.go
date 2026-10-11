@@ -157,7 +157,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	}
 
 	submittedAt := time.Now()
-	attachmentStore := sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}
+	attachmentStore := sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}
 	var rpcResponse map[string]any
 	var rpcMessage = message
 	var extensionCommandWithImages, handledSlashCommand, compactingAfterHandledCommand, runningAfterHandledCommand bool
@@ -436,7 +436,7 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 	result := agent.StopResult{}
 	queuedText := ""
 	stoppedQueuedRun := false
-	if _, statErr := os.Stat(requested); statErr == nil {
+	if app.sessionStore.Exists(requested) {
 		if client := app.rpcClients.Client(requested); client != nil {
 			var queued map[string][]string
 
@@ -830,8 +830,7 @@ func (app *application) persistedActionSession(response http.ResponseWriter, req
 	if !ok {
 		return nil, false
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, persisted := store.Session(path)
+	session, persisted := app.sessionStore.Session(path)
 	if !persisted {
 		http.NotFound(response, request)
 		return nil, false
@@ -840,8 +839,7 @@ func (app *application) persistedActionSession(response http.ResponseWriter, req
 }
 
 func (app *application) deleteSessionBlockReason(currentPath, targetPath string) string {
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	if current, found := store.Session(currentPath); found {
+	if current, found := app.sessionStore.Session(currentPath); found {
 		currentPath = current.Path
 	}
 	if currentPath == targetPath {
@@ -898,10 +896,11 @@ func (app *application) deleteSessionData(request *http.Request, path string) (s
 		// Pi may not create a file until the first assistant response. Check
 		// after closing the client so any file it did persist is still deleted.
 		_, pending := app.pendingSessions.CWD(path)
-		if _, err := os.Stat(path); pending && errors.Is(err, os.ErrNotExist) {
+		if pending && !app.sessionStore.Exists(path) {
 			method = "pending"
 		} else {
-			method, err = sessions.DeleteSessionFile(path)
+			var err error
+			method, err = app.sessionStore.Delete(path)
 			if err != nil {
 				return err
 			}
@@ -913,13 +912,12 @@ func (app *application) deleteSessionData(request *http.Request, path string) (s
 }
 
 func (app *application) cleanupDeletedSession(request *http.Request, path string) {
-	app.sessionCache.Forget(path)
 	app.synchronizer.Forget(path)
 	app.pendingSessions.Forget(path)
 	if err := app.gatewayState.Forget(path); err != nil {
 		logInternalError("clean deleted session state", err)
 	}
-	attachments := sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}
+	attachments := sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}
 	if err := attachments.Delete(path); err != nil {
 		logInternalError("clean deleted session attachments", err)
 	}
@@ -1399,8 +1397,7 @@ func (app *application) takeOverSession(response http.ResponseWriter, request *h
 		return
 	}
 	state, err := app.synchronizer.TakeOver(request.Context(), path, func() error {
-		store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-		session, found := store.Session(path)
+		session, found := app.sessionStore.Session(path)
 		if !found {
 			return errors.New("session disappeared during takeover")
 		}
@@ -1437,7 +1434,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 	cwd := app.currentSessionCWD(previous)
 	_, wasPending := app.pendingSessions.CWD(previous)
 	var mover rpc.SessionClientMover = app.rpcClients
-	if _, err := os.Stat(previous); err == nil {
+	if app.sessionStore.Exists(previous) {
 		mover = app.synchronizer
 	}
 	newPath, actionResponse, err := rpc.BranchSession(request.Context(), previous, cwd, mover, app.pendingSessions, func(client agent.Client) (map[string]any, error) {
@@ -1454,7 +1451,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 			return actions.Fork(request.Context(), entryID)
 		}
 	}, func(path string) (string, error) {
-		configured, ok := sessions.ConfiguredSessionPath(app.config.SessionsRoot, path)
+		configured, ok := app.sessionStore.Canonical(path)
 		if !ok {
 			return "", errors.New("Pi reported a session path outside the configured sessions root")
 		}
@@ -1563,7 +1560,7 @@ func (app *application) startNewSession(request *http.Request, cwd, forkFrom str
 		return app.newRPCClient(cwd, app.environmentUser(request), forkFrom)
 	}
 	return rpc.StartNewSession(request.Context(), cwd, app.config.SessionsRoot, factory, app.rpcClients, app.pendingSessions, func(path string) (string, func() error, error) {
-		path, ok := sessions.ConfiguredSessionPath(app.config.SessionsRoot, path)
+		path, ok := app.sessionStore.Canonical(path)
 		if !ok {
 			return "", nil, errors.New("Pi reported a session path outside the configured sessions root")
 		}
@@ -1641,7 +1638,7 @@ func (app *application) actionSessionPath(response http.ResponseWriter, request 
 }
 
 func (app *application) validOwnedSessionPath(request *http.Request, path string) bool {
-	if path == "" || len(path) > maximumSessionPathBytes || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsRune(path, 0) {
+	if path == "" || len(path) > maximumSessionPathBytes || !app.sessionStore.ValidKey(path) || strings.ContainsRune(path, 0) {
 		return false
 	}
 	return app.ownsSession == nil || app.ownsSession(request, path)
@@ -1673,20 +1670,18 @@ func (app *application) knownOrPendingSession(request *http.Request, path string
 		return false
 	}
 	path = resolved
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	_, ok := store.Session(path)
+	_, ok := app.sessionStore.Session(path)
 	return ok
 }
 
 func (app *application) currentSessionCWD(path string) string {
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	if session, ok := store.Session(path); ok {
+	if session, ok := app.sessionStore.Session(path); ok {
 		return session.CWD
 	}
 	if cwd, ok := app.pendingSessions.CWD(path); ok {
 		return cwd
 	}
-	return filepath.Dir(path)
+	return app.sessionStore.FallbackCWD(path)
 }
 
 func (app *application) withSynchronizedBashClient(request *http.Request, path string, call func(agent.Client) error) error {
@@ -1696,7 +1691,7 @@ func (app *application) withSynchronizedBashClient(request *http.Request, path s
 	}
 	path = resolved
 	ctx := request.Context()
-	if _, err := os.Stat(path); err == nil {
+	if app.sessionStore.Exists(path) {
 		return app.synchronizer.WithBashClient(ctx, path, call)
 	}
 	return app.rpcClients.WithBashClient(ctx, path, call)
@@ -1709,7 +1704,7 @@ func (app *application) withSynchronizedInterruptClient(request *http.Request, p
 	}
 	path = resolved
 	ctx := request.Context()
-	if _, err := os.Stat(path); err == nil {
+	if app.sessionStore.Exists(path) {
 		return app.synchronizer.WithInterruptClient(ctx, path, call)
 	}
 	return app.rpcClients.WithInterruptClient(ctx, path, call)
@@ -1717,8 +1712,7 @@ func (app *application) withSynchronizedInterruptClient(request *http.Request, p
 
 func (app *application) abortMatchingPending(request *http.Request, requested string, abort func(agent.Client) error) (string, error) {
 	ctx := request.Context()
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, known := store.Session(requested)
+	session, known := app.sessionStore.Session(requested)
 	if !known {
 		return "", nil
 	}
@@ -1741,7 +1735,7 @@ func (app *application) abortMatchingPending(request *http.Request, requested st
 				unavailable = true
 				return nil
 			}
-			reported, found := store.Session(sessionFileFrom(state))
+			reported, found := app.sessionStore.Session(sessionFileFrom(state))
 			if found && reported.Path == session.Path {
 				matched = true
 				return abort(client)

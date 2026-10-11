@@ -146,8 +146,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			request.URL.RawQuery = params.Encode()
 		}
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	all, metadataDeferred, err := store.SessionsDeferringMetadata(func(path string) bool {
+	all, metadataDeferred, err := app.sessionStore.SessionsDeferringMetadata(func(path string) bool {
 		return request.URL.Path == "/sidebar" && app.rpcClients.Busy(path)
 	})
 	if err != nil {
@@ -297,7 +296,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		view.HideThinkingBlock = app.adapter.DisplaySettings(selected.CWD).HideThinkingBlock
 		leafID, leafSupplied := "", false
 		view.SessionSyncMode = sessions.SyncAvailable
-		_, statErr := os.Stat(selected.Path)
+		saved := app.sessionStore.Exists(selected.Path)
 		if state := selectedSync; state != nil {
 			view.SessionSyncMode, view.SessionSyncRevision, view.SessionSyncError = state.Mode, state.Revision, state.Error
 			view.SessionSyncBlocked = state.Blocked()
@@ -313,18 +312,18 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		view.SessionSyncGatewayBusy = view.SessionSyncBlocked && app.rpcClients.Busy(selected.Path)
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)
 		window := agent.Window{}
-		if statErr == nil {
+		if saved {
 			var err error
-			window, err = store.Window(selected.Path, leafID, leafSupplied, nil, nil)
+			window, err = app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
 			if err != nil {
 				return nil, err
 			}
 		}
 		view.Window = window
 		view.Attachments = make(map[*agent.Message]sessions.AttachmentMatch)
-		if statErr == nil {
-			view.Attachments = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}).Match(selected.Path, window.Messages)
-			view.SessionGeneration = store.Generation(selected.Path)
+		if saved {
+			view.Attachments = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}).Match(selected.Path, window.Messages)
+			view.SessionGeneration = app.sessionStore.Generation(selected.Path)
 		}
 		activeToolIDs := make([]string, 0, len(snapshot.ActiveToolEvents))
 		for _, event := range snapshot.ActiveToolEvents {
@@ -333,8 +332,8 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			}
 		}
 		toolContext := map[string]agent.ToolCallContext(nil)
-		if statErr == nil {
-			toolContext = store.SubagentToolCallContext(selected.Path, window.TreeLeafID, activeToolIDs)
+		if saved {
+			toolContext = app.sessionStore.SubagentToolCallContext(selected.Path, window.TreeLeafID, activeToolIDs)
 		}
 		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, toolContext)
 	}
@@ -496,7 +495,7 @@ func millisecondsString(value *time.Time) string {
 func (app *application) rememberSessionHashes(all []*agent.Session) {
 	values := make(map[string]bool, len(all))
 	for _, session := range all {
-		aliases := sessions.SessionPathAliases(app.config.SessionsRoot, session.Path)
+		aliases := app.sessionStore.Aliases(session.Path)
 		if len(aliases) == 0 {
 			aliases = []string{session.Path}
 		}
@@ -795,9 +794,8 @@ func sessionParent(view *pageView, session *agent.Session) *agent.Session {
 	if session == nil || session.ParentSessionPath == "" {
 		return nil
 	}
-	target := filepath.Clean(session.ParentSessionPath)
 	for _, candidate := range view.Sessions {
-		if filepath.Clean(candidate.Path) == target {
+		if candidate.Path == session.ParentSessionPath {
 			return candidate
 		}
 	}
@@ -808,9 +806,8 @@ func sessionChildren(view *pageView, session *agent.Session) []*agent.Session {
 		return nil
 	}
 	var result []*agent.Session
-	target := filepath.Clean(session.Path)
 	for _, candidate := range view.Sessions {
-		if candidate.ParentSessionPath != "" && filepath.Clean(candidate.ParentSessionPath) == target {
+		if candidate.ParentSessionPath != "" && candidate.ParentSessionPath == session.Path {
 			result = append(result, candidate)
 		}
 	}

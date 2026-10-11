@@ -78,7 +78,7 @@ func TestPendingTagsMaterializeInBackgroundWithoutRequest(t *testing.T) {
 func TestPendingTagMigrationFailureRollsBackMetadataAndOwnership(t *testing.T) {
 	root := t.TempDir()
 	from, to := filepath.Join(root, "pending.jsonl"), filepath.Join(root, "native.jsonl")
-	state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), root)
+	state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), NewPiStore(root, ""))
 	for i := range 32 {
 		if err := state.SetTag(to, fmt.Sprint(i), true); err != nil {
 			t.Fatal(err)
@@ -145,7 +145,7 @@ func TestBackgroundCompletionDoesNotMigrateTagsAfterConcurrentBranch(t *testing.
 			parent := filepath.Join(root, "pending.jsonl")
 			app := notificationTestApplication(t, root, false, true, &recordingPushNotifier{})
 			app.config.AttachmentsRoot = filepath.Join(root, "attachments")
-			app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+			app.synchronizer = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
 			client := &branchCompletionClient{remapClient: &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": child}}}, observed: make(chan struct{}), branched: make(chan struct{})}
 			if err := app.rpcClients.Register(parent, client); err != nil {
 				t.Fatal(err)

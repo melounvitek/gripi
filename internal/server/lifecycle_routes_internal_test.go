@@ -46,9 +46,8 @@ func TestLifecycleDecisionsFailClosed(t *testing.T) {
 				if err := registry.Register(path, client); err != nil {
 					t.Fatal(err)
 				}
-				cache := sessions.NewCache()
-				app := &application{config: config.Config{SessionsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
-				app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+				app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
+				app.synchronizer = sessions.NewSynchronizer(root, root, nil, registry)
 				queried := false
 				client.onState = func() {
 					queried = true

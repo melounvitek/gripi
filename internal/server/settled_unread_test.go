@@ -89,7 +89,7 @@ func TestSidebarUnreadWaitsForSettledAndSurvivesRetirement(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertSettledUnread(t, app, path, want)
-			app.gatewayState = sessions.NewGatewayState(filepath.Join(app.config.SessionsRoot, "read.json"), filepath.Join(app.config.SessionsRoot, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), app.config.SessionsRoot)
+			app.gatewayState = sessions.NewGatewayState(filepath.Join(app.config.SessionsRoot, "read.json"), filepath.Join(app.config.SessionsRoot, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(app.config.SessionsRoot, ""))
 			assertSettledUnread(t, app, path, want)
 		})
 	}

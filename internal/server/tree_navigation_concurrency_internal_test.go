@@ -411,7 +411,7 @@ func newTreeNavigationFixture(t *testing.T) *treeNavigationFixture {
 		t.Fatal(err)
 	}
 	fixture.app.rpcClients = registry
-	fixture.app.synchronizer = sessions.NewSynchronizer(fixture.app.config.SessionsRoot, fixture.app.config.Home, fixture.app.sessionCache, registry)
+	fixture.app.synchronizer = sessions.NewSynchronizer(fixture.app.config.SessionsRoot, fixture.app.config.Home, nil, registry)
 	return fixture
 }
 

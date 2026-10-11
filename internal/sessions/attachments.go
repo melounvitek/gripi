@@ -31,8 +31,9 @@ type AttachmentMatch struct {
 }
 
 type AttachmentStore struct {
-	Root         string
-	SessionsRoot string
+	Root string
+	// Keys finds the attachments recorded under any key of a session.
+	Keys SessionKeys
 }
 
 func (store AttachmentStore) RecordPrompt(sessionPath, message string, imageCount int, timestamp time.Time, paths, mimeTypes []string) error {
@@ -63,8 +64,8 @@ func (store AttachmentStore) RecordPrompt(sessionPath, message string, imageCoun
 
 func (store AttachmentStore) Delete(sessionPath string) error {
 	paths := []string{sessionPath}
-	if store.SessionsRoot != "" {
-		if aliases := SessionPathAliases(store.SessionsRoot, sessionPath); len(aliases) > 0 {
+	if store.Keys != nil {
+		if aliases := store.Keys.Aliases(sessionPath); len(aliases) > 0 {
 			paths = aliases
 		}
 	}
@@ -293,8 +294,8 @@ func (store AttachmentStore) Match(sessionPath string, messages []*Message) map[
 
 func (store AttachmentStore) read(sessionPath string) []Attachment {
 	paths := []string{sessionPath}
-	if store.SessionsRoot != "" {
-		if aliases := SessionPathAliases(store.SessionsRoot, sessionPath); len(aliases) > 0 {
+	if store.Keys != nil {
+		if aliases := store.Keys.Aliases(sessionPath); len(aliases) > 0 {
 			paths = aliases
 		}
 	}

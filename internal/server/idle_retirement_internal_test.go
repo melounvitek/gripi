@@ -240,13 +240,12 @@ func newIdleRetirementFixture(t *testing.T) *idleRetirementFixture {
 		}
 		return fixture.replacement, nil
 	}, func() time.Time { return time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC) })
-	cache := sessions.NewCache()
 	fixture.app = &application{
 		config:          config.Config{SessionsRoot: root, Home: root, RPCIdleTimeout: time.Second},
-		sessionCache:    cache,
+		sessionStore:    NewPiStore(root, root),
 		rpcClients:      registry,
 		pendingSessions: agent.NewPendingSessionRegistry(nil),
-		synchronizer:    sessions.NewSynchronizer(root, root, cache, registry),
+		synchronizer:    sessions.NewSynchronizer(root, root, nil, registry),
 	}
 	fixture.path = fixture.session(t, "idle")
 	if err := registry.Register(fixture.path, fixture.old); err != nil {

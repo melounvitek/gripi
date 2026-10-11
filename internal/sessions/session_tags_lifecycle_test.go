@@ -10,7 +10,7 @@ func TestTagsCopyMigrationAndRollbackPreserveOtherEdits(t *testing.T) {
 	for _, move := range []bool{false, true} {
 		t.Run(map[bool]string{false: "copy", true: "migrate"}[move], func(t *testing.T) {
 			root := t.TempDir()
-			state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), "")
+			state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), nil)
 			for _, name := range []string{" WORK ", "alpha"} {
 				if err := state.SetTag("/parent", name, true); err != nil {
 					t.Fatal(err)
@@ -53,7 +53,7 @@ func TestTagsCopyMigrationAndRollbackPreserveOtherEdits(t *testing.T) {
 
 func TestTagRollbackPreservesNewerDestinationEdit(t *testing.T) {
 	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), "")
+	state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), nil)
 	if err := state.SetTag("/parent", "work", true); err != nil {
 		t.Fatal(err)
 	}

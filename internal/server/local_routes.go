@@ -89,8 +89,7 @@ func (app *application) localConversation(response http.ResponseWriter, request 
 		return
 	}
 	defer releaseRequestSlot(app.heavyRequests)
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	window, err := store.Window(request.URL.Query().Get("session"), "", false, nil, nil)
+	window, err := app.sessionStore.Window(request.URL.Query().Get("session"), "", false, nil, nil)
 	// A new session has no file, and so no messages, until Pi has replied once.
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeInternalError(response, "read conversation for gripi commands", err)

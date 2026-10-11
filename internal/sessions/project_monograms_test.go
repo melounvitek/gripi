@@ -10,7 +10,7 @@ func TestProjectMonogramsAreUniqueAndKeptAcrossRestarts(t *testing.T) {
 	root := t.TempDir()
 	monograms := func(cwds ...string) map[string]string {
 		t.Helper()
-		state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), root)
+		state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), rootKeys(root))
 		result, err := state.ProjectMonograms(cwds)
 		if err != nil {
 			t.Fatal(err)
@@ -41,7 +41,7 @@ func TestProjectMonogramsAreUniqueAndKeptAcrossRestarts(t *testing.T) {
 
 func TestProjectMonogramsRepeatWhenANameHasNoFreeLetters(t *testing.T) {
 	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), root)
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), rootKeys(root))
 	got, err := state.ProjectMonograms([]string{"/a/ab", "/b/ab"})
 	want := map[string]string{"/a/ab": "ab", "/b/ab": "ab"}
 	if err != nil || !maps.Equal(got, want) {

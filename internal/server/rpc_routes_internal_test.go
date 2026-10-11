@@ -52,7 +52,7 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
-	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), sessionsRoot)
+	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(sessionsRoot, ""))
 	if err := gatewayState.SetPinned(pendingPath, true); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	if err := os.WriteFile(metadata, []byte("gateway metadata\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	app := &application{config: config.Config{SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot}, sessionCache: sessions.NewCache(), gatewayState: gatewayState, rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot}, sessionStore: NewPiStore(sessionsRoot, ""), gatewayState: gatewayState, rpcClients: registry, pendingSessions: pending}
 
 	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), pendingPath)
 	if err != nil || result != realPath {
@@ -134,11 +134,11 @@ func TestCanonicalRPCSessionPathNormalizesNativePhysicalPathToConfiguredRoot(t *
 	claimed := ""
 	app := &application{
 		config:          config.Config{SessionsRoot: configuredRoot, AttachmentsRoot: attachmentsRoot},
-		sessionCache:    sessions.NewCache(),
+		sessionStore:    NewPiStore(configuredRoot, ""),
 		rpcClients:      registry,
 		pendingSessions: pending,
 		claimSession:    func(_ *http.Request, path string) (bool, error) { claimed = path; return true, nil },
-		gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), configuredRoot),
+		gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), NewPiStore(configuredRoot, "")),
 	}
 	if err := app.gatewayState.SetTag(pendingPath, "work", true); err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestCanonicalRPCSessionPathNormalizesExistingPhysicalPath(t *testing.T) {
 		created.Add(1)
 		return &remapClient{}, nil
 	}, nil)
-	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
+	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionStore: NewPiStore(configuredRoot, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
 
 	for _, path := range []string{physicalPath, configuredPath} {
@@ -219,6 +219,7 @@ func TestStartNewSessionNormalizesANotYetExistingNativePath(t *testing.T) {
 	claimed := ""
 	app := &application{
 		config:          config.Config{SessionsRoot: configuredRoot},
+		sessionStore:    NewPiStore(configuredRoot, ""),
 		newRPCClient:    func(string, string, string) (agent.Client, error) { return client, nil },
 		rpcClients:      registry,
 		pendingSessions: agent.NewPendingSessionRegistry(nil),
@@ -260,7 +261,7 @@ func TestCanonicalRPCSessionPathFinalizesPendingSessionAtSameConfiguredPath(t *t
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(configuredPath, project, "")
-	app := &application{config: config.Config{SessionsRoot: configuredRoot, AttachmentsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: configuredRoot, AttachmentsRoot: t.TempDir()}, sessionStore: NewPiStore(configuredRoot, ""), rpcClients: registry, pendingSessions: pending}
 
 	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), physicalPath)
 	if err != nil || result != configuredPath || !registry.Active(configuredPath) {
@@ -287,7 +288,7 @@ func TestCanonicalRPCSessionPathDoesNotInspectAnotherWorkspacePendingClient(t *t
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
-	app := &application{config: config.Config{SessionsRoot: root}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending,
+	app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: pending,
 		ownsSession: func(_ *http.Request, path string) bool { return path == target },
 	}
 
@@ -316,9 +317,8 @@ func TestPreparePageCanonicalizesSelectedPendingSessionBeforeBuildingView(t *tes
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: pending}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: pending}
+	app.synchronizer = sessions.NewSynchronizer(root, root, nil, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
 
 	view, err := app.preparePage(request, false)
@@ -346,7 +346,7 @@ func TestPreparePageOrdersPendingSessionByRecentActivity(t *testing.T) {
 	})
 	pending.Remember(pendingPath, project, "")
 	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
-	app := &application{config: config.Config{SessionsRoot: root, Home: root}, sessionCache: sessions.NewCache(), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: root, Home: root}, sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: pending}
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
 
 	view, err := app.preparePage(request, false)
@@ -438,7 +438,7 @@ func TestPendingRemapRejectsADeletedDestination(t *testing.T) {
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember("/pending", "/project", "")
 	root := t.TempDir()
-	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
+	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), nil)
 	if err := gatewayState.Forget("/real"); err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +474,7 @@ func TestCompletedPendingRemapRequiresEveryDestinationOwnership(t *testing.T) {
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remap("/pending", "/intermediate")
 	pending.Remap("/intermediate", "/real")
-	app := &application{pendingSessions: pending, ownsSession: func(_ *http.Request, path string) bool { return path == "/pending" || path == "/intermediate" }}
+	app := &application{sessionStore: NewPiStore("", ""), pendingSessions: pending, ownsSession: func(_ *http.Request, path string) bool { return path == "/pending" || path == "/intermediate" }}
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
 
 	if _, err := app.canonicalRPCSessionPath(request, "/pending"); err == nil {
@@ -501,7 +501,7 @@ func TestEventsContinuesResolvingACompletedPendingSessionRemap(t *testing.T) {
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remap("/pending", "/real")
-	app := &application{config: config.Config{}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{}, sessionStore: NewPiStore("", ""), rpcClients: registry, pendingSessions: pending}
 	for iteration := 0; iteration < 2; iteration++ {
 		request := httptest.NewRequest(http.MethodGet, "http://app.test/events?session="+url.QueryEscape("/pending")+"&after=0", nil)
 		response := httptest.NewRecorder()
@@ -521,13 +521,12 @@ func TestEventsReportsUnreplayableCursors(t *testing.T) {
 				t.Error("event polling must not create a client")
 				return nil, os.ErrNotExist
 			}, nil)
-			cache := sessions.NewCache()
 			app := &application{
 				config:          config.Config{SessionsRoot: root, Home: root},
-				sessionCache:    cache,
+				sessionStore:    NewPiStore(root, root),
 				rpcClients:      registry,
 				pendingSessions: agent.NewPendingSessionRegistry(nil),
-				synchronizer:    sessions.NewSynchronizer(root, root, cache, registry),
+				synchronizer:    sessions.NewSynchronizer(root, root, nil, registry),
 			}
 			var sequence int64
 			if state != "absent" {
@@ -622,11 +621,10 @@ func TestSidebarRendersRPCActivityIndicators(t *testing.T) {
 			if err := registry.Register(path, client); err != nil {
 				t.Fatal(err)
 			}
-			cache := sessions.NewCache()
 			app := &application{
 				config:          config.Config{SessionsRoot: root, Home: root},
-				sessionCache:    cache,
-				gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root),
+				sessionStore:    NewPiStore(root, root),
+				gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")),
 				rpcClients:      registry,
 				pendingSessions: agent.NewPendingSessionRegistry(nil),
 				heavyRequests:   make(chan struct{}, 1),
@@ -686,9 +684,8 @@ func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app.synchronizer = sessions.NewSynchronizer(root, root, nil, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	view, err := app.preparePage(request, true)
 	if err != nil {
@@ -727,9 +724,8 @@ func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {
 	path := filepath.Join(root, "session.jsonl")
 	writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": project}, {"type": "message", "id": "old", "parentId": nil, "timestamp": "2026-01-01T00:00:01Z", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Old"}}}}})
 	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app.synchronizer = sessions.NewSynchronizer(root, root, nil, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	if _, err := app.preparePage(request, true); err != nil {
 		t.Fatal(err)
@@ -794,9 +790,9 @@ func TestAcceptedPromptImageSurvivesAttachmentMetadataFailure(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, sessions.SessionHash(path)+".jsonl"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
-	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), cache, registry)
+	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending}
+	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
+	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), nil, registry)
 	temporary := t.TempDir()
 	t.Setenv("TMPDIR", temporary)
 	var invalidBody bytes.Buffer
@@ -894,9 +890,8 @@ func TestAbortRetiresAQueuedRunAndRestoresItsMessages(t *testing.T) {
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
+	app.synchronizer = sessions.NewSynchronizer(root, root, nil, registry)
 	if state, err := app.synchronizer.Inspect(context.Background(), path, true); err != nil || state.Mode != sessions.SyncManaged {
 		t.Fatalf("initial synchronization = %#v, %v", state, err)
 	}
@@ -939,7 +934,8 @@ func TestAbortDoesNotRetireAQueuedPendingSession(t *testing.T) {
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(path, "/project", "")
-	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
+	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
@@ -961,7 +957,8 @@ func TestAbortAllowsTrackedSyntheticPendingSession(t *testing.T) {
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(path, "/project", "")
-	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
+	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
@@ -997,9 +994,8 @@ func TestAbortMatchesPendingClientReportingPhysicalSessionPath(t *testing.T) {
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
-	app.synchronizer = sessions.NewSynchronizer(configuredRoot, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionStore: NewPiStore(configuredRoot, ""), rpcClients: registry, pendingSessions: pending}
+	app.synchronizer = sessions.NewSynchronizer(configuredRoot, root, nil, registry)
 	started, release := make(chan struct{}), make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
@@ -1045,9 +1041,9 @@ func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(path, t.TempDir(), "")
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: t.TempDir()}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
-	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), cache, registry)
+	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
+	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
+	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), nil, registry)
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/prompt", strings.NewReader(url.Values{"session": {path}, "message": {"after compaction"}, "streaming_behavior": {"follow_up"}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
@@ -1105,9 +1101,8 @@ func TestPreparePageOmitsCompletedSubagentSnapshotPersistedOutsideInitialWindow(
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app.synchronizer = sessions.NewSynchronizer(root, root, nil, registry)
 
 	view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true)
 	if err != nil {

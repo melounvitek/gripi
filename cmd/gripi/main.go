@@ -118,7 +118,15 @@ func newPiAdapter(cfg config.Config) (*pi.Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
 	}
-	return pi.New(pi.Options{Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension}), nil
+	// The adapter's state lives with the gateway's.
+	stateDir := ""
+	if cfg.ReadStatePath != "" {
+		stateDir = filepath.Dir(cfg.ReadStatePath)
+	}
+	return pi.New(pi.Options{
+		Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension,
+		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir,
+	}), nil
 }
 
 // startupAddress is the URL to open where localhost reaches the gateway. Other

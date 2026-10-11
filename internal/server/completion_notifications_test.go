@@ -67,7 +67,7 @@ func TestRPCSettledReplyFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) 
 		delivered <- notification
 		return nil
 	}))
-	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+	app.synchronizer = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
 	notifier := newCompletionNotifier(app)
 	notifier.gracePeriod = 0
 	t.Cleanup(func() {
@@ -165,7 +165,7 @@ func TestCompletionNotifierRefreshesSyncBeforeDelivery(t *testing.T) {
 			if err := app.rpcClients.Register(path, client); err != nil {
 				t.Fatal(err)
 			}
-			app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+			app.synchronizer = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
 			if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
 				t.Fatal(err)
 			}
@@ -215,7 +215,7 @@ func TestCompletionNotifierWorkerRetriesUnavailableInspection(t *testing.T) {
 				if err := app.rpcClients.Register(path, client); err != nil {
 					t.Fatal(err)
 				}
-				app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+				app.synchronizer = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
 				notifier := newCompletionNotifier(app)
 				started := make(chan struct{})
 				notifier.waitUntil = func(context.Context, time.Time) bool {
@@ -285,7 +285,7 @@ func TestCompletionNotifierInspectionRetryHonorsDeliveryDeadline(t *testing.T) {
 			if err := app.rpcClients.Register(path, client); err != nil {
 				t.Fatal(err)
 			}
-			app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+			app.synchronizer = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
 			notifier := newCompletionNotifier(app)
 			reply := completedReply{client: client, path: path, text: "done", id: "reply"}
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -433,7 +433,7 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	app := notificationTestApplication(t, root, false, true, fake)
 	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "external"}}
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
-	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+	app.synchronizer = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
 	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
@@ -821,12 +821,12 @@ func notificationTestApplication(t *testing.T, root string, multiUser, authDisab
 		adapter:              agentpi.New(agentpi.Options{}),
 		browserStore:         access.NewBrowserStore(cfg.BrowserAccessPath),
 		workspaceStore:       access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
-		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
+		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, NewPiStore(cfg.SessionsRoot, "")),
 		pushSubscriptions:    push.NewSubscriptionStore(cfg.PushSubscriptionsPath),
 		pushNotifier:         notifier,
-		gatewayState:         sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root),
+		gatewayState:         sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")),
 		notificationPresence: newNotificationPresence(time.Now),
-		sessionCache:         sessions.NewCache(),
+		sessionStore:         NewPiStore(root, ""),
 		pendingSessions:      agent.NewPendingSessionRegistry(nil),
 		rpcClients:           agent.NewRegistry(nil, nil),
 	}

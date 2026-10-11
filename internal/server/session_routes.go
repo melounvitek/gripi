@@ -222,8 +222,7 @@ func (app *application) conversationOlder(response http.ResponseWriter, request 
 	if !owned {
 		return
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, ok := store.Session(path)
+	session, ok := app.sessionStore.Session(path)
 	if !ok {
 		writeJSON(response, empty)
 		return
@@ -239,12 +238,12 @@ func (app *application) conversationOlder(response http.ResponseWriter, request 
 	if supplied && len(leaf) > 0 {
 		leafID = leaf[0]
 	}
-	window, err := store.Window(session.Path, leafID, supplied, &cursor, after)
+	window, err := app.sessionStore.Window(session.Path, leafID, supplied, &cursor, after)
 	if err != nil {
 		http.Error(response, "Session changed while it was read", http.StatusServiceUnavailable)
 		return
 	}
-	matches := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}).Match(session.Path, window.Messages)
+	matches := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}).Match(session.Path, window.Messages)
 	view := &pageView{Selected: session, Home: app.config.Home, Attachments: matches, HideThinkingBlock: app.adapter.DisplaySettings(session.CWD).HideThinkingBlock}
 	var html bytes.Buffer
 	for _, message := range window.Messages {
@@ -327,8 +326,7 @@ func (app *application) sessionImage(response http.ResponseWriter, request *http
 		http.NotFound(response, request)
 		return
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	data, mimeType, err := store.Image(path, request.PathValue("entry_id"), index)
+	data, mimeType, err := app.sessionStore.Image(path, request.PathValue("entry_id"), index)
 	if err != nil {
 		http.NotFound(response, request)
 		return
@@ -345,8 +343,7 @@ func (app *application) knownSessionHash(hash string) bool {
 	if fresh {
 		return known
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	all, err := store.Sessions()
+	all, err := app.sessionStore.Sessions()
 	if err != nil {
 		return false
 	}
@@ -374,9 +371,8 @@ func (app *application) composerPathSuggestions(response http.ResponseWriter, re
 	if !owned {
 		return
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
 	var cwd string
-	if session, ok := store.Session(raw); ok {
+	if session, ok := app.sessionStore.Session(raw); ok {
 		cwd = session.CWD
 	} else {
 		cwd, ok = app.pendingSessions.CWD(raw)
@@ -424,8 +420,7 @@ func (app *application) pinSession(response http.ResponseWriter, request *http.R
 }
 
 func (app *application) gatewayStateSessionPath(path string) (string, bool) {
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	if session, persisted := store.Session(path); persisted {
+	if session, persisted := app.sessionStore.Session(path); persisted {
 		return session.Path, true
 	}
 	_, pending := app.pendingSessions.CWD(path)
@@ -440,15 +435,14 @@ func (app *application) markSessionRead(response http.ResponseWriter, request *h
 	if !ok {
 		return
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, ok := store.Session(path)
+	session, ok := app.sessionStore.Session(path)
 	if !ok {
 		http.NotFound(response, request)
 		return
 	}
 	unlock := app.sessionMutationLocks.Lock(session.Path)
 	defer unlock()
-	session, ok = store.Session(session.Path)
+	session, ok = app.sessionStore.Session(session.Path)
 	if !ok {
 		http.NotFound(response, request)
 		return
@@ -470,7 +464,7 @@ func (app *application) markSessionRead(response http.ResponseWriter, request *h
 		writeText(response, http.StatusBadRequest, "Invalid read state")
 		return
 	}
-	if generation != store.Generation(session.Path) {
+	if generation != app.sessionStore.Generation(session.Path) {
 		writeText(response, http.StatusConflict, "Session changed")
 		return
 	}

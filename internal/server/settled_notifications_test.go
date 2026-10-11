@@ -179,7 +179,7 @@ func TestSidebarCompletionMetadataChangesOnlyOnEligibleSettledReply(t *testing.T
 	if len(notifier.clients) != 0 {
 		t.Fatal("retired client completion state retained")
 	}
-	app.gatewayState = sessions.NewGatewayState(filepath.Join(app.config.SessionsRoot, "read.json"), filepath.Join(app.config.SessionsRoot, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), app.config.SessionsRoot)
+	app.gatewayState = sessions.NewGatewayState(filepath.Join(app.config.SessionsRoot, "read.json"), filepath.Join(app.config.SessionsRoot, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(app.config.SessionsRoot, ""))
 	app.completionNotifications = newCompletionNotifier(app)
 	t.Cleanup(app.completionNotifications.cancel)
 	assertMetadata(completedReplyID(map[string]any{"message": next}), "Next reply")

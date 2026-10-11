@@ -11,6 +11,7 @@ import (
 	"github.com/melounvitek/gripi/internal/agent"
 	pisettings "github.com/melounvitek/gripi/internal/pi"
 	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 type Options struct {
@@ -20,6 +21,11 @@ type Options struct {
 	AutoApproveProjects bool
 	// Extension is the gateway's Pi extension, which carries the requests Pi's RPC mode lacks.
 	Extension []byte
+	// SessionsRoot is where Pi saves sessions, and Home the folder that session paths are shown relative to.
+	SessionsRoot string
+	Home         string
+	// StateDir keeps what the adapter learns about sessions across restarts. Without it the adapter forgets.
+	StateDir string
 }
 
 type Adapter struct {
@@ -29,16 +35,26 @@ type Adapter struct {
 	extensionMu   sync.Mutex
 	extensionPath string
 	extensionRoot string
+	store         sessionStore
 }
 
 var _ agent.Adapter = (*Adapter)(nil)
 
 func New(options Options) *Adapter {
+	cache := sessions.NewCache()
+	if options.StateDir != "" {
+		cache = sessions.LoadCache(filepath.Join(options.StateDir, "session-metadata-cache.json"))
+	}
 	return &Adapter{
 		command:   options.Command,
 		extension: options.Extension,
 		settings:  pisettings.SettingsResolver{AgentDir: options.AgentDir, AutoApproveProjects: options.AutoApproveProjects},
+		store:     sessionStore{sessions.Store{Root: options.SessionsRoot, Home: options.Home, Cache: cache}},
 	}
+}
+
+func (adapter *Adapter) Store() agent.Store {
+	return adapter.store
 }
 
 func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Client, error) {

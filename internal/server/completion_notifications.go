@@ -160,8 +160,7 @@ func (notifier *completionNotifier) pruneClientsLocked() {
 }
 
 func (notifier *completionNotifier) responseCount(path string, fallback int) int {
-	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
-	if session, found := store.Session(path); found {
+	if session, found := notifier.app.sessionStore.Session(path); found {
 		return session.AssistantResponseCount
 	}
 	return fallback
@@ -333,8 +332,7 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	}
 
 	title := "current session"
-	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
-	if session, found := store.Session(path); found && strings.TrimSpace(session.DisplayName) != "" {
+	if session, found := notifier.app.sessionStore.Session(path); found && strings.TrimSpace(session.DisplayName) != "" {
 		title = agent.NotificationPreview(session.DisplayName)
 	}
 	payload, err := json.Marshal(map[string]string{
@@ -377,13 +375,12 @@ func (notifier *completionNotifier) sessionPath(ctx context.Context, reply compl
 		return path, nil
 	}
 	reported := sessionFileFrom(state)
-	if configured, valid := sessions.ConfiguredSessionPath(notifier.app.config.SessionsRoot, reported); valid {
+	if configured, valid := notifier.app.sessionStore.Canonical(reported); valid {
 		reported = configured
 	} else {
 		return path, nil
 	}
-	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
-	session, found := store.Session(reported)
+	session, found := notifier.app.sessionStore.Session(reported)
 	if !found || session.CWD != pendingCWD {
 		return path, nil
 	}

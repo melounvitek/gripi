@@ -8,6 +8,8 @@ type Adapter interface {
 	StartInCWD(cwd, forkFrom string, options StartOptions) (Client, error)
 	// DisplaySettings returns the agent's display preferences for a project.
 	DisplaySettings(cwd string) DisplaySettings
+	// Store returns the agent's catalog of saved sessions.
+	Store() Store
 	// Close releases what the adapter holds after its clients have stopped.
 	Close() error
 }

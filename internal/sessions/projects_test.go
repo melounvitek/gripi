@@ -18,7 +18,7 @@ func TestProjectsPreserveExistingDirectoriesWithoutImportingLaterCLISessions(t *
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			newState := func() *GatewayState {
-				return NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), root)
+				return NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), rootKeys(root))
 			}
 			existing := test.existing
 			state := newState()
@@ -52,7 +52,7 @@ func TestProjectsPreserveExistingDirectoriesWithoutImportingLaterCLISessions(t *
 func TestProjectRollbackPreservesLaterGatewayAdoption(t *testing.T) {
 	for _, laterAdoption := range []bool{false, true} {
 		root := t.TempDir()
-		state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), root)
+		state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), rootKeys(root))
 		rollback, err := state.RememberProject("/new")
 		if err != nil {
 			t.Fatal(err)
@@ -82,7 +82,7 @@ func TestProjectsDoNotReplaceMalformedStateWithDiscoveredDirectories(t *testing.
 	if err := os.WriteFile(path, malformed, 0600); err != nil {
 		t.Fatal(err)
 	}
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), root)
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), rootKeys(root))
 	if _, err := state.ProjectCWDs([]*Session{{CWD: "/cli-only"}}); err == nil {
 		t.Fatal("malformed project state was ignored")
 	}

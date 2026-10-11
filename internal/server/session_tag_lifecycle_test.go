@@ -93,7 +93,7 @@ func TestSessionTagLifecycleWithNativePi(t *testing.T) {
 			expected = []string{}
 		}
 		assertTags(child, expected)
-		tags, err := sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, sessionsRoot).SessionTags()
+		tags, err := sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, gateway.NewPiStore(sessionsRoot, "")).SessionTags()
 		if err != nil || !reflect.DeepEqual(tags[pending], []string{"pending"}) {
 			t.Fatalf("branch erased source tags: %v, %v", tags, err)
 		}
@@ -112,7 +112,7 @@ func TestSessionTagLifecycleWithNativePi(t *testing.T) {
 			t.Fatal("deleted session left an unused suggestion")
 		}
 	}
-	tags, err := sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, sessionsRoot).SessionTags()
+	tags, err := sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, gateway.NewPiStore(sessionsRoot, "")).SessionTags()
 	if err != nil || len(tags[parent]) != 0 {
 		t.Fatalf("deleted session tags = %v, %v", tags[parent], err)
 	}

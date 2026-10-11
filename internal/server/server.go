@@ -51,7 +51,7 @@ type application struct {
 	adminLimiter            *access.RateLimiter
 	newBrowserToken         func() (string, error)
 	instanceID              string
-	sessionCache            *sessions.Cache
+	sessionStore            agent.Store
 	gatewayState            *sessions.GatewayState
 	markdown                *rendering.Markdown
 	heavyRequests           chan struct{}
@@ -82,8 +82,7 @@ type application struct {
 var errSessionFolderMissing = &sessions.SyncBlockedError{Mode: sessions.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
 
 func (app *application) sessionFolderMissing(path string) bool {
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, found := store.Session(path)
+	session, found := app.sessionStore.Session(path)
 	return found && session.FolderMissing
 }
 
@@ -122,8 +121,8 @@ func (handler *Handler) Close(ctx context.Context) error {
 	if handler.closed {
 		return nil
 	}
-	if handler.app.sessionCache != nil {
-		if err := handler.app.sessionCache.Save(); err != nil {
+	if handler.app.sessionStore != nil {
+		if err := handler.app.sessionStore.SaveCache(); err != nil {
 			logInternalError("save session metadata cache", err)
 		}
 	}
@@ -197,6 +196,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	pushIdentity := push.NewVAPIDIdentity(cfg.WebPushVAPIDPath)
 	pushSubscriptions := push.NewSubscriptionStore(cfg.PushSubscriptionsPath)
 	pushDelivery := push.NewWebPushDelivery(pushIdentity, "https://github.com/melounvitek/gripi", &http.Client{Timeout: 15 * time.Second})
+	store := adapter.Store()
 
 	app := &application{
 		config:               cfg,
@@ -204,7 +204,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		templates:            templates,
 		browserStore:         access.NewBrowserStore(cfg.BrowserAccessPath),
 		workspaceStore:       access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
-		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
+		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, store),
 		environment:          environment.NewStore(cfg.EnvironmentPath),
 		workspaceSecret:      workspaceSecret,
 		pushIdentity:         pushIdentity,
@@ -215,8 +215,8 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		adminLimiter:         access.NewRateLimiter(10, 5*time.Minute),
 		newBrowserToken:      newBrowserToken,
 		instanceID:           instanceID,
-		sessionCache:         sessions.NewCache(),
-		gatewayState:         sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, cfg.SessionsRoot),
+		sessionStore:         store,
+		gatewayState:         sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, store),
 		markdown:             markdown,
 		heavyRequests:        make(chan struct{}, 2),
 		imageRequests:        make(chan struct{}, 2),
@@ -226,13 +226,11 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		pendingSessions:      agent.NewPendingSessionRegistry(nil),
 	}
 	if cfg.ReadStatePath != "" {
-		app.sessionCache = sessions.LoadCache(filepath.Join(filepath.Dir(cfg.ReadStatePath), "session-metadata-cache.json"))
-		store := sessions.Store{Root: cfg.SessionsRoot, Home: cfg.Home, Cache: app.sessionCache}
 		existing, err := store.Sessions()
 		if err != nil {
 			return nil, fmt.Errorf("list existing projects: %w", err)
 		}
-		if err := app.sessionCache.Save(); err != nil {
+		if err := store.SaveCache(); err != nil {
 			logInternalError("save session metadata cache", err)
 		}
 		if _, err := app.gatewayState.ProjectCWDs(existing); err != nil {
@@ -268,7 +266,8 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		}
 		return adapter.StartInCWD(cwd, forkFrom, agent.StartOptions{Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
 	}
-	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, app.sessionCache, app.rpcClients)
+	// The synchronizer reads session files directly and never uses the metadata cache.
+	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, nil, app.rpcClients)
 	if cfg.ReadStatePath != "" {
 		state := filepath.Dir(cfg.ReadStatePath)
 		app.synchronizer.RestoreBaselines(filepath.Join(state, "session-baselines.json"))
