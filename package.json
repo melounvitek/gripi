@@ -12,7 +12,7 @@
   "scripts": {
     "desktop": "electron .",
     "desktop:check": "node --test electron/*.test.js && node --check electron/main.js && node --check electron/preload.js && node --check electron/gateway_preload.js && node --check electron/shell.js",
-    "frontend:check": "node --test test/frontend*.test.mjs test/demo.test.mjs && for file in public/assets/*.js demo/*.js; do node --check \"$file\"; done",
+    "frontend:check": "node --test test/frontend*.test.mjs test/demo.test.mjs && for file in public/assets/*.js; do node --input-type=module --check < \"$file\" || { echo \"Syntax error in $file\" >&2; exit 1; }; done && for file in demo/*.js; do node --check \"$file\" || exit 1; done",
     "pi-extension:check": "node --test test/pi_extension.test.mjs",
     "scripts:check": "node --test test/scripts.test.mjs",
     "fake-pi:check": "node --test e2e/support/*.test.mjs && node --check e2e/support/fake_pi.mjs",
