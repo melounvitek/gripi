@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -295,7 +296,7 @@ func TestImagesReachHermesAndStayInTheConversation(t *testing.T) {
 func sharedFiles(t *testing.T) (image, notImage string, contents []byte) {
 	t.Helper()
 	folder := t.TempDir()
-	image, notImage = filepath.Join(folder, "shot.png"), filepath.Join(folder, "notes.png")
+	image, notImage = filepath.Join(folder, "page shot.png"), filepath.Join(folder, "notes.png")
 	contents = []byte("\x89PNG\r\n\x1a\nfixture-image")
 	if err := os.WriteFile(image, contents, 0600); err != nil {
 		t.Fatal(err)
@@ -331,23 +332,39 @@ func shownImages(t *testing.T, handler http.Handler, page string) [][]byte {
 
 func TestAnImageHermesSharesShowsInPlaceOfItsTag(t *testing.T) {
 	image, notImage, contents := sharedFiles(t)
+	tag := `MEDIA:"` + image + `"`
+	// Nothing writes to the pipe, which would hold a read of it forever.
+	pipe := filepath.Join(t.TempDir(), "pipe.png")
+	if err := syscall.Mkfifo(pipe, 0600); err != nil {
+		t.Fatal(err)
+	}
+	reply := func(id, text string) map[string]any {
+		update := textUpdate("agent_message_chunk", text)
+		update["messageId"] = id
+		return update
+	}
 	handler := hermesHandler(t, map[string]any{
 		"sessionId": "hermes-shot", "cwd": t.TempDir(), "title": "Screenshot the page", "updatedAt": "2026-03-01T10:00:00Z",
 		"history": []any{
 			textUpdate("user_message_chunk", "Screenshot the page"),
-			textUpdate("agent_message_chunk", "Here it is: `MEDIA:"+image+"`\n\nMy notes: MEDIA:"+notImage),
+			reply("reply-1", "Here it is: `"+tag+"`\n\nYou can share one too:\n```\n"+tag+"\n```\n\nMy notes: MEDIA:"+notImage+"\n\nA pipe: MEDIA:"+pipe),
+			reply("reply-2", tag),
 		},
 	})
 
-	page := getPage(t, handler, "/?session="+url.QueryEscape("hermes:hermes-shot"))
-	if !strings.Contains(page, "Here it is:") || strings.Contains(page, "MEDIA:"+image) {
+	page := html.UnescapeString(getPage(t, handler, "/?session="+url.QueryEscape("hermes:hermes-shot")))
+	if !strings.Contains(page, "<p>Here it is:</p>") {
 		t.Error("the page doesn't show the image in place of its tag")
 	}
-	// A file that the browser can't show as an image stays as Hermes wrote it.
-	if !strings.Contains(page, "MEDIA:"+notImage) {
-		t.Error("the page lacks the tag of the file that isn't an image")
+	// Like Hermes, the gateway leaves an example in code, and the tag of a file that the browser can't show as an image.
+	if !strings.Contains(page, "<code>"+tag) || !strings.Contains(page, "MEDIA:"+notImage) || !strings.Contains(page, "MEDIA:"+pipe) {
+		t.Error("the page lacks the tags that share no image")
 	}
-	if images := shownImages(t, handler, page); len(images) != 1 || !bytes.Equal(images[0], contents) {
+	// A reply of only an image keeps its tag as its text.
+	if article := page[strings.Index(page, `data-message-key="2:0"`):]; !strings.Contains(article[:strings.Index(article, "</article>")], tag) {
+		t.Error("the reply of only an image lacks its tag")
+	}
+	if images := shownImages(t, handler, page); len(images) != 2 || !bytes.Equal(images[0], contents) || !bytes.Equal(images[1], contents) {
 		t.Fatalf("the page shows the images %q", images)
 	}
 }
@@ -358,7 +375,7 @@ func TestAnImageHermesSharesShowsLiveAndAfterTheRun(t *testing.T) {
 	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
 	key := payload["session"].(string)
 	// The fake Hermes repeats the prompt in its reply.
-	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Look: MEDIA:" + image}}); code != http.StatusOK {
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {`Look: **MEDIA:"` + image + `"**`}}); code != http.StatusOK {
 		t.Fatalf("prompt = %d %v", code, payload)
 	}
 

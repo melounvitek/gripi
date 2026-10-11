@@ -515,8 +515,6 @@ func (client *client) endReply(stopReason string) *agent.Reply {
 	message := client.reply
 	message.StopReason = stopReason
 	client.reply, client.replyID, client.update = nil, "", 0
-	// The reply's text keeps its tags, so that a reply of only images still tells the user about it.
-	text := message.text()
 	var images []piPart
 	for index, part := range message.Content {
 		if part.Type != "text" {
@@ -532,6 +530,7 @@ func (client *client) endReply(stopReason string) *agent.Reply {
 	}
 	message.Content = append(message.Content, images...)
 	client.emit(map[string]any{"type": "message_end", "message": message})
+	text := message.text()
 	if text == "" {
 		return nil
 	}
