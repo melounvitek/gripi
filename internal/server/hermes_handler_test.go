@@ -287,7 +287,7 @@ func TestImagesReachHermesAndStayInTheConversation(t *testing.T) {
 	}
 }
 
-func TestHermesRefusesMoreImagesThanItCanRead(t *testing.T) {
+func TestHermesRefusesAMessageTooLargeForIt(t *testing.T) {
 	handler := hermesHandler(t)
 	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
 	key := payload["session"].(string)
@@ -295,12 +295,13 @@ func TestHermesRefusesMoreImagesThanItCanRead(t *testing.T) {
 	writer := multipart.NewWriter(&body)
 	_ = writer.WriteField("session", key)
 	_ = writer.WriteField("message", "Compare these")
-	for _, name := range []string{"first.png", "second.png"} {
-		part, err := writer.CreatePart(textproto.MIMEHeader{"Content-Disposition": {`form-data; name="images[]"; filename="` + name + `"`}, "Content-Type": {"image/png"}})
+	// Four images of the most an upload takes are more than Hermes reads once encoded.
+	for index := range 4 {
+		part, err := writer.CreatePart(textproto.MIMEHeader{"Content-Disposition": {fmt.Sprintf(`form-data; name="images[]"; filename="%d.png"`, index)}, "Content-Type": {"image/png"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _ = part.Write(bytes.Repeat([]byte{'x'}, 6<<20))
+		_, _ = part.Write(bytes.Repeat([]byte{'x'}, 10<<20))
 	}
 	_ = writer.Close()
 	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:4567/prompt", &body)
@@ -308,7 +309,7 @@ func TestHermesRefusesMoreImagesThanItCanRead(t *testing.T) {
 	request.Header.Set("Accept", "application/json")
 
 	response := serveAction(handler, request)
-	if response.Code == http.StatusOK || !strings.Contains(response.Body.String(), "10 MB of images") {
+	if response.Code == http.StatusOK || !strings.Contains(response.Body.String(), "too large for Hermes") {
 		t.Fatalf("prompt = %d %s", response.Code, response.Body.String())
 	}
 }

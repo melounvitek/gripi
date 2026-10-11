@@ -1034,7 +1034,7 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
     scheduleNextEventPoll(0);
     sidebarController.requestRefresh();
   }
-  const attachmentsDisabled = submitting || stopping || sessionSyncBlocked();
+  const attachmentsDisabled = submitting || stopping || waitingForHermes || sessionSyncBlocked();
   if (imageInput) imageInput.disabled = attachmentsDisabled;
   if (attachButton) {
     attachButton.classList.toggle("is-disabled", attachmentsDisabled);

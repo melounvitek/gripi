@@ -62,9 +62,11 @@ test("stopping Hermes ends its run", async ({ page }) => {
   await expect(composer).toBeDisabled();
   await expect(composer).toHaveAttribute("placeholder", "Hermes is working…");
   await expect(page.getByRole("button", { name: /^(Send|Steer)/ })).toBeHidden();
+  await expect(page.locator("#image-input")).toBeDisabled();
   await page.getByRole("button", { name: "Abort running Hermes" }).click();
   await expectRunFinished(page);
   await expect(composer).toHaveAttribute("placeholder", "Ask Hermes…");
+  await expect(page.locator("#image-input")).toBeEnabled();
 });
 
 test("Hermes asks in a dialog before a dangerous command, which a reload keeps", async ({ page }) => {
