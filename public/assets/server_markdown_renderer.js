@@ -55,8 +55,11 @@ export class ServerMarkdownRenderer {
 
       // A placeholder gives way to the text, which then wipes in whole: the "…" of an empty body while it loads, or "Thinking…".
       const previousHeight = !job.body.firstChild || job.body.textContent.trim() === THINKING_PLACEHOLDER ? 0 : job.body.offsetHeight;
+      // Each render replaces the code blocks, and a streaming one renders with every line, so they keep their horizontal scroll.
+      const scrolls = [...job.body.querySelectorAll("pre")].map((pre) => pre.scrollLeft);
       job.body.replaceChildren(...rendered.childNodes);
       enhanceMarkdownCodeBlocks(job.body, this.document);
+      job.body.querySelectorAll("pre").forEach((pre, index) => { pre.scrollLeft = scrolls[index] ?? 0; });
       this.conversationController.afterMarkdownRender(job.body, previousHeight);
       if (job.body.dataset.plainText !== text) return this.request(job);
       delete job.body.dataset.rendering;

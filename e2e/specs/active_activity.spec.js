@@ -446,6 +446,30 @@ for (const view of ["Full", "Brief"]) {
   });
 }
 
+test("a streaming code block shows its finished lines without moving them", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const answer = (text) => ({ type: "message_update", message: assistant([{ type: "text", text: `Run this:\n\n\`\`\`sh\n${text}` }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  const one = `echo ${"one ".repeat(80)}`;
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, answer(`${one}\necho tw`));
+  const body = page.locator("#live-output .message--assistant .message-body");
+  const code = body.locator("pre");
+  const codeTop = () => code.evaluate((element) => element.getBoundingClientRect().top - element.closest(".message-body").getBoundingClientRect().top);
+  const scrollLeft = () => code.evaluate((element) => element.scrollLeft);
+  await expect(code).toHaveText(one);
+  const top = await codeTop();
+  // The reader scrolls along the long line.
+  await code.evaluate((element) => { element.scrollLeft = 200; });
+  await deliver(answer(`${one}\necho two\necho thr`));
+  await expect(code).toHaveText(`${one}\necho two`);
+  expect(await codeTop()).toBe(top);
+  expect(await scrollLeft()).toBe(200);
+  await deliver(answer(`${one}\necho two\necho three\n\`\`\`\n\nThen check the outp`));
+  await expect(code).toHaveText(`${one}\necho two\necho three`);
+  expect(await codeTop()).toBe(top);
+  expect(await scrollLeft()).toBe(200);
+  await expect(body).not.toContainText("Then check");
+});
+
 async function streamingReplyAtBottom(page) {
   const deliver = await liveEvents(page);
   const scroller = page.locator("#conversation-scroll");

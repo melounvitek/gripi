@@ -139,6 +139,7 @@ function markdownBody() {
     innerHTML: "",
     textContent: "",
     closest() { return null; },
+    querySelectorAll() { return []; },
     replaceChildren(...nodes) { this.innerHTML = nodes.join(""); },
   };
 }

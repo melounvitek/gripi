@@ -420,7 +420,7 @@
     .message--error, .message--tool-error, .gateway-update-failure-output { background: var(--danger-soft); color: #e8a9a9; }
     /* Every block shares one padding. */
     .message--user, .message--compact, .message--error, .message--tool-preparation, .message[data-role="custom"] { padding-block: 0.65rem; border-radius: 0.2rem; }
-    .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after,
+    .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after,
     .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after,
     .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after,
     .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { content: ""; display: inline-block; width: 0.55em; height: 1.05em; margin-left: 0.15rem; background: var(--accent-bright); vertical-align: -0.15em; animation: streaming-caret-blink 1000ms steps(1) infinite; }
@@ -847,7 +847,7 @@
     /* revealGrowth in dom.js wipes newly streamed blocks in from the top by animating this soft edge. */
     @property --reveal-edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
     .message-body--revealing { -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); }
-    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(pre):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (max-width: 760px), (pointer: coarse) {
       /* Touch rows: one line with the leading slot, title, tags, time and the 44px actions button, whose menu holds Pin. */
       .session-row { min-height: 2.75rem; padding: 0 2.9rem 0 0.5rem; }

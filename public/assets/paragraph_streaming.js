@@ -26,7 +26,8 @@
 // An opening fence may sit at any indentation, since fences inside list
 // items are indented past the marker. A closing fence may be indented at most
 // three spaces more than its opener. Deeper lines are content in the block.
-const MARKDOWN_FENCE_PATTERN = /^( *)(`{3,}|~{3,})/;
+// A backtick fence carries no backticks after it, or the line is inline code.
+const MARKDOWN_FENCE_PATTERN = /^( *)(`{3,}(?!.*`)|~{3,})/;
 // CommonMark blank lines hold only spaces and tabs. Other whitespace, such as
 // a no-break space, is paragraph content.
 const BLANK_LINE_PATTERN = /^[ \t]*$/;
@@ -53,6 +54,9 @@ const TOP_LEVEL_HEADING_PATTERN = /^#{1,6}(?:[ \t]|$)/;
  *
  * A section title holds the boundary until a content line follows it, so a
  * title never lands alone and waits above a block that is still streaming.
+ *
+ * Inside an open fence, the end of each finished line is a boundary, since
+ * Markdown renders an unclosed fence as code to the end.
  */
 export function finishedMarkdownBlocks(text) {
   let openFence = null;
@@ -75,6 +79,9 @@ export function finishedMarkdownBlocks(text) {
     if (newline === -1) {
       break;
     }
+    if (openFence !== null) {
+      boundary = newline + 1;
+    }
     const fenceMatch = MARKDOWN_FENCE_PATTERN.exec(line);
     if (fenceMatch) {
       const indent = fenceMatch[1].length;
@@ -90,7 +97,6 @@ export function finishedMarkdownBlocks(text) {
       ) {
         // CommonMark: a closing fence carries no info string.
         openFence = null;
-        boundary = newline + 1;
       }
     } else if (openFence === null && BLANK_LINE_PATTERN.test(line) && lineStart > 0) {
       if (!titleAwaitingContent) {
