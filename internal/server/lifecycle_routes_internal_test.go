@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestLifecycleDecisionsFailClosed(t *testing.T) {
@@ -41,17 +41,16 @@ func TestLifecycleDecisionsFailClosed(t *testing.T) {
 					t.Fatal(err)
 				}
 				client := &lifecycleStateClient{remapClient: &remapClient{state: test.state, busy: test.cachedBusy}, stateErr: test.err}
-				registry := rpc.NewRegistry(nil, nil)
+				registry := agent.NewRegistry(nil, nil)
 				if err := registry.Register(path, client); err != nil {
 					t.Fatal(err)
 				}
-				cache := sessions.NewCache()
-				app := &application{config: config.Config{SessionsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil)}
-				app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+				app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
+				app.guard = sessionfile.NewSynchronizer(registry)
 				queried := false
 				client.onState = func() {
 					queried = true
-					if err := app.synchronizer.WithExclusiveOperation(path, func() error { return nil }); !errors.Is(err, sessions.ErrSyncBusy) {
+					if err := app.guard.WithExclusiveOperation(path, func() error { return nil }); !errors.Is(err, agent.ErrSyncBusy) {
 						t.Errorf("state query was not serialized with mutations: %v", err)
 					}
 				}
@@ -79,27 +78,30 @@ func TestLifecycleDecisionsFailClosed(t *testing.T) {
 
 type lifecycleStateClient struct {
 	*remapClient
-	rpc.ActionClient
-	stateErr  error
-	onState   func()
-	closed    bool
-	aborted   bool
-	navigated bool
+	agent.TreeNavigator // Unexercised actions intentionally have no implementation.
+	stateErr            error
+	onState             func()
+	closed              bool
+	aborted             bool
+	navigated           bool
 }
 
-func (client *lifecycleStateClient) GetState(context.Context) (map[string]any, error) {
+func (client *lifecycleStateClient) State(context.Context) (agent.State, error) {
 	client.onState()
-	return client.state, client.stateErr
+	if client.stateErr != nil {
+		return agent.State{}, client.stateErr
+	}
+	return stateFrom(client.state)
 }
 func (client *lifecycleStateClient) Close() error {
 	client.closed = true
 	return nil
 }
-func (client *lifecycleStateClient) Abort(context.Context) (map[string]any, error) {
+func (client *lifecycleStateClient) Cancel(context.Context) error {
 	client.aborted = true
-	return map[string]any{"success": true}, nil
+	return nil
 }
-func (client *lifecycleStateClient) NavigateTree(context.Context, string, string, string) (map[string]any, error) {
+func (client *lifecycleStateClient) NavigateTree(context.Context, string, string, string) (agent.Navigation, error) {
 	client.navigated = true
-	return map[string]any{"success": true}, nil
+	return agent.Navigation{}, nil
 }

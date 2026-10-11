@@ -61,7 +61,15 @@ export const sessions = {
   bashMobile: "E2E Bash Cancel Mobile",
   environment: "E2E Environment Desktop",
   wrappedToolOutput: "E2E Wrapped Tool Output Mobile",
-  writeOutput: "E2E Write Output Desktop"
+  writeOutput: "E2E Write Output Desktop",
+  liveToolResults: "E2E Live Tool Results Desktop",
+  liveErrors: "E2E Live Errors Desktop",
+  liveCustomMessages: "E2E Live Custom Messages Desktop",
+  liveShell: "E2E Live Shell Desktop",
+  liveExtensionUi: "E2E Live Extension UI Desktop",
+  liveFooter: "E2E Live Footer Desktop",
+  liveCompaction: "E2E Live Compaction Desktop",
+  liveThinking: "E2E Live Thinking Desktop"
 };
 
 export const footerModel = {
@@ -147,6 +155,8 @@ export const nativeBash = {
   },
   excluded: { command: "printf 'excluded native bash output'", output: "excluded native bash output\n" },
   nonzero: { command: "exit 7", output: "deterministic nonzero output\n", exitCode: 7 },
+  failure: { command: "start-missing-shell # e2e-failure", error: "spawn /bin/missing-shell ENOENT" },
+  truncated: { command: "seq 1 100000 # e2e-truncated", output: "99999\n100000\n", fullOutputFile: "pi-bash-e2e-truncated.log" },
   cancel: { command: "sleep 30 # e2e-cancel" },
   reload: { command: "sleep 30 # e2e-reload" },
   overlap: { command: "sleep 30 # e2e-overlap" },
@@ -221,4 +231,95 @@ export const replies = {
   extensionApproved: "Release approval was confirmed.",
   extensionRaceComplete: "Queued extension requests completed.",
   newSession: "First session response complete."
+};
+
+// Live-rendering characterization scenarios. Each prompt starts a fake Pi run that pauses at confirmation
+// dialogs titled by `gates`, so a test can inspect every stage before Pi retires and history replaces live cards.
+export const live = {
+  toolResults: {
+    prompt: "Show live paired tool results",
+    gates: { results: "Show the paired tool results?", finish: "Finish the paired tool results?" },
+    readOk: { id: "live-read-ok", path: "live/read-ok.txt", result: "live read content stays hidden" },
+    readError: { id: "live-read-error", path: "live/missing.txt", result: "ENOENT: no such file or directory, access 'live/missing.txt'" },
+    editOk: {
+      id: "live-edit-ok",
+      path: "live/edit-ok.txt",
+      oldText: "old line",
+      newText: "new line",
+      result: "Successfully replaced 1 block(s) in live/edit-ok.txt.",
+      diff: " 1 alpha\n-2 old line\n+2 new line\n 3 omega"
+    },
+    editError: {
+      id: "live-edit-error",
+      path: "live/edit-error.txt",
+      oldText: "missing line",
+      newText: "replacement line",
+      result: "Could not find the exact text in live/edit-error.txt."
+    },
+    writeOk: { id: "live-write-ok", path: "live/write-ok.txt", content: "written content", result: "Successfully wrote to live/write-ok.txt" },
+    writeError: { id: "live-write-error", path: "live/write-error.txt", content: "blocked content", result: "EACCES: permission denied, open 'live/write-error.txt'" },
+    reply: "Live paired tool results complete."
+  },
+  errors: {
+    transientRetry: { prompt: "Retry a transient provider error", gate: "Retry the provider request?", error: "529 overloaded during the first attempt", reply: "Retried provider response complete." },
+    exhaustedRetry: { prompt: "Exhaust the provider retries", error: "503 unavailable after every retry" },
+    extensionErrors: {
+      prompt: "Report extension handler errors",
+      error: "Extension tool_call handler failed",
+      terminalUiError: "This extension command requires terminal UI that Gripi does not support yet.",
+      reply: "Reply after extension errors."
+    },
+    summarizationRetry: { prompt: "Retry summarization during automatic compaction", error: "terminated while summarizing", summary: "Summary after a summarization retry.", reply: "Reply before a summarization retry." }
+  },
+  customMessages: {
+    prompt: "Send extension custom messages",
+    gate: "Finish the custom messages?",
+    customType: "e2e-note",
+    shown: "**Displayed** custom note",
+    hidden: "Hidden custom context",
+    reply: "Custom messages complete."
+  },
+  extensionUi: {
+    prompt: "Update extension widgets, title, and notices",
+    restorePrompt: "Keep extension widgets for a page reload",
+    gates: { removal: "Remove a widget and the title?", decline: "Offer editor text to decline?", restore: "Finish after the page reload?" },
+    widgets: {
+      above: { key: "e2e-live-above", lines: ["Above editor first line", "Above editor second line"] },
+      implicit: { key: "e2e-live-default", lines: ["Default placement line"] },
+      below: { key: "e2e-live-below", lines: ["Below editor line"] }
+    },
+    title: "E2E extension title",
+    notices: { info: "Extension info notice", warning: "Extension warning notice", error: "Extension error notice" },
+    editorText: { empty: "Extension text for an empty editor", replaced: "Extension text replacing the draft", declined: "Extension text the user declines" },
+    reply: "Extension UI updates complete.",
+    restoreReply: "Extension UI restore complete."
+  },
+  footer: {
+    prompt: "Update the footer and session name live",
+    gates: { start: "Start the footer updates?", streaming: "End the footer message?", ended: "End the footer turn?" },
+    provider: "e2e-live",
+    model: "live-message-model",
+    thinkingLevel: "high",
+    renamed: "E2E Live Footer Renamed Desktop",
+    reply: "Footer updates complete."
+  },
+  compaction: {
+    failurePrompt: "Fail automatic compaction",
+    failureGate: "Fail the automatic compaction?",
+    error: "Auto-compaction failed: summary request timed out",
+    abortPrompt: "Hold automatic compaction until stopped",
+    duplicatePrompt: "Report one automatic compaction twice",
+    duplicateGate: "Finish the repeated compaction?",
+    summary: "Live compaction summary.",
+    reply: "Reply before automatic compaction."
+  },
+  thinking: {
+    prompt: "Finish thinking before answering",
+    gates: { thinking: "Finish the first thought?", ended: "Answer after thinking?", failing: "Fail while thinking?" },
+    errorPrompt: "Fail while thinking",
+    abortPrompt: "Keep thinking until stopped",
+    thought: "Weighing the first option.",
+    error: "Provider stream ended while thinking.",
+    reply: "Thinking characterization complete."
+  }
 };

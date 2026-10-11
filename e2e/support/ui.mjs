@@ -46,6 +46,17 @@ export async function expectRunFinished(page) {
   await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
 }
 
+// Answers a fake Pi confirmation that holds a scenario between stages; see `live` in contract.mjs.
+export async function continueScenario(page, title) {
+  const dialog = page.getByRole("dialog", { name: title });
+  await dialog.getByRole("option", { name: "Yes" }).click();
+  await expect(dialog).toBeHidden();
+}
+
+export function liveMessage(page, role, text) {
+  return page.locator(`#live-output article.message--live[data-role="${role}"]`).filter({ hasText: text });
+}
+
 export function activityView(page, view) {
   return page.getByRole("group", { name: "Agent activity", exact: true }).getByRole("button", { name: view, exact: true });
 }

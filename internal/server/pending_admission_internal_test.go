@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -153,7 +153,7 @@ func TestPendingAdmissionRemapRejectsRetiringDestination(t *testing.T) {
 		})
 	})
 	idleRetirementWait(t, done, "nonblocking remap rejection")
-	if !errors.Is(moveErr, rpc.ErrOperationPending) || claimed {
+	if !errors.Is(moveErr, agent.ErrOperationPending) || claimed {
 		t.Fatalf("remap during destination retirement = %v, claimed=%v", moveErr, claimed)
 	}
 	if resolved, remapped := fixture.app.pendingSessions.Resolve(pending); remapped {

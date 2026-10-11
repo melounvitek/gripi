@@ -30,7 +30,7 @@ func TestSessionTagLifecycleWithNativePi(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
 	cfg := config.Config{Environment: "test", Home: root, SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(root, "attachments"), ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pins.json"), SessionTagsPath: filepath.Join(root, "tags.json"), BrowserAuthDisabled: true, PiCommand: []string{"node", filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_pi.mjs")}}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestSessionTagLifecycleWithNativePi(t *testing.T) {
 			expected = []string{}
 		}
 		assertTags(child, expected)
-		tags, err := sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, sessionsRoot).SessionTags()
+		tags, err := sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, gateway.NewPiStore(sessionsRoot, "")).SessionTags()
 		if err != nil || !reflect.DeepEqual(tags[pending], []string{"pending"}) {
 			t.Fatalf("branch erased source tags: %v, %v", tags, err)
 		}
@@ -112,7 +112,7 @@ func TestSessionTagLifecycleWithNativePi(t *testing.T) {
 			t.Fatal("deleted session left an unused suggestion")
 		}
 	}
-	tags, err := sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, sessionsRoot).SessionTags()
+	tags, err := sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, gateway.NewPiStore(sessionsRoot, "")).SessionTags()
 	if err != nil || len(tags[parent]) != 0 {
 		t.Fatalf("deleted session tags = %v, %v", tags[parent], err)
 	}

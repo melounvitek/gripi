@@ -14,7 +14,7 @@ import (
 func newTagColorState(t *testing.T) *GatewayState {
 	t.Helper()
 	root := t.TempDir()
-	return NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "session-tags.json"), "")
+	return NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "session-tags.json"), nil)
 }
 
 func tagColors(t *testing.T, state *GatewayState) map[string]string {
@@ -107,7 +107,7 @@ func TestTagColorsStabilityAndLifecycleRollback(t *testing.T) {
 	if colors := tagColors(t, state); !maps.Equal(colors, reserved) {
 		t.Fatalf("reservations changed after rollback/removal: %v, want %v", colors, reserved)
 	}
-	state = NewGatewayState(state.readPath, state.pinnedPath, state.tagsPath, "")
+	state = NewGatewayState(state.readPath, state.pinnedPath, state.tagsPath, nil)
 	if colors := tagColors(t, state); !maps.Equal(colors, reserved) {
 		t.Fatalf("reservations changed after reload: %v", colors)
 	}
@@ -335,7 +335,7 @@ func TestTagColorsMalformedAssignmentsAndEmptyPath(t *testing.T) {
 		t.Fatalf("created reservations for malformed assignments: %v", err)
 	}
 	t.Chdir(t.TempDir())
-	state = NewGatewayState("", "", "", "")
+	state = NewGatewayState("", "", "", nil)
 	if colors := tagColors(t, state); len(colors) != 0 {
 		t.Fatalf("unconfigured colors = %v", colors)
 	}

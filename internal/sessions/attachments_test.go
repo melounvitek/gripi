@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 func TestAttachmentMatchReadsMetadataStoredForThePhysicalSessionPath(t *testing.T) {
@@ -36,11 +38,11 @@ func TestAttachmentMatchReadsMetadataStoredForThePhysicalSessionPath(t *testing.
 	if err := os.WriteFile(filepath.Join(attachmentsRoot, physicalHash+".jsonl"), append(metadata, '\n'), 0600); err != nil {
 		t.Fatal(err)
 	}
-	first := &Message{Role: "user", Text: "prompt"}
-	second := &Message{Role: "user", Text: "prompt"}
+	first := &agent.Message{Role: "user", Text: "prompt"}
+	second := &agent.Message{Role: "user", Text: "prompt"}
 
-	matches := (AttachmentStore{Root: attachmentsRoot, SessionsRoot: configuredRoot}).Match(configuredPath, []*Message{first, second})
-	for _, message := range []*Message{first, second} {
+	matches := (AttachmentStore{Root: attachmentsRoot, Keys: rootKeys(configuredRoot)}).Match(configuredPath, []*agent.Message{first, second})
+	for _, message := range []*agent.Message{first, second} {
 		match, ok := matches[message]
 		if !ok || len(match.Images) != 1 || match.Images[0].Src != "/attachments/"+physicalHash+"/image.png" {
 			t.Fatalf("match = %#v, %v", match, ok)
@@ -122,5 +124,31 @@ func TestAttachmentMigrationCanRollbackCommittedReplacement(t *testing.T) {
 	restored, err := os.ReadFile(toPath)
 	if err != nil || string(restored) != "existing\n" {
 		t.Fatalf("restored = %q, %v", restored, err)
+	}
+}
+
+func TestAttachmentStoreDeleteRemovesSessionMetadataAndImages(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := filepath.Join(root, "sessions", "session.jsonl")
+	store := AttachmentStore{Root: filepath.Join(root, "attachments"), Keys: rootKeys(filepath.Join(root, "sessions"))}
+	metadataPath := filepath.Join(store.Root, SessionHash(sessionPath)+".jsonl")
+	imagesPath := filepath.Join(store.Root, SessionHash(sessionPath))
+	if err := os.MkdirAll(imagesPath, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, []byte("metadata"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(imagesPath, "image.png"), []byte("image"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Delete(sessionPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{metadataPath, imagesPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("attachment path remains at %s: %v", path, err)
+		}
 	}
 }

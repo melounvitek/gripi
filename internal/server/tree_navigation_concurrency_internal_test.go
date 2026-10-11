@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/melounvitek/gripi/internal/rpc"
-	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 )
 
 func TestTreeNavigationExcludesPrompts(t *testing.T) {
@@ -36,7 +36,7 @@ func TestTreeNavigationExcludesPrompts(t *testing.T) {
 			fixture := newTreeNavigationFixture(t)
 			fixture.a.state = treeNavigationState(test.streaming)
 			if test.streaming {
-				fixture.a.live.QueuedMessages = map[string][]string{"steering": {"steer one", "steer two"}, "followUp": {"follow up"}}
+				fixture.a.live.Queue = agent.Queue{Steering: []string{"steer one", "steer two"}, FollowUp: []string{"follow up"}}
 			}
 			entered, release, block := idleRetirementBarrier()
 			defer release()
@@ -305,9 +305,10 @@ func TestTreeNavigationReleasesAdmissionOnFailure(t *testing.T) {
 	}
 }
 
-// Keep wrapper behavior local: the idle fixture's embedded ActionClient is nil.
 type treeNavigationClient struct {
 	*idleRetirementClient
+	agent.TreeNavigator // Unexercised actions intentionally have no implementation.
+	agent.ShellRunner
 	name                         string
 	record                       func(string)
 	onState, onAbort, onNavigate func(context.Context) error
@@ -316,24 +317,22 @@ type treeNavigationClient struct {
 	bashes                       atomic.Int32
 }
 
-func (client *treeNavigationClient) GetState(ctx context.Context) (map[string]any, error) {
+func (client *treeNavigationClient) State(ctx context.Context) (agent.State, error) {
 	client.getStateCalls.Add(1)
 	if client.onState != nil {
 		if err := client.onState(ctx); err != nil {
-			return nil, err
+			return agent.State{}, err
 		}
 	}
-	return client.state, nil
+	return stateFrom(client.state)
 }
 
-func (client *treeNavigationClient) Abort(ctx context.Context) (map[string]any, error) {
+func (client *treeNavigationClient) Cancel(ctx context.Context) error {
 	client.record("Abort(" + client.name + ")")
 	if client.onAbort != nil {
-		if err := client.onAbort(ctx); err != nil {
-			return nil, err
-		}
+		return client.onAbort(ctx)
 	}
-	return map[string]any{"success": true}, nil
+	return nil
 }
 
 func (client *treeNavigationClient) Close() error {
@@ -341,36 +340,37 @@ func (client *treeNavigationClient) Close() error {
 	return client.idleRetirementClient.Close()
 }
 
-func (client *treeNavigationClient) NavigateTree(ctx context.Context, entry, summary, instructions string) (map[string]any, error) {
+func (client *treeNavigationClient) NavigateTree(ctx context.Context, entry, summary, instructions string) (agent.Navigation, error) {
 	client.record("Navigate(" + client.name + ")")
 	if entry != "target" || summary != "none" || instructions != "" {
-		return nil, errors.New("unexpected navigation arguments")
+		return agent.Navigation{}, errors.New("unexpected navigation arguments")
 	}
 	if client.onNavigate != nil {
 		if err := client.onNavigate(ctx); err != nil {
-			return nil, err
+			return agent.Navigation{}, err
 		}
 	}
-	return map[string]any{"success": true, "data": map[string]any{"editorText": "branch draft", "cancelled": client.cancelled}}, nil
+	editorText := "branch draft"
+	return agent.Navigation{Cancelled: client.cancelled, EditorText: &editorText}, nil
 }
 
-func (client *treeNavigationClient) QueueCompactionPrompt(_ context.Context, message string, images []rpc.PromptImage, behavior string) (map[string]any, bool, error) {
+func (client *treeNavigationClient) DeferPrompt(_ context.Context, prompt agent.Prompt) (agent.PromptResult, bool, error) {
 	client.queues.Add(1)
-	if message != "hello" || len(images) != 0 || behavior != "steer" && behavior != "followUp" {
-		return nil, false, errors.New("unexpected compaction prompt arguments")
+	if prompt.Text != "hello" || prompt.Images != nil || prompt.Delivery != agent.Steer && prompt.Delivery != agent.FollowUp {
+		return agent.PromptResult{}, false, errors.New("unexpected compaction prompt arguments")
 	}
 	if client.onQueue != nil {
 		client.onQueue()
 	}
-	return map[string]any{"success": true, "compacting": client.queued}, client.queued, nil
+	return agent.PromptResult{QueuedAfterCompaction: client.queued}, client.queued, nil
 }
 
-func (client *treeNavigationClient) Bash(_ context.Context, command string, excluded bool) (map[string]any, error) {
+func (client *treeNavigationClient) RunShell(_ context.Context, command string, excluded bool) (agent.ShellRun, error) {
 	client.bashes.Add(1)
 	if command != "echo hello" || excluded {
-		return nil, errors.New("unexpected bash arguments")
+		return agent.ShellRun{}, errors.New("unexpected bash arguments")
 	}
-	return map[string]any{"success": true, "id": "bash-test"}, nil
+	return agent.ShellRun{ID: "bash-test", Data: json.RawMessage(`{"id":"bash-test","success":true}`)}, nil
 }
 
 type treeNavigationFixture struct {
@@ -392,9 +392,7 @@ func newTreeNavigationFixture(t *testing.T) *treeNavigationFixture {
 	fixture.a = &treeNavigationClient{idleRetirementClient: fixture.old, name: "A", record: record}
 	fixture.b = &treeNavigationClient{idleRetirementClient: fixture.replacement, name: "B", record: record}
 	fixture.a.state, fixture.b.state = treeNavigationState(false), treeNavigationState(false)
-	// LiveSnapshot initializes this slice lazily; make concurrent reads read-only.
-	fixture.a.live.ActiveToolEvents, fixture.b.live.ActiveToolEvents = []map[string]any{}, []map[string]any{}
-	registry := rpc.NewRegistry(func(path string) (rpc.RPCClient, error) {
+	registry := agent.NewRegistry(func(path string) (agent.Client, error) {
 		fixture.created.Add(1)
 		record("Create(B)")
 		if path != fixture.path {
@@ -411,7 +409,7 @@ func newTreeNavigationFixture(t *testing.T) *treeNavigationFixture {
 		t.Fatal(err)
 	}
 	fixture.app.rpcClients = registry
-	fixture.app.synchronizer = sessions.NewSynchronizer(fixture.app.config.SessionsRoot, fixture.app.config.Home, fixture.app.sessionCache, registry)
+	fixture.app.guard = sessionfile.NewSynchronizer(registry)
 	return fixture
 }
 

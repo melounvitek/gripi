@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -30,8 +30,8 @@ func TestComposerPathSuggestionsUseSessionCWD(t *testing.T) {
 			path := filepath.Join(sessionsRoot, "session.jsonl")
 			app := &application{
 				config:          config.Config{Home: root, SessionsRoot: sessionsRoot},
-				sessionCache:    sessions.NewCache(),
-				pendingSessions: rpc.NewPendingSessionRegistry(nil),
+				sessionStore:    NewPiStore(sessionsRoot, root),
+				pendingSessions: agent.NewPendingSessionRegistry(nil),
 				ownsSession:     func(*http.Request, string) bool { return state != "unowned pending" },
 			}
 			switch state {

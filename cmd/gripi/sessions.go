@@ -17,8 +17,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/prompts"
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
@@ -401,7 +401,7 @@ func sendMessage(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return usageError(stderr, "send", "the message is empty")
 	}
 	// Steered, the gateway would run these as the composer does; otherwise Pi would get them as text.
-	if prompts.ParseSlashCommand(message).Type != "" {
+	if (pi.Composer{}).SlashCommand(message).Name != "" {
 		return usageError(stderr, "send", strings.Fields(message)[0]+" is a command of the browser's composer, which send does not run")
 	}
 

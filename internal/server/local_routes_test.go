@@ -78,7 +78,7 @@ func fakePiConfig(t *testing.T) (cfg config.Config, alpha, beta, project string)
 // startGateway starts a gateway that is stopped with the test, unless the test stops it first.
 func startGateway(t *testing.T, cfg config.Config) http.Handler {
 	t.Helper()
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}

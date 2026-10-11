@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 // Timestamp is how gripi commands see a time: in UTC with milliseconds,
@@ -89,8 +89,7 @@ func (app *application) localConversation(response http.ResponseWriter, request 
 		return
 	}
 	defer releaseRequestSlot(app.heavyRequests)
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	window, err := store.Window(request.URL.Query().Get("session"), "", false, nil, nil)
+	window, err := app.sessionStore.Window(request.URL.Query().Get("session"), "", false, nil, nil)
 	// A new session has no file, and so no messages, until Pi has replied once.
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeInternalError(response, "read conversation for gripi commands", err)
@@ -119,10 +118,9 @@ func (app *application) localConversation(response http.ResponseWriter, request 
 
 func (app *application) localSessionState(path string) string {
 	live := app.rpcClients.LiveSnapshot(path)
-	dialogs, _ := live.ExtensionUI["pending_dialogs"].([]map[string]any)
 	switch {
 	// A dialog keeps Pi busy until someone answers, so it must not read as working.
-	case len(dialogs) > 0:
+	case live.PendingRequests > 0:
 		return "waiting"
 	// Prompts queued during a compaction are delivered just after it ends.
 	case app.rpcClients.DeferringCompactionPrompts(path):
@@ -130,8 +128,8 @@ func (app *application) localSessionState(path string) string {
 	case live.Busy:
 		return "working"
 	}
-	if blocked := app.synchronizer.KnownBlocked(path); blocked != nil {
-		if blocked.Mode == sessions.SyncConflict {
+	if blocked := app.guard.KnownBlocked(path); blocked != nil {
+		if blocked.Mode == agent.SyncConflict {
 			return "conflict"
 		}
 		return "external"

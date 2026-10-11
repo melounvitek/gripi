@@ -10,12 +10,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 	"github.com/melounvitek/gripi/internal/rendering"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
-func settledNotificationFixture(t *testing.T) (*application, *completionNotifier, *rpc.Client, string) {
+func settledNotificationFixture(t *testing.T) (*application, *completionNotifier, *agentpi.Client, string) {
 	t.Helper()
 	root := t.TempDir()
 	path := writeNotificationSession(t, root, "Background session")
@@ -28,11 +30,11 @@ func settledNotificationFixture(t *testing.T) (*application, *completionNotifier
 	return app, notifier, notificationRPCClient(t, app, path), path
 }
 
-func notificationRPCClient(t *testing.T, app *application, path string) *rpc.Client {
+func notificationRPCClient(t *testing.T, app *application, path string) *agentpi.Client {
 	t.Helper()
 	in, input := io.Pipe()
 	output, out := io.Pipe()
-	client := rpc.NewClient(input, output, nil, rpc.ClientOptions{})
+	client := &agentpi.Client{Client: rpc.NewClient(input, output, nil, rpc.ClientOptions{})}
 	t.Cleanup(func() { _ = client.Close(); _ = in.Close(); _ = out.Close() })
 	if err := app.rpcClients.Register(path, client); err != nil {
 		t.Fatal(err)
@@ -46,6 +48,18 @@ func notificationMessage(id, text, stop string) map[string]any {
 
 func notificationAgentEnd(messages ...any) map[string]any {
 	return map[string]any{"type": "agent_end", "messages": messages}
+}
+
+// observePi passes the notifier a Pi event as the Pi adapter does.
+func (notifier *completionNotifier) observePi(client agent.Client, event map[string]any) {
+	if lifecycle, ok := agentpi.Lifecycle(event); ok {
+		notifier.Observe(client, lifecycle)
+	}
+}
+
+func piReplyID(message map[string]any) string {
+	lifecycle, _ := agentpi.Lifecycle(map[string]any{"type": "message_end", "message": message})
+	return lifecycle.Reply.ID
 }
 
 func TestSettledNotificationsConsumeLastAgentEndCandidate(t *testing.T) {
@@ -87,14 +101,14 @@ func TestSettledNotificationsConsumeLastAgentEndCandidate(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, notifier, client, _ := settledNotificationFixture(t)
-			notifier.Observe(client, start)
+			notifier.observePi(client, start)
 			for _, event := range test.events {
-				notifier.Observe(client, event)
+				notifier.observePi(client, event)
 			}
 			if len(notifier.queue) != 0 {
 				t.Fatal("notification queued before settled")
 			}
-			notifier.Observe(client, settled)
+			notifier.observePi(client, settled)
 			if test.want == "" {
 				if len(notifier.queue) != 0 {
 					t.Fatal("ineligible completion queued")
@@ -112,11 +126,11 @@ func TestSettledNotificationsConsumeLastAgentEndCandidate(t *testing.T) {
 			default:
 				t.Fatal("eligible settled completion not queued")
 			}
-			notifier.Observe(client, settled)
+			notifier.observePi(client, settled)
 			for _, event := range test.events {
-				notifier.Observe(client, event)
+				notifier.observePi(client, event)
 			}
-			notifier.Observe(client, settled)
+			notifier.observePi(client, settled)
 			if len(notifier.queue) != 0 {
 				t.Fatal("duplicate completion queued")
 			}
@@ -150,44 +164,44 @@ func TestSidebarCompletionMetadataChangesOnlyOnEligibleSettledReply(t *testing.T
 	}
 	assertMetadata("", "")
 	final := notificationMessage("final", "**Done** <safe>", "stop")
-	notifier.Observe(client, map[string]any{"type": "agent_start"})
+	notifier.observePi(client, map[string]any{"type": "agent_start"})
 	// Persisted counts and previews must not produce completion metadata.
 	appendExternalSessionReply(t, path, "progress", "")
-	notifier.Observe(client, map[string]any{"type": "message_end", "message": final})
-	notifier.Observe(client, notificationAgentEnd(final))
+	notifier.observePi(client, map[string]any{"type": "message_end", "message": final})
+	notifier.observePi(client, notificationAgentEnd(final))
 	assertMetadata("", "")
-	notifier.Observe(client, map[string]any{"type": "agent_settled"})
-	id := completedReplyID(map[string]any{"message": final})
-	preview := sessions.NotificationPreview("**Done** <safe>")
+	notifier.observePi(client, map[string]any{"type": "agent_settled"})
+	id := piReplyID(final)
+	preview := agent.NotificationPreview("**Done** <safe>")
 	assertMetadata(id, preview)
-	notifier.Observe(client, map[string]any{"type": "agent_start"})
+	notifier.observePi(client, map[string]any{"type": "agent_start"})
 	appendExternalSessionReply(t, path, "more-progress", "progress")
-	notifier.Observe(client, map[string]any{"type": "message_end", "message": notificationMessage("progress", "New progress", "stop")})
+	notifier.observePi(client, map[string]any{"type": "message_end", "message": notificationMessage("progress", "New progress", "stop")})
 	assertMetadata(id, preview)
-	notifier.Observe(client, notificationAgentEnd(final, notificationMessage("error", "Failed", "error")))
-	notifier.Observe(client, map[string]any{"type": "agent_settled"})
+	notifier.observePi(client, notificationAgentEnd(final, notificationMessage("error", "Failed", "error")))
+	notifier.observePi(client, map[string]any{"type": "agent_settled"})
 	assertMetadata(id, preview)
 	next := notificationMessage("next", "Next reply", "stop")
-	notifier.Observe(client, notificationAgentEnd(next))
-	notifier.Observe(client, map[string]any{"type": "agent_settled"})
-	assertMetadata(completedReplyID(map[string]any{"message": next}), "Next reply")
+	notifier.observePi(client, notificationAgentEnd(next))
+	notifier.observePi(client, map[string]any{"type": "agent_settled"})
+	assertMetadata(piReplyID(next), "Next reply")
 	if _, err := app.rpcClients.CloseClientWithoutOperations(path); err != nil {
 		t.Fatal(err)
 	}
-	assertMetadata(completedReplyID(map[string]any{"message": next}), "Next reply")
+	assertMetadata(piReplyID(next), "Next reply")
 	if len(notifier.clients) != 0 {
 		t.Fatal("retired client completion state retained")
 	}
-	app.gatewayState = sessions.NewGatewayState(filepath.Join(app.config.SessionsRoot, "read.json"), filepath.Join(app.config.SessionsRoot, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), app.config.SessionsRoot)
+	app.gatewayState = sessions.NewGatewayState(filepath.Join(app.config.SessionsRoot, "read.json"), filepath.Join(app.config.SessionsRoot, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(app.config.SessionsRoot, ""))
 	app.completionNotifications = newCompletionNotifier(app)
 	t.Cleanup(app.completionNotifications.cancel)
-	assertMetadata(completedReplyID(map[string]any{"message": next}), "Next reply")
+	assertMetadata(piReplyID(next), "Next reply")
 }
 
 func TestSettledNotificationExternalFollowDoesNotPublishCompletion(t *testing.T) {
 	app, path, _ := externalSessionTestApplication(t)
 	appendExternalSessionReply(t, path, "external", "")
-	if state, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil || state.Mode != sessions.SyncExternalFollow {
+	if state, err := inspectGuard(app.guard, context.Background(), path, false); err != nil || state.Mode != agent.SyncExternalFollow {
 		t.Fatalf("external sync = %#v, %v", state, err)
 	}
 	client := notificationRPCClient(t, app, path)
@@ -195,8 +209,8 @@ func TestSettledNotificationExternalFollowDoesNotPublishCompletion(t *testing.T)
 	notifier.started = true
 	t.Cleanup(notifier.cancel)
 	app.completionNotifications = notifier
-	notifier.Observe(client, notificationAgentEnd(notificationMessage("external", "CLI reply", "stop")))
-	notifier.Observe(client, map[string]any{"type": "agent_settled"})
+	notifier.observePi(client, notificationAgentEnd(notificationMessage("external", "CLI reply", "stop")))
+	notifier.observePi(client, map[string]any{"type": "agent_settled"})
 	completions, err := app.gatewayState.Completions()
 	if err != nil {
 		t.Fatal(err)
@@ -226,16 +240,16 @@ func TestSettledNotificationPreservesReadBeforeAgentEnd(t *testing.T) {
 		t.Run("intervening role="+role, func(t *testing.T) {
 			app, notifier, client, path := settledNotificationFixture(t)
 			final := notificationMessage("final", "Already read", "stop")
-			notifier.Observe(client, map[string]any{"type": "agent_start"})
-			notifier.Observe(client, map[string]any{"type": "message_end", "message": final})
-			if _, _, err := app.gatewayState.ReadAndObserve([]*sessions.Session{{Path: path, AssistantResponseCount: 1}}, &sessions.Session{Path: path, AssistantResponseCount: 1}, true, nil); err != nil {
+			notifier.observePi(client, map[string]any{"type": "agent_start"})
+			notifier.observePi(client, map[string]any{"type": "message_end", "message": final})
+			if _, _, err := app.gatewayState.ReadAndObserve([]*agent.Session{{Path: path, AssistantResponseCount: 1}}, &agent.Session{Path: path, AssistantResponseCount: 1}, true, nil); err != nil {
 				t.Fatal(err)
 			}
 			if role != "" {
-				notifier.Observe(client, map[string]any{"type": "message_end", "message": map[string]any{"role": role, "content": "Extension output"}})
+				notifier.observePi(client, map[string]any{"type": "message_end", "message": map[string]any{"role": role, "content": "Extension output"}})
 			}
-			notifier.Observe(client, notificationAgentEnd(final))
-			notifier.Observe(client, map[string]any{"type": "agent_settled"})
+			notifier.observePi(client, notificationAgentEnd(final))
+			notifier.observePi(client, map[string]any{"type": "agent_settled"})
 			select {
 			case reply := <-notifier.queue:
 				if err := notifier.deliver(context.Background(), reply); err != nil {

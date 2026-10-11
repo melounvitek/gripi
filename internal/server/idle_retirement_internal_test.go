@@ -15,9 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestIdleRetirementPromptWaits(t *testing.T) {
@@ -232,20 +233,20 @@ func newIdleRetirementFixture(t *testing.T) *idleRetirementFixture {
 	fixture := &idleRetirementFixture{old: &idleRetirementClient{}, replacement: &idleRetirementClient{}}
 	// Requests may touch the entry, but it remains expired relative to the
 	// real time used by cleanupIdleRPCClients, without sleeps or clock races.
-	registry := rpc.NewRegistry(func(path string) (rpc.RPCClient, error) {
+	registry := agent.NewRegistry(func(path string) (agent.Client, error) {
 		fixture.created.Add(1)
 		if path != fixture.path {
 			return nil, errors.New("unexpected factory session: " + path)
 		}
 		return fixture.replacement, nil
 	}, func() time.Time { return time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC) })
-	cache := sessions.NewCache()
 	fixture.app = &application{
 		config:          config.Config{SessionsRoot: root, Home: root, RPCIdleTimeout: time.Second},
-		sessionCache:    cache,
+		adapter:         agentpi.New(agentpi.Options{}),
+		sessionStore:    NewPiStore(root, root),
 		rpcClients:      registry,
-		pendingSessions: rpc.NewPendingSessionRegistry(nil),
-		synchronizer:    sessions.NewSynchronizer(root, root, cache, registry),
+		pendingSessions: agent.NewPendingSessionRegistry(nil),
+		guard:           sessionfile.NewSynchronizer(registry),
 	}
 	fixture.path = fixture.session(t, "idle")
 	if err := registry.Register(fixture.path, fixture.old); err != nil {
@@ -287,16 +288,14 @@ type idleRetirementCall struct {
 
 type idleRetirementClient struct {
 	remapClient
-	rpc.ActionClient // Unexercised actions intentionally have no implementation.
-	onClose          func() error
-	onPrompt         func()
-	closes, queues   atomic.Int32
-	mu               sync.Mutex
-	calls            []idleRetirementCall
+	onClose        func() error
+	onPrompt       func()
+	closes, queues atomic.Int32
+	mu             sync.Mutex
+	calls          []idleRetirementCall
 }
 
-var _ rpc.RPCClient = (*idleRetirementClient)(nil)
-var _ rpc.ActionClient = (*idleRetirementClient)(nil)
+var _ agent.Client = (*idleRetirementClient)(nil)
 
 func (client *idleRetirementClient) Close() error {
 	client.closes.Add(1)
@@ -306,27 +305,29 @@ func (client *idleRetirementClient) Close() error {
 	return nil
 }
 
-func (client *idleRetirementClient) Prompt(_ context.Context, message string, images []rpc.PromptImage) (map[string]any, error) {
-	return client.dispatch(message, images, "")
-}
-
-func (client *idleRetirementClient) PromptWithBehavior(_ context.Context, message string, images []rpc.PromptImage, behavior string) (map[string]any, error) {
-	return client.dispatch(message, images, behavior)
-}
-
-func (client *idleRetirementClient) QueueCompactionPrompt(context.Context, string, []rpc.PromptImage, string) (map[string]any, bool, error) {
-	client.queues.Add(1)
-	return nil, false, nil
-}
-
-func (client *idleRetirementClient) dispatch(message string, images []rpc.PromptImage, behavior string) (map[string]any, error) {
+func (client *idleRetirementClient) Prompt(_ context.Context, prompt agent.Prompt) (agent.PromptResult, error) {
+	var images []agent.PromptImage
+	if prompt.Images != nil {
+		var err error
+		if images, err = prompt.Images(); err != nil {
+			return agent.PromptResult{}, err
+		}
+	}
+	behavior := map[agent.Delivery]string{agent.Steer: "steer", agent.FollowUp: "followUp"}[prompt.Delivery]
 	client.mu.Lock()
-	client.calls = append(client.calls, idleRetirementCall{message, behavior, len(images)})
+	client.calls = append(client.calls, idleRetirementCall{prompt.Text, behavior, len(images)})
 	client.mu.Unlock()
 	if client.onPrompt != nil {
 		client.onPrompt()
 	}
-	return map[string]any{"success": true}, nil
+	return agent.PromptResult{}, nil
+}
+
+func (client *idleRetirementClient) DeferringCompactionPrompts() bool { return client.compacting }
+
+func (client *idleRetirementClient) DeferPrompt(context.Context, agent.Prompt) (agent.PromptResult, bool, error) {
+	client.queues.Add(1)
+	return agent.PromptResult{}, false, nil
 }
 
 func (client *idleRetirementClient) assertCalls(t *testing.T, behavior string, count int) {

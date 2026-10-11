@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -77,7 +80,7 @@ func TestPendingTagsMaterializeInBackgroundWithoutRequest(t *testing.T) {
 func TestPendingTagMigrationFailureRollsBackMetadataAndOwnership(t *testing.T) {
 	root := t.TempDir()
 	from, to := filepath.Join(root, "pending.jsonl"), filepath.Join(root, "native.jsonl")
-	state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), root)
+	state := sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), NewPiStore(root, ""))
 	for i := range 32 {
 		if err := state.SetTag(to, fmt.Sprint(i), true); err != nil {
 			t.Fatal(err)
@@ -93,11 +96,11 @@ func TestPendingTagMigrationFailureRollsBackMetadataAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := rpc.NewRegistry(nil, nil)
+	registry := agent.NewRegistry(nil, nil)
 	if err := registry.Register(from, &remapClient{}); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(from, root, "")
 	attachments := filepath.Join(root, "attachments")
 	if err := os.Mkdir(attachments, 0700); err != nil {
@@ -144,7 +147,7 @@ func TestBackgroundCompletionDoesNotMigrateTagsAfterConcurrentBranch(t *testing.
 			parent := filepath.Join(root, "pending.jsonl")
 			app := notificationTestApplication(t, root, false, true, &recordingPushNotifier{})
 			app.config.AttachmentsRoot = filepath.Join(root, "attachments")
-			app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+			app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 			client := &branchCompletionClient{remapClient: &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": child}}}, observed: make(chan struct{}), branched: make(chan struct{})}
 			if err := app.rpcClients.Register(parent, client); err != nil {
 				t.Fatal(err)
@@ -187,30 +190,35 @@ func TestBackgroundCompletionDoesNotMigrateTagsAfterConcurrentBranch(t *testing.
 
 type branchCompletionClient struct {
 	*remapClient
-	rpc.ActionClient
 	observed chan struct{}
 	branched chan struct{}
 	calls    atomic.Int32
 }
 
-func (client *branchCompletionClient) GetState(ctx context.Context) (map[string]any, error) {
+func (client *branchCompletionClient) State(ctx context.Context) (agent.State, error) {
 	if client.calls.Add(1) == 1 {
 		close(client.observed)
 		<-client.branched
 	}
-	return client.remapClient.GetState(ctx)
+	return client.remapClient.State(ctx)
 }
 
-func (client *branchCompletionClient) CloneSession(context.Context) (map[string]any, error) {
-	return map[string]any{"success": true}, nil
+func (client *branchCompletionClient) Clone(ctx context.Context) (agent.Branch, error) {
+	return client.NewSession(ctx)
 }
 
-func (client *branchCompletionClient) Fork(context.Context, string) (map[string]any, error) {
-	return map[string]any{"success": true}, nil
+func (client *branchCompletionClient) Fork(ctx context.Context, _ string) (agent.Branch, error) {
+	return client.NewSession(ctx)
 }
 
-func (client *branchCompletionClient) NewSession(context.Context, string) (map[string]any, error) {
-	return map[string]any{"success": true}, nil
+func (client *branchCompletionClient) ForkMessages(context.Context) (json.RawMessage, error) {
+	return nil, errors.New("unexpected fork messages")
+}
+
+// NewSession reports the session that the client's state names, as Pi's client does after switching.
+func (client *branchCompletionClient) NewSession(ctx context.Context) (agent.Branch, error) {
+	state, err := client.State(ctx)
+	return agent.Branch{Key: state.Key, ID: state.ID, Moved: true}, err
 }
 
 func tagLifecycleRequest(path string) *http.Request {

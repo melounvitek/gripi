@@ -11,8 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -46,8 +47,8 @@ func TestDeletePendingSession(t *testing.T) {
 				remapClient: &remapClient{state: map[string]any{"success": true, "data": data}},
 				onState:     func() {},
 			}
-			registry := rpc.NewRegistry(nil, nil)
-			pending := rpc.NewPendingSessionRegistry(nil)
+			registry := agent.NewRegistry(nil, nil)
+			pending := agent.NewPendingSessionRegistry(nil)
 			if test.name != "unknown" {
 				pending.Remember(path, root, "")
 			}
@@ -56,13 +57,12 @@ func TestDeletePendingSession(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			cache := sessions.NewCache()
-			state := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), root)
+			state := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), NewPiStore(root, ""))
 			app := &application{
 				config:       config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")},
-				sessionCache: cache, gatewayState: state, rpcClients: registry, pendingSessions: pending,
-				synchronizer: sessions.NewSynchronizer(root, root, cache, registry),
-				ownsSession:  func(*http.Request, string) bool { return test.name != "unowned" },
+				sessionStore: NewPiStore(root, root), gatewayState: state, rpcClients: registry, pendingSessions: pending,
+				guard:       sessionfile.NewSynchronizer(registry),
+				ownsSession: func(*http.Request, string) bool { return test.name != "unowned" },
 			}
 			released := ""
 			app.releaseSession = func(_ *http.Request, path string) error { released = path; return nil }
@@ -210,7 +210,7 @@ func newPendingDeleteFixture(t *testing.T) *idleRetirementFixture {
 	}
 	root := fixture.app.config.SessionsRoot
 	fixture.app.config.AttachmentsRoot = filepath.Join(root, "attachments")
-	fixture.app.gatewayState = sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), root)
+	fixture.app.gatewayState = sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pins.json"), filepath.Join(root, "tags.json"), NewPiStore(root, ""))
 	fixture.app.pendingSessions.Remember(fixture.path, root, "")
 	fixture.old.state = map[string]any{"success": true, "data": map[string]any{"sessionFile": fixture.path}}
 	return fixture
@@ -230,9 +230,9 @@ type pendingDeleteGapClient struct {
 	beforeClose func()
 }
 
-func (client *pendingDeleteGapClient) GetState(ctx context.Context) (map[string]any, error) {
+func (client *pendingDeleteGapClient) State(ctx context.Context) (agent.State, error) {
 	client.states++
-	return client.idleRetirementClient.GetState(ctx)
+	return client.idleRetirementClient.State(ctx)
 }
 
 func (client *pendingDeleteGapClient) Busy() bool {

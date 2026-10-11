@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 	"github.com/melounvitek/gripi/internal/rendering"
-	"github.com/melounvitek/gripi/internal/rpc"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestLiveOutputHydratesActiveAssistantEvent(t *testing.T) {
@@ -23,7 +24,7 @@ func TestLiveOutputHydratesActiveAssistantEvent(t *testing.T) {
 		if err := json.Unmarshal([]byte(`{"event_sequence":42,"active_assistant_event":`+event+`}`), &snapshot); err != nil {
 			t.Fatal(err)
 		}
-		view := &pageView{Selected: &sessions.Session{Path: "/session", CWD: "/project"}, LiveOutput: liveOutputFrom(snapshot, nil, "", nil)}
+		view := &pageView{Selected: &agent.Session{Path: "/session", CWD: "/project"}, LiveOutput: liveOutputFrom(agentpi.LiveSnapshotFrom(snapshot), nil, "", nil)}
 		templates, err := template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
 		if err != nil {
 			t.Fatal(err)
@@ -54,18 +55,18 @@ func TestLiveOutputHydratesActiveAssistantEvent(t *testing.T) {
 
 func TestLiveOutputFiltersPersistedToolsWithoutLosingPairing(t *testing.T) {
 	stamp := time.Date(2026, 1, 1, 0, 0, 2, 0, time.UTC)
-	snapshot := rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
+	snapshot := agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
 		{"type": "tool_execution_update", "toolName": "bash", "toolCallId": "paired"},
 		{"type": "tool_execution_start", "toolName": "read", "toolCallId": "persisted"},
 		{"type": "tool_execution_end", "toolName": "subagent", "toolCallId": "older-result"},
 		{"type": "tool_execution_end", "toolName": "subagent", "toolCallId": "unpersisted"},
 		{"type": "tool_execution_update", "toolName": "custom", "toolCallId": "running", "gatewayTimestamp": stamp.UnixMilli()},
-	}}
-	messages := []*sessions.Message{
+	}})
+	messages := []*agent.Message{
 		{Role: "assistant", ToolCallID: "paired", ToolResultPersisted: true},
 		{Role: "toolResult", ToolCallID: "persisted"},
 	}
-	context := map[string]sessions.ToolCallContext{
+	context := map[string]agent.ToolCallContext{
 		"older-result": {ResultPersisted: true},
 		"unpersisted":  {Timestamp: stamp, Prompt: "Review active work"},
 	}

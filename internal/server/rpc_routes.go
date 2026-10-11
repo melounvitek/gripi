@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -32,17 +31,17 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 	after, _ := strconv.ParseInt(request.URL.Query().Get("after"), 10, 64)
 	batch := app.rpcClients.EventsAfter(path, after)
 	payload := map[string]any{"events": batch.Events, "last_seq": batch.LastSeq, "missed": batch.Missed}
-	if _, err := os.Stat(path); err == nil {
-		state := app.synchronizer.InspectIfAvailable(request.Context(), path, false)
+	if app.sessionStore.Exists(path) {
+		state := app.guard.InspectIfAvailable(request.Context(), path, false)
 		if state != nil {
 			mode := state.Mode
 			if app.sessionFolderMissing(path) {
-				mode = sessions.SyncFolderMissing
+				mode = agent.SyncFolderMissing
 			}
 			payload["session_sync"] = map[string]any{"mode": mode, "revision": nullableString(state.Revision), "error": nullableString(state.Error), "gateway_busy": app.rpcClients.Busy(path)}
 		}
 	} else {
-		payload["session_sync"] = map[string]any{"mode": sessions.SyncAvailable, "revision": nil, "error": nil, "gateway_busy": app.rpcClients.Busy(path)}
+		payload["session_sync"] = map[string]any{"mode": agent.SyncAvailable, "revision": nil, "error": nil, "gateway_busy": app.rpcClients.Busy(path)}
 	}
 	writeJSON(response, payload)
 }
@@ -62,11 +61,11 @@ func (app *application) liveSessionStatus(response http.ResponseWriter, request 
 		return
 	}
 	live := app.readLiveStatus(request.Context(), path)
-	var status sessions.Status
-	if live == nil || !live.diskIndependent {
-		if _, err := os.Stat(path); err == nil {
-			store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-			persisted, err := store.Status(path)
+	var status agent.Status
+	// The saved status fills in what the agent doesn't report.
+	if live == nil || live.Provider == "" || live.ModelID == "" || live.ThinkingLevel == "" || live.Context == nil {
+		if app.sessionStore.Exists(path) {
+			persisted, err := app.sessionStore.Status(path)
 			if err != nil {
 				http.NotFound(response, request)
 				return
@@ -104,29 +103,26 @@ func (app *application) commands(response http.ResponseWriter, request *http.Req
 		return
 	}
 	app.rpcDiagnostics.Log("request_operation", map[string]any{"path": request.URL.Path, "session": path, "lane": "operation"})
-	var rpcResponse map[string]any
-	err = app.withSynchronizedClient(request, path, func(client rpc.RPCClient) error {
+	composer := app.adapter.Composer()
+	var agentCommands []agent.Command
+	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		var requestErr error
-		rpcResponse, requestErr = client.GetCommands(request.Context())
+		agentCommands, requestErr = client.Commands(request.Context())
 		return requestErr
 	})
-	commands := rpc.CommandsFrom(rpcResponse)
-	if err != nil {
-		if !commandCatalogFallbackError(err) && app.writeRPCError(response, err) {
-			return
-		}
-		commands = rpc.BuiltinCommands()
+	// Without the agent's own commands, the palette still lists those of the gateway.
+	commands := composer.Commands()
+	if err == nil {
+		commands = append(commands, agentCommands...)
+	} else if !commandCatalogFallbackError(err) && app.writeRPCError(response, err) {
+		return
 	}
 	groups := make([]commandGroup, 0, 4)
-	for _, source := range []string{"extension", "prompt", "skill", "other"} {
+	for _, source := range composer.CommandGroups() {
 		group := commandGroup{Source: source}
 		for _, command := range commands {
-			commandSource := stringFromAny(command["source"])
-			if commandSource == "" {
-				commandSource = "other"
-			}
-			if commandSource == source {
-				group.Commands = append(group.Commands, commandView{Name: stringFromAny(command["name"]), Description: stringFromAny(command["description"])})
+			if command.Group == source {
+				group.Commands = append(group.Commands, commandView{Name: command.Name, Description: command.Description})
 			}
 		}
 		if len(group.Commands) > 0 {
@@ -148,91 +144,54 @@ type commandView struct{ Name, Description string }
 
 func (command commandView) Text() string { return "/" + command.Name + " " + command.Description }
 
-type liveStatus struct {
-	provider, modelID, thinking string
-	context                     map[string]any
-	diskIndependent             bool
-}
-
-func (app *application) readLiveStatus(ctx context.Context, path string) *liveStatus {
-	var stateResponse, statsResponse map[string]any
-	err := app.rpcClients.WithObservingClient(ctx, path, false, func(client rpc.RPCClient) error {
-		var err error
-		stateResponse, err = client.GetState(ctx)
-		if err != nil {
-			return err
-		}
-		statsResponse, err = client.GetSessionStats(ctx)
+// readLiveStatus returns nil when no client runs the session.
+func (app *application) readLiveStatus(ctx context.Context, path string) *agent.LiveStatus {
+	var status *agent.LiveStatus
+	err := app.rpcClients.WithObservingClient(ctx, path, false, func(client agent.Client) error {
+		live, err := client.LiveStatus(ctx)
+		status = &live
 		return err
 	})
-	if err != nil || stateResponse == nil || statsResponse == nil {
+	if err != nil {
 		return nil
 	}
-	state := successfulData(stateResponse)
-	stats := successfulData(statsResponse)
-	result := &liveStatus{}
-	if model, ok := state["model"].(map[string]any); ok {
-		result.provider = nonemptyString(model["provider"])
-		result.modelID = nonemptyString(model["id"])
-	}
-	result.thinking = nonemptyString(state["thinkingLevel"])
-	if contextUsage, ok := stats["contextUsage"].(map[string]any); ok && validContextUsage(contextUsage) {
-		result.context = contextUsage
-	}
-	result.diskIndependent = result.provider != "" && result.modelID != "" && result.thinking != "" && result.context != nil
-	return result
+	return status
 }
 
-func applyLiveStatus(status *sessions.Status, live *liveStatus) {
-	if live.provider != "" {
-		status.Provider = live.provider
+func applyLiveStatus(status *agent.Status, live *agent.LiveStatus) {
+	if live.Provider != "" {
+		status.Provider = live.Provider
 	}
-	if live.modelID != "" {
-		status.ModelID = live.modelID
+	if live.ModelID != "" {
+		status.ModelID = live.ModelID
 	}
-	if live.thinking != "" {
-		status.ThinkingLevel = live.thinking
+	if live.ThinkingLevel != "" {
+		status.ThinkingLevel = live.ThinkingLevel
 	}
-	if live.context != nil {
-		if value, ok := numericValue(live.context["tokens"]); ok {
-			status.ContextTokens = value
-			status.HasContextTokens = true
-		} else {
-			status.ContextTokens = 0
-			status.HasContextTokens = false
-		}
-		if value, ok := numericValue(live.context["contextWindow"]); ok {
-			status.ContextLimit = value
-			status.HasContextLimit = true
-		} else {
-			status.ContextLimit = 0
-			status.HasContextLimit = false
-		}
-		if value, ok := numericValue(live.context["percent"]); ok {
-			status.ContextPercent = value
-		} else {
-			status.ContextPercent = 0
-		}
+	if live.Context != nil {
+		status.ContextTokens, status.HasContextTokens = live.Context.Tokens, live.Context.HasTokens
+		status.ContextLimit, status.HasContextLimit = live.Context.Window, live.Context.HasWindow
+		status.ContextPercent = live.Context.Percent
 		status.ContextEstimated = false
 	}
 }
 
-func (app *application) withSynchronizedClient(request *http.Request, path string, call func(rpc.RPCClient) error) error {
+func (app *application) withSynchronizedClient(request *http.Request, path string, call func(agent.Client) error) error {
 	resolved, _, err := app.resolveOwnedPendingPath(request, path)
 	if err != nil {
 		return err
 	}
 	path = resolved
 	ctx := request.Context()
-	if _, err := os.Stat(path); err == nil {
-		return app.synchronizer.WithMutableClient(ctx, path, call)
+	if app.sessionStore.Exists(path) {
+		return app.guard.WithMutableClient(ctx, path, call)
 	}
 	return app.rpcClients.WithClient(ctx, path, call)
 }
 
 func (app *application) writeRPCError(response http.ResponseWriter, err error) bool {
-	var blocked *sessions.SyncBlockedError
-	var timeout *rpc.RequestTimeoutError
+	var blocked *agent.SyncBlockedError
+	var timeout *agent.RequestTimeoutError
 	switch {
 	case errors.As(err, &blocked):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": blocked.Error(), "session_sync_mode": blocked.Mode})
@@ -240,10 +199,10 @@ func (app *application) writeRPCError(response http.ResponseWriter, err error) b
 	case errors.Is(err, errSessionNavigating):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"code": "session_operation_pending", "retryable": false, "error": err.Error()})
 		return true
-	case errors.Is(err, sessions.ErrSyncBusy), errors.Is(err, rpc.ErrOperationPending):
+	case errors.Is(err, agent.ErrSyncBusy), errors.Is(err, agent.ErrOperationPending):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"code": "session_operation_pending", "error": "Another session operation is pending. Please retry."})
 		return true
-	case errors.Is(err, rpc.ErrClientRetiring):
+	case errors.Is(err, agent.ErrClientRetiring):
 		response.Header().Set("Retry-After", "1")
 		writeJSONStatus(response, http.StatusServiceUnavailable, map[string]any{"error": "Pi RPC client is restarting"})
 		return true
@@ -279,8 +238,7 @@ func (app *application) commandSessionAvailable(path string) bool {
 	if app.rpcClients.Active(path) {
 		return true
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	_, ok := store.Session(path)
+	_, ok := app.sessionStore.Session(path)
 	return ok
 }
 
@@ -291,17 +249,16 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 	} else if remapped {
 		return resolved, nil
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, known := store.Session(path)
+	session, known := app.sessionStore.Session(path)
 	if known {
 		path = session.Path
 	}
 	if cwd, ok := app.pendingSessions.CWD(path); ok && app.rpcClients.Active(path) {
-		var state map[string]any
-		if app.rpcClients.WithExistingClient(ctx, path, false, func(client rpc.RPCClient) error { var err error; state, err = client.GetState(ctx); return err }) == nil {
-			reported := sessionFileFrom(state)
+		var state agent.State
+		if app.rpcClients.WithExistingClient(ctx, path, false, func(client agent.Client) error { var err error; state, err = client.State(ctx); return err }) == nil {
+			reported := state.Key
 			if reported != "" {
-				if session, ok := store.Session(reported); ok && session.CWD == cwd {
+				if session, ok := app.sessionStore.Session(reported); ok && session.CWD == cwd {
 					if err := app.movePendingRPCClient(request, path, session.Path); err != nil {
 						return path, err
 					}
@@ -325,14 +282,14 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 		if pending.CWD != session.CWD || !app.rpcClients.Active(pending.Path) {
 			continue
 		}
-		var state map[string]any
-		err := app.rpcClients.WithExistingClient(ctx, pending.Path, false, func(client rpc.RPCClient) error {
+		var state agent.State
+		err := app.rpcClients.WithExistingClient(ctx, pending.Path, false, func(client agent.Client) error {
 			var requestErr error
-			state, requestErr = client.GetState(ctx)
+			state, requestErr = client.State(ctx)
 			return requestErr
 		})
 		if err == nil {
-			reported, found := store.Session(sessionFileFrom(state))
+			reported, found := app.sessionStore.Session(state.Key)
 			if found && reported.Path == session.Path {
 				if err := app.movePendingRPCClient(request, pending.Path, session.Path); err != nil {
 					return path, err
@@ -584,11 +541,11 @@ func (app *application) retireStaleRPCClient(request *http.Request, path string)
 func (app *application) retireRPCClient(ctx context.Context, path string, close func() (bool, error)) error {
 	var closed bool
 	var err error
-	if _, statErr := os.Stat(path); statErr == nil {
-		app.synchronizer.ReconcileIfAvailable(ctx, path, false, func(sessions.SyncResult) {
+	if app.sessionStore.Exists(path) {
+		app.guard.ReconcileIfAvailable(ctx, path, false, func(agent.SyncResult) {
 			closed, err = close()
 			if closed {
-				app.synchronizer.Forget(path)
+				app.guard.Forget(path)
 			}
 		})
 	} else {
@@ -600,55 +557,8 @@ func (app *application) retireRPCClient(ctx context.Context, path string, close 
 	return err
 }
 
-func successfulData(response map[string]any) map[string]any {
-	if response["success"] != true {
-		return nil
-	}
-	data, _ := response["data"].(map[string]any)
-	return data
-}
-func sessionFileFrom(response map[string]any) string {
-	data := response
-	if nested, ok := response["data"].(map[string]any); ok {
-		data = nested
-	}
-	for _, key := range []string{"sessionFile", "session_file", "path"} {
-		if value := stringFromAny(data[key]); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-func validContextUsage(value map[string]any) bool {
-	for _, key := range []string{"tokens", "contextWindow", "percent"} {
-		if value[key] == nil {
-			continue
-		}
-		if _, ok := numericValue(value[key]); !ok {
-			return false
-		}
-	}
-	return true
-}
-func numericValue(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case json.Number:
-		result, err := typed.Float64()
-		return result, err == nil
-	default:
-		return 0, false
-	}
-}
-func stringFromAny(value any) string  { result, _ := value.(string); return result }
-func nonemptyString(value any) string { return stringFromAny(value) }
 func commandCatalogFallbackError(err error) bool {
-	return errors.Is(err, rpc.ErrOperationPending) || errors.Is(err, rpc.ErrClientRetiring) || errors.Is(err, rpc.ErrClientStarting) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, rpc.ErrProcessExited)
+	return errors.Is(err, agent.ErrOperationPending) || errors.Is(err, agent.ErrClientRetiring) || errors.Is(err, agent.ErrClientStarting) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, agent.ErrProcessExited)
 }
 
 func nullableString(value string) any {

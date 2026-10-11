@@ -8,13 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/melounvitek/gripi/internal/sessions"
 	"github.com/melounvitek/gripi/internal/state"
 )
 
@@ -413,25 +411,29 @@ type workspaceOwnershipState struct {
 }
 
 type WorkspaceOwnershipStore struct {
-	file         *state.File
-	sessionsRoot string
-	mu           sync.Mutex
+	file *state.File
+	keys SessionKeys
+	mu   sync.Mutex
 }
 
-func NewWorkspaceOwnershipStore(path, sessionsRoot string) *WorkspaceOwnershipStore {
-	return &WorkspaceOwnershipStore{file: state.NewFile(path), sessionsRoot: sessionsRoot}
+// SessionKeys tells which session keys name the same session. The agent's store provides it.
+type SessionKeys interface {
+	Canonical(key string) (string, bool)
+	Aliases(key string) []string
+}
+
+// NewWorkspaceOwnershipStore keeps owners under the canonical keys from keys. Without keys, every key is its own session.
+func NewWorkspaceOwnershipStore(path string, keys SessionKeys) *WorkspaceOwnershipStore {
+	return &WorkspaceOwnershipStore{file: state.NewFile(path), keys: keys}
 }
 
 func (store *WorkspaceOwnershipStore) Claim(sessionPath, workspaceID string) (bool, error) {
 	if sessionPath == "" || workspaceID == "" {
 		return false, nil
 	}
-	canonical, err := store.canonicalPath(sessionPath)
-	if err != nil {
-		return false, err
-	}
+	canonical := store.canonicalPath(sessionPath)
 	created := false
-	err = store.update(func(value *workspaceOwnershipState) error {
+	err := store.update(func(value *workspaceOwnershipState) error {
 		owner := value.Sessions[canonical]
 		if owner != "" && owner != workspaceID {
 			return ErrSessionOwnedByAnotherWorkspace
@@ -446,10 +448,7 @@ func (store *WorkspaceOwnershipStore) Claim(sessionPath, workspaceID string) (bo
 }
 
 func (store *WorkspaceOwnershipStore) Release(sessionPath, workspaceID string) error {
-	canonical, err := store.canonicalPath(sessionPath)
-	if err != nil {
-		return err
-	}
+	canonical := store.canonicalPath(sessionPath)
 	return store.update(func(value *workspaceOwnershipState) error {
 		if value.Sessions[canonical] == workspaceID {
 			delete(value.Sessions, canonical)
@@ -462,10 +461,7 @@ func (store *WorkspaceOwnershipStore) Owner(sessionPath string) (string, error) 
 	if sessionPath == "" {
 		return "", nil
 	}
-	canonical, err := store.canonicalPath(sessionPath)
-	if err != nil {
-		return "", err
-	}
+	canonical := store.canonicalPath(sessionPath)
 	value, err := store.data()
 	return value.Sessions[canonical], err
 }
@@ -474,10 +470,7 @@ func (store *WorkspaceOwnershipStore) OwnedBy(sessionPath, workspaceID string) (
 	if sessionPath == "" || workspaceID == "" {
 		return false, nil
 	}
-	canonical, err := store.canonicalPath(sessionPath)
-	if err != nil {
-		return false, err
-	}
+	canonical := store.canonicalPath(sessionPath)
 	value, err := store.data()
 	return value.Sessions[canonical] == workspaceID, err
 }
@@ -518,22 +511,18 @@ func (store *WorkspaceOwnershipStore) OwnsHash(hash, workspaceID string) (bool, 
 	return false, nil
 }
 
-func (store *WorkspaceOwnershipStore) canonicalPath(path string) (string, error) {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	if store.sessionsRoot != "" {
-		if configured, ok := sessions.ConfiguredSessionPath(store.sessionsRoot, absolute); ok {
-			return configured, nil
+func (store *WorkspaceOwnershipStore) canonicalPath(path string) string {
+	if store.keys != nil {
+		if canonical, ok := store.keys.Canonical(path); ok {
+			return canonical
 		}
 	}
-	return absolute, nil
+	return path
 }
 
 func (store *WorkspaceOwnershipStore) pathAliases(path string) []string {
-	if store.sessionsRoot != "" {
-		if aliases := sessions.SessionPathAliases(store.sessionsRoot, path); len(aliases) > 0 {
+	if store.keys != nil {
+		if aliases := store.keys.Aliases(path); len(aliases) > 0 {
 			return aliases
 		}
 	}
@@ -577,10 +566,7 @@ func (store *WorkspaceOwnershipStore) read() (workspaceOwnershipState, error) {
 	}
 	normalized := make(map[string]string, len(value.Sessions))
 	for path, owner := range value.Sessions {
-		canonical, err := store.canonicalPath(path)
-		if err != nil {
-			return workspaceOwnershipState{}, err
-		}
+		canonical := store.canonicalPath(path)
 		if existing := normalized[canonical]; existing != "" && existing != owner {
 			return workspaceOwnershipState{}, ErrSessionOwnedByAnotherWorkspace
 		}

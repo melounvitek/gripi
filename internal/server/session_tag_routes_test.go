@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/access"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
+	"github.com/melounvitek/gripi/internal/server"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -44,7 +46,7 @@ func TestSessionTagsPersistReuseRemoveWithoutChangingPiFiles(t *testing.T) {
 	cfg.MultiUserMode = false
 	cfg.SessionsRoot = fixture.sessionsRoot
 	handler := multiUserHandler(t, cfg)
-	all, err := (sessions.Store{Root: cfg.SessionsRoot, Cache: sessions.NewCache()}).Sessions()
+	all, err := (sessionfile.Store{Root: cfg.SessionsRoot, Cache: sessionfile.NewCache()}).Sessions()
 	if err != nil || len(all) < 2 {
 		t.Fatalf("sessions = %v, %v", all, err)
 	}
@@ -169,7 +171,7 @@ func TestSessionTagAssignmentsAreIndependentUnderConcurrentRequests(t *testing.T
 	cfg.MultiUserMode = false
 	cfg.SessionsRoot = fixture.sessionsRoot
 	handler := multiUserHandler(t, cfg)
-	all, err := (sessions.Store{Root: cfg.SessionsRoot, Cache: sessions.NewCache()}).Sessions()
+	all, err := (sessionfile.Store{Root: cfg.SessionsRoot, Cache: sessionfile.NewCache()}).Sessions()
 	if err != nil || len(all) < 2 {
 		t.Fatalf("sessions = %v, %v", all, err)
 	}
@@ -224,11 +226,11 @@ func TestMultiUserSessionTagCatalogIsIsolated(t *testing.T) {
 	cfg := multiUserConfig(fixture.root)
 	cfg.SessionsRoot = fixture.sessionsRoot
 	handler := multiUserHandler(t, cfg)
-	all, err := (sessions.Store{Root: cfg.SessionsRoot, Cache: sessions.NewCache()}).Sessions()
+	all, err := (sessionfile.Store{Root: cfg.SessionsRoot, Cache: sessionfile.NewCache()}).Sessions()
 	if err != nil || len(all) < 2 {
 		t.Fatalf("sessions = %v, %v", all, err)
 	}
-	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot)
+	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, server.NewPiStore(cfg.SessionsRoot, ""))
 	for i, workspace := range []string{"workspace-a", "workspace-b"} {
 		if err := access.NewWorkspaceStore(cfg.WorkspaceAccessPath).ApproveWorkspace(workspace); err != nil {
 			t.Fatal(err)

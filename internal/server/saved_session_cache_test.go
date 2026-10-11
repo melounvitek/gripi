@@ -30,7 +30,7 @@ func TestRestartedGatewayListsUnchangedSessionsWithoutReadingThem(t *testing.T) 
 	type closer interface{ Close(context.Context) error }
 	start := func() http.Handler {
 		t.Helper()
-		handler, err := gateway.NewHandler(cfg, gripi.WebFiles)
+		handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
 		if err != nil {
 			t.Fatal(err)
 		}

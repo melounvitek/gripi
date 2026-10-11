@@ -15,11 +15,11 @@ func TestSessionPaletteListsSessionsWithoutMarkingThemRead(t *testing.T) {
 	app.heavyRequests = make(chan struct{}, 1)
 	assertSettledUnread(t, app, path, false)
 	final := notificationMessage("final", "Final", "stop")
-	notifier.Observe(client, map[string]any{"type": "agent_start"})
+	notifier.observePi(client, map[string]any{"type": "agent_start"})
 	appendExternalSessionReply(t, path, "final", "")
-	notifier.Observe(client, map[string]any{"type": "message_end", "message": final})
-	notifier.Observe(client, notificationAgentEnd(final))
-	notifier.Observe(client, map[string]any{"type": "agent_settled"})
+	notifier.observePi(client, map[string]any{"type": "message_end", "message": final})
+	notifier.observePi(client, notificationAgentEnd(final))
+	notifier.observePi(client, map[string]any{"type": "agent_settled"})
 	assertSettledUnread(t, app, path, true)
 
 	// Naming a session must not select it: the second listing would then find it read.

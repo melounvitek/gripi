@@ -43,13 +43,18 @@ func fakePiGateway(t *testing.T) (alpha, beta string) {
 	_, file, _, _ := runtime.Caller(0)
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
 	t.Setenv("GRIPI_E2E_FAKE_PI_LOG", filepath.Join(root, "fake-pi.log"))
-	handler, err := gateway.NewHandler(config.Config{
+	cfg := config.Config{
 		Address: "127.0.0.1:4567", Environment: "test", Home: home,
 		SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(home, ".pi", "gripi", "attachments"),
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
 		PiCommand: []string{"node", filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_pi.mjs")},
-	}, gripi.WebFiles)
+	}
+	adapter, err := newPiAdapter(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := gateway.NewHandler(cfg, gripi.WebFiles, adapter)
 	if err != nil {
 		t.Fatal(err)
 	}

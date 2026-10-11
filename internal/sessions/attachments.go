@@ -3,6 +3,8 @@ package sessions
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 const attachmentMatchWindow = 5 * time.Minute
@@ -25,12 +29,13 @@ type Attachment struct {
 
 type AttachmentMatch struct {
 	Count  int
-	Images []Image
+	Images []agent.Image
 }
 
 type AttachmentStore struct {
-	Root         string
-	SessionsRoot string
+	Root string
+	// Keys finds the attachments recorded under any key of a session.
+	Keys SessionKeys
 }
 
 func (store AttachmentStore) RecordPrompt(sessionPath, message string, imageCount int, timestamp time.Time, paths, mimeTypes []string) error {
@@ -61,8 +66,8 @@ func (store AttachmentStore) RecordPrompt(sessionPath, message string, imageCoun
 
 func (store AttachmentStore) Delete(sessionPath string) error {
 	paths := []string{sessionPath}
-	if store.SessionsRoot != "" {
-		if aliases := SessionPathAliases(store.SessionsRoot, sessionPath); len(aliases) > 0 {
+	if store.Keys != nil {
+		if aliases := store.Keys.Aliases(sessionPath); len(aliases) > 0 {
 			paths = aliases
 		}
 	}
@@ -237,9 +242,9 @@ func replaceFile(path string, contents []byte) error {
 	return os.Rename(temporaryPath, path)
 }
 
-func (store AttachmentStore) Match(sessionPath string, messages []*Message) map[*Message]AttachmentMatch {
+func (store AttachmentStore) Match(sessionPath string, messages []*agent.Message) map[*agent.Message]AttachmentMatch {
 	attachments := store.read(sessionPath)
-	matches := make(map[*Message]AttachmentMatch)
+	matches := make(map[*agent.Message]AttachmentMatch)
 	used := make(map[int]bool)
 	for _, message := range messages {
 		if message.Role != "user" {
@@ -282,7 +287,7 @@ func (store AttachmentStore) Match(sessionPath string, messages []*Message) map[
 			if err != nil || relative == ".." || len(relative) >= 3 && relative[:3] == ".."+string(filepath.Separator) {
 				continue
 			}
-			match.Images = append(match.Images, Image{Src: "/attachments/" + filepath.ToSlash(relative), MIMEType: mimeType})
+			match.Images = append(match.Images, agent.Image{Src: "/attachments/" + filepath.ToSlash(relative), MIMEType: mimeType})
 		}
 		matches[message] = match
 	}
@@ -291,8 +296,8 @@ func (store AttachmentStore) Match(sessionPath string, messages []*Message) map[
 
 func (store AttachmentStore) read(sessionPath string) []Attachment {
 	paths := []string{sessionPath}
-	if store.SessionsRoot != "" {
-		if aliases := SessionPathAliases(store.SessionsRoot, sessionPath); len(aliases) > 0 {
+	if store.Keys != nil {
+		if aliases := store.Keys.Aliases(sessionPath); len(aliases) > 0 {
 			paths = aliases
 		}
 	}
@@ -323,4 +328,15 @@ func (store AttachmentStore) read(sessionPath string) []Attachment {
 		}
 	}
 	return result
+}
+
+func SessionHash(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(sum[:])
+}
+
+func MessageHash(text string) string {
+	normalized := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n"))
+	sum := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(sum[:])
 }

@@ -29,7 +29,7 @@ func TestMultiUserSessionWithoutAnOwnerGetsNoVariables(t *testing.T) {
 	if _, err := environment.NewStore(cfg.EnvironmentPath).Save("", "", environment.Variable{Name: "ENVTEST_TOKEN", Value: "gateway owner's token"}); err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(cfg, gripi.WebFiles)
+	handler, err := NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}

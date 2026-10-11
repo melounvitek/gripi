@@ -422,7 +422,7 @@ func newEnvironmentFixture(t *testing.T, multiUser bool) *environmentFixture {
 		}
 	}
 	fixture.cfg = cfg
-	fixture.handler, err = server.NewHandler(cfg, gripi.WebFiles)
+	fixture.handler, err = server.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +436,7 @@ func (fixture *environmentFixture) session(t *testing.T, name, workspace string)
 	path := filepath.Join(fixture.cfg.SessionsRoot, name+".jsonl")
 	writeActionSession(t, path, fixture.project)
 	if workspace != "" {
-		if _, err := access.NewWorkspaceOwnershipStore(fixture.cfg.WorkspaceOwnershipPath, fixture.cfg.SessionsRoot).Claim(path, workspace); err != nil {
+		if _, err := access.NewWorkspaceOwnershipStore(fixture.cfg.WorkspaceOwnershipPath, server.NewPiStore(fixture.cfg.SessionsRoot, "")).Claim(path, workspace); err != nil {
 			t.Fatal(err)
 		}
 	}

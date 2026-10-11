@@ -12,9 +12,10 @@ import (
 	"testing"
 
 	gripi "github.com/melounvitek/gripi"
+	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestNewCLIProjectsStayOutOfSelectorsUntilTakeoverAcrossRestarts(t *testing.T) {
@@ -22,7 +23,7 @@ func TestNewCLIProjectsStayOutOfSelectorsUntilTakeoverAcrossRestarts(t *testing.
 	writeNotificationSession(t, root, "Existing project")
 	cfg := config.Config{Home: root, SessionsRoot: root, ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pins.json"), SessionTagsPath: filepath.Join(root, "tags.json"), BrowserAuthDisabled: true}
 	start := func() *Handler {
-		handler, err := NewHandler(cfg, gripi.WebFiles)
+		handler, err := NewPiHandler(cfg, gripi.WebFiles)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -64,9 +65,9 @@ func TestNewCLIProjectsStayOutOfSelectorsUntilTakeoverAcrossRestarts(t *testing.
 
 	app := handler.app
 	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "external"}}
-	app.rpcClients = rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
-	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
-	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
+	app.guard = sessionfile.NewSynchronizer(app.rpcClients)
+	if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
 	appendExternalSessionReply(t, path, "external", "")
@@ -92,7 +93,7 @@ func TestCreatingSessionInGripiAddsItsProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(app.config.SessionsRoot, "gateway-session.jsonl")
-	app.newRPCClient = func(string, string, string) (rpc.RPCClient, error) {
+	app.newRPCClient = func(string, string, string) (agent.Client, error) {
 		writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "gateway", "timestamp": "2026-01-01T00:00:00Z", "cwd": cwd}})
 		return &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": path}}}, nil
 	}

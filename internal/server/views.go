@@ -19,8 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/melounvitek/gripi/internal/pi"
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -42,16 +41,16 @@ var projectColors = []string{
 type sidebarActivity struct{ Busy, Compacting bool }
 type sidebarSessionData struct {
 	View     *pageView
-	Session  *sessions.Session
+	Session  *agent.Session
 	Shortcut int
 }
 type messageData struct {
 	View    *pageView
-	Message *sessions.Message
+	Message *agent.Message
 }
 type relationData struct {
 	View             *pageView
-	Session, Current *sessions.Session
+	Session, Current *agent.Session
 }
 
 type liveOutputData struct {
@@ -77,11 +76,11 @@ type pageView struct {
 	Nonce                     string
 	ServerOrigin              string
 	Params                    url.Values
-	Sessions                  []*sessions.Session
-	Selected                  *sessions.Session
-	SidebarSessions           []*sessions.Session
-	PinnedSessions            []*sessions.Session
-	SeparateCurrent           *sessions.Session
+	Sessions                  []*agent.Session
+	Selected                  *agent.Session
+	SidebarSessions           []*agent.Session
+	PinnedSessions            []*agent.Session
+	SeparateCurrent           *agent.Session
 	KnownCWDs                 []string
 	NewSessionCWDs            []string
 	ProjectActivity           map[string]time.Time
@@ -97,13 +96,13 @@ type pageView struct {
 	Pinned                    map[string]bool
 	UnreadCount               int
 	SessionsLimit             int
-	SessionPool               []*sessions.Session
+	SessionPool               []*agent.Session
 	SessionPoolLength         int
 	SessionTotal              int
 	CLISessionsShown          bool
 	CLISessionCount           int
-	Window                    sessions.Window
-	Attachments               map[*sessions.Message]sessions.AttachmentMatch
+	Window                    agent.Window
+	Attachments               map[*agent.Message]sessions.AttachmentMatch
 	SessionOnly               bool
 	GatewayInstanceID         string
 	Home                      string
@@ -111,7 +110,7 @@ type pageView struct {
 	WorkspaceAccessEnabled    bool
 	ResourceMonitoringEnabled bool
 	SessionGeneration         string
-	SessionSyncMode           sessions.SyncMode
+	SessionSyncMode           agent.SyncMode
 	SessionSyncRevision       string
 	SessionSyncError          string
 	SessionSyncBlocked        bool
@@ -129,8 +128,8 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			continue
 		}
 		if _, err := app.canonicalRPCSessionPath(request, pending.Path); err != nil &&
-			!errors.Is(err, rpc.ErrOperationPending) && !errors.Is(err, rpc.ErrClientRetiring) &&
-			!errors.Is(err, rpc.ErrClientStarting) && !errors.Is(err, errSessionNavigating) {
+			!errors.Is(err, agent.ErrOperationPending) && !errors.Is(err, agent.ErrClientRetiring) &&
+			!errors.Is(err, agent.ErrClientStarting) && !errors.Is(err, errSessionNavigating) {
 			return nil, err
 		}
 	}
@@ -147,8 +146,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			request.URL.RawQuery = params.Encode()
 		}
 	}
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	all, metadataDeferred, err := store.SessionsDeferringMetadata(func(path string) bool {
+	all, metadataDeferred, err := app.sessionStore.SessionsDeferringMetadata(func(path string) bool {
 		return request.URL.Path == "/sidebar" && app.rpcClients.Busy(path)
 	})
 	if err != nil {
@@ -170,7 +168,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		if knownPaths[pending.Path] {
 			continue
 		}
-		all = append(all, &sessions.Session{Path: pending.Path, ID: pending.ID, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt})
+		all = append(all, &agent.Session{Path: pending.Path, ID: pending.ID, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt})
 	}
 	sort.SliceStable(all, func(left, right int) bool {
 		return all[left].ConversationActivityAt.After(all[right].ConversationActivityAt)
@@ -208,7 +206,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if !knownProjects[selectedProject] {
 		selectedProject = ""
 	}
-	var selected *sessions.Session
+	var selected *agent.Session
 	if params.Get("no_session") != "1" {
 		for _, session := range all {
 			if session.Path == params.Get("session") {
@@ -226,19 +224,19 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			}
 		}
 	}
-	var selectedSync *sessions.SyncResult
+	var selectedSync *agent.SyncResult
 	externalFollow := make(map[string]bool)
-	if app.synchronizer != nil {
+	if app.guard != nil {
 		for _, session := range all {
 			// Do not attribute appends while an owned pending client could manage this file.
 			if knownPaths[session.Path] && (app.rpcClients.Active(session.Path) || !unresolvedPendingCWDs[session.CWD]) {
 				includePosition := includeConversation && session == selected
-				state := app.synchronizer.InspectIfAvailable(request.Context(), session.Path, includePosition)
+				state := app.guard.InspectIfAvailable(request.Context(), session.Path, includePosition)
 				if includePosition {
 					selectedSync = state
 				}
 			}
-			if state := app.synchronizer.KnownBlocked(session.Path); state != nil && state.Mode == sessions.SyncExternalFollow {
+			if state := app.guard.KnownBlocked(session.Path); state != nil && state.Mode == agent.SyncExternalFollow {
 				externalFollow[session.Path] = true
 			}
 		}
@@ -277,7 +275,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	view.SelectedTag, _ = sessions.NormalizeTag(params.Get("tag"))
 	view.prepareSidebar()
-	renderedSessions := make([]*sessions.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)
+	renderedSessions := make([]*agent.Session, 0, len(view.PinnedSessions)+len(view.SidebarSessions)+1)
 	renderedSessions = append(renderedSessions, view.PinnedSessions...)
 	renderedSessions = append(renderedSessions, view.SidebarSessions...)
 	if view.SeparateCurrent != nil {
@@ -295,66 +293,54 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		return nil, err
 	}
 	if includeConversation && selected != nil {
-		view.HideThinkingBlock = app.piDisplaySettings(selected.CWD).HideThinkingBlock
+		view.HideThinkingBlock = app.adapter.DisplaySettings(selected.CWD).HideThinkingBlock
 		leafID, leafSupplied := "", false
-		view.SessionSyncMode = sessions.SyncAvailable
-		_, statErr := os.Stat(selected.Path)
+		view.SessionSyncMode = agent.SyncAvailable
+		saved := app.sessionStore.Exists(selected.Path)
 		if state := selectedSync; state != nil {
 			view.SessionSyncMode, view.SessionSyncRevision, view.SessionSyncError = state.Mode, state.Revision, state.Error
 			view.SessionSyncBlocked = state.Blocked()
-			if state.Mode == sessions.SyncManaged {
+			if state.Mode == agent.SyncManaged {
 				leafID, leafSupplied = state.RPCLeafID, true
 			} else if state.Blocked() {
 				leafID, leafSupplied = state.PersistedLeafID, true
 			}
 		}
 		if selected.FolderMissing {
-			view.SessionSyncMode, view.SessionSyncBlocked = sessions.SyncFolderMissing, true
+			view.SessionSyncMode, view.SessionSyncBlocked = agent.SyncFolderMissing, true
 		}
 		view.SessionSyncGatewayBusy = view.SessionSyncBlocked && app.rpcClients.Busy(selected.Path)
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)
-		window := sessions.Window{}
-		if statErr == nil {
+		window := agent.Window{}
+		if saved {
 			var err error
-			window, err = store.Window(selected.Path, leafID, leafSupplied, nil, nil)
+			window, err = app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
 			if err != nil {
 				return nil, err
 			}
 		}
 		view.Window = window
-		view.Attachments = make(map[*sessions.Message]sessions.AttachmentMatch)
-		if statErr == nil {
-			view.Attachments = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, SessionsRoot: app.config.SessionsRoot}).Match(selected.Path, window.Messages)
-			view.SessionGeneration = store.Generation(selected.Path)
+		view.Attachments = make(map[*agent.Message]sessions.AttachmentMatch)
+		if saved {
+			view.Attachments = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}).Match(selected.Path, window.Messages)
+			view.SessionGeneration = app.sessionStore.Generation(selected.Path)
 		}
-		activeToolIDs := make([]string, 0, len(snapshot.ActiveToolEvents))
-		for _, event := range snapshot.ActiveToolEvents {
-			if id := stringFromAny(event["toolCallId"]); id != "" {
-				activeToolIDs = append(activeToolIDs, id)
+		activeToolIDs := make([]string, 0, len(snapshot.ActiveTools))
+		for _, tool := range snapshot.ActiveTools {
+			if tool.ID != "" {
+				activeToolIDs = append(activeToolIDs, tool.ID)
 			}
 		}
-		toolContext := map[string]sessions.ToolCallContext(nil)
-		if statErr == nil {
-			toolContext = store.SubagentToolCallContext(selected.Path, window.TreeLeafID, activeToolIDs)
+		toolContext := map[string]agent.ToolCallContext(nil)
+		if saved {
+			toolContext = app.sessionStore.SubagentToolCallContext(selected.Path, window.TreeLeafID, activeToolIDs)
 		}
 		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, toolContext)
 	}
 	return view, nil
 }
 
-func (app *application) piDisplaySettings(cwd string) pi.DisplaySettings {
-	agentDir := app.config.PiAgentDir
-	if agentDir == "" {
-		agentDir = filepath.Join(app.config.Home, ".pi", "agent")
-	}
-	return (pi.SettingsResolver{AgentDir: agentDir, AutoApproveProjects: app.config.AutoApproveProjects}).DisplaySettings(cwd)
-}
-
-func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, home string, toolContext map[string]sessions.ToolCallContext) liveOutputData {
-	activeTools := snapshot.ActiveToolEvents
-	if activeTools == nil {
-		activeTools = []map[string]any{}
-	}
+func liveOutputFrom(snapshot agent.LiveSnapshot, messages []*agent.Message, home string, toolContext map[string]agent.ToolCallContext) liveOutputData {
 	persistedToolResults := map[string]bool{}
 	for _, message := range messages {
 		if (message.Role == "toolResult" || message.ToolResultPersisted) && message.ToolCallID != "" {
@@ -366,23 +352,14 @@ func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, hom
 			persistedToolResults[id] = true
 		}
 	}
-	remainingActiveTools := make([]map[string]any, 0, len(activeTools))
-	for _, event := range activeTools {
-		if !persistedToolResults[stringFromAny(event["toolCallId"])] {
-			remainingActiveTools = append(remainingActiveTools, event)
+	activeTools := make([]json.RawMessage, 0, len(snapshot.ActiveTools))
+	for _, tool := range snapshot.ActiveTools {
+		if !persistedToolResults[tool.ID] {
+			activeTools = append(activeTools, tool.Data)
 		}
 	}
-	activeTools = remainingActiveTools
-	completedBash := snapshot.CompletedBashEvents
-	if completedBash == nil {
-		completedBash = []map[string]any{}
-	}
-	queued := snapshot.QueuedMessages
-	if queued == nil {
-		queued = map[string][]string{"steering": {}, "followUp": {}}
-	}
-	extensionUI := snapshot.ExtensionUI
-	if extensionUI == nil {
+	extensionUI := any(snapshot.ExtensionUI)
+	if snapshot.ExtensionUI == nil {
 		extensionUI = map[string]any{"pending_dialogs": []map[string]any{}, "statuses": []map[string]any{}, "widgets": []map[string]any{}, "title": nil}
 	}
 	toolTimestamps, toolPrompts := map[string]time.Time{}, map[string]string{}
@@ -396,22 +373,21 @@ func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, hom
 	}
 	activeBash := any(nil)
 	persistedBash := []string{}
-	if snapshot.ActiveBash != nil {
-		if activeBashPersisted(snapshot.ActiveBash, messages, home) {
-			persistedBash = append(persistedBash, stringFromAny(snapshot.ActiveBash["bash_id"]))
+	if shell := snapshot.ActiveShell; shell != nil {
+		if activeShellPersisted(*shell, messages, home) {
+			persistedBash = append(persistedBash, shell.ID)
 		} else {
-			activeBash = snapshot.ActiveBash
+			activeBash = map[string]any{"bash_id": shell.ID, "command": shell.Command, "exclude_from_context": shell.ExcludeFromContext, "started_at": shell.StartedAt}
 		}
 	}
-	remainingCompleted := completedBash[:0]
-	for _, event := range completedBash {
-		if completedBashPersisted(event, messages, home) {
-			persistedBash = append(persistedBash, stringFromAny(event["bashId"]))
+	completedBash := make([]json.RawMessage, 0, len(snapshot.CompletedShells))
+	for _, shell := range snapshot.CompletedShells {
+		if completedShellPersisted(shell, messages, home) {
+			persistedBash = append(persistedBash, shell.ID)
 		} else {
-			remainingCompleted = append(remainingCompleted, event)
+			completedBash = append(completedBash, shell.Data)
 		}
 	}
-	completedBash = remainingCompleted
 	agentBusy := snapshot.AgentRunning || snapshot.Compacting
 	composerState := "idle"
 	if agentBusy {
@@ -429,69 +405,52 @@ func liveOutputFrom(snapshot rpc.LiveSnapshot, messages []*sessions.Message, hom
 	}
 	return liveOutputData{
 		EventAfter:               snapshot.EventSequence,
-		ActiveAssistantEventJSON: jsonData(snapshot.ActiveAssistantEvent),
+		ActiveAssistantEventJSON: jsonData(snapshot.ActiveAssistant),
 		ActiveToolEventsJSON:     jsonData(activeTools), ActiveToolTimestampsJSON: jsonData(toolTimestamps), ActiveToolPromptsJSON: jsonData(toolPrompts),
 		ActiveBashJSON: jsonData(activeBash), CompletedBashEventsJSON: jsonData(completedBash), PersistedBashJSON: jsonData(persistedBash),
-		QueuedMessagesJSON: jsonData(queued), ExtensionUIJSON: jsonData(extensionUI), ComposerState: composerState,
+		QueuedMessagesJSON: jsonData(queuedMessages(snapshot.Queue)), ExtensionUIJSON: jsonData(extensionUI), ComposerState: composerState,
 		ComposerStateSince: millisecondsString(stateSince), ComposerBusySince: millisecondsString(agentBusySince),
 		Compacting: snapshot.Compacting, AgentRunning: snapshot.AgentRunning,
 	}
 }
 
-func activeBashPersisted(active map[string]any, messages []*sessions.Message, home string) bool {
-	started, ok := timeFromAny(active["started_at"])
-	if !ok {
+// queuedMessages is the queue as the browser reads it.
+func queuedMessages(queue agent.Queue) map[string][]string {
+	return map[string][]string{"steering": append([]string{}, queue.Steering...), "followUp": append([]string{}, queue.FollowUp...)}
+}
+
+func activeShellPersisted(shell agent.Shell, messages []*agent.Message, home string) bool {
+	if shell.StartedAt.IsZero() {
 		return false
 	}
-	summary := "$ " + sessions.DisplayHomePath(stringFromAny(active["command"]), home)
+	summary := "$ " + agent.DisplayHomePath(shell.Command, home)
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
-		if message.Role == "bashExecution" && message.Summary == summary && !message.Timestamp.IsZero() && !message.Timestamp.Before(started) {
+		if message.Role == "bashExecution" && message.Summary == summary && !message.Timestamp.IsZero() && !message.Timestamp.Before(shell.StartedAt) {
 			return true
 		}
 	}
 	return false
 }
 
-func completedBashPersisted(event map[string]any, messages []*sessions.Message, home string) bool {
-	if event["type"] != "bash_end" {
+func completedShellPersisted(shell agent.CompletedShell, messages []*agent.Message, home string) bool {
+	if !shell.Ended {
 		return false
 	}
-	result, ok := event["result"].(map[string]any)
-	if !ok {
-		return false
-	}
-	startedMilliseconds, ok := numericValue(event["startedAt"])
-	if !ok {
-		return false
-	}
-	summary := "$ " + sessions.DisplayHomePath(stringFromAny(event["command"]), home)
+	summary := "$ " + agent.DisplayHomePath(shell.Command, home)
 	for _, message := range messages {
-		if message.Role != "bashExecution" || message.Summary != summary || message.Text != stringFromAny(result["output"]) || message.BashCancelled != (result["cancelled"] == true) || message.BashTruncated != (result["truncated"] == true) || message.BashExcludedFromContext != (event["excludeFromContext"] == true) || message.BashRecordedAt.IsZero() || message.BashRecordedAt.UnixMilli() < int64(startedMilliseconds) {
+		if message.Role != "bashExecution" || message.Summary != summary || message.Text != shell.Output || message.BashCancelled != shell.Cancelled || message.BashTruncated != shell.Truncated || message.BashExcludedFromContext != shell.ExcludeFromContext || message.BashRecordedAt.IsZero() || message.BashRecordedAt.UnixMilli() < shell.StartedAt.UnixMilli() {
 			continue
 		}
-		resultExit, hasExit := numericValue(result["exitCode"])
-		if (message.BashExitCode == nil) != !hasExit {
+		if (message.BashExitCode == nil) != (shell.ExitCode == nil) {
 			continue
 		}
-		if hasExit && *message.BashExitCode != int(resultExit) {
+		if shell.ExitCode != nil && *message.BashExitCode != *shell.ExitCode {
 			continue
 		}
 		return true
 	}
 	return false
-}
-
-func timeFromAny(value any) (time.Time, bool) {
-	switch typed := value.(type) {
-	case time.Time:
-		return typed, true
-	case string:
-		parsed, err := time.Parse(time.RFC3339Nano, typed)
-		return parsed, err == nil
-	default:
-		return time.Time{}, false
-	}
 }
 
 func jsonData(value any) string { encoded, _ := json.Marshal(value); return string(encoded) }
@@ -502,10 +461,10 @@ func millisecondsString(value *time.Time) string {
 	return strconv.FormatInt(value.UnixMilli(), 10)
 }
 
-func (app *application) rememberSessionHashes(all []*sessions.Session) {
+func (app *application) rememberSessionHashes(all []*agent.Session) {
 	values := make(map[string]bool, len(all))
 	for _, session := range all {
-		aliases := sessions.SessionPathAliases(app.config.SessionsRoot, session.Path)
+		aliases := app.sessionStore.Aliases(session.Path)
 		if len(aliases) == 0 {
 			aliases = []string{session.Path}
 		}
@@ -532,7 +491,7 @@ func (view *pageView) prepareSidebar() {
 	}
 	cookie, err := view.Request.Cookie(cliSessionsCookie)
 	view.CLISessionsShown = err == nil && cookie.Value == "1"
-	var pool []*sessions.Session
+	var pool []*agent.Session
 	query := strings.ToLower(view.SearchQuery)
 	for _, session := range view.Sessions {
 		if view.Pinned[session.Path] {
@@ -586,7 +545,7 @@ func (view *pageView) prepareSidebar() {
 	}
 }
 
-func knownCWDs(all []*sessions.Session, projects map[string]bool) ([]string, map[string]time.Time) {
+func knownCWDs(all []*agent.Session, projects map[string]bool) ([]string, map[string]time.Time) {
 	latest := make(map[string]time.Time)
 	for _, session := range all {
 		if projects[session.CWD] && session.ConversationActivityAt.After(latest[session.CWD]) {
@@ -673,17 +632,17 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return value.Local().Format("2006-01-02 15:04")
 		},
 		"sessionURL": sessionURL, "sessionClasses": sessionClasses, "unreadLabel": unreadLabel, "plural": plural,
-		"sessionData": func(view *pageView, session *sessions.Session, shortcut int) sidebarSessionData {
+		"sessionData": func(view *pageView, session *agent.Session, shortcut int) sidebarSessionData {
 			return sidebarSessionData{view, session, shortcut}
 		},
 		"sessionParent": sessionParent, "sessionChildren": sessionChildren, "sessionRoot": sessionRoot,
-		"relationData": func(view *pageView, session, current *sessions.Session) relationData {
+		"relationData": func(view *pageView, session, current *agent.Session) relationData {
 			return relationData{view, session, current}
 		},
-		"messageData":    func(view *pageView, message *sessions.Message) messageData { return messageData{view, message} },
+		"messageData":    func(view *pageView, message *agent.Message) messageData { return messageData{view, message} },
 		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL,
 		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
-		"messageBody": func(message *sessions.Message) template.HTML {
+		"messageBody": func(message *agent.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
 				return template.HTML(markdownRenderer.Render(message.Text))
 			}
@@ -693,7 +652,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 		"imageSource": imageSource,
 		"statusItems": statusItems, "bashStatusItems": bashStatusItems, "attachmentLabel": attachmentLabel,
 		"visibleImages": visibleImages, "attachmentCount": attachmentCount, "collapsible": collapsible, "toolOutputHiddenLabel": toolOutputHiddenLabel,
-		"terminalOutput": terminalOutput, "terminalSource": terminalSource, "terminalTruncated": func(message *sessions.Message) bool { return len(message.Text) > 262144 },
+		"terminalOutput": terminalOutput, "terminalSource": terminalSource, "terminalTruncated": func(message *agent.Message) bool { return len(message.Text) > 262144 },
 		"conversationSearch": conversationSearch, "tildePath": tildePath,
 	}
 }
@@ -780,7 +739,7 @@ func plural(value int) string {
 	}
 	return "s"
 }
-func sessionURL(view *pageView, session *sessions.Session) string {
+func sessionURL(view *pageView, session *agent.Session) string {
 	values := url.Values{"session": {session.Path}}
 	if view.SelectedTag != "" {
 		values.Set("tag", view.SelectedTag)
@@ -800,33 +759,31 @@ func sessionURL(view *pageView, session *sessions.Session) string {
 	}
 	return "/?" + values.Encode()
 }
-func sessionParent(view *pageView, session *sessions.Session) *sessions.Session {
+func sessionParent(view *pageView, session *agent.Session) *agent.Session {
 	if session == nil || session.ParentSessionPath == "" {
 		return nil
 	}
-	target := filepath.Clean(session.ParentSessionPath)
 	for _, candidate := range view.Sessions {
-		if filepath.Clean(candidate.Path) == target {
+		if candidate.Path == session.ParentSessionPath {
 			return candidate
 		}
 	}
 	return nil
 }
-func sessionChildren(view *pageView, session *sessions.Session) []*sessions.Session {
+func sessionChildren(view *pageView, session *agent.Session) []*agent.Session {
 	if session == nil {
 		return nil
 	}
-	var result []*sessions.Session
-	target := filepath.Clean(session.Path)
+	var result []*agent.Session
 	for _, candidate := range view.Sessions {
-		if candidate.ParentSessionPath != "" && filepath.Clean(candidate.ParentSessionPath) == target {
+		if candidate.ParentSessionPath != "" && candidate.ParentSessionPath == session.Path {
 			result = append(result, candidate)
 		}
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].ModifiedAt.After(result[j].ModifiedAt) })
 	return result
 }
-func sessionRoot(view *pageView, session *sessions.Session) *sessions.Session {
+func sessionRoot(view *pageView, session *agent.Session) *agent.Session {
 	seen := make(map[string]bool)
 	current := session
 	for current != nil && !seen[current.Path] {
@@ -863,7 +820,7 @@ func filtersClearURL(view *pageView) string {
 	}
 	return "/?" + values.Encode()
 }
-func retainedSessionsLimit(view *pageView, session *sessions.Session) string {
+func retainedSessionsLimit(view *pageView, session *agent.Session) string {
 	if view.SessionsLimit <= recentSessionLimit || session == nil {
 		return ""
 	}
@@ -874,7 +831,7 @@ func retainedSessionsLimit(view *pageView, session *sessions.Session) string {
 	}
 	return ""
 }
-func sessionClasses(view *pageView, session *sessions.Session) string {
+func sessionClasses(view *pageView, session *agent.Session) string {
 	values := []string{"session", "recent-session"}
 	if view.Selected != nil && view.Selected.Path == session.Path {
 		values = append(values, "selected")
@@ -893,7 +850,7 @@ func unreadLabel(count int) string {
 	}
 	return strconv.Itoa(count)
 }
-func conversationSearch(view *pageView, session *sessions.Session) string {
+func conversationSearch(view *pageView, session *agent.Session) string {
 	if len(view.SearchQuery) >= 3 && strings.Contains(strings.ToLower(session.FirstUserMessage), strings.ToLower(view.SearchQuery)) {
 		return view.SearchQuery
 	}
@@ -920,7 +877,7 @@ func messageRoleKey(role string) string {
 		return "status"
 	}
 }
-func messageClass(message *sessions.Message) string {
+func messageClass(message *agent.Message) string {
 	values := []string{"message", "message--" + messageRoleKey(message.Role)}
 	if message.Compact {
 		values = append(values, "message--compact")
@@ -957,7 +914,7 @@ func messageClass(message *sessions.Message) string {
 	}
 	return strings.Join(values, " ")
 }
-func messageRoleLabel(message *sessions.Message) string {
+func messageRoleLabel(message *agent.Message) string {
 	if message.Compact && message.Role == "assistant" && message.ToolName != "" {
 		return "tool"
 	}
@@ -977,7 +934,7 @@ func messageRoleLabel(message *sessions.Message) string {
 		return message.Role
 	}
 }
-func messageFingerprint(message *sessions.Message) string {
+func messageFingerprint(message *agent.Message) string {
 	if message.Timestamp.IsZero() {
 		return ""
 	}
@@ -988,10 +945,10 @@ func messageFingerprint(message *sessions.Message) string {
 	}
 	return fmt.Sprintf("%s:%d:%x", messageRoleKey(message.Role), message.Timestamp.Unix(), hash)
 }
-func compactBody(view *pageView, message *sessions.Message) template.HTML {
+func compactBody(view *pageView, message *agent.Message) template.HTML {
 	return renderCompactLines(message, strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n"), 0, view.Home)
 }
-func compactTail(view *pageView, message *sessions.Message) template.HTML {
+func compactTail(view *pageView, message *agent.Message) template.HTML {
 	lines := compactTailLines(message.Text, !message.ToolTranscript)
 
 	return renderCompactLines(message, lines, max(len(lines)-toolOutputMobileTailLines, 0), view.Home)
@@ -1016,7 +973,7 @@ func compactTailLines(text string, trimCharacters bool) []string {
 
 	return lines
 }
-func renderCompactLines(message *sessions.Message, lines []string, desktop int, home string) template.HTML {
+func renderCompactLines(message *agent.Message, lines []string, desktop int, home string) template.HTML {
 	diff := message.ToolTranscript && (message.ToolName == "edit" || message.ToolName == "write")
 	var output strings.Builder
 	class := "tool-output-content"
@@ -1026,7 +983,7 @@ func renderCompactLines(message *sessions.Message, lines []string, desktop int, 
 	output.WriteString(`<span class="` + class + `">`)
 	for index, line := range lines {
 		if !message.ToolPreview {
-			line = sessions.DisplayHomePath(line, home)
+			line = agent.DisplayHomePath(line, home)
 		}
 		lineClass := "tool-output-line"
 		if diff {
@@ -1049,7 +1006,7 @@ func renderCompactLines(message *sessions.Message, lines []string, desktop int, 
 	output.WriteString(`</span>`)
 	return template.HTML(output.String())
 }
-func statusItems(status sessions.Status) [][2]string {
+func statusItems(status agent.Status) [][2]string {
 	var result [][2]string
 	if status.HasContextTokens || status.HasContextLimit {
 		value := ""
@@ -1085,7 +1042,7 @@ func compactNumber(value float64) string {
 	}
 	return strconv.FormatFloat(value/1e6, 'f', 1, 64) + "M"
 }
-func bashStatusItems(message *sessions.Message) []string {
+func bashStatusItems(message *agent.Message) []string {
 	var values []string
 	if message.BashExcludedFromContext {
 		values = append(values, "excluded from model context")
@@ -1107,30 +1064,30 @@ func bashStatusItems(message *sessions.Message) []string {
 func attachmentLabel(count int) string {
 	return fmt.Sprintf("📎 %d image attachment%s", count, plural(count))
 }
-func imageSource(view *pageView, image sessions.Image) string {
+func imageSource(view *pageView, image agent.Image) string {
 	if image.Src != "" {
 		return image.Src
 	}
 	// The extension keeps the image viewer's download filename meaningful.
 	return "/session_images/" + url.PathEscape(image.EntryID) + "/" + strconv.Itoa(image.Index) + "." + strings.TrimPrefix(image.MIMEType, "image/") + "?session=" + url.QueryEscape(view.Selected.Path)
 }
-func visibleImages(view *pageView, message *sessions.Message) []sessions.Image {
+func visibleImages(view *pageView, message *agent.Message) []agent.Image {
 	if len(message.Images) > 0 {
 		return message.Images
 	}
 	return view.Attachments[message].Images
 }
-func attachmentCount(view *pageView, message *sessions.Message) int {
+func attachmentCount(view *pageView, message *agent.Message) int {
 	return view.Attachments[message].Count
 }
-func collapsible(message *sessions.Message) bool {
+func collapsible(message *agent.Message) bool {
 	lines := strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n")
 	longOutput := !message.ToolTranscript && utf8.RuneCountInString(message.Text) > toolOutputCollapseCharacters
 
 	return message.Compact && !message.Thinking && !message.FinalAssistantResponse && (len(lines) > toolOutputDesktopTailLines || longOutput)
 }
 
-func toolOutputHiddenLabel(message *sessions.Message, tailLines int) string {
+func toolOutputHiddenLabel(message *agent.Message, tailLines int) string {
 	if !message.ToolTranscript && utf8.RuneCountInString(message.Text) > toolOutputCollapseCharacters {
 		return "… (earlier output)"
 	}
@@ -1139,13 +1096,13 @@ func toolOutputHiddenLabel(message *sessions.Message, tailLines int) string {
 
 	return fmt.Sprintf("… (%d earlier lines)", lines-tailLines)
 }
-func terminalOutput(message *sessions.Message) bool {
+func terminalOutput(message *agent.Message) bool {
 	if !message.Compact || message.ToolName == "read" || message.ToolName == "edit" || message.ToolName == "write" {
 		return false
 	}
 	return strings.ContainsAny(message.Text, "\b\x1b") || strings.Contains(message.Text, "\r")
 }
-func terminalSource(message *sessions.Message) string {
+func terminalSource(message *agent.Message) string {
 	value := message.Text
 	if len(value) > 262144 {
 		if latest := strings.LastIndex(value, "\x1b[2J"); latest >= 0 && len(value)-latest <= 262144 {

@@ -35,7 +35,7 @@ func TestSessionTagsNormalizePathsAndForgetOnlyTarget(t *testing.T) {
 	}
 	path := filepath.Join(configured, "session.jsonl")
 	tagsPath := filepath.Join(root, "tags.json")
-	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), tagsPath, configured)
+	state := NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), tagsPath, rootKeys(configured))
 	for _, assignment := range []struct{ path, name string }{{filepath.Join(physical, "session.jsonl"), " Work "}, {path, "WORK"}, {path, "alpha"}, {"/other", "work"}} {
 		if err := state.SetTag(assignment.path, assignment.name, true); err != nil {
 			t.Fatal(err)
@@ -66,7 +66,7 @@ func TestSessionTagsNormalizePathsAndForgetOnlyTarget(t *testing.T) {
 
 func TestSessionTagsLimitAllowsIdempotentAssignmentsAndRemoval(t *testing.T) {
 	root := t.TempDir()
-	state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), "")
+	state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), nil)
 	for i := range 32 {
 		if err := state.SetTag("/session", fmt.Sprint(i), true); err != nil {
 			t.Fatal(err)
@@ -93,7 +93,7 @@ func TestSessionTagsPreserveMalformedStateDuringForget(t *testing.T) {
 	if err := os.WriteFile(path, malformed, 0600); err != nil {
 		t.Fatal(err)
 	}
-	state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), path, "")
+	state := NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), path, nil)
 	if _, err := state.SessionTags(); err == nil {
 		t.Fatal("read malformed tags")
 	}

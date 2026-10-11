@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 // ProjectCWDs preserves existing projects on first startup. Later discoveries
 // stay out of the project list until Gripi explicitly remembers their directory.
-func (state *GatewayState) ProjectCWDs(existing []*Session) (map[string]bool, error) {
+func (state *GatewayState) ProjectCWDs(existing []*agent.Session) (map[string]bool, error) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 

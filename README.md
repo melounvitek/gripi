@@ -180,4 +180,4 @@ mise run setup
 mise run dev
 ```
 
-`mise run dev` serves the gateway in development mode on <http://localhost:4567>. It uses the same port, settings, and Gripi data as an installed gateway, so stop that one first. Run the main checks with `mise run test`. See [testing](docs/testing.md) for the other checks and the browser suite, [frontend architecture](docs/frontend.md) for how the UI is organized, and [configuration](docs/configuration.md) for all settings.
+`mise run dev` serves the gateway in development mode on <http://localhost:4567>. It uses the same port, settings, and Gripi data as an installed gateway, so stop that one first. Run the main checks with `mise run test`. See [testing](docs/testing.md) for the other checks and the browser suite, [frontend architecture](docs/frontend.md) for how the UI is organized, [backend architecture](docs/architecture.md) for how the gateway runs Pi behind an agent adapter, and [configuration](docs/configuration.md) for all settings.

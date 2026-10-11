@@ -20,9 +20,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/rendering"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -44,13 +47,13 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	}
 	pendingPath := filepath.Join(sessionsRoot, "pending.jsonl")
 	client := &remapClient{state: map[string]any{"type": "response", "success": true, "data": map[string]any{"sessionFile": realPath}}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(pendingPath, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
-	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), sessionsRoot)
+	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(sessionsRoot, ""))
 	if err := gatewayState.SetPinned(pendingPath, true); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +64,7 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	if err := os.WriteFile(metadata, []byte("gateway metadata\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	app := &application{config: config.Config{SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot}, sessionCache: sessions.NewCache(), gatewayState: gatewayState, rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: sessionsRoot, AttachmentsRoot: attachmentsRoot}, sessionStore: NewPiStore(sessionsRoot, ""), gatewayState: gatewayState, rpcClients: registry, pendingSessions: pending}
 
 	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), pendingPath)
 	if err != nil || result != realPath {
@@ -80,7 +83,7 @@ func TestCanonicalRPCSessionPathMovesPendingClientAndGatewayState(t *testing.T) 
 	if err != nil || string(migrated) != "gateway metadata\n" {
 		t.Fatalf("migrated metadata = %q, %v", migrated, err)
 	}
-	_, pinned, err := gatewayState.ReadAndObserve([]*sessions.Session{{Path: realPath, CWD: project}}, nil, false, nil)
+	_, pinned, err := gatewayState.ReadAndObserve([]*agent.Session{{Path: realPath, CWD: project}}, nil, false, nil)
 	if err != nil || !pinned[realPath] {
 		t.Fatalf("migrated pin = %v, %v", pinned, err)
 	}
@@ -119,11 +122,11 @@ func TestCanonicalRPCSessionPathNormalizesNativePhysicalPathToConfiguredRoot(t *
 	writeSessionRecords(t, physicalPath, []map[string]any{{"type": "session", "version": 3, "id": "real", "cwd": project}})
 	pendingPath := filepath.Join(configuredRoot, "pending.jsonl")
 	client := &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": physicalPath}}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(pendingPath, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
 	metadata := filepath.Join(attachmentsRoot, sessions.SessionHash(pendingPath)+".jsonl")
 	if err := os.WriteFile(metadata, []byte("gateway metadata\n"), 0600); err != nil {
@@ -132,11 +135,11 @@ func TestCanonicalRPCSessionPathNormalizesNativePhysicalPathToConfiguredRoot(t *
 	claimed := ""
 	app := &application{
 		config:          config.Config{SessionsRoot: configuredRoot, AttachmentsRoot: attachmentsRoot},
-		sessionCache:    sessions.NewCache(),
+		sessionStore:    NewPiStore(configuredRoot, ""),
 		rpcClients:      registry,
 		pendingSessions: pending,
 		claimSession:    func(_ *http.Request, path string) (bool, error) { claimed = path; return true, nil },
-		gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), configuredRoot),
+		gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pins"), filepath.Join(root, "tags"), NewPiStore(configuredRoot, "")),
 	}
 	if err := app.gatewayState.SetTag(pendingPath, "work", true); err != nil {
 		t.Fatal(err)
@@ -176,11 +179,11 @@ func TestCanonicalRPCSessionPathNormalizesExistingPhysicalPath(t *testing.T) {
 	configuredPath := filepath.Join(configuredRoot, "existing.jsonl")
 	writeSessionRecords(t, physicalPath, []map[string]any{{"type": "session", "version": 3, "id": "existing", "cwd": project}})
 	created := atomic.Int32{}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) {
+	registry := agent.NewRegistry(func(string) (agent.Client, error) {
 		created.Add(1)
 		return &remapClient{}, nil
 	}, nil)
-	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil)}
+	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionStore: NewPiStore(configuredRoot, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
 
 	for _, path := range []string{physicalPath, configuredPath} {
@@ -188,7 +191,7 @@ func TestCanonicalRPCSessionPathNormalizesExistingPhysicalPath(t *testing.T) {
 		if err != nil || canonical != configuredPath {
 			t.Fatalf("canonical path for %q = %q, %v", path, canonical, err)
 		}
-		if err := registry.WithClient(request.Context(), canonical, func(rpc.RPCClient) error { return nil }); err != nil {
+		if err := registry.WithClient(request.Context(), canonical, func(agent.Client) error { return nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -213,13 +216,14 @@ func TestStartNewSessionNormalizesANotYetExistingNativePath(t *testing.T) {
 	physicalPath := filepath.Join(physicalRoot, "pending.jsonl")
 	configuredPath := filepath.Join(configuredRoot, "pending.jsonl")
 	client := &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": physicalPath}}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	claimed := ""
 	app := &application{
 		config:          config.Config{SessionsRoot: configuredRoot},
-		newRPCClient:    func(string, string, string) (rpc.RPCClient, error) { return client, nil },
+		sessionStore:    NewPiStore(configuredRoot, ""),
+		newRPCClient:    func(string, string, string) (agent.Client, error) { return client, nil },
 		rpcClients:      registry,
-		pendingSessions: rpc.NewPendingSessionRegistry(nil),
+		pendingSessions: agent.NewPendingSessionRegistry(nil),
 		claimSession:    func(_ *http.Request, path string) (bool, error) { claimed = path; return true, nil },
 	}
 
@@ -252,13 +256,13 @@ func TestCanonicalRPCSessionPathFinalizesPendingSessionAtSameConfiguredPath(t *t
 	configuredPath := filepath.Join(configuredRoot, "materialized.jsonl")
 	writeSessionRecords(t, physicalPath, []map[string]any{{"type": "session", "version": 3, "id": "real", "cwd": project}})
 	client := &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": physicalPath}}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(configuredPath, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(configuredPath, project, "")
-	app := &application{config: config.Config{SessionsRoot: configuredRoot, AttachmentsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: configuredRoot, AttachmentsRoot: t.TempDir()}, sessionStore: NewPiStore(configuredRoot, ""), rpcClients: registry, pendingSessions: pending}
 
 	result, err := app.canonicalRPCSessionPath(httptest.NewRequest(http.MethodGet, "http://app.test/", nil), physicalPath)
 	if err != nil || result != configuredPath || !registry.Active(configuredPath) {
@@ -279,13 +283,13 @@ func TestCanonicalRPCSessionPathDoesNotInspectAnotherWorkspacePendingClient(t *t
 	writeSessionRecords(t, target, []map[string]any{{"type": "session", "version": 3, "id": "target", "cwd": project}})
 	pendingPath := filepath.Join(root, "other-pending.jsonl")
 	client := &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": target}}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(pendingPath, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
-	app := &application{config: config.Config{SessionsRoot: root}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending,
+	app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: pending,
 		ownsSession: func(_ *http.Request, path string) bool { return path == target },
 	}
 
@@ -308,15 +312,14 @@ func TestPreparePageCanonicalizesSelectedPendingSessionBeforeBuildingView(t *tes
 	writeSessionRecords(t, realPath, []map[string]any{{"type": "session", "version": 3, "id": "real", "timestamp": "2026-01-01T00:00:00Z", "cwd": project}})
 	pendingPath := filepath.Join(root, "pending.jsonl")
 	client := &remapClient{state: map[string]any{"success": true, "data": map[string]any{"sessionFile": realPath}}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(pendingPath, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: pending}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: pending}
+	app.guard = sessionfile.NewSynchronizer(registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
 
 	view, err := app.preparePage(request, false)
@@ -339,12 +342,12 @@ func TestPreparePageOrdersPendingSessionByRecentActivity(t *testing.T) {
 		writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": fmt.Sprintf("persisted-%02d", index), "timestamp": "2026-01-01T00:00:00Z", "cwd": project}})
 	}
 	pendingPath := filepath.Join(root, "pending.jsonl")
-	pending := rpc.NewPendingSessionRegistry(func() time.Time {
+	pending := agent.NewPendingSessionRegistry(func() time.Time {
 		return time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
 	})
 	pending.Remember(pendingPath, project, "")
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
-	app := &application{config: config.Config{SessionsRoot: root, Home: root}, sessionCache: sessions.NewCache(), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: pending}
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root}, sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: pending}
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
 
 	view, err := app.preparePage(request, false)
@@ -360,11 +363,11 @@ func TestPreparePageOrdersPendingSessionByRecentActivity(t *testing.T) {
 }
 
 func TestImagePromptLockFollowsRemapChainAndBlocksTheFinalPath(t *testing.T) {
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register("/intermediate", &remapClient{}); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remap("/pending", "/intermediate")
 	pending.Remember("/intermediate", "/project", "")
 	app := &application{config: config.Config{AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
@@ -393,11 +396,11 @@ func TestImagePromptLockFollowsRemapChainAndBlocksTheFinalPath(t *testing.T) {
 
 func TestPendingRemapVerifiesSourceOwnershipAndClaimsDestination(t *testing.T) {
 	client := &remapClient{}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register("/pending", client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember("/pending", "/project", "")
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
 	claimed := ""
@@ -412,11 +415,11 @@ func TestPendingRemapVerifiesSourceOwnershipAndClaimsDestination(t *testing.T) {
 		t.Fatalf("claimed=%q pending=%v real=%v", claimed, registry.Active("/pending"), registry.Active("/real"))
 	}
 
-	other := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	other := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := other.Register("/other-pending", &remapClient{}); err != nil {
 		t.Fatal(err)
 	}
-	otherPending := rpc.NewPendingSessionRegistry(nil)
+	otherPending := agent.NewPendingSessionRegistry(nil)
 	otherPending.Remember("/other-pending", "/project", "")
 	app.rpcClients, app.pendingSessions = other, otherPending
 	app.ownsSession = func(*http.Request, string) bool { return false }
@@ -429,14 +432,14 @@ func TestPendingRemapVerifiesSourceOwnershipAndClaimsDestination(t *testing.T) {
 }
 
 func TestPendingRemapRejectsADeletedDestination(t *testing.T) {
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register("/pending", &remapClient{}); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember("/pending", "/project", "")
 	root := t.TempDir()
-	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), "")
+	gatewayState := sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), nil)
 	if err := gatewayState.Forget("/real"); err != nil {
 		t.Fatal(err)
 	}
@@ -450,11 +453,11 @@ func TestPendingRemapRejectsADeletedDestination(t *testing.T) {
 		t.Fatal("rejected remap changed clients")
 	}
 
-	sameRegistry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	sameRegistry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := sameRegistry.Register("/same", &remapClient{}); err != nil {
 		t.Fatal(err)
 	}
-	samePending := rpc.NewPendingSessionRegistry(nil)
+	samePending := agent.NewPendingSessionRegistry(nil)
 	samePending.Remember("/same", "/project", "")
 	app.rpcClients, app.pendingSessions = sameRegistry, samePending
 	if err := gatewayState.Forget("/same"); err != nil {
@@ -469,10 +472,10 @@ func TestPendingRemapRejectsADeletedDestination(t *testing.T) {
 }
 
 func TestCompletedPendingRemapRequiresEveryDestinationOwnership(t *testing.T) {
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remap("/pending", "/intermediate")
 	pending.Remap("/intermediate", "/real")
-	app := &application{pendingSessions: pending, ownsSession: func(_ *http.Request, path string) bool { return path == "/pending" || path == "/intermediate" }}
+	app := &application{sessionStore: NewPiStore("", ""), pendingSessions: pending, ownsSession: func(_ *http.Request, path string) bool { return path == "/pending" || path == "/intermediate" }}
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
 
 	if _, err := app.canonicalRPCSessionPath(request, "/pending"); err == nil {
@@ -493,13 +496,13 @@ func TestCompletedPendingRemapRequiresEveryDestinationOwnership(t *testing.T) {
 
 func TestEventsContinuesResolvingACompletedPendingSessionRemap(t *testing.T) {
 	client := &remapClient{}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register("/real", client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remap("/pending", "/real")
-	app := &application{config: config.Config{}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{}, sessionStore: NewPiStore("", ""), rpcClients: registry, pendingSessions: pending}
 	for iteration := 0; iteration < 2; iteration++ {
 		request := httptest.NewRequest(http.MethodGet, "http://app.test/events?session="+url.QueryEscape("/pending")+"&after=0", nil)
 		response := httptest.NewRecorder()
@@ -515,26 +518,25 @@ func TestEventsReportsUnreplayableCursors(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "session.jsonl")
-			registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) {
+			registry := agent.NewRegistry(func(string) (agent.Client, error) {
 				t.Error("event polling must not create a client")
 				return nil, os.ErrNotExist
 			}, nil)
-			cache := sessions.NewCache()
 			app := &application{
 				config:          config.Config{SessionsRoot: root, Home: root},
-				sessionCache:    cache,
+				sessionStore:    NewPiStore(root, root),
 				rpcClients:      registry,
-				pendingSessions: rpc.NewPendingSessionRegistry(nil),
-				synchronizer:    sessions.NewSynchronizer(root, root, cache, registry),
+				pendingSessions: agent.NewPendingSessionRegistry(nil),
+				guard:           sessionfile.NewSynchronizer(registry),
 			}
 			var sequence int64
 			if state != "absent" {
 				stdinReader, stdinWriter := io.Pipe()
 				stdoutReader, stdoutWriter := io.Pipe()
 				observed := make(chan struct{}, 1)
-				client := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{
+				client := &agentpi.Client{Client: rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{
 					EventObserver: func(*rpc.Client, map[string]any) { observed <- struct{}{} },
-				})
+				})}
 				t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
 				if err := registry.Register(path, client); err != nil {
 					t.Fatal(err)
@@ -616,17 +618,16 @@ func TestSidebarRendersRPCActivityIndicators(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := &remapClient{busy: test.busy, compacting: test.compacting}
-			registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+			registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 			if err := registry.Register(path, client); err != nil {
 				t.Fatal(err)
 			}
-			cache := sessions.NewCache()
 			app := &application{
 				config:          config.Config{SessionsRoot: root, Home: root},
-				sessionCache:    cache,
-				gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root),
+				sessionStore:    NewPiStore(root, root),
+				gatewayState:    sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")),
 				rpcClients:      registry,
-				pendingSessions: rpc.NewPendingSessionRegistry(nil),
+				pendingSessions: agent.NewPendingSessionRegistry(nil),
 				heavyRequests:   make(chan struct{}, 1),
 			}
 			var err error
@@ -679,14 +680,13 @@ func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "source"}, live: rpc.LiveSnapshot{EventSequence: 9, ActiveToolEvents: []map[string]any{{"type": "tool_execution_update", "toolCallId": "tool-1", "toolName": "subagent"}}, AgentRunning: true}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "source"}, live: agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{EventSequence: 9, ActiveToolEvents: []map[string]any{{"type": "tool_execution_update", "toolCallId": "tool-1", "toolName": "subagent"}}, AgentRunning: true})}
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app.guard = sessionfile.NewSynchronizer(registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	view, err := app.preparePage(request, true)
 	if err != nil {
@@ -698,7 +698,7 @@ func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 	if view.LiveOutput.EventAfter != 9 || view.LiveOutput.ComposerState != "running" || !strings.Contains(view.LiveOutput.ActiveToolEventsJSON, "tool-1") || !strings.Contains(view.LiveOutput.ActiveToolPromptsJSON, "Review active work") || view.LiveOutput.ActiveToolTimestampsJSON != `{"tool-1":"2026-01-01T00:00:02Z"}` {
 		t.Fatalf("live output = %#v", view.LiveOutput)
 	}
-	if view.SessionSyncMode != sessions.SyncManaged {
+	if view.SessionSyncMode != agent.SyncManaged {
 		t.Fatalf("sync mode = %s", view.SessionSyncMode)
 	}
 	app.templates, err = template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
@@ -724,10 +724,9 @@ func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {
 	}
 	path := filepath.Join(root, "session.jsonl")
 	writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": project}, {"type": "message", "id": "old", "parentId": nil, "timestamp": "2026-01-01T00:00:01Z", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Old"}}}}})
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app.guard = sessionfile.NewSynchronizer(registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	if _, err := app.preparePage(request, true); err != nil {
 		t.Fatal(err)
@@ -742,7 +741,7 @@ func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !view.SessionSyncBlocked || view.SessionSyncMode != sessions.SyncExternalFollow || view.Window.TreeLeafID != "external" {
+	if !view.SessionSyncBlocked || view.SessionSyncMode != agent.SyncExternalFollow || view.Window.TreeLeafID != "external" {
 		t.Fatalf("external view: blocked=%v mode=%s leaf=%s", view.SessionSyncBlocked, view.SessionSyncMode, view.Window.TreeLeafID)
 	}
 	app.templates, err = template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
@@ -782,19 +781,19 @@ func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {
 func TestAcceptedPromptImageSurvivesAttachmentMetadataFailure(t *testing.T) {
 	path := "/pending-image"
 	client := &followUpRaceClient{Client: (*rpc.Client)(nil)}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(path, "/project", "")
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, sessions.SessionHash(path)+".jsonl"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
-	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), cache, registry)
+	app := &application{adapter: agentpi.New(agentpi.Options{}), config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending}
+	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
+	app.guard = sessionfile.NewSynchronizer(registry)
 	temporary := t.TempDir()
 	t.Setenv("TMPDIR", temporary)
 	var invalidBody bytes.Buffer
@@ -880,22 +879,21 @@ func TestAbortRetiresAQueuedRunAndRestoresItsMessages(t *testing.T) {
 				t.Fatal(err)
 			}
 		},
-		live: rpc.LiveSnapshot{
+		live: agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{
 			AgentRunning: true,
 			QueuedMessages: map[string][]string{
 				"steering": {"Change direction"},
 				"followUp": {"Then continue"},
 			},
-		},
+		}),
 	}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root}, sessionCache: cache, rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil)}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
-	if state, err := app.synchronizer.Inspect(context.Background(), path, true); err != nil || state.Mode != sessions.SyncManaged {
+	app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
+	app.guard = sessionfile.NewSynchronizer(registry)
+	if state, err := inspectGuard(app.guard, context.Background(), path, true); err != nil || state.Mode != agent.SyncManaged {
 		t.Fatalf("initial synchronization = %#v, %v", state, err)
 	}
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
@@ -915,8 +913,8 @@ func TestAbortRetiresAQueuedRunAndRestoresItsMessages(t *testing.T) {
 	if !client.closed || client.aborted || registry.Active(path) {
 		t.Fatalf("closed=%v aborted=%v active=%v", client.closed, client.aborted, registry.Active(path))
 	}
-	state, err := app.synchronizer.Inspect(context.Background(), path, false)
-	if err != nil || state.Mode != sessions.SyncAvailable {
+	state, err := inspectGuard(app.guard, context.Background(), path, false)
+	if err != nil || state.Mode != agent.SyncAvailable {
 		t.Fatalf("synchronization after stop = %#v, %v", state, err)
 	}
 }
@@ -925,19 +923,20 @@ func TestAbortDoesNotRetireAQueuedPendingSession(t *testing.T) {
 	path := "/synthetic-pending-queue"
 	client := &queuedAbortClient{
 		followUpRaceClient: &followUpRaceClient{Client: (*rpc.Client)(nil)},
-		live: rpc.LiveSnapshot{
+		live: agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{
 			AgentRunning:   true,
 			QueuedMessages: map[string][]string{"steering": {"Keep queued"}},
-		},
+		}),
 		onClose: func() {},
 	}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(path, "/project", "")
-	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
+	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
@@ -953,13 +952,14 @@ func TestAbortDoesNotRetireAQueuedPendingSession(t *testing.T) {
 func TestAbortAllowsTrackedSyntheticPendingSession(t *testing.T) {
 	path := "/synthetic-pending"
 	client := &followUpRaceClient{Client: (*rpc.Client)(nil)}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(path, "/project", "")
-	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, sessionCache: sessions.NewCache(), rpcClients: registry, pendingSessions: pending}
+	app := &application{config: config.Config{SessionsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
+	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/abort", strings.NewReader(url.Values{"session": {path}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
@@ -989,19 +989,18 @@ func TestAbortMatchesPendingClientReportingPhysicalSessionPath(t *testing.T) {
 	writeSessionRecords(t, physicalPath, []map[string]any{{"type": "session", "version": 3, "id": "active", "cwd": project}})
 	pendingPath := filepath.Join(configuredRoot, "pending.jsonl")
 	client := &followUpRaceClient{Client: (*rpc.Client)(nil), interruptState: map[string]any{"success": true, "data": map[string]any{"sessionFile": physicalPath}}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(pendingPath, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
-	app.synchronizer = sessions.NewSynchronizer(configuredRoot, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionStore: NewPiStore(configuredRoot, ""), rpcClients: registry, pendingSessions: pending}
+	app.guard = sessionfile.NewSynchronizer(registry)
 	started, release := make(chan struct{}), make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- registry.WithExistingClient(context.Background(), pendingPath, true, func(rpc.RPCClient) error {
+		done <- registry.WithExistingClient(context.Background(), pendingPath, true, func(agent.Client) error {
 			close(started)
 			<-release
 			return nil
@@ -1027,13 +1026,13 @@ func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *
 	path := "/pending-follow-up"
 	started, release := make(chan struct{}), make(chan struct{})
 	client := &followUpRaceClient{Client: (*rpc.Client)(nil)}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
 	client.queue = func() {
 		go func() {
-			_ = registry.WithClient(context.Background(), path, func(rpc.RPCClient) error {
+			_ = registry.WithClient(context.Background(), path, func(agent.Client) error {
 				close(started)
 				<-release
 				return nil
@@ -1041,11 +1040,11 @@ func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *
 		}()
 		<-started
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(path, t.TempDir(), "")
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: t.TempDir()}, sessionCache: cache, rpcClients: registry, pendingSessions: pending}
-	app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), cache, registry)
+	app := &application{adapter: agentpi.New(agentpi.Options{}), config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
+	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
+	app.guard = sessionfile.NewSynchronizer(registry)
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/prompt", strings.NewReader(url.Values{"session": {path}, "message": {"after compaction"}, "streaming_behavior": {"follow_up"}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
@@ -1094,18 +1093,17 @@ func TestPreparePageOmitsCompletedSubagentSnapshotPersistedOutsideInitialWindow(
 		t.Fatal(err)
 	}
 
-	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "running-call"}, live: rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
+	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "running-call"}, live: agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
 		{"type": "tool_execution_end", "toolCallId": "completed", "toolName": "subagent"},
 		{"type": "tool_execution_start", "toolCallId": "running", "toolName": "subagent"},
 		{"type": "tool_execution_end", "toolCallId": "unpersisted", "toolName": "subagent"},
-	}}}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
+	}})}
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
 	}
-	cache := sessions.NewCache()
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, sessionCache: cache, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root), rpcClients: registry, pendingSessions: rpc.NewPendingSessionRegistry(nil), instanceID: "test"}
-	app.synchronizer = sessions.NewSynchronizer(root, root, cache, registry)
+	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
+	app.guard = sessionfile.NewSynchronizer(registry)
 
 	view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true)
 	if err != nil {
@@ -1120,11 +1118,11 @@ func TestPreparePageOmitsCompletedSubagentSnapshotPersistedOutsideInitialWindow(
 }
 
 func TestLiveOutputOmitsCompletedSubagentSnapshotsWithPersistedResults(t *testing.T) {
-	messages := []*sessions.Message{{Role: "toolResult", ToolCallID: "first", ToolName: "subagent"}}
-	snapshot := rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
+	messages := []*agent.Message{{Role: "toolResult", ToolCallID: "first", ToolName: "subagent"}}
+	snapshot := agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
 		{"type": "tool_execution_end", "toolCallId": "first", "toolName": "subagent"},
 		{"type": "tool_execution_start", "toolCallId": "second", "toolName": "subagent"},
-	}}
+	}})
 
 	output := liveOutputFrom(snapshot, messages, "/home/test", nil)
 	if strings.Contains(output.ActiveToolEventsJSON, "first") || !strings.Contains(output.ActiveToolEventsJSON, "second") {
@@ -1135,8 +1133,8 @@ func TestLiveOutputOmitsCompletedSubagentSnapshotsWithPersistedResults(t *testin
 func TestLiveOutputRecognizesNativeIntegerCompletedBashAsPersisted(t *testing.T) {
 	recorded := time.UnixMilli(1_750_000_000_500)
 	exitCode := 0
-	messages := []*sessions.Message{{Role: "bashExecution", Summary: "$ printf done", Text: "done", BashExitCode: &exitCode, BashRecordedAt: recorded}}
-	snapshot := rpc.LiveSnapshot{CompletedBashEvents: []map[string]any{{"type": "bash_end", "bashId": "bash-1", "command": "printf done", "startedAt": int64(1_750_000_000_000), "result": map[string]any{"output": "done", "exitCode": int64(0)}}}}
+	messages := []*agent.Message{{Role: "bashExecution", Summary: "$ printf done", Text: "done", BashExitCode: &exitCode, BashRecordedAt: recorded}}
+	snapshot := agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{CompletedBashEvents: []map[string]any{{"type": "bash_end", "bashId": "bash-1", "command": "printf done", "startedAt": int64(1_750_000_000_000), "result": map[string]any{"output": "done", "exitCode": int64(0)}}}})
 	output := liveOutputFrom(snapshot, messages, "/home/test", nil)
 	if output.CompletedBashEventsJSON != "[]" || output.PersistedBashJSON != `["bash-1"]` {
 		t.Fatalf("completed=%s persisted=%s", output.CompletedBashEventsJSON, output.PersistedBashJSON)
@@ -1183,7 +1181,7 @@ func (registry *cancelledRestartRegistry) ResumeAfterFailedShutdown() bool {
 func TestHandlerCloseStopsUpdateCoordinator(t *testing.T) {
 	coordinator := &fakeUpdateCoordinator{}
 	handler := &Handler{app: &application{
-		rpcClients:        rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil),
+		rpcClients:        agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil),
 		updateCoordinator: coordinator,
 	}}
 	if err := handler.Close(context.Background()); err != nil {
@@ -1196,7 +1194,7 @@ func TestHandlerCloseStopsUpdateCoordinator(t *testing.T) {
 
 func TestHandlerCloseHonorsContextWhileMaintenanceFinishes(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
-	maintenance, err := rpc.NewMaintenance(time.Millisecond, func(context.Context) error {
+	maintenance, err := agent.NewMaintenance(time.Millisecond, func(context.Context) error {
 		select {
 		case started <- struct{}{}:
 		default:
@@ -1209,7 +1207,7 @@ func TestHandlerCloseHonorsContextWhileMaintenanceFinishes(t *testing.T) {
 	}
 	maintenance.Start(context.Background())
 	<-started
-	handler := &Handler{app: &application{rpcClients: rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil), rpcMaintenance: maintenance}}
+	handler := &Handler{app: &application{rpcClients: agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil), rpcMaintenance: maintenance}}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if err := handler.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -1223,11 +1221,11 @@ func TestHandlerCloseHonorsContextWhileMaintenanceFinishes(t *testing.T) {
 
 func TestPendingRemapWaitsForPromptAttachmentBoundary(t *testing.T) {
 	from, to := "/pending-boundary", "/real-boundary"
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(from, &remapClient{}); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(from, "/project", "")
 	app := &application{config: config.Config{AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
 	unlockBoundary := app.imagePromptLocks.Lock(from)
@@ -1255,17 +1253,17 @@ func TestPendingRemapWaitsForPromptAttachmentBoundary(t *testing.T) {
 func TestAttachmentPromptRecordingCannotRacePendingMigration(t *testing.T) {
 	root := t.TempDir()
 	from, to := "/pending", "/real"
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(from, &remapClient{}); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(from, "/project", "")
 	app := &application{config: config.Config{AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending}
 	started, record := make(chan struct{}), make(chan struct{})
 	recorded := make(chan error, 1)
 	go func() {
-		recorded <- registry.WithClient(context.Background(), from, func(rpc.RPCClient) error {
+		recorded <- registry.WithClient(context.Background(), from, func(agent.Client) error {
 			close(started)
 			<-record
 			return (sessions.AttachmentStore{Root: root}).RecordPrompt(from, "message", 1, time.Now(), []string{"/image"}, []string{"image/png"})
@@ -1273,7 +1271,7 @@ func TestAttachmentPromptRecordingCannotRacePendingMigration(t *testing.T) {
 	}()
 	<-started
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/", nil)
-	if err := app.movePendingRPCClient(request, from, to); !errors.Is(err, rpc.ErrOperationPending) {
+	if err := app.movePendingRPCClient(request, from, to); !errors.Is(err, agent.ErrOperationPending) {
 		t.Fatalf("move during prompt recording = %v", err)
 	}
 	close(record)
@@ -1293,11 +1291,11 @@ func TestPendingClientMoveRollsBackWhenAttachmentMigrationFails(t *testing.T) {
 	root := t.TempDir()
 	from, to := "/pending", "/real"
 	client := &remapClient{}
-	registry := rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return nil, os.ErrNotExist }, nil)
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(from, client); err != nil {
 		t.Fatal(err)
 	}
-	pending := rpc.NewPendingSessionRegistry(nil)
+	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(from, "/project", "")
 	source := filepath.Join(root, sessions.SessionHash(from)+".jsonl")
 	if err := os.WriteFile(source, []byte("metadata\n"), 0600); err != nil {
@@ -1360,41 +1358,48 @@ type followUpRaceClient struct {
 	prompted       bool
 }
 
-func (*followUpRaceClient) Close() error                     { return nil }
-func (*followUpRaceClient) Compacting() bool                 { return false }
-func (*followUpRaceClient) DeferringCompactionPrompts() bool { return false }
-func (*followUpRaceClient) LiveSnapshot() rpc.LiveSnapshot   { return rpc.LiveSnapshot{} }
-func (*followUpRaceClient) GetState(context.Context) (map[string]any, error) {
-	return map[string]any{"success": true}, nil
+func (*followUpRaceClient) Close() error                               { return nil }
+func (*followUpRaceClient) Compacting() bool                           { return false }
+func (*followUpRaceClient) DeferringCompactionPrompts() bool           { return false }
+func (*followUpRaceClient) EventsAfter(int64) agent.EventBatch         { return agent.EventBatch{} }
+func (*followUpRaceClient) LiveSnapshot() agent.LiveSnapshot           { return agent.LiveSnapshot{} }
+func (*followUpRaceClient) State(context.Context) (agent.State, error) { return agent.State{}, nil }
+func (*followUpRaceClient) LiveStatus(context.Context) (agent.LiveStatus, error) {
+	return agent.LiveStatus{}, nil
 }
-func (client *followUpRaceClient) QueueCompactionFollowUp(context.Context, string, []rpc.PromptImage) (map[string]any, bool, error) {
+func (*followUpRaceClient) Commands(context.Context) ([]agent.Command, error) { return nil, nil }
+func (*followUpRaceClient) NewSession(context.Context) (agent.Branch, error) {
+	return agent.Branch{}, errUnsupportedAction
+}
+func (client *followUpRaceClient) DeferPrompt(context.Context, agent.Prompt) (agent.PromptResult, bool, error) {
 	client.queue()
-	return nil, false, nil
+	return agent.PromptResult{}, false, nil
 }
-func (client *followUpRaceClient) QueueCompactionPrompt(context.Context, string, []rpc.PromptImage, string) (map[string]any, bool, error) {
-	client.queue()
-	return nil, false, nil
+func (client *followUpRaceClient) Prompt(_ context.Context, prompt agent.Prompt) (agent.PromptResult, error) {
+	if prompt.Images != nil {
+		if _, err := prompt.Images(); err != nil {
+			return agent.PromptResult{}, err
+		}
+	}
+	if prompt.Delivery == agent.FollowUp {
+		client.followUpCalled = true
+	} else {
+		client.prompted = true
+	}
+	return agent.PromptResult{}, nil
 }
-func (client *followUpRaceClient) FollowUp(context.Context, string, []rpc.PromptImage) (map[string]any, error) {
-	client.followUpCalled = true
-	return map[string]any{"success": true}, nil
-}
-func (client *followUpRaceClient) Prompt(context.Context, string, []rpc.PromptImage) (map[string]any, error) {
-	client.prompted = true
-	return map[string]any{"success": true}, nil
-}
-func (client *followUpRaceClient) GetStateForInterrupt(context.Context) (map[string]any, error) {
-	return client.interruptState, nil
+func (client *followUpRaceClient) InterruptState(context.Context) (agent.State, error) {
+	return stateFrom(client.interruptState)
 }
 func (*followUpRaceClient) ActiveBashCommand() string { return "" }
-func (client *followUpRaceClient) Abort(context.Context) (map[string]any, error) {
+func (client *followUpRaceClient) Cancel(context.Context) error {
 	client.aborted = true
-	return map[string]any{"success": true}, nil
+	return nil
 }
 
 type queuedAbortClient struct {
 	*followUpRaceClient
-	live    rpc.LiveSnapshot
+	live    agent.LiveSnapshot
 	onClose func()
 	closed  bool
 }
@@ -1404,12 +1409,12 @@ func (client *queuedAbortClient) Close() error {
 	client.onClose()
 	return nil
 }
-func (*queuedAbortClient) Busy() bool                            { return true }
-func (*queuedAbortClient) AgentRunning() bool                    { return true }
-func (*queuedAbortClient) ActiveBashCommand() string             { return "" }
-func (client *queuedAbortClient) LiveSnapshot() rpc.LiveSnapshot { return client.live }
-func (client *queuedAbortClient) QueuedMessagesForStop() (map[string][]string, bool) {
-	return client.live.QueuedMessages, true
+func (*queuedAbortClient) Busy() bool                              { return true }
+func (*queuedAbortClient) AgentRunning() bool                      { return true }
+func (*queuedAbortClient) ActiveBashCommand() string               { return "" }
+func (client *queuedAbortClient) LiveSnapshot() agent.LiveSnapshot { return client.live }
+func (client *queuedAbortClient) QueuedMessagesForStop() (agent.Queue, bool) {
+	return client.live.Queue, true
 }
 func (*queuedAbortClient) SessionPosition(context.Context, string) (rpc.SessionEntries, error) {
 	return rpc.SessionEntries{Known: true, LeafID: "before"}, nil
@@ -1421,7 +1426,7 @@ func (client *queuedAbortClient) SessionEntriesAfter(context.Context, string) (r
 type remapClient struct {
 	state         map[string]any
 	position      rpc.SessionEntries
-	live          rpc.LiveSnapshot
+	live          agent.LiveSnapshot
 	busy          bool
 	compacting    bool
 	getStateCalls atomic.Int32
@@ -1435,21 +1440,27 @@ func (client *remapClient) AgentRunning() bool       { return false }
 func (client *remapClient) Compacting() bool         { return client.compacting }
 func (client *remapClient) EventSequence() int64     { return 0 }
 func (client *remapClient) EventReplayCursor() int64 { return 0 }
-func (client *remapClient) EventsAfter(int64) rpc.EventBatch {
-	return rpc.EventBatch{Events: []map[string]any{}}
+func (client *remapClient) EventsAfter(int64) agent.EventBatch {
+	return agent.EventBatch{Events: []json.RawMessage{}}
 }
-func (client *remapClient) LiveSnapshot() rpc.LiveSnapshot {
-	if client.live.ActiveToolEvents == nil {
-		client.live.ActiveToolEvents = []map[string]any{}
-	}
+func (client *remapClient) LiveSnapshot() agent.LiveSnapshot {
 	return client.live
 }
-func (client *remapClient) GetState(context.Context) (map[string]any, error) {
+func (client *remapClient) State(context.Context) (agent.State, error) {
 	client.getStateCalls.Add(1)
-	return client.state, nil
+	return stateFrom(client.state)
 }
-func (client *remapClient) GetSessionStats(context.Context) (map[string]any, error) { return nil, nil }
-func (client *remapClient) GetCommands(context.Context) (map[string]any, error)     { return nil, nil }
+func (client *remapClient) LiveStatus(context.Context) (agent.LiveStatus, error) {
+	return agent.LiveStatus{}, nil
+}
+func (client *remapClient) Commands(context.Context) ([]agent.Command, error) { return nil, nil }
+func (client *remapClient) Prompt(context.Context, agent.Prompt) (agent.PromptResult, error) {
+	return agent.PromptResult{}, errUnsupportedAction
+}
+func (client *remapClient) Cancel(context.Context) error { return errUnsupportedAction }
+func (client *remapClient) NewSession(context.Context) (agent.Branch, error) {
+	return agent.Branch{}, errUnsupportedAction
+}
 func (client *remapClient) SessionPosition(context.Context, string) (rpc.SessionEntries, error) {
 	if !client.position.Known && client.position.Error == "" {
 		return rpc.SessionEntries{Known: true}, nil
@@ -1459,3 +1470,17 @@ func (client *remapClient) SessionPosition(context.Context, string) (rpc.Session
 func (client *remapClient) SessionEntriesAfter(context.Context, string) (rpc.SessionEntries, error) {
 	return client.SessionPosition(context.Background(), "")
 }
+
+// stateFrom reads a fake client's state from Pi's answer to get_state. An answer without success still names its session.
+func stateFrom(response map[string]any) (agent.State, error) {
+	if response["success"] == false {
+		return agent.State{}, &agent.RequestError{Message: stringFromAny(response["error"])}
+	}
+	data := response
+	if nested, ok := response["data"].(map[string]any); ok {
+		data = nested
+	}
+	return agent.State{Key: stringFromAny(data["sessionFile"]), ID: stringFromAny(data["sessionId"]), Streaming: data["isStreaming"] == true, Compacting: data["isCompacting"] == true}, nil
+}
+
+func stringFromAny(value any) string { result, _ := value.(string); return result }

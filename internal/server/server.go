@@ -20,13 +20,13 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/access"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/environment"
 	"github.com/melounvitek/gripi/internal/keyedlock"
 	"github.com/melounvitek/gripi/internal/push"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/resource"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 	"github.com/melounvitek/gripi/internal/update"
 )
@@ -36,7 +36,7 @@ var templateFiles embed.FS
 
 type application struct {
 	config                  config.Config
-	files                   fs.FS
+	adapter                 agent.Adapter
 	templates               *template.Template
 	browserStore            *access.BrowserStore
 	workspaceStore          *access.WorkspaceStore
@@ -51,7 +51,7 @@ type application struct {
 	adminLimiter            *access.RateLimiter
 	newBrowserToken         func() (string, error)
 	instanceID              string
-	sessionCache            *sessions.Cache
+	sessionStore            agent.Store
 	gatewayState            *sessions.GatewayState
 	markdown                *rendering.Markdown
 	heavyRequests           chan struct{}
@@ -61,32 +61,28 @@ type application struct {
 	sessionHashesMu         sync.Mutex
 	knownSessionHashes      map[string]bool
 	sessionHashesAt         time.Time
-	rpcClients              *rpc.Registry
-	newRPCClient            func(cwd, userID, forkFrom string) (rpc.RPCClient, error)
-	rpcDiagnostics          *rpc.Diagnostics
-	pendingSessions         *rpc.PendingSessionRegistry
+	rpcClients              *agent.Registry
+	newRPCClient            func(cwd, userID, forkFrom string) (agent.Client, error)
+	rpcDiagnostics          *agent.Diagnostics
+	pendingSessions         *agent.PendingSessionRegistry
 	pendingRemapMu          sync.Mutex
 	imagePromptLocks        keyedlock.Mutexes
 	promptAdmissions        sessionAdmissions
 	sessionMutationLocks    keyedlock.Mutexes
-	synchronizer            *sessions.Synchronizer
-	rpcMaintenance          *rpc.Maintenance
+	guard                   agent.Guard
+	rpcMaintenance          *agent.Maintenance
 	completionNotifications *completionNotifier
 	resourceMonitor         resourceMonitor
 	updateCoordinator       updateCoordinator
-	extensionMu             sync.Mutex
-	extensionPath           string
-	extensionRoot           string
 	ownsSession             func(*http.Request, string) bool
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
 }
 
-var errSessionFolderMissing = &sessions.SyncBlockedError{Mode: sessions.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
+var errSessionFolderMissing = &agent.SyncBlockedError{Mode: agent.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
 
 func (app *application) sessionFolderMissing(path string) bool {
-	store := sessions.Store{Root: app.config.SessionsRoot, Home: app.config.Home, Cache: app.sessionCache}
-	session, found := store.Session(path)
+	session, found := app.sessionStore.Session(path)
 	return found && session.FolderMissing
 }
 
@@ -125,8 +121,8 @@ func (handler *Handler) Close(ctx context.Context) error {
 	if handler.closed {
 		return nil
 	}
-	if handler.app.sessionCache != nil {
-		if err := handler.app.sessionCache.Save(); err != nil {
+	if handler.app.sessionStore != nil {
+		if err := handler.app.sessionStore.SaveCache(); err != nil {
 			logInternalError("save session metadata cache", err)
 		}
 	}
@@ -157,25 +153,21 @@ func (handler *Handler) Close(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
-	if handler.app.extensionRoot != "" {
-		if err := os.RemoveAll(handler.app.extensionRoot); err != nil {
+	// The adapter saves what its guard knows about sessions, which must wait until their clients have stopped.
+	if handler.app.adapter != nil {
+		if err := handler.app.adapter.Close(); err != nil {
 			return err
-		}
-	}
-	if handler.app.synchronizer != nil {
-		if err := handler.app.synchronizer.SaveBaselines(); err != nil {
-			logInternalError("save session baselines", err)
 		}
 	}
 	handler.closed = true
 	return nil
 }
 
-func NewHandler(cfg config.Config, files fs.FS) (http.Handler, error) {
-	return newHandler(cfg, files, randomBrowserToken)
+func NewHandler(cfg config.Config, files fs.FS, adapter agent.Adapter) (http.Handler, error) {
+	return newHandler(cfg, files, adapter, randomBrowserToken)
 }
 
-func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, error)) (http.Handler, error) {
+func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowserToken func() (string, error)) (http.Handler, error) {
 	public, err := fs.Sub(files, "public")
 	if err != nil {
 		return nil, fmt.Errorf("open embedded public files: %w", err)
@@ -200,14 +192,15 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	pushIdentity := push.NewVAPIDIdentity(cfg.WebPushVAPIDPath)
 	pushSubscriptions := push.NewSubscriptionStore(cfg.PushSubscriptionsPath)
 	pushDelivery := push.NewWebPushDelivery(pushIdentity, "https://github.com/melounvitek/gripi", &http.Client{Timeout: 15 * time.Second})
+	store := adapter.Store()
 
 	app := &application{
 		config:               cfg,
-		files:                files,
+		adapter:              adapter,
 		templates:            templates,
 		browserStore:         access.NewBrowserStore(cfg.BrowserAccessPath),
 		workspaceStore:       access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
-		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
+		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, store),
 		environment:          environment.NewStore(cfg.EnvironmentPath),
 		workspaceSecret:      workspaceSecret,
 		pushIdentity:         pushIdentity,
@@ -218,34 +211,32 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		adminLimiter:         access.NewRateLimiter(10, 5*time.Minute),
 		newBrowserToken:      newBrowserToken,
 		instanceID:           instanceID,
-		sessionCache:         sessions.NewCache(),
-		gatewayState:         sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, cfg.SessionsRoot),
+		sessionStore:         store,
+		gatewayState:         sessions.NewGatewayState(cfg.ReadStatePath, cfg.PinnedSessionsPath, cfg.SessionTagsPath, store),
 		markdown:             markdown,
 		heavyRequests:        make(chan struct{}, 2),
 		imageRequests:        make(chan struct{}, 2),
 		fdRequests:           make(chan struct{}, 4),
 		unknownBodySpools:    make(chan struct{}, unknownBodySpoolLimit),
 		knownSessionHashes:   make(map[string]bool),
-		pendingSessions:      rpc.NewPendingSessionRegistry(nil),
+		pendingSessions:      agent.NewPendingSessionRegistry(nil),
 	}
 	if cfg.ReadStatePath != "" {
-		app.sessionCache = sessions.LoadCache(filepath.Join(filepath.Dir(cfg.ReadStatePath), "session-metadata-cache.json"))
-		store := sessions.Store{Root: cfg.SessionsRoot, Home: cfg.Home, Cache: app.sessionCache}
 		existing, err := store.Sessions()
 		if err != nil {
 			return nil, fmt.Errorf("list existing projects: %w", err)
 		}
-		if err := app.sessionCache.Save(); err != nil {
+		if err := store.SaveCache(); err != nil {
 			logInternalError("save session metadata cache", err)
 		}
 		if _, err := app.gatewayState.ProjectCWDs(existing); err != nil {
 			return nil, err
 		}
 	}
-	diagnostics := &rpc.Diagnostics{Enabled: cfg.RPCDiagnosticsEnabled, Writer: os.Stderr}
+	diagnostics := &agent.Diagnostics{Enabled: cfg.RPCDiagnosticsEnabled, Writer: os.Stderr}
 	app.rpcDiagnostics = diagnostics
 	app.completionNotifications = newCompletionNotifier(app)
-	app.rpcClients = rpc.NewRegistry(func(sessionPath string) (rpc.RPCClient, error) {
+	app.rpcClients = agent.NewRegistry(func(sessionPath string) (agent.Client, error) {
 		// Pi exits at once when a session's folder is gone, so such a session stays read-only.
 		if app.sessionFolderMissing(sessionPath) {
 			return nil, errSessionFolderMissing
@@ -261,31 +252,18 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 		if err != nil {
 			return nil, err
 		}
-		extensionPath, err := app.rpcExtensionPath()
-		if err != nil {
-			return nil, err
-		}
-		return rpc.Start(sessionPath, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
+		return adapter.Start(sessionPath, agent.StartOptions{Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
-	app.newRPCClient = func(cwd, userID, forkFrom string) (rpc.RPCClient, error) {
+	app.newRPCClient = func(cwd, userID, forkFrom string) (agent.Client, error) {
 		variables, err := app.piEnvironment(userID)
 		if err != nil {
 			return nil, err
 		}
-		extensionPath, err := app.rpcExtensionPath()
-		if err != nil {
-			return nil, err
-		}
-		return rpc.StartInCWD(cwd, forkFrom, cfg.PiCommand, extensionPath, variables, diagnostics, app.completionNotifications.Observe)
+		return adapter.StartInCWD(cwd, forkFrom, agent.StartOptions{Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
 	}
-	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, app.sessionCache, app.rpcClients)
-	if cfg.ReadStatePath != "" {
-		state := filepath.Dir(cfg.ReadStatePath)
-		app.synchronizer.RestoreBaselines(filepath.Join(state, "session-baselines.json"))
-		if err := app.synchronizer.PersistExternalFollow(filepath.Join(state, "external-sessions.json")); err != nil {
-			return nil, err
-		}
+	if app.guard, err = adapter.Guard(app.rpcClients); err != nil {
+		return nil, err
 	}
 	if cfg.MultiUserMode {
 		app.ownsSession = func(request *http.Request, path string) bool {
@@ -317,7 +295,7 @@ func newHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, 
 	updater.ResumeCutover = func() { app.rpcClients.ResumeAfterFailedShutdown() }
 	app.updateCoordinator = update.NewCoordinator(updater, app.requestGatewayRestart, app.rpcClients.BusySessionCount, app.rpcClients.DrainIfIdle)
 	if cfg.RPCIdleTimeout > 0 && cfg.RPCIdleSweep > 0 {
-		app.rpcMaintenance, _ = rpc.NewMaintenance(cfg.RPCIdleSweep, app.cleanupIdleRPCClients, rpc.LogMaintenanceError(os.Stderr))
+		app.rpcMaintenance, _ = agent.NewMaintenance(cfg.RPCIdleSweep, app.cleanupIdleRPCClients, agent.LogMaintenanceError(os.Stderr))
 		app.rpcMaintenance.Start(context.Background())
 	}
 	mux := http.NewServeMux()
@@ -378,29 +356,6 @@ func requestGatewayRestart(ctx context.Context, path string, registry restartReg
 		registry.ResumeAfterFailedShutdown()
 	}
 	return err
-}
-
-func (app *application) rpcExtensionPath() (string, error) {
-	app.extensionMu.Lock()
-	defer app.extensionMu.Unlock()
-	if app.extensionPath != "" {
-		return app.extensionPath, nil
-	}
-	contents, err := fs.ReadFile(app.files, "pi_extensions/gripi-tree.ts")
-	if err != nil {
-		return "", fmt.Errorf("read embedded Pi extension: %w", err)
-	}
-	root, err := os.MkdirTemp("", "gripi-rpc-")
-	if err != nil {
-		return "", fmt.Errorf("create Pi extension directory: %w", err)
-	}
-	path := filepath.Join(root, "gripi-tree.ts")
-	if err := os.WriteFile(path, contents, 0600); err != nil {
-		_ = os.RemoveAll(root)
-		return "", fmt.Errorf("write Pi extension: %w", err)
-	}
-	app.extensionRoot, app.extensionPath = root, path
-	return path, nil
 }
 
 func filesOnly(root fs.FS, next http.Handler) http.Handler {

@@ -30,7 +30,7 @@ func TestSessionWhoseFolderIsGoneIsReadOnlyAndNeverStartsPi(t *testing.T) {
 	sessionPath := filepath.Join(sessionsRoot, "gone.jsonl")
 	writeActionSession(t, sessionPath, folder)
 	started := filepath.Join(root, "pi-started")
-	handler, err := gateway.NewHandler(config.Config{
+	handler, err := gateway.NewPiHandler(config.Config{
 		Address: "127.0.0.1:4567", Environment: "test", Home: home,
 		SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(root, "attachments"),
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
@@ -127,7 +127,7 @@ func TestContinuingInAnotherFolderForksTheSessionThere(t *testing.T) {
 	fakeLog := filepath.Join(root, "fake-pi.log")
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", sessionsRoot)
 	t.Setenv("GRIPI_E2E_FAKE_PI_LOG", fakeLog)
-	handler, err := gateway.NewHandler(config.Config{
+	handler, err := gateway.NewPiHandler(config.Config{
 		Address: "127.0.0.1:4567", Environment: "test", Home: home,
 		SessionsRoot: sessionsRoot, AttachmentsRoot: filepath.Join(root, "attachments"),
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
@@ -189,7 +189,7 @@ func TestOnlyTheOwnerContinuesASessionInAnotherFolder(t *testing.T) {
 	if err := access.NewWorkspaceStore(cfg.WorkspaceAccessPath).ApproveWorkspace("workspace-a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot).Claim(source, "workspace-b"); err != nil {
+	if _, err := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, gateway.NewPiStore(cfg.SessionsRoot, "")).Claim(source, "workspace-b"); err != nil {
 		t.Fatal(err)
 	}
 

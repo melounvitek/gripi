@@ -18,7 +18,7 @@ func TestBrowserTokenEntropyErrorsReturnInternalServerError(t *testing.T) {
 		PermittedHosts:      []string{"example.com"},
 		BrowserAuthDisabled: false,
 	}
-	handler, err := newHandler(cfg, gripi.WebFiles, func() (string, error) {
+	handler, err := newPiHandler(cfg, gripi.WebFiles, func() (string, error) {
 		return "", errors.New("entropy unavailable")
 	})
 	if err != nil {

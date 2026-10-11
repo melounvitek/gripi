@@ -15,42 +15,14 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/access"
+	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/push"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
-
-func TestCompletedAssistantReplyAcceptsOnlyFinalTextFromCompletedAssistantMessages(t *testing.T) {
-	commentarySignature := `{"v":1,"id":"commentary","phase":"commentary"}`
-	tests := []struct {
-		name  string
-		event map[string]any
-		text  string
-		ok    bool
-	}{
-		{name: "final reply", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "content": []any{
-			map[string]any{"type": "text", "text": "working", "textSignature": commentarySignature},
-			map[string]any{"type": "text", "text": "completed"},
-		}}}, text: "completed", ok: true},
-		{name: "partial update", event: map[string]any{"type": "message_update", "message": map[string]any{"role": "assistant", "content": []any{"partial"}}}},
-		{name: "commentary only", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "working", "textSignature": commentarySignature}}}}},
-		{name: "tool-use stop", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "toolUse", "content": []any{"working"}}}},
-		{name: "aborted stop", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "aborted", "content": []any{"partial"}}}},
-		{name: "error stop", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "error", "content": []any{"failed"}}}},
-		{name: "tool message", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "toolResult", "content": []any{"done"}}}},
-		{name: "user message", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "user", "content": []any{"done"}}}},
-		{name: "empty final", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "content": []any{"  "}}}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			text, ok := completedAssistantReply(test.event)
-			if text != test.text || ok != test.ok {
-				t.Fatalf("completedAssistantReply() = %q, %t", text, ok)
-			}
-		})
-	}
-}
 
 func TestRPCSettledReplyFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) {
 	root := t.TempDir()
@@ -65,7 +37,7 @@ func TestRPCSettledReplyFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) 
 		delivered <- notification
 		return nil
 	}))
-	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+	app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 	notifier := newCompletionNotifier(app)
 	notifier.gracePeriod = 0
 	t.Cleanup(func() {
@@ -78,8 +50,9 @@ func TestRPCSettledReplyFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) 
 	stdoutReader, stdoutWriter := io.Pipe()
 	t.Cleanup(func() { _ = stdoutWriter.Close() })
 	observed := make(chan struct{}, 10)
-	client := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: func(client *rpc.Client, event map[string]any) {
-		notifier.Observe(client, event)
+	client := &agentpi.Client{}
+	client.Client = rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: func(_ *rpc.Client, event map[string]any) {
+		notifier.observePi(client, event)
 		observed <- struct{}{}
 	}})
 	t.Cleanup(func() { _ = client.Close() })
@@ -163,8 +136,8 @@ func TestCompletionNotifierRefreshesSyncBeforeDelivery(t *testing.T) {
 			if err := app.rpcClients.Register(path, client); err != nil {
 				t.Fatal(err)
 			}
-			app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
-			if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+			app.guard = sessionfile.NewSynchronizer(app.rpcClients)
+			if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 				t.Fatal(err)
 			}
 			file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
@@ -213,7 +186,7 @@ func TestCompletionNotifierWorkerRetriesUnavailableInspection(t *testing.T) {
 				if err := app.rpcClients.Register(path, client); err != nil {
 					t.Fatal(err)
 				}
-				app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+				app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 				notifier := newCompletionNotifier(app)
 				started := make(chan struct{})
 				notifier.waitUntil = func(context.Context, time.Time) bool {
@@ -247,9 +220,9 @@ func TestCompletionNotifierWorkerRetriesUnavailableInspection(t *testing.T) {
 				}
 				var err error
 				if lock == "sync operation" {
-					err = app.synchronizer.WithExclusiveOperation(path, whileLocked)
+					err = app.guard.WithExclusiveOperation(path, whileLocked)
 				} else {
-					err = app.rpcClients.WithExistingClient(context.Background(), path, false, func(rpc.RPCClient) error { return whileLocked() })
+					err = app.rpcClients.WithExistingClient(context.Background(), path, false, func(agent.Client) error { return whileLocked() })
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -283,7 +256,7 @@ func TestCompletionNotifierInspectionRetryHonorsDeliveryDeadline(t *testing.T) {
 			if err := app.rpcClients.Register(path, client); err != nil {
 				t.Fatal(err)
 			}
-			app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
+			app.guard = sessionfile.NewSynchronizer(app.rpcClients)
 			notifier := newCompletionNotifier(app)
 			reply := completedReply{client: client, path: path, text: "done", id: "reply"}
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -291,9 +264,9 @@ func TestCompletionNotifierInspectionRetryHonorsDeliveryDeadline(t *testing.T) {
 			deliver := func() error { return notifier.deliver(ctx, reply) }
 			var err error
 			if lock == "sync operation" {
-				err = app.synchronizer.WithExclusiveOperation(path, deliver)
+				err = app.guard.WithExclusiveOperation(path, deliver)
 			} else {
-				err = app.rpcClients.WithExistingClient(ctx, path, false, func(rpc.RPCClient) error { return deliver() })
+				err = app.rpcClients.WithExistingClient(ctx, path, false, func(agent.Client) error { return deliver() })
 			}
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("delivery error = %v, want deadline exceeded", err)
@@ -430,9 +403,9 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	fake := &recordingPushNotifier{}
 	app := notificationTestApplication(t, root, false, true, fake)
 	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "external"}}
-	app.rpcClients = rpc.NewRegistry(func(string) (rpc.RPCClient, error) { return client, nil }, nil)
-	app.synchronizer = sessions.NewSynchronizer(root, root, app.sessionCache, app.rpcClients)
-	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
+	app.guard = sessionfile.NewSynchronizer(app.rpcClients)
+	if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
@@ -444,7 +417,7 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil || state.Mode != sessions.SyncExternalFollow {
+	if state, err := inspectGuard(app.guard, context.Background(), path, false); err != nil || state.Mode != agent.SyncExternalFollow {
 		t.Fatalf("external sync = %#v, %v", state, err)
 	}
 
@@ -464,7 +437,7 @@ func TestCompletionNotifierKeepsExternalFollowQuietUntilTakeover(t *testing.T) {
 		t.Error("notification delivered during external follow")
 	}
 
-	if _, err := app.synchronizer.TakeOver(context.Background(), path, func() error {
+	if _, err := app.guard.TakeOver(context.Background(), path, func() error {
 		notifier.schedule(reply)
 		if len(notifier.queue) != 0 {
 			t.Error("external reply was queued while takeover held the sync lock")
@@ -510,25 +483,6 @@ func TestCompletionNotifierCloseCancelsRepliesWaitingForTheGracePeriod(t *testin
 	case <-delivered:
 		t.Fatal("reply delivered while closing during its grace period")
 	default:
-	}
-}
-
-func TestCompletedReplyIDIsStableWithoutNativeMessageIDs(t *testing.T) {
-	event := map[string]any{"type": "message_end", "message": map[string]any{
-		"role": "assistant", "timestamp": float64(1_750_000_000_000), "content": []any{"same reply"},
-	}}
-	first := completedReplyID(event)
-	if second := completedReplyID(event); second != first {
-		t.Fatalf("same reply IDs = %q and %q", first, second)
-	}
-	event["message"].(map[string]any)["timestamp"] = float64(1_750_000_000_001)
-	if next := completedReplyID(event); next == first {
-		t.Fatalf("distinct timestamp reused reply ID %q", next)
-	}
-
-	delete(event["message"].(map[string]any), "timestamp")
-	if fallback := completedReplyID(event); fallback != completedReplyID(event) {
-		t.Fatalf("content fallback is unstable: %q", fallback)
 	}
 }
 
@@ -816,16 +770,17 @@ func notificationTestApplication(t *testing.T, root string, multiUser, authDisab
 	}
 	app := &application{
 		config:               cfg,
+		adapter:              agentpi.New(agentpi.Options{}),
 		browserStore:         access.NewBrowserStore(cfg.BrowserAccessPath),
 		workspaceStore:       access.NewWorkspaceStore(cfg.WorkspaceAccessPath),
-		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot),
+		ownershipStore:       access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, NewPiStore(cfg.SessionsRoot, "")),
 		pushSubscriptions:    push.NewSubscriptionStore(cfg.PushSubscriptionsPath),
 		pushNotifier:         notifier,
-		gatewayState:         sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), root),
+		gatewayState:         sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")),
 		notificationPresence: newNotificationPresence(time.Now),
-		sessionCache:         sessions.NewCache(),
-		pendingSessions:      rpc.NewPendingSessionRegistry(nil),
-		rpcClients:           rpc.NewRegistry(nil, nil),
+		sessionStore:         NewPiStore(root, ""),
+		pendingSessions:      agent.NewPendingSessionRegistry(nil),
+		rpcClients:           agent.NewRegistry(nil, nil),
 	}
 	return app
 }

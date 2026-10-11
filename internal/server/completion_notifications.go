@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -23,7 +23,7 @@ const (
 )
 
 type completedReply struct {
-	client         rpc.RPCClient
+	client         agent.Client
 	path           string
 	text           string
 	id             string
@@ -34,7 +34,7 @@ type completedReply struct {
 
 type clientCompletionState struct {
 	pending *completedReply
-	// Preserve read suppression between message_end and agent_settled.
+	// Preserve read suppression between the reply's end and the run's settling.
 	message *completedReply
 	// Synthetic pending paths have no session file to count yet.
 	responseCount int
@@ -52,7 +52,7 @@ type completionNotifier struct {
 	mu          sync.Mutex
 	started     bool
 	closed      bool
-	clients     map[*rpc.Client]*clientCompletionState
+	clients     map[agent.Client]*clientCompletionState
 }
 
 func newCompletionNotifier(app *application) *completionNotifier {
@@ -61,16 +61,11 @@ func newCompletionNotifier(app *application) *completionNotifier {
 		app: app, ctx: ctx, cancel: cancel,
 		queue: make(chan completedReply, completionNotificationQueueSize), done: make(chan struct{}),
 		now: time.Now, waitUntil: waitUntilNotificationDeadline, gracePeriod: completionNotificationGracePeriod,
-		clients: make(map[*rpc.Client]*clientCompletionState),
+		clients: make(map[agent.Client]*clientCompletionState),
 	}
 }
 
-func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string]any) {
-	switch event["type"] {
-	case "agent_start", "message_end", "agent_end", "agent_settled":
-	default:
-		return
-	}
+func (notifier *completionNotifier) Observe(client agent.Client, lifecycle agent.Lifecycle) {
 	notifier.mu.Lock()
 	notifier.pruneClientsLocked()
 	path := notifier.app.rpcClients.PathForClient(client)
@@ -84,58 +79,45 @@ func (notifier *completionNotifier) Observe(client *rpc.Client, event map[string
 		notifier.clients[client] = state
 	}
 	var ready *completedReply
-	switch event["type"] {
-	case "agent_start":
+	reply := lifecycle.Reply
+	switch lifecycle.Step {
+	case agent.RunStarted:
 		state.pending, state.message = nil, nil
 		state.responseCount = notifier.responseCount(path, state.responseCount)
 		if err := notifier.app.gatewayState.BeginCompletion(path, state.responseCount); err != nil {
 			log.Printf("begin session completion: %v", err)
 		}
-	case "message_end":
-		message, _ := event["message"].(map[string]any)
-		if message["role"] != "assistant" {
-			break
-		}
+	case agent.ReplyEnded:
 		state.message = nil
-		if strings.TrimSpace(sessions.FinalAssistantText(message["content"])) != "" {
+		if reply.Text != "" {
 			state.responseCount++
 		}
-		if text, eligible := completedAssistantReply(event); eligible {
-			state.message = &completedReply{client: client, path: path, text: text, id: completedReplyID(event)}
+		if reply.Final {
+			state.message = &completedReply{client: client, path: path, text: reply.Text, id: reply.ID}
 			notifier.captureReadCount(state.message)
 		}
-	case "agent_end":
+	case agent.RunEnded:
 		state.pending = nil
-		messages, _ := event["messages"].([]any)
-		for index := len(messages) - 1; index >= 0; index-- {
-			message, _ := messages[index].(map[string]any)
-			if message["role"] != "assistant" {
-				continue
+		if reply.Final {
+			pending := &completedReply{client: client, path: path, text: reply.Text, id: reply.ID}
+			if state.message != nil && state.message.id == pending.id {
+				pending.path = state.message.path
+				pending.readCount, pending.readCountKnown = state.message.readCount, state.message.readCountKnown
+			} else {
+				notifier.captureReadCount(pending)
 			}
-			candidate := map[string]any{"type": "message_end", "message": message}
-			if text, eligible := completedAssistantReply(candidate); eligible {
-				reply := &completedReply{client: client, path: path, text: text, id: completedReplyID(candidate)}
-				if state.message != nil && state.message.id == reply.id {
-					reply.path = state.message.path
-					reply.readCount, reply.readCountKnown = state.message.readCount, state.message.readCountKnown
-				} else {
-					notifier.captureReadCount(reply)
-				}
-				state.pending = reply
-			}
-			// Never fall back to an earlier eligible assistant reply.
-			break
+			state.pending = pending
 		}
-	case "agent_settled":
+	case agent.RunSettled:
 		ready = state.pending
 		delete(notifier.clients, client)
-		if notifier.app.synchronizer != nil {
-			if sync := notifier.app.synchronizer.KnownBlocked(path); sync != nil && sync.Mode == sessions.SyncExternalFollow {
+		if notifier.app.guard != nil {
+			if sync := notifier.app.guard.KnownBlocked(path); sync != nil && sync.Mode == agent.SyncExternalFollow {
 				ready = nil
 			}
 		}
 		if ready != nil {
-			published, err := notifier.app.gatewayState.Complete(path, sessions.Completion{ID: ready.id, Preview: sessions.NotificationPreview(ready.text), ResponseCount: notifier.responseCount(path, state.responseCount)})
+			published, err := notifier.app.gatewayState.Complete(path, sessions.Completion{ID: ready.id, Preview: agent.NotificationPreview(ready.text), ResponseCount: notifier.responseCount(path, state.responseCount)})
 			if err != nil {
 				log.Printf("save session completion: %v", err)
 			}
@@ -160,8 +142,7 @@ func (notifier *completionNotifier) pruneClientsLocked() {
 }
 
 func (notifier *completionNotifier) responseCount(path string, fallback int) int {
-	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
-	if session, found := store.Session(path); found {
+	if session, found := notifier.app.sessionStore.Session(path); found {
 		return session.AssistantResponseCount
 	}
 	return fallback
@@ -181,8 +162,8 @@ func (notifier *completionNotifier) captureReadCount(reply *completedReply) {
 }
 
 func (notifier *completionNotifier) schedule(reply completedReply) {
-	if notifier.app.synchronizer != nil {
-		if state := notifier.app.synchronizer.KnownBlocked(reply.path); state != nil && state.Mode == sessions.SyncExternalFollow {
+	if notifier.app.guard != nil {
+		if state := notifier.app.guard.KnownBlocked(reply.path); state != nil && state.Mode == agent.SyncExternalFollow {
 			return
 		}
 	}
@@ -269,18 +250,18 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	if err != nil {
 		return err
 	}
-	if notifier.app.synchronizer != nil {
+	if notifier.app.guard != nil {
 		for {
-			if state := notifier.app.synchronizer.KnownBlocked(path); state != nil && state.Mode == sessions.SyncExternalFollow {
+			if state := notifier.app.guard.KnownBlocked(path); state != nil && state.Mode == agent.SyncExternalFollow {
 				return nil
 			}
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			// Inspect only in the delivery worker: RPC callbacks must not wait for RPC responses.
-			state := notifier.app.synchronizer.InspectIfAvailable(ctx, path, false)
+			state := notifier.app.guard.InspectIfAvailable(ctx, path, false)
 			if state != nil {
-				if state.Mode == sessions.SyncExternalFollow {
+				if state.Mode == agent.SyncExternalFollow {
 					return nil
 				}
 				break
@@ -333,14 +314,13 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	}
 
 	title := "current session"
-	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
-	if session, found := store.Session(path); found && strings.TrimSpace(session.DisplayName) != "" {
-		title = sessions.NotificationPreview(session.DisplayName)
+	if session, found := notifier.app.sessionStore.Session(path); found && strings.TrimSpace(session.DisplayName) != "" {
+		title = agent.NotificationPreview(session.DisplayName)
 	}
 	payload, err := json.Marshal(map[string]string{
 		"type":  "gripi-notification",
 		"title": title,
-		"body":  sessions.NotificationPreview(reply.text),
+		"body":  agent.NotificationPreview(reply.text),
 		"tag":   completedReplyTag(path, reply.id),
 		"url":   completedReplyURL(path),
 	})
@@ -372,18 +352,17 @@ func (notifier *completionNotifier) sessionPath(ctx context.Context, reply compl
 		return path, nil
 	}
 
-	state, err := reply.client.GetState(ctx)
+	state, err := reply.client.State(ctx)
 	if err != nil {
 		return path, nil
 	}
-	reported := sessionFileFrom(state)
-	if configured, valid := sessions.ConfiguredSessionPath(notifier.app.config.SessionsRoot, reported); valid {
+	reported := state.Key
+	if configured, valid := notifier.app.sessionStore.Canonical(reported); valid {
 		reported = configured
 	} else {
 		return path, nil
 	}
-	store := sessions.Store{Root: notifier.app.config.SessionsRoot, Home: notifier.app.config.Home, Cache: notifier.app.sessionCache}
-	session, found := store.Session(reported)
+	session, found := notifier.app.sessionStore.Session(reported)
 	if !found || session.CWD != pendingCWD {
 		return path, nil
 	}
@@ -464,39 +443,4 @@ func completedReplyURL(path string) string {
 func completedReplyTag(path, replyID string) string {
 	digest := sha256.Sum256([]byte(path + "\x00" + replyID))
 	return "gripi-final-reply:" + hex.EncodeToString(digest[:16])
-}
-
-func completedReplyID(event map[string]any) string {
-	message, _ := event["message"].(map[string]any)
-	for _, value := range []any{message["id"], message["messageId"], event["id"], event["messageId"]} {
-		if encoded, err := json.Marshal(value); err == nil && string(encoded) != "null" && string(encoded) != `""` {
-			digest := sha256.Sum256(encoded)
-			return hex.EncodeToString(digest[:16])
-		}
-	}
-	stable := any(message)
-	if len(message) == 0 {
-		stable = event
-	}
-	encoded, _ := json.Marshal(stable)
-	digest := sha256.Sum256(encoded)
-	return hex.EncodeToString(digest[:16])
-}
-
-func completedAssistantReply(event map[string]any) (string, bool) {
-	if event["type"] != "message_end" {
-		return "", false
-	}
-	message := event
-	if nested, ok := event["message"].(map[string]any); ok {
-		message = nested
-	}
-	if role, _ := message["role"].(string); role != "" && role != "assistant" {
-		return "", false
-	}
-	if stopReason, _ := message["stopReason"].(string); stopReason != "" && stopReason != "stop" && stopReason != "length" {
-		return "", false
-	}
-	text := sessions.FinalAssistantText(message["content"])
-	return text, text != ""
 }

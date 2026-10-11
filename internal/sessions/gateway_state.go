@@ -1,3 +1,5 @@
+// Package sessions keeps what the gateway owns about sessions: read state, pins, tags, completions, projects,
+// attachments and path suggestions.
 package sessions
 
 import (
@@ -10,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 type GatewayState struct {
@@ -22,25 +26,35 @@ type GatewayState struct {
 	tagsPath               string
 	tagChanges             map[string]uint64
 	tagRevision            uint64
-	sessionsRoot           string
+	keys                   SessionKeys
 	pinnedChanges          map[string]uint64
 	pinnedRevision         uint64
 	forgotten              map[string]bool
 	mu                     sync.Mutex
 }
 
-func NewGatewayState(readPath, pinnedPath, tagsPath, sessionsRoot string) *GatewayState {
-	return &GatewayState{readPath: readPath, completionsPath: filepath.Join(filepath.Dir(readPath), "completions.json"), projectsPath: filepath.Join(filepath.Dir(readPath), "projects.json"), projectChanges: make(map[string]uint64), pinnedPath: pinnedPath, tagsPath: tagsPath, sessionsRoot: sessionsRoot, externalResponseCounts: make(map[string]int)}
+// SessionKeys tells gateway state which keys name the same session, and whether a session is saved. The agent's
+// store provides it.
+type SessionKeys interface {
+	Exists(key string) bool
+	Canonical(key string) (string, bool)
+	Aliases(key string) []string
 }
 
-func (state *GatewayState) ReadAndObserve(all []*Session, selected *Session, markSelected bool, externalFollow map[string]bool) (map[string]bool, map[string]bool, error) {
+// NewGatewayState keeps state under the canonical keys from keys. Without keys, every key is its own session and none
+// is saved.
+func NewGatewayState(readPath, pinnedPath, tagsPath string, keys SessionKeys) *GatewayState {
+	return &GatewayState{readPath: readPath, completionsPath: filepath.Join(filepath.Dir(readPath), "completions.json"), projectsPath: filepath.Join(filepath.Dir(readPath), "projects.json"), projectChanges: make(map[string]uint64), pinnedPath: pinnedPath, tagsPath: tagsPath, keys: keys, externalResponseCounts: make(map[string]int)}
+}
+
+func (state *GatewayState) ReadAndObserve(all []*agent.Session, selected *agent.Session, markSelected bool, externalFollow map[string]bool) (map[string]bool, map[string]bool, error) {
 	return state.ReadAndObservePending(all, selected, markSelected, externalFollow, nil)
 }
 
 // ReadAndObservePending leaves newly discovered rows unobserved until an owned
 // pending client in their CWD can be identified and its completion boundary moved.
 // Existing read state is still observed, preserving older unread replies.
-func (state *GatewayState) ReadAndObservePending(all []*Session, selected *Session, markSelected bool, externalFollow, pendingCWDs map[string]bool) (map[string]bool, map[string]bool, error) {
+func (state *GatewayState) ReadAndObservePending(all []*agent.Session, selected *agent.Session, markSelected bool, externalFollow, pendingCWDs map[string]bool) (map[string]bool, map[string]bool, error) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	counts := map[string]int{}
@@ -378,7 +392,7 @@ func (state *GatewayState) sessionForgotten(path string) bool {
 	if !state.forgotten[path] {
 		return false
 	}
-	if _, err := os.Stat(path); err == nil {
+	if state.keys != nil && state.keys.Exists(path) {
 		delete(state.forgotten, path)
 		return false
 	}
@@ -386,8 +400,8 @@ func (state *GatewayState) sessionForgotten(path string) bool {
 }
 
 func (state *GatewayState) configuredPath(path string) string {
-	if state.sessionsRoot != "" {
-		if configured, ok := ConfiguredSessionPath(state.sessionsRoot, path); ok {
+	if state.keys != nil {
+		if configured, ok := state.keys.Canonical(path); ok {
 			return configured
 		}
 	}

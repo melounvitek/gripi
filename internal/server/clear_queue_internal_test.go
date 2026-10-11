@@ -17,8 +17,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/melounvitek/gripi/internal/rpc"
-	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 )
 
 func TestClearQueueUsesOnlyExistingClientAndRecordedAliases(t *testing.T) {
@@ -64,11 +65,11 @@ func TestClearQueueReturnsAuthoritativeSnapshotAfterClearing(t *testing.T) {
 			queues := map[string][]string(nil)
 			want := map[string]any{}
 			if name == "concurrent_message" {
-				queues = map[string][]string{"followUp": {"queued after clear"}}
-				want["followUp"] = []any{"queued after clear"}
+				queues = map[string][]string{"steering": {}, "followUp": {"queued after clear"}}
+				want["steering"], want["followUp"] = []any{}, []any{"queued after clear"}
 			}
 			f.client.onClear = func() {
-				f.client.live = rpc.LiveSnapshot{EventSequence: 27, QueuedMessages: queues}
+				f.client.live = agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{EventSequence: 27, QueuedMessages: queues})
 			}
 			payload := clearQueuePayload(t, f.serve(context.Background(), f.path), http.StatusOK)
 			if payload["event_sequence"] != float64(27) || !reflect.DeepEqual(payload["queued_messages"], want) {
@@ -126,8 +127,8 @@ func TestClearQueueSurfacesFailuresWithoutRetiringOrResettingQueues(t *testing.T
 	}{
 		{"native", map[string]any{"success": false, "error": "native clear rejected"}, nil, 422, "native clear rejected"},
 		{"invalid_response", nil, nil, 422, ""},
-		{"timeout", nil, &rpc.RequestTimeoutError{Command: "clear_queue", Accepted: true}, 504, "clear_queue"},
-		{"not_accepted_timeout", nil, &rpc.RequestTimeoutError{Command: "clear_queue"}, 504, "clear_queue"},
+		{"timeout", nil, &agent.RequestTimeoutError{Command: "clear_queue", Accepted: true}, 504, "clear_queue"},
+		{"not_accepted_timeout", nil, &agent.RequestTimeoutError{Command: "clear_queue"}, 504, "clear_queue"},
 		{"disconnected", nil, io.ErrClosedPipe, 502, ""},
 		{"other", nil, errors.New("native transport failed"), 502, "native transport failed"},
 		{"canceled", nil, context.Canceled, 408, ""},
@@ -156,7 +157,7 @@ func TestClearQueueInterruptsCompactionWithoutTakingOperationOrSyncLane(t *testi
 	defer release()
 	var operationErr error
 	done := idleRetirementRun(t, func() {
-		operationErr = f.app.synchronizer.WithMutableClient(context.Background(), f.path, func(rpc.RPCClient) error {
+		operationErr = f.app.guard.WithMutableClient(context.Background(), f.path, func(agent.Client) error {
 			block()
 			return nil
 		})
@@ -394,21 +395,21 @@ func TestClearQueueFollowsAliasCommittedBeforeAdmission(t *testing.T) {
 }
 
 func TestClearQueueRespectsKnownSynchronizationBlock(t *testing.T) {
-	for _, mode := range []sessions.SyncMode{sessions.SyncConflict, sessions.SyncExternalFollow} {
+	for _, mode := range []agent.SyncMode{agent.SyncConflict, agent.SyncExternalFollow} {
 		t.Run(string(mode), func(t *testing.T) {
 			f := newClearQueueFixture(t)
 			// Establish external changes without a client, then register one.
 			if _, err := f.app.rpcClients.CloseClientIfIdle(f.path); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.app.synchronizer.Inspect(context.Background(), f.path, false); err != nil {
+			if _, err := inspectGuard(f.app.guard, context.Background(), f.path, false); err != nil {
 				t.Fatal(err)
 			}
 			file, err := os.OpenFile(f.path, os.O_APPEND|os.O_WRONLY, 0600)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if mode == sessions.SyncConflict {
+			if mode == agent.SyncConflict {
 				_, err = file.WriteString(`{"type":`)
 			} else {
 				err = json.NewEncoder(file).Encode(map[string]any{"type": "message", "id": "external", "parentId": nil, "message": map[string]any{"role": "user", "content": "external"}})
@@ -417,7 +418,7 @@ func TestClearQueueRespectsKnownSynchronizationBlock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := f.app.synchronizer.Inspect(context.Background(), f.path, false)
+			result, err := inspectGuard(f.app.guard, context.Background(), f.path, false)
 			if err != nil || result.Mode != mode {
 				t.Fatalf("inspect = %+v, %v", result, err)
 			}
@@ -442,7 +443,7 @@ type clearQueueFixture struct {
 func newClearQueueFixture(t *testing.T) *clearQueueFixture {
 	t.Helper()
 	f := &clearQueueFixture{idleRetirementFixture: newIdleRetirementFixture(t), client: &clearQueueClient{result: map[string]any{"success": true, "data": map[string]any{"editorText": "must not restore"}}}}
-	f.client.live = rpc.LiveSnapshot{EventSequence: 23, QueuedMessages: map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}}
+	f.client.live = agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{EventSequence: 23, QueuedMessages: map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}})
 	if err := f.app.rpcClients.Register(f.path, f.client); err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +461,7 @@ func (f *clearQueueFixture) assertUntouched(t *testing.T, calls int32) {
 	if f.client.clears.Load() != calls || f.client.closes.Load() != 0 || f.client.aborts.Load() != 0 || f.created.Load() != 0 || f.client.getStateCalls.Load() != 0 || f.app.rpcClients.Client(f.path) != f.client {
 		t.Fatalf("clear=%d close=%d abort=%d create=%d state=%d client=%T", f.client.clears.Load(), f.client.closes.Load(), f.client.aborts.Load(), f.created.Load(), f.client.getStateCalls.Load(), f.app.rpcClients.Client(f.path))
 	}
-	if !reflect.DeepEqual(f.client.live.QueuedMessages, map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}) {
+	if !reflect.DeepEqual(f.client.live.Queue, agent.Queue{Steering: []string{"steer"}, FollowUp: []string{"follow"}}) {
 		t.Fatal("route optimistically changed the queue snapshot")
 	}
 }
@@ -473,12 +474,16 @@ type clearQueueClient struct {
 	err                    error
 }
 
-func (client *clearQueueClient) ClearQueue(context.Context) (map[string]any, error) {
+// ClearQueue answers like Pi's client: result is Pi's answer, which fails the clear unless it succeeded.
+func (client *clearQueueClient) ClearQueue(context.Context) error {
 	client.clears.Add(1)
 	if client.onClear != nil {
 		client.onClear()
 	}
-	return client.result, client.err
+	if client.err == nil && client.result["success"] != true {
+		return &agent.RequestError{Message: stringFromAny(client.result["error"])}
+	}
+	return client.err
 }
 func (client *clearQueueClient) Close() error {
 	client.closes.Add(1)
@@ -487,12 +492,9 @@ func (client *clearQueueClient) Close() error {
 	}
 	return nil
 }
-func (client *clearQueueClient) Abort(context.Context) (map[string]any, error) {
+func (client *clearQueueClient) Cancel(context.Context) error {
 	client.aborts.Add(1)
-	return map[string]any{"success": true}, nil
-}
-func (client *clearQueueClient) AbortBash(ctx context.Context) (map[string]any, error) {
-	return client.Abort(ctx)
+	return nil
 }
 
 func clearQueueRequest(ctx context.Context, path string) *http.Request {

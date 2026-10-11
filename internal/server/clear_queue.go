@@ -5,8 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/melounvitek/gripi/internal/rpc"
-	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 func (app *application) clearQueue(response http.ResponseWriter, request *http.Request) {
@@ -37,7 +36,7 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 			fail(http.StatusRequestTimeout, err.Error())
 		case errors.Is(err, context.DeadlineExceeded):
 			fail(http.StatusGatewayTimeout, err.Error())
-		case errors.Is(err, rpc.ErrInterruptPending):
+		case errors.Is(err, agent.ErrInterruptPending):
 			fail(http.StatusConflict, err.Error())
 		default:
 			if !app.writeRPCError(response, err) {
@@ -66,25 +65,22 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		fail(http.StatusNotFound, "Session not found")
 		return
 	}
-	if app.synchronizer != nil {
-		if blocked := app.synchronizer.KnownBlocked(path); blocked != nil {
-			writeError(&sessions.SyncBlockedError{Mode: blocked.Mode, Message: app.synchronizer.Message(*blocked)})
+	if app.guard != nil {
+		if blocked := app.guard.KnownBlocked(path); blocked != nil {
+			writeError(&agent.SyncBlockedError{Mode: blocked.Mode, Message: app.guard.Message(*blocked)})
 			return
 		}
 	}
-	var result map[string]any
-	var snapshot rpc.LiveSnapshot
+	var snapshot agent.LiveSnapshot
 	var clearErr error
 	found, supported := false, false
-	err = app.rpcClients.WithExistingInterruptClient(request.Context(), path, func(client rpc.RPCClient) error {
+	err = app.rpcClients.WithExistingInterruptClient(request.Context(), path, func(client agent.Client) error {
 		found = true
-		clearer, ok := client.(interface {
-			ClearQueue(context.Context) (map[string]any, error)
-		})
+		clearer, ok := client.(agent.QueueClearer)
 		supported = ok
 		if ok {
-			result, clearErr = clearer.ClearQueue(request.Context())
-			if clearErr == nil && successfulRPCResponse(result) {
+			clearErr = clearer.ClearQueue(request.Context())
+			if clearErr == nil {
 				snapshot = client.LiveSnapshot()
 			}
 		}
@@ -92,6 +88,7 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		// only this operation's errors out of registry terminal-error handling.
 		return nil
 	})
+	refused := refusal(clearErr)
 	switch {
 	case err != nil:
 		writeError(err)
@@ -99,17 +96,18 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		fail(http.StatusConflict, "No active Pi RPC client for this session")
 	case !supported:
 		fail(http.StatusNotImplemented, "Pi RPC client does not support clearing the queue")
+	case refused != nil:
+		fail(http.StatusUnprocessableEntity, failureMessage(refused.Message, "Could not clear the queue"))
 	case clearErr != nil:
 		writeError(clearErr)
-	case !successfulRPCResponse(result):
-		fail(http.StatusUnprocessableEntity, rpcErrorMessage(result, "Could not clear the queue"))
 	default:
-		if snapshot.QueuedMessages == nil {
-			snapshot.QueuedMessages = map[string][]string{}
+		queued := map[string][]string{}
+		if len(snapshot.Queue.Steering) > 0 || len(snapshot.Queue.FollowUp) > 0 {
+			queued = queuedMessages(snapshot.Queue)
 		}
 		writeJSON(response, map[string]any{
 			"ok": true, "session": path,
-			"queued_messages": snapshot.QueuedMessages, "event_sequence": snapshot.EventSequence,
+			"queued_messages": queued, "event_sequence": snapshot.EventSequence,
 		})
 	}
 }

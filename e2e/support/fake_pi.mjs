@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-import { activeRecovery, footerModel, footerStatus, mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool, writeTool } from "./contract.mjs";
+import { activeRecovery, footerModel, footerStatus, live, mobileSubagents, nativeBash, paginatedSubagent, prompts, replies, subagents, tool, writeTool } from "./contract.mjs";
 
 const LONG_BASH_COMMANDS = new Set([nativeBash.cancel.command, nativeBash.reload.command, nativeBash.overlap.command, nativeBash.mobileCancel.command]);
 const resumedPath = valueAfter("--session");
@@ -33,6 +34,8 @@ let entrySequence = 0;
 const timers = new Set();
 let heldPromptEvents = null;
 let recoveryMessage = null;
+let liveGate = null;
+let liveAbort = null;
 
 if (sessionPath) loadSession(sessionPath);
 else if (forkSource) forkSession(forkSource);
@@ -401,6 +404,7 @@ function acceptPrompt(command) {
     schedule(120, completeDeltaAssistant);
     return;
   }
+  if (startLiveScenario(command.message)) return;
 
   let reply = replies.standard;
   if (path.basename(process.cwd()).startsWith("new-session-")) reply = replies.newSession;
@@ -597,6 +601,13 @@ function acceptAbort(command) {
     return;
   }
   clearTimers();
+  if (liveAbort) {
+    const abortLive = liveAbort;
+    liveAbort = null;
+    abortLive();
+    respond(command, true);
+    return;
+  }
   const abortSteer = queuedAbortSteer;
   if (pendingMessages.length) clearPendingMessages();
   if (abortSteer) {
@@ -650,6 +661,11 @@ function acceptBash(command) {
     return;
   }
 
+  if (command.command === nativeBash.failure.command) {
+    respond(command, false, { error: nativeBash.failure.error });
+    return;
+  }
+
   const operation = { command, timer: null };
   activeBash = operation;
   if (LONG_BASH_COMMANDS.has(command.command)) {
@@ -680,6 +696,7 @@ function completeBash(operation, result) {
     ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
     cancelled: result.cancelled,
     truncated: result.truncated,
+    ...(result.fullOutputPath ? { fullOutputPath: result.fullOutputPath } : {}),
     timestamp: Date.now(),
     ...(operation.command.excludeFromContext === true ? { excludeFromContext: true } : {})
   };
@@ -692,6 +709,9 @@ function bashResult(command) {
   if (command === nativeBash.included.command) return completedBashResult(nativeBash.included.output);
   if (command === nativeBash.excluded.command) return completedBashResult(nativeBash.excluded.output);
   if (command === nativeBash.nonzero.command) return completedBashResult(nativeBash.nonzero.output, nativeBash.nonzero.exitCode);
+  if (command === nativeBash.truncated.command) {
+    return { ...completedBashResult(nativeBash.truncated.output), truncated: true, fullOutputPath: path.join(os.homedir(), nativeBash.truncated.fullOutputFile) };
+  }
   // Shows what the gateway put in this process's environment.
   const variable = command.match(/^printenv (\w+)$/)?.[1];
   if (variable) return completedBashResult(`${process.env[variable] ?? ""}\n`);
@@ -708,6 +728,12 @@ function persistDeferredBashMessages() {
 }
 
 function acceptExtensionResponse(command) {
+  if (liveGate && command.id === liveGate.id) {
+    const { next } = liveGate;
+    liveGate = null;
+    next();
+    return;
+  }
   if (activeScenario === prompts.extensionKinds) extensionAnswers.push(command.value);
   if (command.id !== pendingExtensionRequest) return;
   pendingExtensionRequest = null;
@@ -1010,6 +1036,293 @@ function finishAssistant(completed, priorMessages = []) {
   activeScenario = null;
   persistDeferredBashMessages();
   emit({ type: "agent_settled" });
+}
+
+function startLiveScenario(message) {
+  const start = {
+    [live.toolResults.prompt]: startLiveToolResults,
+    [live.errors.transientRetry.prompt]: startTransientRetry,
+    [live.errors.exhaustedRetry.prompt]: startExhaustedRetry,
+    [live.errors.extensionErrors.prompt]: startExtensionErrors,
+    [live.errors.summarizationRetry.prompt]: startSummarizationRetry,
+    [live.customMessages.prompt]: startLiveCustomMessages,
+    [live.extensionUi.prompt]: startLiveExtensionUi,
+    [live.extensionUi.restorePrompt]: startRestoredExtensionUi,
+    [live.footer.prompt]: startLiveFooter,
+    [live.compaction.failurePrompt]: startFailedCompaction,
+    [live.compaction.abortPrompt]: startAbortedCompaction,
+    [live.compaction.duplicatePrompt]: startDuplicateCompaction,
+    [live.thinking.prompt]: startFinishedThinking,
+    [live.thinking.errorPrompt]: startFailedThinking,
+    [live.thinking.abortPrompt]: startAbortedThinking
+  }[message];
+  if (!start) return false;
+  schedule(120, start);
+  return true;
+}
+
+// Pauses a characterization scenario at a confirmation, which also pauses the browser's event polling.
+// The timeout only closes the dialog after a failed test, so it can't block the tests that follow.
+function holdLiveScenario(title, next) {
+  liveGate = { id: `e2e-live-gate-${randomUUID()}`, next };
+  emit({ type: "extension_ui_request", id: liveGate.id, method: "confirm", title, timeout: 15_000 });
+}
+
+function startLiveToolResults() {
+  const scenario = live.toolResults;
+  const tools = [
+    { tool: scenario.readOk, name: "read", args: { path: scenario.readOk.path }, isError: false, details: {} },
+    { tool: scenario.readError, name: "read", args: { path: scenario.readError.path }, isError: true, details: {} },
+    { tool: scenario.editOk, name: "edit", args: { path: scenario.editOk.path, edits: [{ oldText: scenario.editOk.oldText, newText: scenario.editOk.newText }] }, isError: false, details: { diff: scenario.editOk.diff, firstChangedLine: 2 } },
+    { tool: scenario.editError, name: "edit", args: { path: scenario.editError.path, edits: [{ oldText: scenario.editError.oldText, newText: scenario.editError.newText }] }, isError: true, details: {} },
+    { tool: scenario.writeOk, name: "write", args: { path: scenario.writeOk.path, content: scenario.writeOk.content }, isError: false, details: {} },
+    { tool: scenario.writeError, name: "write", args: { path: scenario.writeError.path, content: scenario.writeError.content }, isError: true, details: {} }
+  ];
+  const calls = tools.map(({ tool, name, args }) => ({ type: "toolCall", id: tool.id, name, arguments: args }));
+  const toolMessage = assistantMessage(calls, "toolUse");
+  emit({ type: "message_start", message: { ...toolMessage, content: [] } });
+  emit({ type: "message_update", message: toolMessage, assistantMessageEvent: { type: "toolcall_end", contentIndex: calls.length - 1, toolCall: calls.at(-1), partial: toolMessage } });
+  emit({ type: "message_end", message: toolMessage });
+  appendMessage(toolMessage);
+  for (const call of calls) emit({ type: "tool_execution_start", toolCallId: call.id, toolName: call.name, args: call.arguments });
+
+  holdLiveScenario(scenario.gates.results, () => {
+    const toolResults = tools.map(({ tool, name, isError, details }) => {
+      const result = { content: [{ type: "text", text: tool.result }], details };
+      emit({ type: "tool_execution_end", toolCallId: tool.id, toolName: name, result, isError });
+      const message = { role: "toolResult", toolCallId: tool.id, toolName: name, ...result, isError, timestamp: Date.now() };
+      appendMessage(message);
+      emitMessage(message);
+      return message;
+    });
+    emit({ type: "turn_end", message: toolMessage, toolResults });
+    emit({ type: "turn_start" });
+    holdLiveScenario(scenario.gates.finish, () => completeAssistant(scenario.reply, [toolMessage, ...toolResults]));
+  });
+}
+
+// Like Pi's auto-retry: the failed attempt ends its run, and the retry starts a new one before the run settles.
+function startTransientRetry() {
+  const scenario = live.errors.transientRetry;
+  const failed = failAssistant(scenario.error);
+  emit({ type: "agent_end", messages: [failed], willRetry: true });
+  emit({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: scenario.error });
+  holdLiveScenario(scenario.gate, () => {
+    emit({ type: "agent_start" });
+    emit({ type: "turn_start" });
+    const reply = emitAssistantReply(scenario.reply);
+    emit({ type: "auto_retry_end", success: true, attempt: 1 });
+    emit({ type: "turn_end", message: reply, toolResults: [] });
+    emit({ type: "agent_end", messages: [reply], willRetry: false });
+    settleRun();
+  });
+}
+
+function startExhaustedRetry() {
+  const scenario = live.errors.exhaustedRetry;
+  const failed = failAssistant(scenario.error);
+  emit({ type: "agent_end", messages: [failed], willRetry: false });
+  emit({ type: "auto_retry_end", success: false, attempt: 3, finalError: scenario.error });
+  settleRun();
+}
+
+function failAssistant(errorMessage) {
+  const failed = { ...assistantMessage([], "error"), errorMessage };
+  emit({ type: "message_start", message: assistantMessage([], "stop", failed.timestamp) });
+  emit({ type: "message_end", message: failed });
+  appendMessage(failed);
+  emit({ type: "turn_end", message: failed, toolResults: [] });
+  return failed;
+}
+
+function startExtensionErrors() {
+  const scenario = live.errors.extensionErrors;
+  emit({ type: "extension_error", extensionPath: path.join(os.homedir(), ".pi", "agent", "extensions", "e2e-guard.ts"), event: "tool_call", error: scenario.error });
+  // Pi's /sessions extension command fails like this without a terminal UI.
+  emit({ type: "extension_error", extensionPath: "command:sessions", event: "command", error: "Cannot read properties of undefined (reading 'action')" });
+  completeAssistant(scenario.reply);
+}
+
+function startSummarizationRetry() {
+  const scenario = live.errors.summarizationRetry;
+  replyBeforeCompaction(scenario.reply);
+  emit({ type: "summarization_retry_scheduled", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: scenario.error });
+  emit({ type: "summarization_retry_attempt_start", source: "compaction", reason: "threshold" });
+  emit({ type: "summarization_retry_finished" });
+  completeCompaction(scenario.summary);
+  settleRun();
+}
+
+function startLiveCustomMessages() {
+  const scenario = live.customMessages;
+  const timestamp = Date.now();
+  const shown = { role: "custom", customType: scenario.customType, content: scenario.shown, display: true, timestamp };
+  emitCustomMessage(shown);
+  emitCustomMessage({ role: "custom", customType: scenario.customType, content: [{ type: "text", text: scenario.hidden }], display: false, timestamp });
+  // Pi's custom messages have no ID, so a repeat of the same note is told apart by its timestamp.
+  emitCustomMessage({ ...shown, timestamp: timestamp + 1000 });
+  holdLiveScenario(scenario.gate, () => completeAssistant(scenario.reply));
+}
+
+function emitCustomMessage(message) {
+  appendEntry("custom_message", { customType: message.customType, content: message.content, display: message.display });
+  emitMessage(message);
+}
+
+function startLiveExtensionUi() {
+  const scenario = live.extensionUi;
+  const { above, implicit, below } = scenario.widgets;
+  emitExtensionUi({ method: "setWidget", widgetKey: above.key, widgetLines: above.lines, widgetPlacement: "aboveEditor" });
+  emitExtensionUi({ method: "setWidget", widgetKey: implicit.key, widgetLines: implicit.lines });
+  emitExtensionUi({ method: "setWidget", widgetKey: below.key, widgetLines: below.lines, widgetPlacement: "belowEditor" });
+  emitExtensionUi({ method: "setTitle", title: scenario.title });
+  emitExtensionUi({ method: "notify", message: scenario.notices.info, notifyType: "info" });
+  emitExtensionUi({ method: "notify", message: scenario.notices.warning, notifyType: "warning" });
+  emitExtensionUi({ method: "notify", message: scenario.notices.error, notifyType: "error" });
+  emitExtensionUi({ method: "set_editor_text", text: scenario.editorText.empty });
+  holdLiveScenario(scenario.gates.removal, () => {
+    // Pi leaves out widget lines and the title when an extension clears them.
+    emitExtensionUi({ method: "setWidget", widgetKey: implicit.key });
+    emitExtensionUi({ method: "setTitle" });
+    emitExtensionUi({ method: "set_editor_text", text: scenario.editorText.replaced });
+    holdLiveScenario(scenario.gates.decline, () => {
+      emitExtensionUi({ method: "set_editor_text", text: scenario.editorText.declined });
+      completeAssistant(scenario.reply);
+    });
+  });
+}
+
+function startRestoredExtensionUi() {
+  const scenario = live.extensionUi;
+  const { above, below } = scenario.widgets;
+  emitExtensionUi({ method: "setWidget", widgetKey: above.key, widgetLines: above.lines, widgetPlacement: "aboveEditor" });
+  emitExtensionUi({ method: "setWidget", widgetKey: below.key, widgetLines: below.lines, widgetPlacement: "belowEditor" });
+  emitExtensionUi({ method: "setTitle", title: scenario.title });
+  holdLiveScenario(scenario.gates.restore, () => completeAssistant(scenario.restoreReply));
+}
+
+function emitExtensionUi(fields) {
+  emit({ type: "extension_ui_request", id: randomUUID(), ...fields });
+}
+
+// The first pause lets the status refresh after the user message finish before the footer changes.
+function startLiveFooter() {
+  const scenario = live.footer;
+  holdLiveScenario(scenario.gates.start, () => {
+    const started = { ...assistantMessage([], "stop"), provider: scenario.provider, model: scenario.model };
+    emit({ type: "message_start", message: started });
+    thinkingLevel = scenario.thinkingLevel;
+    appendEntry("thinking_level_change", { thinkingLevel });
+    emit({ type: "thinking_level_changed", level: thinkingLevel });
+    holdLiveScenario(scenario.gates.streaming, () => {
+      const completed = { ...started, content: [{ type: "text", text: scenario.reply }] };
+      emit({ type: "message_end", message: completed });
+      appendMessage(completed);
+      holdLiveScenario(scenario.gates.ended, () => {
+        // No pause follows the rename: the sidebar doesn't refresh while a dialog is open.
+        sessionName = scenario.renamed;
+        appendEntry("session_info", { name: sessionName });
+        emit({ type: "session_info_changed", name: sessionName });
+        emit({ type: "turn_end", message: completed, toolResults: [] });
+        emit({ type: "agent_end", messages: [completed], willRetry: false });
+        settleRun();
+      });
+    });
+  });
+}
+
+function startFailedCompaction() {
+  const scenario = live.compaction;
+  replyBeforeCompaction(scenario.reply);
+  holdLiveScenario(scenario.failureGate, () => {
+    emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false, errorMessage: scenario.error });
+    settleRun();
+  });
+}
+
+function startAbortedCompaction() {
+  replyBeforeCompaction(live.compaction.reply);
+  liveAbort = () => {
+    emit({ type: "compaction_end", reason: "threshold", aborted: true, willRetry: false });
+    settleRun({ aborted: true });
+  };
+}
+
+function startDuplicateCompaction() {
+  const scenario = live.compaction;
+  replyBeforeCompaction(scenario.reply);
+  completeCompaction(scenario.summary);
+  // Older Pi versions also sent a legacy compaction event with the same summary.
+  emit({ type: "compaction", summary: scenario.summary });
+  emit({ type: "compaction", summary: scenario.summary, timestamp: new Date(Date.now() + 11_000).toISOString() });
+  holdLiveScenario(scenario.duplicateGate, () => settleRun());
+}
+
+// Like Pi's automatic compaction, which runs after agent_end and before the run settles.
+function replyBeforeCompaction(text) {
+  const reply = emitAssistantReply(text);
+  emit({ type: "turn_end", message: reply, toolResults: [] });
+  emit({ type: "agent_end", messages: [reply], willRetry: false });
+  emit({ type: "compaction_start", reason: "threshold" });
+}
+
+function completeCompaction(summary) {
+  const result = { summary, firstKeptEntryId: leafId, tokensBefore: 150 };
+  appendEntry("compaction", result);
+  emit({ type: "compaction_end", reason: "threshold", result, aborted: false, willRetry: false });
+}
+
+function startFinishedThinking() {
+  const scenario = live.thinking;
+  const started = startThinking();
+  holdLiveScenario(scenario.gates.thinking, () => {
+    emit({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: scenario.thought } });
+    holdLiveScenario(scenario.gates.ended, () => {
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 } });
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: scenario.reply } });
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 1, content: scenario.reply } });
+      finishAssistant({ ...started, content: [{ type: "thinking", thinking: scenario.thought }, { type: "text", text: scenario.reply }] });
+    });
+  });
+}
+
+function startFailedThinking() {
+  const scenario = live.thinking;
+  const started = startThinking();
+  holdLiveScenario(scenario.gates.failing, () => {
+    finishAssistant({ ...started, content: [{ type: "thinking", thinking: scenario.thought }], stopReason: "error", errorMessage: scenario.error });
+  });
+}
+
+function startAbortedThinking() {
+  const started = startThinking();
+  liveAbort = () => finishAssistant({ ...started, content: [{ type: "thinking", thinking: live.thinking.thought }], stopReason: "aborted" });
+}
+
+// Delta-only, like native Pi, so the gateway rebuilds the partial message.
+function startThinking() {
+  const started = assistantMessage([], "stop");
+  emit({ type: "message_start", message: started });
+  emit({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } });
+  emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: live.thinking.thought } });
+  return started;
+}
+
+function emitAssistantReply(text) {
+  const timestamp = Date.now();
+  const completed = assistantMessage([{ type: "text", text }], "stop", timestamp);
+  emit({ type: "message_start", message: assistantMessage([], "stop", timestamp) });
+  emit({ type: "message_update", message: completed, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: text, partial: completed } });
+  emit({ type: "message_end", message: completed });
+  appendMessage(completed);
+  return completed;
+}
+
+function settleRun(fields = {}) {
+  busy = false;
+  activeScenario = null;
+  persistDeferredBashMessages();
+  emit({ type: "agent_settled", ...fields });
 }
 
 function replaceWithNewSession(command) {

@@ -12,6 +12,7 @@ import (
 
 	gripi "github.com/melounvitek/gripi"
 	"github.com/melounvitek/gripi/internal/access"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/server"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -110,7 +111,7 @@ func TestMultiUserFiltersListingsReadsActionsAndAttachments(t *testing.T) {
 		t.Fatalf("session paths = %v", paths)
 	}
 	own, other := paths[0], paths[1]
-	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot)
+	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, server.NewPiStore(cfg.SessionsRoot, ""))
 	if _, err := owners.Claim(own, workspace); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +193,7 @@ func TestMultiUserListsSessionsThroughASymlinkedSessionsRoot(t *testing.T) {
 	if err := access.NewWorkspaceStore(cfg.WorkspaceAccessPath).ApproveWorkspace(workspace); err != nil {
 		t.Fatal(err)
 	}
-	all, err := (sessions.Store{Root: configuredRoot, Home: fixture.home, Cache: sessions.NewCache()}).Sessions()
+	all, err := (sessionfile.Store{Root: configuredRoot, Home: fixture.home, Cache: sessionfile.NewCache()}).Sessions()
 	if err != nil || len(all) == 0 {
 		t.Fatalf("sessions = %#v, %v", all, err)
 	}
@@ -200,7 +201,7 @@ func TestMultiUserListsSessionsThroughASymlinkedSessionsRoot(t *testing.T) {
 	if !strings.HasPrefix(path, configuredRoot+string(filepath.Separator)) {
 		t.Fatalf("session path = %q", path)
 	}
-	if _, err := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, cfg.SessionsRoot).Claim(path, workspace); err != nil {
+	if _, err := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, server.NewPiStore(cfg.SessionsRoot, "")).Claim(path, workspace); err != nil {
 		t.Fatal(err)
 	}
 	cookie := "gripi_workspace=" + workspace
@@ -240,7 +241,7 @@ func multiUserConfig(root string) config.Config {
 }
 func multiUserHandler(t *testing.T, cfg config.Config) http.Handler {
 	t.Helper()
-	handler, err := server.NewHandler(cfg, gripi.WebFiles)
+	handler, err := server.NewPiHandler(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
