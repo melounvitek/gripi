@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { nativeBash, prompts, sessions } from "../support/contract.mjs";
-import { expectRunFinished, selectSession, sendPrompt } from "../support/ui.mjs";
+import { nativeBash, prompts, replies, sessions } from "../support/contract.mjs";
+import { activityView, expectRunFinished, liveMessage, selectSession, sendPrompt } from "../support/ui.mjs";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -14,6 +14,62 @@ function shellCard(page, command) {
 function statusItems(card) {
   return card.getByRole("status", { name: "Shell command status" }).locator(".bash-execution-status-item");
 }
+
+test("a shell command's output shows as it arrives, also after a reload and in Brief view", async ({ page }) => {
+  const { command, chunks } = nativeBash.streaming;
+  const [first, second] = chunks.map((chunk) => chunk.trim());
+  let releasePrompt;
+  const promptHeld = new Promise((resolve) => { releasePrompt = resolve; });
+  await page.route("**/prompt", async (route) => {
+    await promptHeld;
+    await route.continue();
+  });
+  await sendPrompt(page, `!${command}`);
+  // Like Pi CLI, the command runs at once, before the gateway has even received it.
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "bash");
+  await expect(page.locator(".composer-state")).toHaveText("Shell command running…");
+  releasePrompt();
+
+  const card = shellCard(page, command);
+  const lines = card.locator(".tool-output-line");
+  await expect(lines.first()).toHaveText(first);
+  await expect(statusItems(card)).toHaveText(["running"]);
+  await activityView(page, "Brief").click();
+  await expect(lines.first()).toBeVisible();
+
+  // The page restores the output so far, and the rest keeps coming.
+  await page.reload();
+  await expect(lines.first()).toHaveText(first);
+  await expect(lines.first()).toBeVisible();
+  await expect(statusItems(card)).toHaveText(["running"]);
+  await expect(lines).toHaveText([first, second]);
+  await expect(statusItems(card)).toHaveText(["running"]);
+
+  await page.getByRole("button", { name: "Abort running Pi" }).click();
+  await expect(statusItems(card)).toHaveText(["cancelled"]);
+  await expect(lines).toHaveText([first, second]);
+  await expectRunFinished(page);
+});
+
+test("a shell command that fails to start leaves a prompt sent meanwhile sending", async ({ page }) => {
+  const { command } = nativeBash.excluded;
+  const held = [];
+  await page.route("**/prompt", (route) => { held.push(route); });
+  await sendPrompt(page, `!${command}`);
+  await expect.poll(() => held.length).toBe(1);
+  await sendPrompt(page, prompts.standard);
+  await expect.poll(() => held.length).toBe(2);
+  const state = page.locator(".composer-state");
+  await expect(state).toHaveAttribute("data-state", "sending");
+
+  await held[0].fulfill({ status: 500, body: "Unavailable" });
+  await expect(page.getByLabel("Message to Pi")).toHaveValue(`!${command}`);
+  await expect(state).toHaveAttribute("data-state", "sending");
+
+  await held[1].continue();
+  await expect(liveMessage(page, "assistant", replies.standard)).toBeVisible();
+  await expectRunFinished(page);
+});
 
 test("a shell command Pi fails to run shows the error", async ({ page }) => {
   const { command, error } = nativeBash.failure;

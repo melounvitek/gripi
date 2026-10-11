@@ -25,6 +25,10 @@ window.gripiDesktop.onAddGatewayRequested(() => {
   render();
 });
 
+window.gripiDesktop.onCommandPaletteRequested(() => {
+  dispatchActiveGatewayEvent("gripi:command-palette-requested");
+});
+
 window.gripiDesktop.onFindInSessionRequested(() => {
   dispatchActiveGatewayEvent("gripi:current-session-find-requested");
 });

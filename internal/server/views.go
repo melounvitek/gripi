@@ -377,7 +377,7 @@ func liveOutputFrom(snapshot agent.LiveSnapshot, messages []*agent.Message, home
 		if activeShellPersisted(*shell, messages, home) {
 			persistedBash = append(persistedBash, shell.ID)
 		} else {
-			activeBash = map[string]any{"bash_id": shell.ID, "command": shell.Command, "exclude_from_context": shell.ExcludeFromContext, "started_at": shell.StartedAt}
+			activeBash = map[string]any{"bash_id": shell.ID, "command": shell.Command, "exclude_from_context": shell.ExcludeFromContext, "started_at": shell.StartedAt, "output": shell.Output}
 		}
 	}
 	completedBash := make([]json.RawMessage, 0, len(snapshot.CompletedShells))
@@ -911,6 +911,9 @@ func messageClass(message *agent.Message) string {
 	}
 	if message.ToolPending {
 		values = append(values, "message--tool-pending")
+	}
+	if message.Omitted {
+		values = append(values, "message--omitted")
 	}
 	return strings.Join(values, " ")
 }

@@ -72,9 +72,8 @@ test("a page reload restores extension widgets and title, and Pi reload clears t
 
   await page.reload();
   await expect(gate).toBeVisible();
-  // The snapshot leaves out widgetPlacement, so a widget below the editor comes back above it.
-  await expectWidgets(page, "above", [above, below]);
-  await expect(page.locator("[data-extension-widgets-below]")).toBeHidden();
+  await expectWidgets(page, "above", [above]);
+  await expectWidgets(page, "below", [below]);
   await expect(page).toHaveTitle(scenario.title);
 
   await continueScenario(page, scenario.gates.restore);

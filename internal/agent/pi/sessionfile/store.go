@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/keyedlock"
 )
 
 const (
@@ -52,6 +54,8 @@ type segment struct {
 	ToolName      string
 	Minimum       int64
 	PairedMinimum int64
+	// Error is kept only for an entry over MaxRenderedEntryBytes, which is not read again to render it.
+	Error bool
 }
 
 type entry struct {
@@ -132,9 +136,15 @@ type metadataCacheItem struct {
 	element *list.Element
 }
 
+// indexBuildWorkers bounds how many session indexes are built at once, since
+// each build may hold up to maxBuiltIndexBytes. Building is CPU-bound, so more
+// builds than CPUs would only add memory.
+var indexBuildWorkers = min(4, runtime.GOMAXPROCS(0))
+
 type Cache struct {
 	mu            sync.Mutex
-	buildMu       sync.Mutex
+	buildLocks    keyedlock.Mutexes
+	builds        chan struct{}
 	clock         uint64
 	bytes         int64
 	items         map[string]*cacheItem
@@ -145,7 +155,7 @@ type Cache struct {
 }
 
 func NewCache() *Cache {
-	return &Cache{items: make(map[string]*cacheItem), metadataItems: make(map[string]*metadataCacheItem)}
+	return &Cache{items: make(map[string]*cacheItem), metadataItems: make(map[string]*metadataCacheItem), builds: make(chan struct{}, indexBuildWorkers)}
 }
 
 func (cache *Cache) Index(path string) (*index, error) {
@@ -165,8 +175,10 @@ func (cache *Cache) Index(path string) (*index, error) {
 	}
 	cache.mu.Unlock()
 
-	cache.buildMu.Lock()
-	defer cache.buildMu.Unlock()
+	unlock := cache.buildLocks.Lock(path)
+	defer unlock()
+	cache.builds <- struct{}{}
+	defer func() { <-cache.builds }()
 	stat, err = os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -327,7 +339,12 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*age
 	if err != nil {
 		return nil, false, err
 	}
-	var result []*agent.Session
+	type listing struct {
+		configuredPath, realPath string
+		session                  *agent.Session
+	}
+	var listed []listing
+	var unindexed []int
 	deferred := false
 	err = filepath.WalkDir(root, func(path string, item os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -354,17 +371,39 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*age
 			deferred = true
 		}
 		if !found {
-			indexed, indexErr := store.Cache.Index(realPath)
-			if indexErr != nil {
-				return nil
-			}
-			session = sessionFromIndex(indexed)
+			unindexed = append(unindexed, len(listed))
 		}
+		listed = append(listed, listing{configuredPath: configuredPath, realPath: realPath, session: session})
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	// On a first start the cache lacks every session, so they are indexed in parallel.
+	positions := make(chan int)
+	var workers sync.WaitGroup
+	for range min(indexBuildWorkers, len(unindexed)) {
+		workers.Go(func() {
+			for position := range positions {
+				if indexed, err := store.Cache.Index(listed[position].realPath); err == nil {
+					listed[position].session = sessionFromIndex(indexed)
+				}
+			}
+		})
+	}
+	for _, position := range unindexed {
+		positions <- position
+	}
+	close(positions)
+	workers.Wait()
+	var result []*agent.Session
+	for _, item := range listed {
+		session := item.session
 		if session == nil || session.CWD == "" || !filepath.IsAbs(session.CWD) {
-			return nil
+			continue
 		}
 		copy := *session
-		copy.Path = configuredPath
+		copy.Path = item.configuredPath
 		copy.FolderMissing = folderMissing(copy.CWD)
 		if copy.ParentSessionPath != "" {
 			if parent, ok := ConfiguredSessionPath(configuredRoot, copy.ParentSessionPath); ok {
@@ -372,10 +411,6 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*age
 			}
 		}
 		result = append(result, &copy)
-		return nil
-	})
-	if err != nil {
-		return nil, false, err
 	}
 	sort.SliceStable(result, func(left, right int) bool {
 		return result[left].ConversationActivityAt.After(result[right].ConversationActivityAt)
@@ -598,7 +633,7 @@ func configuredSessionPath(realPath, configuredRoot, realRoot string) (string, b
 	return filepath.Join(configuredRoot, relative), true
 }
 
-func buildIndex(path string, _ os.FileInfo) (*index, error) {
+var buildIndex = func(path string, _ os.FileInfo) (*index, error) {
 	return buildIndexWithValidationHook(path, nil)
 }
 
@@ -711,12 +746,13 @@ func indexSnapshotValid(indexed *index, stat os.FileInfo) bool {
 	return stat.Size() > indexed.size || stat.ModTime().Equal(indexed.mtime)
 }
 
-var errEntryOverCap = errors.New("JSONL entry exceeds 64 MiB cap")
+var errEntryOverCap = errors.New("malformed JSONL entry exceeds 64 MiB cap")
 
 // readIndexedLine reads the line starting at offset in file. A line over
 // MaxIndexedEntryBytes is streamed through the bounded scanner and returned as
 // metadata. The scanner knows only the usual entry shapes, so any other line is
-// read again in full.
+// read again in full, unless it is over MaxRenderedEntryBytes, which leaves
+// only a stub with its place in the session tree.
 func readIndexedLine(reader *bufio.Reader, file io.ReaderAt, offset int64) ([]byte, int64, *entry, error) {
 	var materialized []byte
 	var total int64
@@ -739,7 +775,11 @@ func readIndexedLine(reader *bufio.Reader, file io.ReaderAt, offset int64) ([]by
 		}
 		if err == nil || errors.Is(err, io.EOF) {
 			if overCap {
-				return nil, total, nil, errEntryOverCap
+				stub, ok := scanOversizedEntry(io.NewSectionReader(file, offset, total))
+				if !ok {
+					return nil, total, nil, errEntryOverCap
+				}
+				return nil, total, &stub, nil
 			}
 			if scanner != nil {
 				if metadata, ok := scanner.finish(); ok {
@@ -1320,7 +1360,21 @@ func renderUnits(path string, indexed *index, selected []unit, home string) ([]*
 			continue
 		}
 		if item.Length > MaxRenderedEntryBytes {
-			return nil, errors.New("selected session entry exceeds rendering bound")
+			// Only a stub is indexed, so a placeholder stands in for the message.
+			part := item.Segments[0]
+			placeholder := &agent.Message{
+				Role: part.Role, Text: fmt.Sprintf("Message too large to show (%.1fMB)", float64(item.Length)/(1<<20)),
+				Timestamp: parseTime(item.Session.Timestamp), Key: [2]int{item.Ordinal, 0}, ToolCallID: part.ToolCallID, ToolName: part.ToolName,
+				Error: part.Error, Omitted: true,
+			}
+			switch {
+			case part.Role == "toolResult":
+				placeholder.Compact, placeholder.Summary = true, firstString(part.ToolName, "tool result")
+			case item.Type == "compaction":
+				placeholder.Compaction, placeholder.Summary = true, "Conversation compacted"
+			}
+			messages = append(messages, placeholder)
+			continue
 		}
 		data := make([]byte, item.Length)
 		if _, err := file.ReadAt(data, item.Offset); err != nil && !errors.Is(err, io.EOF) {

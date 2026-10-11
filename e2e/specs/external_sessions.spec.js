@@ -413,6 +413,7 @@ for (const touch of [false, true]) {
         if (touch) await takeover.tap();
         else await takeover.click();
         await expect(page.locator("[data-session-sync-error]")).toHaveText("Please retry takeover");
+        await expect(page.locator("[data-session-sync-error]")).toHaveCSS("color", "rgb(204, 102, 102)");
       }
       const pending = await holdNextFragment(page);
       await appendCLIReply(copiedSession.file, "Snapshot during takeover press");

@@ -446,6 +446,30 @@ for (const view of ["Full", "Brief"]) {
   });
 }
 
+test("a streaming code block shows its finished lines without moving them", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const answer = (text) => ({ type: "message_update", message: assistant([{ type: "text", text: `Run this:\n\n\`\`\`sh\n${text}` }]), assistantMessageEvent: { type: "text_delta", contentIndex: 0 } });
+  const one = `echo ${"one ".repeat(80)}`;
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, answer(`${one}\necho tw`));
+  const body = page.locator("#live-output .message--assistant .message-body");
+  const code = body.locator("pre");
+  const codeTop = () => code.evaluate((element) => element.getBoundingClientRect().top - element.closest(".message-body").getBoundingClientRect().top);
+  const scrollLeft = () => code.evaluate((element) => element.scrollLeft);
+  await expect(code).toHaveText(one);
+  const top = await codeTop();
+  // The reader scrolls along the long line.
+  await code.evaluate((element) => { element.scrollLeft = 200; });
+  await deliver(answer(`${one}\necho two\necho thr`));
+  await expect(code).toHaveText(`${one}\necho two`);
+  expect(await codeTop()).toBe(top);
+  expect(await scrollLeft()).toBe(200);
+  await deliver(answer(`${one}\necho two\necho three\n\`\`\`\n\nThen check the outp`));
+  await expect(code).toHaveText(`${one}\necho two\necho three`);
+  expect(await codeTop()).toBe(top);
+  expect(await scrollLeft()).toBe(200);
+  await expect(body).not.toContainText("Then check");
+});
+
 async function streamingReplyAtBottom(page) {
   const deliver = await liveEvents(page);
   const scroller = page.locator("#conversation-scroll");
@@ -524,12 +548,12 @@ const block = (name, paragraphs = 3) => Array.from({ length: paragraphs }, (_, i
 const replyBody = (page) => page.locator("#live-output .message--assistant:not(.message--thinking) .message-body").last();
 
 // Records the scroll position and the latest reply's wipe on every frame until read.
-async function recordFrames(page) {
-  await page.evaluate(() => {
+async function recordFrames(page, bodies = "#live-output .message--assistant:not(.message--thinking) .message-body") {
+  await page.evaluate((bodies) => {
     const scroller = document.querySelector("#conversation-scroll");
     const frames = window.recordedFrames = [];
     const record = () => {
-      const body = [...document.querySelectorAll("#live-output .message--assistant:not(.message--thinking) .message-body")].at(-1);
+      const body = [...document.querySelectorAll(bodies)].at(-1);
       frames.push({
         time: performance.now(),
         top: scroller.scrollTop,
@@ -537,12 +561,13 @@ async function recordFrames(page) {
         revealing: body?.classList.contains("message-body--revealing") ?? false,
         edge: parseFloat(body ? getComputedStyle(body).getPropertyValue("--reveal-edge") : ""),
         height: body?.offsetHeight ?? 0,
+        images: [...(body?.querySelectorAll("img") ?? [])].map((image) => image.naturalHeight > 0),
         bottomButton: document.querySelector(".jump-to-latest")?.classList.contains("is-visible") ?? false,
       });
       if (window.recordedFrames === frames) requestAnimationFrame(record);
     };
     requestAnimationFrame(record);
-  });
+  }, bodies);
   // Two more frames, so a scroll made in the last frame after its record is recorded too.
   return () => page.evaluate(async () => {
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -607,6 +632,58 @@ test("a streamed block wipes in from the old bottom while the view glides down t
   const tops = recorded.map((frame) => frame.top);
   expect(rising(tops)).toBe(true);
   expect(new Set(tops).size).toBeGreaterThanOrEqual(4);
+});
+
+for (const [name, part, placeholder] of [["thinking", "thinking", "Thinking…"], ["a reply", "text", ""]]) {
+  test(`the first block of ${name} wipes in from the top over its placeholder`, async ({ page }) => {
+    const deliver = await liveEvents(page);
+    const update = (text) => ({ type: "message_update", message: assistant([{ type: part, [part]: text }]), assistantMessageEvent: { type: `${part}_delta`, contentIndex: 0 } });
+    const body = page.locator(`#live-output .message--assistant${part === "thinking" ? ".message--thinking" : ":not(.message--thinking)"} .message-body`);
+    const markdown = await holdMarkdown(page);
+    await deliver({ type: "agent_start" }, { type: "message_start", message: assistant([]) }, update("Comparing"));
+    if (placeholder) {
+      await markdown.release();
+      await expect(body).toHaveText(placeholder);
+      await expect(revealing(page)).toHaveCount(0);
+    }
+    const paragraph = Array.from({ length: 6 }, () => "Comparing the two options before choosing one.").join(" ");
+    await deliver(update(`${paragraph}\n\nThe sec`));
+    // While its first render loads, a reply shows a "…" placeholder.
+    await expect.poll(markdown.pending).toBe(1);
+    const placeholderHeight = await body.evaluate((element) => element.offsetHeight);
+    expect(placeholderHeight).toBeGreaterThan(10);
+    const frames = await recordFrames(page, "#live-output .message--assistant .message-body");
+    await markdown.release();
+    await expect(body).toHaveText(paragraph);
+    await expect(revealing(page)).toHaveCount(0);
+    const edges = (await frames()).filter((frame) => frame.revealing).map((frame) => frame.edge);
+    // The edge is soft over 32px above it, so the first line starts hidden instead of replacing the placeholder at once.
+    expect(edges[0] - 32).toBeLessThan(placeholderHeight / 2);
+  });
+}
+
+test("a streamed image lands with its block already loaded, and a following view scrolls to it", async ({ page }) => {
+  const { addBlock, fromBottom } = await streamingReplyAtBottom(page);
+  await expect(revealing(page)).toHaveCount(0);
+  const image = await page.screenshot({ clip: { x: 0, y: 0, width: 320, height: 240 }, scale: "css" });
+  // Replies can only show the gateway's own images, which it serves like this.
+  await page.route("**/e2e-streamed-image.png", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.fulfill({ body: image, contentType: "image/png", headers: { "Cache-Control": "private, no-store" } });
+  });
+  const frames = await recordFrames(page);
+  await addBlock("![Streamed diagram](/e2e-streamed-image.png)\n\n");
+  await expect(replyBody(page).getByRole("img", { name: "Streamed diagram" })).toBeVisible();
+  await expect(revealing(page)).toHaveCount(0);
+  await expect.poll(fromBottom).toBeLessThan(2);
+  // The next block renders the reply again, image and all.
+  await addBlock(block("After", 1));
+  await expect(replyBody(page)).toContainText("After paragraph 1");
+  await expect(revealing(page)).toHaveCount(0);
+  const recorded = (await frames()).filter((frame) => frame.images.length > 0);
+  // Never in view unloaded, so it wipes in with its block and nothing below it moves later.
+  expect(recorded.length).toBeGreaterThan(0);
+  expect(recorded.every((frame) => frame.images.every(Boolean))).toBe(true);
 });
 
 test("a block that lands mid-wipe continues the wipe without the edge dropping", async ({ page }) => {

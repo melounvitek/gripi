@@ -104,6 +104,11 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	if err := app.retireStaleRPCClient(request, path); err != nil {
+		// Such as a model that the new variables have no key for.
+		if refused := refusal(err); refused != nil {
+			app.writeRPCFailure(response, request, refused.Message, false)
+			return
+		}
 		app.writeActionRPCError(response, err)
 		return
 	}

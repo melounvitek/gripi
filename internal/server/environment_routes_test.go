@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -281,9 +282,10 @@ func TestChangedVariablesApplyFromTheNextMessage(t *testing.T) {
 	waitForFakePiSettled(t, fixture.handler, session, 0)
 
 	fixture.save(t, "", "ENVTEST_TOKEN", "second")
+	cursor := fakePiEventCursor(t, fixture.handler, session)
 	fixture.prompt(t, session, "Use the second token", "")
 	fixture.assertTokens(t, session, "first", "second")
-	waitForFakePiSettled(t, fixture.handler, session, 0)
+	waitForFakePiSettled(t, fixture.handler, session, cursor)
 
 	fixture.prompt(t, session, "!printf unchanged", "")
 	fixture.assertTokens(t, session, "first", "second")
@@ -301,30 +303,28 @@ func TestRestartForChangedVariablesKeepsTheEventCursorValid(t *testing.T) {
 	waitForFakePiSettled(t, fixture.handler, session, 0)
 	cursor := fakePiEventCursor(t, fixture.handler, session)
 
+	// Another tab, still at the old Pi's last event, polls again only after the new Pi has sent more events than the old one.
 	fixture.save(t, "", "ENVTEST_TOKEN", "second")
-	// This turn stays open, so the new Pi's event sequence stays below the browser's cursor.
-	fixture.prompt(t, session, "Start the steer scenario", "")
+	fixture.prompt(t, session, "Use the second token", "")
 	fixture.assertTokens(t, session, "first", "second")
+	waitForFakePiSettled(t, fixture.handler, session, cursor)
+	settled := fakePiEventCursor(t, fixture.handler, session)
+	fixture.prompt(t, session, "Use the token again", "")
+	waitForFakePiSettled(t, fixture.handler, session, settled)
 
-	for deadline := time.Now().Add(4 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		response := fixture.get(fmt.Sprintf("/events?session=%s&after=%d", url.QueryEscape(session), cursor), "")
-		var batch struct {
-			Events  []map[string]any `json:"events"`
-			LastSeq int64            `json:"last_seq"`
-			Missed  bool             `json:"missed"`
-		}
-		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &batch) != nil || batch.LastSeq >= cursor {
-			t.Fatalf("events after the old Pi's last event %d = %d %s", cursor, response.Code, response.Body.String())
-		}
-		if batch.Missed {
-			t.Fatalf("the cursor at the old Pi's last event %d missed events: %s", cursor, response.Body.String())
-		}
-		if slices.ContainsFunc(batch.Events, func(event map[string]any) bool { return event["type"] == "agent_start" }) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the new turn did not arrive after the old Pi's last event %d: %s", cursor, response.Body.String())
-		}
+	response := fixture.get(fmt.Sprintf("/events?session=%s&after=%d", url.QueryEscape(session), cursor), "")
+	var batch struct {
+		LastSeq int64 `json:"last_seq"`
+		Missed  bool  `json:"missed"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &batch) != nil || batch.Missed {
+		t.Fatalf("events after the old Pi's last event %d = %d %s", cursor, response.Code, response.Body.String())
+	}
+	if batch.LastSeq-cursor < cursor {
+		t.Fatalf("the new Pi sent %d events, fewer than the old Pi's %d", batch.LastSeq-cursor, cursor)
+	}
+	if !strings.Contains(response.Body.String(), "Use the second token") {
+		t.Fatalf("the new Pi's first turn is missing after the old Pi's last event %d: %s", cursor, response.Body.String())
 	}
 }
 
@@ -348,7 +348,7 @@ func TestChangedVariablesDoNotRestartABusyPi(t *testing.T) {
 	fixture.assertTokens(t, session, "first", "second")
 }
 
-func TestChangedVariablesLeaveAnUnsavedNewSessionAlone(t *testing.T) {
+func TestChangedVariablesApplyToAnUnsavedNewSessionWithWhatWasChosenInIt(t *testing.T) {
 	fixture := newEnvironmentFixture(t, false)
 	fixture.save(t, "", "ENVTEST_TOKEN", "first")
 	created := fixture.post("/sessions/new_at_cwd", url.Values{"cwd": {fixture.project}}, "")
@@ -358,15 +358,45 @@ func TestChangedVariablesLeaveAnUnsavedNewSessionAlone(t *testing.T) {
 	if created.Code != http.StatusOK || json.Unmarshal(created.Body.Bytes(), &payload) != nil || payload.Session == "" {
 		t.Fatalf("new session = %d %s", created.Code, created.Body.String())
 	}
+	session := payload.Session
+	if response := fixture.post("/sessions/model_settings", url.Values{"session": {session}, "provider": {"e2e"}, "model": {"contract-model"}, "thinking": {"high"}}, ""); response.Code != http.StatusOK {
+		t.Fatalf("model settings = %d %s", response.Code, response.Body.String())
+	}
+	fixture.prompt(t, session, "/name Release plan", "")
+	cursor := fakePiEventCursor(t, fixture.handler, session)
 
 	fixture.save(t, "", "ENVTEST_TOKEN", "second")
-	fixture.prompt(t, payload.Session, "Create the first deterministic response", "")
-	fixture.assertTokens(t, "", "first")
-	waitForFakePiSettled(t, fixture.handler, payload.Session, 0)
-
-	// Pi has saved the session now, so a new process can resume it.
-	fixture.prompt(t, payload.Session, "Use the second token", "")
+	fixture.prompt(t, session, "Create the first deterministic response", "")
 	fixture.assertTokens(t, "", "first", "second")
+	if restarted := fixture.piStarts(t)[1].arguments; !strings.Contains(restarted, "--session "+session) {
+		t.Fatalf("the new Pi started with %q, want session %s", restarted, session)
+	}
+	waitForFakePiSettled(t, fixture.handler, session, cursor)
+
+	// Pi saved the session where the gateway expected it, from the session's folder and with what was chosen in it.
+	contents, err := os.ReadFile(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header map[string]any
+	chosen := map[string]string{}
+	for index, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatal(err)
+		}
+		if index == 0 {
+			header = record
+		}
+		for _, field := range []string{"modelId", "thinkingLevel", "name"} {
+			if value, ok := record[field].(string); ok {
+				chosen[field] = value
+			}
+		}
+	}
+	if header["cwd"] != fixture.project || !maps.Equal(chosen, map[string]string{"modelId": "contract-model", "thinkingLevel": "high", "name": "Release plan"}) {
+		t.Fatalf("saved session in %v with %v", header["cwd"], chosen)
+	}
 }
 
 type environmentFixture struct {

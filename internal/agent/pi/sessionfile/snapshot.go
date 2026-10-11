@@ -66,93 +66,73 @@ func readFileSnapshot(path string) (FileSnapshot, error) {
 	return FileSnapshot{}, errors.New("session file kept changing while it was read")
 }
 
+// lastAppendCursor finds the lines from the end backward and reads each like
+// the index does, so a line of any size is read in bounded memory.
 func lastAppendCursor(file *os.File, size int64) (string, string, bool, error) {
 	complete := true
-	var fragments [][]byte
-	var fragmentBytes int64
-	position := size
-	for position > 0 {
-		length := int64(8 << 10)
-		if position < length {
-			length = position
-		}
-		position -= length
-		chunk := make([]byte, length)
-		if _, err := file.ReadAt(chunk, position); err != nil && !errors.Is(err, io.EOF) {
+	for end := size; end > 0; {
+		start, err := lineStart(file, end)
+		if err != nil {
 			return "", "", false, err
 		}
-		lineEnd := len(chunk)
-		for lineEnd > 0 {
-			newline := bytes.LastIndexByte(chunk[:lineEnd], '\n')
-			if newline < 0 {
-				break
-			}
-			parts := make([][]byte, 0, len(fragments)+1)
-			parts = append(parts, chunk[newline+1:lineEnd])
-			for index := len(fragments) - 1; index >= 0; index-- {
-				parts = append(parts, fragments[index])
-			}
-			total := int64(lineEnd-newline-1) + fragmentBytes
-			if total > MaxRenderedEntryBytes {
-				return "", "", false, errEntryOverCap
-			}
-			if cursor, leaf, found, valid := appendCursorFromParts(parts, total); found {
-				return cursor, leaf, complete && valid, nil
-			} else if !valid {
-				complete = false
-			}
-			fragments, fragmentBytes = nil, 0
-			lineEnd = newline
+		cursor, leaf, found, valid, err := appendCursorAt(file, start, end)
+		if err != nil {
+			return "", "", false, err
 		}
-		if lineEnd > 0 {
-			fragment := append([]byte(nil), chunk[:lineEnd]...)
-			fragments = append(fragments, fragment)
-			fragmentBytes += int64(len(fragment))
-			if fragmentBytes > MaxRenderedEntryBytes {
-				return "", "", false, errEntryOverCap
-			}
+		complete = complete && valid
+		if found {
+			return cursor, leaf, complete, nil
 		}
-	}
-	parts := make([][]byte, 0, len(fragments))
-	for index := len(fragments) - 1; index >= 0; index-- {
-		parts = append(parts, fragments[index])
-	}
-	if cursor, leaf, found, valid := appendCursorFromParts(parts, fragmentBytes); found {
-		return cursor, leaf, complete && valid, nil
-	} else if !valid {
-		complete = false
+		end = start - 1
 	}
 	return "", "", complete, nil
 }
 
-func appendCursorFromParts(parts [][]byte, total int64) (cursor, leaf string, found, valid bool) {
-	if total <= MaxIndexedEntryBytes {
-		line := make([]byte, 0, total)
-		for _, part := range parts {
-			line = append(line, part...)
+// lineStart returns where the line that ends at end begins.
+func lineStart(file *os.File, end int64) (int64, error) {
+	chunk := make([]byte, 8<<10)
+	for position := end; position > 0; {
+		length := min(int64(len(chunk)), position)
+		position -= length
+		if _, err := file.ReadAt(chunk[:length], position); err != nil && !errors.Is(err, io.EOF) {
+			return 0, err
 		}
-		return appendCursorFromLine(line)
-	}
-	scanner := newIndexJSONScanner()
-	for _, part := range parts {
-		scanner.feed(part)
-	}
-	entry, ok := scanner.finish()
-	if !ok {
-		line := make([]byte, 0, total)
-		for _, part := range parts {
-			line = append(line, part...)
+		if newline := bytes.LastIndexByte(chunk[:length], '\n'); newline >= 0 {
+			return position + int64(newline) + 1, nil
 		}
-		return appendCursorFromLine(line)
 	}
-	if entry.ID == "" || entry.Type == "session" {
-		return "", "", false, true
+	return 0, nil
+}
+
+func appendCursorAt(file *os.File, start, end int64) (cursor, leaf string, found, valid bool, err error) {
+	section := io.NewSectionReader(file, start, end-start)
+	var line []byte
+	var large *entry
+	if end-start > MaxRenderedEntryBytes {
+		// Unlike the index, this knows the length, so the stub is read at once.
+		stub, ok := scanOversizedEntry(section)
+		if !ok {
+			return "", "", false, false, nil
+		}
+		large = &stub
+	} else {
+		line, _, large, err = readIndexedLine(bufio.NewReader(section), file, start)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", "", false, false, err
+		}
 	}
-	leaf = entry.ID
-	if entry.Type == "leaf" {
-		leaf = entry.TargetID
+	if large == nil {
+		cursor, leaf, found, valid = appendCursorFromLine(line)
+		return cursor, leaf, found, valid, nil
 	}
-	return entry.ID, leaf, true, true
+	if large.ID == "" || large.Type == "session" {
+		return "", "", false, true, nil
+	}
+	leaf = large.ID
+	if large.Type == "leaf" {
+		leaf = large.TargetID
+	}
+	return large.ID, leaf, true, true, nil
 }
 
 func appendCursorFromLine(line []byte) (cursor, leaf string, found, valid bool) {

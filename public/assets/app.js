@@ -212,7 +212,13 @@ const commandPaletteController = new CommandPaletteController(document, {
   currentSessionPath,
   previousSessionPath: () => readMainSessionHistory().previous,
   openSession: (path) => switchSession(sessionUrl(path), { push: true, focus: true }),
-  commands: commandPaletteCommands
+  // What the sidebar's row menu calls, for a row the palette lists instead.
+  deleteSession: (session) => {
+    sessionActionsController.target = null;
+    sessionActionsController.openDelete(session);
+  },
+  commands: commandPaletteCommands,
+  piCommands: piPaletteCommands
 });
 const environmentController = new EnvironmentController(document, window, { openModal });
 const treeSessionController = new TreeSessionController(document, window, {
@@ -331,18 +337,29 @@ function handleSessionSearchShortcut(event) {
   return true;
 }
 
-// Each command calls what its own control calls. Commands that Pi runs through the composer stay under "/", where they cannot take a draft with them.
+// Each command calls what its own control calls. Those that Pi runs through the composer are sent as the composer sends them, but without its draft and attachments.
 function commandPaletteCommands() {
   const row = sidebarController.element?.querySelector('.session-row[data-current="true"]');
   const target = row && sessionActionsController.targetFor(row);
   const writable = promptTextarea && !promptTextarea.disabled;
+  const running = composerState?.dataset.state === "running";
   const otherView = document.querySelector('[data-conversation-view][aria-pressed="false"]');
   const sidebarHidden = document.body.classList.contains("desktop-sidebar-hidden");
+  const projectFilter = document.querySelector("[data-sidebar-project-filter]");
+  const tagChooser = document.querySelector("[data-tag-chooser]");
+  const cliToggle = document.querySelector("[data-sidebar-cli-toggle]");
+  const notificationToggle = document.querySelector("[data-notification-toggle]");
+  const gatewayUpdate = document.querySelector("[data-gateway-update]:not([hidden]) [data-gateway-update-button]:not([hidden])");
   return [
     ["This session", [
       writable && { label: "Choose model and thinking", detail: "/model", run: openModelSettingsModal },
       writable && { label: "Session tree", detail: "/tree", run: openTreeSessionModal },
       writable && { label: "Fork from a message", detail: "/fork", run: openForkSessionModal },
+      writable && { label: "Compact context", detail: "/compact", run: () => runPaletteCommand("/compact") },
+      writable && { label: "Clone session", detail: "/clone", run: () => runPaletteCommand("/clone") },
+      writable && { label: "Download as HTML", detail: "/export", run: () => runPaletteCommand("/export") },
+      // Like Pi CLI, which refuses to reload while it works.
+      writable && !running && { label: "Reload Pi resources", detail: "/reload", run: () => runPaletteCommand("/reload") },
       target && {
         label: "Rename…",
         run: () => {
@@ -361,9 +378,37 @@ function commandPaletteCommands() {
       { label: "New session…", keys: "ctrl+n", run: openNewSessionModal },
       { label: "Environment…", run: () => environmentController.open() },
       // On narrow screens the sidebar is a drawer instead.
-      window.matchMedia("(min-width: 761px)").matches && { label: sidebarHidden ? "Show sidebar" : "Hide sidebar", run: () => sidebarController.setDesktopVisibility(!sidebarHidden, true) }
+      window.matchMedia("(min-width: 761px)").matches && { label: sidebarHidden ? "Show sidebar" : "Hide sidebar", run: () => sidebarController.setDesktopVisibility(!sidebarHidden, true) },
+      projectFilter && { label: "Show only a project…", run: () => sidebarController.openProjectFilter() },
+      // Anchored to the composer, like Tags… above.
+      tagChooser && { label: "Show only a tag…", run: () => sessionTagsController.open("", promptTextarea) },
+      cliToggle && { label: `${cliToggle.getAttribute("aria-pressed") === "true" ? "Hide" : "Show"} Pi CLI sessions`, run: () => cliToggle.click() },
+      notificationToggle && { label: notificationsEnabled() ? "Turn off notifications" : "Turn on notifications", run: () => notificationToggle.click() },
+      gatewayUpdate && { label: `${gatewayUpdate.textContent}…`, run: () => gatewayUpdate.click() }
     ]]
   ];
+}
+
+// Pi's skills, prompt templates and extension commands, from the list the composer shows under "/".
+async function piPaletteCommands() {
+  const url = commandList?.dataset.commandsUrl;
+  if (!url || !promptTextarea || promptTextarea.disabled) return [];
+  const response = await fetch(url);
+  if (!response.ok) return [];
+  const list = document.createElement("template");
+  list.innerHTML = await response.text();
+  // The gateway's own commands have rows of their own.
+  return [...list.content.querySelectorAll('.command:not([data-command-source="other"])')].map(({ dataset }) => ({
+    label: `/${dataset.commandName}`,
+    detail: dataset.commandDescription,
+    run: () => runPaletteCommand(`/${dataset.commandName}`)
+  }));
+}
+
+// As Pi CLI runs a command entered on its own: with no arguments, steered in while Pi works.
+function runPaletteCommand(command) {
+  if (!promptTextarea || promptTextarea.disabled) return;
+  sendPrompt(command, composerState?.dataset.state === "running" ? "steer" : null, { composer: false });
 }
 
 function requestCurrentSessionFindNavigation(direction) {
@@ -1405,6 +1450,11 @@ function renderEvent(event) {
     return;
   }
 
+  if (event.type === "bash_update") {
+    liveMessageRenderer.renderBashEvent(event);
+    return;
+  }
+
   if (["bash_end", "bash_error"].includes(event.type)) {
     finishLiveBash(event);
     return;
@@ -1794,6 +1844,8 @@ async function pollEvents() {
     const eventsUrl = new URL(liveOutput.dataset.eventsUrl, window.location.origin);
     eventsUrl.searchParams.set("after", lastEventSeq);
     const response = await fetch(eventsUrl, { signal: controller.signal });
+    // A server error, such as a proxy's 502 while the gateway is down, fails the poll like no answer; a 4xx is the gateway's answer.
+    if (response.status >= 500) throw new Error(`Event poll failed with HTTP ${response.status}`);
     if (!response.ok || !eventPollCurrent(generation, sessionViewGeneration)) return;
 
     const payload = await response.json();
@@ -1881,12 +1933,17 @@ async function submitBashPrompt(rawMessage, bashCommand) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
+  // Like Pi CLI, show the command running at once; the running state also polls fast enough to bring its card soon.
+  if (composerState?.dataset.state !== "running") setComposerState("bash", "Shell command running…");
   resetEventPollBackoff();
   scheduleNextEventPoll(0);
 
-  const restoreSubmittedBashInput = () => {
+  const restoreSubmittedBashInput = (errorMessage) => {
+    showStatus(errorMessage, true);
     if (submittedViewChanged()) return;
     restoreSubmittedComposerInput(rawMessage, submittedImageFiles);
+    // A prompt sent meanwhile owns the composer state.
+    if (!["sending", "exporting"].includes(composerState?.dataset.state)) showCurrentActiveTask("error", errorMessage);
   };
 
   try {
@@ -1901,9 +1958,7 @@ async function submitBashPrompt(rawMessage, bashCommand) {
       return;
     }
     if (!response.ok || !payload?.bash_id) {
-      restoreSubmittedBashInput();
-      const errorMessage = payload?.error || (payload?.code === "session_operation_pending" ? "Another session operation is pending. Please retry." : "Shell command failed to start");
-      showStatus(errorMessage, true);
+      restoreSubmittedBashInput(payload?.error || (payload?.code === "session_operation_pending" ? "Another session operation is pending. Please retry." : "Shell command failed to start"));
       return;
     }
 
@@ -1918,14 +1973,13 @@ async function submitBashPrompt(rawMessage, bashCommand) {
     };
     finishLiveBash(completionEvent);
   } catch (_error) {
-    restoreSubmittedBashInput();
-    showStatus("Shell command failed to start", true);
+    restoreSubmittedBashInput("Shell command failed to start");
   } finally {
     scheduleNextEventPoll(0);
   }
 }
 
-async function submitExportPrompt(rawMessage, exportCommand) {
+async function submitExportPrompt(rawMessage, exportCommand, { composer = true } = {}) {
   const activeRun = composerState?.dataset.state === "running";
   const generation = sessionViewGeneration;
   const switchGeneration = sessionSwitchGeneration.capture();
@@ -1938,13 +1992,15 @@ async function submitExportPrompt(rawMessage, exportCommand) {
   formData.set("session", submittedSession);
   formData.set("filename", exportCommand.filename);
 
-  promptTextarea.value = "";
-  clearStoredComposerDraft(submittedSession);
-  clearAttachments();
-  commandList?.classList.remove("is-visible");
-  commandList?.removeAttribute("open");
-  resetCommandSelection();
-  resizePromptTextarea();
+  if (composer) {
+    promptTextarea.value = "";
+    clearStoredComposerDraft(submittedSession);
+    clearAttachments();
+    commandList?.classList.remove("is-visible");
+    commandList?.removeAttribute("open");
+    resetCommandSelection();
+    resizePromptTextarea();
+  }
   setComposerState("exporting", "Exporting…");
   showStatus("Exporting session…", true);
 
@@ -1970,7 +2026,7 @@ async function submitExportPrompt(rawMessage, exportCommand) {
   } catch (error) {
     if (submittedViewChanged()) return;
 
-    restoreSubmittedComposerInput(rawMessage, submittedImageFiles);
+    if (composer) restoreSubmittedComposerInput(rawMessage, submittedImageFiles);
     if (composerState?.dataset.state === "exporting") {
       if (activeRun) showCurrentActiveTask();
       else setComposerState("error", error.message || "Session could not be exported");
@@ -2024,11 +2080,14 @@ async function submitPrompt(event) {
   const rawMessage = promptTextarea.value;
   const bashCommand = parseNativeBash(rawMessage);
   if (bashCommand) return submitBashPrompt(rawMessage, bashCommand);
+  return sendPrompt(rawMessage, submittedStreamingBehavior());
+}
 
-  const streamingBehavior = submittedStreamingBehavior();
+// Without the composer, the message goes alone: the draft and attachments are neither sent, cleared nor restored.
+async function sendPrompt(rawMessage, streamingBehavior, { composer = true } = {}) {
   const handleBuiltinCommand = streamingBehavior !== "follow_up";
   const exportCommand = handleBuiltinCommand ? sessionExportSlashCommand(rawMessage) : null;
-  if (exportCommand) return submitExportPrompt(rawMessage, exportCommand);
+  if (exportCommand) return submitExportPrompt(rawMessage, exportCommand, { composer });
 
   const queuedPrompt = !!streamingBehavior;
   const followUp = streamingBehavior === "follow_up";
@@ -2047,11 +2106,11 @@ async function submitPrompt(event) {
     return true;
   };
   const message = rawMessage.trim();
-  const submittedImageFiles = pendingImages.map((entry) => entry.file);
+  const submittedImageFiles = composer ? pendingImages.map((entry) => entry.file) : [];
   if (!message && submittedImageFiles.length === 0) return;
   const submissionGeneration = ++promptSubmissionGeneration;
   const submittedPromptSuperseded = () => submissionGeneration !== promptSubmissionGeneration;
-  if (streamingBehavior) selectStreamingBehavior("steer", { focus: false });
+  if (streamingBehavior && composer) selectStreamingBehavior("steer", { focus: false });
 
   const formData = new FormData(promptForm);
   addSessionViewFormParams(formData);
@@ -2074,7 +2133,7 @@ async function submitPrompt(event) {
     if (!queuedPrompt) {
       liveMessageRenderer.resetLiveAssistantTracking();
       document.querySelectorAll(".tree-position-banner").forEach((banner) => banner.remove());
-      const optimisticImages = pendingImages.map((entry) => ({ src: URL.createObjectURL(entry.file), alt: entry.file.name || "Attached image" }));
+      const optimisticImages = submittedImageFiles.map((file) => ({ src: URL.createObjectURL(file), alt: file.name || "Attached image" }));
       liveMessageRenderer.appendMessage("user", message || `[${imageAttachmentLabel(submittedImageFiles.length)}]`, true, true, new Date(), { optimistic: true, optimisticText: message, images: optimisticImages });
     }
     resetEventPollBackoff();
@@ -2087,19 +2146,21 @@ async function submitPrompt(event) {
     liveMessageRenderer.appendPendingCompactionMessage(new Date());
     sidebarController.markSessionCompacting(submittedSession);
   }
-  promptTextarea.value = "";
-  clearStoredComposerDraft(submittedSession);
-  clearAttachments();
-  commandList?.classList.remove("is-visible");
-  commandList?.removeAttribute("open");
-  resetCommandSelection();
-  resizePromptTextarea();
+  if (composer) {
+    promptTextarea.value = "";
+    clearStoredComposerDraft(submittedSession);
+    clearAttachments();
+    commandList?.classList.remove("is-visible");
+    commandList?.removeAttribute("open");
+    resetCommandSelection();
+    resizePromptTextarea();
+  }
   setComposerState("sending", nameCommand ? "Naming…" : compactCommand ? "Compacting…" : reloadCommand ? "Reloading…" : cloneCommand ? "Cloning…" : newCommand ? "Starting…" : forkCommand ? "Opening fork…" : treeCommand ? "Opening tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening instructions…" : compactingQueuedPrompt ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering…" : "Sending…");
   showStatus(nameCommand ? "Setting session name…" : compactCommand ? "Compacting session…" : reloadCommand ? "Reloading Pi resources…" : cloneCommand ? "Cloning session…" : newCommand ? "Starting new session…" : forkCommand ? "Opening fork picker…" : treeCommand ? "Opening session tree…" : modelCommand ? "Opening model settings…" : authGuidanceCommand ? "Opening authentication instructions…" : compactingQueuedPrompt ? "Queueing for after compaction…" : followUp ? "Queueing follow-up…" : steer ? "Steering Pi…" : "Sending…", true);
   if (cloneCommand || newCommand) showSessionSwitching();
 
   const restoreSubmittedPromptInput = () => {
-    restoreSubmittedComposerInput(message, submittedImageFiles);
+    if (composer) restoreSubmittedComposerInput(message, submittedImageFiles);
     if (cloneCommand || newCommand) hideSessionSwitching();
   };
 
@@ -2123,7 +2184,7 @@ async function submitPrompt(event) {
     clearPendingCompaction();
     if (queuedPrompt) {
       const currentState = composerState?.dataset.state;
-      if (["running", "sending"].includes(currentState)) selectStreamingBehavior(streamingBehavior, { focus: false });
+      if (composer && ["running", "sending"].includes(currentState)) selectStreamingBehavior(streamingBehavior, { focus: false });
       if (currentState === "sending") setComposerState("running", compactingQueuedPrompt ? "Compacting…" : WORKING_LABEL, { since: previousWaitingForOutputSince });
       showStatus(errorMessage, true);
       return;
@@ -2203,7 +2264,7 @@ async function submitPrompt(event) {
         showStatus(payload.error, true);
         return;
       }
-      clearStoredComposerDraft(submittedSession);
+      if (composer) clearStoredComposerDraft(submittedSession);
       if (payload?.session && promptSessionInput && payload.session !== promptSessionInput.value) {
         const switched = await switchSession(payload.redirect || `/?session=${encodeURIComponent(payload.session)}`, { push: true, focus: true });
         if (switched) appendSessionNameFeedback(payload);
@@ -2217,7 +2278,7 @@ async function submitPrompt(event) {
       sidebarController.refresh().catch(() => {});
       return;
     }
-    clearStoredComposerDraft(submittedSession);
+    if (composer) clearStoredComposerDraft(submittedSession);
     if (payload?.command === "reload") {
       setComposerState("success", "Reloaded");
       refreshCommandsAfterReload();
@@ -2275,7 +2336,7 @@ async function submitPrompt(event) {
       else if (payload?.steer) showStatus("Steered Pi", true);
     }
   } else {
-    clearStoredComposerDraft(submittedSession);
+    if (composer) clearStoredComposerDraft(submittedSession);
     liveAgentRunning = true;
     setComposerState("running", WORKING_LABEL);
   }
@@ -2714,6 +2775,9 @@ function resetSessionViewState() {
   clearAttachments();
   const modelModal = document.querySelector('[data-modal="model-settings-modal"]');
   if (modelModal) modelModal.hidden = true;
+  // Its commands act on the session they were listed for.
+  const commandPalette = document.querySelector('[data-modal="command-palette-modal"]');
+  if (commandPalette) commandPalette.hidden = true;
   modelSettingsOperationGeneration += 1;
   document.body.classList.toggle("modal-open", piModalIsOpen());
 }
@@ -3302,6 +3366,10 @@ window.addEventListener("gripi:new-session-requested", () => openNewSessionModal
 window.addEventListener("gripi:current-session-find-requested", requestCurrentSessionFind);
 window.addEventListener("gripi:current-session-find-navigation-requested", (event) => requestCurrentSessionFindNavigation(event.detail));
 window.addEventListener("gripi:session-search-requested", requestSessionSearch);
+// The desktop app's menu, like Ctrl+K, which the menu only gets when the page leaves it unhandled.
+window.addEventListener("gripi:command-palette-requested", () => {
+  if (!sessionSwitching()) commandPaletteController.toggle();
+});
 window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
 function handleModalTab(event) {

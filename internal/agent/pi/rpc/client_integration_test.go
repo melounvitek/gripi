@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/melounvitek/gripi/internal/agent"
 )
@@ -43,7 +44,7 @@ func TestClientUsesNativeFakePiRPCWithoutRewritingSessionOnReads(t *testing.T) {
 	logPath := filepath.Join(root, "fake.log")
 	t.Setenv("GRIPI_E2E_FAKE_PI_LOG", logPath)
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", root)
-	client, err := Start(path, []string{node, filepath.Join(repo, "e2e", "support", "fake_pi.mjs")}, filepath.Join(repo, "pi_extensions", "gripi-tree.ts"), nil, nil, nil)
+	client, err := Start(path, "", []string{node, filepath.Join(repo, "e2e", "support", "fake_pi.mjs")}, filepath.Join(repo, "pi_extensions", "gripi-tree.ts"), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +150,7 @@ func TestProcessClientPreservesFinalResponseBeforeImmediateExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for iteration := 0; iteration < 20; iteration++ {
-		client, err := Start(filepath.Join(root, "unused.jsonl"), []string{node, script}, script, nil, nil, nil)
+		client, err := Start(filepath.Join(root, "unused.jsonl"), "", []string{node, script}, script, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -781,6 +782,45 @@ func TestClientBoundsReplayAndCoalescesLiveUpdates(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestClientContinuesTheEventNumbersOfTheClientItReplaces(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+	// Pi can send events while it starts, before the registry hands the client out.
+	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "id": "status", "method": "setStatus", "statusKey": "fixture", "statusText": "ready"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "message": map[string]any{"content": "first"}})
+	// A third event grows the buffer past the coalesced update's place in it.
+	writeRecord(t, stdoutWriter, map[string]any{"type": "turn_start"})
+	waitSequence(t, client, 3)
+
+	client.ContinueEventsAfter(20)
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "message": map[string]any{"content": "second"}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "turn_end"})
+	waitSequence(t, client, 25)
+
+	if batch := client.EventsAfter(0); !batch.Missed || batch.LastSeq != 25 {
+		t.Fatalf("cursor before the replaced client's last event = %#v, want missed", batch)
+	}
+	batch := client.EventsAfter(20)
+	var types []string
+	for _, event := range batch.Events {
+		types = append(types, event["type"].(string))
+	}
+	// The second update replaced the first, as it would without renumbering.
+	if batch.Missed || batch.LastSeq != 25 || !reflect.DeepEqual(types, []string{"extension_ui_request", "turn_start", "message_update", "turn_end"}) {
+		t.Fatalf("events after the replaced client's last event = %#v", batch)
+	}
+	if update := eventOfType(t, batch.Events, "message_update"); !reflect.DeepEqual(update["message"], map[string]any{"content": "second"}) {
+		t.Fatalf("coalesced update = %#v", update)
+	}
+	if snapshot := client.LiveSnapshot(); snapshot.EventSequence != 25 || snapshot.EventReplayCursor != 20 {
+		t.Fatalf("snapshot numbers = %d, %d", snapshot.EventSequence, snapshot.EventReplayCursor)
+	}
+	_ = stdoutWriter.Close()
+}
+
 func TestClientKeepsCurrentReplayCursorThroughImageToolResultLifecycle(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
@@ -1158,6 +1198,103 @@ func TestClientRejectsBashDuringReload(t *testing.T) {
 	}
 }
 
+func TestClientStreamsTheEndOfARunningShellsOutput(t *testing.T) {
+	stdoutReader, stdoutWriter := io.Pipe()
+	var client *Client
+	requests := make(chan map[string]any, 1)
+	// Pi prints the first line before the client learns that it has written the command.
+	stdin := stdinFunc(func(value []byte) (int, error) {
+		var request map[string]any
+		if err := json.Unmarshal(value, &request); err != nil {
+			return 0, err
+		}
+		if _, err := io.WriteString(stdoutWriter, `{"type":"bash_execution_update","id":`+quoted(request["id"].(string))+`,"delta":"zero\n"}`+"\n"); err != nil {
+			return 0, err
+		}
+		for deadline := time.Now().Add(time.Second); ; time.Sleep(time.Millisecond) {
+			client.mu.Lock()
+			stored := client.activeBashOutput != ""
+			client.mu.Unlock()
+			if stored {
+				break
+			}
+			if time.Now().After(deadline) {
+				return 0, errors.New("output printed before the start was not kept")
+			}
+		}
+		requests <- request
+		return len(value), nil
+	})
+	client = NewClient(stdin, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdoutWriter.Close() })
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.Bash(context.Background(), "make", true)
+		done <- err
+	}()
+	var id string
+	select {
+	case request := <-requests:
+		id = request["id"].(string)
+	case err := <-done:
+		t.Fatalf("shell did not start: %v", err)
+	}
+	for deadline := time.Now().Add(time.Second); client.ActiveBashCommand() == ""; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("shell did not start")
+		}
+	}
+	if events := client.EventsAfter(0).Events; len(events) != 2 || events[0]["type"] != "bash_start" || events[1]["type"] != "bash_update" || events[1]["output"] != "zero\n" {
+		t.Fatalf("start events = %#v", events)
+	}
+	cursor := client.EventSequence()
+	updates := func() []map[string]any {
+		t.Helper()
+		var result []map[string]any
+		for _, event := range client.EventsAfter(cursor).Events {
+			if event["type"] == "bash_update" {
+				result = append(result, event)
+			}
+		}
+		return result
+	}
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "bash_execution_update", "id": id, "delta": "one\n"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "bash_execution_update", "id": "bash-other", "delta": "elsewhere\n"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "bash_execution_update", "id": id, "delta": "two\n"})
+	// The end of an agent run that overlaps the command leaves the command's update alone.
+	writeRecord(t, stdoutWriter, map[string]any{"type": "agent_end", "messages": []any{}})
+	waitSequence(t, client, cursor+3)
+	// The update stands on its own, like the command's start.
+	if got := updates(); len(got) != 1 || got[0]["bashId"] != id || got[0]["command"] != "make" || got[0]["excludeFromContext"] != true || got[0]["output"] != "zero\none\ntwo\n" {
+		t.Fatalf("updates = %#v", got)
+	}
+	if output := client.LiveSnapshot().ActiveBash["output"]; output != "zero\none\ntwo\n" {
+		t.Fatalf("snapshot output = %#v", output)
+	}
+
+	// Like an active tool's snapshot, a large output keeps only its end, cut between characters.
+	writeRecord(t, stdoutWriter, map[string]any{"type": "bash_execution_update", "id": id, "delta": strings.Repeat("é", MaxActiveToolSnapshotBytes) + "last"})
+	waitSequence(t, client, cursor+4)
+	output := client.LiveSnapshot().ActiveBash["output"].(string)
+	if len(output) > MaxActiveToolSnapshotBytes || len(output) < MaxActiveToolSnapshotBytes-1 || !utf8.ValidString(output) || !strings.HasSuffix(output, "élast") {
+		t.Fatalf("bounded output = %d bytes, valid %v, ends %q", len(output), utf8.ValidString(output), output[max(0, len(output)-8):])
+	}
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "response", "id": id, "command": "bash", "success": true, "data": map[string]any{"output": "last", "exitCode": 0}})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := updates(); len(got) != 0 || !containsEvent(client.EventsAfter(cursor).Events, "bash_end") || client.LiveSnapshot().ActiveBash != nil {
+		t.Fatalf("ended shell still streams: %#v", client.EventsAfter(cursor).Events)
+	}
+}
+
+type stdinFunc func([]byte) (int, error)
+
+func (write stdinFunc) Write(value []byte) (int, error) { return write(value) }
+func (stdinFunc) Close() error                          { return nil }
+
 func TestClientTimesOutResponsesAndDiscardsLateRPCReplies(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
@@ -1233,12 +1370,15 @@ func TestClientSnapshotsAndAnswersExtensionUIState(t *testing.T) {
 	writeRecord(t, stdoutWriter, map[string]any{"type": "queue_update", "steering": []any{"adjust"}, "followUp": []any{"next"}})
 	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "id": "confirm-1", "method": "confirm", "title": "Approve?", "timeout": 10000})
 	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setStatus", "statusKey": "release", "statusText": "waiting"})
-	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setWidget", "widgetKey": "release", "widgetLines": []any{"one"}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setWidget", "widgetKey": "release", "widgetLines": []any{"one"}, "widgetPlacement": "belowEditor"})
 	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "method": "setTitle", "title": "Release"})
 	waitSequence(t, client, 5)
 	snapshot := client.LiveSnapshot()
 	if snapshot.QueuedMessages["steering"][0] != "adjust" || snapshot.ExtensionUI == nil {
 		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if widgets := snapshot.ExtensionUI["widgets"].([]map[string]any); len(widgets) != 1 || widgets[0]["widgetPlacement"] != "belowEditor" {
+		t.Fatalf("widgets = %#v", widgets)
 	}
 	pending, _ := snapshot.ExtensionUI["pending_dialogs"].([]map[string]any)
 	if len(pending) != 1 || pending[0]["id"] != "confirm-1" {
@@ -1277,7 +1417,7 @@ func TestPiStartsWithoutGatewaySettingsAndASavedVariableWins(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("GRIPI_PORT", "4567")
 	dump := filepath.Join(t.TempDir(), "environment")
-	client, err := Start("unused.jsonl", []string{"/bin/sh", "-c", `env > "$0"`, dump}, "unused.ts", []string{"APP_ENV=saved"}, nil, nil)
+	client, err := Start("unused.jsonl", "", []string{"/bin/sh", "-c", `env > "$0"`, dump}, "unused.ts", []string{"APP_ENV=saved"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

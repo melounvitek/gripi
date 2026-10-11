@@ -44,6 +44,21 @@ for (const scenario of [
             (span) => getComputedStyle(span).color !== getComputedStyle(element).color
           ));
           expect(highlighted).toBe(true);
+
+          // The Copy button sits above the first line of code, so it never covers a long one, and copies on the first tap.
+          const overlaps = await response.locator(".message-code-block").evaluateAll((blocks) => blocks.map((block) => {
+            const firstLine = document.createRange();
+            firstLine.selectNodeContents(block.querySelector("pre code"));
+            return block.querySelector(".code-block-copy-button").getBoundingClientRect().bottom - firstLine.getClientRects()[0].top;
+          }));
+          expect(overlaps).toHaveLength(3);
+          for (const overlap of overlaps) expect.soft(overlap, `${stage}: Copy button above the code`).toBeLessThanOrEqual(0);
+          await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+          const copy = response.locator(".message-code-block").filter({ hasText: "const safeValue = 42;" }).getByRole("button");
+          if (isMobile) await copy.tap();
+          else await copy.click();
+          await expect(copy).toHaveText("Copied");
+          expect((await page.evaluate(() => navigator.clipboard.readText())).trim()).toBe("const safeValue = 42;");
         }
 
         const composer = page.getByLabel("Message to Pi");

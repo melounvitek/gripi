@@ -130,12 +130,17 @@ test("delta-only updates use the gateway partial message and its timestamp", () 
   assert.equal(eventTimestamp(event), gatewayPartialMessage.timestamp);
 });
 
+// The renderer parses each render into a detached element and moves its nodes into the body. Here the HTML is the only node.
+const markdownDocument = { createElement: () => ({ set innerHTML(html) { this.childNodes = [html]; }, querySelectorAll: () => [] }) };
+
 function markdownBody() {
   return {
     dataset: {},
     innerHTML: "",
     textContent: "",
     closest() { return null; },
+    querySelectorAll() { return []; },
+    replaceChildren(...nodes) { this.innerHTML = nodes.join(""); },
   };
 }
 
@@ -336,7 +341,7 @@ test("Markdown binding aborts stale work and newer text waits for the render in 
     return request.promise;
   };
   try {
-    const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
+    const renderer = new ServerMarkdownRenderer(markdownDocument, { afterMarkdownRender() {} });
     const staleBody = markdownBody();
     renderer.render(staleBody, "old", 0);
     await settle(() => requests.length === 1);
@@ -375,7 +380,7 @@ test("unchanged Markdown keeps pending work and completed DOM intact", async () 
     requests.push(options);
     return response.promise;
   };
-  const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
+  const renderer = new ServerMarkdownRenderer(markdownDocument, { afterMarkdownRender() {} });
   try {
     const body = markdownBody();
     let replacements = 0;
@@ -410,7 +415,7 @@ test("Markdown binding allows canceled identical text to restart", async () => {
     return response.promise;
   };
   try {
-    const renderer = new ServerMarkdownRenderer({}, { afterMarkdownRender() {} });
+    const renderer = new ServerMarkdownRenderer(markdownDocument, { afterMarkdownRender() {} });
     const body = markdownBody();
     renderer.render(body, "Same text", 0);
     await settle(() => requests.length === 1);
@@ -603,6 +608,23 @@ test("persisted paired tool results ignore replayed message events with the same
   renderer.renderMessageEvent({ type: "message_start", message: { role: "toolResult", toolCallId: "bash-1", toolName: "bash", content: [{ type: "text", text: "Done" }] } });
 
   assert.equal(appended, 0);
+});
+
+test("a paired tool result sent in both message_start and message_end shows once on its call card", () => {
+  const document = new FakeDocument();
+  const conversation = { element: new FakeElement("section"), followLiveOutput: () => false, afterLiveOutputChange() {}, resetOversizedFollow() {} };
+  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser(), { bind() {} });
+  renderer.liveOutput = new FakeElement("section");
+  renderer.conversationScroll = conversation.element;
+  const call = { type: "toolCall", id: "write-1", name: "write", arguments: { path: "notes.md", content: "hello" } };
+  renderer.renderMessageEvent({ type: "message_end", message: { role: "assistant", content: [call] } });
+  const result = { role: "toolResult", toolCallId: "write-1", toolName: "write", content: [{ type: "text", text: "Wrote notes.md" }], isError: false };
+
+  renderer.renderMessageEvent({ type: "message_start", message: result });
+  renderer.renderMessageEvent({ type: "message_end", message: result });
+
+  assert.equal(renderer.liveOutput.children.length, 1);
+  assert.equal(renderer.liveOutput.querySelector(".message-body").dataset.rawText, "+ hello\n\nWrote notes.md");
 });
 
 test("result-first tool lifecycle updates one fallback result card", () => {

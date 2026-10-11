@@ -252,7 +252,8 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		if err != nil {
 			return nil, err
 		}
-		return adapter.Start(sessionPath, agent.StartOptions{Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
+		cwd, _ := app.pendingSessions.CWD(sessionPath)
+		return adapter.Start(sessionPath, agent.StartOptions{CWD: cwd, Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
 	app.newRPCClient = func(cwd, userID, forkFrom string) (agent.Client, error) {

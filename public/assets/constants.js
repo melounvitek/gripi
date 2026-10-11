@@ -4,6 +4,7 @@ export const SESSION_PRELOAD_MAX_AGE_MS = 1000;
 export const SESSION_SWITCH_TIMEOUT_MS = 12 * 1000;
 export const STALE_SESSION_REFRESH_AFTER_MS = 60 * 1000;
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+export const THINKING_PLACEHOLDER = "Thinking…";
 export const TOOL_OUTPUT_DESKTOP_TAIL_LINES = 18;
 export const TOOL_OUTPUT_MOBILE_TAIL_LINES = 12;
 export const TOOL_OUTPUT_COLLAPSE_CHARACTERS = 500;

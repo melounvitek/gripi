@@ -37,9 +37,10 @@ let recoveryMessage = null;
 let liveGate = null;
 let liveAbort = null;
 
-if (sessionPath) loadSession(sessionPath);
+if (sessionPath && existsSync(sessionPath)) loadSession(sessionPath);
 else if (forkSource) forkSession(forkSource);
-else prepareNewSession();
+// Like Pi, a --session file that does not exist yet gets a new session, which Pi saves there.
+else prepareNewSession(sessionPath);
 log({ event: "started", sessionPath, cwd: process.cwd() });
 process.once("exit", () => log({ event: "stopped" }));
 
@@ -666,8 +667,15 @@ function acceptBash(command) {
     return;
   }
 
-  const operation = { command, timer: null };
+  const operation = { command, timer: null, output: "" };
   activeBash = operation;
+  if (command.command === nativeBash.streaming.command) {
+    // Streams its output while it runs, which ends only when aborted.
+    const [first, second] = nativeBash.streaming.chunks;
+    sendBashOutput(operation, first);
+    operation.timer = setTimeout(() => sendBashOutput(operation, second), 1500);
+    return;
+  }
   if (LONG_BASH_COMMANDS.has(command.command)) {
     operation.timer = setTimeout(() => completeBash(operation, bashResult(command.command)), 30_000);
     return;
@@ -682,7 +690,13 @@ function acceptBashAbort(command) {
   respond(command, true);
   if (!activeBash) return;
 
-  completeBash(activeBash, { output: "", cancelled: true, truncated: false });
+  // Like Pi, an aborted command keeps the output it printed.
+  completeBash(activeBash, { output: activeBash.output, cancelled: true, truncated: false });
+}
+
+function sendBashOutput(operation, delta) {
+  operation.output += delta;
+  send({ type: "bash_execution_update", id: operation.command.id, delta });
 }
 
 function completeBash(operation, result) {
@@ -1354,9 +1368,9 @@ function forkSession(sourcePath) {
   writeFileSync(sessionPath, `${[header, ...entries].map((record) => JSON.stringify(record)).join("\n")}\n`);
 }
 
-function prepareNewSession() {
+function prepareNewSession(filePath) {
   if (!sessionsRoot) throw new Error("GRIPI_E2E_SESSIONS_ROOT is required for new fake sessions");
-  sessionPath = path.join(sessionsRoot, "e2e", `generated-${randomUUID()}.jsonl`);
+  sessionPath = filePath || path.join(sessionsRoot, "e2e", `generated-${randomUUID()}.jsonl`);
   header = {
     type: "session",
     version: 3,

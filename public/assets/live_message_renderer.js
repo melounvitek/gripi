@@ -1,4 +1,4 @@
-import { PAIRED_TOOL_NAMES, TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES, TOOL_OUTPUT_TAIL_CHARACTERS } from "./constants.js";
+import { PAIRED_TOOL_NAMES, THINKING_PLACEHOLDER, TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES, TOOL_OUTPUT_TAIL_CHARACTERS } from "./constants.js";
 import { renderTextWithLinks } from "./dom.js";
 import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimeLabel, messageTimestampKey, normalizedMessageText, stableTextHash } from "./formatting.js";
 import { finishedMarkdownBlocks } from "./paragraph_streaming.js";
@@ -386,11 +386,12 @@ export class LiveMessageRenderer {
 
   renderBashEvent(event) {
     const bashId = event?.bashId || event?.bash_id;
-    if (!bashId || !["bash_start", "bash_end", "bash_error"].includes(event.type)) return null;
+    if (!bashId || !["bash_start", "bash_update", "bash_end", "bash_error"].includes(event.type)) return null;
     if (this.completedBashExecutionIds.has(bashId)) return this.liveBashExecutions.get(bashId) || null;
 
     const timestamp = eventTimestamp(event);
-    if (event.type !== "bash_start") this.completedBashExecutionIds.add(bashId);
+    const running = ["bash_start", "bash_update"].includes(event.type);
+    if (!running) this.completedBashExecutionIds.add(bashId);
     const result = event.result && typeof event.result === "object" ? event.result : {};
     const command = String(event.command || "");
     const excluded = event.excludeFromContext === true || event.exclude_from_context === true;
@@ -400,13 +401,14 @@ export class LiveMessageRenderer {
     const fullOutputPath = truncated && typeof result.fullOutputPath === "string" ? this.parser.displayHomePath(result.fullOutputPath) : "";
     const statusItems = [];
     if (excluded) statusItems.push("excluded from model context");
-    if (event.type === "bash_start") statusItems.push("running");
+    if (running) statusItems.push("running");
     if (event.type === "bash_end" && Number.isInteger(result.exitCode) && result.exitCode !== 0) statusItems.push(`exit ${result.exitCode}`);
     if (cancelled) statusItems.push("cancelled");
     if (truncated) statusItems.push("output truncated");
     if (fullOutputPath) statusItems.push(`full output: ${fullOutputPath}`);
     if (event.type === "bash_error") statusItems.push("failed");
-    const output = event.type === "bash_error" ? String(event.error || "Bash command failed") : String(result.output || "");
+    // A running command's events carry its output so far.
+    const output = event.type === "bash_error" ? String(event.error || "Bash command failed") : String((running ? event.output : result.output) || "");
     const summary = `$ ${this.parser.displayHomePath(command)}`;
 
     let entry = this.liveBashExecutions.get(bashId);
@@ -429,7 +431,7 @@ export class LiveMessageRenderer {
 
     entry.article.dataset.bashId = bashId;
     entry.summaryText.textContent = summary;
-    if (event.type !== "bash_start") {
+    if (!running) {
       const timestampKey = messageTimestampKey(timestamp);
       entry.article.dataset.messageTimestamp = timestampKey;
       entry.article.dataset.messageFingerprint = messageFingerprint("bashExecution", output, timestampKey);
@@ -463,6 +465,7 @@ export class LiveMessageRenderer {
         bashId: active.bash_id,
         command: active.command,
         excludeFromContext: active.exclude_from_context === true,
+        output: active.output,
         ...(Number.isFinite(startedAt) ? { gatewayTimestamp: startedAt } : {})
       };
       this.renderBashEvent(event);
@@ -1179,7 +1182,7 @@ export class LiveMessageRenderer {
     const thinking = roleName === "assistant" && event.type !== "message_end" && ["thinking_start", "thinking_delta"].includes(update.type);
     if (thinking && !segments.some((segment) => segment.thinking && segment.startIndex === update.contentIndex)) {
       const index = update.contentIndex ?? 0;
-      segments = [...segments, { text: "Thinking…", thinking: true, compact: false, startIndex: index, endIndex: index }];
+      segments = [...segments, { text: THINKING_PLACEHOLDER, thinking: true, compact: false, startIndex: index, endIndex: index }];
     }
     if (roleName === "assistant") {
       this.liveAssistantSegments.forEach((entry) => {
@@ -1229,7 +1232,9 @@ export class LiveMessageRenderer {
           this.replaceMessageImages(toolExecutionEntry.article, segment.images);
           this.conversationController.afterLiveOutputChange(shouldScroll, true, errorChanged);
         } else if (pairedToolCallEntry && segment.isToolResult) {
-          const mergedText = segment.toolName === "read" && segment.error !== true ? "" : (segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text : [pairedToolCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\n\n"));
+          // Pi sends the result in both message_start and message_end, so it joins the call's own text, not the card's.
+          pairedToolCallEntry.callText ??= pairedToolCallEntry.body.dataset.rawText;
+          const mergedText = segment.toolName === "read" && segment.error !== true ? "" : (segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text : [pairedToolCallEntry.callText, segment.text].filter(Boolean).join("\n\n"));
           const preview = segment.toolPreview === true || (segment.error === true && pairedToolCallEntry.body.classList.contains("message-body--edit-preview"));
           this.renderToolTranscriptBody(pairedToolCallEntry.body, mergedText, segment.toolName || pairedToolCallEntry.toolName, { preview });
           const errorChanged = pairedToolCallEntry.article.classList.contains("message--tool-error") !== (segment.error === true);

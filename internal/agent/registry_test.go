@@ -405,32 +405,77 @@ func TestRegistryUsesSettlementAndFiveMinuteIdleBoundary(t *testing.T) {
 	}
 }
 
-func TestRegistryDoesNotReportMissedEventsAtAnIdleRetiredClientsLastEvent(t *testing.T) {
+func TestRegistryContinuesTheEventNumbersOfAnIdleRetiredClient(t *testing.T) {
 	now := time.Unix(1_000, 0)
 	client := newRegistryClient()
 	client.sequence = 20
-	registry := NewRegistry(nil, func() time.Time { return now })
+	replacement := newRegistryClient()
+	registry := NewRegistry(func(string) (Client, error) { return replacement, nil }, func() time.Time { return now })
 	if err := registry.Register("/session", client); err != nil {
 		t.Fatal(err)
 	}
 	if closed, err := registry.CloseClientIfExpired("/session", time.Second, now.Add(time.Second), nil); err != nil || !closed {
 		t.Fatalf("idle retirement = %v, %v", closed, err)
 	}
+	// A cursor at the retired client's last event, or a page's first poll, missed nothing and stays at that event.
 	for after, missed := range map[int64]bool{0: false, 19: true, 20: false, 21: true} {
-		if batch := registry.EventsAfter("/session", after); batch.Missed != missed || batch.LastSeq != 0 || batch.Events == nil || len(batch.Events) != 0 {
+		if batch := registry.EventsAfter("/session", after); batch.Missed != missed || batch.LastSeq != 20 || batch.Events == nil || len(batch.Events) != 0 {
 			t.Errorf("after=%d: %#v; want missed=%v", after, batch, missed)
 		}
 	}
+	if snapshot := registry.LiveSnapshot("/session"); snapshot.EventSequence != 20 {
+		t.Errorf("a page loaded without a client starts at %d, want 20", snapshot.EventSequence)
+	}
 
-	replacement := newRegistryClient()
-	if err := registry.Register("/session", replacement); err != nil {
+	if _, err := registry.EnsureClient("/session"); err != nil {
 		t.Fatal(err)
+	}
+	if sequence := replacement.EventSequence(); sequence != 20 {
+		t.Fatalf("the next client numbers its events after %d, want 20", sequence)
 	}
 	if closed, err := registry.CloseClientIfIdle("/session"); err != nil || !closed {
 		t.Fatalf("replacement close = %v, %v", closed, err)
 	}
 	if batch := registry.EventsAfter("/session", 20); !batch.Missed {
 		t.Errorf("cursor from an earlier client after replacement: %#v; want missed", batch)
+	}
+}
+
+func TestRegistryKeepsTheEventCursorOfSnapshotsWhileClientsRetireAndStart(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	client := newRegistryClient()
+	client.sequence = 20
+	registry := NewRegistry(func(string) (Client, error) { return newRegistryClient(), nil }, func() time.Time { return now })
+	if err := registry.Register("/session", client); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	result := make(chan int64, 1)
+	go func() {
+		for {
+			select {
+			case <-done:
+				result <- 20
+				return
+			default:
+			}
+			if sequence := registry.LiveSnapshot("/session").EventSequence; sequence != 20 {
+				result <- sequence
+				return
+			}
+		}
+	}()
+	for range 300 {
+		if closed, err := registry.CloseClientIfExpired("/session", time.Second, now.Add(time.Second), nil); err != nil || !closed {
+			t.Fatalf("idle retirement = %v, %v", closed, err)
+		}
+		if _, err := registry.EnsureClient("/session"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(done)
+	if sequence := <-result; sequence != 20 {
+		t.Fatalf("a snapshot between clients started at %d, want 20", sequence)
 	}
 }
 
@@ -605,11 +650,14 @@ func (client *registryClient) AgentRunning() bool       { return false }
 func (client *registryClient) Compacting() bool         { return false }
 func (client *registryClient) EventSequence() int64     { return client.sequence }
 func (client *registryClient) EventReplayCursor() int64 { return 0 }
+func (client *registryClient) ContinueEventsAfter(sequence int64) {
+	client.sequence += sequence
+}
 func (client *registryClient) EventsAfter(int64) EventBatch {
 	return EventBatch{Events: []json.RawMessage{}}
 }
 func (client *registryClient) LiveSnapshot() LiveSnapshot {
-	return LiveSnapshot{}
+	return LiveSnapshot{EventSequence: client.sequence}
 }
 func (client *registryClient) DeferringCompactionPrompts() bool { return client.deferring }
 func (client *registryClient) QueuedMessagesForStop() (Queue, bool) {

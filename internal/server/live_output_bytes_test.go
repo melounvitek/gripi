@@ -73,7 +73,7 @@ func TestLiveOutputAndEventsKeepTheirBytes(t *testing.T) {
 		send(event)
 	}
 
-	// Shells run in the order of answers: Pi reports the end of two, refuses a third and keeps the last running.
+	// Shells run in the order of answers: Pi reports the end of two, refuses a third and keeps the last running, which has printed a line.
 	commands := json.NewDecoder(stdinReader)
 	var shellIDs []string
 	runShell := func(command string, exclude bool, answer map[string]any) chan error {
@@ -112,6 +112,14 @@ func TestLiveOutputAndEventsKeepTheirBytes(t *testing.T) {
 		_ = json.NewEncoder(stdoutWriter).Encode(map[string]any{"type": "response", "id": shellIDs[3], "command": "bash", "success": true, "data": map[string]any{"output": ""}})
 		<-running
 	})
+	if err := json.NewEncoder(stdoutWriter).Encode(map[string]any{"type": "bash_execution_update", "id": shellIDs[3], "delta": "tick <1>\n"}); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(time.Second); client.EventSequence() < 20; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("shell output was not stored")
+		}
+	}
 	ids := strings.NewReplacer(shellIDs[0], "bash-A", shellIDs[1], "bash-B", shellIDs[2], "bash-C", shellIDs[3], "bash-D")
 	normalized := func(output liveOutputData) liveOutputData {
 		output.ActiveBashJSON = ids.Replace(output.ActiveBashJSON)
@@ -131,12 +139,12 @@ func TestLiveOutputAndEventsKeepTheirBytes(t *testing.T) {
 		{Role: "bashExecution", Summary: "$ sleep 10", Timestamp: recorded},
 	}
 	live := liveOutputData{
-		EventAfter:               19,
+		EventAfter:               20,
 		ActiveToolEventsJSON:     `[{"args":{"path":"README.md"},"gatewayTimestamp":1767323045006,"toolCallId":"read-1","toolName":"read","type":"tool_execution_start"},{"gatewayTimestamp":1767323045006,"partialResult":{"content":[{"text":"Working","type":"text"}]},"toolCallId":"agent-1","toolName":"subagent","type":"tool_execution_update"}]`,
 		ActiveAssistantEventJSON: `{"assistantMessageEvent":{"contentIndex":0,"type":"text_delta"},"gatewayPartialMessage":{"content":[{"text":"Hello \u003cb\u003e\u0026\u2028","type":"text"}],"role":"assistant"},"type":"message_update"}`,
 		ActiveToolTimestampsJSON: `{}`,
 		ActiveToolPromptsJSON:    `{}`,
-		ActiveBashJSON:           `{"bash_id":"bash-D","command":"sleep 10","exclude_from_context":false,"started_at":"2026-01-02T03:04:05.006Z"}`,
+		ActiveBashJSON:           `{"bash_id":"bash-D","command":"sleep 10","exclude_from_context":false,"output":"tick \u003c1\u003e\n","started_at":"2026-01-02T03:04:05.006Z"}`,
 		CompletedBashEventsJSON:  `[{"bashId":"bash-A","command":"printf done","excludeFromContext":false,"gatewayTimestamp":1767323045006,"result":{"cancelled":false,"exitCode":0,"output":"done","truncated":false},"startedAt":1767323045006,"type":"bash_end"},{"bashId":"bash-B","command":"false","excludeFromContext":true,"gatewayTimestamp":1767323045006,"result":{"cancelled":false,"exitCode":1,"fullOutputPath":"/tmp/out","output":"","truncated":true},"startedAt":1767323045006,"type":"bash_end"},{"bashId":"bash-C","command":"missing","error":"Bash failed \u003cx\u003e","excludeFromContext":false,"gatewayTimestamp":1767323045006,"startedAt":1767323045006,"type":"bash_error"}]`,
 		PersistedBashJSON:        `[]`,
 		QueuedMessagesJSON:       `{"followUp":["Then \u0026 more"],"steering":["Steer \u003cnow\u003e"]}`,
@@ -194,8 +202,9 @@ func TestLiveOutputAndEventsKeepTheirBytes(t *testing.T) {
 		`{"bashId":"bash-B","command":"false","excludeFromContext":true,"gatewayTimestamp":1767323045006,"result":{"cancelled":false,"exitCode":1,"fullOutputPath":"/tmp/out","output":"","truncated":true},"startedAt":1767323045006,"type":"bash_end"},` +
 		`{"bashId":"bash-C","command":"missing","excludeFromContext":false,"gatewayTimestamp":1767323045006,"type":"bash_start"},` +
 		`{"bashId":"bash-C","command":"missing","error":"Bash failed \u003cx\u003e","excludeFromContext":false,"gatewayTimestamp":1767323045006,"startedAt":1767323045006,"type":"bash_error"},` +
-		`{"bashId":"bash-D","command":"sleep 10","excludeFromContext":false,"gatewayTimestamp":1767323045006,"type":"bash_start"}` +
-		`],"last_seq":19,"missed":false,"session_sync":{"error":null,"gateway_busy":true,"mode":"available","revision":null}}`
+		`{"bashId":"bash-D","command":"sleep 10","excludeFromContext":false,"gatewayTimestamp":1767323045006,"type":"bash_start"},` +
+		`{"bashId":"bash-D","command":"sleep 10","excludeFromContext":false,"gatewayTimestamp":1767323045006,"output":"tick \u003c1\u003e\n","type":"bash_update"}` +
+		`],"last_seq":20,"missed":false,"session_sync":{"error":null,"gateway_busy":true,"mode":"available","revision":null}}`
 	if body := ids.Replace(response.Body.String()); response.Code != http.StatusOK || body != want {
 		t.Errorf("events = %d %s", response.Code, body)
 	}

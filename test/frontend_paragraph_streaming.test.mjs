@@ -35,7 +35,7 @@ test("delivers completed paragraphs", () => {
 });
 
 test("keeps code fences intact", () => {
-  assert.equal(finishedMarkdownBlocks("Intro\n\n```ts\nx()\n\n"), "Intro\n\n");
+  assert.equal(finishedMarkdownBlocks("Intro\n\n```ts\nx()\n\n"), "Intro\n\n```ts\nx()\n\n");
   assert.equal(finishedMarkdownBlocks("```ts\nx()\n```\nrest"), "```ts\nx()\n```\n");
 });
 
@@ -62,13 +62,21 @@ test("ends a block at an unindented ATX heading even without a blank line", () =
 });
 
 test("closes a code fence only with a bare fence of the same kind and at least the same length", () => {
-  assert.equal(finishedMarkdownBlocks("```\ncode\n```js\nmore\n"), "");
-  assert.equal(finishedMarkdownBlocks("```\ncode\n~~~\nmore\n"), "");
-  assert.equal(finishedMarkdownBlocks("```\ncode\n````\nrest"), "```\ncode\n````\n");
+  // Finished lines of an open fence are code, while an unfinished paragraph below a closed fence would wait.
+  assert.equal(finishedMarkdownBlocks("```\ncode\n```js\nmore\n"), "```\ncode\n```js\nmore\n");
+  assert.equal(finishedMarkdownBlocks("```\ncode\n~~~\nmore\n"), "```\ncode\n~~~\nmore\n");
+  assert.equal(finishedMarkdownBlocks("```\ncode\n````\nrest\n"), "```\ncode\n````\n");
 });
 
-test("does not end a block at a blank line inside a code fence", () => {
-  assert.equal(finishedMarkdownBlocks("```\na\n\nb\n\n"), "");
+test("delivers the finished lines of an open code fence", () => {
+  assert.equal(finishedMarkdownBlocks("Intro\n\n```ts\n"), "Intro\n\n");
+  assert.equal(finishedMarkdownBlocks("Intro\n\n```ts\nx()\ny("), "Intro\n\n```ts\nx()\n");
+  assert.equal(finishedMarkdownBlocks("**Example**\n\n```ts\nx()\n"), "**Example**\n\n```ts\nx()\n");
+  assert.equal(finishedMarkdownBlocks("- one\n  ```sh\n  ls\n  pw"), "- one\n  ```sh\n  ls\n");
+});
+
+test("does not open a code fence at a backtick line whose info string has a backtick", () => {
+  assert.equal(finishedMarkdownBlocks("```ts``` is inline code.\nThis line is finished\nand this one is not"), "");
 });
 
 test("ignores carriage returns and trailing whitespace on boundary lines", () => {

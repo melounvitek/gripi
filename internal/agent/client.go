@@ -18,6 +18,10 @@ type Client interface {
 	EventSequence() int64
 	EventReplayCursor() int64
 	EventsAfter(int64) EventBatch
+	// ContinueEventsAfter numbers the client's events, including those it has already, after the last event of the
+	// client it replaces, so that a cursor from that client stays valid. The registry calls it before anyone reads the
+	// client's events.
+	ContinueEventsAfter(int64)
 	LiveSnapshot() LiveSnapshot
 
 	// State asks the agent about the session.
@@ -167,6 +171,8 @@ type Shell struct {
 	Command            string
 	ExcludeFromContext bool
 	StartedAt          time.Time
+	// Output is what the command printed, or the end of it that the agent keeps while the command runs.
+	Output string
 }
 
 type CompletedShell struct {
@@ -174,7 +180,6 @@ type CompletedShell struct {
 	// Ended says the command ran to its end with the result below, which the session saves. A command that failed to
 	// run has none.
 	Ended     bool
-	Output    string
 	ExitCode  *int
 	Cancelled bool
 	Truncated bool

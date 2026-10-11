@@ -29,7 +29,7 @@ func LiveSnapshotFrom(snapshot rpc.LiveSnapshot) agent.LiveSnapshot {
 	}
 	if active := snapshot.ActiveBash; active != nil {
 		started, _ := active["started_at"].(time.Time)
-		result.ActiveShell = &agent.Shell{ID: stringValue(active["bash_id"]), Command: stringValue(active["command"]), ExcludeFromContext: active["exclude_from_context"] == true, StartedAt: started}
+		result.ActiveShell = &agent.Shell{ID: stringValue(active["bash_id"]), Command: stringValue(active["command"]), ExcludeFromContext: active["exclude_from_context"] == true, StartedAt: started, Output: stringValue(active["output"])}
 	}
 	for _, event := range snapshot.CompletedBashEvents {
 		result.CompletedShells = append(result.CompletedShells, completedShell(event))

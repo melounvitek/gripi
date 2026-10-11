@@ -69,7 +69,8 @@ export const sessions = {
   liveExtensionUi: "E2E Live Extension UI Desktop",
   liveFooter: "E2E Live Footer Desktop",
   liveCompaction: "E2E Live Compaction Desktop",
-  liveThinking: "E2E Live Thinking Desktop"
+  liveThinking: "E2E Live Thinking Desktop",
+  paletteCommands: "E2E Palette Commands Desktop"
 };
 
 export const footerModel = {
@@ -157,6 +158,7 @@ export const nativeBash = {
   nonzero: { command: "exit 7", output: "deterministic nonzero output\n", exitCode: 7 },
   failure: { command: "start-missing-shell # e2e-failure", error: "spawn /bin/missing-shell ENOENT" },
   truncated: { command: "seq 1 100000 # e2e-truncated", output: "99999\n100000\n", fullOutputFile: "pi-bash-e2e-truncated.log" },
+  streaming: { command: "for index in 1 2; do echo \"streamed line $index\"; sleep 1; done # e2e-streaming", chunks: ["streamed line 1\n", "streamed line 2\n"] },
   cancel: { command: "sleep 30 # e2e-cancel" },
   reload: { command: "sleep 30 # e2e-reload" },
   overlap: { command: "sleep 30 # e2e-overlap" },

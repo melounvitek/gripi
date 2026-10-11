@@ -17,8 +17,13 @@ export class CommandPaletteController {
     this.modal.addEventListener("input", () => this.render());
     this.modal.addEventListener("click", (event) => {
       // There is no close button, so a click beside the card closes.
-      if (event.target === this.modal) this.callbacks.closeModal(this.modal);
-      else this.activate(event.target.closest('[role="option"]'));
+      if (event.target === this.modal) {
+        this.callbacks.closeModal(this.modal);
+        return;
+      }
+      // On the page, the click would close a list that the command opens, such as the project filter's.
+      event.stopPropagation();
+      this.activate(event.target.closest('[role="option"]'));
     });
     this.modal.addEventListener("keydown", (event) => this.handleKeydown(event));
   }
@@ -38,6 +43,7 @@ export class CommandPaletteController {
     // Rows appear only once the sessions arrive, so none moves under the cursor afterwards.
     this.sessions = null;
     this.pending = null;
+    this.piCommands = null;
     this.render();
     this.callbacks.openModal(this.modal);
     let sessions = null;
@@ -51,6 +57,18 @@ export class CommandPaletteController {
     this.render();
     // Without the sessions every row is a command, which a waiting Enter or digit never meant.
     if (this.pending && !this.failed) this.activate(this.pending());
+  }
+
+  // Listing Pi's skills, prompt templates and extension commands starts the session's Pi, so as in the composer, only a "/" loads them.
+  async loadPiCommands() {
+    const opening = this.opening;
+    this.piCommands = [];
+    const commands = await this.callbacks.piCommands().catch(() => []);
+    if (opening !== this.opening || this.modal.hidden || !commands.length) return;
+    this.piCommands = commands;
+    // Added below the rows shown, which stay, so the cursor and a mouse button pressed on a row stay on theirs.
+    this.commandGroup("Pi commands", commands);
+    this.finish(this.cursor);
   }
 
   options() {
@@ -76,6 +94,7 @@ export class CommandPaletteController {
 
   sessionRow(session) {
     const row = this.row(session.monogram, session.name, session.age, () => this.callbacks.openSession(session.path));
+    this.rowSessions.set(row, session);
     row.title = session.project;
     if (session.unread) {
       row.classList.add("is-unread");
@@ -119,39 +138,52 @@ export class CommandPaletteController {
     this.list.append(group);
   }
 
+  matches(text) {
+    return this.words.every((word) => text.toLowerCase().includes(word));
+  }
+
+  commandGroup(title, commands) {
+    this.group(title, commands.filter((command) => command && this.matches(`${command.label} ${command.detail || ""}`)).map((command) => this.commandRow(command)));
+  }
+
   render() {
     const words = this.input.value.toLowerCase().split(/\s+/).filter(Boolean);
-    const matches = (text) => words.every((word) => text.toLowerCase().includes(word));
+    this.words = words;
     this.list.replaceChildren();
     this.runs = new Map();
-    let more = 0;
+    this.rowSessions = new Map();
+    this.more = 0;
     if (this.sessions) {
       const current = this.callbacks.currentSessionPath();
-      const matching = this.sessions.filter((session) => session.path !== current && matches(`${session.name}\n${session.project}`));
+      const matching = this.sessions.filter((session) => session.path !== current && this.matches(`${session.name}\n${session.project}`));
       // Unread sessions lead, however old. With nothing typed, the session this tab had open before follows them, so with nothing
       // unread, Ctrl+K then Enter flips between two.
       const previous = words.length ? null : this.callbacks.previousSessionPath();
       const rank = (session) => (session.unread ? 2 : session.path === previous ? 1 : 0);
       matching.sort((left, right) => rank(right) - rank(left));
       const shown = matching.slice(0, words.length ? MATCHING_SESSIONS : RECENT_SESSIONS);
-      more = matching.length - shown.length;
+      this.more = matching.length - shown.length;
       this.group(words.length ? "Sessions" : "Recent sessions", shown.map((session) => this.sessionRow(session)));
-      for (const [title, commands] of this.callbacks.commands()) {
-        this.group(title, commands.filter((command) => command && matches(`${command.label} ${command.detail || ""}`)).map((command) => this.commandRow(command)));
-      }
+      if (!this.piCommands && this.input.value.trimStart().startsWith("/")) this.loadPiCommands();
+      for (const [title, commands] of [...this.callbacks.commands(), ["Pi commands", this.piCommands || []]]) this.commandGroup(title, commands);
     }
+    this.finish(0);
+  }
+
+  // Numbers the rows for Ctrl and a digit, and says what the list leaves out.
+  finish(cursor) {
     const options = this.options();
     options.forEach((option, index) => {
       option.id = `command-palette-option-${index}`;
       option.querySelector(".command-palette-key").textContent = index < 9 ? index + 1 : "";
     });
-    this.setCursor(0);
+    this.setCursor(cursor);
 
     let status = "";
     if (!this.sessions) status = "Loading…";
     else if (this.failed) status = "Could not load sessions.";
     else if (!options.length) status = "No matches.";
-    else if (more) status = `${more} more session${more === 1 ? "" : "s"} · ${words.length ? "keep typing" : "type"} to find them`;
+    else if (this.more) status = `${this.more} more session${this.more === 1 ? "" : "s"} · ${this.words.length ? "keep typing" : "type"} to find them`;
     this.status.textContent = status;
     this.status.hidden = !status;
   }
@@ -184,6 +216,18 @@ export class CommandPaletteController {
       // Enter can beat the sessions: it then opens the first match once they arrive.
       if (this.sessions) this.activate(this.options()[this.cursor]);
       else this.pending = () => this.options()[this.cursor];
+    } else if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase() === "d") {
+      // As in Pi CLI's session picker. The session open here is not listed, and like the sidebar's menu, a running one is refused.
+      event.preventDefault();
+      const session = this.rowSessions.get(this.options()[this.cursor]);
+      if (!session) return;
+      if (session.busy) {
+        this.status.textContent = "Cannot delete a running session";
+        this.status.hidden = false;
+        return;
+      }
+      this.callbacks.closeModal(this.modal);
+      this.callbacks.deleteSession(session);
     }
   }
 }

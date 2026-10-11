@@ -1443,6 +1443,7 @@ func (client *remapClient) EventReplayCursor() int64 { return 0 }
 func (client *remapClient) EventsAfter(int64) agent.EventBatch {
 	return agent.EventBatch{Events: []json.RawMessage{}}
 }
+func (client *remapClient) ContinueEventsAfter(int64) {}
 func (client *remapClient) LiveSnapshot() agent.LiveSnapshot {
 	return client.live
 }

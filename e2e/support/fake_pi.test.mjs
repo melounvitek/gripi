@@ -71,6 +71,25 @@ test("fake Pi follows the native prompt lifecycle for a new session", { timeout:
   assert.deepEqual(persisted.filter((entry) => entry.type === "message").map((entry) => entry.message.role), ["user", "user", "assistant", "toolResult", "assistant"]);
 });
 
+test("fake Pi starts a new session in a --session file that does not exist yet, like Pi", { timeout: 5_000 }, async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-unsaved-"));
+  const fixture = await seedFixtures(root);
+  const project = fixture.projects["new-session-desktop"];
+  const sessionPath = path.join(fixture.sessionsRoot, "e2e", "unsaved.jsonl");
+  const child = spawnFake(fixture, ["--mode", "rpc", "--session", sessionPath], project);
+  context.after(() => cleanup(child, root));
+  const records = recordsFrom(child.stdout);
+
+  child.stdin.write(`${JSON.stringify({ id: "unsaved-state", type: "get_state" })}\n`);
+  assert.equal((await nextRecord(records)).data.sessionFile, sessionPath);
+  child.stdin.write(`${JSON.stringify({ id: "unsaved-prompt", type: "prompt", message: prompts.newSession })}\n`);
+  assert.equal((await nextRecord(records)).id, "unsaved-prompt");
+  while ((await nextRecord(records)).type !== "agent_settled");
+
+  const header = JSON.parse((await readFile(sessionPath, "utf8")).split("\n")[0]);
+  assert.deepEqual([header.type, header.cwd], ["session", project]);
+});
+
 test("fake Pi keeps fresh bash history in memory until an assistant response persists the session", { timeout: 5_000 }, async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "gripi-fake-pi-bash-"));
   const fixture = await seedFixtures(root);

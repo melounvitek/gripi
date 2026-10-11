@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { sessions } from "../support/contract.mjs";
-import { selectSession, sendPrompt } from "../support/ui.mjs";
+import { prompts, replies, sessions } from "../support/contract.mjs";
+import { expectRunFinished, message, selectSession, sendPrompt, startSession } from "../support/ui.mjs";
 
 const GITHUB_LINES = [
   "# gh: pull requests, issues, API",
@@ -307,10 +307,47 @@ test("Pi gets a saved variable from the next message, without the gateway's own 
   const printed = (name) => page.locator('article[data-role="bashExecution"]').filter({ hasText: `$ printenv ${name}` });
   await sendPrompt(page, "!printenv E2E_ENVIRONMENT_TOKEN");
   await expect(printed("E2E_ENVIRONMENT_TOKEN")).toContainText("fake-token-for-pi");
+  // The output shows while the command runs, and the next command can start only after it ends.
+  await expectRunFinished(page);
 
   await sendPrompt(page, "!printenv GRIPI_PORT");
   await expect(printed("GRIPI_PORT")).toBeVisible();
   // The status says "running" until the command ends.
   await expect(printed("GRIPI_PORT").getByRole("status", { name: "Shell command status" })).toBeHidden();
   await expect(printed("GRIPI_PORT").locator(".message-body")).toHaveText("");
+});
+
+test("a new session gets changed variables from its next message and keeps what was chosen in it", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Not specific to touch");
+  await page.goto("/");
+  await startSession(page, "new-session-desktop");
+  await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
+  const session = new URL(page.url()).searchParams.get("session");
+  const modelButton = page.getByRole("button", { name: "Open model and thinking settings" });
+  const picker = page.getByRole("dialog", { name: "Model & thinking" });
+  await modelButton.click();
+  await picker.getByRole("option", { name: /contract-model/ }).click();
+  await modelButton.click();
+  await picker.getByRole("button", { name: "high", exact: true }).click();
+  await expect(modelButton).toContainText("e2e/contract-model (high)");
+  await sendPrompt(page, "/name Release plan");
+  await expect(page.getByRole("heading", { level: 1, name: "Release plan" })).toBeVisible();
+
+  await key(page).click();
+  await add(page, isMobile, "E2E_ENVIRONMENT_TOKEN", "fake-token-for-a-new-session");
+  await expect(status(page)).toHaveText("Saved · used from your next message.");
+  await page.keyboard.press("Escape");
+  await sendPrompt(page, "!printenv E2E_ENVIRONMENT_TOKEN");
+  const printed = page.locator('article[data-role="bashExecution"]').filter({ hasText: "$ printenv E2E_ENVIRONMENT_TOKEN" });
+  await expect(printed).toContainText("fake-token-for-a-new-session");
+
+  // The new Pi's first reply arrives in the same view, and the session is saved with what was chosen before.
+  await sendPrompt(page, prompts.newSession);
+  await expect(message(page, "assistant", replies.newSession)).toBeVisible();
+  await expectRunFinished(page);
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1, name: "Release plan" })).toBeVisible();
+  await expect(modelButton).toContainText("e2e/contract-model (high)");
+  expect(new URL(page.url()).searchParams.get("session")).toBe(session);
+  expect((await page.request.post("/sessions/delete", { form: { session } })).ok()).toBe(true);
 });

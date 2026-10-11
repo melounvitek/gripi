@@ -20,8 +20,6 @@ type clientEntry struct {
 	retiring       bool
 	// Taken before the client's factory ran, so before the factory read anything the client depends on.
 	startedAt time.Time
-	// Last event sequence of the idle-retired client that this one replaced.
-	replacedSequence int64
 }
 
 type Registry struct {
@@ -38,7 +36,7 @@ type Registry struct {
 	shutdownDone     chan struct{}
 	shutdownErr      error
 	resumeOnShutdown bool
-	// Last event sequence of each client retired while idle, until a new client replaces it.
+	// Last event sequence of each client retired while idle, which the next client of its session continues from.
 	retiredSequences map[string]int64
 }
 
@@ -101,8 +99,8 @@ func (registry *Registry) registerStartedAt(path string, client Client, startedA
 		if current != nil {
 			old = current.client
 		}
+		registry.continueRetiredEventsLocked(path, client)
 		registry.clients[path] = newClientEntry(client, startedAt, registry.clock())
-		delete(registry.retiredSequences, path)
 	}
 	diagnostics := registry.diagnostics
 	registry.mu.Unlock()
@@ -112,6 +110,14 @@ func (registry *Registry) registerStartedAt(path string, client Client, startedA
 		}
 	}
 	return nil
+}
+
+// continueRetiredEventsLocked numbers the events of a session's new client after those of its idle-retired one.
+func (registry *Registry) continueRetiredEventsLocked(path string, client Client) {
+	if retired, ok := registry.retiredSequences[path]; ok {
+		client.ContinueEventsAfter(retired)
+		delete(registry.retiredSequences, path)
+	}
 }
 
 func (registry *Registry) Client(path string) Client {
@@ -204,10 +210,19 @@ func (registry *Registry) DeferringCompactionPrompts(path string) bool {
 	return client != nil && client.Compacting()
 }
 func (registry *Registry) LiveSnapshot(path string) LiveSnapshot {
-	if client := registry.Client(path); client != nil {
+	// Read at once, so that a client starting meanwhile cannot hide the retired one's last event.
+	registry.mu.Lock()
+	var client Client
+	if entry := registry.clients[path]; entry != nil && !entry.retiring {
+		client = entry.client
+	}
+	retired := registry.retiredSequences[path]
+	registry.mu.Unlock()
+	if client != nil {
 		return client.LiveSnapshot()
 	}
-	return LiveSnapshot{}
+	// A page loaded between two clients starts at the last event of the one that retired, which the next continues.
+	return LiveSnapshot{EventSequence: retired}
 }
 
 func (registry *Registry) BusySessionCount() int {
@@ -355,10 +370,9 @@ func (registry *Registry) acquire(path string, create, touch, observer bool) (*c
 	entry := existing
 	unused := Client(nil)
 	if entry == nil {
+		registry.continueRetiredEventsLocked(path, client)
 		entry = newClientEntry(client, startedAt, registry.clock())
-		entry.replacedSequence = registry.retiredSequences[path]
 		registry.clients[path] = entry
-		delete(registry.retiredSequences, path)
 	} else {
 		unused = client
 	}
@@ -573,22 +587,21 @@ func (registry *Registry) moveWithCommit(oldPath, newPath string, prepare func()
 }
 
 func (registry *Registry) EventsAfter(path string, after int64) EventBatch {
-	if entry, _ := registry.acquire(path, false, false, false); entry != nil {
-		defer registry.release(entry, false, false)
-		result := entry.client.EventsAfter(after)
-		// A cursor at the last event of the idle-retired client that this one replaced missed nothing, so it gets this
-		// client's events from the first one. Once this client reaches that sequence, the cursor counts as its own, so
-		// a viewer that first polls after that point misses this client's events up to that sequence.
-		if result.Missed && after > 0 && after == entry.replacedSequence {
-			result = entry.client.EventsAfter(0)
-		}
-		return result
-	}
+	// Like acquire, but reads the retired client's last event at once, so that a client starting meanwhile cannot
+	// hide it.
 	registry.mu.Lock()
-	retired, ok := registry.retiredSequences[path]
+	entry := registry.clients[path]
+	if entry == nil || entry.retiring || registry.closed {
+		retired, ok := registry.retiredSequences[path]
+		registry.mu.Unlock()
+		// A cursor at the last event of an idle-retired client has nothing left to replay, and stays there for the
+		// next client, which continues from that event.
+		return EventBatch{Events: []json.RawMessage{}, LastSeq: retired, Missed: after > 0 && !(ok && after == retired)}
+	}
+	entry.activeRequests++
 	registry.mu.Unlock()
-	// A cursor at the last event of an idle-retired client has nothing left to replay.
-	return EventBatch{Events: []json.RawMessage{}, Missed: after > 0 && !(ok && after == retired)}
+	defer registry.release(entry, false, false)
+	return entry.client.EventsAfter(after)
 }
 
 func (registry *Registry) RetireQueuedClient(path string, client Client) (bool, Queue, error) {
@@ -618,11 +631,61 @@ func (registry *Registry) CloseClientIfExpired(path string, idle time.Duration, 
 
 // CloseClientIfStartedBefore retires an idle client that started no later than the given time.
 func (registry *Registry) CloseClientIfStartedBefore(path string, moment time.Time) (bool, error) {
-	return registry.closeIdleWhen(path, func(entry *clientEntry) bool {
-		// Prompts deferred during a compaction exist only in the process until they are delivered.
-		state, ok := entry.client.(CompactionPromptDeferrer)
-		return !entry.startedAt.After(moment) && !(ok && state.DeferringCompactionPrompts())
-	}, nil)
+	return registry.closeIdleWhen(path, func(entry *clientEntry) bool { return startedBefore(entry, moment) }, nil)
+}
+
+func startedBefore(entry *clientEntry, moment time.Time) bool {
+	// Prompts deferred during a compaction exist only in the process until they are delivered.
+	state, ok := entry.client.(CompactionPromptDeferrer)
+	return !entry.startedAt.After(moment) && !(ok && state.DeferringCompactionPrompts())
+}
+
+// restartIfStartedBefore replaces an idle client that started no later than moment with a new one from the factory,
+// which ready prepares from the old one before anyone else reaches it. The old client keeps the session when the new
+// one cannot start or get ready.
+func (registry *Registry) restartIfStartedBefore(path string, moment time.Time, ready func(old, replacement Client) error) (bool, error) {
+	registry.mu.Lock()
+	entry := registry.clients[path]
+	// Observers only read, and the old client keeps answering them until the new one is ready.
+	if registry.closed || entry == nil || entry.retiring || entry.activeRequests > entry.observers || entry.client.Busy() || !startedBefore(entry, moment) {
+		registry.mu.Unlock()
+		return false, nil
+	}
+	entry.retiring = true
+	// Polls during the restart missed nothing at the old client's last event, which the new one continues from.
+	registry.retiredSequences[path] = entry.client.EventSequence()
+	registry.factoryWG.Add(1)
+	defer registry.factoryWG.Done()
+	startedAt := registry.clock()
+	diagnostics := registry.diagnostics
+	registry.mu.Unlock()
+
+	replacement, err := registry.factory(path)
+	if err == nil {
+		err = ready(entry.client, replacement)
+	}
+	registry.mu.Lock()
+	if err == nil && registry.closed {
+		err = ErrClientRetiring
+	}
+	if err == nil {
+		registry.continueRetiredEventsLocked(path, replacement)
+		registry.clients[path] = newClientEntry(replacement, startedAt, registry.clock())
+	} else {
+		delete(registry.retiredSequences, path)
+		entry.retiring = false
+	}
+	registry.mu.Unlock()
+	if err != nil {
+		if replacement != nil {
+			_ = replacement.Close()
+		}
+		return false, err
+	}
+	if err := entry.client.Close(); err != nil {
+		diagnostics.Log("replaced_client_close_failed", map[string]any{"session": path, "error": err.Error()})
+	}
+	return true, nil
 }
 
 // closeIdleWhen closes an idle client that is due and keeps its last event sequence for EventsAfter.

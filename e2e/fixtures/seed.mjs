@@ -214,6 +214,7 @@ export async function seedFixtures(root) {
   await writeSession(root, projects["settings-project"], "live-footer", sessions.liveFooter, 0);
   await writeSession(root, projects["controls-project"], "live-compaction", sessions.liveCompaction, 0);
   await writeSession(root, projects["prompt-project"], "live-thinking", sessions.liveThinking, 0);
+  await writeSession(root, projects["prompt-project"], "palette-commands", sessions.paletteCommands, 0);
 
   const configuredCwdsPath = path.join(state, "configured-cwds");
   await writeFile(configuredCwdsPath, `${projects["new-session-desktop"]}\n${projects["new-session-mobile"]}\n`);

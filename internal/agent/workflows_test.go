@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStartNewSessionRegistersAndTracksAPathBeforeItExists(t *testing.T) {
@@ -214,6 +215,138 @@ func TestBranchSessionFetchesPostSwitchStateInsideTheOriginalLaneAndDoesNotFallB
 	}
 }
 
+func TestRestartUnsavedSessionCarriesWhatWasChosenInItToANewClient(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	old := newChoicesClient("old", "Release plan", LiveStatus{Provider: "e2e", ModelID: "contract-model", ThinkingLevel: "high"})
+	old.sequence = 7
+	replacement := newChoicesClient("new", "", LiveStatus{Provider: "e2e", ModelID: "fixture-model", ThinkingLevel: "medium"})
+	starting, release := make(chan struct{}), make(chan struct{})
+	registry := NewRegistry(func(string) (Client, error) { close(starting); <-release; return replacement, nil }, func() time.Time { return now })
+	if err := registry.Register("/pending", old); err != nil {
+		t.Fatal(err)
+	}
+	pending := NewPendingSessionRegistry(nil)
+	pending.Remember("/pending", "/project", "old")
+
+	result := make(chan error, 1)
+	go func() {
+		restarted, err := RestartUnsavedSession(context.Background(), "/pending", now, registry, pending)
+		if err == nil && !restarted {
+			err = errors.New("not restarted")
+		}
+		result <- err
+	}()
+	<-starting
+	// Until the new client is ready, nothing reaches the session, and the old client's last event is a valid cursor.
+	if _, err := registry.EnsureClient("/pending"); !errors.Is(err, ErrClientRetiring) {
+		t.Fatalf("client during the restart: %v", err)
+	}
+	if batch := registry.EventsAfter("/pending", 7); batch.Missed || batch.LastSeq != 7 {
+		t.Fatalf("poll during the restart = %#v", batch)
+	}
+	close(release)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+
+	if registry.Client("/pending") != replacement || !old.closed() || replacement.closed() {
+		t.Fatalf("registered new=%v, old closed=%v, new closed=%v", registry.Client("/pending") == replacement, old.closed(), replacement.closed())
+	}
+	if replacement.status != old.status || replacement.state.Name != "Release plan" {
+		t.Fatalf("new client has %#v, named %q", replacement.status, replacement.state.Name)
+	}
+	if sequence := replacement.EventSequence(); sequence != 7 {
+		t.Fatalf("new client numbers its events after %d, want 7", sequence)
+	}
+	if entries := pending.Entries(); len(entries) != 1 || entries[0].CWD != "/project" || entries[0].ID != "new" {
+		t.Fatalf("pending = %#v", entries)
+	}
+}
+
+func TestRestartUnsavedSessionKeepsTheOldClientWhenTheNewOneRefusesItsModel(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	old := newChoicesClient("old", "", LiveStatus{Provider: "e2e", ModelID: "contract-model", ThinkingLevel: "high"})
+	replacement := newChoicesClient("new", "", LiveStatus{})
+	replacement.setModelErr = &RequestError{Message: "No API key for e2e/contract-model"}
+	registry := NewRegistry(func(string) (Client, error) { return replacement, nil }, func() time.Time { return now })
+	if err := registry.Register("/pending", old); err != nil {
+		t.Fatal(err)
+	}
+	pending := NewPendingSessionRegistry(nil)
+	pending.Remember("/pending", "/project", "old")
+
+	restarted, err := RestartUnsavedSession(context.Background(), "/pending", now, registry, pending)
+
+	var refused *RequestError
+	if restarted || !errors.As(err, &refused) || refused.Message != "No API key for e2e/contract-model" {
+		t.Fatalf("restart = %v, %v", restarted, err)
+	}
+	if registry.Client("/pending") != old || old.closed() || !replacement.closed() {
+		t.Fatalf("registered old=%v, old closed=%v, new closed=%v", registry.Client("/pending") == old, old.closed(), replacement.closed())
+	}
+	if entries := pending.Entries(); len(entries) != 1 || entries[0].ID != "old" {
+		t.Fatalf("pending = %#v", entries)
+	}
+}
+
+func TestRestartUnsavedSessionLeavesAClientThatStartedAfterTheChangeOrRuns(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	client := newChoicesClient("old", "", LiveStatus{Provider: "e2e", ModelID: "contract-model"})
+	var replacements []*choicesClient
+	registry := NewRegistry(func(string) (Client, error) {
+		replacement := newChoicesClient("new", "", LiveStatus{})
+		replacements = append(replacements, replacement)
+		return replacement, nil
+	}, func() time.Time { return now })
+	if err := registry.Register("/pending", client); err != nil {
+		t.Fatal(err)
+	}
+	pending := NewPendingSessionRegistry(nil)
+
+	if restarted, err := RestartUnsavedSession(context.Background(), "/pending", now.Add(-time.Second), registry, pending); restarted || err != nil {
+		t.Fatalf("client that started after the change: %v, %v", restarted, err)
+	}
+	client.isBusy = true
+	if restarted, err := RestartUnsavedSession(context.Background(), "/pending", now, registry, pending); restarted || err != nil {
+		t.Fatalf("busy client: %v, %v", restarted, err)
+	}
+	// Pi can take a prompt before it reports the run that the prompt starts.
+	client.isBusy = false
+	client.state.Streaming = true
+	if restarted, err := RestartUnsavedSession(context.Background(), "/pending", now, registry, pending); restarted || err != nil {
+		t.Fatalf("client that took a prompt: %v, %v", restarted, err)
+	}
+	if registry.Client("/pending") != client || client.closed() || len(replacements) > 1 || (len(replacements) == 1 && !replacements[0].closed()) {
+		t.Fatalf("the client was replaced, or a new one left running: %d", len(replacements))
+	}
+}
+
+func TestRestartUnsavedSessionDoesNotWaitForObservers(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	old := newChoicesClient("old", "", LiveStatus{})
+	replacement := newChoicesClient("new", "", LiveStatus{})
+	registry := NewRegistry(func(string) (Client, error) { return replacement, nil }, func() time.Time { return now })
+	if err := registry.Register("/pending", old); err != nil {
+		t.Fatal(err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	observed := make(chan error, 1)
+	go func() {
+		observed <- registry.WithObservingClient(context.Background(), "/pending", false, func(Client) error { close(started); <-release; return nil })
+	}()
+	<-started
+
+	restarted, err := RestartUnsavedSession(context.Background(), "/pending", now, registry, NewPendingSessionRegistry(nil))
+
+	close(release)
+	if err := <-observed; err != nil {
+		t.Fatal(err)
+	}
+	if !restarted || err != nil || registry.Client("/pending") != replacement {
+		t.Fatalf("restart with an observer = %v, %v", restarted, err)
+	}
+}
+
 type workflowClient struct {
 	*registryClient
 	state    State
@@ -222,6 +355,36 @@ type workflowClient struct {
 
 func (client *workflowClient) State(context.Context) (State, error) {
 	return client.state, client.stateErr
+}
+
+// choicesClient serves an unsaved session, which holds the model, thinking level and name chosen in it.
+type choicesClient struct {
+	*workflowClient
+	status      LiveStatus
+	setModelErr error
+}
+
+func newChoicesClient(id, name string, status LiveStatus) *choicesClient {
+	return &choicesClient{workflowClient: &workflowClient{registryClient: newRegistryClient(), state: State{ID: id, Name: name}}, status: status}
+}
+
+func (client *choicesClient) LiveStatus(context.Context) (LiveStatus, error) {
+	return client.status, nil
+}
+func (client *choicesClient) ModelSettings(context.Context) (ModelSettings, error) {
+	return ModelSettings{}, nil
+}
+func (client *choicesClient) SetModel(_ context.Context, provider, modelID, thinkingLevel string) (ModelChoice, error) {
+	if client.setModelErr != nil {
+		return ModelChoice{}, client.setModelErr
+	}
+	client.status = LiveStatus{Provider: provider, ModelID: modelID, ThinkingLevel: thinkingLevel}
+	return ModelChoice{ThinkingLevel: thinkingLevel}, nil
+}
+func (client *choicesClient) CycleThinkingLevel(context.Context) (string, error) { return "", nil }
+func (client *choicesClient) Rename(_ context.Context, name string) error {
+	client.state.Name = name
+	return nil
 }
 
 const pendingWorkflowKey = "/sessions/pending.jsonl"
