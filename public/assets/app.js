@@ -1137,8 +1137,7 @@ function renderAttachments() {
 }
 
 function addImageFiles(files, { restore = false } = {}) {
-  // Gripi sends Hermes no images yet.
-  if (!restore && (promptTextarea?.disabled || hermesSession())) return false;
+  if (!restore && promptTextarea?.disabled) return false;
 
   const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
   if (imageFiles.length === 0) return false;
