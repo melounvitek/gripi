@@ -1367,7 +1367,7 @@ func (*followUpRaceClient) LiveStatus(context.Context) (agent.LiveStatus, error)
 }
 func (*followUpRaceClient) Commands(context.Context) ([]agent.Command, error) { return nil, nil }
 func (*followUpRaceClient) NewSession(context.Context) (agent.Branch, error) {
-	return agent.Branch{}, errUnsupportedActionClient
+	return agent.Branch{}, errUnsupportedAction
 }
 func (client *followUpRaceClient) DeferPrompt(context.Context, agent.Prompt) (agent.PromptResult, bool, error) {
 	client.queue()
@@ -1456,11 +1456,11 @@ func (client *remapClient) LiveStatus(context.Context) (agent.LiveStatus, error)
 }
 func (client *remapClient) Commands(context.Context) ([]agent.Command, error) { return nil, nil }
 func (client *remapClient) Prompt(context.Context, agent.Prompt) (agent.PromptResult, error) {
-	return agent.PromptResult{}, errUnsupportedActionClient
+	return agent.PromptResult{}, errUnsupportedAction
 }
-func (client *remapClient) Cancel(context.Context) error { return errUnsupportedActionClient }
+func (client *remapClient) Cancel(context.Context) error { return errUnsupportedAction }
 func (client *remapClient) NewSession(context.Context) (agent.Branch, error) {
-	return agent.Branch{}, errUnsupportedActionClient
+	return agent.Branch{}, errUnsupportedAction
 }
 func (client *remapClient) SessionPosition(context.Context, string) (rpc.SessionEntries, error) {
 	if !client.position.Known && client.position.Error == "" {

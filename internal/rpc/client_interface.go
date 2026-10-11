@@ -35,21 +35,3 @@ func sessionEntriesReader(client RPCClient) (SessionEntriesReader, error) {
 	}
 	return reader, nil
 }
-
-// ActionClient is what the gateway still asks of Pi through raw requests.
-type ActionClient interface {
-	GetState(context.Context) (map[string]any, error)
-	GetAvailableModels(context.Context) (map[string]any, error)
-	ScopedModels(context.Context) (map[string]any, error)
-	SetModel(context.Context, string, string) (map[string]any, error)
-	SetThinkingLevel(context.Context, string) (map[string]any, error)
-	CycleThinkingLevel(context.Context) (map[string]any, error)
-	AbortBash(context.Context) (map[string]any, error)
-	ActiveBashCommand() string
-	ExportHTML(context.Context, string) (map[string]any, error)
-	Bash(context.Context, string, bool) (map[string]any, error)
-	ExtensionUIResponse(context.Context, string, *string, *bool, bool) (map[string]any, error)
-	TreeSnapshot(context.Context, string) (map[string]any, error)
-	NavigateTree(context.Context, string, string, string) (map[string]any, error)
-	SetTreeLabel(context.Context, string, string) (map[string]any, error)
-}

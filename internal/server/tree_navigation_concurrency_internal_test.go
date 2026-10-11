@@ -305,9 +305,10 @@ func TestTreeNavigationReleasesAdmissionOnFailure(t *testing.T) {
 	}
 }
 
-// Keep wrapper behavior local: the idle fixture's embedded ActionClient is nil.
 type treeNavigationClient struct {
 	*idleRetirementClient
+	agent.TreeNavigator // Unexercised actions intentionally have no implementation.
+	agent.ShellRunner
 	name                         string
 	record                       func(string)
 	onState, onAbort, onNavigate func(context.Context) error
@@ -339,17 +340,18 @@ func (client *treeNavigationClient) Close() error {
 	return client.idleRetirementClient.Close()
 }
 
-func (client *treeNavigationClient) NavigateTree(ctx context.Context, entry, summary, instructions string) (map[string]any, error) {
+func (client *treeNavigationClient) NavigateTree(ctx context.Context, entry, summary, instructions string) (agent.Navigation, error) {
 	client.record("Navigate(" + client.name + ")")
 	if entry != "target" || summary != "none" || instructions != "" {
-		return nil, errors.New("unexpected navigation arguments")
+		return agent.Navigation{}, errors.New("unexpected navigation arguments")
 	}
 	if client.onNavigate != nil {
 		if err := client.onNavigate(ctx); err != nil {
-			return nil, err
+			return agent.Navigation{}, err
 		}
 	}
-	return map[string]any{"success": true, "data": map[string]any{"editorText": "branch draft", "cancelled": client.cancelled}}, nil
+	editorText := "branch draft"
+	return agent.Navigation{Cancelled: client.cancelled, EditorText: &editorText}, nil
 }
 
 func (client *treeNavigationClient) DeferPrompt(_ context.Context, prompt agent.Prompt) (agent.PromptResult, bool, error) {
@@ -363,12 +365,12 @@ func (client *treeNavigationClient) DeferPrompt(_ context.Context, prompt agent.
 	return agent.PromptResult{QueuedAfterCompaction: client.queued}, client.queued, nil
 }
 
-func (client *treeNavigationClient) Bash(_ context.Context, command string, excluded bool) (map[string]any, error) {
+func (client *treeNavigationClient) RunShell(_ context.Context, command string, excluded bool) (agent.ShellRun, error) {
 	client.bashes.Add(1)
 	if command != "echo hello" || excluded {
-		return nil, errors.New("unexpected bash arguments")
+		return agent.ShellRun{}, errors.New("unexpected bash arguments")
 	}
-	return map[string]any{"success": true, "id": "bash-test"}, nil
+	return agent.ShellRun{ID: "bash-test", Data: json.RawMessage(`{"id":"bash-test","success":true}`)}, nil
 }
 
 type treeNavigationFixture struct {

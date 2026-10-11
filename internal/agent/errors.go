@@ -13,6 +13,7 @@ var (
 	ErrClientStarting   = errors.New("Pi RPC client is starting")
 	ErrProcessExited    = errors.New("Pi RPC process exited")
 	ErrStartFailed      = errors.New("Pi could not start")
+	ErrInvalidResponse  = errors.New("the agent answered with an invalid response")
 )
 
 // RequestError is a request that the agent refused. Message is the agent's reason, which may be empty.

@@ -147,7 +147,6 @@ func TestNewSessionRegistrationFailureRollsBackCreation(t *testing.T) {
 
 type projectCreationClient struct {
 	*remapClient
-	rpc.ActionClient
 	cancelled bool
 }
 

@@ -20,7 +20,6 @@ import (
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/prompts"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -329,52 +328,43 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	app.writePromptResult(response, request, path, payload)
 }
 
-var errUnsupportedActionClient = errors.New("the agent does not support this action")
+var errUnsupportedAction = errors.New("the agent does not support this action")
 
 // capability finds a feature that only some agents have.
 func capability[T any](client agent.Client) (T, error) {
 	feature, ok := client.(T)
 	if !ok {
-		return feature, errUnsupportedActionClient
+		return feature, errUnsupportedAction
 	}
 	return feature, nil
 }
 
-func checkedActionClient(client agent.Client) (rpc.ActionClient, error) {
-	actions, ok := client.(rpc.ActionClient)
-	if !ok {
-		return nil, errUnsupportedActionClient
-	}
-	return actions, nil
-}
-
 func (app *application) runBash(response http.ResponseWriter, request *http.Request, path, command string, excluded bool) {
-	var result map[string]any
+	var run agent.ShellRun
 	err := app.withSynchronizedBashClient(request, path, func(client agent.Client) error {
-		actions, err := checkedActionClient(client)
+		shell, err := capability[agent.ShellRunner](client)
 		if err != nil {
 			return err
 		}
-		result, err = actions.Bash(request.Context(), command, excluded)
+		run, err = shell.RunShell(request.Context(), command, excluded)
 		return err
 	})
-	var bashErr *rpc.BashRequestError
-	if errors.As(err, &bashErr) {
-		result = map[string]any{"id": bashErr.BashID, "success": false, "error": bashErr.Error()}
-		err = nil
+	var shellErr *agent.ShellError
+	if errors.As(err, &shellErr) {
+		run, err = shellErr.Run, nil
 	}
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
 	}
-	if !wantsJSON(request) && !successfulRPCResponse(result) {
-		app.writeRPCFailure(response, request, stringFromAny(result["error"]), false)
+	if !wantsJSON(request) && run.Failed {
+		app.writeRPCFailure(response, request, run.Error, false)
 		return
 	}
 	if wantsJSON(request) {
-		payload := map[string]any{"command": "bash", "bash_id": result["id"], "data": responseData(result), "exclude_from_context": excluded, "session": path, "redirect": app.sessionRedirectPath(request, path)}
-		if result["success"] == false {
-			payload["error"] = result["error"]
+		payload := map[string]any{"command": "bash", "bash_id": run.ID, "data": run.Data, "exclude_from_context": excluded, "session": path, "redirect": app.sessionRedirectPath(request, path)}
+		if run.Failed {
+			payload["error"] = run.Error
 		}
 		writeJSON(response, payload)
 		return
@@ -431,8 +421,8 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 	}
 	abortClient := func(client agent.Client) error {
 		var err error
-		if actions, ok := client.(rpc.ActionClient); ok && actions.ActiveBashCommand() != "" {
-			_, err = actions.AbortBash(request.Context())
+		if shell, ok := client.(agent.ShellRunner); ok && shell.ShellRunning() {
+			err = shell.CancelShell(request.Context())
 		} else {
 			err = client.Cancel(request.Context())
 		}
@@ -513,37 +503,24 @@ func (app *application) modelSettings(response http.ResponseWriter, request *htt
 	if !ok {
 		return
 	}
-	var stateResponse, modelsResponse, scopedResponse map[string]any
+	var settings agent.ModelSettings
 	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
-		actions, err := checkedActionClient(client)
+		models, err := capability[agent.ModelSelector](client)
 		if err != nil {
 			return err
 		}
-		stateResponse, err = actions.GetState(request.Context())
-		if err == nil {
-			modelsResponse, err = actions.GetAvailableModels(request.Context())
-		}
-		if err == nil {
-			// The scope only picks the list the picker opens on, so the picker still works without it.
-			scopedResponse, _ = actions.ScopedModels(request.Context())
-		}
+		settings, err = models.ModelSettings(request.Context())
 		return err
 	})
+	if errors.Is(err, agent.ErrInvalidResponse) {
+		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not load model settings"})
+		return
+	}
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
 	}
-	state := successfulData(stateResponse)
-	models, valid := successfulData(modelsResponse)["models"].([]any)
-	if state == nil || !valid {
-		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not load model settings"})
-		return
-	}
-	scopedModels, _ := successfulData(scopedResponse)["models"].([]any)
-	if scopedModels == nil {
-		scopedModels = []any{}
-	}
-	writeJSON(response, map[string]any{"state": state, "models": models, "scopedModels": scopedModels})
+	writeJSON(response, map[string]any{"state": settings.State, "models": settings.Models, "scopedModels": settings.ScopedModels})
 }
 
 func (app *application) setModelSettings(response http.ResponseWriter, request *http.Request) {
@@ -575,40 +552,23 @@ func (app *application) setModelSettings(response http.ResponseWriter, request *
 		writeText(response, http.StatusBadRequest, "Invalid thinking level")
 		return
 	}
-	var stateResponse map[string]any
+	var choice agent.ModelChoice
 	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
-		actions, err := checkedActionClient(client)
+		models, err := capability[agent.ModelSelector](client)
 		if err != nil {
 			return err
 		}
-		setting, err := actions.SetModel(request.Context(), provider, modelID)
-		if err != nil {
-			return err
-		}
-		if err := rpcRefusal(setting); err != nil {
-			return err
-		}
-		setting, err = actions.SetThinkingLevel(request.Context(), thinking)
-		if err != nil {
-			return err
-		}
-		if err := rpcRefusal(setting); err != nil {
-			return err
-		}
-		stateResponse, err = actions.GetState(request.Context())
+		choice, err = models.SetModel(request.Context(), provider, modelID, thinking)
 		return err
 	})
-	if app.writeSettingError(response, err) {
-		return
-	}
-	state := successfulData(stateResponse)
-	model, modelOK := state["model"].(map[string]any)
-	confirmedThinking, thinkingOK := state["thinkingLevel"].(string)
-	if state == nil || !modelOK || !thinkingOK {
+	if errors.Is(err, agent.ErrInvalidResponse) {
 		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not confirm model settings"})
 		return
 	}
-	writeJSON(response, map[string]any{"model": model, "thinking": confirmedThinking})
+	if app.writeSettingError(response, err) {
+		return
+	}
+	writeJSON(response, map[string]any{"model": choice.Model, "thinking": choice.ThinkingLevel})
 }
 
 func (app *application) cycleThinking(response http.ResponseWriter, request *http.Request) {
@@ -619,30 +579,21 @@ func (app *application) cycleThinking(response http.ResponseWriter, request *htt
 	if !ok {
 		return
 	}
-	var result map[string]any
+	var level string
 	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
-		actions, err := checkedActionClient(client)
+		models, err := capability[agent.ModelSelector](client)
 		if err != nil {
 			return err
 		}
-		result, err = actions.CycleThinkingLevel(request.Context())
+		level, err = models.CycleThinkingLevel(request.Context())
 		return err
 	})
+	if errors.Is(err, agent.ErrInvalidResponse) {
+		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not change thinking level"})
+		return
+	}
 	if app.writeSettingError(response, err) {
 		return
-	}
-	if !successfulRPCResponse(result) {
-		app.writeRPCSettingFailure(response, stringFromAny(result["error"]))
-		return
-	}
-	data := responseData(result)
-	level := ""
-	if data != nil {
-		level = stringFromAny(data["level"])
-		if level != "" && !slices.Contains(app.adapter.Composer().ThinkingLevels(), level) {
-			writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not change thinking level"})
-			return
-		}
 	}
 	var value any
 	if level != "" {
@@ -948,30 +899,23 @@ func (app *application) treeEntries(response http.ResponseWriter, request *http.
 		writeText(response, http.StatusBadRequest, "Invalid tree filter")
 		return
 	}
-	var result map[string]any
+	var tree json.RawMessage
 	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
-		actions, err := checkedActionClient(client)
+		navigator, err := capability[agent.TreeNavigator](client)
 		if err != nil {
 			return err
 		}
-		result, err = actions.TreeSnapshot(request.Context(), filter)
+		tree, err = navigator.Tree(request.Context(), filter)
 		return err
 	})
-	if app.writeSettingError(response, err) {
-		return
-	}
-	if !successfulRPCResponse(result) {
-		app.writeRPCSettingFailure(response, stringFromAny(result["error"]))
-		return
-	}
-	snapshot := responseData(result)
-	_, entriesOK := snapshot["entries"].([]any)
-	_, settingsOK := snapshot["settings"].(map[string]any)
-	if !entriesOK || !settingsOK || !slices.Contains(app.adapter.Composer().TreeFilters(), stringFromAny(snapshot["filter"])) {
+	if errors.Is(err, agent.ErrInvalidResponse) {
 		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not load session tree"})
 		return
 	}
-	writeJSON(response, snapshot)
+	if app.writeSettingError(response, err) {
+		return
+	}
+	writeJSON(response, tree)
 }
 
 func (app *application) navigateTree(response http.ResponseWriter, request *http.Request) {
@@ -1064,43 +1008,39 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 			return
 		}
 	}
-	var result map[string]any
+	var navigation agent.Navigation
 	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
-		actions, err := checkedActionClient(client)
+		navigator, err := capability[agent.TreeNavigator](client)
 		if err != nil {
 			return err
 		}
 		if summary != "custom" {
 			instructions = ""
 		}
-		result, err = actions.NavigateTree(request.Context(), entryID, summary, instructions)
+		navigation, err = navigator.NavigateTree(request.Context(), entryID, summary, instructions)
 		return err
 	})
+	// The queued messages that the stop dropped go back to the editor, even when the navigation fails.
 	if err != nil && restoredQueuedText != "" {
-		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Could not navigate the session tree.", "editorText": restoredQueuedText})
+		if refused := refusal(err); refused != nil {
+			writeJSONStatus(response, http.StatusUnprocessableEntity, map[string]any{"error": failureMessage(refused.Message, "Could not navigate the session tree."), "editorText": restoredQueuedText})
+		} else {
+			writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Could not navigate the session tree.", "editorText": restoredQueuedText})
+		}
 		return
 	}
 	if app.writeSettingError(response, err) {
 		return
 	}
-	if !successfulRPCResponse(result) {
-		if restoredQueuedText != "" {
-			writeJSONStatus(response, http.StatusUnprocessableEntity, map[string]any{"error": failureMessage(stringFromAny(result["error"]), "Could not navigate the session tree."), "editorText": restoredQueuedText})
-			return
-		}
-		app.writeRPCSettingFailure(response, stringFromAny(result["error"]))
-		return
-	}
-	data := responseData(result)
-	payload := map[string]any{"session": path, "redirect": app.sessionRedirectPath(request, path), "cancelled": data["cancelled"] == true}
+	payload := map[string]any{"session": path, "redirect": app.sessionRedirectPath(request, path), "cancelled": navigation.Cancelled}
 	if restoredQueuedText != "" {
 		payload["editorText"] = restoredQueuedText
-	} else if editor, valid := data["editorText"].(string); valid {
-		if len(editor) > extensionValueBytes {
+	} else if navigation.EditorText != nil {
+		if len(*navigation.EditorText) > extensionValueBytes {
 			writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Extension editor response is too long"})
 			return
 		}
-		payload["editorText"] = editor
+		payload["editorText"] = *navigation.EditorText
 	}
 	writeJSON(response, payload)
 }
@@ -1126,23 +1066,17 @@ func (app *application) setTreeLabel(response http.ResponseWriter, request *http
 		writeText(response, http.StatusBadRequest, "Label is too long")
 		return
 	}
-	var result map[string]any
 	err := app.withSynchronizedClient(request, path, func(client agent.Client) error {
-		actions, err := checkedActionClient(client)
+		navigator, err := capability[agent.TreeNavigator](client)
 		if err != nil {
 			return err
 		}
 		if client.Busy() {
 			return errSessionBusy
 		}
-		result, err = actions.SetTreeLabel(request.Context(), entryID, label)
-		return err
+		return navigator.LabelTreeEntry(request.Context(), entryID, label)
 	})
 	if app.writeSettingError(response, err) {
-		return
-	}
-	if !successfulRPCResponse(result) {
-		app.writeRPCSettingFailure(response, stringFromAny(result["error"]))
 		return
 	}
 	payload := map[string]any{"entryId": entryID, "label": nil}
@@ -1209,21 +1143,19 @@ func (app *application) exportSession(response http.ResponseWriter, request *htt
 	}
 	defer os.Remove(temporaryPath)
 
-	var result map[string]any
 	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
-		actions, err := checkedActionClient(client)
+		exporter, err := capability[agent.Exporter](client)
 		if err != nil {
 			return err
 		}
-		result, err = actions.ExportHTML(request.Context(), temporaryPath)
-		return err
+		return exporter.ExportHTML(request.Context(), temporaryPath)
 	})
-	if err != nil {
-		app.writeActionRPCError(response, err)
+	if refused := refusal(err); refused != nil {
+		app.writeRPCFailure(response, request, refused.Message, true)
 		return
 	}
-	if !successfulRPCResponse(result) {
-		app.writeRPCFailure(response, request, stringFromAny(result["error"]), true)
+	if err != nil {
+		app.writeActionRPCError(response, err)
 		return
 	}
 	file, err := os.Open(temporaryPath)
@@ -1296,31 +1228,29 @@ func (app *application) extensionUIResponse(response http.ResponseWriter, reques
 		writeText(response, http.StatusBadRequest, "Invalid extension UI response")
 		return
 	}
-	var result map[string]any
 	called := false
 	path, ok = app.resolveActionPendingPath(response, request, path)
 	if !ok {
 		return
 	}
 	err := app.rpcClients.WithExistingClient(request.Context(), path, true, func(client agent.Client) error {
-		actions, err := checkedActionClient(client)
+		responder, err := capability[agent.Responder](client)
 		if err != nil {
 			return err
 		}
 		called = true
-		result, err = actions.ExtensionUIResponse(request.Context(), id, value, confirmed, cancelled)
-		return err
+		return responder.Answer(request.Context(), id, agent.Answer{Cancelled: cancelled, Confirmed: confirmed, Value: value})
 	})
+	if refused := refusal(err); refused != nil {
+		app.writeRPCSettingFailure(response, refused.Message)
+		return
+	}
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
 	}
 	if !called {
 		writeText(response, http.StatusNotFound, "No active Pi session")
-		return
-	}
-	if !successfulRPCResponse(result) {
-		app.writeRPCSettingFailure(response, stringFromAny(result["error"]))
 		return
 	}
 	writeJSON(response, map[string]any{"ok": true, "session": path})
@@ -1707,14 +1637,6 @@ func refusal(err error) *agent.RequestError {
 	return refused
 }
 
-// rpcRefusal returns the error of an answer in which Pi refused a raw request.
-func rpcRefusal(response map[string]any) error {
-	if successfulRPCResponse(response) {
-		return nil
-	}
-	return &agent.RequestError{Message: stringFromAny(response["error"])}
-}
-
 var errSessionBusy = errors.New("session is busy")
 
 func (app *application) writeSettingError(response http.ResponseWriter, err error) bool {
@@ -1741,7 +1663,7 @@ func (app *application) writeActionRPCError(response http.ResponseWriter, err er
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": pending.Error()})
 		return true
 	}
-	if errors.Is(err, agent.ErrBashPending) || errors.Is(err, rpc.ErrBashAlreadyRunning) {
+	if errors.Is(err, agent.ErrBashPending) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "A bash command is already running for this session"})
 		return true
 	}
@@ -1810,17 +1732,6 @@ func (app *application) sessionRedirectPath(request *http.Request, path string) 
 
 func wantsJSON(request *http.Request) bool {
 	return strings.Contains(request.Header.Get("Accept"), "application/json")
-}
-
-func successfulRPCResponse(response map[string]any) bool {
-	return response != nil && response["success"] == true
-}
-
-func responseData(response map[string]any) map[string]any {
-	if nested, ok := response["data"].(map[string]any); ok {
-		return nested
-	}
-	return response
 }
 
 func failureMessage(reason, fallback string) string {

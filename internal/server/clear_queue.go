@@ -71,7 +71,6 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 			return
 		}
 	}
-	var result map[string]any
 	var snapshot agent.LiveSnapshot
 	var clearErr error
 	found, supported := false, false
@@ -80,8 +79,8 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		clearer, ok := client.(agent.QueueClearer)
 		supported = ok
 		if ok {
-			result, clearErr = clearer.ClearQueue(request.Context())
-			if clearErr == nil && successfulRPCResponse(result) {
+			clearErr = clearer.ClearQueue(request.Context())
+			if clearErr == nil {
 				snapshot = client.LiveSnapshot()
 			}
 		}
@@ -89,6 +88,7 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		// only this operation's errors out of registry terminal-error handling.
 		return nil
 	})
+	refused := refusal(clearErr)
 	switch {
 	case err != nil:
 		writeError(err)
@@ -96,10 +96,10 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		fail(http.StatusConflict, "No active Pi RPC client for this session")
 	case !supported:
 		fail(http.StatusNotImplemented, "Pi RPC client does not support clearing the queue")
+	case refused != nil:
+		fail(http.StatusUnprocessableEntity, failureMessage(refused.Message, "Could not clear the queue"))
 	case clearErr != nil:
 		writeError(clearErr)
-	case !successfulRPCResponse(result):
-		fail(http.StatusUnprocessableEntity, failureMessage(stringFromAny(result["error"]), "Could not clear the queue"))
 	default:
 		if snapshot.QueuedMessages == nil {
 			snapshot.QueuedMessages = map[string][]string{}

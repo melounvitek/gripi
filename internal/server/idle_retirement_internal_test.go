@@ -18,7 +18,6 @@ import (
 	"github.com/melounvitek/gripi/internal/agent"
 	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -289,16 +288,14 @@ type idleRetirementCall struct {
 
 type idleRetirementClient struct {
 	remapClient
-	rpc.ActionClient // Unexercised actions intentionally have no implementation.
-	onClose          func() error
-	onPrompt         func()
-	closes, queues   atomic.Int32
-	mu               sync.Mutex
-	calls            []idleRetirementCall
+	onClose        func() error
+	onPrompt       func()
+	closes, queues atomic.Int32
+	mu             sync.Mutex
+	calls          []idleRetirementCall
 }
 
 var _ agent.Client = (*idleRetirementClient)(nil)
-var _ rpc.ActionClient = (*idleRetirementClient)(nil)
 
 func (client *idleRetirementClient) Close() error {
 	client.closes.Add(1)

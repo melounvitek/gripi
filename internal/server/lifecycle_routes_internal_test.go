@@ -13,7 +13,6 @@ import (
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -79,12 +78,12 @@ func TestLifecycleDecisionsFailClosed(t *testing.T) {
 
 type lifecycleStateClient struct {
 	*remapClient
-	rpc.ActionClient
-	stateErr  error
-	onState   func()
-	closed    bool
-	aborted   bool
-	navigated bool
+	agent.TreeNavigator // Unexercised actions intentionally have no implementation.
+	stateErr            error
+	onState             func()
+	closed              bool
+	aborted             bool
+	navigated           bool
 }
 
 func (client *lifecycleStateClient) State(context.Context) (agent.State, error) {
@@ -102,7 +101,7 @@ func (client *lifecycleStateClient) Cancel(context.Context) error {
 	client.aborted = true
 	return nil
 }
-func (client *lifecycleStateClient) NavigateTree(context.Context, string, string, string) (map[string]any, error) {
+func (client *lifecycleStateClient) NavigateTree(context.Context, string, string, string) (agent.Navigation, error) {
 	client.navigated = true
-	return map[string]any{"success": true}, nil
+	return agent.Navigation{}, nil
 }

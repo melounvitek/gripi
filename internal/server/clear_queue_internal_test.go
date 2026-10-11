@@ -473,12 +473,16 @@ type clearQueueClient struct {
 	err                    error
 }
 
-func (client *clearQueueClient) ClearQueue(context.Context) (map[string]any, error) {
+// ClearQueue answers like Pi's client: result is Pi's answer, which fails the clear unless it succeeded.
+func (client *clearQueueClient) ClearQueue(context.Context) error {
 	client.clears.Add(1)
 	if client.onClear != nil {
 		client.onClear()
 	}
-	return client.result, client.err
+	if client.err == nil && client.result["success"] != true {
+		return &agent.RequestError{Message: stringFromAny(client.result["error"])}
+	}
+	return client.err
 }
 func (client *clearQueueClient) Close() error {
 	client.closes.Add(1)

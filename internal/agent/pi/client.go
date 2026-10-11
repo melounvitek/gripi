@@ -3,6 +3,9 @@ package pi
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/melounvitek/gripi/internal/agent"
@@ -25,7 +28,11 @@ var (
 	_ agent.Compacter                = (*Client)(nil)
 	_ agent.Renamer                  = (*Client)(nil)
 	_ agent.Reloader                 = (*Client)(nil)
-	_ rpc.ActionClient               = (*Client)(nil)
+	_ agent.Exporter                 = (*Client)(nil)
+	_ agent.ShellRunner              = (*Client)(nil)
+	_ agent.TreeNavigator            = (*Client)(nil)
+	_ agent.ModelSelector            = (*Client)(nil)
+	_ agent.Responder                = (*Client)(nil)
 	_ rpc.SessionEntriesReader       = (*Client)(nil)
 )
 
@@ -275,7 +282,7 @@ func (client *Client) ForkMessages(ctx context.Context) (json.RawMessage, error)
 	if messages == nil {
 		messages = []any{}
 	}
-	return json.Marshal(messages)
+	return encoded(messages), nil
 }
 
 func (client *Client) Compact(ctx context.Context, instructions string) error {
@@ -288,6 +295,138 @@ func (client *Client) Rename(ctx context.Context, name string) error {
 
 func (client *Client) Reload(ctx context.Context) error {
 	return answer(client.Client.Reload(ctx))
+}
+
+func (client *Client) ExportHTML(ctx context.Context, path string) error {
+	return answer(client.Client.ExportHTML(ctx, path))
+}
+
+func (client *Client) RunShell(ctx context.Context, command string, excludeFromContext bool) (agent.ShellRun, error) {
+	response, err := client.Bash(ctx, command, excludeFromContext)
+	var requestErr *rpc.BashRequestError
+	switch {
+	case errors.As(err, &requestErr):
+		return agent.ShellRun{}, &agent.ShellError{Run: shellRun(map[string]any{"id": requestErr.BashID, "success": false, "error": requestErr.Error()}), Err: err}
+	case errors.Is(err, rpc.ErrBashAlreadyRunning):
+		return agent.ShellRun{}, fmt.Errorf("%w: %w", agent.ErrBashPending, err)
+	case err != nil:
+		return agent.ShellRun{}, err
+	}
+	return shellRun(response), nil
+}
+
+// shellRun passes Pi's answer to the browser as it is, or the whole answer when Pi refused the command.
+func shellRun(response map[string]any) agent.ShellRun {
+	return agent.ShellRun{ID: stringValue(response["id"]), Failed: response["success"] != true, Error: stringValue(response["error"]), Data: encoded(responseData(response))}
+}
+
+func (client *Client) ShellRunning() bool {
+	return client.ActiveBashCommand() != ""
+}
+
+func (client *Client) CancelShell(ctx context.Context) error {
+	return answer(client.AbortBash(ctx))
+}
+
+func (client *Client) Tree(ctx context.Context, filter string) (json.RawMessage, error) {
+	response, err := client.TreeSnapshot(ctx, filter)
+	if err := answer(response, err); err != nil {
+		return nil, err
+	}
+	tree := responseData(response)
+	_, entries := tree["entries"].([]any)
+	_, settings := tree["settings"].(map[string]any)
+	if !entries || !settings || !slices.Contains(treeFilters, stringValue(tree["filter"])) {
+		return nil, agent.ErrInvalidResponse
+	}
+	return encoded(tree), nil
+}
+
+func (client *Client) NavigateTree(ctx context.Context, entryID, summary, instructions string) (agent.Navigation, error) {
+	response, err := client.Client.NavigateTree(ctx, entryID, summary, instructions)
+	if err := answer(response, err); err != nil {
+		return agent.Navigation{}, err
+	}
+	data := responseData(response)
+	navigation := agent.Navigation{Cancelled: data["cancelled"] == true}
+	if text, ok := data["editorText"].(string); ok {
+		navigation.EditorText = &text
+	}
+	return navigation, nil
+}
+
+func (client *Client) LabelTreeEntry(ctx context.Context, entryID, label string) error {
+	return answer(client.SetTreeLabel(ctx, entryID, label))
+}
+
+// ModelSettings passes Pi's state and models to the browser. The scoped models only pick the list that the picker
+// opens on, so the picker still works without them.
+func (client *Client) ModelSettings(ctx context.Context) (agent.ModelSettings, error) {
+	stateResponse, err := client.GetState(ctx)
+	if err != nil {
+		return agent.ModelSettings{}, err
+	}
+	modelsResponse, err := client.GetAvailableModels(ctx)
+	if err != nil {
+		return agent.ModelSettings{}, err
+	}
+	scopedResponse, _ := client.ScopedModels(ctx)
+	state := successfulData(stateResponse)
+	models, valid := successfulData(modelsResponse)["models"].([]any)
+	if state == nil || !valid {
+		return agent.ModelSettings{}, agent.ErrInvalidResponse
+	}
+	scoped, _ := successfulData(scopedResponse)["models"].([]any)
+	if scoped == nil {
+		scoped = []any{}
+	}
+	return agent.ModelSettings{State: encoded(state), Models: encoded(models), ScopedModels: encoded(scoped)}, nil
+}
+
+func (client *Client) SetModel(ctx context.Context, provider, modelID, thinkingLevel string) (agent.ModelChoice, error) {
+	if err := answer(client.Client.SetModel(ctx, provider, modelID)); err != nil {
+		return agent.ModelChoice{}, err
+	}
+	if err := answer(client.SetThinkingLevel(ctx, thinkingLevel)); err != nil {
+		return agent.ModelChoice{}, err
+	}
+	stateResponse, err := client.GetState(ctx)
+	if err != nil {
+		return agent.ModelChoice{}, err
+	}
+	state := successfulData(stateResponse)
+	model, modelOK := state["model"].(map[string]any)
+	thinking, thinkingOK := state["thinkingLevel"].(string)
+	if !modelOK || !thinkingOK {
+		return agent.ModelChoice{}, agent.ErrInvalidResponse
+	}
+	return agent.ModelChoice{Model: encoded(model), ThinkingLevel: thinking}, nil
+}
+
+func (client *Client) CycleThinkingLevel(ctx context.Context) (string, error) {
+	response, err := client.Client.CycleThinkingLevel(ctx)
+	if err := answer(response, err); err != nil {
+		return "", err
+	}
+	level := stringValue(responseData(response)["level"])
+	if level != "" && !slices.Contains(thinkingLevels, level) {
+		return "", agent.ErrInvalidResponse
+	}
+	return level, nil
+}
+
+func (client *Client) Answer(ctx context.Context, id string, reply agent.Answer) error {
+	return answer(client.ExtensionUIResponse(ctx, id, reply.Value, reply.Confirmed, reply.Cancelled))
+}
+
+func (client *Client) ClearQueue(ctx context.Context) error {
+	return answer(client.Client.ClearQueue(ctx))
+}
+
+// encoded passes on a value that Pi sent: values decoded from JSON always encode again.
+func encoded(value any) json.RawMessage {
+	data, _ := json.Marshal(value)
+	return data
 }
 
 // answer returns the error of a request that failed or that Pi refused.

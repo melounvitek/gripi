@@ -558,13 +558,6 @@ func (app *application) retireRPCClient(ctx context.Context, path string, close 
 	return err
 }
 
-func successfulData(response map[string]any) map[string]any {
-	if response["success"] != true {
-		return nil
-	}
-	data, _ := response["data"].(map[string]any)
-	return data
-}
 func numericValue(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float64:
