@@ -15,6 +15,16 @@ var (
 	ErrStartFailed      = errors.New("Pi could not start")
 )
 
+// RequestError is a request that the agent refused. Message is the agent's reason, which may be empty.
+type RequestError struct{ Message string }
+
+func (err *RequestError) Error() string {
+	if err.Message == "" {
+		return "the agent refused the request"
+	}
+	return err.Message
+}
+
 type RequestTimeoutError struct {
 	Command  string
 	Accepted bool

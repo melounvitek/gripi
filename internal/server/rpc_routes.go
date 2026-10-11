@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -64,7 +63,8 @@ func (app *application) liveSessionStatus(response http.ResponseWriter, request 
 	}
 	live := app.readLiveStatus(request.Context(), path)
 	var status agent.Status
-	if live == nil || !live.diskIndependent {
+	// The saved status fills in what the agent doesn't report.
+	if live == nil || live.Provider == "" || live.ModelID == "" || live.ThinkingLevel == "" || live.Context == nil {
 		if app.sessionStore.Exists(path) {
 			persisted, err := app.sessionStore.Status(path)
 			if err != nil {
@@ -104,29 +104,26 @@ func (app *application) commands(response http.ResponseWriter, request *http.Req
 		return
 	}
 	app.rpcDiagnostics.Log("request_operation", map[string]any{"path": request.URL.Path, "session": path, "lane": "operation"})
-	var rpcResponse map[string]any
+	composer := app.adapter.Composer()
+	var agentCommands []agent.Command
 	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		var requestErr error
-		rpcResponse, requestErr = client.GetCommands(request.Context())
+		agentCommands, requestErr = client.Commands(request.Context())
 		return requestErr
 	})
-	commands := rpc.CommandsFrom(rpcResponse)
-	if err != nil {
-		if !commandCatalogFallbackError(err) && app.writeRPCError(response, err) {
-			return
-		}
-		commands = rpc.BuiltinCommands()
+	// Without the agent's own commands, the palette still lists those of the gateway.
+	commands := composer.Commands()
+	if err == nil {
+		commands = append(commands, agentCommands...)
+	} else if !commandCatalogFallbackError(err) && app.writeRPCError(response, err) {
+		return
 	}
 	groups := make([]commandGroup, 0, 4)
-	for _, source := range []string{"extension", "prompt", "skill", "other"} {
+	for _, source := range composer.CommandGroups() {
 		group := commandGroup{Source: source}
 		for _, command := range commands {
-			commandSource := stringFromAny(command["source"])
-			if commandSource == "" {
-				commandSource = "other"
-			}
-			if commandSource == source {
-				group.Commands = append(group.Commands, commandView{Name: stringFromAny(command["name"]), Description: stringFromAny(command["description"])})
+			if command.Group == source {
+				group.Commands = append(group.Commands, commandView{Name: command.Name, Description: command.Description})
 			}
 		}
 		if len(group.Commands) > 0 {
@@ -148,71 +145,34 @@ type commandView struct{ Name, Description string }
 
 func (command commandView) Text() string { return "/" + command.Name + " " + command.Description }
 
-type liveStatus struct {
-	provider, modelID, thinking string
-	context                     map[string]any
-	diskIndependent             bool
-}
-
-func (app *application) readLiveStatus(ctx context.Context, path string) *liveStatus {
-	var stateResponse, statsResponse map[string]any
+// readLiveStatus returns nil when no client runs the session.
+func (app *application) readLiveStatus(ctx context.Context, path string) *agent.LiveStatus {
+	var status *agent.LiveStatus
 	err := app.rpcClients.WithObservingClient(ctx, path, false, func(client agent.Client) error {
-		var err error
-		stateResponse, err = client.GetState(ctx)
-		if err != nil {
-			return err
-		}
-		statsResponse, err = client.GetSessionStats(ctx)
+		live, err := client.LiveStatus(ctx)
+		status = &live
 		return err
 	})
-	if err != nil || stateResponse == nil || statsResponse == nil {
+	if err != nil {
 		return nil
 	}
-	state := successfulData(stateResponse)
-	stats := successfulData(statsResponse)
-	result := &liveStatus{}
-	if model, ok := state["model"].(map[string]any); ok {
-		result.provider = nonemptyString(model["provider"])
-		result.modelID = nonemptyString(model["id"])
-	}
-	result.thinking = nonemptyString(state["thinkingLevel"])
-	if contextUsage, ok := stats["contextUsage"].(map[string]any); ok && validContextUsage(contextUsage) {
-		result.context = contextUsage
-	}
-	result.diskIndependent = result.provider != "" && result.modelID != "" && result.thinking != "" && result.context != nil
-	return result
+	return status
 }
 
-func applyLiveStatus(status *agent.Status, live *liveStatus) {
-	if live.provider != "" {
-		status.Provider = live.provider
+func applyLiveStatus(status *agent.Status, live *agent.LiveStatus) {
+	if live.Provider != "" {
+		status.Provider = live.Provider
 	}
-	if live.modelID != "" {
-		status.ModelID = live.modelID
+	if live.ModelID != "" {
+		status.ModelID = live.ModelID
 	}
-	if live.thinking != "" {
-		status.ThinkingLevel = live.thinking
+	if live.ThinkingLevel != "" {
+		status.ThinkingLevel = live.ThinkingLevel
 	}
-	if live.context != nil {
-		if value, ok := numericValue(live.context["tokens"]); ok {
-			status.ContextTokens = value
-			status.HasContextTokens = true
-		} else {
-			status.ContextTokens = 0
-			status.HasContextTokens = false
-		}
-		if value, ok := numericValue(live.context["contextWindow"]); ok {
-			status.ContextLimit = value
-			status.HasContextLimit = true
-		} else {
-			status.ContextLimit = 0
-			status.HasContextLimit = false
-		}
-		if value, ok := numericValue(live.context["percent"]); ok {
-			status.ContextPercent = value
-		} else {
-			status.ContextPercent = 0
-		}
+	if live.Context != nil {
+		status.ContextTokens, status.HasContextTokens = live.Context.Tokens, live.Context.HasTokens
+		status.ContextLimit, status.HasContextLimit = live.Context.Window, live.Context.HasWindow
+		status.ContextPercent = live.Context.Percent
 		status.ContextEstimated = false
 	}
 }
@@ -295,9 +255,9 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 		path = session.Path
 	}
 	if cwd, ok := app.pendingSessions.CWD(path); ok && app.rpcClients.Active(path) {
-		var state map[string]any
-		if app.rpcClients.WithExistingClient(ctx, path, false, func(client agent.Client) error { var err error; state, err = client.GetState(ctx); return err }) == nil {
-			reported := sessionFileFrom(state)
+		var state agent.State
+		if app.rpcClients.WithExistingClient(ctx, path, false, func(client agent.Client) error { var err error; state, err = client.State(ctx); return err }) == nil {
+			reported := state.Key
 			if reported != "" {
 				if session, ok := app.sessionStore.Session(reported); ok && session.CWD == cwd {
 					if err := app.movePendingRPCClient(request, path, session.Path); err != nil {
@@ -323,14 +283,14 @@ func (app *application) canonicalRPCSessionPath(request *http.Request, path stri
 		if pending.CWD != session.CWD || !app.rpcClients.Active(pending.Path) {
 			continue
 		}
-		var state map[string]any
+		var state agent.State
 		err := app.rpcClients.WithExistingClient(ctx, pending.Path, false, func(client agent.Client) error {
 			var requestErr error
-			state, requestErr = client.GetState(ctx)
+			state, requestErr = client.State(ctx)
 			return requestErr
 		})
 		if err == nil {
-			reported, found := app.sessionStore.Session(sessionFileFrom(state))
+			reported, found := app.sessionStore.Session(state.Key)
 			if found && reported.Path == session.Path {
 				if err := app.movePendingRPCClient(request, pending.Path, session.Path); err != nil {
 					return path, err
@@ -605,29 +565,6 @@ func successfulData(response map[string]any) map[string]any {
 	data, _ := response["data"].(map[string]any)
 	return data
 }
-func sessionFileFrom(response map[string]any) string {
-	data := response
-	if nested, ok := response["data"].(map[string]any); ok {
-		data = nested
-	}
-	for _, key := range []string{"sessionFile", "session_file", "path"} {
-		if value := stringFromAny(data[key]); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-func validContextUsage(value map[string]any) bool {
-	for _, key := range []string{"tokens", "contextWindow", "percent"} {
-		if value[key] == nil {
-			continue
-		}
-		if _, ok := numericValue(value[key]); !ok {
-			return false
-		}
-	}
-	return true
-}
 func numericValue(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float64:
@@ -643,8 +580,7 @@ func numericValue(value any) (float64, bool) {
 		return 0, false
 	}
 }
-func stringFromAny(value any) string  { result, _ := value.(string); return result }
-func nonemptyString(value any) string { return stringFromAny(value) }
+func stringFromAny(value any) string { result, _ := value.(string); return result }
 func commandCatalogFallbackError(err error) bool {
 	return errors.Is(err, agent.ErrOperationPending) || errors.Is(err, agent.ErrClientRetiring) || errors.Is(err, agent.ErrClientStarting) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, agent.ErrProcessExited)
 }

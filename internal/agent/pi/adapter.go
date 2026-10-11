@@ -83,11 +83,9 @@ func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Cli
 	if err != nil {
 		return nil, err
 	}
-	client, err := rpc.Start(key, adapter.command, extensionPath, options.Env, options.Diagnostics, observer(options.Observe))
-	if err != nil {
-		return nil, err
-	}
-	return client, nil
+	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
+		return rpc.Start(key, adapter.command, extensionPath, options.Env, options.Diagnostics, observer)
+	})
 }
 
 func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOptions) (agent.Client, error) {
@@ -95,18 +93,9 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 	if err != nil {
 		return nil, err
 	}
-	client, err := rpc.StartInCWD(cwd, forkFrom, adapter.command, extensionPath, options.Env, options.Diagnostics, observer(options.Observe))
-	if err != nil {
-		return nil, err
-	}
-	return client, nil
-}
-
-func observer(observe func(agent.Client, map[string]any)) func(*rpc.Client, map[string]any) {
-	if observe == nil {
-		return nil
-	}
-	return func(client *rpc.Client, event map[string]any) { observe(client, event) }
+	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
+		return rpc.StartInCWD(cwd, forkFrom, adapter.command, extensionPath, options.Env, options.Diagnostics, observer)
+	})
 }
 
 func (adapter *Adapter) Composer() agent.Composer {

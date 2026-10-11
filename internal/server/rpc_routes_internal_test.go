@@ -533,9 +533,9 @@ func TestEventsReportsUnreplayableCursors(t *testing.T) {
 				stdinReader, stdinWriter := io.Pipe()
 				stdoutReader, stdoutWriter := io.Pipe()
 				observed := make(chan struct{}, 1)
-				client := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{
+				client := &agentpi.Client{Client: rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{
 					EventObserver: func(*rpc.Client, map[string]any) { observed <- struct{}{} },
-				})
+				})}
 				t.Cleanup(func() { _ = client.Close(); _ = stdinReader.Close(); _ = stdoutWriter.Close() })
 				if err := registry.Register(path, client); err != nil {
 					t.Fatal(err)
@@ -1357,36 +1357,42 @@ type followUpRaceClient struct {
 	prompted       bool
 }
 
-func (*followUpRaceClient) Close() error                     { return nil }
-func (*followUpRaceClient) Compacting() bool                 { return false }
-func (*followUpRaceClient) DeferringCompactionPrompts() bool { return false }
-func (*followUpRaceClient) LiveSnapshot() agent.LiveSnapshot { return agent.LiveSnapshot{} }
-func (*followUpRaceClient) GetState(context.Context) (map[string]any, error) {
-	return map[string]any{"success": true}, nil
+func (*followUpRaceClient) Close() error                               { return nil }
+func (*followUpRaceClient) Compacting() bool                           { return false }
+func (*followUpRaceClient) DeferringCompactionPrompts() bool           { return false }
+func (*followUpRaceClient) LiveSnapshot() agent.LiveSnapshot           { return agent.LiveSnapshot{} }
+func (*followUpRaceClient) State(context.Context) (agent.State, error) { return agent.State{}, nil }
+func (*followUpRaceClient) LiveStatus(context.Context) (agent.LiveStatus, error) {
+	return agent.LiveStatus{}, nil
 }
-func (client *followUpRaceClient) QueueCompactionFollowUp(context.Context, string, []agent.PromptImage) (map[string]any, bool, error) {
+func (*followUpRaceClient) Commands(context.Context) ([]agent.Command, error) { return nil, nil }
+func (*followUpRaceClient) NewSession(context.Context) (agent.Branch, error) {
+	return agent.Branch{}, errUnsupportedActionClient
+}
+func (client *followUpRaceClient) DeferPrompt(context.Context, agent.Prompt) (agent.PromptResult, bool, error) {
 	client.queue()
-	return nil, false, nil
+	return agent.PromptResult{}, false, nil
 }
-func (client *followUpRaceClient) QueueCompactionPrompt(context.Context, string, []agent.PromptImage, string) (map[string]any, bool, error) {
-	client.queue()
-	return nil, false, nil
+func (client *followUpRaceClient) Prompt(_ context.Context, prompt agent.Prompt) (agent.PromptResult, error) {
+	if prompt.Images != nil {
+		if _, err := prompt.Images(); err != nil {
+			return agent.PromptResult{}, err
+		}
+	}
+	if prompt.Delivery == agent.FollowUp {
+		client.followUpCalled = true
+	} else {
+		client.prompted = true
+	}
+	return agent.PromptResult{}, nil
 }
-func (client *followUpRaceClient) FollowUp(context.Context, string, []agent.PromptImage) (map[string]any, error) {
-	client.followUpCalled = true
-	return map[string]any{"success": true}, nil
-}
-func (client *followUpRaceClient) Prompt(context.Context, string, []agent.PromptImage) (map[string]any, error) {
-	client.prompted = true
-	return map[string]any{"success": true}, nil
-}
-func (client *followUpRaceClient) GetStateForInterrupt(context.Context) (map[string]any, error) {
-	return client.interruptState, nil
+func (client *followUpRaceClient) InterruptState(context.Context) (agent.State, error) {
+	return stateFrom(client.interruptState)
 }
 func (*followUpRaceClient) ActiveBashCommand() string { return "" }
-func (client *followUpRaceClient) Abort(context.Context) (map[string]any, error) {
+func (client *followUpRaceClient) Cancel(context.Context) error {
 	client.aborted = true
-	return map[string]any{"success": true}, nil
+	return nil
 }
 
 type queuedAbortClient struct {
@@ -1441,12 +1447,21 @@ func (client *remapClient) LiveSnapshot() agent.LiveSnapshot {
 	}
 	return client.live
 }
-func (client *remapClient) GetState(context.Context) (map[string]any, error) {
+func (client *remapClient) State(context.Context) (agent.State, error) {
 	client.getStateCalls.Add(1)
-	return client.state, nil
+	return stateFrom(client.state)
 }
-func (client *remapClient) GetSessionStats(context.Context) (map[string]any, error) { return nil, nil }
-func (client *remapClient) GetCommands(context.Context) (map[string]any, error)     { return nil, nil }
+func (client *remapClient) LiveStatus(context.Context) (agent.LiveStatus, error) {
+	return agent.LiveStatus{}, nil
+}
+func (client *remapClient) Commands(context.Context) ([]agent.Command, error) { return nil, nil }
+func (client *remapClient) Prompt(context.Context, agent.Prompt) (agent.PromptResult, error) {
+	return agent.PromptResult{}, errUnsupportedActionClient
+}
+func (client *remapClient) Cancel(context.Context) error { return errUnsupportedActionClient }
+func (client *remapClient) NewSession(context.Context) (agent.Branch, error) {
+	return agent.Branch{}, errUnsupportedActionClient
+}
 func (client *remapClient) SessionPosition(context.Context, string) (rpc.SessionEntries, error) {
 	if !client.position.Known && client.position.Error == "" {
 		return rpc.SessionEntries{Known: true}, nil
@@ -1455,4 +1470,16 @@ func (client *remapClient) SessionPosition(context.Context, string) (rpc.Session
 }
 func (client *remapClient) SessionEntriesAfter(context.Context, string) (rpc.SessionEntries, error) {
 	return client.SessionPosition(context.Background(), "")
+}
+
+// stateFrom reads a fake client's state from Pi's answer to get_state. An answer without success still names its session.
+func stateFrom(response map[string]any) (agent.State, error) {
+	if response["success"] == false {
+		return agent.State{}, &agent.RequestError{Message: stringFromAny(response["error"])}
+	}
+	data := response
+	if nested, ok := response["data"].(map[string]any); ok {
+		data = nested
+	}
+	return agent.State{Key: stringFromAny(data["sessionFile"]), ID: stringFromAny(data["sessionId"]), Streaming: data["isStreaming"] == true, Compacting: data["isCompacting"] == true}, nil
 }

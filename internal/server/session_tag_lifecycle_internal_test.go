@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -194,24 +196,30 @@ type branchCompletionClient struct {
 	calls    atomic.Int32
 }
 
-func (client *branchCompletionClient) GetState(ctx context.Context) (map[string]any, error) {
+func (client *branchCompletionClient) State(ctx context.Context) (agent.State, error) {
 	if client.calls.Add(1) == 1 {
 		close(client.observed)
 		<-client.branched
 	}
-	return client.remapClient.GetState(ctx)
+	return client.remapClient.State(ctx)
 }
 
-func (client *branchCompletionClient) CloneSession(context.Context) (map[string]any, error) {
-	return map[string]any{"success": true}, nil
+func (client *branchCompletionClient) Clone(ctx context.Context) (agent.Branch, error) {
+	return client.NewSession(ctx)
 }
 
-func (client *branchCompletionClient) Fork(context.Context, string) (map[string]any, error) {
-	return map[string]any{"success": true}, nil
+func (client *branchCompletionClient) Fork(ctx context.Context, _ string) (agent.Branch, error) {
+	return client.NewSession(ctx)
 }
 
-func (client *branchCompletionClient) NewSession(context.Context, string) (map[string]any, error) {
-	return map[string]any{"success": true}, nil
+func (client *branchCompletionClient) ForkMessages(context.Context) (json.RawMessage, error) {
+	return nil, errors.New("unexpected fork messages")
+}
+
+// NewSession reports the session that the client's state names, as Pi's client does after switching.
+func (client *branchCompletionClient) NewSession(ctx context.Context) (agent.Branch, error) {
+	state, err := client.State(ctx)
+	return agent.Branch{Key: state.Key, ID: state.ID, Moved: true}, err
 }
 
 func tagLifecycleRequest(path string) *http.Request {

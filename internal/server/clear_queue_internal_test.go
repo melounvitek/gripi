@@ -487,12 +487,9 @@ func (client *clearQueueClient) Close() error {
 	}
 	return nil
 }
-func (client *clearQueueClient) Abort(context.Context) (map[string]any, error) {
+func (client *clearQueueClient) Cancel(context.Context) error {
 	client.aborts.Add(1)
-	return map[string]any{"success": true}, nil
-}
-func (client *clearQueueClient) AbortBash(ctx context.Context) (map[string]any, error) {
-	return client.Abort(ctx)
+	return nil
 }
 
 func clearQueueRequest(ctx context.Context, path string) *http.Request {

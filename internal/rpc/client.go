@@ -592,6 +592,14 @@ func (client *Client) resetReplacedSessionState(response map[string]any, err err
 	client.mu.Unlock()
 }
 
+func responseCancelled(response map[string]any) bool {
+	data := response
+	if nested, ok := response["data"].(map[string]any); ok {
+		data = nested
+	}
+	return data["cancelled"] == true
+}
+
 func (client *Client) ExportHTML(ctx context.Context, outputPath string) (map[string]any, error) {
 	return client.request(ctx, "export_html", client.nextID("export_html"), map[string]any{"outputPath": outputPath}, LongRequestTimeout, nil)
 }

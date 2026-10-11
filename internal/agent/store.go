@@ -33,6 +33,8 @@ type Store interface {
 	Aliases(key string) []string
 	// ValidKey reports whether key has the form of the agent's keys. It need not name a saved session.
 	ValidKey(key string) bool
+	// PendingKey returns a new key for a session until the agent names it.
+	PendingKey() string
 	// FallbackCWD returns a working directory for a session whose own the gateway cannot find.
 	FallbackCWD(key string) string
 	// ExportName names the page a session exports to, unless the user picks a name.

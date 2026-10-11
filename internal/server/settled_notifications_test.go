@@ -11,12 +11,13 @@ import (
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
-func settledNotificationFixture(t *testing.T) (*application, *completionNotifier, *rpc.Client, string) {
+func settledNotificationFixture(t *testing.T) (*application, *completionNotifier, *agentpi.Client, string) {
 	t.Helper()
 	root := t.TempDir()
 	path := writeNotificationSession(t, root, "Background session")
@@ -29,11 +30,11 @@ func settledNotificationFixture(t *testing.T) (*application, *completionNotifier
 	return app, notifier, notificationRPCClient(t, app, path), path
 }
 
-func notificationRPCClient(t *testing.T, app *application, path string) *rpc.Client {
+func notificationRPCClient(t *testing.T, app *application, path string) *agentpi.Client {
 	t.Helper()
 	in, input := io.Pipe()
 	output, out := io.Pipe()
-	client := rpc.NewClient(input, output, nil, rpc.ClientOptions{})
+	client := &agentpi.Client{Client: rpc.NewClient(input, output, nil, rpc.ClientOptions{})}
 	t.Cleanup(func() { _ = client.Close(); _ = in.Close(); _ = out.Close() })
 	if err := app.rpcClients.Register(path, client); err != nil {
 		t.Fatal(err)

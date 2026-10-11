@@ -308,27 +308,29 @@ func (client *idleRetirementClient) Close() error {
 	return nil
 }
 
-func (client *idleRetirementClient) Prompt(_ context.Context, message string, images []agent.PromptImage) (map[string]any, error) {
-	return client.dispatch(message, images, "")
-}
-
-func (client *idleRetirementClient) PromptWithBehavior(_ context.Context, message string, images []agent.PromptImage, behavior string) (map[string]any, error) {
-	return client.dispatch(message, images, behavior)
-}
-
-func (client *idleRetirementClient) QueueCompactionPrompt(context.Context, string, []agent.PromptImage, string) (map[string]any, bool, error) {
-	client.queues.Add(1)
-	return nil, false, nil
-}
-
-func (client *idleRetirementClient) dispatch(message string, images []agent.PromptImage, behavior string) (map[string]any, error) {
+func (client *idleRetirementClient) Prompt(_ context.Context, prompt agent.Prompt) (agent.PromptResult, error) {
+	var images []agent.PromptImage
+	if prompt.Images != nil {
+		var err error
+		if images, err = prompt.Images(); err != nil {
+			return agent.PromptResult{}, err
+		}
+	}
+	behavior := map[agent.Delivery]string{agent.Steer: "steer", agent.FollowUp: "followUp"}[prompt.Delivery]
 	client.mu.Lock()
-	client.calls = append(client.calls, idleRetirementCall{message, behavior, len(images)})
+	client.calls = append(client.calls, idleRetirementCall{prompt.Text, behavior, len(images)})
 	client.mu.Unlock()
 	if client.onPrompt != nil {
 		client.onPrompt()
 	}
-	return map[string]any{"success": true}, nil
+	return agent.PromptResult{}, nil
+}
+
+func (client *idleRetirementClient) DeferringCompactionPrompts() bool { return client.compacting }
+
+func (client *idleRetirementClient) DeferPrompt(context.Context, agent.Prompt) (agent.PromptResult, bool, error) {
+	client.queues.Add(1)
+	return agent.PromptResult{}, false, nil
 }
 
 func (client *idleRetirementClient) assertCalls(t *testing.T, behavior string, count int) {

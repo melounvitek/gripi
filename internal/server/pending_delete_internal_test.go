@@ -229,9 +229,9 @@ type pendingDeleteGapClient struct {
 	beforeClose func()
 }
 
-func (client *pendingDeleteGapClient) GetState(ctx context.Context) (map[string]any, error) {
+func (client *pendingDeleteGapClient) State(ctx context.Context) (agent.State, error) {
 	client.states++
-	return client.idleRetirementClient.GetState(ctx)
+	return client.idleRetirementClient.State(ctx)
 }
 
 func (client *pendingDeleteGapClient) Busy() bool {

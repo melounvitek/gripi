@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/melounvitek/gripi/internal/agent"
@@ -60,6 +61,25 @@ func (Composer) SlashCommand(message string) agent.SlashCommand {
 	}
 	return agent.SlashCommand{}
 }
+
+var builtinCommands = []agent.Command{
+	{Name: "name", Group: "other", Description: "Set session display name"},
+	{Name: "compact", Group: "other", Description: "Manually compact context, optional custom instructions"},
+	{Name: "reload", Group: "other", Description: "Reload Pi extensions, skills, prompts, themes, and context files"},
+	{Name: "export", Group: "other", Description: "Download this session as HTML, with an optional filename"},
+	{Name: "fork", Group: "other", Description: "Open the fork picker for this session"},
+	{Name: "tree", Group: "other", Description: "Navigate the current session tree"},
+	{Name: "clone", Group: "other", Description: "Clone this session and switch to the clone"},
+	{Name: "new", Group: "other", Description: "Start a new session in this folder"},
+	{Name: "model", Group: "other", Description: "Choose the model and thinking level"},
+	{Name: "login", Group: "other", Description: "Show Pi CLI login instructions"},
+	{Name: "logout", Group: "other", Description: "Show Pi CLI logout instructions"},
+}
+
+func (Composer) Commands() []agent.Command { return slices.Clone(builtinCommands) }
+
+// CommandGroups follows the sources of Pi's commands. The gateway's own commands are in the last group.
+func (Composer) CommandGroups() []string { return []string{"extension", "prompt", "skill", "other"} }
 
 var thinkingLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 

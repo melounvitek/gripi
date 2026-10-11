@@ -574,9 +574,18 @@ func (client *syncClient) EventsAfter(int64) agent.EventBatch {
 func (client *syncClient) LiveSnapshot() agent.LiveSnapshot {
 	return agent.LiveSnapshot{ActiveToolEvents: []map[string]any{}}
 }
-func (client *syncClient) GetState(context.Context) (map[string]any, error)        { return nil, nil }
-func (client *syncClient) GetSessionStats(context.Context) (map[string]any, error) { return nil, nil }
-func (client *syncClient) GetCommands(context.Context) (map[string]any, error)     { return nil, nil }
+func (client *syncClient) State(context.Context) (agent.State, error) { return agent.State{}, nil }
+func (client *syncClient) LiveStatus(context.Context) (agent.LiveStatus, error) {
+	return agent.LiveStatus{}, nil
+}
+func (client *syncClient) Commands(context.Context) ([]agent.Command, error) { return nil, nil }
+func (client *syncClient) Prompt(context.Context, agent.Prompt) (agent.PromptResult, error) {
+	return agent.PromptResult{}, nil
+}
+func (client *syncClient) Cancel(context.Context) error { return nil }
+func (client *syncClient) NewSession(context.Context) (agent.Branch, error) {
+	return agent.Branch{}, nil
+}
 func (client *syncClient) SessionPosition(_ context.Context, cursor string) (rpc.SessionEntries, error) {
 	client.mu.Lock()
 	hook := client.positionHook

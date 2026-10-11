@@ -80,7 +80,8 @@ func TestRPCSettledReplyFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) 
 	stdoutReader, stdoutWriter := io.Pipe()
 	t.Cleanup(func() { _ = stdoutWriter.Close() })
 	observed := make(chan struct{}, 10)
-	client := rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: func(client *rpc.Client, event map[string]any) {
+	client := &agentpi.Client{}
+	client.Client = rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: func(_ *rpc.Client, event map[string]any) {
 		notifier.Observe(client, event)
 		observed <- struct{}{}
 	}})

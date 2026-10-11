@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -149,14 +151,22 @@ type projectCreationClient struct {
 	cancelled bool
 }
 
-func (client *projectCreationClient) NewSession(context.Context, string) (map[string]any, error) {
-	return map[string]any{"success": true, "data": map[string]any{"cancelled": client.cancelled}}, nil
+func (client *projectCreationClient) NewSession(ctx context.Context) (agent.Branch, error) {
+	if client.cancelled {
+		return agent.Branch{Cancelled: true}, nil
+	}
+	state, err := client.State(ctx)
+	return agent.Branch{Key: state.Key, ID: state.ID, Moved: true}, err
 }
 
-func (client *projectCreationClient) CloneSession(ctx context.Context) (map[string]any, error) {
-	return client.NewSession(ctx, "")
+func (client *projectCreationClient) Clone(ctx context.Context) (agent.Branch, error) {
+	return client.NewSession(ctx)
 }
 
-func (client *projectCreationClient) Fork(ctx context.Context, _ string) (map[string]any, error) {
-	return client.NewSession(ctx, "")
+func (client *projectCreationClient) Fork(ctx context.Context, _ string) (agent.Branch, error) {
+	return client.NewSession(ctx)
+}
+
+func (client *projectCreationClient) ForkMessages(context.Context) (json.RawMessage, error) {
+	return nil, errors.New("unexpected fork messages")
 }

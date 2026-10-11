@@ -614,8 +614,16 @@ func (client *registryClient) DeferringCompactionPrompts() bool { return client.
 func (client *registryClient) QueuedMessagesForStop() (map[string][]string, bool) {
 	return client.queued, len(client.queued["steering"]) > 0 || len(client.queued["followUp"]) > 0
 }
-func (client *registryClient) GetState(context.Context) (map[string]any, error) { return nil, nil }
-func (client *registryClient) GetSessionStats(context.Context) (map[string]any, error) {
-	return nil, nil
+func (client *registryClient) DeferPrompt(context.Context, Prompt) (PromptResult, bool, error) {
+	return PromptResult{}, false, nil
 }
-func (client *registryClient) GetCommands(context.Context) (map[string]any, error) { return nil, nil }
+func (client *registryClient) State(context.Context) (State, error) { return State{}, nil }
+func (client *registryClient) LiveStatus(context.Context) (LiveStatus, error) {
+	return LiveStatus{}, nil
+}
+func (client *registryClient) Commands(context.Context) ([]Command, error) { return nil, nil }
+func (client *registryClient) Prompt(context.Context, Prompt) (PromptResult, error) {
+	return PromptResult{}, nil
+}
+func (client *registryClient) Cancel(context.Context) error               { return nil }
+func (client *registryClient) NewSession(context.Context) (Branch, error) { return Branch{}, nil }

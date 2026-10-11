@@ -316,24 +316,22 @@ type treeNavigationClient struct {
 	bashes                       atomic.Int32
 }
 
-func (client *treeNavigationClient) GetState(ctx context.Context) (map[string]any, error) {
+func (client *treeNavigationClient) State(ctx context.Context) (agent.State, error) {
 	client.getStateCalls.Add(1)
 	if client.onState != nil {
 		if err := client.onState(ctx); err != nil {
-			return nil, err
+			return agent.State{}, err
 		}
 	}
-	return client.state, nil
+	return stateFrom(client.state)
 }
 
-func (client *treeNavigationClient) Abort(ctx context.Context) (map[string]any, error) {
+func (client *treeNavigationClient) Cancel(ctx context.Context) error {
 	client.record("Abort(" + client.name + ")")
 	if client.onAbort != nil {
-		if err := client.onAbort(ctx); err != nil {
-			return nil, err
-		}
+		return client.onAbort(ctx)
 	}
-	return map[string]any{"success": true}, nil
+	return nil
 }
 
 func (client *treeNavigationClient) Close() error {
@@ -354,15 +352,15 @@ func (client *treeNavigationClient) NavigateTree(ctx context.Context, entry, sum
 	return map[string]any{"success": true, "data": map[string]any{"editorText": "branch draft", "cancelled": client.cancelled}}, nil
 }
 
-func (client *treeNavigationClient) QueueCompactionPrompt(_ context.Context, message string, images []agent.PromptImage, behavior string) (map[string]any, bool, error) {
+func (client *treeNavigationClient) DeferPrompt(_ context.Context, prompt agent.Prompt) (agent.PromptResult, bool, error) {
 	client.queues.Add(1)
-	if message != "hello" || len(images) != 0 || behavior != "steer" && behavior != "followUp" {
-		return nil, false, errors.New("unexpected compaction prompt arguments")
+	if prompt.Text != "hello" || prompt.Images != nil || prompt.Delivery != agent.Steer && prompt.Delivery != agent.FollowUp {
+		return agent.PromptResult{}, false, errors.New("unexpected compaction prompt arguments")
 	}
 	if client.onQueue != nil {
 		client.onQueue()
 	}
-	return map[string]any{"success": true, "compacting": client.queued}, client.queued, nil
+	return agent.PromptResult{QueuedAfterCompaction: client.queued}, client.queued, nil
 }
 
 func (client *treeNavigationClient) Bash(_ context.Context, command string, excluded bool) (map[string]any, error) {

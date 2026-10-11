@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -103,7 +104,8 @@ func TestBusyRPCSidebarKeepsWorkingIndicatorAndReadFinalSuppression(t *testing.T
 	in, input := io.Pipe()
 	output, out := io.Pipe()
 	observed := make(chan struct{}, 1)
-	client := rpc.NewClient(input, output, nil, rpc.ClientOptions{EventObserver: func(client *rpc.Client, event map[string]any) {
+	client := &agentpi.Client{}
+	client.Client = rpc.NewClient(input, output, nil, rpc.ClientOptions{EventObserver: func(_ *rpc.Client, event map[string]any) {
 		notifier.Observe(client, event)
 		observed <- struct{}{}
 	}})
@@ -222,7 +224,7 @@ func TestUnresolvedPendingSidebarDoesNotExposeProgressOrReadIt(t *testing.T) {
 			app.config.AttachmentsRoot = t.TempDir()
 			in, input := io.Pipe()
 			output, out := io.Pipe()
-			client := rpc.NewClient(input, output, nil, rpc.ClientOptions{})
+			client := &agentpi.Client{Client: rpc.NewClient(input, output, nil, rpc.ClientOptions{})}
 			t.Cleanup(func() { _ = client.Close(); _ = in.Close(); _ = out.Close() })
 			if err := app.rpcClients.Register(pending, client); err != nil {
 				t.Fatal(err)

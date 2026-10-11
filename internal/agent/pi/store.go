@@ -1,9 +1,12 @@
 package pi
 
 import (
+	"crypto/rand"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -32,6 +35,18 @@ func (store sessionStore) Aliases(key string) []string {
 
 func (store sessionStore) ValidKey(key string) bool {
 	return filepath.IsAbs(key) && filepath.Clean(key) == key
+}
+
+// PendingKey is a path under the sessions root that stands in until Pi reports its file, which it saves only after
+// the first reply.
+func (store sessionStore) PendingKey() string {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		return filepath.Join(store.Root, fmt.Sprintf("pending-%x.jsonl", time.Now().UnixNano()))
+	}
+	value[6] = value[6]&0x0f | 0x40
+	value[8] = value[8]&0x3f | 0x80
+	return filepath.Join(store.Root, fmt.Sprintf("pending-%x-%x-%x-%x-%x.jsonl", value[0:4], value[4:6], value[6:8], value[8:10], value[10:16]))
 }
 
 // FallbackCWD is the folder that holds the session file.

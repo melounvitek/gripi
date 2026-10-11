@@ -370,11 +370,11 @@ func (notifier *completionNotifier) sessionPath(ctx context.Context, reply compl
 		return path, nil
 	}
 
-	state, err := reply.client.GetState(ctx)
+	state, err := reply.client.State(ctx)
 	if err != nil {
 		return path, nil
 	}
-	reported := sessionFileFrom(state)
+	reported := state.Key
 	if configured, valid := notifier.app.sessionStore.Canonical(reported); valid {
 		reported = configured
 	} else {

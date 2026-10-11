@@ -20,8 +20,8 @@ import (
 // unidentifiedPendingClient serves a new session whose Pi doesn't say which session file it writes.
 type unidentifiedPendingClient struct{ *followUpRaceClient }
 
-func (unidentifiedPendingClient) GetStateForInterrupt(context.Context) (map[string]any, error) {
-	return nil, errors.New("get_state timed out")
+func (unidentifiedPendingClient) InterruptState(context.Context) (agent.State, error) {
+	return agent.State{}, errors.New("get_state timed out")
 }
 
 func TestAbortRefusesToGuessWhichPendingSessionToStop(t *testing.T) {

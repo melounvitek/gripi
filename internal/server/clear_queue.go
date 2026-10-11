@@ -99,7 +99,7 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 	case clearErr != nil:
 		writeError(clearErr)
 	case !successfulRPCResponse(result):
-		fail(http.StatusUnprocessableEntity, rpcErrorMessage(result, "Could not clear the queue"))
+		fail(http.StatusUnprocessableEntity, failureMessage(stringFromAny(result["error"]), "Could not clear the queue"))
 	default:
 		if snapshot.QueuedMessages == nil {
 			snapshot.QueuedMessages = map[string][]string{}

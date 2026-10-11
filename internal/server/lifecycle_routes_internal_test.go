@@ -87,17 +87,20 @@ type lifecycleStateClient struct {
 	navigated bool
 }
 
-func (client *lifecycleStateClient) GetState(context.Context) (map[string]any, error) {
+func (client *lifecycleStateClient) State(context.Context) (agent.State, error) {
 	client.onState()
-	return client.state, client.stateErr
+	if client.stateErr != nil {
+		return agent.State{}, client.stateErr
+	}
+	return stateFrom(client.state)
 }
 func (client *lifecycleStateClient) Close() error {
 	client.closed = true
 	return nil
 }
-func (client *lifecycleStateClient) Abort(context.Context) (map[string]any, error) {
+func (client *lifecycleStateClient) Cancel(context.Context) error {
 	client.aborted = true
-	return map[string]any{"success": true}, nil
+	return nil
 }
 func (client *lifecycleStateClient) NavigateTree(context.Context, string, string, string) (map[string]any, error) {
 	client.navigated = true

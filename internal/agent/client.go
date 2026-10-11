@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// Client serves one session of an agent. Close releases the session, which need not stop a process. A request that
+// the agent refuses fails with a *RequestError. Features that only some agents have are optional interfaces.
 type Client interface {
 	Close() error
 	Busy() bool
@@ -16,29 +18,106 @@ type Client interface {
 	EventReplayCursor() int64
 	EventsAfter(int64) EventBatch
 	LiveSnapshot() LiveSnapshot
-	GetState(context.Context) (map[string]any, error)
-	GetSessionStats(context.Context) (map[string]any, error)
-	GetCommands(context.Context) (map[string]any, error)
+
+	// State asks the agent about the session.
+	State(context.Context) (State, error)
+	// LiveStatus asks the agent for its model, thinking level and context usage.
+	LiveStatus(context.Context) (LiveStatus, error)
+	// Commands lists the agent's own commands, without those the gateway runs itself.
+	Commands(context.Context) ([]Command, error)
+	// Prompt returns once the agent has accepted the prompt, without waiting for the run it starts.
+	Prompt(context.Context, Prompt) (PromptResult, error)
+	// Cancel stops the agent's run.
+	Cancel(context.Context) error
+	// NewSession starts an empty session in the session's folder.
+	NewSession(context.Context) (Branch, error)
 }
 
-// CompactionPromptDeferrer is a client that holds prompts back during a compaction and delivers them after it.
-type CompactionPromptDeferrer interface {
-	DeferringCompactionPrompts() bool
+type State struct {
+	// Key is the session the agent says it serves, or empty before the agent names it.
+	Key        string
+	ID         string
+	Name       string
+	Streaming  bool
+	Compacting bool
 }
 
-// QueueRestorer is a client that hands back its queued messages when a stop retires it.
-type QueueRestorer interface {
-	QueuedMessagesForStop() (map[string][]string, bool)
+// LiveStatus leaves empty what the agent doesn't report.
+type LiveStatus struct {
+	Provider      string
+	ModelID       string
+	ThinkingLevel string
+	Context       *ContextUsage
 }
 
-type QueueClearer interface {
-	ClearQueue(context.Context) (map[string]any, error)
+// ContextUsage is how much of the model's context window the session fills.
+type ContextUsage struct {
+	Tokens    float64
+	HasTokens bool
+	Window    float64
+	HasWindow bool
+	Percent   float64
 }
+
+type Command struct {
+	Name        string
+	Description string
+	Group       string
+}
+
+type Prompt struct {
+	Text     string
+	Delivery Delivery
+	// Images saves the attached images and returns them, and is nil without images. The client calls it only to
+	// send them, so that the images of a prompt that takes none are never saved.
+	Images func() ([]PromptImage, error)
+}
+
+// Delivery says when a prompt sent during a run reaches the agent.
+type Delivery int
+
+const (
+	// Start is for a session without a run.
+	Start Delivery = iota
+	// Steer reaches the running agent as soon as it can take it.
+	Steer
+	// FollowUp waits for the run to end.
+	FollowUp
+)
 
 type PromptImage struct {
 	Path     string
 	MIMEType string
 	Size     int64
+}
+
+type PromptResult struct {
+	Disposition Disposition
+	// QueuedAfterCompaction says the client holds the prompt until a compaction ends.
+	QueuedAfterCompaction bool
+	// Activity is what the session did just after a command the agent ran at once during a compaction.
+	Activity *Activity
+}
+
+// Disposition says how the agent took a prompt: "started" a run, "queued" it behind one, or "handled" it without one.
+// It is empty when the agent doesn't say.
+type Disposition string
+
+type Activity struct {
+	Running    bool
+	Compacting bool
+}
+
+// Branch is a session that the agent created from the current one.
+type Branch struct {
+	Key string
+	ID  string
+	// Moved says the client now serves the new session instead of the current one.
+	Moved bool
+	// Cancelled says the agent's extensions cancelled the branch.
+	Cancelled bool
+	// Text is the text of the message a fork starts from, for the user to edit.
+	Text *string
 }
 
 type EventBatch struct {

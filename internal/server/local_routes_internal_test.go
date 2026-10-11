@@ -53,6 +53,9 @@ func TestLocalSessionsReportSessionsChangedOutsideTheGateway(t *testing.T) {
 type deferringClient struct{ *remapClient }
 
 func (deferringClient) DeferringCompactionPrompts() bool { return true }
+func (deferringClient) DeferPrompt(context.Context, agent.Prompt) (agent.PromptResult, bool, error) {
+	return agent.PromptResult{}, true, nil
+}
 
 func TestLocalSessionsKeepCompactingUntilQueuedPromptsAreDelivered(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
