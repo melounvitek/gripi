@@ -604,6 +604,50 @@ func TestPagesTellAgentsApartOnlyWhenTheGatewayRunsHermes(t *testing.T) {
 	}
 }
 
+func TestHermesSessionsStartInTheHomeFolderAndShowNoFolder(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "hermes.log")
+	t.Setenv("FAKE_HERMES_LOG", log)
+	project := t.TempDir()
+	cfg := hermesConfig(t, map[string]any{"sessionId": "hermes-chat", "cwd": project, "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z"})
+	handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+
+	// A new session started from a Hermes session in a project also starts in the home folder.
+	if code, payload := postJSON(t, handler, "/sessions/new", url.Values{"session": {"hermes:hermes-chat"}}); code != http.StatusOK {
+		t.Fatalf("new Hermes session = %d %v", code, payload)
+	}
+	contents, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cwds []string
+	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+		var record struct {
+			Method string `json:"method"`
+			Params struct {
+				CWD string `json:"cwd"`
+			} `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &record) == nil && record.Method == "session/new" {
+			cwds = append(cwds, record.Params.CWD)
+		}
+	}
+	if !slices.Equal(cwds, []string{cfg.Home}) {
+		t.Fatalf("Hermes started sessions in %v", cwds)
+	}
+
+	page := getPage(t, handler, "/?session="+url.QueryEscape("hermes:hermes-chat"))
+	// Neither the sidebar nor the header shows a Hermes session's folder.
+	for _, absent := range []string{`class="session-project"`, "session-header-project-label"} {
+		if strings.Contains(page, absent) {
+			t.Errorf("the Hermes session's page contains %q", absent)
+		}
+	}
+}
+
 func TestAQuestionHermesStopsWaitingForCloses(t *testing.T) {
 	handler := hermesHandler(t)
 	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})

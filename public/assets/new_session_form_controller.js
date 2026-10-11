@@ -75,6 +75,11 @@ export class NewSessionFormController {
     try {
       this.window.localStorage?.setItem(AGENT_KEY, name);
     } catch (_error) {}
+    // A Hermes session belongs to no project, so it starts in the home folder.
+    if (name === "hermes") {
+      form.querySelector("[data-new-session-cwd-value]").value = form.dataset.home;
+      return form.requestSubmit();
+    }
     form._newSessionFormState.agentStep = false;
     if (this.projects(form).length) this.showProjects(form);
     else this.browse(form, form.dataset.home);
@@ -257,8 +262,6 @@ export class NewSessionFormController {
     } else {
       const more = matching.length - visible.length;
       if (more) list.append(this.row("more", "…", `${more} more project${more === 1 ? "" : "s"}`));
-      // A Hermes chat needs no project: it runs in the home folder.
-      if (form.querySelector("[data-new-session-agent-value]")?.value === "hermes") list.append(this.row("start", "~", "No folder", form.dataset.home));
       list.append(this.row("path", "+", "Other folder…"));
 
       label.textContent = state.fork ? "Folder:" : "Project or path:";

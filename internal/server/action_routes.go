@@ -1431,6 +1431,10 @@ func (app *application) startNewSession(request *http.Request, cwd, forkFrom, ag
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
+	// A Hermes session belongs to no project, so it always starts in the home folder.
+	if agentName == "hermes" {
+		cwd = app.config.Home
+	}
 	factory := func(cwd string) (agent.Client, error) {
 		return app.newRPCClient(cwd, app.environmentUser(request), forkFrom, agentName)
 	}
