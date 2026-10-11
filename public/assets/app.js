@@ -3357,6 +3357,10 @@ window.addEventListener("gripi:new-session-requested", () => openNewSessionModal
 window.addEventListener("gripi:current-session-find-requested", requestCurrentSessionFind);
 window.addEventListener("gripi:current-session-find-navigation-requested", (event) => requestCurrentSessionFindNavigation(event.detail));
 window.addEventListener("gripi:session-search-requested", requestSessionSearch);
+// The desktop app's menu, like Ctrl+K, which the menu only gets when the page leaves it unhandled.
+window.addEventListener("gripi:command-palette-requested", () => {
+  if (!sessionSwitching()) commandPaletteController.toggle();
+});
 window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
 function handleModalTab(event) {

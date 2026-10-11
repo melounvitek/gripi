@@ -210,6 +210,13 @@ function installAppMenu() {
             routeSessionSearchShortcut(browserWindow);
           }
         },
+        {
+          label: "Go to or Run…",
+          accelerator: "CmdOrCtrl+K",
+          click: (_menuItem, browserWindow) => {
+            routeGatewayShortcut(browserWindow, "gateway:command-palette-requested", "gripi:command-palette-requested");
+          }
+        },
         { type: "separator" },
         { role: "cut" },
         { role: "copy" },

@@ -171,6 +171,9 @@ test("desktop find shortcuts route through the shell and preserve standard editi
   assert.match(main, /label: "Search Sessions…"/);
   assert.match(main, /accelerator: "CmdOrCtrl\+Shift\+F"/);
   assert.match(main, /gateway:search-sessions-requested/);
+  assert.match(main, /label: "Go to or Run…"/);
+  assert.match(main, /accelerator: "CmdOrCtrl\+K"/);
+  assert.match(main, /routeGatewayShortcut\(browserWindow, "gateway:command-palette-requested", "gripi:command-palette-requested"\)/);
   assert.match(main, /click: \(_menuItem, browserWindow\) => \{/);
   assert.match(main, /routeGatewayShortcut\(browserWindow, "gateway:find-in-session-requested", "gripi:current-session-find-requested"\)/);
   assert.match(main, /routeSessionSearchShortcut\(browserWindow\)/);
@@ -187,6 +190,7 @@ test("desktop find shortcuts route through the shell and preserve standard editi
   assert.match(preload, /ipcRenderer\.on\("gateway:find-in-session-navigation-requested", \(_event, direction\) => callback\(direction\)\)/);
   assert.match(preload, /onSearchSessionsRequested/);
   assert.match(preload, /ipcRenderer\.on\("gateway:search-sessions-requested", \(_event, gatewayId\) => callback\(gatewayId\)\)/);
+  assert.match(preload, /ipcRenderer\.on\("gateway:command-palette-requested", \(_event\) => callback\(\)\)/);
 
   assert.match(shell, /onFindInSessionRequested/);
   assert.match(shell, /dispatchActiveGatewayEvent\("gripi:current-session-find-requested"\)/);
@@ -241,6 +245,7 @@ test("popup find stays local while popup session search activates the shell gate
         },
         getGatewayConfig: () => new Promise(() => {}),
         onAddGatewayRequested() {},
+        onCommandPaletteRequested(callback) { callbacks.palette = callback; },
         onFindInSessionRequested() {},
         onFindInSessionNavigationRequested(callback) { callbacks.navigation = callback; },
         onGatewayActivationRequested() {},
@@ -263,8 +268,10 @@ test("popup find stays local while popup session search activates the shell gate
     routeGatewayShortcut(popupWindow, "gateway:find-in-session-requested", "gripi:current-session-find-requested");
     routeGatewayShortcut(popupWindow, "gateway:find-in-session-navigation-requested", "gripi:current-session-find-navigation-requested", -1);
     routeSessionSearchShortcut(popupWindow);
+    routeGatewayShortcut(popupWindow, "gateway:command-palette-requested", "gripi:command-palette-requested");
   `, mainContext);
   assert.match(popupCalls[0][0], /gripi:current-session-find-requested/);
+  assert.match(popupCalls[2][0], /gripi:command-palette-requested/);
   assert.match(popupCalls[1][0], /gripi:current-session-find-navigation-requested/);
   assert.match(popupCalls[1][0], /detail/);
   assert.equal(popupCalls[0][1], true);
@@ -297,6 +304,10 @@ test("popup find stays local while popup session search activates the shell gate
 
   callbacks.navigation(-1);
   assert.deepEqual(order, ["dispatch:gripi:current-session-find-navigation-requested:-1"]);
+
+  order.length = 0;
+  callbacks.palette();
+  assert.deepEqual(order, ["dispatch:gripi:command-palette-requested:undefined"]);
 
   order.length = 0;
   await callbacks.search("popup");
@@ -405,6 +416,7 @@ test("desktop shell gives the server view keyboard focus once it loads", async (
       gripiDesktop: {
         getGatewayConfig: async () => ({ activeGatewayId: gateway.id, gateways: [gateway] }),
         onAddGatewayRequested() {},
+        onCommandPaletteRequested() {},
         onFindInSessionRequested() {},
         onFindInSessionNavigationRequested() {},
         onGatewayActivationRequested() {},

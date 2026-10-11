@@ -592,3 +592,14 @@ test("Ctrl+D asks to delete the highlighted session, as in Pi CLI's session pick
   await input(page).fill(title);
   await expect(status(page)).toHaveText("No matches.");
 });
+
+test("the desktop app's menu opens and closes the palette as Ctrl+K does", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Desktop app");
+  await page.goto("/?no_session=1");
+  const fromMenu = () => page.evaluate(() => window.dispatchEvent(new Event("gripi:command-palette-requested")));
+  await fromMenu();
+  await expect(input(page)).toBeFocused();
+  await expect(options(page).first()).toHaveAttribute("aria-selected", "true");
+  await fromMenu();
+  await expect(dialog(page)).toBeHidden();
+});

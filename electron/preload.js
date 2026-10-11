@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("gripiDesktop", {
   onAddGatewayRequested: (callback) => {
     ipcRenderer.on("gateway:add-requested", callback);
   },
+  onCommandPaletteRequested: (callback) => {
+    ipcRenderer.on("gateway:command-palette-requested", (_event) => callback());
+  },
   onFindInSessionRequested: (callback) => {
     ipcRenderer.on("gateway:find-in-session-requested", (_event) => callback());
   },
