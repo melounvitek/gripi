@@ -129,8 +129,8 @@ func (notifier *completionNotifier) Observe(client agent.Client, event map[strin
 	case "agent_settled":
 		ready = state.pending
 		delete(notifier.clients, client)
-		if notifier.app.synchronizer != nil {
-			if sync := notifier.app.synchronizer.KnownBlocked(path); sync != nil && sync.Mode == sessions.SyncExternalFollow {
+		if notifier.app.guard != nil {
+			if sync := notifier.app.guard.KnownBlocked(path); sync != nil && sync.Mode == agent.SyncExternalFollow {
 				ready = nil
 			}
 		}
@@ -180,8 +180,8 @@ func (notifier *completionNotifier) captureReadCount(reply *completedReply) {
 }
 
 func (notifier *completionNotifier) schedule(reply completedReply) {
-	if notifier.app.synchronizer != nil {
-		if state := notifier.app.synchronizer.KnownBlocked(reply.path); state != nil && state.Mode == sessions.SyncExternalFollow {
+	if notifier.app.guard != nil {
+		if state := notifier.app.guard.KnownBlocked(reply.path); state != nil && state.Mode == agent.SyncExternalFollow {
 			return
 		}
 	}
@@ -268,18 +268,18 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	if err != nil {
 		return err
 	}
-	if notifier.app.synchronizer != nil {
+	if notifier.app.guard != nil {
 		for {
-			if state := notifier.app.synchronizer.KnownBlocked(path); state != nil && state.Mode == sessions.SyncExternalFollow {
+			if state := notifier.app.guard.KnownBlocked(path); state != nil && state.Mode == agent.SyncExternalFollow {
 				return nil
 			}
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			// Inspect only in the delivery worker: RPC callbacks must not wait for RPC responses.
-			state := notifier.app.synchronizer.InspectIfAvailable(ctx, path, false)
+			state := notifier.app.guard.InspectIfAvailable(ctx, path, false)
 			if state != nil {
-				if state.Mode == sessions.SyncExternalFollow {
+				if state.Mode == agent.SyncExternalFollow {
 					return nil
 				}
 				break

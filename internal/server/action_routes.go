@@ -241,8 +241,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		return err
 	}
 	if behavior != "" && command.Type == "" {
-		if blocked := app.synchronizer.KnownBlocked(path); blocked != nil {
-			err = &sessions.SyncBlockedError{Mode: blocked.Mode, Message: app.synchronizer.Message(*blocked)}
+		if blocked := app.guard.KnownBlocked(path); blocked != nil {
+			err = &agent.SyncBlockedError{Mode: blocked.Mode, Message: app.guard.Message(*blocked)}
 		} else {
 			queued, handled := false, false
 			path, ok = app.resolveActionPendingPath(response, request, path)
@@ -446,8 +446,8 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 				return retired, retireErr
 			}
 
-			if app.synchronizer != nil {
-				stoppedQueuedRun, err = app.synchronizer.RetireManagedClientIfAvailable(requested, retire)
+			if app.guard != nil {
+				stoppedQueuedRun, err = app.guard.RetireManagedClientIfAvailable(requested, retire)
 			} else {
 				stoppedQueuedRun, err = retire()
 			}
@@ -774,7 +774,7 @@ func (app *application) setSessionName(request *http.Request, path, name string)
 		if closed, closeErr := app.rpcClients.CloseClientIfIdle(path); closeErr != nil {
 			logInternalError("close renamed session client", closeErr)
 		} else if closed {
-			app.synchronizer.Forget(path)
+			app.guard.Forget(path)
 		}
 	}
 	return err
@@ -814,7 +814,7 @@ func (app *application) deleteSession(response http.ResponseWriter, request *htt
 		return
 	}
 	method, err := app.deleteSessionData(request, path)
-	if errors.Is(err, errDeleteRunning) || errors.Is(err, sessions.ErrSyncBusy) {
+	if errors.Is(err, errDeleteRunning) || errors.Is(err, agent.ErrSyncBusy) {
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Cannot delete a running session"})
 		return
 	}
@@ -886,7 +886,7 @@ func (app *application) closeDeleteSessionClient(ctx context.Context, path strin
 
 func (app *application) deleteSessionData(request *http.Request, path string) (string, error) {
 	method := ""
-	err := app.synchronizer.WithExclusiveOperation(path, func() error {
+	err := app.guard.WithExclusiveOperation(path, func() error {
 		if app.rpcClients.Busy(path) || app.rpcClients.Compacting(path) {
 			return errDeleteRunning
 		}
@@ -912,7 +912,7 @@ func (app *application) deleteSessionData(request *http.Request, path string) (s
 }
 
 func (app *application) cleanupDeletedSession(request *http.Request, path string) {
-	app.synchronizer.Forget(path)
+	app.guard.Forget(path)
 	app.pendingSessions.Forget(path)
 	if err := app.gatewayState.Forget(path); err != nil {
 		logInternalError("clean deleted session state", err)
@@ -1396,7 +1396,7 @@ func (app *application) takeOverSession(response http.ResponseWriter, request *h
 	if !ok {
 		return
 	}
-	state, err := app.synchronizer.TakeOver(request.Context(), path, func() error {
+	state, err := app.guard.TakeOver(request.Context(), path, func() error {
 		session, found := app.sessionStore.Session(path)
 		if !found {
 			return errors.New("session disappeared during takeover")
@@ -1408,7 +1408,7 @@ func (app *application) takeOverSession(response http.ResponseWriter, request *h
 		return err
 	})
 	if err != nil {
-		if errors.Is(err, sessions.ErrSyncBusy) {
+		if errors.Is(err, agent.ErrSyncBusy) {
 			writeJSONStatus(response, http.StatusConflict, map[string]any{"error": "Wait for the gateway task to finish before taking over."})
 			return
 		}
@@ -1435,7 +1435,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 	_, wasPending := app.pendingSessions.CWD(previous)
 	var mover rpc.SessionClientMover = app.rpcClients
 	if app.sessionStore.Exists(previous) {
-		mover = app.synchronizer
+		mover = app.guard
 	}
 	newPath, actionResponse, err := rpc.BranchSession(request.Context(), previous, cwd, mover, app.pendingSessions, func(client agent.Client) (map[string]any, error) {
 		actions, err := checkedActionClient(client)
@@ -1529,7 +1529,7 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 		return
 	}
 	if newPath != previous {
-		app.synchronizer.Forget(previous)
+		app.guard.Forget(previous)
 	}
 	if responseData(actionResponse)["cancelled"] == true {
 		if wantsJSON(request) {
@@ -1692,7 +1692,7 @@ func (app *application) withSynchronizedBashClient(request *http.Request, path s
 	path = resolved
 	ctx := request.Context()
 	if app.sessionStore.Exists(path) {
-		return app.synchronizer.WithBashClient(ctx, path, call)
+		return app.guard.WithBashClient(ctx, path, call)
 	}
 	return app.rpcClients.WithBashClient(ctx, path, call)
 }
@@ -1705,7 +1705,7 @@ func (app *application) withSynchronizedInterruptClient(request *http.Request, p
 	path = resolved
 	ctx := request.Context()
 	if app.sessionStore.Exists(path) {
-		return app.synchronizer.WithInterruptClient(ctx, path, call)
+		return app.guard.WithInterruptClient(ctx, path, call)
 	}
 	return app.rpcClients.WithInterruptClient(ctx, path, call)
 }

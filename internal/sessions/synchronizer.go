@@ -13,39 +13,6 @@ import (
 	"github.com/melounvitek/gripi/internal/rpc"
 )
 
-type SyncMode string
-
-const (
-	SyncAvailable      SyncMode = "available"
-	SyncManaged        SyncMode = "managed"
-	SyncExternalFollow SyncMode = "external_follow"
-	SyncConflict       SyncMode = "conflict"
-	// SyncFolderMissing is reported by the gateway, not the synchronizer: Pi cannot run in a folder that is gone.
-	SyncFolderMissing SyncMode = "folder_missing"
-)
-
-type SyncResult struct {
-	Mode            SyncMode `json:"mode"`
-	Revision        string   `json:"revision,omitempty"`
-	AppendCursor    string   `json:"append_cursor,omitempty"`
-	PersistedLeafID string   `json:"persisted_leaf_id,omitempty"`
-	RPCLeafID       string   `json:"rpc_leaf_id,omitempty"`
-	Error           string   `json:"error,omitempty"`
-}
-
-func (result SyncResult) Blocked() bool {
-	return result.Mode == SyncExternalFollow || result.Mode == SyncConflict
-}
-
-type SyncBlockedError struct {
-	Mode    SyncMode
-	Message string
-}
-
-func (err *SyncBlockedError) Error() string { return err.Message }
-
-var ErrSyncBusy = errors.New("another session operation is pending")
-
 type syncState struct {
 	Snapshot  *FileSnapshot
 	Mode      SyncMode

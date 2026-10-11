@@ -4,6 +4,7 @@ package pi
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -35,10 +36,15 @@ type Adapter struct {
 	extensionMu   sync.Mutex
 	extensionPath string
 	extensionRoot string
+	stateDir      string
 	store         sessionStore
+	synchronizer  *sessions.Synchronizer
 }
 
-var _ agent.Adapter = (*Adapter)(nil)
+var (
+	_ agent.Adapter = (*Adapter)(nil)
+	_ agent.Guard   = (*sessions.Synchronizer)(nil)
+)
 
 func New(options Options) *Adapter {
 	cache := sessions.NewCache()
@@ -49,12 +55,27 @@ func New(options Options) *Adapter {
 		command:   options.Command,
 		extension: options.Extension,
 		settings:  pisettings.SettingsResolver{AgentDir: options.AgentDir, AutoApproveProjects: options.AutoApproveProjects},
+		stateDir:  options.StateDir,
 		store:     sessionStore{sessions.Store{Root: options.SessionsRoot, Home: options.Home, Cache: cache}},
 	}
 }
 
 func (adapter *Adapter) Store() agent.Store {
 	return adapter.store
+}
+
+// Guard keeps the gateway's Pi and Pi CLI from both writing a session file. It restores what the previous run
+// knew about the files, so it must be called only once.
+func (adapter *Adapter) Guard(clients *agent.Registry) (agent.Guard, error) {
+	synchronizer := sessions.NewSynchronizer(adapter.store.Root, adapter.store.Home, adapter.store.Cache, clients)
+	if adapter.stateDir != "" {
+		synchronizer.RestoreBaselines(filepath.Join(adapter.stateDir, "session-baselines.json"))
+		if err := synchronizer.PersistExternalFollow(filepath.Join(adapter.stateDir, "external-sessions.json")); err != nil {
+			return nil, err
+		}
+	}
+	adapter.synchronizer = synchronizer
+	return synchronizer, nil
 }
 
 func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Client, error) {
@@ -93,8 +114,21 @@ func (adapter *Adapter) DisplaySettings(cwd string) agent.DisplaySettings {
 	return agent.DisplaySettings{HideThinkingBlock: settings.HideThinkingBlock}
 }
 
-// Close removes the extracted extension, so it must run after every Pi process has stopped.
+// Close removes the extracted extension and saves the baselines of the session files, so it must run after every
+// Pi process has stopped: the gateway's own last writes would otherwise read as Pi CLI's after a restart.
 func (adapter *Adapter) Close() error {
+	if err := adapter.removeExtension(); err != nil {
+		return err
+	}
+	if adapter.synchronizer != nil {
+		if err := adapter.synchronizer.SaveBaselines(); err != nil {
+			log.Printf("save session baselines: %v", err)
+		}
+	}
+	return nil
+}
+
+func (adapter *Adapter) removeExtension() error {
 	adapter.extensionMu.Lock()
 	defer adapter.extensionMu.Unlock()
 	if adapter.extensionRoot == "" {

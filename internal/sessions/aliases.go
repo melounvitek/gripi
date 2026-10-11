@@ -10,7 +10,21 @@ type (
 	Status          = agent.Status
 	Window          = agent.Window
 	ToolCallContext = agent.ToolCallContext
+
+	SyncMode         = agent.SyncMode
+	SyncResult       = agent.SyncResult
+	SyncBlockedError = agent.SyncBlockedError
 )
+
+const (
+	SyncAvailable      = agent.SyncAvailable
+	SyncManaged        = agent.SyncManaged
+	SyncExternalFollow = agent.SyncExternalFollow
+	SyncConflict       = agent.SyncConflict
+	SyncFolderMissing  = agent.SyncFolderMissing
+)
+
+var ErrSyncBusy = agent.ErrSyncBusy
 
 func DisplayHomePath(value, home string) string { return agent.DisplayHomePath(value, home) }
 

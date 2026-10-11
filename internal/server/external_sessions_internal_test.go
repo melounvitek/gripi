@@ -72,7 +72,7 @@ func TestSidebarKeepsExternalSessionQuietDuringAnExclusiveOperation(t *testing.T
 		t.Fatal(err)
 	}
 	appendExternalSessionReply(t, path, "external-latest", "external")
-	if err := app.synchronizer.WithExclusiveOperation(path, refresh); err != nil {
+	if err := app.guard.WithExclusiveOperation(path, refresh); err != nil {
 		t.Fatal(err)
 	}
 	if count := app.gatewayState.ExternalResponseCounts()[path]; count != 2 {
@@ -92,7 +92,7 @@ func TestSidebarObservationDoesNotBlockPendingSessions(t *testing.T) {
 	if view.Selected == nil || view.Selected.Path != path || view.SessionSyncBlocked {
 		t.Fatalf("pending session selection = %#v, blocked = %t", view.Selected, view.SessionSyncBlocked)
 	}
-	if state := app.synchronizer.KnownBlocked(path); state != nil {
+	if state := app.guard.KnownBlocked(path); state != nil {
 		t.Fatalf("pending session was inspected before its file existed: %#v", state)
 	}
 	if !view.ExternalFollow[actual] {
@@ -107,7 +107,7 @@ func TestSidebarResolvesOwnedPendingAliasesBeforeObservingDiskSessions(t *testin
 			pending := filepath.Join(app.config.SessionsRoot, "pending.jsonl")
 			now := time.Now()
 			app.rpcClients = agent.NewRegistry(nil, func() time.Time { return now })
-			app.synchronizer = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, nil, app.rpcClients)
+			app.guard = sessions.NewSynchronizer(app.config.SessionsRoot, app.config.Home, nil, app.rpcClients)
 			app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 			if err := app.rpcClients.Register(pending, client); err != nil {
 				t.Fatal(err)
@@ -123,7 +123,7 @@ func TestSidebarResolvesOwnedPendingAliasesBeforeObservingDiskSessions(t *testin
 				if err != nil {
 					return err
 				}
-				if view.ExternalFollow[path] || app.synchronizer.KnownBlocked(path) != nil {
+				if view.ExternalFollow[path] || app.guard.KnownBlocked(path) != nil {
 					t.Fatalf("managed append classified as external: %v", view.ExternalFollow)
 				}
 				if _, recorded := app.gatewayState.ExternalResponseCounts()[path]; recorded {
@@ -205,7 +205,7 @@ func TestSidebarKeepsPendingSessionManagedDuringRemapPreparation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if view.ExternalFollow[path] || app.synchronizer.KnownBlocked(path) != nil {
+		if view.ExternalFollow[path] || app.guard.KnownBlocked(path) != nil {
 			t.Errorf("managed append classified as external: %v", view.ExternalFollow)
 		}
 		if _, recorded := app.gatewayState.ExternalResponseCounts()[path]; recorded {
@@ -253,7 +253,7 @@ func TestSidebarDoesNotQueryUnownedPendingAliases(t *testing.T) {
 func TestTakeoverClearsUnobservedExternalRepliesButNewRepliesBecomeUnread(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	appendExternalSessionReply(t, path, "external", "")
-	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+	if _, err := app.guard.Inspect(context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
 	// This reply arrives after the last sidebar observation, before takeover.
@@ -306,13 +306,13 @@ func TestTakeoverClearsUnobservedExternalRepliesButNewRepliesBecomeUnread(t *tes
 func TestTakeoverKeepsQueuedNotificationsQuietWhileSavingTheReadBoundary(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	appendExternalSessionReply(t, path, "external", "")
-	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+	if _, err := app.guard.Inspect(context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
 	client.position = rpc.SessionEntries{Known: true, LeafID: "external"}
 	notifier := newCompletionNotifier(app)
 	reply := completedReply{client: client, path: path, text: "Old reply", readCountKnown: true}
-	_, err := app.synchronizer.TakeOver(context.Background(), path, func() error {
+	_, err := app.guard.TakeOver(context.Background(), path, func() error {
 		// Delivery interleaves after Pi loaded the file but before read state is saved.
 		if err := notifier.deliver(context.Background(), reply); err != nil {
 			return err
@@ -336,7 +336,7 @@ func TestTakeoverKeepsQueuedNotificationsQuietWhileSavingTheReadBoundary(t *test
 func TestTakeoverReadStateFailureKeepsExternalFollow(t *testing.T) {
 	app, path, client := externalSessionTestApplication(t)
 	appendExternalSessionReply(t, path, "external", "")
-	if _, err := app.synchronizer.Inspect(context.Background(), path, false); err != nil {
+	if _, err := app.guard.Inspect(context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}
 	// Force persistence to fail after Pi has successfully loaded the external leaf.
@@ -351,7 +351,7 @@ func TestTakeoverReadStateFailureKeepsExternalFollow(t *testing.T) {
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("takeover with broken read state = %d", response.Code)
 	}
-	if state := app.synchronizer.KnownBlocked(path); state == nil || state.Mode != sessions.SyncExternalFollow {
+	if state := app.guard.KnownBlocked(path); state == nil || state.Mode != sessions.SyncExternalFollow {
 		t.Fatalf("failed takeover enabled the session: %#v", state)
 	}
 }
@@ -363,7 +363,7 @@ func externalSessionTestApplication(t *testing.T) (*application, string, *remapC
 	app := notificationTestApplication(t, root, false, true, &recordingPushNotifier{})
 	client := &remapClient{}
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
-	app.synchronizer = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
+	app.guard = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
 	var err error
 	app.templates, err = template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
 	if err != nil {

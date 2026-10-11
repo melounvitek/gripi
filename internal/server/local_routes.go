@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 // Timestamp is how gripi commands see a time: in UTC with milliseconds,
@@ -129,8 +129,8 @@ func (app *application) localSessionState(path string) string {
 	case live.Busy:
 		return "working"
 	}
-	if blocked := app.synchronizer.KnownBlocked(path); blocked != nil {
-		if blocked.Mode == sessions.SyncConflict {
+	if blocked := app.guard.KnownBlocked(path); blocked != nil {
+		if blocked.Mode == agent.SyncConflict {
 			return "conflict"
 		}
 		return "external"

@@ -34,16 +34,16 @@ func (app *application) events(response http.ResponseWriter, request *http.Reque
 	batch := app.rpcClients.EventsAfter(path, after)
 	payload := map[string]any{"events": batch.Events, "last_seq": batch.LastSeq, "missed": batch.Missed}
 	if app.sessionStore.Exists(path) {
-		state := app.synchronizer.InspectIfAvailable(request.Context(), path, false)
+		state := app.guard.InspectIfAvailable(request.Context(), path, false)
 		if state != nil {
 			mode := state.Mode
 			if app.sessionFolderMissing(path) {
-				mode = sessions.SyncFolderMissing
+				mode = agent.SyncFolderMissing
 			}
 			payload["session_sync"] = map[string]any{"mode": mode, "revision": nullableString(state.Revision), "error": nullableString(state.Error), "gateway_busy": app.rpcClients.Busy(path)}
 		}
 	} else {
-		payload["session_sync"] = map[string]any{"mode": sessions.SyncAvailable, "revision": nil, "error": nil, "gateway_busy": app.rpcClients.Busy(path)}
+		payload["session_sync"] = map[string]any{"mode": agent.SyncAvailable, "revision": nil, "error": nil, "gateway_busy": app.rpcClients.Busy(path)}
 	}
 	writeJSON(response, payload)
 }
@@ -225,13 +225,13 @@ func (app *application) withSynchronizedClient(request *http.Request, path strin
 	path = resolved
 	ctx := request.Context()
 	if app.sessionStore.Exists(path) {
-		return app.synchronizer.WithMutableClient(ctx, path, call)
+		return app.guard.WithMutableClient(ctx, path, call)
 	}
 	return app.rpcClients.WithClient(ctx, path, call)
 }
 
 func (app *application) writeRPCError(response http.ResponseWriter, err error) bool {
-	var blocked *sessions.SyncBlockedError
+	var blocked *agent.SyncBlockedError
 	var timeout *agent.RequestTimeoutError
 	switch {
 	case errors.As(err, &blocked):
@@ -240,7 +240,7 @@ func (app *application) writeRPCError(response http.ResponseWriter, err error) b
 	case errors.Is(err, errSessionNavigating):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"code": "session_operation_pending", "retryable": false, "error": err.Error()})
 		return true
-	case errors.Is(err, sessions.ErrSyncBusy), errors.Is(err, agent.ErrOperationPending):
+	case errors.Is(err, agent.ErrSyncBusy), errors.Is(err, agent.ErrOperationPending):
 		writeJSONStatus(response, http.StatusConflict, map[string]any{"code": "session_operation_pending", "error": "Another session operation is pending. Please retry."})
 		return true
 	case errors.Is(err, agent.ErrClientRetiring):
@@ -583,10 +583,10 @@ func (app *application) retireRPCClient(ctx context.Context, path string, close 
 	var closed bool
 	var err error
 	if app.sessionStore.Exists(path) {
-		app.synchronizer.ReconcileIfAvailable(ctx, path, false, func(sessions.SyncResult) {
+		app.guard.ReconcileIfAvailable(ctx, path, false, func(agent.SyncResult) {
 			closed, err = close()
 			if closed {
-				app.synchronizer.Forget(path)
+				app.guard.Forget(path)
 			}
 		})
 	} else {

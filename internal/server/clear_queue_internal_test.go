@@ -156,7 +156,7 @@ func TestClearQueueInterruptsCompactionWithoutTakingOperationOrSyncLane(t *testi
 	defer release()
 	var operationErr error
 	done := idleRetirementRun(t, func() {
-		operationErr = f.app.synchronizer.WithMutableClient(context.Background(), f.path, func(agent.Client) error {
+		operationErr = f.app.guard.WithMutableClient(context.Background(), f.path, func(agent.Client) error {
 			block()
 			return nil
 		})
@@ -401,7 +401,7 @@ func TestClearQueueRespectsKnownSynchronizationBlock(t *testing.T) {
 			if _, err := f.app.rpcClients.CloseClientIfIdle(f.path); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.app.synchronizer.Inspect(context.Background(), f.path, false); err != nil {
+			if _, err := f.app.guard.Inspect(context.Background(), f.path, false); err != nil {
 				t.Fatal(err)
 			}
 			file, err := os.OpenFile(f.path, os.O_APPEND|os.O_WRONLY, 0600)
@@ -417,7 +417,7 @@ func TestClearQueueRespectsKnownSynchronizationBlock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := f.app.synchronizer.Inspect(context.Background(), f.path, false)
+			result, err := f.app.guard.Inspect(context.Background(), f.path, false)
 			if err != nil || result.Mode != mode {
 				t.Fatalf("inspect = %+v, %v", result, err)
 			}

@@ -110,7 +110,7 @@ type pageView struct {
 	WorkspaceAccessEnabled    bool
 	ResourceMonitoringEnabled bool
 	SessionGeneration         string
-	SessionSyncMode           sessions.SyncMode
+	SessionSyncMode           agent.SyncMode
 	SessionSyncRevision       string
 	SessionSyncError          string
 	SessionSyncBlocked        bool
@@ -224,19 +224,19 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			}
 		}
 	}
-	var selectedSync *sessions.SyncResult
+	var selectedSync *agent.SyncResult
 	externalFollow := make(map[string]bool)
-	if app.synchronizer != nil {
+	if app.guard != nil {
 		for _, session := range all {
 			// Do not attribute appends while an owned pending client could manage this file.
 			if knownPaths[session.Path] && (app.rpcClients.Active(session.Path) || !unresolvedPendingCWDs[session.CWD]) {
 				includePosition := includeConversation && session == selected
-				state := app.synchronizer.InspectIfAvailable(request.Context(), session.Path, includePosition)
+				state := app.guard.InspectIfAvailable(request.Context(), session.Path, includePosition)
 				if includePosition {
 					selectedSync = state
 				}
 			}
-			if state := app.synchronizer.KnownBlocked(session.Path); state != nil && state.Mode == sessions.SyncExternalFollow {
+			if state := app.guard.KnownBlocked(session.Path); state != nil && state.Mode == agent.SyncExternalFollow {
 				externalFollow[session.Path] = true
 			}
 		}
@@ -295,19 +295,19 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if includeConversation && selected != nil {
 		view.HideThinkingBlock = app.adapter.DisplaySettings(selected.CWD).HideThinkingBlock
 		leafID, leafSupplied := "", false
-		view.SessionSyncMode = sessions.SyncAvailable
+		view.SessionSyncMode = agent.SyncAvailable
 		saved := app.sessionStore.Exists(selected.Path)
 		if state := selectedSync; state != nil {
 			view.SessionSyncMode, view.SessionSyncRevision, view.SessionSyncError = state.Mode, state.Revision, state.Error
 			view.SessionSyncBlocked = state.Blocked()
-			if state.Mode == sessions.SyncManaged {
+			if state.Mode == agent.SyncManaged {
 				leafID, leafSupplied = state.RPCLeafID, true
 			} else if state.Blocked() {
 				leafID, leafSupplied = state.PersistedLeafID, true
 			}
 		}
 		if selected.FolderMissing {
-			view.SessionSyncMode, view.SessionSyncBlocked = sessions.SyncFolderMissing, true
+			view.SessionSyncMode, view.SessionSyncBlocked = agent.SyncFolderMissing, true
 		}
 		view.SessionSyncGatewayBusy = view.SessionSyncBlocked && app.rpcClients.Busy(selected.Path)
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)

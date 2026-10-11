@@ -69,7 +69,7 @@ type application struct {
 	imagePromptLocks        keyedlock.Mutexes
 	promptAdmissions        sessionAdmissions
 	sessionMutationLocks    keyedlock.Mutexes
-	synchronizer            *sessions.Synchronizer
+	guard                   agent.Guard
 	rpcMaintenance          *agent.Maintenance
 	completionNotifications *completionNotifier
 	resourceMonitor         resourceMonitor
@@ -79,7 +79,7 @@ type application struct {
 	releaseSession          func(*http.Request, string) error
 }
 
-var errSessionFolderMissing = &sessions.SyncBlockedError{Mode: sessions.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
+var errSessionFolderMissing = &agent.SyncBlockedError{Mode: agent.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
 
 func (app *application) sessionFolderMissing(path string) bool {
 	session, found := app.sessionStore.Session(path)
@@ -153,14 +153,10 @@ func (handler *Handler) Close(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+	// The adapter saves what its guard knows about sessions, which must wait until their clients have stopped.
 	if handler.app.adapter != nil {
 		if err := handler.app.adapter.Close(); err != nil {
 			return err
-		}
-	}
-	if handler.app.synchronizer != nil {
-		if err := handler.app.synchronizer.SaveBaselines(); err != nil {
-			logInternalError("save session baselines", err)
 		}
 	}
 	handler.closed = true
@@ -266,14 +262,8 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		}
 		return adapter.StartInCWD(cwd, forkFrom, agent.StartOptions{Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
 	}
-	// The synchronizer reads session files directly and never uses the metadata cache.
-	app.synchronizer = sessions.NewSynchronizer(cfg.SessionsRoot, cfg.Home, nil, app.rpcClients)
-	if cfg.ReadStatePath != "" {
-		state := filepath.Dir(cfg.ReadStatePath)
-		app.synchronizer.RestoreBaselines(filepath.Join(state, "session-baselines.json"))
-		if err := app.synchronizer.PersistExternalFollow(filepath.Join(state, "external-sessions.json")); err != nil {
-			return nil, err
-		}
+	if app.guard, err = adapter.Guard(app.rpcClients); err != nil {
+		return nil, err
 	}
 	if cfg.MultiUserMode {
 		app.ownsSession = func(request *http.Request, path string) bool {

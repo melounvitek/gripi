@@ -47,11 +47,11 @@ func TestLifecycleDecisionsFailClosed(t *testing.T) {
 					t.Fatal(err)
 				}
 				app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
-				app.synchronizer = sessions.NewSynchronizer(root, root, nil, registry)
+				app.guard = sessions.NewSynchronizer(root, root, nil, registry)
 				queried := false
 				client.onState = func() {
 					queried = true
-					if err := app.synchronizer.WithExclusiveOperation(path, func() error { return nil }); !errors.Is(err, sessions.ErrSyncBusy) {
+					if err := app.guard.WithExclusiveOperation(path, func() error { return nil }); !errors.Is(err, sessions.ErrSyncBusy) {
 						t.Errorf("state query was not serialized with mutations: %v", err)
 					}
 				}

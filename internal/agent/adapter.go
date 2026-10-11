@@ -10,6 +10,8 @@ type Adapter interface {
 	DisplaySettings(cwd string) DisplaySettings
 	// Store returns the agent's catalog of saved sessions.
 	Store() Store
+	// Guard returns the guard for the sessions that clients run. The gateway calls it once, after creating clients.
+	Guard(clients *Registry) (Guard, error)
 	// Close releases what the adapter holds after its clients have stopped.
 	Close() error
 }

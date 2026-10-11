@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func (app *application) clearQueue(response http.ResponseWriter, request *http.Request) {
@@ -66,9 +65,9 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 		fail(http.StatusNotFound, "Session not found")
 		return
 	}
-	if app.synchronizer != nil {
-		if blocked := app.synchronizer.KnownBlocked(path); blocked != nil {
-			writeError(&sessions.SyncBlockedError{Mode: blocked.Mode, Message: app.synchronizer.Message(*blocked)})
+	if app.guard != nil {
+		if blocked := app.guard.KnownBlocked(path); blocked != nil {
+			writeError(&agent.SyncBlockedError{Mode: blocked.Mode, Message: app.guard.Message(*blocked)})
 			return
 		}
 	}
