@@ -16,7 +16,7 @@ type importEdge struct{ from, to string }
 // The coordinator removes entries as steps land, and the list must end empty.
 // Entries that are no longer needed don't fail the test.
 var allowedImports = map[importEdge]bool{
-	{"internal/sessions", "internal/rpc"}: true,
+	{"internal/sessions", "internal/agent/pi/rpc"}: true,
 }
 
 // Only production imports are checked: tests may still build real Pi clients.

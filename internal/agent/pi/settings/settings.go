@@ -1,4 +1,4 @@
-package pi
+package settings
 
 import (
 	"encoding/json"

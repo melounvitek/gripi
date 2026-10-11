@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 )
 
 // Client serves a session through Pi's RPC mode.

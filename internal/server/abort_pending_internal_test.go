@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 

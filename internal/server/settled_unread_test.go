@@ -17,8 +17,8 @@ import (
 
 	"github.com/melounvitek/gripi/internal/agent"
 	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 	"github.com/melounvitek/gripi/internal/rendering"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 

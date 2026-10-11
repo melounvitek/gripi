@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 )
 
 func TestCommandCatalogPreservesBuiltinsAndFiltersPrivateExtensionCommands(t *testing.T) {

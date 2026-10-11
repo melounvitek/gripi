@@ -23,7 +23,7 @@ func TestClientUsesNativeFakePiRPCWithoutRewritingSessionOnReads(t *testing.T) {
 	if err != nil {
 		t.Skip("Node is required")
 	}
-	repo, err := filepath.Abs(filepath.Join("..", ".."))
+	repo, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}

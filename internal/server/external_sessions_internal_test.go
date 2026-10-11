@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 	"github.com/melounvitek/gripi/internal/rendering"
-	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 

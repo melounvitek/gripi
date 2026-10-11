@@ -10,8 +10,8 @@ import (
 	"sync"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	pisettings "github.com/melounvitek/gripi/internal/pi"
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/settings"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -32,7 +32,7 @@ type Options struct {
 type Adapter struct {
 	command       []string
 	extension     []byte
-	settings      pisettings.SettingsResolver
+	settings      settings.SettingsResolver
 	extensionMu   sync.Mutex
 	extensionPath string
 	extensionRoot string
@@ -54,7 +54,7 @@ func New(options Options) *Adapter {
 	return &Adapter{
 		command:   options.Command,
 		extension: options.Extension,
-		settings:  pisettings.SettingsResolver{AgentDir: options.AgentDir, AutoApproveProjects: options.AutoApproveProjects},
+		settings:  settings.SettingsResolver{AgentDir: options.AgentDir, AutoApproveProjects: options.AutoApproveProjects},
 		stateDir:  options.StateDir,
 		store:     sessionStore{sessions.Store{Root: options.SessionsRoot, Home: options.Home, Cache: cache}},
 	}

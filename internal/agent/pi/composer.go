@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 )
 
 // Composer reads what the user types the way Pi CLI's editor does.

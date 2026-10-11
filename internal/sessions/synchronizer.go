@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
 	"github.com/melounvitek/gripi/internal/keyedlock"
-	"github.com/melounvitek/gripi/internal/rpc"
 )
 
 type syncState struct {
