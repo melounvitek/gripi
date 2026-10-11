@@ -1,3 +1,5 @@
+// Package sessionfile reads Pi's JSONL session files and guards them against Pi CLI writing a session that the
+// gateway also runs.
 package sessionfile
 
 import (

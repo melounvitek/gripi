@@ -1,3 +1,4 @@
+// Package rpc runs Pi in RPC mode and speaks its protocol.
 package rpc
 
 import (

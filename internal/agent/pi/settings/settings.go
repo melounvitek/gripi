@@ -1,3 +1,4 @@
+// Package settings reads the Pi settings that the gateway follows.
 package settings
 
 import (

@@ -1,3 +1,5 @@
+// Package sessions keeps what the gateway owns about sessions: read state, pins, tags, completions, projects,
+// attachments and path suggestions.
 package sessions
 
 import (
