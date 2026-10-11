@@ -19,7 +19,7 @@ func fakeHermesPath() string {
 }
 
 func TestRequestsGetHermesErrorAnswers(t *testing.T) {
-	conn, err := start(fakeHermesPath(), os.Environ())
+	conn, err := start(fakeHermesPath(), os.Environ(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestCloseStopsAHermesThatKeepsRunningAndWhatItStarted(t *testing.T) {
 	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	conn, err := start(path, os.Environ())
+	conn, err := start(path, os.Environ(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

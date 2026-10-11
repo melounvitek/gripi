@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	agenthermes "github.com/melounvitek/gripi/internal/agent/hermes"
 	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 )
@@ -42,4 +43,18 @@ func inspectGuard(guard agent.Guard, ctx context.Context, key string, includePos
 	return guard.(interface {
 		Inspect(context.Context, string, bool) (agent.SyncResult, error)
 	}).Inspect(ctx, key, includePosition)
+}
+
+// NewHandlerWithHermes builds the gateway with Pi and the Hermes that cfg.HermesPath runs, as cmd/gripi does.
+func NewHandlerWithHermes(cfg config.Config, files fs.FS) (http.Handler, error) {
+	extension, err := fs.ReadFile(files, "pi_extensions/gripi-tree.ts")
+	if err != nil {
+		return nil, err
+	}
+	piAdapter := agentpi.New(agentpi.Options{Command: cfg.PiCommand, Extension: extension, SessionsRoot: cfg.SessionsRoot, Home: cfg.Home})
+	router := agent.NewRouter(
+		agent.RoutedAgent{Name: "pi", Adapter: piAdapter},
+		agent.RoutedAgent{Name: "hermes", Adapter: agenthermes.New(agenthermes.Options{Path: cfg.HermesPath, Home: cfg.Home})},
+	)
+	return newHandler(cfg, files, router, randomBrowserToken)
 }

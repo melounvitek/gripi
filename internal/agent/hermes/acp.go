@@ -30,6 +30,9 @@ type connection struct {
 	grace     time.Duration
 	closeOnce sync.Once
 
+	// notify receives Hermes's notifications in order, on the goroutine that reads them.
+	notify func(method string, params json.RawMessage)
+
 	mu      sync.Mutex
 	nextID  int64
 	waiting map[int64]chan message
@@ -44,6 +47,7 @@ type connection struct {
 type message struct {
 	ID     json.RawMessage `json:"id,omitempty"`
 	Method string          `json:"method,omitempty"`
+	Params json.RawMessage `json:"params,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  *rpcError       `json:"error,omitempty"`
 }
@@ -65,7 +69,7 @@ func environment(gateway []string) []string {
 	})
 }
 
-func start(path string, env []string) (*connection, error) {
+func start(path string, env []string, notify func(method string, params json.RawMessage)) (*connection, error) {
 	process := exec.Command(path, "acp")
 	process.Env = env
 	// Hermes runs tools and MCP servers in processes of its own, which stop with it.
@@ -85,7 +89,7 @@ func start(path string, env []string) (*connection, error) {
 	if err := process.Start(); err != nil {
 		return nil, fmt.Errorf("Hermes could not start: %w", err)
 	}
-	conn := &connection{process: process, stdin: stdin, grace: 5 * time.Second, waiting: make(map[int64]chan message), exited: make(chan struct{})}
+	conn := &connection{process: process, stdin: stdin, grace: 5 * time.Second, notify: notify, waiting: make(map[int64]chan message), exited: make(chan struct{})}
 	stderrDone := make(chan struct{})
 	go func() {
 		_, _ = io.Copy(&conn.stderr, stderr)
@@ -104,21 +108,32 @@ func (conn *connection) read(stdout io.Reader) {
 	for {
 		line, err := reader.ReadBytes('\n')
 		var received message
-		if json.Unmarshal(line, &received) == nil && received.Method == "" {
-			var id int64
-			if json.Unmarshal(received.ID, &id) == nil {
-				conn.mu.Lock()
-				reply := conn.waiting[id]
-				delete(conn.waiting, id)
-				conn.mu.Unlock()
-				if reply != nil {
-					reply <- received
-				}
+		if json.Unmarshal(line, &received) == nil {
+			switch {
+			case received.Method == "":
+				conn.deliver(received)
+			case received.ID == nil && conn.notify != nil:
+				conn.notify(received.Method, received.Params)
 			}
 		}
 		if err != nil {
 			return
 		}
+	}
+}
+
+// deliver hands an answer to the request that waits for it.
+func (conn *connection) deliver(answer message) {
+	var id int64
+	if json.Unmarshal(answer.ID, &id) != nil {
+		return
+	}
+	conn.mu.Lock()
+	reply := conn.waiting[id]
+	delete(conn.waiting, id)
+	conn.mu.Unlock()
+	if reply != nil {
+		reply <- answer
 	}
 }
 

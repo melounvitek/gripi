@@ -25,13 +25,18 @@ const capabilities = process.env.FAKE_HERMES_CAPABILITIES
   ? JSON.parse(process.env.FAKE_HERMES_CAPABILITIES)
   : { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: { fork: {}, list: {}, resume: {} } };
 
-// FAKE_HERMES_STATE names a JSON file of saved sessions: {"sessions": [{"sessionId", "cwd", "title", "updatedAt"}]}.
+// FAKE_HERMES_STATE names a JSON file of saved sessions: {"sessions": [{"sessionId", "cwd", "title", "updatedAt",
+// "model", "history"}]}, where history holds the ACP updates that session/load replays.
 function savedSessions() {
   const path = process.env.FAKE_HERMES_STATE;
   return path && existsSync(path) ? JSON.parse(readFileSync(path, "utf8")).sessions : [];
 }
 
 const PAGE_SIZE = 50;
+
+function update(sessionId, value) {
+  send({ method: "session/update", params: { sessionId, update: value } });
+}
 
 const methods = {
   initialize: () => ({ protocolVersion: 1, agentCapabilities: capabilities, agentInfo: { name: "hermes-agent", version: "0.0.0-fake" }, authMethods: [] }),
@@ -41,6 +46,15 @@ const methods = {
     const start = cursor ? sessions.findIndex((session) => session.sessionId === cursor) + 1 : 0;
     const page = sessions.slice(start, start + PAGE_SIZE).map(({ sessionId, cwd, title, updatedAt }) => ({ sessionId, cwd, title, updatedAt }));
     return start + PAGE_SIZE < sessions.length ? { sessions: page, nextCursor: page.at(-1).sessionId } : { sessions: page };
+  },
+  // Like Hermes: the transcript replays before the answer, and an unknown session answers nothing.
+  "session/load": ({ sessionId }) => {
+    const session = savedSessions().find((candidate) => candidate.sessionId === sessionId);
+    if (!session) return {};
+    for (const value of session.history ?? []) update(sessionId, value);
+    const model = session.model ?? "anthropic:claude-opus-4-5";
+    setImmediate(() => update(sessionId, { sessionUpdate: "usage_update", size: 200000, used: session.contextUsed ?? 31200 }));
+    return { models: { currentModelId: model, availableModels: [{ modelId: model, name: model }] }, modes: { currentModeId: "default", availableModes: [] } };
   }
 };
 

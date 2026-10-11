@@ -32,6 +32,9 @@ type Adapter struct {
 	listMu   sync.Mutex
 	listed   []listedSession
 	listedAt time.Time
+
+	sessionsMu sync.Mutex
+	sessions   map[string]*session
 }
 
 var _ agent.Adapter = (*Adapter)(nil)
@@ -41,6 +44,8 @@ const (
 	// listFresh is how long a listing serves the gateway, which lists sessions for every page and sidebar.
 	listFresh   = 2 * time.Second
 	listTimeout = 15 * time.Second
+	// loadTimeout bounds loading a session, for which Hermes builds the session's agent.
+	loadTimeout = time.Minute
 )
 
 func New(options Options) *Adapter {
@@ -92,7 +97,7 @@ func (adapter *Adapter) connected(ctx context.Context) (*connection, error) {
 	if adapter.failure != nil && time.Since(adapter.failedAt) < retryAfter {
 		return nil, adapter.failure
 	}
-	conn, err := start(adapter.path, environment(os.Environ()))
+	conn, err := start(adapter.path, environment(os.Environ()), adapter.notified)
 	if err == nil {
 		if err = conn.initialize(ctx); err != nil {
 			_ = conn.Close()

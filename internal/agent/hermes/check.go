@@ -7,7 +7,7 @@ import (
 
 // Check starts Hermes's ACP server at path and reports why Gripi could not run Hermes sessions with it.
 func Check(ctx context.Context, path string) error {
-	conn, err := start(path, environment(os.Environ()))
+	conn, err := start(path, environment(os.Environ()), nil)
 	if err != nil {
 		return err
 	}

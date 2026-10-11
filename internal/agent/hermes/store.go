@@ -122,11 +122,33 @@ func (store store) Session(key string) (*agent.Session, bool) {
 	return listed.session(), true
 }
 
-func (store store) Window(string, string, bool, *int, *int) (agent.Window, error) {
-	return agent.Window{}, fs.ErrNotExist
+// Window pages the conversation that Hermes replays as it loads the session. Hermes keeps no branches, so the leaf
+// is ignored.
+func (store store) Window(key, _ string, _ bool, cursor, after *int) (agent.Window, error) {
+	listed, ok := store.adapter.find(key)
+	if !ok {
+		return agent.Window{}, fs.ErrNotExist
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+	defer cancel()
+	session, err := store.adapter.load(ctx, listed)
+	if err != nil {
+		return agent.Window{}, err
+	}
+	return window(session.messages(), cursor, after, session.status()), nil
 }
 
-func (store store) Status(string) (agent.Status, error) { return agent.Status{}, nil }
+// Status reports the model and context usage of a session that Hermes has loaded.
+func (store store) Status(key string) (agent.Status, error) {
+	id, _ := strings.CutPrefix(key, keyPrefix)
+	store.adapter.sessionsMu.Lock()
+	session := store.adapter.sessions[id]
+	store.adapter.sessionsMu.Unlock()
+	if session == nil {
+		return agent.Status{}, nil
+	}
+	return session.status(), nil
+}
 
 func (store store) Generation(key string) string {
 	if listed, ok := store.adapter.find(key); ok {
