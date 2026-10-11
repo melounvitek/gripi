@@ -1,7 +1,6 @@
 # TODO
 
 - Full-text session search. The sidebar search matches only a session's name, directory and first user message, and of a first message whose entry is over 256 KB only the first 8 KB, which the gateway keeps so a huge one cannot push the session index over its memory bound. Pi's `/resume` picker also matches the session id and the text of every user and assistant message, with fuzzy tokens, `"phrases"` and `re:` patterns. Matching it means indexing message text in the gateway, which costs memory.
-- More palette commands: show only a project or tag, show or hide Pi CLI sessions, delete session, notifications, gateway update.
 - A way into the palette without a keyboard, and an entry in the desktop app's menu.
 - Faster first start. The gateway's first start, and any start after the saved session cache's version changes, still parses every session file one at a time, behind one lock (`buildMu`): 28 s for 1.7 GB of sessions. Parsing them in parallel took 6.8 s with 4 workers and 4.0 s with 8 in a rough test, for about twice the memory (175 MB to 350 MB).
 - Count HTTP errors from event polls as lost connection. "Connection lost. Retrying…" appears after two `/events` requests in a row fail outright. An error response, such as a proxy's 502 while the gateway is down, is retried silently, so behind a proxy a gateway that goes down mid-run shows no warning until the page is refocused.

@@ -17,8 +17,13 @@ export class CommandPaletteController {
     this.modal.addEventListener("input", () => this.render());
     this.modal.addEventListener("click", (event) => {
       // There is no close button, so a click beside the card closes.
-      if (event.target === this.modal) this.callbacks.closeModal(this.modal);
-      else this.activate(event.target.closest('[role="option"]'));
+      if (event.target === this.modal) {
+        this.callbacks.closeModal(this.modal);
+        return;
+      }
+      // On the page, the click would close a list that the command opens, such as the project filter's.
+      event.stopPropagation();
+      this.activate(event.target.closest('[role="option"]'));
     });
     this.modal.addEventListener("keydown", (event) => this.handleKeydown(event));
   }
@@ -89,6 +94,7 @@ export class CommandPaletteController {
 
   sessionRow(session) {
     const row = this.row(session.monogram, session.name, session.age, () => this.callbacks.openSession(session.path));
+    this.rowSessions.set(row, session);
     row.title = session.project;
     if (session.unread) {
       row.classList.add("is-unread");
@@ -145,6 +151,7 @@ export class CommandPaletteController {
     this.words = words;
     this.list.replaceChildren();
     this.runs = new Map();
+    this.rowSessions = new Map();
     this.more = 0;
     if (this.sessions) {
       const current = this.callbacks.currentSessionPath();
@@ -209,6 +216,18 @@ export class CommandPaletteController {
       // Enter can beat the sessions: it then opens the first match once they arrive.
       if (this.sessions) this.activate(this.options()[this.cursor]);
       else this.pending = () => this.options()[this.cursor];
+    } else if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase() === "d") {
+      // As in Pi CLI's session picker. The session open here is not listed, and like the sidebar's menu, a running one is refused.
+      event.preventDefault();
+      const session = this.rowSessions.get(this.options()[this.cursor]);
+      if (!session) return;
+      if (session.busy) {
+        this.status.textContent = "Cannot delete a running session";
+        this.status.hidden = false;
+        return;
+      }
+      this.callbacks.closeModal(this.modal);
+      this.callbacks.deleteSession(session);
     }
   }
 }

@@ -478,12 +478,28 @@ export class SidebarController {
     const input = form?.querySelector('input[name="session_search"]');
     const button = this.element?.querySelector("[data-sidebar-search-toggle]");
     if (!this.setSearchOpen(form, button, true)) return false;
-    const mobileToggle = this.document.getElementById("mobile-session-toggle");
-    if (mobileToggle) mobileToggle.checked = true;
-    if (this.window.matchMedia?.(DESKTOP_SIDEBAR_MEDIA).matches) this.setDesktopVisibility(false);
+    this.reveal();
     input.focus({ preventScroll: true });
     input.select();
     return true;
+  }
+
+  // With the focus on its control, as if it had been opened from the keyboard.
+  openProjectFilter() {
+    const wrapper = this.element?.querySelector("[data-sidebar-project-filter]")?.closest("[data-project-select]");
+    const trigger = wrapper?._projectSelectState?.trigger;
+    if (!trigger) return false;
+    this.reveal();
+    trigger.focus({ preventScroll: true });
+    this.projectSelectController.open(wrapper);
+    return true;
+  }
+
+  // For the moment only: a hidden sidebar stays hidden after a reload.
+  reveal() {
+    const mobileToggle = this.document.getElementById("mobile-session-toggle");
+    if (mobileToggle) mobileToggle.checked = true;
+    if (this.window.matchMedia?.(DESKTOP_SIDEBAR_MEDIA).matches) this.setDesktopVisibility(false);
   }
 
   closeSearch(event) {

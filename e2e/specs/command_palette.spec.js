@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { appendFile, readFile, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { prompts, replies, sessions } from "../support/contract.mjs";
 import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
@@ -317,7 +320,7 @@ test("without an open session only the commands that need none are listed", asyn
   test.skip(isMobile, "Keyboard flow");
   await open(page);
   await expect(dialog(page).getByRole("group", { name: "Recent sessions" }).getByRole("option")).toHaveCount(5);
-  await expect(dialog(page).getByRole("group", { name: "Gripi" }).getByRole("option")).toHaveText([/New session…/, /Environment…/, /Hide sidebar/]);
+  await expect(dialog(page).getByRole("group", { name: "Gripi" }).getByRole("option")).toHaveText([/New session…/, /Environment…/, /Hide sidebar/, /Show only a project…/, /Show only a tag…/, /Turn on notifications/]);
   await expect(dialog(page).getByRole("group", { name: "This session" })).toHaveCount(0);
 });
 
@@ -462,4 +465,130 @@ test("a session switch the palette did not start closes it, since its commands a
   await page.goBack();
   await expect(dialog(page)).toBeHidden();
   await expect(page.getByRole("heading", { level: 1, name: sessions.marker })).toBeHidden();
+});
+
+// A copy of the seeded marker session under a name of its own, to delete or to write to as Pi CLI would.
+async function copySession(page, name) {
+  const marker = (await (await page.request.get("/sessions/palette")).json()).sessions.find((session) => session.name === sessions.marker);
+  const entries = (await readFile(marker.path, "utf8")).trim().split("\n").map(JSON.parse);
+  const id = randomUUID();
+  const file = path.join(path.dirname(marker.path), `palette-${id}.jsonl`);
+  const title = `${name} ${id.slice(0, 8)}`;
+  entries[0].id = id;
+  entries.find((entry) => entry.type === "session_info").name = title;
+  await writeFile(file, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
+  return { file, title, entries };
+}
+
+test("the filter commands open the sidebar's project list and tag chooser", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await open(page);
+  await openSession(page, "contract ready", sessions.marker);
+  const sidebar = page.getByRole("complementary", { name: "Sessions" });
+  const projectFilter = sidebar.getByRole("combobox", { name: "Filter sessions by project" });
+  const allProjects = page.getByRole("option", { name: "All projects" });
+
+  // A hidden sidebar shows for it, and the click that runs it leaves the list open, with the focus on its control.
+  await run(page, "Hide sidebar");
+  await expect(sidebar).toBeHidden();
+  await run(page, "Show only a project…");
+  await expect(sidebar).toBeVisible();
+  await expect(projectFilter).toHaveAttribute("aria-expanded", "true");
+  await expect(allProjects).toBeVisible();
+  await expect(projectFilter).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(allProjects).toBeHidden();
+  await expect.poll(() => new URL(page.url()).searchParams.get("project")).toBeTruthy();
+
+  // Anchored to the composer, like Tags…, which then gets the focus back.
+  await run(page, "Show only a tag…");
+  const tags = page.getByRole("dialog", { name: "Filter by tag" });
+  await expect(tags).toBeVisible();
+  await expect(tags.getByRole("button", { name: "All tags" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(tags).toBeHidden();
+  await expect(composer(page)).toBeFocused();
+});
+
+test("the notification and gateway update commands do what their sidebar controls do", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await page.addInitScript(() => {
+    localStorage.removeItem("gripi:notifications-disabled");
+    window.gripiElectron = { showNotification: async () => {} };
+  });
+  await page.route(/\/gateway-update(\/check)?$/, (route) => route.fulfill({ json: { state: "available", targetSha: "abc12345", message: "1 update commit available" } }));
+  await page.goto("/?no_session=1");
+  const bell = page.getByRole("complementary", { name: "Sessions" }).getByRole("button", { name: /notifications/i });
+  await expect(bell).toHaveAccessibleName("Notifications on — click to disable");
+  await run(page, "Turn off notifications");
+  await expect(bell).toHaveAccessibleName("Notifications off — click to enable");
+  await run(page, "Turn on notifications");
+  await expect(bell).toHaveAccessibleName("Notifications on — click to disable");
+
+  await expect(page.getByRole("button", { name: "Update to abc12345" })).toBeVisible();
+  const confirmation = new Promise((resolve) => page.once("dialog", (shown) => {
+    resolve(shown.message());
+    shown.dismiss();
+  }));
+  await run(page, "Update to abc12345…");
+  expect(await confirmation).toContain("Update Gripi to abc12345?");
+});
+
+test("Pi CLI sessions are shown and hidden again as the sidebar's button does it", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  test.setTimeout(45_000);
+  const { file, entries } = await copySession(page, "E2E Palette CLI");
+  try {
+    // Earlier specs can push it past the sidebar's first page.
+    await page.goto("/?no_session=1&show_all_sessions=1");
+    const link = page.locator(`a.session[data-session-path="${file}"]`);
+    await expect(link).toBeVisible();
+    // Pi CLI writes to it.
+    const assistant = entries.find((entry) => entry.message?.role === "assistant").message;
+    const timestamp = Date.now();
+    await appendFile(file, `${JSON.stringify({ type: "message", id: randomUUID().slice(0, 8), parentId: entries.at(-1).id, timestamp: new Date(timestamp).toISOString(), message: { ...assistant, content: [{ type: "text", text: "CLI reply" }], timestamp } })}\n`);
+    await expect(link).toHaveCount(0, { timeout: 15_000 });
+
+    const toggle = page.locator("[data-sidebar-cli-toggle]");
+    await run(page, "Show Pi CLI sessions");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(link).toBeVisible();
+    await run(page, "Hide Pi CLI sessions");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(link).toHaveCount(0);
+  } finally {
+    await unlink(file);
+  }
+});
+
+test("Ctrl+D asks to delete the highlighted session, as in Pi CLI's session picker, but not a running one", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  const { title } = await copySession(page, "E2E Palette Delete");
+  await page.route("**/sessions/palette", async (route) => {
+    const list = (await (await route.fetch()).json()).sessions;
+    await route.fulfill({ json: { sessions: list.map((session) => ({ ...session, busy: session.name === title })) } });
+  });
+  await page.goto("/?no_session=1");
+  await page.keyboard.press("Control+k");
+  await input(page).fill(title);
+  await expect(options(page)).toHaveText([new RegExp(title)]);
+  await page.keyboard.press("Control+d");
+  await expect(status(page)).toHaveText("Cannot delete a running session");
+  await expect(dialog(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.unroute("**/sessions/palette");
+
+  await page.keyboard.press("Control+k");
+  await input(page).fill(title);
+  await expect(options(page)).toHaveText([new RegExp(title)]);
+  await page.keyboard.press("Control+d");
+  await expect(dialog(page)).toBeHidden();
+  const confirm = page.getByRole("dialog", { name: "Delete session" });
+  await expect(confirm).toContainText(title);
+  await confirm.getByRole("button", { name: "Delete session", exact: true }).click();
+  await expect(confirm).toBeHidden();
+  await page.keyboard.press("Control+k");
+  await input(page).fill(title);
+  await expect(status(page)).toHaveText("No matches.");
 });

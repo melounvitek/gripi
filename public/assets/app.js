@@ -212,6 +212,11 @@ const commandPaletteController = new CommandPaletteController(document, {
   currentSessionPath,
   previousSessionPath: () => readMainSessionHistory().previous,
   openSession: (path) => switchSession(sessionUrl(path), { push: true, focus: true }),
+  // What the sidebar's row menu calls, for a row the palette lists instead.
+  deleteSession: (session) => {
+    sessionActionsController.target = null;
+    sessionActionsController.openDelete(session);
+  },
   commands: commandPaletteCommands,
   piCommands: piPaletteCommands
 });
@@ -340,6 +345,11 @@ function commandPaletteCommands() {
   const running = composerState?.dataset.state === "running";
   const otherView = document.querySelector('[data-conversation-view][aria-pressed="false"]');
   const sidebarHidden = document.body.classList.contains("desktop-sidebar-hidden");
+  const projectFilter = document.querySelector("[data-sidebar-project-filter]");
+  const tagChooser = document.querySelector("[data-tag-chooser]");
+  const cliToggle = document.querySelector("[data-sidebar-cli-toggle]");
+  const notificationToggle = document.querySelector("[data-notification-toggle]");
+  const gatewayUpdate = document.querySelector("[data-gateway-update]:not([hidden]) [data-gateway-update-button]:not([hidden])");
   return [
     ["This session", [
       writable && { label: "Choose model and thinking", detail: "/model", run: openModelSettingsModal },
@@ -368,7 +378,13 @@ function commandPaletteCommands() {
       { label: "New session…", keys: "ctrl+n", run: openNewSessionModal },
       { label: "Environment…", run: () => environmentController.open() },
       // On narrow screens the sidebar is a drawer instead.
-      window.matchMedia("(min-width: 761px)").matches && { label: sidebarHidden ? "Show sidebar" : "Hide sidebar", run: () => sidebarController.setDesktopVisibility(!sidebarHidden, true) }
+      window.matchMedia("(min-width: 761px)").matches && { label: sidebarHidden ? "Show sidebar" : "Hide sidebar", run: () => sidebarController.setDesktopVisibility(!sidebarHidden, true) },
+      projectFilter && { label: "Show only a project…", run: () => sidebarController.openProjectFilter() },
+      // Anchored to the composer, like Tags… above.
+      tagChooser && { label: "Show only a tag…", run: () => sessionTagsController.open("", promptTextarea) },
+      cliToggle && { label: `${cliToggle.getAttribute("aria-pressed") === "true" ? "Hide" : "Show"} Pi CLI sessions`, run: () => cliToggle.click() },
+      notificationToggle && { label: notificationsEnabled() ? "Turn off notifications" : "Turn on notifications", run: () => notificationToggle.click() },
+      gatewayUpdate && { label: `${gatewayUpdate.textContent}…`, run: () => gatewayUpdate.click() }
     ]]
   ];
 }

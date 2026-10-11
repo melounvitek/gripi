@@ -1047,6 +1047,7 @@
     const session = currentSession();
     const otherView = element.viewToggle.querySelector('[aria-pressed="false"]');
     const sidebarHidden = document.body.classList.contains("desktop-sidebar-hidden");
+    const notificationToggle = document.querySelector("[data-notification-toggle]");
     paletteList.replaceChildren(); paletteRuns = new Map();
     // With nothing typed, the session open before this one leads, so Ctrl+K then Enter flips between two.
     const matching = sessions.filter((other) => other.id !== currentId && matches(`${other.name}\n${other.project}`));
@@ -1071,7 +1072,8 @@
         ["New session…", "", "ctrl+n", () => handleSlash("new")],
         ["Environment…", "", "", () => openModal("environment-modal")],
         // On narrow screens the sidebar is a drawer instead.
-        ...(matchMedia("(min-width: 761px)").matches ? [[sidebarHidden ? "Show sidebar" : "Hide sidebar", "", "", () => setDesktopSidebarHidden(!sidebarHidden, true)]] : [])
+        ...(matchMedia("(min-width: 761px)").matches ? [[sidebarHidden ? "Show sidebar" : "Hide sidebar", "", "", () => setDesktopSidebarHidden(!sidebarHidden, true)]] : []),
+        [notificationToggle.classList.contains("is-enabled") ? "Turn off notifications" : "Turn on notifications", "", "", () => notificationToggle.click()]
       ]]
     ]) {
       paletteGroup(title, commands.filter(([label, slash]) => matches(`${label} ${slash}`)).map(([label, slash, keys, run]) => {
