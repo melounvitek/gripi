@@ -35,6 +35,7 @@ const timers = new Set();
 let heldPromptEvents = null;
 let recoveryMessage = null;
 let liveGate = null;
+let liveAbort = null;
 
 if (sessionPath) loadSession(sessionPath);
 else if (forkSource) forkSession(forkSource);
@@ -600,6 +601,13 @@ function acceptAbort(command) {
     return;
   }
   clearTimers();
+  if (liveAbort) {
+    const abortLive = liveAbort;
+    liveAbort = null;
+    abortLive();
+    respond(command, true);
+    return;
+  }
   const abortSteer = queuedAbortSteer;
   if (pendingMessages.length) clearPendingMessages();
   if (abortSteer) {
@@ -1037,7 +1045,16 @@ function startLiveScenario(message) {
     [live.errors.exhaustedRetry.prompt]: startExhaustedRetry,
     [live.errors.extensionErrors.prompt]: startExtensionErrors,
     [live.errors.summarizationRetry.prompt]: startSummarizationRetry,
-    [live.customMessages.prompt]: startLiveCustomMessages
+    [live.customMessages.prompt]: startLiveCustomMessages,
+    [live.extensionUi.prompt]: startLiveExtensionUi,
+    [live.extensionUi.restorePrompt]: startRestoredExtensionUi,
+    [live.footer.prompt]: startLiveFooter,
+    [live.compaction.failurePrompt]: startFailedCompaction,
+    [live.compaction.abortPrompt]: startAbortedCompaction,
+    [live.compaction.duplicatePrompt]: startDuplicateCompaction,
+    [live.thinking.prompt]: startFinishedThinking,
+    [live.thinking.errorPrompt]: startFailedThinking,
+    [live.thinking.abortPrompt]: startAbortedThinking
   }[message];
   if (!start) return false;
   schedule(120, start);
@@ -1152,6 +1169,95 @@ function emitCustomMessage(message) {
   emitMessage(message);
 }
 
+function startLiveExtensionUi() {
+  const scenario = live.extensionUi;
+  const { above, implicit, below } = scenario.widgets;
+  emitExtensionUi({ method: "setWidget", widgetKey: above.key, widgetLines: above.lines, widgetPlacement: "aboveEditor" });
+  emitExtensionUi({ method: "setWidget", widgetKey: implicit.key, widgetLines: implicit.lines });
+  emitExtensionUi({ method: "setWidget", widgetKey: below.key, widgetLines: below.lines, widgetPlacement: "belowEditor" });
+  emitExtensionUi({ method: "setTitle", title: scenario.title });
+  emitExtensionUi({ method: "notify", message: scenario.notices.info, notifyType: "info" });
+  emitExtensionUi({ method: "notify", message: scenario.notices.warning, notifyType: "warning" });
+  emitExtensionUi({ method: "notify", message: scenario.notices.error, notifyType: "error" });
+  emitExtensionUi({ method: "set_editor_text", text: scenario.editorText.empty });
+  holdLiveScenario(scenario.gates.removal, () => {
+    // Pi leaves out widget lines and the title when an extension clears them.
+    emitExtensionUi({ method: "setWidget", widgetKey: implicit.key });
+    emitExtensionUi({ method: "setTitle" });
+    emitExtensionUi({ method: "set_editor_text", text: scenario.editorText.replaced });
+    holdLiveScenario(scenario.gates.decline, () => {
+      emitExtensionUi({ method: "set_editor_text", text: scenario.editorText.declined });
+      completeAssistant(scenario.reply);
+    });
+  });
+}
+
+function startRestoredExtensionUi() {
+  const scenario = live.extensionUi;
+  const { above, below } = scenario.widgets;
+  emitExtensionUi({ method: "setWidget", widgetKey: above.key, widgetLines: above.lines, widgetPlacement: "aboveEditor" });
+  emitExtensionUi({ method: "setWidget", widgetKey: below.key, widgetLines: below.lines, widgetPlacement: "belowEditor" });
+  emitExtensionUi({ method: "setTitle", title: scenario.title });
+  holdLiveScenario(scenario.gates.restore, () => completeAssistant(scenario.restoreReply));
+}
+
+function emitExtensionUi(fields) {
+  emit({ type: "extension_ui_request", id: randomUUID(), ...fields });
+}
+
+// The first pause lets the status refresh after the user message finish before the footer changes.
+function startLiveFooter() {
+  const scenario = live.footer;
+  holdLiveScenario(scenario.gates.start, () => {
+    const started = { ...assistantMessage([], "stop"), provider: scenario.provider, model: scenario.model };
+    emit({ type: "message_start", message: started });
+    thinkingLevel = scenario.thinkingLevel;
+    appendEntry("thinking_level_change", { thinkingLevel });
+    emit({ type: "thinking_level_changed", level: thinkingLevel });
+    holdLiveScenario(scenario.gates.streaming, () => {
+      const completed = { ...started, content: [{ type: "text", text: scenario.reply }] };
+      emit({ type: "message_end", message: completed });
+      appendMessage(completed);
+      holdLiveScenario(scenario.gates.ended, () => {
+        // No pause follows the rename: the sidebar doesn't refresh while a dialog is open.
+        sessionName = scenario.renamed;
+        appendEntry("session_info", { name: sessionName });
+        emit({ type: "session_info_changed", name: sessionName });
+        emit({ type: "turn_end", message: completed, toolResults: [] });
+        emit({ type: "agent_end", messages: [completed], willRetry: false });
+        settleRun();
+      });
+    });
+  });
+}
+
+function startFailedCompaction() {
+  const scenario = live.compaction;
+  replyBeforeCompaction(scenario.reply);
+  holdLiveScenario(scenario.failureGate, () => {
+    emit({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false, errorMessage: scenario.error });
+    settleRun();
+  });
+}
+
+function startAbortedCompaction() {
+  replyBeforeCompaction(live.compaction.reply);
+  liveAbort = () => {
+    emit({ type: "compaction_end", reason: "threshold", aborted: true, willRetry: false });
+    settleRun({ aborted: true });
+  };
+}
+
+function startDuplicateCompaction() {
+  const scenario = live.compaction;
+  replyBeforeCompaction(scenario.reply);
+  completeCompaction(scenario.summary);
+  // Older Pi versions also sent a legacy compaction event with the same summary.
+  emit({ type: "compaction", summary: scenario.summary });
+  emit({ type: "compaction", summary: scenario.summary, timestamp: new Date(Date.now() + 11_000).toISOString() });
+  holdLiveScenario(scenario.duplicateGate, () => settleRun());
+}
+
 // Like Pi's automatic compaction, which runs after agent_end and before the run settles.
 function replyBeforeCompaction(text) {
   const reply = emitAssistantReply(text);
@@ -1164,6 +1270,42 @@ function completeCompaction(summary) {
   const result = { summary, firstKeptEntryId: leafId, tokensBefore: 150 };
   appendEntry("compaction", result);
   emit({ type: "compaction_end", reason: "threshold", result, aborted: false, willRetry: false });
+}
+
+function startFinishedThinking() {
+  const scenario = live.thinking;
+  const started = startThinking();
+  holdLiveScenario(scenario.gates.thinking, () => {
+    emit({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: scenario.thought } });
+    holdLiveScenario(scenario.gates.ended, () => {
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 } });
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: scenario.reply } });
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 1, content: scenario.reply } });
+      finishAssistant({ ...started, content: [{ type: "thinking", thinking: scenario.thought }, { type: "text", text: scenario.reply }] });
+    });
+  });
+}
+
+function startFailedThinking() {
+  const scenario = live.thinking;
+  const started = startThinking();
+  holdLiveScenario(scenario.gates.failing, () => {
+    finishAssistant({ ...started, content: [{ type: "thinking", thinking: scenario.thought }], stopReason: "error", errorMessage: scenario.error });
+  });
+}
+
+function startAbortedThinking() {
+  const started = startThinking();
+  liveAbort = () => finishAssistant({ ...started, content: [{ type: "thinking", thinking: live.thinking.thought }], stopReason: "aborted" });
+}
+
+// Delta-only, like native Pi, so the gateway rebuilds the partial message.
+function startThinking() {
+  const started = assistantMessage([], "stop");
+  emit({ type: "message_start", message: started });
+  emit({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } });
+  emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: live.thinking.thought } });
+  return started;
 }
 
 function emitAssistantReply(text) {
