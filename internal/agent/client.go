@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -120,25 +121,69 @@ type Branch struct {
 	Text *string
 }
 
+// EventBatch holds the events after a cursor, in the agent's format for the browser.
 type EventBatch struct {
-	Events  []map[string]any `json:"events"`
-	LastSeq int64            `json:"last_seq"`
-	Missed  bool             `json:"missed"`
+	Events  []json.RawMessage `json:"events"`
+	LastSeq int64             `json:"last_seq"`
+	Missed  bool              `json:"missed"`
 }
 
+// LiveSnapshot is the state of the session's run that a page starts from. What the browser reads in the agent's
+// format stays opaque, with the fields that the gateway compares typed.
 type LiveSnapshot struct {
-	EventSequence        int64               `json:"event_sequence"`
-	EventReplayCursor    int64               `json:"event_replay_cursor"`
-	ActiveToolEvents     []map[string]any    `json:"active_tool_events"`
-	ActiveAssistantEvent map[string]any      `json:"active_assistant_event,omitempty"`
-	Busy                 bool                `json:"busy,omitempty"`
-	BusySince            *time.Time          `json:"busy_since,omitempty"`
-	AgentBusySince       *time.Time          `json:"agent_busy_since,omitempty"`
-	AgentRunning         bool                `json:"agent_running,omitempty"`
-	ActiveBash           map[string]any      `json:"active_bash,omitempty"`
-	CompletedBashEvents  []map[string]any    `json:"completed_bash_events,omitempty"`
-	Compacting           bool                `json:"compacting,omitempty"`
-	CompactingSince      *time.Time          `json:"compacting_since,omitempty"`
-	QueuedMessages       map[string][]string `json:"queued_messages,omitempty"`
-	ExtensionUI          map[string]any      `json:"extension_ui,omitempty"`
+	EventSequence     int64
+	EventReplayCursor int64
+	ActiveTools       []ActiveTool
+	// ActiveAssistant is the latest event of the reply that streams, in the agent's format for the browser.
+	ActiveAssistant json.RawMessage
+	Busy            bool
+	BusySince       *time.Time
+	AgentBusySince  *time.Time
+	AgentRunning    bool
+	ActiveShell     *Shell
+	// CompletedShells are the shell commands that ended during the run.
+	CompletedShells []CompletedShell
+	Compacting      bool
+	CompactingSince *time.Time
+	Queue           Queue
+	// PendingRequests counts the questions that the agent waits for the user to answer.
+	PendingRequests int
+	// ExtensionUI holds the questions, statuses, widgets and title of the agent's extensions, in its format for the
+	// browser. It is nil when there are none.
+	ExtensionUI json.RawMessage
+}
+
+// ActiveTool is a tool that runs, or that ended before the session saved its result.
+type ActiveTool struct {
+	ID string
+	// Data is the tool's latest event, in the agent's format for the browser.
+	Data json.RawMessage
+}
+
+// Shell is a shell command that the user ran in the session.
+type Shell struct {
+	ID                 string
+	Command            string
+	ExcludeFromContext bool
+	StartedAt          time.Time
+}
+
+type CompletedShell struct {
+	Shell
+	// Ended says the command ran to its end with the result below, which the session saves. A command that failed to
+	// run has none.
+	Ended     bool
+	Output    string
+	ExitCode  *int
+	Cancelled bool
+	Truncated bool
+	// Data is the command's end, in the agent's format for the browser.
+	Data json.RawMessage
+}
+
+// Queue holds the prompts that wait for the run: steered ones reach the agent as soon as it can take them, and
+// follow-ups once the run ends.
+type Queue struct {
+	Steering []string
+	FollowUp []string
 }

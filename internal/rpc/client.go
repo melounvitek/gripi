@@ -74,6 +74,31 @@ type SessionEntries struct {
 	Error   string
 }
 
+// EventBatch holds the events after a cursor, in Pi's format with the gateway's additions.
+type EventBatch struct {
+	Events  []map[string]any `json:"events"`
+	LastSeq int64            `json:"last_seq"`
+	Missed  bool             `json:"missed"`
+}
+
+// LiveSnapshot is the state of the run in Pi's format with the gateway's additions.
+type LiveSnapshot struct {
+	EventSequence        int64               `json:"event_sequence"`
+	EventReplayCursor    int64               `json:"event_replay_cursor"`
+	ActiveToolEvents     []map[string]any    `json:"active_tool_events"`
+	ActiveAssistantEvent map[string]any      `json:"active_assistant_event,omitempty"`
+	Busy                 bool                `json:"busy,omitempty"`
+	BusySince            *time.Time          `json:"busy_since,omitempty"`
+	AgentBusySince       *time.Time          `json:"agent_busy_since,omitempty"`
+	AgentRunning         bool                `json:"agent_running,omitempty"`
+	ActiveBash           map[string]any      `json:"active_bash,omitempty"`
+	CompletedBashEvents  []map[string]any    `json:"completed_bash_events,omitempty"`
+	Compacting           bool                `json:"compacting,omitempty"`
+	CompactingSince      *time.Time          `json:"compacting_since,omitempty"`
+	QueuedMessages       map[string][]string `json:"queued_messages,omitempty"`
+	ExtensionUI          map[string]any      `json:"extension_ui,omitempty"`
+}
+
 type ClientOptions struct {
 	EventBufferLimit                  int
 	EventBufferBytes                  int

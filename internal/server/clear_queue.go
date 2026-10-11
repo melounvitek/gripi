@@ -101,12 +101,13 @@ func (app *application) clearQueue(response http.ResponseWriter, request *http.R
 	case clearErr != nil:
 		writeError(clearErr)
 	default:
-		if snapshot.QueuedMessages == nil {
-			snapshot.QueuedMessages = map[string][]string{}
+		queued := map[string][]string{}
+		if len(snapshot.Queue.Steering) > 0 || len(snapshot.Queue.FollowUp) > 0 {
+			queued = queuedMessages(snapshot.Queue)
 		}
 		writeJSON(response, map[string]any{
 			"ok": true, "session": path,
-			"queued_messages": snapshot.QueuedMessages, "event_sequence": snapshot.EventSequence,
+			"queued_messages": queued, "event_sequence": snapshot.EventSequence,
 		})
 	}
 }

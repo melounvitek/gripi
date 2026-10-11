@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -480,7 +481,7 @@ func TestRegistryObserverAllowsMoveButPreventsRetirement(t *testing.T) {
 
 func TestRetireQueuedClientDoesNotInterruptAnActiveOperation(t *testing.T) {
 	client := newRegistryClient()
-	client.queued = map[string][]string{"steering": {"adjust"}}
+	client.queued = Queue{Steering: []string{"adjust"}}
 	registry := NewRegistry(func(string) (Client, error) { return nil, errors.New("unexpected") }, nil)
 	if err := registry.Register("/session", client); err != nil {
 		t.Fatal(err)
@@ -557,7 +558,7 @@ type registryClient struct {
 	closeErr     error
 	closeStarted chan struct{}
 	releaseClose chan struct{}
-	queued       map[string][]string
+	queued       Queue
 	sequence     int64
 }
 
@@ -605,14 +606,14 @@ func (client *registryClient) Compacting() bool         { return false }
 func (client *registryClient) EventSequence() int64     { return client.sequence }
 func (client *registryClient) EventReplayCursor() int64 { return 0 }
 func (client *registryClient) EventsAfter(int64) EventBatch {
-	return EventBatch{Events: []map[string]any{}}
+	return EventBatch{Events: []json.RawMessage{}}
 }
 func (client *registryClient) LiveSnapshot() LiveSnapshot {
-	return LiveSnapshot{ActiveToolEvents: []map[string]any{}}
+	return LiveSnapshot{}
 }
 func (client *registryClient) DeferringCompactionPrompts() bool { return client.deferring }
-func (client *registryClient) QueuedMessagesForStop() (map[string][]string, bool) {
-	return client.queued, len(client.queued["steering"]) > 0 || len(client.queued["followUp"]) > 0
+func (client *registryClient) QueuedMessagesForStop() (Queue, bool) {
+	return client.queued, len(client.queued.Steering) > 0 || len(client.queued.FollowUp) > 0
 }
 func (client *registryClient) DeferPrompt(context.Context, Prompt) (PromptResult, bool, error) {
 	return PromptResult{}, false, nil

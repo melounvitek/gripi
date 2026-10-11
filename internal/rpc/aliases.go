@@ -5,8 +5,6 @@ import "github.com/melounvitek/gripi/internal/agent"
 // Temporary aliases for the machinery that moved to internal/agent, until callers import it directly.
 type (
 	RPCClient              = agent.Client
-	EventBatch             = agent.EventBatch
-	LiveSnapshot           = agent.LiveSnapshot
 	PromptImage            = agent.PromptImage
 	Registry               = agent.Registry
 	PendingSession         = agent.PendingSession

@@ -569,10 +569,10 @@ func (client *syncClient) Compacting() bool         { return false }
 func (client *syncClient) EventSequence() int64     { return 0 }
 func (client *syncClient) EventReplayCursor() int64 { return 0 }
 func (client *syncClient) EventsAfter(int64) agent.EventBatch {
-	return agent.EventBatch{Events: []map[string]any{}}
+	return agent.EventBatch{Events: []json.RawMessage{}}
 }
 func (client *syncClient) LiveSnapshot() agent.LiveSnapshot {
-	return agent.LiveSnapshot{ActiveToolEvents: []map[string]any{}}
+	return agent.LiveSnapshot{}
 }
 func (client *syncClient) State(context.Context) (agent.State, error) { return agent.State{}, nil }
 func (client *syncClient) LiveStatus(context.Context) (agent.LiveStatus, error) {

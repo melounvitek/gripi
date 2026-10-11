@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -558,22 +557,6 @@ func (app *application) retireRPCClient(ctx context.Context, path string, close 
 	return err
 }
 
-func numericValue(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case json.Number:
-		result, err := typed.Float64()
-		return result, err == nil
-	default:
-		return 0, false
-	}
-}
-func stringFromAny(value any) string { result, _ := value.(string); return result }
 func commandCatalogFallbackError(err error) bool {
 	return errors.Is(err, agent.ErrOperationPending) || errors.Is(err, agent.ErrClientRetiring) || errors.Is(err, agent.ErrClientStarting) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, agent.ErrProcessExited)
 }

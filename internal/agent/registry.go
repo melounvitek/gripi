@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -209,7 +210,7 @@ func (registry *Registry) LiveSnapshot(path string) LiveSnapshot {
 	if client := registry.Client(path); client != nil {
 		return client.LiveSnapshot()
 	}
-	return LiveSnapshot{ActiveToolEvents: []map[string]any{}}
+	return LiveSnapshot{}
 }
 
 func (registry *Registry) BusySessionCount() int {
@@ -590,11 +591,11 @@ func (registry *Registry) EventsAfter(path string, after int64) EventBatch {
 	retired, ok := registry.retiredSequences[path]
 	registry.mu.Unlock()
 	// A cursor at the last event of an idle-retired client has nothing left to replay.
-	return EventBatch{Events: []map[string]any{}, Missed: after > 0 && !(ok && after == retired)}
+	return EventBatch{Events: []json.RawMessage{}, Missed: after > 0 && !(ok && after == retired)}
 }
 
-func (registry *Registry) RetireQueuedClient(path string, client Client) (bool, map[string][]string, error) {
-	var queued map[string][]string
+func (registry *Registry) RetireQueuedClient(path string, client Client) (bool, Queue, error) {
+	var queued Queue
 	retired, err := registry.closeWhen(path, func(entry *clientEntry) bool {
 		if entry.client != client || entry.activeRequests > entry.observers {
 			return false

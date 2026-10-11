@@ -325,10 +325,10 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			view.Attachments = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}).Match(selected.Path, window.Messages)
 			view.SessionGeneration = app.sessionStore.Generation(selected.Path)
 		}
-		activeToolIDs := make([]string, 0, len(snapshot.ActiveToolEvents))
-		for _, event := range snapshot.ActiveToolEvents {
-			if id := stringFromAny(event["toolCallId"]); id != "" {
-				activeToolIDs = append(activeToolIDs, id)
+		activeToolIDs := make([]string, 0, len(snapshot.ActiveTools))
+		for _, tool := range snapshot.ActiveTools {
+			if tool.ID != "" {
+				activeToolIDs = append(activeToolIDs, tool.ID)
 			}
 		}
 		toolContext := map[string]agent.ToolCallContext(nil)
@@ -341,10 +341,6 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 }
 
 func liveOutputFrom(snapshot agent.LiveSnapshot, messages []*agent.Message, home string, toolContext map[string]agent.ToolCallContext) liveOutputData {
-	activeTools := snapshot.ActiveToolEvents
-	if activeTools == nil {
-		activeTools = []map[string]any{}
-	}
 	persistedToolResults := map[string]bool{}
 	for _, message := range messages {
 		if (message.Role == "toolResult" || message.ToolResultPersisted) && message.ToolCallID != "" {
@@ -356,23 +352,14 @@ func liveOutputFrom(snapshot agent.LiveSnapshot, messages []*agent.Message, home
 			persistedToolResults[id] = true
 		}
 	}
-	remainingActiveTools := make([]map[string]any, 0, len(activeTools))
-	for _, event := range activeTools {
-		if !persistedToolResults[stringFromAny(event["toolCallId"])] {
-			remainingActiveTools = append(remainingActiveTools, event)
+	activeTools := make([]json.RawMessage, 0, len(snapshot.ActiveTools))
+	for _, tool := range snapshot.ActiveTools {
+		if !persistedToolResults[tool.ID] {
+			activeTools = append(activeTools, tool.Data)
 		}
 	}
-	activeTools = remainingActiveTools
-	completedBash := snapshot.CompletedBashEvents
-	if completedBash == nil {
-		completedBash = []map[string]any{}
-	}
-	queued := snapshot.QueuedMessages
-	if queued == nil {
-		queued = map[string][]string{"steering": {}, "followUp": {}}
-	}
-	extensionUI := snapshot.ExtensionUI
-	if extensionUI == nil {
+	extensionUI := any(snapshot.ExtensionUI)
+	if snapshot.ExtensionUI == nil {
 		extensionUI = map[string]any{"pending_dialogs": []map[string]any{}, "statuses": []map[string]any{}, "widgets": []map[string]any{}, "title": nil}
 	}
 	toolTimestamps, toolPrompts := map[string]time.Time{}, map[string]string{}
@@ -386,22 +373,21 @@ func liveOutputFrom(snapshot agent.LiveSnapshot, messages []*agent.Message, home
 	}
 	activeBash := any(nil)
 	persistedBash := []string{}
-	if snapshot.ActiveBash != nil {
-		if activeBashPersisted(snapshot.ActiveBash, messages, home) {
-			persistedBash = append(persistedBash, stringFromAny(snapshot.ActiveBash["bash_id"]))
+	if shell := snapshot.ActiveShell; shell != nil {
+		if activeShellPersisted(*shell, messages, home) {
+			persistedBash = append(persistedBash, shell.ID)
 		} else {
-			activeBash = snapshot.ActiveBash
+			activeBash = map[string]any{"bash_id": shell.ID, "command": shell.Command, "exclude_from_context": shell.ExcludeFromContext, "started_at": shell.StartedAt}
 		}
 	}
-	remainingCompleted := completedBash[:0]
-	for _, event := range completedBash {
-		if completedBashPersisted(event, messages, home) {
-			persistedBash = append(persistedBash, stringFromAny(event["bashId"]))
+	completedBash := make([]json.RawMessage, 0, len(snapshot.CompletedShells))
+	for _, shell := range snapshot.CompletedShells {
+		if completedShellPersisted(shell, messages, home) {
+			persistedBash = append(persistedBash, shell.ID)
 		} else {
-			remainingCompleted = append(remainingCompleted, event)
+			completedBash = append(completedBash, shell.Data)
 		}
 	}
-	completedBash = remainingCompleted
 	agentBusy := snapshot.AgentRunning || snapshot.Compacting
 	composerState := "idle"
 	if agentBusy {
@@ -419,69 +405,52 @@ func liveOutputFrom(snapshot agent.LiveSnapshot, messages []*agent.Message, home
 	}
 	return liveOutputData{
 		EventAfter:               snapshot.EventSequence,
-		ActiveAssistantEventJSON: jsonData(snapshot.ActiveAssistantEvent),
+		ActiveAssistantEventJSON: jsonData(snapshot.ActiveAssistant),
 		ActiveToolEventsJSON:     jsonData(activeTools), ActiveToolTimestampsJSON: jsonData(toolTimestamps), ActiveToolPromptsJSON: jsonData(toolPrompts),
 		ActiveBashJSON: jsonData(activeBash), CompletedBashEventsJSON: jsonData(completedBash), PersistedBashJSON: jsonData(persistedBash),
-		QueuedMessagesJSON: jsonData(queued), ExtensionUIJSON: jsonData(extensionUI), ComposerState: composerState,
+		QueuedMessagesJSON: jsonData(queuedMessages(snapshot.Queue)), ExtensionUIJSON: jsonData(extensionUI), ComposerState: composerState,
 		ComposerStateSince: millisecondsString(stateSince), ComposerBusySince: millisecondsString(agentBusySince),
 		Compacting: snapshot.Compacting, AgentRunning: snapshot.AgentRunning,
 	}
 }
 
-func activeBashPersisted(active map[string]any, messages []*agent.Message, home string) bool {
-	started, ok := timeFromAny(active["started_at"])
-	if !ok {
+// queuedMessages is the queue as the browser reads it.
+func queuedMessages(queue agent.Queue) map[string][]string {
+	return map[string][]string{"steering": append([]string{}, queue.Steering...), "followUp": append([]string{}, queue.FollowUp...)}
+}
+
+func activeShellPersisted(shell agent.Shell, messages []*agent.Message, home string) bool {
+	if shell.StartedAt.IsZero() {
 		return false
 	}
-	summary := "$ " + agent.DisplayHomePath(stringFromAny(active["command"]), home)
+	summary := "$ " + agent.DisplayHomePath(shell.Command, home)
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
-		if message.Role == "bashExecution" && message.Summary == summary && !message.Timestamp.IsZero() && !message.Timestamp.Before(started) {
+		if message.Role == "bashExecution" && message.Summary == summary && !message.Timestamp.IsZero() && !message.Timestamp.Before(shell.StartedAt) {
 			return true
 		}
 	}
 	return false
 }
 
-func completedBashPersisted(event map[string]any, messages []*agent.Message, home string) bool {
-	if event["type"] != "bash_end" {
+func completedShellPersisted(shell agent.CompletedShell, messages []*agent.Message, home string) bool {
+	if !shell.Ended {
 		return false
 	}
-	result, ok := event["result"].(map[string]any)
-	if !ok {
-		return false
-	}
-	startedMilliseconds, ok := numericValue(event["startedAt"])
-	if !ok {
-		return false
-	}
-	summary := "$ " + agent.DisplayHomePath(stringFromAny(event["command"]), home)
+	summary := "$ " + agent.DisplayHomePath(shell.Command, home)
 	for _, message := range messages {
-		if message.Role != "bashExecution" || message.Summary != summary || message.Text != stringFromAny(result["output"]) || message.BashCancelled != (result["cancelled"] == true) || message.BashTruncated != (result["truncated"] == true) || message.BashExcludedFromContext != (event["excludeFromContext"] == true) || message.BashRecordedAt.IsZero() || message.BashRecordedAt.UnixMilli() < int64(startedMilliseconds) {
+		if message.Role != "bashExecution" || message.Summary != summary || message.Text != shell.Output || message.BashCancelled != shell.Cancelled || message.BashTruncated != shell.Truncated || message.BashExcludedFromContext != shell.ExcludeFromContext || message.BashRecordedAt.IsZero() || message.BashRecordedAt.UnixMilli() < shell.StartedAt.UnixMilli() {
 			continue
 		}
-		resultExit, hasExit := numericValue(result["exitCode"])
-		if (message.BashExitCode == nil) != !hasExit {
+		if (message.BashExitCode == nil) != (shell.ExitCode == nil) {
 			continue
 		}
-		if hasExit && *message.BashExitCode != int(resultExit) {
+		if shell.ExitCode != nil && *message.BashExitCode != *shell.ExitCode {
 			continue
 		}
 		return true
 	}
 	return false
-}
-
-func timeFromAny(value any) (time.Time, bool) {
-	switch typed := value.(type) {
-	case time.Time:
-		return typed, true
-	case string:
-		parsed, err := time.Parse(time.RFC3339Nano, typed)
-		return parsed, err == nil
-	default:
-		return time.Time{}, false
-	}
 }
 
 func jsonData(value any) string { encoded, _ := json.Marshal(value); return string(encoded) }

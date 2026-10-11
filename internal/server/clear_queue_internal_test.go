@@ -18,6 +18,8 @@ import (
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
@@ -64,11 +66,11 @@ func TestClearQueueReturnsAuthoritativeSnapshotAfterClearing(t *testing.T) {
 			queues := map[string][]string(nil)
 			want := map[string]any{}
 			if name == "concurrent_message" {
-				queues = map[string][]string{"followUp": {"queued after clear"}}
-				want["followUp"] = []any{"queued after clear"}
+				queues = map[string][]string{"steering": {}, "followUp": {"queued after clear"}}
+				want["steering"], want["followUp"] = []any{}, []any{"queued after clear"}
 			}
 			f.client.onClear = func() {
-				f.client.live = agent.LiveSnapshot{EventSequence: 27, QueuedMessages: queues}
+				f.client.live = agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{EventSequence: 27, QueuedMessages: queues})
 			}
 			payload := clearQueuePayload(t, f.serve(context.Background(), f.path), http.StatusOK)
 			if payload["event_sequence"] != float64(27) || !reflect.DeepEqual(payload["queued_messages"], want) {
@@ -442,7 +444,7 @@ type clearQueueFixture struct {
 func newClearQueueFixture(t *testing.T) *clearQueueFixture {
 	t.Helper()
 	f := &clearQueueFixture{idleRetirementFixture: newIdleRetirementFixture(t), client: &clearQueueClient{result: map[string]any{"success": true, "data": map[string]any{"editorText": "must not restore"}}}}
-	f.client.live = agent.LiveSnapshot{EventSequence: 23, QueuedMessages: map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}}
+	f.client.live = agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{EventSequence: 23, QueuedMessages: map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}})
 	if err := f.app.rpcClients.Register(f.path, f.client); err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +462,7 @@ func (f *clearQueueFixture) assertUntouched(t *testing.T, calls int32) {
 	if f.client.clears.Load() != calls || f.client.closes.Load() != 0 || f.client.aborts.Load() != 0 || f.created.Load() != 0 || f.client.getStateCalls.Load() != 0 || f.app.rpcClients.Client(f.path) != f.client {
 		t.Fatalf("clear=%d close=%d abort=%d create=%d state=%d client=%T", f.client.clears.Load(), f.client.closes.Load(), f.client.aborts.Load(), f.created.Load(), f.client.getStateCalls.Load(), f.app.rpcClients.Client(f.path))
 	}
-	if !reflect.DeepEqual(f.client.live.QueuedMessages, map[string][]string{"steering": {"steer"}, "followUp": {"follow"}}) {
+	if !reflect.DeepEqual(f.client.live.Queue, agent.Queue{Steering: []string{"steer"}, FollowUp: []string{"follow"}}) {
 		t.Fatal("route optimistically changed the queue snapshot")
 	}
 }

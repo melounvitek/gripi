@@ -679,7 +679,7 @@ func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "source"}, live: agent.LiveSnapshot{EventSequence: 9, ActiveToolEvents: []map[string]any{{"type": "tool_execution_update", "toolCallId": "tool-1", "toolName": "subagent"}}, AgentRunning: true}}
+	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "source"}, live: agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{EventSequence: 9, ActiveToolEvents: []map[string]any{{"type": "tool_execution_update", "toolCallId": "tool-1", "toolName": "subagent"}}, AgentRunning: true})}
 	registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
@@ -878,13 +878,13 @@ func TestAbortRetiresAQueuedRunAndRestoresItsMessages(t *testing.T) {
 				t.Fatal(err)
 			}
 		},
-		live: agent.LiveSnapshot{
+		live: agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{
 			AgentRunning: true,
 			QueuedMessages: map[string][]string{
 				"steering": {"Change direction"},
 				"followUp": {"Then continue"},
 			},
-		},
+		}),
 	}
 	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	if err := registry.Register(path, client); err != nil {
@@ -922,10 +922,10 @@ func TestAbortDoesNotRetireAQueuedPendingSession(t *testing.T) {
 	path := "/synthetic-pending-queue"
 	client := &queuedAbortClient{
 		followUpRaceClient: &followUpRaceClient{Client: (*rpc.Client)(nil)},
-		live: agent.LiveSnapshot{
+		live: agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{
 			AgentRunning:   true,
 			QueuedMessages: map[string][]string{"steering": {"Keep queued"}},
-		},
+		}),
 		onClose: func() {},
 	}
 	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
@@ -1092,11 +1092,11 @@ func TestPreparePageOmitsCompletedSubagentSnapshotPersistedOutsideInitialWindow(
 		t.Fatal(err)
 	}
 
-	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "running-call"}, live: agent.LiveSnapshot{ActiveToolEvents: []map[string]any{
+	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "running-call"}, live: agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
 		{"type": "tool_execution_end", "toolCallId": "completed", "toolName": "subagent"},
 		{"type": "tool_execution_start", "toolCallId": "running", "toolName": "subagent"},
 		{"type": "tool_execution_end", "toolCallId": "unpersisted", "toolName": "subagent"},
-	}}}
+	}})}
 	registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
 	if err := registry.Register(path, client); err != nil {
 		t.Fatal(err)
@@ -1118,10 +1118,10 @@ func TestPreparePageOmitsCompletedSubagentSnapshotPersistedOutsideInitialWindow(
 
 func TestLiveOutputOmitsCompletedSubagentSnapshotsWithPersistedResults(t *testing.T) {
 	messages := []*agent.Message{{Role: "toolResult", ToolCallID: "first", ToolName: "subagent"}}
-	snapshot := agent.LiveSnapshot{ActiveToolEvents: []map[string]any{
+	snapshot := agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{ActiveToolEvents: []map[string]any{
 		{"type": "tool_execution_end", "toolCallId": "first", "toolName": "subagent"},
 		{"type": "tool_execution_start", "toolCallId": "second", "toolName": "subagent"},
-	}}
+	}})
 
 	output := liveOutputFrom(snapshot, messages, "/home/test", nil)
 	if strings.Contains(output.ActiveToolEventsJSON, "first") || !strings.Contains(output.ActiveToolEventsJSON, "second") {
@@ -1133,7 +1133,7 @@ func TestLiveOutputRecognizesNativeIntegerCompletedBashAsPersisted(t *testing.T)
 	recorded := time.UnixMilli(1_750_000_000_500)
 	exitCode := 0
 	messages := []*agent.Message{{Role: "bashExecution", Summary: "$ printf done", Text: "done", BashExitCode: &exitCode, BashRecordedAt: recorded}}
-	snapshot := agent.LiveSnapshot{CompletedBashEvents: []map[string]any{{"type": "bash_end", "bashId": "bash-1", "command": "printf done", "startedAt": int64(1_750_000_000_000), "result": map[string]any{"output": "done", "exitCode": int64(0)}}}}
+	snapshot := agentpi.LiveSnapshotFrom(rpc.LiveSnapshot{CompletedBashEvents: []map[string]any{{"type": "bash_end", "bashId": "bash-1", "command": "printf done", "startedAt": int64(1_750_000_000_000), "result": map[string]any{"output": "done", "exitCode": int64(0)}}}})
 	output := liveOutputFrom(snapshot, messages, "/home/test", nil)
 	if output.CompletedBashEventsJSON != "[]" || output.PersistedBashJSON != `["bash-1"]` {
 		t.Fatalf("completed=%s persisted=%s", output.CompletedBashEventsJSON, output.PersistedBashJSON)
@@ -1360,6 +1360,7 @@ type followUpRaceClient struct {
 func (*followUpRaceClient) Close() error                               { return nil }
 func (*followUpRaceClient) Compacting() bool                           { return false }
 func (*followUpRaceClient) DeferringCompactionPrompts() bool           { return false }
+func (*followUpRaceClient) EventsAfter(int64) agent.EventBatch         { return agent.EventBatch{} }
 func (*followUpRaceClient) LiveSnapshot() agent.LiveSnapshot           { return agent.LiveSnapshot{} }
 func (*followUpRaceClient) State(context.Context) (agent.State, error) { return agent.State{}, nil }
 func (*followUpRaceClient) LiveStatus(context.Context) (agent.LiveStatus, error) {
@@ -1411,8 +1412,8 @@ func (*queuedAbortClient) Busy() bool                              { return true
 func (*queuedAbortClient) AgentRunning() bool                      { return true }
 func (*queuedAbortClient) ActiveBashCommand() string               { return "" }
 func (client *queuedAbortClient) LiveSnapshot() agent.LiveSnapshot { return client.live }
-func (client *queuedAbortClient) QueuedMessagesForStop() (map[string][]string, bool) {
-	return client.live.QueuedMessages, true
+func (client *queuedAbortClient) QueuedMessagesForStop() (agent.Queue, bool) {
+	return client.live.Queue, true
 }
 func (*queuedAbortClient) SessionPosition(context.Context, string) (rpc.SessionEntries, error) {
 	return rpc.SessionEntries{Known: true, LeafID: "before"}, nil
@@ -1439,12 +1440,9 @@ func (client *remapClient) Compacting() bool         { return client.compacting 
 func (client *remapClient) EventSequence() int64     { return 0 }
 func (client *remapClient) EventReplayCursor() int64 { return 0 }
 func (client *remapClient) EventsAfter(int64) agent.EventBatch {
-	return agent.EventBatch{Events: []map[string]any{}}
+	return agent.EventBatch{Events: []json.RawMessage{}}
 }
 func (client *remapClient) LiveSnapshot() agent.LiveSnapshot {
-	if client.live.ActiveToolEvents == nil {
-		client.live.ActiveToolEvents = []map[string]any{}
-	}
 	return client.live
 }
 func (client *remapClient) State(context.Context) (agent.State, error) {
@@ -1483,3 +1481,5 @@ func stateFrom(response map[string]any) (agent.State, error) {
 	}
 	return agent.State{Key: stringFromAny(data["sessionFile"]), ID: stringFromAny(data["sessionId"]), Streaming: data["isStreaming"] == true, Compacting: data["isCompacting"] == true}, nil
 }
+
+func stringFromAny(value any) string { result, _ := value.(string); return result }

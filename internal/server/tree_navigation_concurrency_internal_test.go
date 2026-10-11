@@ -36,7 +36,7 @@ func TestTreeNavigationExcludesPrompts(t *testing.T) {
 			fixture := newTreeNavigationFixture(t)
 			fixture.a.state = treeNavigationState(test.streaming)
 			if test.streaming {
-				fixture.a.live.QueuedMessages = map[string][]string{"steering": {"steer one", "steer two"}, "followUp": {"follow up"}}
+				fixture.a.live.Queue = agent.Queue{Steering: []string{"steer one", "steer two"}, FollowUp: []string{"follow up"}}
 			}
 			entered, release, block := idleRetirementBarrier()
 			defer release()
@@ -392,8 +392,6 @@ func newTreeNavigationFixture(t *testing.T) *treeNavigationFixture {
 	fixture.a = &treeNavigationClient{idleRetirementClient: fixture.old, name: "A", record: record}
 	fixture.b = &treeNavigationClient{idleRetirementClient: fixture.replacement, name: "B", record: record}
 	fixture.a.state, fixture.b.state = treeNavigationState(false), treeNavigationState(false)
-	// LiveSnapshot initializes this slice lazily; make concurrent reads read-only.
-	fixture.a.live.ActiveToolEvents, fixture.b.live.ActiveToolEvents = []map[string]any{}, []map[string]any{}
 	registry := agent.NewRegistry(func(path string) (agent.Client, error) {
 		fixture.created.Add(1)
 		record("Create(B)")

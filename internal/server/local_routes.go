@@ -118,10 +118,9 @@ func (app *application) localConversation(response http.ResponseWriter, request 
 
 func (app *application) localSessionState(path string) string {
 	live := app.rpcClients.LiveSnapshot(path)
-	dialogs, _ := live.ExtensionUI["pending_dialogs"].([]map[string]any)
 	switch {
 	// A dialog keeps Pi busy until someone answers, so it must not read as working.
-	case len(dialogs) > 0:
+	case live.PendingRequests > 0:
 		return "waiting"
 	// Prompts queued during a compaction are delivered just after it ends.
 	case app.rpcClients.DeferringCompactionPrompts(path):

@@ -396,7 +396,7 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 	stoppedQueuedRun := false
 	if app.sessionStore.Exists(requested) {
 		if client := app.rpcClients.Client(requested); client != nil {
-			var queued map[string][]string
+			var queued agent.Queue
 
 			retire := func() (bool, error) {
 				retired, messages, retireErr := app.rpcClients.RetireQueuedClient(requested, client)
@@ -414,7 +414,7 @@ func (app *application) abortSession(response http.ResponseWriter, request *http
 				return
 			}
 			if stoppedQueuedRun {
-				queuedText = strings.Join(append(append([]string{}, queued["steering"]...), queued["followUp"]...), "\n\n")
+				queuedText = strings.Join(slices.Concat(queued.Steering, queued.FollowUp), "\n\n")
 				result.Forced = true
 			}
 		}
@@ -986,8 +986,8 @@ func (app *application) navigateTree(response http.ResponseWriter, request *http
 			}
 			return nil
 		}
-		queued := client.LiveSnapshot().QueuedMessages
-		restoredQueuedText = strings.Join(append(append([]string{}, queued["steering"]...), queued["followUp"]...), "\n\n")
+		queued := client.LiveSnapshot().Queue
+		restoredQueuedText = strings.Join(slices.Concat(queued.Steering, queued.FollowUp), "\n\n")
 		if err := client.Cancel(request.Context()); err != nil {
 			return err
 		}

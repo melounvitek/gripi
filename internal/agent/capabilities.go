@@ -15,7 +15,7 @@ type CompactionPromptDeferrer interface {
 
 // QueueRestorer is a client that hands back its queued messages when a stop retires it.
 type QueueRestorer interface {
-	QueuedMessagesForStop() (map[string][]string, bool)
+	QueuedMessagesForStop() (Queue, bool)
 }
 
 // QueueClearer is a client that can drop the steered and follow-up prompts waiting for the run.
