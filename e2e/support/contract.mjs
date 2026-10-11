@@ -69,7 +69,8 @@ export const sessions = {
   liveExtensionUi: "E2E Live Extension UI Desktop",
   liveFooter: "E2E Live Footer Desktop",
   liveCompaction: "E2E Live Compaction Desktop",
-  liveThinking: "E2E Live Thinking Desktop"
+  liveThinking: "E2E Live Thinking Desktop",
+  paletteCommands: "E2E Palette Commands Desktop"
 };
 
 export const footerModel = {

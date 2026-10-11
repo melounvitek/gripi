@@ -1062,6 +1062,7 @@
         ["Choose model and thinking", "/model", "", () => handleSlash("model")],
         ["Session tree", "/tree", "", () => handleSlash("tree")],
         ["Fork from a message", "/fork", "", () => handleSlash("fork")],
+        ["Compact context", "/compact", "", () => handleSlash("compact")],
         [session.pinned ? "Unpin" : "Pin", "", "", () => { session.pinned = !session.pinned; persist(); renderSidebar(); }],
         ["Find in session", "", "ctrl+f", showFind],
         [`${otherView.dataset.conversationView === "brief" ? "Brief" : "Full"} activity`, "", "", () => otherView.click()]

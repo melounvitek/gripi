@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { sessions } from "../support/contract.mjs";
+import { prompts, replies, sessions } from "../support/contract.mjs";
+import { expectRunFinished, message, sendPrompt } from "../support/ui.mjs";
 
 const dialog = (page) => page.getByRole("dialog", { name: "Go to or run" });
 const input = (page) => dialog(page).getByRole("combobox");
@@ -318,4 +319,147 @@ test("without an open session only the commands that need none are listed", asyn
   await expect(dialog(page).getByRole("group", { name: "Recent sessions" }).getByRole("option")).toHaveCount(5);
   await expect(dialog(page).getByRole("group", { name: "Gripi" }).getByRole("option")).toHaveText([/New session…/, /Environment…/, /Hide sidebar/]);
   await expect(dialog(page).getByRole("group", { name: "This session" })).toHaveCount(0);
+});
+
+// A draft and an attached image that a command run from the palette must leave as they are.
+async function writeDraft(page) {
+  await composer(page).fill("half-written thought");
+  await page.locator("#image-input").setInputFiles({ name: "draft.png", mimeType: "image/png", buffer: await page.screenshot() });
+  await expect(page.locator(".attachment-tray .attachment")).toHaveCount(1);
+}
+
+async function expectDraft(page) {
+  await expect(composer(page)).toHaveValue("half-written thought");
+  await expect(page.locator(".attachment-tray .attachment")).toHaveCount(1);
+}
+
+async function run(page, name) {
+  await page.keyboard.press("Control+k");
+  await command(page, name).click();
+  await expect(dialog(page)).toBeHidden();
+}
+
+// The managed E2E gateway retires an idle Pi after 2s, and the page then re-renders and ignores keys meanwhile.
+async function waitForIdlePiToRetire(page) {
+  if (process.env.GRIPI_E2E_FAKE_PI_LOG) await expect(page.locator("#live-output")).toHaveAttribute("data-session-sync-mode", "available");
+}
+
+test("Pi's own commands load only once the text starts with a slash, and run steered in while Pi works", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await open(page);
+  await openSession(page, "palette commands", sessions.paletteCommands);
+  await sendPrompt(page, prompts.steerStart);
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
+  await writeDraft(page);
+
+  // Listing them asks Pi, which may have to start for it.
+  const catalogs = [];
+  page.on("request", (request) => { if (new URL(request.url()).pathname === "/commands") catalogs.push(request); });
+  await page.keyboard.press("Control+k");
+  await input(page).fill("steer template");
+  await expect(status(page)).toHaveText("No matches.");
+  expect(catalogs).toHaveLength(0);
+
+  // Pi CLI refuses to reload while it works.
+  await input(page).fill("/");
+  await expect(command(page, "/steer-template Steer from a prompt template")).toBeVisible();
+  await expect(dialog(page).getByRole("option", { name: /Reload Pi resources/ })).toHaveCount(0);
+  await input(page).fill("/steer-t");
+  await expect(options(page)).toHaveText([/\/steer-template/]);
+  const sent = page.waitForRequest((request) => new URL(request.url()).pathname === "/prompt");
+  await page.keyboard.press("Enter");
+  const body = (await sent).postData();
+  expect(body).toContain('name="message"\r\n\r\n/steer-template\r\n');
+  expect(body).toContain('name="streaming_behavior"\r\n\r\nsteer\r\n');
+  expect(body).not.toContain("draft.png");
+  await expect(message(page, "assistant", replies.steer)).toBeVisible();
+  await expectRunFinished(page);
+  await expectDraft(page);
+});
+
+test("Pi's composer commands run from the palette leave a draft and its attachments alone", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await open(page);
+  await openSession(page, "palette commands", sessions.paletteCommands);
+  await waitForIdlePiToRetire(page);
+  await writeDraft(page);
+
+  await page.keyboard.press("Control+k");
+  await input(page).fill("/immediate");
+  const handled = page.waitForResponse((response) => response.request().postData()?.includes("/immediate-command"));
+  await command(page, "/immediate-command Execute immediately").click();
+  expect((await handled).status()).toBe(200);
+  await expectDraft(page);
+  // Nor does the command show them as its own.
+  await expect(message(page, "user", "/immediate-command").locator("img")).toHaveCount(0);
+
+  // Like Pi CLI's /export without a path, it is named after the session file.
+  const download = page.waitForEvent("download");
+  await run(page, "Download as HTML /export");
+  expect((await download).suggestedFilename()).toBe("pi-session-palette-commands.html");
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
+  await expectDraft(page);
+
+  await run(page, "Reload Pi resources /reload");
+  await expect(page.locator(".composer-state")).toHaveText("Reloaded");
+  await expectDraft(page);
+  // The palette asks again each time, so it lists what the reload loaded.
+  await page.keyboard.press("Control+k");
+  await input(page).fill("/fresh");
+  await expect(command(page, "/fresh-resource Loaded after reload")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await run(page, "Compact context /compact");
+  await expect(page.locator('#live-output [data-pending-compaction="true"]')).toBeVisible();
+  await expect(page.locator("#live-output article.message--compaction:not([data-pending-compaction])")).toBeVisible();
+  await expectDraft(page);
+  // The compaction outlasted the idle time.
+  await waitForIdlePiToRetire(page);
+
+  // The clone opens with an empty composer, and the draft stays with the session it was written in.
+  const original = new URL(page.url()).searchParams.get("session");
+  await run(page, "Clone session /clone");
+  await expect.poll(() => new URL(page.url()).searchParams.get("session")).not.toBe(original);
+  await expect(heading(page, sessions.paletteCommands)).toBeVisible();
+  await expect(composer(page)).toHaveValue("");
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).searchParams.get("session")).toBe(original);
+  await expect(composer(page)).toHaveValue("half-written thought");
+});
+
+test("Pi's commands arriving leave the rows shown in place, under the cursor and a pressed mouse button", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await open(page);
+  await openSession(page, "palette commands", sessions.paletteCommands);
+  await waitForIdlePiToRetire(page);
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/commands?**", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.keyboard.press("Control+k");
+  await input(page).fill("/");
+  const model = command(page, "Choose model and thinking /model");
+  await expect(model).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  const selected = await options(page).nth(1).getAttribute("id");
+  await model.hover();
+  await page.mouse.down();
+  release();
+  await expect(command(page, "/immediate-command Execute immediately")).toBeVisible();
+  await expect(page.locator(`#${selected}`)).toHaveAttribute("aria-selected", "true");
+  await page.mouse.up();
+  await expect(page.getByRole("dialog", { name: "Model & thinking" })).toBeVisible();
+});
+
+test("a session switch the palette did not start closes it, since its commands act on the session they were listed for", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  await open(page);
+  await openSession(page, "contract ready", sessions.marker);
+  await page.keyboard.press("Control+k");
+  await expect(command(page, "Session tree /tree")).toBeVisible();
+  await page.goBack();
+  await expect(dialog(page)).toBeHidden();
+  await expect(page.getByRole("heading", { level: 1, name: sessions.marker })).toBeHidden();
 });

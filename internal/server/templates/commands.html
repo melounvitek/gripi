@@ -1,7 +1,7 @@
 {{define "commands_list"}}<details class="command-list" id="command-list" data-loaded="true">
   <summary>Slash commands ({{.Count}})</summary>
-  {{range .Groups}}<h3>{{.Source}} commands</h3>
-    {{range .Commands}}<div class="command" data-command-name="{{.Name}}" data-command-text="{{.Text}}">
+  {{range .Groups}}{{$source := .Source}}<h3>{{.Source}} commands</h3>
+    {{range .Commands}}<div class="command" data-command-name="{{.Name}}" data-command-source="{{$source}}" data-command-description="{{.Description}}" data-command-text="{{.Text}}">
       <code>/{{.Name}}</code>{{if .Description}}
       — {{.Description}}{{end}}
     </div>
