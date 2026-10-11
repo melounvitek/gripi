@@ -570,6 +570,7 @@ func (client *syncClient) EventReplayCursor() int64 { return 0 }
 func (client *syncClient) EventsAfter(int64) agent.EventBatch {
 	return agent.EventBatch{Events: []json.RawMessage{}}
 }
+func (client *syncClient) ContinueEventsAfter(int64) {}
 func (client *syncClient) LiveSnapshot() agent.LiveSnapshot {
 	return agent.LiveSnapshot{}
 }

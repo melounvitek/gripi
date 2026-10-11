@@ -1214,6 +1214,18 @@ func (client *Client) EventReplayCursor() int64 {
 	defer client.mu.Unlock()
 	return client.eventReplayFloor
 }
+
+// ContinueEventsAfter renumbers the events so far, and numbers the later ones, after sequence.
+func (client *Client) ContinueEventsAfter(sequence int64) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	client.eventSequence += sequence
+	client.eventReplayFloor += sequence
+	for index := range client.events {
+		client.events[index].sequence += sequence
+	}
+	client.rebuildCoalescedPointersLocked()
+}
 func (client *Client) Busy() bool {
 	client.mu.Lock()
 	defer client.mu.Unlock()

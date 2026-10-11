@@ -281,9 +281,10 @@ func TestChangedVariablesApplyFromTheNextMessage(t *testing.T) {
 	waitForFakePiSettled(t, fixture.handler, session, 0)
 
 	fixture.save(t, "", "ENVTEST_TOKEN", "second")
+	cursor := fakePiEventCursor(t, fixture.handler, session)
 	fixture.prompt(t, session, "Use the second token", "")
 	fixture.assertTokens(t, session, "first", "second")
-	waitForFakePiSettled(t, fixture.handler, session, 0)
+	waitForFakePiSettled(t, fixture.handler, session, cursor)
 
 	fixture.prompt(t, session, "!printf unchanged", "")
 	fixture.assertTokens(t, session, "first", "second")
@@ -301,30 +302,28 @@ func TestRestartForChangedVariablesKeepsTheEventCursorValid(t *testing.T) {
 	waitForFakePiSettled(t, fixture.handler, session, 0)
 	cursor := fakePiEventCursor(t, fixture.handler, session)
 
+	// Another tab, still at the old Pi's last event, polls again only after the new Pi has sent more events than the old one.
 	fixture.save(t, "", "ENVTEST_TOKEN", "second")
-	// This turn stays open, so the new Pi's event sequence stays below the browser's cursor.
-	fixture.prompt(t, session, "Start the steer scenario", "")
+	fixture.prompt(t, session, "Use the second token", "")
 	fixture.assertTokens(t, session, "first", "second")
+	waitForFakePiSettled(t, fixture.handler, session, cursor)
+	settled := fakePiEventCursor(t, fixture.handler, session)
+	fixture.prompt(t, session, "Use the token again", "")
+	waitForFakePiSettled(t, fixture.handler, session, settled)
 
-	for deadline := time.Now().Add(4 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		response := fixture.get(fmt.Sprintf("/events?session=%s&after=%d", url.QueryEscape(session), cursor), "")
-		var batch struct {
-			Events  []map[string]any `json:"events"`
-			LastSeq int64            `json:"last_seq"`
-			Missed  bool             `json:"missed"`
-		}
-		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &batch) != nil || batch.LastSeq >= cursor {
-			t.Fatalf("events after the old Pi's last event %d = %d %s", cursor, response.Code, response.Body.String())
-		}
-		if batch.Missed {
-			t.Fatalf("the cursor at the old Pi's last event %d missed events: %s", cursor, response.Body.String())
-		}
-		if slices.ContainsFunc(batch.Events, func(event map[string]any) bool { return event["type"] == "agent_start" }) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the new turn did not arrive after the old Pi's last event %d: %s", cursor, response.Body.String())
-		}
+	response := fixture.get(fmt.Sprintf("/events?session=%s&after=%d", url.QueryEscape(session), cursor), "")
+	var batch struct {
+		LastSeq int64 `json:"last_seq"`
+		Missed  bool  `json:"missed"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &batch) != nil || batch.Missed {
+		t.Fatalf("events after the old Pi's last event %d = %d %s", cursor, response.Code, response.Body.String())
+	}
+	if batch.LastSeq-cursor < cursor {
+		t.Fatalf("the new Pi sent %d events, fewer than the old Pi's %d", batch.LastSeq-cursor, cursor)
+	}
+	if !strings.Contains(response.Body.String(), "Use the second token") {
+		t.Fatalf("the new Pi's first turn is missing after the old Pi's last event %d: %s", cursor, response.Body.String())
 	}
 }
 

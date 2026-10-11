@@ -781,6 +781,45 @@ func TestClientBoundsReplayAndCoalescesLiveUpdates(t *testing.T) {
 	_ = stdoutWriter.Close()
 }
 
+func TestClientContinuesTheEventNumbersOfTheClientItReplaces(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	defer stdinReader.Close()
+	stdoutReader, stdoutWriter := io.Pipe()
+	client := NewClient(stdinWriter, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close() })
+	// Pi can send events while it starts, before the registry hands the client out.
+	writeRecord(t, stdoutWriter, map[string]any{"type": "extension_ui_request", "id": "status", "method": "setStatus", "statusKey": "fixture", "statusText": "ready"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "message": map[string]any{"content": "first"}})
+	// A third event grows the buffer past the coalesced update's place in it.
+	writeRecord(t, stdoutWriter, map[string]any{"type": "turn_start"})
+	waitSequence(t, client, 3)
+
+	client.ContinueEventsAfter(20)
+	writeRecord(t, stdoutWriter, map[string]any{"type": "message_update", "message": map[string]any{"content": "second"}})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "turn_end"})
+	waitSequence(t, client, 25)
+
+	if batch := client.EventsAfter(0); !batch.Missed || batch.LastSeq != 25 {
+		t.Fatalf("cursor before the replaced client's last event = %#v, want missed", batch)
+	}
+	batch := client.EventsAfter(20)
+	var types []string
+	for _, event := range batch.Events {
+		types = append(types, event["type"].(string))
+	}
+	// The second update replaced the first, as it would without renumbering.
+	if batch.Missed || batch.LastSeq != 25 || !reflect.DeepEqual(types, []string{"extension_ui_request", "turn_start", "message_update", "turn_end"}) {
+		t.Fatalf("events after the replaced client's last event = %#v", batch)
+	}
+	if update := eventOfType(t, batch.Events, "message_update"); !reflect.DeepEqual(update["message"], map[string]any{"content": "second"}) {
+		t.Fatalf("coalesced update = %#v", update)
+	}
+	if snapshot := client.LiveSnapshot(); snapshot.EventSequence != 25 || snapshot.EventReplayCursor != 20 {
+		t.Fatalf("snapshot numbers = %d, %d", snapshot.EventSequence, snapshot.EventReplayCursor)
+	}
+	_ = stdoutWriter.Close()
+}
+
 func TestClientKeepsCurrentReplayCursorThroughImageToolResultLifecycle(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()

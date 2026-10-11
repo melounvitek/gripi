@@ -18,6 +18,10 @@ type Client interface {
 	EventSequence() int64
 	EventReplayCursor() int64
 	EventsAfter(int64) EventBatch
+	// ContinueEventsAfter numbers the client's events, including those it has already, after the last event of the
+	// client it replaces, so that a cursor from that client stays valid. The registry calls it before anyone reads the
+	// client's events.
+	ContinueEventsAfter(int64)
 	LiveSnapshot() LiveSnapshot
 
 	// State asks the agent about the session.
