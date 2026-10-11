@@ -1442,6 +1442,65 @@ func TestSessionMetadataCacheSupportsConcurrentScans(t *testing.T) {
 	}
 }
 
+func TestSessionsIndexUncachedFilesInParallelUpToTheBuildBound(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for number := range 3 * indexBuildWorkers {
+		writeSessionLines(t, filepath.Join(root, fmt.Sprintf("session-%02d.jsonl", number)), []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Message")})
+	}
+	started := make(chan struct{}, 3*indexBuildWorkers)
+	release := make(chan struct{})
+	original := buildIndex
+	t.Cleanup(func() { buildIndex = original })
+	buildIndex = func(path string, stat os.FileInfo) (*index, error) {
+		started <- struct{}{}
+		<-release
+		return original(path, stat)
+	}
+	type listing struct {
+		sessions []*agent.Session
+		err      error
+	}
+	store := Store{Root: root, Home: root, Cache: NewCache()}
+	listed := make(chan listing, 1)
+	go func() {
+		sessions, err := store.Sessions()
+		listed <- listing{sessions, err}
+	}()
+	opened := make(chan error, 1)
+
+	for range indexBuildWorkers {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			close(release)
+			t.Fatal("session files were not indexed in parallel")
+		}
+	}
+	// A session opened meanwhile waits for a free build too.
+	_, _, other := sessionFixture(t)
+	writeSessionLines(t, other, []string{sessionLine(project)})
+	go func() {
+		_, err := store.Cache.Index(other)
+		opened <- err
+	}()
+	select {
+	case <-started:
+		t.Error("more session files were indexed at once than the bound allows")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if result := <-listed; result.err != nil || len(result.sessions) != 3*indexBuildWorkers {
+		t.Fatalf("sessions = %d, err = %v", len(result.sessions), result.err)
+	}
+	if err := <-opened; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSessionsCanDeferBusyMetadataRefresh(t *testing.T) {
 	root, project, path := sessionFixture(t)
 	writeSessionLines(t, path, []string{sessionLine(project), userLine("user", "", "2026-01-01T00:00:01Z", "Initial")})

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/keyedlock"
 )
 
 const (
@@ -132,9 +134,15 @@ type metadataCacheItem struct {
 	element *list.Element
 }
 
+// indexBuildWorkers bounds how many session indexes are built at once, since
+// each build may hold up to maxBuiltIndexBytes. Building is CPU-bound, so more
+// builds than CPUs would only add memory.
+var indexBuildWorkers = min(4, runtime.GOMAXPROCS(0))
+
 type Cache struct {
 	mu            sync.Mutex
-	buildMu       sync.Mutex
+	buildLocks    keyedlock.Mutexes
+	builds        chan struct{}
 	clock         uint64
 	bytes         int64
 	items         map[string]*cacheItem
@@ -145,7 +153,7 @@ type Cache struct {
 }
 
 func NewCache() *Cache {
-	return &Cache{items: make(map[string]*cacheItem), metadataItems: make(map[string]*metadataCacheItem)}
+	return &Cache{items: make(map[string]*cacheItem), metadataItems: make(map[string]*metadataCacheItem), builds: make(chan struct{}, indexBuildWorkers)}
 }
 
 func (cache *Cache) Index(path string) (*index, error) {
@@ -165,8 +173,10 @@ func (cache *Cache) Index(path string) (*index, error) {
 	}
 	cache.mu.Unlock()
 
-	cache.buildMu.Lock()
-	defer cache.buildMu.Unlock()
+	unlock := cache.buildLocks.Lock(path)
+	defer unlock()
+	cache.builds <- struct{}{}
+	defer func() { <-cache.builds }()
 	stat, err = os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -327,7 +337,12 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*age
 	if err != nil {
 		return nil, false, err
 	}
-	var result []*agent.Session
+	type listing struct {
+		configuredPath, realPath string
+		session                  *agent.Session
+	}
+	var listed []listing
+	var unindexed []int
 	deferred := false
 	err = filepath.WalkDir(root, func(path string, item os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -354,17 +369,39 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*age
 			deferred = true
 		}
 		if !found {
-			indexed, indexErr := store.Cache.Index(realPath)
-			if indexErr != nil {
-				return nil
-			}
-			session = sessionFromIndex(indexed)
+			unindexed = append(unindexed, len(listed))
 		}
+		listed = append(listed, listing{configuredPath: configuredPath, realPath: realPath, session: session})
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	// On a first start the cache lacks every session, so they are indexed in parallel.
+	positions := make(chan int)
+	var workers sync.WaitGroup
+	for range min(indexBuildWorkers, len(unindexed)) {
+		workers.Go(func() {
+			for position := range positions {
+				if indexed, err := store.Cache.Index(listed[position].realPath); err == nil {
+					listed[position].session = sessionFromIndex(indexed)
+				}
+			}
+		})
+	}
+	for _, position := range unindexed {
+		positions <- position
+	}
+	close(positions)
+	workers.Wait()
+	var result []*agent.Session
+	for _, item := range listed {
+		session := item.session
 		if session == nil || session.CWD == "" || !filepath.IsAbs(session.CWD) {
-			return nil
+			continue
 		}
 		copy := *session
-		copy.Path = configuredPath
+		copy.Path = item.configuredPath
 		copy.FolderMissing = folderMissing(copy.CWD)
 		if copy.ParentSessionPath != "" {
 			if parent, ok := ConfiguredSessionPath(configuredRoot, copy.ParentSessionPath); ok {
@@ -372,10 +409,6 @@ func (store Store) SessionsDeferringMetadata(deferFor func(string) bool) ([]*age
 			}
 		}
 		result = append(result, &copy)
-		return nil
-	})
-	if err != nil {
-		return nil, false, err
 	}
 	sort.SliceStable(result, func(left, right int) bool {
 		return result[left].ConversationActivityAt.After(result[right].ConversationActivityAt)
@@ -598,7 +631,7 @@ func configuredSessionPath(realPath, configuredRoot, realRoot string) (string, b
 	return filepath.Join(configuredRoot, relative), true
 }
 
-func buildIndex(path string, _ os.FileInfo) (*index, error) {
+var buildIndex = func(path string, _ os.FileInfo) (*index, error) {
 	return buildIndexWithValidationHook(path, nil)
 }
 
