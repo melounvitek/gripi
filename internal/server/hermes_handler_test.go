@@ -20,9 +20,9 @@ import (
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
-// hermesHandler runs the gateway with the fake Hermes, which has saved the given sessions, each a map in the fake's
-// state format.
-func hermesHandler(t *testing.T, sessions ...map[string]any) http.Handler {
+// hermesConfig configures a gateway with the fake Pi and the fake Hermes, which has saved the given sessions, each a
+// map in the fake's state format.
+func hermesConfig(t *testing.T, sessions ...map[string]any) config.Config {
 	t.Helper()
 	root := t.TempDir()
 	state := filepath.Join(root, "hermes-state.json")
@@ -36,14 +36,20 @@ func hermesHandler(t *testing.T, sessions ...map[string]any) http.Handler {
 	t.Setenv("FAKE_HERMES_STATE", state)
 	_, file, _, _ := runtime.Caller(0)
 	support := filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support")
-	handler, err := gateway.NewHandlerWithHermes(config.Config{
+	return config.Config{
 		Address: "127.0.0.1:4567", Environment: "test", Home: root,
 		SessionsRoot: filepath.Join(root, "sessions"), AttachmentsRoot: filepath.Join(root, "attachments"),
 		ReadStatePath: filepath.Join(root, "read.json"), PinnedSessionsPath: filepath.Join(root, "pinned.json"), SessionTagsPath: filepath.Join(root, "tags.json"),
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true, PermittedHosts: []string{"example.com"},
 		EnvironmentPath: filepath.Join(root, "environment.json"), RPCIdleTimeout: time.Hour,
 		PiCommand: []string{"node", filepath.Join(support, "fake_pi.mjs")}, HermesPath: filepath.Join(support, "fake_hermes.mjs"),
-	}, gripi.WebFiles)
+	}
+}
+
+// hermesHandler runs the gateway with the fake Hermes, which has saved the given sessions.
+func hermesHandler(t *testing.T, sessions ...map[string]any) http.Handler {
+	t.Helper()
+	handler, err := gateway.NewHandlerWithHermes(hermesConfig(t, sessions...), gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,5 +343,63 @@ func TestSavedVariablesReachHermesBeforeItsNextMessage(t *testing.T) {
 	// The session reloaded in the new Hermes keeps its conversation.
 	if page := getPage(t, handler, "/?session="+url.QueryEscape(key)); !strings.Contains(page, "Hermes says: List the files again") || !strings.Contains(page, "Checking the files.") {
 		t.Fatal("the conversation is missing after the restart")
+	}
+}
+
+func TestPagesTellAgentsApartOnlyWhenTheGatewayRunsHermes(t *testing.T) {
+	project := t.TempDir()
+	cfg := hermesConfig(t, map[string]any{"sessionId": "hermes-chat", "cwd": project, "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z"})
+	piSession := filepath.Join(cfg.SessionsRoot, "pi.jsonl")
+	if err := os.MkdirAll(cfg.SessionsRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	records := []string{
+		`{"type":"session","version":3,"id":"pi-chat","timestamp":"2026-02-01T10:00:00Z","cwd":"` + project + `"}`,
+		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-02-01T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"Pi chat"}]}}`,
+	}
+	if err := os.WriteFile(piSession, []byte(strings.Join(records, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	piAlone := cfg
+	piAlone.HermesPath = ""
+	handler, err := gateway.NewPiHandler(piAlone, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	page := getPage(t, handler, "/?session="+url.QueryEscape(piSession))
+	// Absent markup is the requirement here: a gateway without Hermes looks as it did before.
+	for _, absent := range []string{`data-agent="`, "session-agent", `name="agent"`, "All agents", "Hermes Agent"} {
+		if strings.Contains(page, absent) {
+			t.Errorf("the page without Hermes contains %q", absent)
+		}
+	}
+	for _, present := range []string{`aria-label="Message to Pi"`, "Ask Pi…", `aria-label="Abort running Pi"`} {
+		if !strings.Contains(page, present) {
+			t.Errorf("the page without Hermes lacks %q", present)
+		}
+	}
+
+	both, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = both.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	page = getPage(t, both, "/?session="+url.QueryEscape(piSession))
+	for _, present := range []string{`class="session-agent" data-agent="pi"`, `class="session-agent" data-agent="hermes"`, `name="agent" aria-label="Filter sessions by agent"`, `data-new-session-agent="hermes"`, `aria-label="Message to Pi"`, `<main class="conversation-panel" data-agent="pi">`} {
+		if !strings.Contains(page, present) {
+			t.Errorf("the Pi session's page with Hermes lacks %q", present)
+		}
+	}
+	page = getPage(t, both, "/?session="+url.QueryEscape("hermes:hermes-chat"))
+	for _, present := range []string{`<main class="conversation-panel" data-agent="hermes">`, `class="session-header-agent" data-agent="hermes"`, `aria-label="Message to Hermes"`, "Ask Hermes…", `aria-label="Abort running Hermes"`} {
+		if !strings.Contains(page, present) {
+			t.Errorf("the Hermes session's page lacks %q", present)
+		}
+	}
+	page = getPage(t, both, "/?agent=hermes")
+	if !strings.Contains(page, "Hermes chat") || strings.Contains(page, `data-session-name="Pi chat"`) {
+		t.Error("the agent filter does not show only Hermes's sessions")
 	}
 }

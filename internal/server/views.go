@@ -119,6 +119,9 @@ type pageView struct {
 	SidebarMetadataDeferred   bool
 	SidebarActivity           map[string]sidebarActivity
 	LiveOutput                liveOutputData
+	// Agents names the agents when the gateway runs several, which the page then tells apart. It is empty otherwise.
+	Agents        []string
+	SelectedAgent string
 }
 
 func (app *application) preparePage(request *http.Request, includeConversation bool) (*pageView, error) {
@@ -168,7 +171,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		if knownPaths[pending.Path] {
 			continue
 		}
-		all = append(all, &agent.Session{Path: pending.Path, ID: pending.ID, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt})
+		all = append(all, &agent.Session{Path: pending.Path, ID: pending.ID, CWD: pending.CWD, DisplayName: "New session (pending first assistant response)", CreatedAt: pending.CreatedAt, ModifiedAt: pending.CreatedAt, ConversationActivityAt: pending.CreatedAt, Agent: app.agentOf(pending.Path)})
 	}
 	sort.SliceStable(all, func(left, right int) bool {
 		return all[left].ConversationActivityAt.After(all[right].ConversationActivityAt)
@@ -248,6 +251,12 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity)}
 	view.ExternalFollow = externalFollow
+	if router, ok := app.adapter.(*agent.Router); ok {
+		view.Agents = router.Names()
+		if selected := params.Get("agent"); slices.Contains(view.Agents, selected) {
+			view.SelectedAgent = selected
+		}
+	}
 	if notifier := app.completionNotifications; notifier != nil {
 		notifier.mu.Lock()
 		notifier.pruneClientsLocked()
@@ -509,6 +518,9 @@ func (view *pageView) prepareSidebar() {
 		if view.SelectedProject != "" && session.CWD != view.SelectedProject {
 			continue
 		}
+		if view.SelectedAgent != "" && session.Agent != view.SelectedAgent {
+			continue
+		}
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{session.DisplayName, session.CWD, filepath.Base(session.CWD), session.FirstUserMessage}, "\n")), query) {
 			continue
 		}
@@ -640,7 +652,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return relationData{view, session, current}
 		},
 		"messageData":    func(view *pageView, message *agent.Message) messageData { return messageData{view, message} },
-		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL,
+		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "agentGlyph": agentGlyph,
 		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
 		"messageBody": func(message *agent.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
@@ -750,6 +762,9 @@ func sessionURL(view *pageView, session *agent.Session) string {
 		if view.SelectedProject != "" {
 			values.Set("project", view.SelectedProject)
 		}
+		if view.SelectedAgent != "" {
+			values.Set("agent", view.SelectedAgent)
+		}
 		if view.SearchQuery != "" {
 			values.Set("session_search", view.SearchQuery)
 		}
@@ -806,6 +821,9 @@ func sidebarLoadURL(view *pageView) string {
 	}
 	if view.SelectedProject != "" {
 		values.Set("project", view.SelectedProject)
+	}
+	if view.SelectedAgent != "" {
+		values.Set("agent", view.SelectedAgent)
 	}
 	if view.SearchQuery != "" {
 		values.Set("session_search", view.SearchQuery)
@@ -1118,3 +1136,27 @@ func terminalSource(message *agent.Message) string {
 	return base64Text(value)
 }
 func base64Text(value string) string { return base64.StdEncoding.EncodeToString([]byte(value)) }
+
+// agentOf names the agent of a session when the gateway runs several, and is empty otherwise.
+func (app *application) agentOf(key string) string {
+	if router, ok := app.adapter.(*agent.Router); ok {
+		return router.Agent(key)
+	}
+	return ""
+}
+
+// agentLabel names a session's agent for the user, and Pi when the gateway runs Pi alone.
+func agentLabel(name string) string {
+	if name == "hermes" {
+		return "Hermes"
+	}
+	return "Pi"
+}
+
+// agentGlyph marks an agent in the sidebar and the session header: π for Pi, and Hermes's caduceus.
+func agentGlyph(name string) template.HTML {
+	if name == "hermes" {
+		return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18"/><path d="M12 5.5C10 3.5 6.5 3.2 3.5 4.5c2.3 1.4 5.4 2 8.5 2.5M12 5.5c2-2 5.5-2.3 8.5-1-2.3 1.4-5.4 2-8.5 2.5"/><path d="M9 10c0 1.8 6 1.4 6 3.5S9 15.7 9 17.5s4.5 1.9 6 1.5"/></svg>`
+	}
+	return "π"
+}

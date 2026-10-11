@@ -188,6 +188,8 @@
     .image-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     .attach-button { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; border: 0; border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; }
     .attach-button:hover { color: var(--text); background: #ffffff08; }
+    /* Gripi sends Hermes no images yet. */
+    .conversation-panel[data-agent="hermes"] .attach-button { display: none; }
     .image-input:focus-visible + .attach-button { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
     h1 { font-size: 1.1rem; line-height: 1.25; margin: 0 0 1rem; font-weight: 650; letter-spacing: -0.01em; }
     h2 { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; margin: 0; color: var(--gold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.14em; }
@@ -262,6 +264,12 @@
     /* Every row starts with the same fixed slot: the project letters, or the terminal icon of a session active outside Gripi. */
     .session-row .session-project { order: -1; flex: 0 0 0.875rem; margin: 0; font-size: 0.7rem; }
     .session-row.is-external .session-project { display: none; }
+    /* With several agents, each row starts with its agent: π for Pi, the caduceus for Hermes. */
+    .session-row .session-agent { order: -2; flex: 0 0 0.875rem; }
+    .session-agent, .session-header-agent { display: inline-flex; align-items: center; justify-content: center; color: var(--muted-soft); font-family: var(--mono); font-size: 0.75rem; line-height: 1; }
+    .session-agent[data-agent="hermes"], .session-header-agent[data-agent="hermes"] { color: var(--gold); }
+    .session-agent svg, .session-header-agent svg { width: 0.8rem; height: 0.8rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .session-header-agent { flex: none; gap: 0.3rem; font-size: inherit; }
     /* The time slot fits "13h" and shows the activity dot while Pi works. */
     .session-row .session-meta { flex: none; min-width: 3ch; overflow: visible; text-align: right; }
     a.session { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: inherit; text-decoration: none; }

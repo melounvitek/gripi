@@ -176,6 +176,8 @@ export class SessionActionsController {
       heading.hidden = !multiple;
     }
     menu.querySelectorAll('[data-session-action="rename"], [data-session-action="delete"], .session-actions-separator').forEach((item) => { item.hidden = multiple; });
+    // Gripi can neither rename nor delete a Hermes session.
+    if (row.dataset.agent === "hermes") menu.querySelectorAll('[data-session-action="rename"], [data-session-action="delete"]').forEach((item) => { item.hidden = true; });
     const openWindow = menu.querySelector('[data-session-action="window"]');
     if (openWindow) openWindow.textContent = multiple ? "Open in new windows" : "Open in new window";
     const pin = menu.querySelector("[data-session-action-pin]");

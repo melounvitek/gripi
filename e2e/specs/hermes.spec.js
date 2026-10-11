@@ -40,9 +40,14 @@ test("a Hermes reply streams with its thinking and tool, and stays after a reloa
 
 test("stopping Hermes ends its run", async ({ page }) => {
   await sendPrompt(page, hermes.stopPrompt);
-  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeVisible();
-  await page.getByRole("button", { name: "Abort running Pi" }).click();
+  // Hermes would take another message as a correction of its turn, which Gripi doesn't offer: only Stop is left.
+  const composer = page.getByLabel("Message to Hermes");
+  await expect(composer).toBeDisabled();
+  await expect(composer).toHaveAttribute("placeholder", "Hermes is working…");
+  await expect(page.getByRole("button", { name: /^(Send|Steer)/ })).toBeHidden();
+  await page.getByRole("button", { name: "Abort running Hermes" }).click();
   await expectRunFinished(page);
+  await expect(composer).toHaveAttribute("placeholder", "Ask Hermes…");
 });
 
 test("Hermes asks in a dialog before a dangerous command, which a reload keeps", async ({ page }) => {
@@ -63,4 +68,13 @@ test("Hermes asks in a dialog before a dangerous command, which a reload keeps",
   await expect(tool).toContainText(permission.denied);
   await expect(tool).toHaveClass(/message--tool-error/);
   await expectRunFinished(page);
+});
+
+test("the agent filter shows only Hermes's sessions, each marked as Hermes's", async ({ page }) => {
+  await page.getByRole("combobox", { name: "Filter sessions by agent" }).click();
+  await page.getByRole("option", { name: "hermes" }).click();
+  const rows = page.locator(".sessions-list .session-row, .current-session-section .session-row");
+  await expect(rows.first()).toBeVisible();
+  await expect(page.locator('.session-row[data-agent="pi"]')).toHaveCount(0);
+  await expect(page.locator(".session-row").filter({ hasText: hermes.saved.title }).locator('.session-agent[data-agent="hermes"]')).toBeVisible();
 });

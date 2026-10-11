@@ -32,8 +32,12 @@ export function message(page, role, text) {
   return page.locator(`article[data-role="${role}"]`).filter({ hasText: text });
 }
 
+// The composer and the stop button name the session's agent, Pi or Hermes.
+const composerLabel = /^Message to (Pi|Hermes)$/;
+const stopLabel = /^Abort running (Pi|Hermes)$/;
+
 export async function sendPrompt(page, text) {
-  const composer = page.getByLabel("Message to Pi");
+  const composer = page.getByLabel(composerLabel);
   await composer.fill(text);
   const sendButton = page.getByRole("button", { name: /Send$/ });
   if (await sendButton.isVisible()) await sendButton.click();
@@ -42,8 +46,8 @@ export async function sendPrompt(page, text) {
 
 export async function expectRunFinished(page) {
   await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
-  await expect(page.getByLabel("Message to Pi")).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
+  await expect(page.getByLabel(composerLabel)).toBeEnabled();
+  await expect(page.getByRole("button", { name: stopLabel })).toBeHidden();
 }
 
 // Answers a fake Pi confirmation that holds a scenario between stages; see `live` in contract.mjs.

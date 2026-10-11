@@ -59,10 +59,19 @@ export default defineConfig({
       // Needs the gateway that also runs the fake Hermes: node e2e/support/managed_server.mjs --hermes
       name: "hermes",
       dependencies: ["setup"],
-      testMatch: /specs\/hermes[^/]*\.spec\.js$/,
+      testMatch: /specs\/hermes\.spec\.js$/,
       use: {
         storageState,
         viewport: { width: 1440, height: 900 }
+      }
+    },
+    {
+      name: "hermes-touch",
+      dependencies: ["setup"],
+      testMatch: /specs\/hermes_touch\.spec\.js$/,
+      use: {
+        ...devices["Pixel 7"],
+        storageState
       }
     },
     {

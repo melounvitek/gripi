@@ -101,7 +101,7 @@ let exitCode = 1;
 try {
   await waitForServer(baseURL, server);
   const playwright = path.join(repoRoot, "node_modules", "@playwright", "test", "cli.js");
-  const defaultProjects = withHermes ? ["--project=hermes"] : ["--project=desktop", "--project=mobile", "--project=iphone"];
+  const defaultProjects = withHermes ? ["--project=hermes", "--project=hermes-touch"] : ["--project=desktop", "--project=mobile", "--project=iphone"];
   const args = ["test", ...(playwrightArgs.length ? playwrightArgs : defaultProjects)];
   const tests = spawn(process.execPath, [playwright, ...args], {
     cwd: repoRoot,

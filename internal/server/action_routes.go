@@ -620,11 +620,7 @@ func (app *application) newSession(response http.ResponseWriter, request *http.R
 		return
 	}
 	// A new session in the folder of another one runs the same agent.
-	agentName := ""
-	if session, found := app.sessionStore.Session(path); found {
-		agentName = session.Agent
-	}
-	newPath, err := app.startNewSession(request, app.currentSessionCWD(path), "", agentName)
+	newPath, err := app.startNewSession(request, app.currentSessionCWD(path), "", app.agentOf(path))
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return

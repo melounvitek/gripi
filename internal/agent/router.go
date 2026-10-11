@@ -26,6 +26,20 @@ func NewRouter(agents ...RoutedAgent) *Router {
 	return &Router{agents: agents}
 }
 
+// Agent names the agent of the session key, such as a new one that its agent hasn't saved yet.
+func (router *Router) Agent(key string) string {
+	return router.agents[max(router.owner(key), 0)].Name
+}
+
+// Names names the router's agents, the first one first.
+func (router *Router) Names() []string {
+	names := make([]string, len(router.agents))
+	for index, routed := range router.agents {
+		names[index] = routed.Name
+	}
+	return names
+}
+
 var errNoAgent = errors.New("no agent serves this session")
 
 // owner returns the index of the agent whose keys look like key, or -1.
