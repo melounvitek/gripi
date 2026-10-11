@@ -93,7 +93,7 @@ func TestCreatingSessionInGripiAddsItsProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(app.config.SessionsRoot, "gateway-session.jsonl")
-	app.newRPCClient = func(string, string, string) (agent.Client, error) {
+	app.newRPCClient = func(string, string, string, string) (agent.Client, error) {
 		writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "gateway", "timestamp": "2026-01-01T00:00:00Z", "cwd": cwd}})
 		return &remapClient{state: map[string]any{"data": map[string]any{"sessionFile": path}}}, nil
 	}

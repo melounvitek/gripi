@@ -17,7 +17,7 @@
     "scripts:check": "node --test test/scripts.test.mjs",
     "fake-pi:check": "node --test e2e/support/*.test.mjs && node --check e2e/support/fake_pi.mjs",
     "test:e2e:support": "npm run fake-pi:check",
-    "test:e2e": "npm run test:e2e:support && node e2e/support/managed_server.mjs",
+    "test:e2e": "npm run test:e2e:support && node e2e/support/managed_server.mjs && node e2e/support/managed_server.mjs --hermes",
     "test:e2e:external": "node e2e/support/external.mjs",
     "test:e2e:real": "node e2e/support/managed_server.mjs --real-pi --project=real-pi",
     "dist": "electron-builder",

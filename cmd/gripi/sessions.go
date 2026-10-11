@@ -243,7 +243,14 @@ func printJSON(stdout, stderr io.Writer, name string, value any) int {
 
 func printSessions(stdout io.Writer, sessions []gateway.LocalSession) {
 	table := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(table, "ID\tSTATE\tUNREAD\tPINNED\tUPDATED\tPROJECT\tTAGS\tNAME")
+	// Only a gateway that runs several agents names them.
+	agents := slices.ContainsFunc(sessions, func(session gateway.LocalSession) bool { return session.Agent != "" })
+	if agents {
+		fmt.Fprint(table, "ID\tAGENT\t")
+	} else {
+		fmt.Fprint(table, "ID\t")
+	}
+	fmt.Fprintln(table, "STATE\tUNREAD\tPINNED\tUPDATED\tPROJECT\tTAGS\tNAME")
 	for _, session := range sessions {
 		tags := "-"
 		if len(session.Tags) > 0 {
@@ -253,7 +260,11 @@ func printSessions(stdout io.Writer, sessions []gateway.LocalSession) {
 		if len(name) > 60 {
 			name = append(name[:59], '…')
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", session.ID, session.State, yesOrDash(session.Unread), yesOrDash(session.Pinned), age(time.Since(session.UpdatedAt.Time)), filepath.Base(session.CWD), tags, string(name))
+		fmt.Fprintf(table, "%s\t", session.ID)
+		if agents {
+			fmt.Fprintf(table, "%s\t", session.Agent)
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", session.State, yesOrDash(session.Unread), yesOrDash(session.Pinned), age(time.Since(session.UpdatedAt.Time)), filepath.Base(session.CWD), tags, string(name))
 	}
 	table.Flush()
 }

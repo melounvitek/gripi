@@ -245,7 +245,7 @@ func startProcess(cwd string, command, args, variables []string, diagnostics *ag
 	}
 	cmd := exec.Command(command[0], append(command[1:], args...)...)
 	cmd.Dir = cwd
-	cmd.Env = append(ScrubbedEnvironment(os.Environ()), variables...)
+	cmd.Env = append(agent.ScrubbedEnvironment(os.Environ()), variables...)
 	configureProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -284,22 +284,6 @@ func startProcess(cwd string, command, args, variables []string, diagnostics *ag
 	client.waitDone = make(chan struct{})
 	go client.waitForProcess()
 	return client, nil
-}
-
-// ScrubbedEnvironment drops the gateway's own settings, which would otherwise
-// configure the projects and gateways that Pi's commands run.
-func ScrubbedEnvironment(environment []string) []string {
-	result := make([]string, 0, len(environment))
-	for _, entry := range environment {
-		key, _, _ := strings.Cut(entry, "=")
-		// gripi commands in a session reach this gateway through the socket, and the browser suite's fake Pi reads GRIPI_E2E_*.
-		kept := key == "GRIPI_SOCKET_PATH" || strings.HasPrefix(key, "GRIPI_E2E_")
-		if key == "APP_ENV" || (strings.HasPrefix(key, "GRIPI_") && !kept) {
-			continue
-		}
-		result = append(result, entry)
-	}
-	return result
 }
 
 func NewClient(stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser, options ClientOptions) *Client {

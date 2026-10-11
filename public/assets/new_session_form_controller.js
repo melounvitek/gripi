@@ -2,6 +2,7 @@ import { pointPickerCursor } from "./dom.js";
 import { recentSessionShortcutFromEvent } from "./shortcuts.js";
 
 const RECENT_PROJECTS = 5;
+const AGENT_KEY = "gripi:new-session-agent";
 
 export class NewSessionFormController {
   constructor(document, window) {
@@ -41,12 +42,40 @@ export class NewSessionFormController {
   // fork is the { path, name } of a session whose folder is gone, which Pi forks into the folder picked here.
   open(form, fork) {
     if (!form?._newSessionFormState) return;
-    Object.assign(form._newSessionFormState, { expanded: false, fork });
+    // A gateway that runs several agents asks for the agent first. A session continued in another folder stays Pi's.
+    const agentStep = !fork && this.agents(form).length > 0;
+    Object.assign(form._newSessionFormState, { expanded: false, fork, agentStep });
     form.querySelector("[data-new-session-fork-from]").value = fork?.path || "";
+    const agentValue = form.querySelector("[data-new-session-agent-value]");
+    if (agentValue) agentValue.value = "";
     form.closest("[data-modal]").querySelector("#new-session-modal-title").textContent = fork ? "Continue in another folder" : "New session";
     const note = form.querySelector("[data-new-session-fork-note]");
     note.textContent = fork ? `Pi forks “${fork.name}” into the folder you pick. The original stays as it is.` : "";
     note.hidden = !fork;
+    if (agentStep) this.showAgents(form);
+    else if (this.projects(form).length) this.showProjects(form);
+    else this.browse(form, form.dataset.home);
+  }
+
+  agents(form) {
+    return [...form.querySelectorAll("[data-new-session-agent]")];
+  }
+
+  showAgents(form) {
+    this.cancelBrowse(form);
+    form._newSessionFormState.folder = null;
+    this.input(form).value = "";
+    this.focusInput(form);
+    const remembered = this.agents(form).findIndex((row) => row.dataset.newSessionAgent === this.window.localStorage?.getItem(AGENT_KEY));
+    this.render(form, Math.max(remembered, 0));
+  }
+
+  chooseAgent(form, name) {
+    form.querySelector("[data-new-session-agent-value]").value = name;
+    try {
+      this.window.localStorage?.setItem(AGENT_KEY, name);
+    } catch (_error) {}
+    form._newSessionFormState.agentStep = false;
     if (this.projects(form).length) this.showProjects(form);
     else this.browse(form, form.dataset.home);
   }
@@ -168,6 +197,20 @@ export class NewSessionFormController {
     const browsing = state.folder !== null;
     const projects = this.projects(form);
     list.querySelectorAll("[data-new-session-action]").forEach((row) => row.remove());
+    this.agents(form).forEach((row) => { row.hidden = !state.agentStep; });
+    // Typing filters the projects and folders, but not the agents.
+    const input = this.input(form);
+    input.dataset.placeholder ??= input.placeholder;
+    input.placeholder = state.agentStep ? "" : input.dataset.placeholder;
+    if (state.agentStep) {
+      projects.forEach((row) => { row.hidden = true; });
+      label.textContent = "Agent:";
+      this.setStatus(form, "");
+      list.querySelectorAll('[role="option"]').forEach((option, index) => { option.id = `new-session-option-${index}`; });
+      this.setCursor(form, cursor ?? 0);
+      form.querySelector("[data-new-session-hint]").textContent = "↑↓ navigate · enter choose · esc cancel";
+      return;
+    }
     // The path is searched too: a worktree is often named after its branch, not its project.
     const matching = browsing ? [] : projects.filter((row) => [".new-session-name", ".new-session-path"].some((part) => row.querySelector(part).textContent.toLowerCase().includes(query)));
     const visible = query || state.expanded ? matching : matching.slice(0, RECENT_PROJECTS);
@@ -214,6 +257,8 @@ export class NewSessionFormController {
     } else {
       const more = matching.length - visible.length;
       if (more) list.append(this.row("more", "…", `${more} more project${more === 1 ? "" : "s"}`));
+      // A Hermes chat needs no project: it runs in the home folder.
+      if (form.querySelector("[data-new-session-agent-value]")?.value === "hermes") list.append(this.row("start", "~", "No folder", form.dataset.home));
       list.append(this.row("path", "+", "Other folder…"));
 
       label.textContent = state.fork ? "Folder:" : "Project or path:";
@@ -230,8 +275,10 @@ export class NewSessionFormController {
   }
 
   activate(form, option) {
-    const { newSessionAction: action, newSessionPath: path, newSessionProject: project } = option.dataset;
-    if (project || action === "folder" || action === "start") {
+    const { newSessionAction: action, newSessionPath: path, newSessionProject: project, newSessionAgent: agentName } = option.dataset;
+    if (agentName) {
+      this.chooseAgent(form, agentName);
+    } else if (project || action === "folder" || action === "start") {
       form.querySelector("[data-new-session-cwd-value]").value = project || path;
       form.requestSubmit();
     } else if (action === "more") {

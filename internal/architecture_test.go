@@ -9,8 +9,8 @@ import (
 
 const module = "github.com/melounvitek/gripi/"
 
-// Only production imports are checked: tests may still build real Pi clients.
-func TestProductionImportsKeepPiBehindTheAgentAdapter(t *testing.T) {
+// Only production imports are checked: tests may still build real agent clients.
+func TestProductionImportsKeepAgentsBehindTheirAdapters(t *testing.T) {
 	command := exec.Command("go", "list", "-f", "{{.ImportPath}}{{range .Imports}} {{.}}{{end}}", module+"...")
 	var stderr strings.Builder
 	command.Stderr = &stderr
@@ -32,21 +32,32 @@ func TestProductionImportsKeepPiBehindTheAgentAdapter(t *testing.T) {
 // shared lists the gateway's utility packages, which any layer may use.
 var shared = []string{"internal/keyedlock", "internal/state"}
 
+var adapters = []string{"internal/agent/pi", "internal/agent/hermes"}
+
 func forbiddenImport(from, to string) bool {
 	if !within(to, "internal") || slices.Contains(shared, to) || from == "cmd/gripi" {
 		return false
 	}
 	switch {
-	case within(from, "internal/agent/pi"):
-		// The adapter uses the core and itself, never the gateway.
-		return to != "internal/agent" && !within(to, "internal/agent/pi")
+	case adapter(from) != "":
+		// An adapter uses the core and itself, never the gateway or another adapter.
+		return to != "internal/agent" && !within(to, adapter(from))
 	case within(from, "internal/agent"):
 		// The core knows neither its adapters nor the gateway.
 		return true
 	default:
 		// The gateway reaches agents only through the core.
-		return within(to, "internal/agent/pi")
+		return adapter(to) != ""
 	}
+}
+
+func adapter(path string) string {
+	for _, root := range adapters {
+		if within(path, root) {
+			return root
+		}
+	}
+	return ""
 }
 
 func TestForbiddenImports(t *testing.T) {
@@ -63,6 +74,13 @@ func TestForbiddenImports(t *testing.T) {
 		{"internal/agent", "internal/access", true},
 		{"internal/agent/pi", "internal/sessions", true},
 		{"internal/agent/pi/rpc", "internal/server", true},
+		{"internal/server", "internal/agent/hermes", true},
+		{"internal/agent", "internal/agent/hermes", true},
+		{"internal/agent/hermes", "internal/agent/pi", true},
+		{"internal/agent/pi", "internal/agent/hermes", true},
+		{"internal/agent/hermes", "internal/server", true},
+		{"internal/agent/hermes", "internal/agent", false},
+		{"cmd/gripi", "internal/agent/hermes", false},
 		{"cmd/gripi", "internal/agent/pi", false},
 		{"internal/server", "internal/agent", false},
 		{"internal/sessions", "internal/agent", false},

@@ -159,6 +159,9 @@ func openSession(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	if err != nil {
 		return failure(stderr, "open", err)
 	}
+	if session.Agent != "" && session.Agent != "pi" {
+		return failure(stderr, "open", fmt.Errorf("gripi open continues Pi sessions only, and this session runs with %s", session.Agent))
+	}
 	_, err = os.Stat(session.Path)
 	switch {
 	// Until the first reply only the gateway's Pi process has the session; it has no file yet.

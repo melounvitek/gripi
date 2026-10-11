@@ -577,7 +577,7 @@ export class ConversationController {
       header.append(count);
       const waiting = this.document.createElement("p");
       waiting.className = "active-activity-waiting";
-      waiting.textContent = "Pi is working…";
+      waiting.textContent = `${this.document.getElementById("live-output")?.dataset.agent === "hermes" ? "Hermes" : "Pi"} is working…`;
       group.append(header, waiting);
       this.activeActivityGroup = group;
     }

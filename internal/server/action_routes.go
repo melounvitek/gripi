@@ -84,7 +84,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		writeText(response, http.StatusBadRequest, "Message cannot be empty")
 		return
 	}
-	composer := app.adapter.Composer()
+	composer := app.adapter.Composer(path)
 	if composer.InternalCommand(message) {
 		app.writeRequestError(response, request, http.StatusBadRequest, strings.Fields(message)[0]+" is a command that Gripi uses itself, so it cannot be sent as a message")
 		return
@@ -553,7 +553,7 @@ func (app *application) setModelSettings(response http.ResponseWriter, request *
 		writeText(response, http.StatusBadRequest, "Model is too long")
 		return
 	}
-	if !slices.Contains(app.adapter.Composer().ThinkingLevels(), thinking) {
+	if !slices.Contains(app.adapter.Composer(path).ThinkingLevels(), thinking) {
 		writeText(response, http.StatusBadRequest, "Invalid thinking level")
 		return
 	}
@@ -619,7 +619,8 @@ func (app *application) newSession(response http.ResponseWriter, request *http.R
 		http.NotFound(response, request)
 		return
 	}
-	newPath, err := app.startNewSession(request, app.currentSessionCWD(path), "")
+	// A new session in the folder of another one runs the same agent.
+	newPath, err := app.startNewSession(request, app.currentSessionCWD(path), "", app.agentOf(path))
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
@@ -651,7 +652,7 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		forkFrom = source.Path
 	}
 	request.Form.Del("project")
-	newPath, err := app.startNewSession(request, cwd, forkFrom)
+	newPath, err := app.startNewSession(request, cwd, forkFrom, request.FormValue("agent"))
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
@@ -900,7 +901,7 @@ func (app *application) treeEntries(response http.ResponseWriter, request *http.
 		return
 	}
 	filter := request.URL.Query().Get("filter")
-	if filter != "" && !slices.Contains(app.adapter.Composer().TreeFilters(), filter) {
+	if filter != "" && !slices.Contains(app.adapter.Composer(path).TreeFilters(), filter) {
 		writeText(response, http.StatusBadRequest, "Invalid tree filter")
 		return
 	}
@@ -1425,12 +1426,13 @@ func (app *application) replaceSessionFromAction(response http.ResponseWriter, r
 	http.Redirect(response, request, app.sessionRedirectPath(request, newPath), http.StatusSeeOther)
 }
 
-func (app *application) startNewSession(request *http.Request, cwd, forkFrom string) (string, error) {
+// startNewSession starts a session with the agent that agentName names, or the gateway's first agent when it is empty.
+func (app *application) startNewSession(request *http.Request, cwd, forkFrom, agentName string) (string, error) {
 	if app.newRPCClient == nil {
 		return "", errors.New("new Pi RPC client factory is unavailable")
 	}
 	factory := func(cwd string) (agent.Client, error) {
-		return app.newRPCClient(cwd, app.environmentUser(request), forkFrom)
+		return app.newRPCClient(cwd, app.environmentUser(request), forkFrom, agentName)
 	}
 	return agent.StartNewSession(request.Context(), cwd, factory, app.sessionStore, app.rpcClients, app.pendingSessions, func(path string) (func() error, error) {
 		var err error

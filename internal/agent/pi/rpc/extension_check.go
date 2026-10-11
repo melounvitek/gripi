@@ -36,7 +36,7 @@ func CheckExtension(ctx context.Context, command []string, extension []byte) err
 	process := exec.CommandContext(ctx, command[0], slices.Concat(command[1:], []string{"--mode", "rpc", "--no-session", "--extension", extensionPath})...)
 	process.Dir = root
 	// An empty Pi config keeps the user's own extensions and settings from failing the check.
-	process.Env = append(ScrubbedEnvironment(os.Environ()), "PI_CODING_AGENT_DIR="+filepath.Join(root, "agent"), "PI_SKIP_VERSION_CHECK=1")
+	process.Env = append(agent.ScrubbedEnvironment(os.Environ()), "PI_CODING_AGENT_DIR="+filepath.Join(root, "agent"), "PI_SKIP_VERSION_CHECK=1")
 	process.WaitDelay = time.Second
 	var stderr bytes.Buffer
 	process.Stderr = &stderr

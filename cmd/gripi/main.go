@@ -19,6 +19,8 @@ import (
 	"time"
 
 	gripi "github.com/melounvitek/gripi"
+	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/hermes"
 	"github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
@@ -33,7 +35,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	adapter, err := newPiAdapter(cfg)
+	adapter, err := newAdapter(cfg)
 	if err != nil {
 		return err
 	}
@@ -60,6 +62,11 @@ func serve() error {
 	}
 	if missingPi != nil {
 		log.Printf("Warning: Pi was not found (%v). Sessions cannot start until Pi is installed (https://pi.dev/).", missingPi)
+	}
+	if cfg.HermesPath != "" {
+		if _, err := exec.LookPath(cfg.HermesPath); err != nil {
+			log.Printf("Warning: Hermes was not found (%v). Hermes sessions are unavailable until GRIPI_HERMES names it.", err)
+		}
 	}
 
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -113,20 +120,38 @@ func serve() error {
 	return nil
 }
 
+// newAdapter returns Pi's adapter alone, unless GRIPI_HERMES adds Hermes next to it.
+func newAdapter(cfg config.Config) (agent.Adapter, error) {
+	piAdapter, err := newPiAdapter(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.HermesPath == "" {
+		return piAdapter, nil
+	}
+	return agent.NewRouter(
+		agent.RoutedAgent{Name: "pi", Adapter: piAdapter},
+		agent.RoutedAgent{Name: "hermes", Adapter: hermes.New(hermes.Options{Path: cfg.HermesPath, Home: cfg.Home, IdleTimeout: cfg.RPCIdleTimeout, StateDir: stateDir(cfg)})},
+	), nil
+}
+
 func newPiAdapter(cfg config.Config) (*pi.Adapter, error) {
 	extension, err := fs.ReadFile(gripi.WebFiles, "pi_extensions/gripi-tree.ts")
 	if err != nil {
 		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
 	}
-	// The adapter's state lives with the gateway's.
-	stateDir := ""
-	if cfg.ReadStatePath != "" {
-		stateDir = filepath.Dir(cfg.ReadStatePath)
-	}
 	return pi.New(pi.Options{
 		Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension,
-		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir,
+		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg),
 	}), nil
+}
+
+// stateDir is where the adapters keep their state, which lives with the gateway's.
+func stateDir(cfg config.Config) string {
+	if cfg.ReadStatePath == "" {
+		return ""
+	}
+	return filepath.Dir(cfg.ReadStatePath)
 }
 
 // startupAddress is the URL to open where localhost reaches the gateway. Other

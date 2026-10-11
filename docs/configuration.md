@@ -17,6 +17,7 @@ Boolean settings accept `1`, `true`, `yes`, or `on` for true and `0`, `false`, `
 | `GRIPI_MULTI_USER_MODE` | off | [Multi-user mode](#multi-user-mode) |
 | `GRIPI_AUTO_APPROVE_PROJECTS` | on | [Project resource approval](#project-resource-approval) |
 | `GRIPI_NODE`, `GRIPI_PI` | `pi` from `PATH` | [Custom Pi runtime](#custom-pi-runtime) |
+| `GRIPI_HERMES` | off | [Hermes Agent (experimental)](#hermes-agent-experimental) |
 | `GRIPI_SESSIONS_ROOT` | `~/.pi/agent/sessions` | [Session location](#session-location) |
 | `GRIPI_RPC_IDLE_TIMEOUT_SECONDS` | `300` | [Pi process lifetime](#pi-process-lifetime) |
 | `GRIPI_RPC_IDLE_SWEEP_SECONDS` | `30` | [Pi process lifetime](#pi-process-lifetime) |
@@ -198,6 +199,28 @@ GRIPI_PI=/path/to/pi
 ```
 
 The selected runtime must already work, authenticated and configured, for the gateway’s OS user.
+
+## Hermes Agent (experimental)
+
+Gripi can also run [Hermes Agent](https://github.com/NousResearch/hermes-agent) sessions next to Pi's. It is off unless you name the Hermes to run:
+
+```sh
+GRIPI_HERMES=/home/me/.local/bin/hermes
+```
+
+The path can also be a Hermes profile wrapper, which `hermes profile alias <name>` creates, to run that profile with its own sessions, memory and model. Gripi runs `<path> acp`, Hermes's Agent Client Protocol server, so that Hermes must already work and be authenticated for the gateway's OS user. Gripi doesn't install, configure or update Hermes, and `gripi check` checks it too once it is set.
+
+With Hermes on, every session in the sidebar is marked with its agent, a filter shows one agent's sessions, and the New session dialog first asks for the agent. A Hermes session can also start without a project: it then runs in your home folder.
+
+What to expect:
+
+- Gripi lists only the Hermes sessions that ACP clients created, such as Gripi itself or an editor. Hermes's CLI, desktop app, cron jobs and messaging platforms keep their sessions to themselves.
+- All Hermes sessions run in one Hermes process, which stops once nothing has used it for the [Pi process lifetime](#pi-process-lifetime).
+- While Hermes works, the composer waits: Stop is the only action. Gripi doesn't send Hermes images, choose its model, rename, delete, fork or tree its sessions yet, and `gripi open` refuses them.
+- Hermes asks before dangerous commands, as its `approvals.mode` setting says, and before editing sensitive files such as `.env` or keys. The question appears as a dialog in the session. Other edits go ahead without asking, as in Hermes's CLI. A dialog stays open after Hermes has stopped waiting for the answer, after its `approvals.timeout`, until you close it.
+- A session that another ACP client, such as an editor, continues keeps showing what Gripi's Hermes loaded, until that Hermes restarts.
+- Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next Hermes session starts, once no other Hermes session is open. A new session's first message still runs with the variables from before, because the session lives only in the running Hermes until then.
+- [Multi-user mode](#multi-user-mode) refuses the setting, because every user would share the one Hermes, with its memory, skills and messaging accounts.
 
 ## Session location
 

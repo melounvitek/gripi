@@ -112,8 +112,27 @@ func TestLoadDefaults(t *testing.T) {
 	if len(cfg.PiCommand) != 2 || cfg.PiCommand[0] != "pi" || cfg.PiCommand[1] != "--approve" {
 		t.Fatalf("PiCommand = %#v", cfg.PiCommand)
 	}
+	if cfg.HermesPath != "" {
+		t.Fatalf("HermesPath = %q", cfg.HermesPath)
+	}
 	if !cfg.Production {
 		t.Fatal("Production = false")
+	}
+}
+
+func TestLoadEnablesHermesWithItsPathFromTheGatewayEnv(t *testing.T) {
+	home := t.TempDir()
+	envPath := filepath.Join(home, "gateway.env")
+	if err := os.WriteFile(envPath, []byte("GRIPI_ADMIN_PASSWORD=secret\nGRIPI_HERMES= /home/me/.local/bin/work \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load([]string{"HOME=" + home, "GRIPI_ENV_PATH=" + envPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HermesPath != "/home/me/.local/bin/work" {
+		t.Fatalf("HermesPath = %q", cfg.HermesPath)
 	}
 }
 
@@ -291,6 +310,7 @@ func TestLoadValidatesRuntimeConfiguration(t *testing.T) {
 		{"rounded overflowing sweep", []string{"GRIPI_RPC_IDLE_SWEEP_SECONDS=9223372036.854776"}},
 		{"overflowing sweep", []string{"GRIPI_RPC_IDLE_SWEEP_SECONDS=1e20"}},
 		{"invalid port", []string{"GRIPI_PORT=70000"}},
+		{"Hermes in multi-user mode", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_MULTI_USER_MODE=1"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

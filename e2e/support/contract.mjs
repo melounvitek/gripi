@@ -325,3 +325,41 @@ export const live = {
     reply: "Thinking characterization complete."
   }
 };
+
+// The fake Hermes's saved session, and what it streams for a prompt. Only the gateway that runs with Hermes has them.
+export const hermes = {
+  saved: {
+    id: "e2e-hermes-saved",
+    title: "E2E Hermes Saved",
+    prompt: "Summarize the fixture project",
+    thought: "Reading the README first.",
+    tool: "read_file: README.md",
+    toolOutput: "# Fixture project",
+    reply: "The fixture project holds the browser suite's sessions."
+  },
+  run: {
+    thought: "Planning the answer.",
+    intro: "Checking the files.",
+    tool: "terminal: ls",
+    toolOutput: "README.md",
+    replyPrefix: "Hermes says: "
+  },
+  stopPrompt: "Wait for stop",
+  // Its first paragraph streams while the turn holds until stopped.
+  stopThought: "Waiting until stopped.",
+  exitPrompt: "Exit now",
+  // Streams many small pieces of thinking, then holds like stopPrompt.
+  longPrompt: "Think at length, then wait for stop",
+  // Hermes asks before it runs the command of this prompt, and runs it only if allowed.
+  permission: {
+    prompt: "Delete the build folder",
+    tool: "terminal: rm -rf build",
+    title: "recursive delete: rm -rf build",
+    allow: "Allow once",
+    deny: "Deny",
+    allowed: "removed build/",
+    denied: "Denied by the user",
+    // Hermes stops waiting for an answer to this one at once, as after its approvals.timeout.
+    expiringPrompt: "Delete the build folder unless I am too slow"
+  }
+};

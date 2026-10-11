@@ -62,7 +62,7 @@ type application struct {
 	knownSessionHashes      map[string]bool
 	sessionHashesAt         time.Time
 	rpcClients              *agent.Registry
-	newRPCClient            func(cwd, userID, forkFrom string) (agent.Client, error)
+	newRPCClient            func(cwd, userID, forkFrom, agentName string) (agent.Client, error)
 	rpcDiagnostics          *agent.Diagnostics
 	pendingSessions         *agent.PendingSessionRegistry
 	pendingRemapMu          sync.Mutex
@@ -256,12 +256,12 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		return adapter.Start(sessionPath, agent.StartOptions{CWD: cwd, Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
 	}, nil)
 	app.rpcClients.SetDiagnostics(diagnostics)
-	app.newRPCClient = func(cwd, userID, forkFrom string) (agent.Client, error) {
+	app.newRPCClient = func(cwd, userID, forkFrom, agentName string) (agent.Client, error) {
 		variables, err := app.piEnvironment(userID)
 		if err != nil {
 			return nil, err
 		}
-		return adapter.StartInCWD(cwd, forkFrom, agent.StartOptions{Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
+		return adapter.StartInCWD(cwd, forkFrom, agent.StartOptions{Agent: agentName, Env: variables, Diagnostics: diagnostics, Observe: app.completionNotifications.Observe})
 	}
 	if app.guard, err = adapter.Guard(app.rpcClients); err != nil {
 		return nil, err

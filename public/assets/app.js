@@ -344,6 +344,8 @@ function commandPaletteCommands() {
   const writable = promptTextarea && !promptTextarea.disabled;
   const running = composerState?.dataset.state === "running";
   const otherView = document.querySelector('[data-conversation-view][aria-pressed="false"]');
+  // Hermes has none of Pi's session commands, and Gripi cannot rename its sessions.
+  const pi = !hermesSession();
   const sidebarHidden = document.body.classList.contains("desktop-sidebar-hidden");
   const projectFilter = document.querySelector("[data-sidebar-project-filter]");
   const tagChooser = document.querySelector("[data-tag-chooser]");
@@ -352,15 +354,15 @@ function commandPaletteCommands() {
   const gatewayUpdate = document.querySelector("[data-gateway-update]:not([hidden]) [data-gateway-update-button]:not([hidden])");
   return [
     ["This session", [
-      writable && { label: "Choose model and thinking", detail: "/model", run: openModelSettingsModal },
-      writable && { label: "Session tree", detail: "/tree", run: openTreeSessionModal },
-      writable && { label: "Fork from a message", detail: "/fork", run: openForkSessionModal },
-      writable && { label: "Compact context", detail: "/compact", run: () => runPaletteCommand("/compact") },
-      writable && { label: "Clone session", detail: "/clone", run: () => runPaletteCommand("/clone") },
-      writable && { label: "Download as HTML", detail: "/export", run: () => runPaletteCommand("/export") },
+      writable && pi && { label: "Choose model and thinking", detail: "/model", run: openModelSettingsModal },
+      writable && pi && { label: "Session tree", detail: "/tree", run: openTreeSessionModal },
+      writable && pi && { label: "Fork from a message", detail: "/fork", run: openForkSessionModal },
+      writable && pi && { label: "Compact context", detail: "/compact", run: () => runPaletteCommand("/compact") },
+      writable && pi && { label: "Clone session", detail: "/clone", run: () => runPaletteCommand("/clone") },
+      writable && pi && { label: "Download as HTML", detail: "/export", run: () => runPaletteCommand("/export") },
       // Like Pi CLI, which refuses to reload while it works.
-      writable && !running && { label: "Reload Pi resources", detail: "/reload", run: () => runPaletteCommand("/reload") },
-      target && {
+      writable && pi && !running && { label: "Reload Pi resources", detail: "/reload", run: () => runPaletteCommand("/reload") },
+      target && pi && {
         label: "Rename…",
         run: () => {
           // No row menu opened this, so closing it has no menu button to return the focus to.
@@ -486,11 +488,20 @@ function selectStreamingBehavior(behavior, { focus = true } = {}) {
   updatePromptPlaceholder();
 }
 
+// A Hermes session takes no messages while Hermes works; the user stops it instead.
+function hermesSession() {
+  return liveOutput?.dataset.agent === "hermes";
+}
+
+function agentLabel() {
+  return hermesSession() ? "Hermes" : "Pi";
+}
+
 function updateStreamingSendControl(state = composerState?.dataset.state) {
   const running = state === "running";
   const behavior = selectedStreamingBehavior();
   if (sendControl) sendControl.classList.toggle("is-streaming", running);
-  if (sendMenuToggle) sendMenuToggle.hidden = !running;
+  if (sendMenuToggle) sendMenuToggle.hidden = !running || hermesSession();
   sendMenu?.querySelectorAll("[data-streaming-behavior]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.streamingBehavior === behavior)));
   if (sendButton && running) {
     sendButton.textContent = behavior === "follow_up" ? "Queue" : "Steer";
@@ -506,14 +517,15 @@ function updatePromptPlaceholder() {
     return;
   }
   if (composerState?.dataset.state === "running") {
-    promptTextarea.placeholder = selectedStreamingBehavior() === "follow_up" ? "Queue follow-up…" : "Steer Pi…";
+    if (hermesSession()) promptTextarea.placeholder = "Hermes is working…";
+    else promptTextarea.placeholder = selectedStreamingBehavior() === "follow_up" ? "Queue follow-up…" : "Steer Pi…";
     return;
   }
   if (promptTextarea.disabled) {
     promptTextarea.placeholder = composerState?.dataset.state === "exporting" ? "Exporting…" : "Sending…";
     return;
   }
-  promptTextarea.placeholder = "Ask Pi…";
+  promptTextarea.placeholder = `Ask ${agentLabel()}…`;
 }
 
 function setStatusItem(key, label, value) {
@@ -997,8 +1009,9 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
   if (!["running", "sending"].includes(state)) streamingBehaviorSelection = "steer";
   updateStreamingSendControl(state);
   if (abortButton) abortButton.disabled = !taskBusy || stopping;
+  const waitingForHermes = state === "running" && hermesSession();
   if (sendButton) {
-    sendButton.hidden = submitting || stopping;
+    sendButton.hidden = submitting || stopping || waitingForHermes;
     sendButton.disabled = stopping || sessionSyncBlocked();
     if (state !== "running") {
       sendButton.textContent = state === "sending" ? "Sending…" : "Send";
@@ -1010,10 +1023,11 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
     composerStopButton.disabled = !taskBusy || stopping;
     composerStopButton.classList.toggle("is-visible", taskBusy);
   }
-  if (promptTextarea) promptTextarea.disabled = submitting || stopping || sessionSyncBlocked();
+  if (promptTextarea) promptTextarea.disabled = submitting || stopping || waitingForHermes || sessionSyncBlocked();
   if (focus && state !== previousState) syncComposerFocus(state);
   const modelButton = sessionStatusBar?.querySelector('[data-status-key="model"]');
-  if (modelButton) modelButton.disabled = submitting || stopping || sessionSyncBlocked();
+  // Gripi doesn't choose Hermes's model yet.
+  if (modelButton) modelButton.disabled = submitting || stopping || sessionSyncBlocked() || hermesSession();
   syncModelSettingsControls();
   if (composerState && state === "running" && previousState !== "running") {
     resetEventPollBackoff();
@@ -1123,7 +1137,8 @@ function renderAttachments() {
 }
 
 function addImageFiles(files, { restore = false } = {}) {
-  if (!restore && promptTextarea?.disabled) return false;
+  // Gripi sends Hermes no images yet.
+  if (!restore && (promptTextarea?.disabled || hermesSession())) return false;
 
   const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
   if (imageFiles.length === 0) return false;
@@ -1466,7 +1481,7 @@ function renderEvent(event) {
     liveBusySince = eventTimeMilliseconds(event);
     liveErrorText = "";
     setComposerState("running", WORKING_LABEL, { since: liveBusySince });
-    showStatus("Pi is thinking…");
+    showStatus(`${agentLabel()} is thinking…`);
     return;
   }
 
@@ -1478,7 +1493,7 @@ function renderEvent(event) {
     liveBusySince ||= eventTimeMilliseconds(event);
     liveErrorText = "";
     setComposerState("running", WORKING_LABEL, { since: liveBusySince });
-    showStatus("Pi is thinking…");
+    showStatus(`${agentLabel()} is thinking…`);
     return;
   }
 
@@ -2078,14 +2093,15 @@ async function submitPrompt(event) {
   if (promptTextarea?.disabled) return;
 
   const rawMessage = promptTextarea.value;
-  const bashCommand = parseNativeBash(rawMessage);
+  // Hermes reads ! and / itself.
+  const bashCommand = !hermesSession() && parseNativeBash(rawMessage);
   if (bashCommand) return submitBashPrompt(rawMessage, bashCommand);
   return sendPrompt(rawMessage, submittedStreamingBehavior());
 }
 
 // Without the composer, the message goes alone: the draft and attachments are neither sent, cleared nor restored.
 async function sendPrompt(rawMessage, streamingBehavior, { composer = true } = {}) {
-  const handleBuiltinCommand = streamingBehavior !== "follow_up";
+  const handleBuiltinCommand = streamingBehavior !== "follow_up" && !hermesSession();
   const exportCommand = handleBuiltinCommand ? sessionExportSlashCommand(rawMessage) : null;
   if (exportCommand) return submitExportPrompt(rawMessage, exportCommand, { composer });
 

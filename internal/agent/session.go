@@ -20,6 +20,8 @@ type Session struct {
 	ConversationActivityAt         time.Time
 	// FolderMissing is checked on every read rather than cached, so a folder that comes back is noticed.
 	FolderMissing bool `json:"-"`
+	// Agent names the session's agent when a Router serves several, and is empty otherwise.
+	Agent string `json:"-"`
 }
 
 type Image struct {

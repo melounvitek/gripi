@@ -21,7 +21,7 @@ import (
 
 // fakePiGateway runs a gateway backed by the fake Pi on a socket the commands
 // will find. It has two idle sessions, 0a1-alpha and the more recent 0a1-beta.
-func fakePiGateway(t *testing.T) (alpha, beta string) {
+func fakePiGateway(t *testing.T, configure ...func(*config.Config)) (alpha, beta string) {
 	t.Helper()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -50,7 +50,10 @@ func fakePiGateway(t *testing.T) (alpha, beta string) {
 		BrowserAccessPath: filepath.Join(root, "browser.json"), BrowserAuthDisabled: true,
 		PiCommand: []string{"node", filepath.Join(filepath.Dir(file), "..", "..", "e2e", "support", "fake_pi.mjs")},
 	}
-	adapter, err := newPiAdapter(cfg)
+	for _, change := range configure {
+		change(&cfg)
+	}
+	adapter, err := newAdapter(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -103,7 +103,7 @@ func (app *application) commands(response http.ResponseWriter, request *http.Req
 		return
 	}
 	app.rpcDiagnostics.Log("request_operation", map[string]any{"path": request.URL.Path, "session": path, "lane": "operation"})
-	composer := app.adapter.Composer()
+	composer := app.adapter.Composer(path)
 	var agentCommands []agent.Command
 	err = app.withSynchronizedClient(request, path, func(client agent.Client) error {
 		var requestErr error
@@ -535,6 +535,11 @@ func (app *application) retireStaleRPCClient(request *http.Request, path string)
 		return nil
 	}
 	if _, pending := app.pendingSessions.CWD(path); pending && !app.sessionStore.Exists(path) {
+		// An unsaved Hermes session lives only in the Hermes that all Hermes sessions share, so it gets the variables
+		// once saved, when its client retires like a saved session's.
+		if app.agentOf(path) == "hermes" {
+			return nil
+		}
 		_, err := agent.RestartUnsavedSession(request.Context(), path, changedAt, app.rpcClients, app.pendingSessions)
 		return err
 	}

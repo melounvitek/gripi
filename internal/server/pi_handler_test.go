@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	agenthermes "github.com/melounvitek/gripi/internal/agent/hermes"
 	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 )
@@ -17,6 +18,14 @@ func NewPiHandler(cfg config.Config, files fs.FS) (http.Handler, error) {
 }
 
 func newPiHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string, error)) (http.Handler, error) {
+	adapter, err := piAdapter(cfg, files)
+	if err != nil {
+		return nil, err
+	}
+	return newHandler(cfg, files, adapter, newBrowserToken)
+}
+
+func piAdapter(cfg config.Config, files fs.FS) (*agentpi.Adapter, error) {
 	extension, err := fs.ReadFile(files, "pi_extensions/gripi-tree.ts")
 	if err != nil {
 		return nil, err
@@ -25,11 +34,10 @@ func newPiHandler(cfg config.Config, files fs.FS, newBrowserToken func() (string
 	if cfg.ReadStatePath != "" {
 		stateDir = filepath.Dir(cfg.ReadStatePath)
 	}
-	adapter := agentpi.New(agentpi.Options{
+	return agentpi.New(agentpi.Options{
 		Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension,
 		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir,
-	})
-	return newHandler(cfg, files, adapter, newBrowserToken)
+	}), nil
 }
 
 // NewPiStore returns the Pi adapter's store for the sessions under sessionsRoot.
@@ -42,4 +50,17 @@ func inspectGuard(guard agent.Guard, ctx context.Context, key string, includePos
 	return guard.(interface {
 		Inspect(context.Context, string, bool) (agent.SyncResult, error)
 	}).Inspect(ctx, key, includePosition)
+}
+
+// NewHandlerWithHermes builds the gateway with Pi and the Hermes that cfg.HermesPath runs, as cmd/gripi does.
+func NewHandlerWithHermes(cfg config.Config, files fs.FS) (http.Handler, error) {
+	pi, err := piAdapter(cfg, files)
+	if err != nil {
+		return nil, err
+	}
+	router := agent.NewRouter(
+		agent.RoutedAgent{Name: "pi", Adapter: pi},
+		agent.RoutedAgent{Name: "hermes", Adapter: agenthermes.New(agenthermes.Options{Path: cfg.HermesPath, Home: cfg.Home, IdleTimeout: cfg.RPCIdleTimeout, StateDir: filepath.Dir(cfg.ReadStatePath)})},
+	)
+	return newHandler(cfg, files, router, randomBrowserToken)
 }
