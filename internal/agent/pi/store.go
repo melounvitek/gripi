@@ -3,6 +3,7 @@ package pi
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -36,6 +37,15 @@ func (store sessionStore) ValidKey(key string) bool {
 // FallbackCWD is the folder that holds the session file.
 func (store sessionStore) FallbackCWD(key string) string {
 	return filepath.Dir(key)
+}
+
+// ExportName follows Pi CLI, which names an export after the session file.
+func (store sessionStore) ExportName(key string) string {
+	base := strings.TrimSuffix(filepath.Base(key), filepath.Ext(key))
+	if base == "" || base == "." {
+		base = "session"
+	}
+	return "pi-session-" + base
 }
 
 func (store sessionStore) Delete(key string) (string, error) {

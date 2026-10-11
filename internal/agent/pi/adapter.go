@@ -109,6 +109,10 @@ func observer(observe func(agent.Client, map[string]any)) func(*rpc.Client, map[
 	return func(client *rpc.Client, event map[string]any) { observe(client, event) }
 }
 
+func (adapter *Adapter) Composer() agent.Composer {
+	return Composer{}
+}
+
 func (adapter *Adapter) DisplaySettings(cwd string) agent.DisplaySettings {
 	settings := adapter.settings.DisplaySettings(cwd)
 	return agent.DisplaySettings{HideThinkingBlock: settings.HideThinkingBlock}

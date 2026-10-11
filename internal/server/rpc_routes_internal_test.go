@@ -790,7 +790,7 @@ func TestAcceptedPromptImageSurvivesAttachmentMetadataFailure(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, sessions.SessionHash(path)+".jsonl"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending}
+	app := &application{adapter: agentpi.New(agentpi.Options{}), config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending}
 	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
 	app.guard = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), nil, registry)
 	temporary := t.TempDir()
@@ -1041,7 +1041,7 @@ func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *
 	}
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(path, t.TempDir(), "")
-	app := &application{config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
+	app := &application{adapter: agentpi.New(agentpi.Options{}), config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
 	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
 	app.guard = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), nil, registry)
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/prompt", strings.NewReader(url.Values{"session": {path}, "message": {"after compaction"}, "streaming_behavior": {"follow_up"}}.Encode()))

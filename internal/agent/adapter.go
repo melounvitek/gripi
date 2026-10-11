@@ -8,6 +8,8 @@ type Adapter interface {
 	StartInCWD(cwd, forkFrom string, options StartOptions) (Client, error)
 	// DisplaySettings returns the agent's display preferences for a project.
 	DisplaySettings(cwd string) DisplaySettings
+	// Composer describes how the agent reads what the user types.
+	Composer() Composer
 	// Store returns the agent's catalog of saved sessions.
 	Store() Store
 	// Guard returns the guard for the sessions that clients run. The gateway calls it once, after creating clients.

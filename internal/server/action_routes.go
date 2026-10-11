@@ -39,12 +39,6 @@ const (
 
 var errDeleteRunning = errors.New("session is running")
 
-var thinkingLevels = map[string]bool{
-	"off": true, "minimal": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true,
-}
-
-var treeFilters = map[string]bool{"default": true, "no-tools": true, "user-only": true, "labeled-only": true, "all": true}
-
 func (app *application) registerActionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /prompt", app.prompt)
 	mux.HandleFunc("POST /abort", app.abortSession)
@@ -90,7 +84,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		writeText(response, http.StatusBadRequest, "Message cannot be empty")
 		return
 	}
-	if rpc.InternalCommand(message) {
+	composer := app.adapter.Composer()
+	if composer.InternalCommand(message) {
 		app.writeRequestError(response, request, http.StatusBadRequest, strings.Fields(message)[0]+" is a command that Gripi uses itself, so it cannot be sent as a message")
 		return
 	}
@@ -112,7 +107,8 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		app.writeActionRPCError(response, err)
 		return
 	}
-	if command, bash := prompts.ParseBashCommand(message, request.FormValue("bash_mode")); bash {
+	// In prompt mode the browser sends a shell command's text as a prompt.
+	if command, shell := composer.ShellCommand(message); shell && request.FormValue("bash_mode") != "prompt" {
 		if len(imageFiles) > 0 {
 			app.writeRequestError(response, request, http.StatusBadRequest, "Images cannot be attached to bash commands")
 			return
@@ -125,27 +121,23 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		writeText(response, http.StatusBadRequest, "Invalid streaming behavior")
 		return
 	}
-	command := prompts.SlashCommand{}
+	command := agent.SlashCommand{}
 	if behavior != "follow_up" {
-		command = prompts.ParseSlashCommand(message)
+		command = composer.SlashCommand(message)
 	}
-	if command.Type == "login" || command.Type == "logout" {
-		guidance := map[string]string{
-			"login":  "`/login` isn’t available in Gripi. Run `/login` in the Pi CLI, then restart the Gripi gateway to load the new credentials.",
-			"logout": "`/logout` isn’t available in Gripi. Run `/logout` in the Pi CLI, then restart the Gripi gateway to reload credentials.",
-		}
-		app.writePromptResult(response, request, path, map[string]any{"command": command.Type, "message": guidance[command.Type]})
+	if command.Unavailable != "" {
+		app.writePromptResult(response, request, path, map[string]any{"command": command.Name, "message": command.Unavailable})
 		return
 	}
-	if command.Type == "fork" || command.Type == "tree" || command.Type == "model" {
-		app.writePromptResult(response, request, path, map[string]any{"command": command.Type})
+	if command.Name == "fork" || command.Name == "tree" || command.Name == "model" {
+		app.writePromptResult(response, request, path, map[string]any{"command": command.Name})
 		return
 	}
-	if command.Type == "new" || command.Type == "clone" {
-		app.replaceSessionFromAction(response, request, path, command.Type, "")
+	if command.Name == "new" || command.Name == "clone" {
+		app.replaceSessionFromAction(response, request, path, command.Name, "")
 		return
 	}
-	if len(imageFiles) > 0 && command.Type == "" {
+	if len(imageFiles) > 0 && command.Name == "" {
 		var unlock func()
 		var err error
 		path, unlock, err = app.lockResolvedImagePromptPath(request, path)
@@ -174,7 +166,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 	}
 	defer func() { _ = cleanupFailedImages() }()
 	prepareImages := func() error {
-		if extensionCommandWithImages || len(imageFiles) == 0 || len(rpcImages) > 0 || behavior == "" && command.Type != "" {
+		if extensionCommandWithImages || len(imageFiles) == 0 || len(rpcImages) > 0 || behavior == "" && command.Name != "" {
 			return nil
 		}
 		images, cleanup, err := prompts.PersistUploadedImages(imageFiles, filepath.Join(app.config.AttachmentsRoot, sessions.SessionHash(path)))
@@ -214,15 +206,15 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		if err := prepareImages(); err != nil {
 			return err
 		}
-		switch command.Type {
+		switch command.Name {
 		case "name":
-			if command.Name != "" {
-				rpcResponse, err = actions.SetSessionName(request.Context(), command.Name)
+			if command.Argument != "" {
+				rpcResponse, err = actions.SetSessionName(request.Context(), command.Argument)
 			} else {
 				rpcResponse, err = client.GetState(request.Context())
 			}
 		case "compact":
-			rpcResponse, err = actions.Compact(request.Context(), command.Instructions)
+			rpcResponse, err = actions.Compact(request.Context(), command.Argument)
 		case "reload":
 			rpcResponse, err = actions.Reload(request.Context())
 		default:
@@ -240,7 +232,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		}
 		return err
 	}
-	if behavior != "" && command.Type == "" {
+	if behavior != "" && command.Name == "" {
 		if blocked := app.guard.KnownBlocked(path); blocked != nil {
 			err = &agent.SyncBlockedError{Mode: blocked.Mode, Message: app.guard.Message(*blocked)}
 		} else {
@@ -292,12 +284,12 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		app.writeActionRPCError(response, errors.Join(err, cleanupFailedImages()))
 		return
 	}
-	if !successfulRPCResponse(rpcResponse) && command.Type != "compact" {
+	if !successfulRPCResponse(rpcResponse) && command.Name != "compact" {
 		if err := cleanupFailedImages(); err != nil {
 			http.Error(response, "Unable to clean up prompt attachments", http.StatusInternalServerError)
 			return
 		}
-		app.writeRPCFailure(response, request, rpcResponse, command.Type != "")
+		app.writeRPCFailure(response, request, rpcResponse, command.Name != "")
 		return
 	}
 	payload := map[string]any{}
@@ -318,12 +310,12 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 		payload["compacting"] = compactingAfterHandledCommand
 		payload["running"] = runningAfterHandledCommand
 	}
-	if command.Type != "" {
-		payload["command"] = command.Type
-		if command.Name != "" {
-			payload["name"] = command.Name
+	if command.Name != "" {
+		payload["command"] = command.Name
+		if command.Name == "name" && command.Argument != "" {
+			payload["name"] = command.Argument
 		}
-		if command.Type == "name" && command.Name == "" {
+		if command.Name == "name" && command.Argument == "" {
 			name := stringFromAny(responseData(rpcResponse)["sessionName"])
 			if name == "" {
 				payload["error"] = "Usage: /name <name>"
@@ -332,7 +324,7 @@ func (app *application) prompt(response http.ResponseWriter, request *http.Reque
 			}
 		}
 	}
-	if command.Type == "" && strings.HasPrefix(strings.TrimSpace(message), "/") && !strings.ContainsAny(message, "\r\n") {
+	if command.Name == "" && strings.HasPrefix(strings.TrimSpace(message), "/") && !strings.ContainsAny(message, "\r\n") {
 		var state map[string]any
 		if app.rpcClients.WithExistingClient(request.Context(), path, true, func(client agent.Client) error {
 			var stateErr error
@@ -600,7 +592,7 @@ func (app *application) setModelSettings(response http.ResponseWriter, request *
 		writeText(response, http.StatusBadRequest, "Model is too long")
 		return
 	}
-	if !thinkingLevels[thinking] {
+	if !slices.Contains(app.adapter.Composer().ThinkingLevels(), thinking) {
 		writeText(response, http.StatusBadRequest, "Invalid thinking level")
 		return
 	}
@@ -668,7 +660,7 @@ func (app *application) cycleThinking(response http.ResponseWriter, request *htt
 	level := ""
 	if data != nil {
 		level = stringFromAny(data["level"])
-		if level != "" && !thinkingLevels[level] {
+		if level != "" && !slices.Contains(app.adapter.Composer().ThinkingLevels(), level) {
 			writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not change thinking level"})
 			return
 		}
@@ -986,7 +978,7 @@ func (app *application) treeEntries(response http.ResponseWriter, request *http.
 		return
 	}
 	filter := request.URL.Query().Get("filter")
-	if filter != "" && !treeFilters[filter] {
+	if filter != "" && !slices.Contains(app.adapter.Composer().TreeFilters(), filter) {
 		writeText(response, http.StatusBadRequest, "Invalid tree filter")
 		return
 	}
@@ -1009,7 +1001,7 @@ func (app *application) treeEntries(response http.ResponseWriter, request *http.
 	snapshot := responseData(result)
 	_, entriesOK := snapshot["entries"].([]any)
 	_, settingsOK := snapshot["settings"].(map[string]any)
-	if !entriesOK || !settingsOK || !treeFilters[stringFromAny(snapshot["filter"])] {
+	if !entriesOK || !settingsOK || !slices.Contains(app.adapter.Composer().TreeFilters(), stringFromAny(snapshot["filter"])) {
 		writeJSONStatus(response, http.StatusBadGateway, map[string]any{"error": "Could not load session tree"})
 		return
 	}
@@ -1245,7 +1237,7 @@ func (app *application) exportSession(response http.ResponseWriter, request *htt
 	if !ok {
 		return
 	}
-	filename, ok := exportDownloadFilename(request.FormValue("filename"), path)
+	filename, ok := exportDownloadFilename(request.FormValue("filename"), app.sessionStore.ExportName(path))
 	if !ok {
 		app.writeRequestError(response, request, http.StatusBadRequest, "Export filename is too long")
 		return
@@ -1298,7 +1290,7 @@ func (app *application) exportSession(response http.ResponseWriter, request *htt
 	http.ServeContent(response, request, filename, info.ModTime(), file)
 }
 
-func exportDownloadFilename(raw, sessionPath string) (string, bool) {
+func exportDownloadFilename(raw, defaultName string) (string, bool) {
 	name := strings.TrimSpace(raw)
 	if name != "" {
 		name = path.Base(strings.ReplaceAll(name, `\`, "/"))
@@ -1310,11 +1302,7 @@ func exportDownloadFilename(raw, sessionPath string) (string, bool) {
 		}, name))
 	}
 	if name == "" || name == "." || name == "/" {
-		base := strings.TrimSuffix(filepath.Base(sessionPath), filepath.Ext(sessionPath))
-		if base == "" || base == "." {
-			base = "session"
-		}
-		name = "pi-session-" + base
+		name = defaultName
 	}
 	if !strings.EqualFold(filepath.Ext(name), ".html") {
 		name += ".html"

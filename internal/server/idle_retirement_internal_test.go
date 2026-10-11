@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/rpc"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -242,6 +243,7 @@ func newIdleRetirementFixture(t *testing.T) *idleRetirementFixture {
 	}, func() time.Time { return time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC) })
 	fixture.app = &application{
 		config:          config.Config{SessionsRoot: root, Home: root, RPCIdleTimeout: time.Second},
+		adapter:         agentpi.New(agentpi.Options{}),
 		sessionStore:    NewPiStore(root, root),
 		rpcClients:      registry,
 		pendingSessions: agent.NewPendingSessionRegistry(nil),

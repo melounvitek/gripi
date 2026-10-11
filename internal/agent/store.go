@@ -35,6 +35,8 @@ type Store interface {
 	ValidKey(key string) bool
 	// FallbackCWD returns a working directory for a session whose own the gateway cannot find.
 	FallbackCWD(key string) string
+	// ExportName names the page a session exports to, unless the user picks a name.
+	ExportName(key string) string
 	// Delete removes the saved session and what the store cached about it, and says how: Pi answers "trash" or "unlink".
 	Delete(key string) (method string, err error)
 	// SaveCache keeps what the store has learnt about sessions, so the next start can list them without reading
