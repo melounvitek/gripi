@@ -108,6 +108,28 @@ test("a failed poll stays silent until the next poll fails too", async ({ page }
   await expect(warning).toBeHidden();
 });
 
+test("polls a proxy answers with a server error count as failed, unlike the gateway's own refusals", async ({ page }) => {
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  let polls = 0;
+  let status = 404;
+  await page.route(/\/events(?:\?|$)/, (route) => {
+    polls += 1;
+    return status ? route.fulfill({ status, body: "Unavailable" }) : route.continue();
+  });
+  const warning = page.getByText("Connection lost. Retrying…");
+
+  // A session the gateway no longer finds is an answer, not a lost connection. Failed polls back off for 2s.
+  await expect.poll(() => polls, { timeout: 15_000 }).toBe(3);
+  expect(await warning.isVisible()).toBe(false);
+
+  // The proxy in front of a gateway that went down.
+  status = 502;
+  await expect(warning).toBeVisible({ timeout: 15_000 });
+  status = 0;
+  await expect(warning).toBeHidden({ timeout: 15_000 });
+});
+
 test("an event that cannot be rendered is skipped without losing its batch or warning of a lost connection", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.history);

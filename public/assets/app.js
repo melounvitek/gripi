@@ -1844,6 +1844,8 @@ async function pollEvents() {
     const eventsUrl = new URL(liveOutput.dataset.eventsUrl, window.location.origin);
     eventsUrl.searchParams.set("after", lastEventSeq);
     const response = await fetch(eventsUrl, { signal: controller.signal });
+    // A server error, such as a proxy's 502 while the gateway is down, fails the poll like no answer; a 4xx is the gateway's answer.
+    if (response.status >= 500) throw new Error(`Event poll failed with HTTP ${response.status}`);
     if (!response.ok || !eventPollCurrent(generation, sessionViewGeneration)) return;
 
     const payload = await response.json();
