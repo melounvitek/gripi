@@ -147,6 +147,13 @@ func TestMessageTemplateIdentifiesPersistedPairedToolResults(t *testing.T) {
 	}
 }
 
+func TestMessageClassKeepsTheRoleOfAnOmittedMessage(t *testing.T) {
+	placeholder := &agent.Message{Role: "user", Text: "Message too large to show (64.0MB)", Omitted: true}
+	if got := messageClass(placeholder); got != "message message--user message--omitted" {
+		t.Fatalf("omitted message class = %q", got)
+	}
+}
+
 func TestMessageClassMarksToolCallsWithoutResultsPending(t *testing.T) {
 	call := &agent.Message{Role: "assistant", Compact: true, ToolCallID: "bash-1", ToolName: "bash", ToolPending: true}
 	if got := messageClass(call); !strings.Contains(got, "message--tool-pending") {

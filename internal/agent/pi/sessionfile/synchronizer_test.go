@@ -146,6 +146,40 @@ func TestAppendedEntryIDsIncludeLargeEntriesTheIndexScannerRejects(t *testing.T)
 	}
 }
 
+func TestSynchronizerReconcilesAndTakesOverAnEntryOverTheCap(t *testing.T) {
+	path := synchronizerSession(t)
+	appendSyncEntry(t, path, map[string]any{"type": "message", "id": "old", "parentId": nil, "message": map[string]any{"role": "user", "content": []any{}}})
+	client := newSyncClient()
+	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "old"}
+	fresh := newSyncClient()
+	fresh.positions["huge"] = rpc.SessionEntries{Known: true, LeafID: "huge"}
+	registry := agent.NewRegistry(func(string) (agent.Client, error) { return fresh, nil }, nil)
+	if err := registry.Register(path, client); err != nil {
+		t.Fatal(err)
+	}
+	synchronizer := NewSynchronizer(registry)
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncManaged {
+		t.Fatalf("initial result = %#v", result)
+	}
+
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := `{"type":"message","id":"huge","parentId":"old","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"call","toolName":"subagent","content":[{"type":"text","text":"`
+	writeRepeatedSessionLine(t, path, strings.TrimSuffix(string(existing), "\n"), prefix, 'x', MaxRenderedEntryBytes, `"}],"isError":false}}`, nil)
+	client.mu.Lock()
+	client.positions["old"] = rpc.SessionEntries{Known: true, LeafID: "huge", Entries: []map[string]any{{"id": "huge"}}}
+	client.mu.Unlock()
+	if result := inspectSync(t, synchronizer, path, false); result.Mode != agent.SyncManaged || result.PersistedLeafID != "huge" {
+		t.Fatalf("gateway append = %#v", result)
+	}
+
+	if result, err := synchronizer.TakeOver(context.Background(), path, nil); err != nil || result.Mode != agent.SyncManaged || result.RPCLeafID != "huge" {
+		t.Fatalf("takeover = %#v, err = %v", result, err)
+	}
+}
+
 func BenchmarkSynchronizerInspectUnchangedLargeTail(b *testing.B) {
 	root := b.TempDir()
 	path := filepath.Join(root, "session.jsonl")

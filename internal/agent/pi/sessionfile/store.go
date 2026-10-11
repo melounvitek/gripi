@@ -54,6 +54,8 @@ type segment struct {
 	ToolName      string
 	Minimum       int64
 	PairedMinimum int64
+	// Error is kept only for an entry over MaxRenderedEntryBytes, which is not read again to render it.
+	Error bool
 }
 
 type entry struct {
@@ -744,12 +746,13 @@ func indexSnapshotValid(indexed *index, stat os.FileInfo) bool {
 	return stat.Size() > indexed.size || stat.ModTime().Equal(indexed.mtime)
 }
 
-var errEntryOverCap = errors.New("JSONL entry exceeds 64 MiB cap")
+var errEntryOverCap = errors.New("malformed JSONL entry exceeds 64 MiB cap")
 
 // readIndexedLine reads the line starting at offset in file. A line over
 // MaxIndexedEntryBytes is streamed through the bounded scanner and returned as
 // metadata. The scanner knows only the usual entry shapes, so any other line is
-// read again in full.
+// read again in full, unless it is over MaxRenderedEntryBytes, which leaves
+// only a stub with its place in the session tree.
 func readIndexedLine(reader *bufio.Reader, file io.ReaderAt, offset int64) ([]byte, int64, *entry, error) {
 	var materialized []byte
 	var total int64
@@ -772,7 +775,11 @@ func readIndexedLine(reader *bufio.Reader, file io.ReaderAt, offset int64) ([]by
 		}
 		if err == nil || errors.Is(err, io.EOF) {
 			if overCap {
-				return nil, total, nil, errEntryOverCap
+				stub, ok := scanOversizedEntry(io.NewSectionReader(file, offset, total))
+				if !ok {
+					return nil, total, nil, errEntryOverCap
+				}
+				return nil, total, &stub, nil
 			}
 			if scanner != nil {
 				if metadata, ok := scanner.finish(); ok {
@@ -1353,7 +1360,21 @@ func renderUnits(path string, indexed *index, selected []unit, home string) ([]*
 			continue
 		}
 		if item.Length > MaxRenderedEntryBytes {
-			return nil, errors.New("selected session entry exceeds rendering bound")
+			// Only a stub is indexed, so a placeholder stands in for the message.
+			part := item.Segments[0]
+			placeholder := &agent.Message{
+				Role: part.Role, Text: fmt.Sprintf("Message too large to show (%.1fMB)", float64(item.Length)/(1<<20)),
+				Timestamp: parseTime(item.Session.Timestamp), Key: [2]int{item.Ordinal, 0}, ToolCallID: part.ToolCallID, ToolName: part.ToolName,
+				Error: part.Error, Omitted: true,
+			}
+			switch {
+			case part.Role == "toolResult":
+				placeholder.Compact, placeholder.Summary = true, firstString(part.ToolName, "tool result")
+			case item.Type == "compaction":
+				placeholder.Compaction, placeholder.Summary = true, "Conversation compacted"
+			}
+			messages = append(messages, placeholder)
+			continue
 		}
 		data := make([]byte, item.Length)
 		if _, err := file.ReadAt(data, item.Offset); err != nil && !errors.Is(err, io.EOF) {

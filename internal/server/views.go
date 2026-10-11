@@ -912,6 +912,9 @@ func messageClass(message *agent.Message) string {
 	if message.ToolPending {
 		values = append(values, "message--tool-pending")
 	}
+	if message.Omitted {
+		values = append(values, "message--omitted")
+	}
 	return strings.Join(values, " ")
 }
 func messageRoleLabel(message *agent.Message) string {

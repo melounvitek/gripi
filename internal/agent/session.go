@@ -58,6 +58,8 @@ type Message struct {
 	BashExcludedFromContext bool
 	BashFullOutputPath      string
 	BashRecordedAt          time.Time
+	// Omitted marks a placeholder for a message too large to read.
+	Omitted bool
 }
 
 type Status struct {

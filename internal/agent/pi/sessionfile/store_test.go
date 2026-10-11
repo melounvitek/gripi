@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1014,9 +1015,9 @@ func TestUnreadableOversizedEntriesAreSkipped(t *testing.T) {
 			malformed := `{"type":"message","id":"bad","parentId":"user","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"text","text":"` + strings.Repeat("x", MaxIndexedEntryBytes+1) + `"}],}}`
 			writeSessionLines(t, path, []string{header, malformed, later})
 		}},
-		{"over cap", func(t *testing.T) {
+		{"over cap and cut off", func(t *testing.T) {
 			prefix := `{"type":"message","id":"too-large","parentId":"user","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"`
-			writeRepeatedSessionLine(t, path, header, prefix, 'x', MaxRenderedEntryBytes, `"}}`, []string{later})
+			writeRepeatedSessionLine(t, path, header, prefix, 'x', MaxRenderedEntryBytes, `"}`, []string{later})
 		}},
 	}
 	for _, test := range tests {
@@ -1031,6 +1032,88 @@ func TestUnreadableOversizedEntriesAreSkipped(t *testing.T) {
 			window, err := store.Window(path, "later", true, nil, nil)
 			if err != nil || len(window.Messages) != 2 || window.Messages[0].Text != "Question" || window.Messages[1].Text != "Later" {
 				t.Fatalf("window = %#v, err = %v", window.Messages, err)
+			}
+		})
+	}
+}
+
+func TestEntriesOverTheCapKeepTheHistoryBeforeThem(t *testing.T) {
+	question := userLine("user", "", "2026-01-01T00:00:01Z", "Question")
+	later := userLine("later", "huge", "2026-01-01T00:00:03Z", "Later")
+	tests := []struct {
+		name, before, prefix, suffix string
+		messages                     int
+		want                         []string
+		check                        func(*testing.T, Store, string, *agent.Message)
+	}{
+		{
+			name:     "message",
+			prefix:   `{"type":"message","id":"huge","parentId":"user","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"text","text":"`,
+			suffix:   `"}]}}`,
+			messages: 3,
+			want:     []string{"user: Question", "user: Message too large to show (64.0MB)", "user: Later"},
+		},
+		{
+			name:     "tool result",
+			before:   `{"type":"message","id":"call","parentId":"user","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-1","name":"subagent","arguments":{"task":"Summarize the logs"}}]}}`,
+			prefix:   `{"type":"message","id":"huge","parentId":"call","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"call-1","toolName":"subagent","content":[{"type":"text","text":"`,
+			suffix:   `"}],"isError":true}}`,
+			messages: 3,
+			want:     []string{"user: Question", "toolResult: Message too large to show (64.0MB)", "user: Later"},
+			check: func(t *testing.T, store Store, path string, placeholder *agent.Message) {
+				// A finished subagent's live card must give way to its saved result.
+				if context := store.SubagentToolCallContext(path, "later", []string{"call-1"})["call-1"]; !context.ResultPersisted || placeholder.ToolPrompt != "Summarize the logs" || !placeholder.Error {
+					t.Fatalf("tool context = %#v, result = %#v", context, placeholder)
+				}
+			},
+		},
+		{
+			name:     "compaction",
+			prefix:   `{"type":"compaction","id":"huge","parentId":"user","timestamp":"2026-01-01T00:00:02Z","summary":"`,
+			suffix:   `","firstKeptEntryId":"user","tokensBefore":100}`,
+			messages: 2,
+			want:     []string{"user: Question", "status: Message too large to show (64.0MB)", "user: Later"},
+			check: func(t *testing.T, _ Store, _ string, placeholder *agent.Message) {
+				if !placeholder.Compaction || placeholder.Summary != "Conversation compacted" {
+					t.Fatalf("compaction = %#v", placeholder)
+				}
+			},
+		},
+		{
+			name:     "extension data",
+			prefix:   `{"type":"custom","customType":"state","data":{"blob":"`,
+			suffix:   `","items":[1,2,3]},"id":"huge","parentId":"user","timestamp":"2026-01-01T00:00:02Z"}`,
+			messages: 2,
+			want:     []string{"user: Question", "user: Later"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, project, path := sessionFixture(t)
+			header := sessionLine(project) + "\n" + question
+			if test.before != "" {
+				header += "\n" + test.before
+			}
+			writeRepeatedSessionLine(t, path, header, test.prefix, 'x', MaxRenderedEntryBytes, test.suffix, []string{later})
+			store := Store{Root: root, Home: root, Cache: NewCache()}
+
+			sessions, err := store.Sessions()
+			if err != nil || len(sessions) != 1 || sessions[0].DisplayName != "Question" || sessions[0].MessageCount != test.messages {
+				t.Fatalf("sessions = %#v, err = %v", sessions, err)
+			}
+			window, err := store.Window(path, "", false, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, message := range window.Messages {
+				got = append(got, message.Role+": "+message.Text)
+			}
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("messages = %q, want %q", got, test.want)
+			}
+			if test.check != nil {
+				test.check(t, store, path, window.Messages[1])
 			}
 		})
 	}
