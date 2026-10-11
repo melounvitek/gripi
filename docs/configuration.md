@@ -218,6 +218,13 @@ What to expect:
 - All Hermes sessions run in one Hermes process, which stops once nothing has used it for the [Pi process lifetime](#pi-process-lifetime).
 - While Hermes works, the composer waits: Stop is the only action. Gripi doesn't choose Hermes's model, rename, delete, fork or tree its sessions yet, and `gripi open` refuses them.
 - A message to Hermes takes up to about 36 MB of images, which Hermes reads encoded on one line of at most 50 MB.
+- Hermes shares a file by writing `MEDIA:` and the file's absolute path in its reply. Gripi shows a PNG, JPEG, GIF or WebP image of up to 10 MB in place of the tag, for as long as the file exists. It leaves tags in code blocks and quotes, tags of other files, and the tags of a reply that has nothing else to say as they are. Hermes tells its model about the tag only in its screenshot tool, unless `~/.hermes/config.yaml` does so for every ACP client, which editors then show as plain text:
+
+  ```yaml
+  platform_hints:
+    acp: "You can send files natively: write MEDIA:/absolute/path/to/file in your response."
+  ```
+
 - Hermes asks before dangerous commands, as its `approvals.mode` setting says, and before editing sensitive files such as `.env` or keys. The question appears as a dialog in the session. Other edits go ahead without asking, as in Hermes's CLI. A dialog stays open after Hermes has stopped waiting for the answer, after its `approvals.timeout`, until you close it.
 - A session that another ACP client, such as an editor, continues keeps showing what Gripi's Hermes loaded, until that Hermes restarts.
 - Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next Hermes session starts, once no other Hermes session is open. A new session's first message still runs with the variables from before, because the session lives only in the running Hermes until then.

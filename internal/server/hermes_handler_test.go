@@ -3,8 +3,10 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -13,9 +15,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -284,6 +288,109 @@ func TestImagesReachHermesAndStayInTheConversation(t *testing.T) {
 	}
 	if page := getPage(t, handler, "/?session="+url.QueryEscape(key)); !strings.Contains(page, "/attachments/") || !strings.Contains(page, `alt="Attached image"`) {
 		t.Fatal("the page after the run lacks the image")
+	}
+}
+
+// sharedFiles writes a PNG image and a text file named like one for Hermes to share, and returns their paths and the
+// image's contents.
+func sharedFiles(t *testing.T) (image, notImage string, contents []byte) {
+	t.Helper()
+	folder := t.TempDir()
+	image, notImage = filepath.Join(folder, "page shot.png"), filepath.Join(folder, "notes.png")
+	contents = []byte("\x89PNG\r\n\x1a\nfixture-image")
+	if err := os.WriteFile(image, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(notImage, []byte("plain notes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return image, notImage, contents
+}
+
+// shownImages fetches the images that a page shows from the session's files.
+func shownImages(t *testing.T, handler http.Handler, page string) [][]byte {
+	t.Helper()
+	var images [][]byte
+	for _, match := range regexp.MustCompile(`src="(/session_images/[^"]+)"`).FindAllStringSubmatch(page, -1) {
+		source := html.UnescapeString(match[1])
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, source, nil))
+		if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "image/png" {
+			t.Fatalf("GET %s = %d %s", source, recorder.Code, recorder.Header().Get("Content-Type"))
+		}
+		images = append(images, recorder.Body.Bytes())
+		// The gateway serves only the files that the session's replies share.
+		other := strings.Replace(source, "/0.png", "/1.png", 1)
+		recorder = httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, other, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("GET %s = %d", other, recorder.Code)
+		}
+	}
+	return images
+}
+
+func TestAnImageHermesSharesShowsInPlaceOfItsTag(t *testing.T) {
+	image, notImage, contents := sharedFiles(t)
+	tag := `MEDIA:"` + image + `"`
+	// Nothing writes to the pipe, which would hold a read of it forever.
+	pipe := filepath.Join(t.TempDir(), "pipe.png")
+	if err := syscall.Mkfifo(pipe, 0600); err != nil {
+		t.Fatal(err)
+	}
+	reply := func(id, text string) map[string]any {
+		update := textUpdate("agent_message_chunk", text)
+		update["messageId"] = id
+		return update
+	}
+	handler := hermesHandler(t, map[string]any{
+		"sessionId": "hermes-shot", "cwd": t.TempDir(), "title": "Screenshot the page", "updatedAt": "2026-03-01T10:00:00Z",
+		"history": []any{
+			textUpdate("user_message_chunk", "Screenshot the page"),
+			reply("reply-1", "```shot```\n\nHere it is: `"+tag+"`\n\nYou can share one too:\n````\n```\n"+tag+"\n```\n````\n\nMy notes: MEDIA:"+notImage+"\n\nA pipe: MEDIA:"+pipe),
+			reply("reply-2", "```"+tag+"```"),
+		},
+	})
+
+	page := html.UnescapeString(getPage(t, handler, "/?session="+url.QueryEscape("hermes:hermes-shot")))
+	if !strings.Contains(page, "<p>Here it is:</p>") {
+		t.Error("the page doesn't show the image in place of its tag")
+	}
+	// Like Hermes, the gateway leaves an example in code, and the tag of a file that the browser can't show as an image.
+	if !strings.Contains(page, "<code>```\n"+tag) || !strings.Contains(page, "MEDIA:"+notImage) || !strings.Contains(page, "MEDIA:"+pipe) {
+		t.Error("the page lacks the tags that share no image")
+	}
+	// A reply of only an image keeps its tag as its text.
+	if article := page[strings.Index(page, `data-message-key="2:0"`):]; !strings.Contains(article[:strings.Index(article, "</article>")], tag) {
+		t.Error("the reply of only an image lacks its tag")
+	}
+	if images := shownImages(t, handler, page); len(images) != 2 || !bytes.Equal(images[0], contents) || !bytes.Equal(images[1], contents) {
+		t.Fatalf("the page shows the images %q", images)
+	}
+}
+
+func TestAnImageHermesSharesShowsLiveAndAfterTheRun(t *testing.T) {
+	image, _, contents := sharedFiles(t)
+	handler := hermesHandler(t)
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	// The fake Hermes repeats the prompt in its reply.
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {`Look: **MEDIA:"` + image + `"**`}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+
+	var reply []any
+	for _, event := range eventsUntil(t, handler, key, "agent_settled") {
+		if message, _ := event.Message.(map[string]any); event.Type == "message_end" && message["role"] == "assistant" {
+			reply = message["content"].([]any)
+		}
+	}
+	shared := map[string]any{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(contents)}
+	if len(reply) != 2 || fmt.Sprint(reply[0]) != fmt.Sprint(map[string]any{"type": "text", "text": "Hermes says: Look: "}) || fmt.Sprint(reply[1]) != fmt.Sprint(shared) {
+		t.Fatalf("the live reply is %v", reply)
+	}
+	if images := shownImages(t, handler, getPage(t, handler, "/?session="+url.QueryEscape(key))); len(images) != 1 || !bytes.Equal(images[0], contents) {
+		t.Fatalf("the page after the run shows the images %q", images)
 	}
 }
 

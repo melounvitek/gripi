@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -178,7 +179,27 @@ func (store store) Generation(key string) string {
 	return ""
 }
 
-func (store store) Image(string, string, int) ([]byte, string, error) { return nil, "", fs.ErrNotExist }
+// Image reads an image file that a reply shares, the index-th of the entry-th message.
+func (store store) Image(key, entryID string, index int) ([]byte, string, error) {
+	listed, ok := store.adapter.find(key)
+	entry, err := strconv.Atoi(entryID)
+	if !ok || err != nil {
+		return nil, "", fs.ErrNotExist
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+	defer cancel()
+	session, _, err := store.adapter.load(ctx, listed)
+	if err != nil {
+		return nil, "", err
+	}
+	session.mu.Lock()
+	paths := session.transcript.media[entry]
+	session.mu.Unlock()
+	if index < 0 || index >= len(paths) {
+		return nil, "", fs.ErrNotExist
+	}
+	return readImage(paths[index])
+}
 
 func (store store) SubagentToolCallContext(string, string, []string) map[string]agent.ToolCallContext {
 	return nil

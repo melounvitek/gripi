@@ -515,6 +515,20 @@ func (client *client) endReply(stopReason string) *agent.Reply {
 	message := client.reply
 	message.StopReason = stopReason
 	client.reply, client.replyID, client.update = nil, "", 0
+	var images []piPart
+	for index, part := range message.Content {
+		if part.Type != "text" {
+			continue
+		}
+		var shared []mediaImage
+		message.Content[index].Text, shared = mediaImages(part.Text)
+		for _, image := range shared {
+			if data, mimeType, err := readImage(image.path); err == nil {
+				images = append(images, piPart{Type: "image", Data: base64.StdEncoding.EncodeToString(data), MIMEType: mimeType})
+			}
+		}
+	}
+	message.Content = append(message.Content, images...)
 	client.emit(map[string]any{"type": "message_end", "message": message})
 	text := message.text()
 	if text == "" {
