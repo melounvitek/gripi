@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 )
 
 // Lifecycle returns the step of a run that a Pi RPC event reports, which the adapter passes to the gateway.
@@ -38,7 +38,7 @@ func Lifecycle(event map[string]any) (agent.Lifecycle, bool) {
 // reply reads an assistant message that ended. It is final only when Pi stopped it normally or at the length limit,
 // or didn't say why it stopped.
 func reply(event, message map[string]any) agent.Reply {
-	result := agent.Reply{Text: sessions.FinalAssistantText(message["content"])}
+	result := agent.Reply{Text: sessionfile.FinalAssistantText(message["content"])}
 	stopReason, _ := message["stopReason"].(string)
 	result.Final = result.Text != "" && (stopReason == "" || stopReason == "stop" || stopReason == "length")
 	if result.Final {

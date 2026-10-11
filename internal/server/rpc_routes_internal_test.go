@@ -23,6 +23,7 @@ import (
 	"github.com/melounvitek/gripi/internal/agent"
 	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/rendering"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -318,7 +319,7 @@ func TestPreparePageCanonicalizesSelectedPendingSessionBeforeBuildingView(t *tes
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
 	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read"), filepath.Join(root, "pinned"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: pending}
-	app.guard = sessions.NewSynchronizer(root, root, nil, registry)
+	app.guard = sessionfile.NewSynchronizer(root, root, nil, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(pendingPath), nil)
 
 	view, err := app.preparePage(request, false)
@@ -526,7 +527,7 @@ func TestEventsReportsUnreplayableCursors(t *testing.T) {
 				sessionStore:    NewPiStore(root, root),
 				rpcClients:      registry,
 				pendingSessions: agent.NewPendingSessionRegistry(nil),
-				guard:           sessions.NewSynchronizer(root, root, nil, registry),
+				guard:           sessionfile.NewSynchronizer(root, root, nil, registry),
 			}
 			var sequence int64
 			if state != "absent" {
@@ -685,7 +686,7 @@ func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
-	app.guard = sessions.NewSynchronizer(root, root, nil, registry)
+	app.guard = sessionfile.NewSynchronizer(root, root, nil, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	view, err := app.preparePage(request, true)
 	if err != nil {
@@ -725,7 +726,7 @@ func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {
 	writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": project}, {"type": "message", "id": "old", "parentId": nil, "timestamp": "2026-01-01T00:00:01Z", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Old"}}}}})
 	registry := agent.NewRegistry(func(string) (agent.Client, error) { return nil, os.ErrNotExist }, nil)
 	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
-	app.guard = sessions.NewSynchronizer(root, root, nil, registry)
+	app.guard = sessionfile.NewSynchronizer(root, root, nil, registry)
 	request := httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil)
 	if _, err := app.preparePage(request, true); err != nil {
 		t.Fatal(err)
@@ -792,7 +793,7 @@ func TestAcceptedPromptImageSurvivesAttachmentMetadataFailure(t *testing.T) {
 	}
 	app := &application{adapter: agentpi.New(agentpi.Options{}), config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: root}, rpcClients: registry, pendingSessions: pending}
 	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
-	app.guard = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), nil, registry)
+	app.guard = sessionfile.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), nil, registry)
 	temporary := t.TempDir()
 	t.Setenv("TMPDIR", temporary)
 	var invalidBody bytes.Buffer
@@ -891,7 +892,7 @@ func TestAbortRetiresAQueuedRunAndRestoresItsMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
-	app.guard = sessions.NewSynchronizer(root, root, nil, registry)
+	app.guard = sessionfile.NewSynchronizer(root, root, nil, registry)
 	if state, err := inspectGuard(app.guard, context.Background(), path, true); err != nil || state.Mode != sessions.SyncManaged {
 		t.Fatalf("initial synchronization = %#v, %v", state, err)
 	}
@@ -995,7 +996,7 @@ func TestAbortMatchesPendingClientReportingPhysicalSessionPath(t *testing.T) {
 	pending := agent.NewPendingSessionRegistry(nil)
 	pending.Remember(pendingPath, project, "")
 	app := &application{config: config.Config{SessionsRoot: configuredRoot}, sessionStore: NewPiStore(configuredRoot, ""), rpcClients: registry, pendingSessions: pending}
-	app.guard = sessions.NewSynchronizer(configuredRoot, root, nil, registry)
+	app.guard = sessionfile.NewSynchronizer(configuredRoot, root, nil, registry)
 	started, release := make(chan struct{}), make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
@@ -1043,7 +1044,7 @@ func TestFollowUpFallsBackToOperationLaneWhenCompactionEndsBeforeAtomicQueue(t *
 	pending.Remember(path, t.TempDir(), "")
 	app := &application{adapter: agentpi.New(agentpi.Options{}), config: config.Config{SessionsRoot: t.TempDir(), AttachmentsRoot: t.TempDir()}, rpcClients: registry, pendingSessions: pending}
 	app.sessionStore = NewPiStore(app.config.SessionsRoot, "")
-	app.guard = sessions.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), nil, registry)
+	app.guard = sessionfile.NewSynchronizer(app.config.SessionsRoot, t.TempDir(), nil, registry)
 	request := httptest.NewRequest(http.MethodPost, "http://app.test/prompt", strings.NewReader(url.Values{"session": {path}, "message": {"after compaction"}, "streaming_behavior": {"follow_up"}}.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
@@ -1102,7 +1103,7 @@ func TestPreparePageOmitsCompletedSubagentSnapshotPersistedOutsideInitialWindow(
 		t.Fatal(err)
 	}
 	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: NewPiStore(root, root), gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(t.TempDir(), "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
-	app.guard = sessions.NewSynchronizer(root, root, nil, registry)
+	app.guard = sessionfile.NewSynchronizer(root, root, nil, registry)
 
 	view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true)
 	if err != nil {

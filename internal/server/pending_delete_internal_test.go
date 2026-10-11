@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
@@ -60,7 +61,7 @@ func TestDeletePendingSession(t *testing.T) {
 			app := &application{
 				config:       config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")},
 				sessionStore: NewPiStore(root, root), gatewayState: state, rpcClients: registry, pendingSessions: pending,
-				guard:       sessions.NewSynchronizer(root, root, nil, registry),
+				guard:       sessionfile.NewSynchronizer(root, root, nil, registry),
 				ownsSession: func(*http.Request, string) bool { return test.name != "unowned" },
 			}
 			released := ""

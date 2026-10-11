@@ -124,3 +124,29 @@ func TestAttachmentMigrationCanRollbackCommittedReplacement(t *testing.T) {
 		t.Fatalf("restored = %q, %v", restored, err)
 	}
 }
+
+func TestAttachmentStoreDeleteRemovesSessionMetadataAndImages(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := filepath.Join(root, "sessions", "session.jsonl")
+	store := AttachmentStore{Root: filepath.Join(root, "attachments"), Keys: rootKeys(filepath.Join(root, "sessions"))}
+	metadataPath := filepath.Join(store.Root, SessionHash(sessionPath)+".jsonl")
+	imagesPath := filepath.Join(store.Root, SessionHash(sessionPath))
+	if err := os.MkdirAll(imagesPath, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, []byte("metadata"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(imagesPath, "image.png"), []byte("image"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Delete(sessionPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{metadataPath, imagesPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("attachment path remains at %s: %v", path, err)
+		}
+	}
+}

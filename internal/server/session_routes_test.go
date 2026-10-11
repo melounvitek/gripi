@@ -21,9 +21,9 @@ import (
 	"time"
 
 	gripi "github.com/melounvitek/gripi"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/server"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 type nativeFixture struct {
@@ -747,7 +747,7 @@ func seedOversizedNativeGeneralSubagentFixture(t *testing.T, laterMessages int) 
 	}
 	rawOutputMarker := "UNIQUE_OVERSIZED_GENERAL_RAW_TOOL_OUTPUT_MARKER"
 	result := oversizedNativeGeneralSubagentLine(project, toolCount, rawOutputMarker+strings.Repeat("raw tool output ", 128))
-	if len(result) <= sessions.MaxIndexedEntryBytes {
+	if len(result) <= sessionfile.MaxIndexedEntryBytes {
 		t.Fatalf("oversized native general subagent line is only %d bytes", len(result))
 	}
 	lines := []string{

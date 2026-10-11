@@ -17,8 +17,8 @@ import (
 
 	"github.com/melounvitek/gripi/internal/agent"
 	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestIdleRetirementPromptWaits(t *testing.T) {
@@ -246,7 +246,7 @@ func newIdleRetirementFixture(t *testing.T) *idleRetirementFixture {
 		sessionStore:    NewPiStore(root, root),
 		rpcClients:      registry,
 		pendingSessions: agent.NewPendingSessionRegistry(nil),
-		guard:           sessions.NewSynchronizer(root, root, nil, registry),
+		guard:           sessionfile.NewSynchronizer(root, root, nil, registry),
 	}
 	fixture.path = fixture.session(t, "idle")
 	if err := registry.Register(fixture.path, fixture.old); err != nil {

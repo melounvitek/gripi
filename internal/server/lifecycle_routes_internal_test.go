@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/sessions"
 )
@@ -46,7 +47,7 @@ func TestLifecycleDecisionsFailClosed(t *testing.T) {
 					t.Fatal(err)
 				}
 				app := &application{config: config.Config{SessionsRoot: root}, sessionStore: NewPiStore(root, ""), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil)}
-				app.guard = sessions.NewSynchronizer(root, root, nil, registry)
+				app.guard = sessionfile.NewSynchronizer(root, root, nil, registry)
 				queried := false
 				client.onState = func() {
 					queried = true

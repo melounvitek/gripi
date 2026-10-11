@@ -12,6 +12,7 @@ import (
 
 	gripi "github.com/melounvitek/gripi"
 	"github.com/melounvitek/gripi/internal/access"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/server"
 	"github.com/melounvitek/gripi/internal/sessions"
@@ -192,7 +193,7 @@ func TestMultiUserListsSessionsThroughASymlinkedSessionsRoot(t *testing.T) {
 	if err := access.NewWorkspaceStore(cfg.WorkspaceAccessPath).ApproveWorkspace(workspace); err != nil {
 		t.Fatal(err)
 	}
-	all, err := (sessions.Store{Root: configuredRoot, Home: fixture.home, Cache: sessions.NewCache()}).Sessions()
+	all, err := (sessionfile.Store{Root: configuredRoot, Home: fixture.home, Cache: sessionfile.NewCache()}).Sessions()
 	if err != nil || len(all) == 0 {
 		t.Fatalf("sessions = %#v, %v", all, err)
 	}

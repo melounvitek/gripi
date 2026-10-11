@@ -11,8 +11,8 @@ import (
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/agent/pi/settings"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 type Options struct {
@@ -38,25 +38,25 @@ type Adapter struct {
 	extensionRoot string
 	stateDir      string
 	store         sessionStore
-	synchronizer  *sessions.Synchronizer
+	synchronizer  *sessionfile.Synchronizer
 }
 
 var (
 	_ agent.Adapter = (*Adapter)(nil)
-	_ agent.Guard   = (*sessions.Synchronizer)(nil)
+	_ agent.Guard   = (*sessionfile.Synchronizer)(nil)
 )
 
 func New(options Options) *Adapter {
-	cache := sessions.NewCache()
+	cache := sessionfile.NewCache()
 	if options.StateDir != "" {
-		cache = sessions.LoadCache(filepath.Join(options.StateDir, "session-metadata-cache.json"))
+		cache = sessionfile.LoadCache(filepath.Join(options.StateDir, "session-metadata-cache.json"))
 	}
 	return &Adapter{
 		command:   options.Command,
 		extension: options.Extension,
 		settings:  settings.SettingsResolver{AgentDir: options.AgentDir, AutoApproveProjects: options.AutoApproveProjects},
 		stateDir:  options.StateDir,
-		store:     sessionStore{sessions.Store{Root: options.SessionsRoot, Home: options.Home, Cache: cache}},
+		store:     sessionStore{sessionfile.Store{Root: options.SessionsRoot, Home: options.Home, Cache: cache}},
 	}
 }
 
@@ -67,7 +67,7 @@ func (adapter *Adapter) Store() agent.Store {
 // Guard keeps the gateway's Pi and Pi CLI from both writing a session file. It restores what the previous run
 // knew about the files, so it must be called only once.
 func (adapter *Adapter) Guard(clients *agent.Registry) (agent.Guard, error) {
-	synchronizer := sessions.NewSynchronizer(adapter.store.Root, adapter.store.Home, adapter.store.Cache, clients)
+	synchronizer := sessionfile.NewSynchronizer(adapter.store.Root, adapter.store.Home, adapter.store.Cache, clients)
 	if adapter.stateDir != "" {
 		synchronizer.RestoreBaselines(filepath.Join(adapter.stateDir, "session-baselines.json"))
 		if err := synchronizer.PersistExternalFollow(filepath.Join(adapter.stateDir, "external-sessions.json")); err != nil {

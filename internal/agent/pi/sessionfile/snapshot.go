@@ -1,4 +1,4 @@
-package sessions
+package sessionfile
 
 import (
 	"bufio"

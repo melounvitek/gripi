@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 )
 
 // sessionStore reads Pi's session files. A key is the absolute path of a session file, and the canonical key goes
 // through the configured sessions root even when that root is a symlink.
 type sessionStore struct {
-	sessions.Store
+	sessionfile.Store
 }
 
 var _ agent.Store = sessionStore{}
@@ -26,11 +26,11 @@ func (store sessionStore) Exists(key string) bool {
 }
 
 func (store sessionStore) Canonical(key string) (string, bool) {
-	return sessions.ConfiguredSessionPath(store.Root, key)
+	return sessionfile.ConfiguredSessionPath(store.Root, key)
 }
 
 func (store sessionStore) Aliases(key string) []string {
-	return sessions.SessionPathAliases(store.Root, key)
+	return sessionfile.SessionPathAliases(store.Root, key)
 }
 
 func (store sessionStore) ValidKey(key string) bool {
@@ -64,7 +64,7 @@ func (store sessionStore) ExportName(key string) string {
 }
 
 func (store sessionStore) Delete(key string) (string, error) {
-	method, err := sessions.DeleteSessionFile(key)
+	method, err := sessionfile.DeleteSessionFile(key)
 	if err != nil {
 		return "", err
 	}

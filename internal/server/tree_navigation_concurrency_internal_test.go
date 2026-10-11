@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 )
 
 func TestTreeNavigationExcludesPrompts(t *testing.T) {
@@ -409,7 +409,7 @@ func newTreeNavigationFixture(t *testing.T) *treeNavigationFixture {
 		t.Fatal(err)
 	}
 	fixture.app.rpcClients = registry
-	fixture.app.guard = sessions.NewSynchronizer(fixture.app.config.SessionsRoot, fixture.app.config.Home, nil, registry)
+	fixture.app.guard = sessionfile.NewSynchronizer(fixture.app.config.SessionsRoot, fixture.app.config.Home, nil, registry)
 	return fixture
 }
 

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 )
 
 // rootKeys relates session keys as the Pi adapter's store does for sessions under a root.
@@ -15,9 +17,11 @@ func (root rootKeys) Exists(key string) bool {
 	return err == nil
 }
 func (root rootKeys) Canonical(key string) (string, bool) {
-	return ConfiguredSessionPath(string(root), key)
+	return sessionfile.ConfiguredSessionPath(string(root), key)
 }
-func (root rootKeys) Aliases(key string) []string { return SessionPathAliases(string(root), key) }
+func (root rootKeys) Aliases(key string) []string {
+	return sessionfile.SessionPathAliases(string(root), key)
+}
 
 func TestGatewayStateStaleObservationCannotUndoTakeover(t *testing.T) {
 	for _, selected := range []bool{false, true} {

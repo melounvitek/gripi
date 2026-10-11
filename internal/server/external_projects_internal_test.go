@@ -14,8 +14,8 @@ import (
 	gripi "github.com/melounvitek/gripi"
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 func TestNewCLIProjectsStayOutOfSelectorsUntilTakeoverAcrossRestarts(t *testing.T) {
@@ -66,7 +66,7 @@ func TestNewCLIProjectsStayOutOfSelectorsUntilTakeoverAcrossRestarts(t *testing.
 	app := handler.app
 	client := &remapClient{position: rpc.SessionEntries{Known: true, LeafID: "external"}}
 	app.rpcClients = agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
-	app.guard = sessions.NewSynchronizer(root, root, nil, app.rpcClients)
+	app.guard = sessionfile.NewSynchronizer(root, root, nil, app.rpcClients)
 	if _, err := inspectGuard(app.guard, context.Background(), path, false); err != nil {
 		t.Fatal(err)
 	}

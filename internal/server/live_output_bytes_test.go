@@ -16,8 +16,8 @@ import (
 	"github.com/melounvitek/gripi/internal/agent"
 	agentpi "github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/agent/pi/rpc"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 	"github.com/melounvitek/gripi/internal/config"
-	"github.com/melounvitek/gripi/internal/sessions"
 )
 
 // The browser parses the live state in the page and the polled events, so the gateway must pass them on byte for
@@ -31,7 +31,7 @@ func TestLiveOutputAndEventsKeepTheirBytes(t *testing.T) {
 		sessionStore:    NewPiStore(root, root),
 		rpcClients:      registry,
 		pendingSessions: agent.NewPendingSessionRegistry(nil),
-		guard:           sessions.NewSynchronizer(root, root, nil, registry),
+		guard:           sessionfile.NewSynchronizer(root, root, nil, registry),
 	}
 	started := time.Date(2026, 1, 2, 3, 4, 5, 6_000_000, time.UTC)
 	clock := func() time.Time { return started }

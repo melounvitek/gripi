@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/melounvitek/gripi/internal/sessions"
+	"github.com/melounvitek/gripi/internal/agent/pi/sessionfile"
 )
 
 func TestTagFilteringCombinesBeforePaginationAndPreservesCurrentAndPins(t *testing.T) {
 	fixture := seedNativeFixture(t)
 	handler := fixtureHandler(t, fixture)
-	all, err := (sessions.Store{Root: fixture.sessionsRoot, Home: fixture.home, Cache: sessions.NewCache()}).Sessions()
+	all, err := (sessionfile.Store{Root: fixture.sessionsRoot, Home: fixture.home, Cache: sessionfile.NewCache()}).Sessions()
 	if err != nil {
 		t.Fatal(err)
 	}
