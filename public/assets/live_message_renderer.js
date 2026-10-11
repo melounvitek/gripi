@@ -1229,7 +1229,9 @@ export class LiveMessageRenderer {
           this.replaceMessageImages(toolExecutionEntry.article, segment.images);
           this.conversationController.afterLiveOutputChange(shouldScroll, true, errorChanged);
         } else if (pairedToolCallEntry && segment.isToolResult) {
-          const mergedText = segment.toolName === "read" && segment.error !== true ? "" : (segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text : [pairedToolCallEntry.body.dataset.rawText, segment.text].filter(Boolean).join("\n\n"));
+          // Pi sends the result in both message_start and message_end, so it joins the call's own text, not the card's.
+          pairedToolCallEntry.callText ??= pairedToolCallEntry.body.dataset.rawText;
+          const mergedText = segment.toolName === "read" && segment.error !== true ? "" : (segment.toolName === "bash" || (segment.toolTranscript && segment.error !== true && segment.toolName !== "write") ? segment.text : [pairedToolCallEntry.callText, segment.text].filter(Boolean).join("\n\n"));
           const preview = segment.toolPreview === true || (segment.error === true && pairedToolCallEntry.body.classList.contains("message-body--edit-preview"));
           this.renderToolTranscriptBody(pairedToolCallEntry.body, mergedText, segment.toolName || pairedToolCallEntry.toolName, { preview });
           const errorChanged = pairedToolCallEntry.article.classList.contains("message--tool-error") !== (segment.error === true);

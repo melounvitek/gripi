@@ -605,6 +605,23 @@ test("persisted paired tool results ignore replayed message events with the same
   assert.equal(appended, 0);
 });
 
+test("a paired tool result sent in both message_start and message_end shows once on its call card", () => {
+  const document = new FakeDocument();
+  const conversation = { element: new FakeElement("section"), followLiveOutput: () => false, afterLiveOutputChange() {}, resetOversizedFollow() {} };
+  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser(), { bind() {} });
+  renderer.liveOutput = new FakeElement("section");
+  renderer.conversationScroll = conversation.element;
+  const call = { type: "toolCall", id: "write-1", name: "write", arguments: { path: "notes.md", content: "hello" } };
+  renderer.renderMessageEvent({ type: "message_end", message: { role: "assistant", content: [call] } });
+  const result = { role: "toolResult", toolCallId: "write-1", toolName: "write", content: [{ type: "text", text: "Wrote notes.md" }], isError: false };
+
+  renderer.renderMessageEvent({ type: "message_start", message: result });
+  renderer.renderMessageEvent({ type: "message_end", message: result });
+
+  assert.equal(renderer.liveOutput.children.length, 1);
+  assert.equal(renderer.liveOutput.querySelector(".message-body").dataset.rawText, "+ hello\n\nWrote notes.md");
+});
+
 test("result-first tool lifecycle updates one fallback result card", () => {
   const document = new FakeDocument();
   const conversation = {

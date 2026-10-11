@@ -52,22 +52,21 @@ test("live read, edit and write results merge into their call cards", async ({ p
   await expect(outputLines(page, editOk).filter({ hasText: `-2 ${editOk.oldText}` })).toHaveClass(/tool-diff-line--remove/);
   await expect(outputLines(page, editOk).filter({ hasText: `+2 ${editOk.newText}` })).toHaveClass(/tool-diff-line--add/);
 
-  // Other results are appended to the call card. The result's message_start and message_end each append it,
-  // so live it shows twice.
+  // Other results are appended to the call card once, though Pi sends them in both message_start and message_end.
   await expect(toolCard(page, readError)).toHaveClass(/message--tool-error/);
-  await expect(outputLines(page, readError)).toHaveText([readError.result, "", readError.result]);
+  await expect(outputLines(page, readError)).toHaveText([readError.result]);
 
   // A failed edit keeps its preview.
   await expect(toolCard(page, editError)).toHaveClass(/message--tool-error/);
   await expect(outputBody(page, editError)).toHaveClass(/message-body--edit-preview/);
-  await expect(outputLines(page, editError)).toHaveText(["Edit 1", `- ${editError.oldText}`, `+ ${editError.newText}`, "", editError.result, "", editError.result]);
+  await expect(outputLines(page, editError)).toHaveText(["Edit 1", `- ${editError.oldText}`, `+ ${editError.newText}`, "", editError.result]);
 
   await expect(toolCard(page, writeOk)).not.toHaveClass(/message--tool-error/);
-  await expect(outputLines(page, writeOk)).toHaveText([`+ ${writeOk.content}`, "", writeOk.result, "", writeOk.result]);
+  await expect(outputLines(page, writeOk)).toHaveText([`+ ${writeOk.content}`, "", writeOk.result]);
 
   await expect(toolCard(page, writeError)).toHaveClass(/message--tool-error/);
   await expect(outputBody(page, writeError)).not.toHaveClass(/message-body--edit-preview/);
-  await expect(outputLines(page, writeError)).toHaveText([`+ ${writeError.content}`, "", writeError.result, "", writeError.result]);
+  await expect(outputLines(page, writeError)).toHaveText([`+ ${writeError.content}`, "", writeError.result]);
 
   await continueScenario(page, scenario.gates.finish);
   await expect(liveMessage(page, "assistant", scenario.reply)).toBeVisible();
