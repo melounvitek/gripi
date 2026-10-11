@@ -47,6 +47,8 @@ type Config struct {
 	RPCIdleTimeout            time.Duration
 	RPCIdleSweep              time.Duration
 	PiCommand                 []string
+	// HermesPath runs Hermes Agent, or one of its profiles, next to Pi. Hermes is off when it is empty.
+	HermesPath string
 }
 
 func Load(environ []string) (Config, error) {
@@ -125,6 +127,11 @@ func Load(environ []string) (Config, error) {
 	if autoApprove {
 		piCommand = append(piCommand, "--approve")
 	}
+	hermesPath := strings.TrimSpace(values["GRIPI_HERMES"])
+	// Every user would share the one Hermes, with its memory, skills and messaging accounts.
+	if hermesPath != "" && multiUserMode {
+		return Config{}, errors.New("GRIPI_HERMES is not supported in multi-user mode")
+	}
 
 	adminPassword := values["GRIPI_ADMIN_PASSWORD"]
 	if adminPassword == "" && !browserAuthDisabled {
@@ -171,6 +178,7 @@ func Load(environ []string) (Config, error) {
 		RPCIdleTimeout:            time.Duration(idleTimeout) * time.Second,
 		RPCIdleSweep:              idleSweep,
 		PiCommand:                 piCommand,
+		HermesPath:                hermesPath,
 	}
 	return cfg, nil
 }

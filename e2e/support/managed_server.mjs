@@ -60,6 +60,7 @@ const serverEnv = {
   GRIPI_RPC_IDLE_SWEEP_SECONDS: process.env.GRIPI_E2E_RPC_IDLE_SWEEP_SECONDS || (realPi ? "30" : "0.1"),
   GRIPI_NODE: realPi ? "" : process.execPath,
   GRIPI_PI: realPi ? "" : fakePiPath,
+  GRIPI_HERMES: "",
   GRIPI_E2E_SESSIONS_ROOT: fixture.sessionsRoot,
   GRIPI_E2E_FAKE_PI_LOG: fakeLogPath,
   ...(realPi ? {
