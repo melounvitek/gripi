@@ -37,9 +37,10 @@ let recoveryMessage = null;
 let liveGate = null;
 let liveAbort = null;
 
-if (sessionPath) loadSession(sessionPath);
+if (sessionPath && existsSync(sessionPath)) loadSession(sessionPath);
 else if (forkSource) forkSession(forkSource);
-else prepareNewSession();
+// Like Pi, a --session file that does not exist yet gets a new session, which Pi saves there.
+else prepareNewSession(sessionPath);
 log({ event: "started", sessionPath, cwd: process.cwd() });
 process.once("exit", () => log({ event: "stopped" }));
 
@@ -1354,9 +1355,9 @@ function forkSession(sourcePath) {
   writeFileSync(sessionPath, `${[header, ...entries].map((record) => JSON.stringify(record)).join("\n")}\n`);
 }
 
-function prepareNewSession() {
+function prepareNewSession(filePath) {
   if (!sessionsRoot) throw new Error("GRIPI_E2E_SESSIONS_ROOT is required for new fake sessions");
-  sessionPath = path.join(sessionsRoot, "e2e", `generated-${randomUUID()}.jsonl`);
+  sessionPath = filePath || path.join(sessionsRoot, "e2e", `generated-${randomUUID()}.jsonl`);
   header = {
     type: "session",
     version: 3,

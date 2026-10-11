@@ -524,14 +524,19 @@ func (app *application) cleanupIdleRPCClient(ctx context.Context, path string, n
 }
 
 // retireStaleRPCClient retires the session's idle Pi if it started before the user's variables last changed, so that
-// the next client gets them. Pi has not saved a pending session, so a new process could not resume it.
+// the next client gets them. Pi has not saved a pending session, so a new process could not resume it, and such a
+// session restarts at once instead, with what was chosen in it.
 func (app *application) retireStaleRPCClient(request *http.Request, path string) error {
-	if _, pending := app.pendingSessions.CWD(path); pending || app.environment == nil {
+	if app.environment == nil {
 		return nil
 	}
 	changedAt := app.environment.ChangedAt(app.environmentUser(request))
 	if changedAt.IsZero() {
 		return nil
+	}
+	if _, pending := app.pendingSessions.CWD(path); pending && !app.sessionStore.Exists(path) {
+		_, err := agent.RestartUnsavedSession(request.Context(), path, changedAt, app.rpcClients, app.pendingSessions)
+		return err
 	}
 	return app.retireRPCClient(request.Context(), path, func() (bool, error) {
 		return app.rpcClients.CloseClientIfStartedBefore(path, changedAt)

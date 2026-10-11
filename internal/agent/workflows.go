@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ClientMover runs call on a session's client and moves the client to the key that call returns, like
@@ -68,6 +69,50 @@ func StartNewSession(ctx context.Context, cwd string, start func(cwd string) (Cl
 	}
 	return key, nil
 }
+
+// RestartUnsavedSession restarts the idle client of a session that the agent has not saved yet, if it started no
+// later than moment, so that the agent gets what changed since, such as the user's variables. The session exists only
+// in the old client, so the new one starts it empty under the same key, with the model, thinking level and name
+// chosen in it so far. The old client keeps the session when the new one cannot take them.
+func RestartUnsavedSession(ctx context.Context, key string, moment time.Time, clients *Registry, pending *PendingSessionRegistry) (bool, error) {
+	var id string
+	restarted, err := clients.restartIfStartedBefore(key, moment, func(old, replacement Client) error {
+		state, err := old.State(ctx)
+		if err != nil {
+			return err
+		}
+		// The agent can take a prompt before it reports the run that the prompt starts.
+		if state.Streaming || state.Compacting {
+			return errRunning
+		}
+		status, err := old.LiveStatus(ctx)
+		if err != nil {
+			return err
+		}
+		if models, ok := replacement.(ModelSelector); ok && status.Provider != "" && status.ModelID != "" {
+			if _, err := models.SetModel(ctx, status.Provider, status.ModelID, status.ThinkingLevel); err != nil {
+				return err
+			}
+		}
+		if renamer, ok := replacement.(Renamer); ok && state.Name != "" {
+			if err := renamer.Rename(ctx, state.Name); err != nil {
+				return err
+			}
+		}
+		state, err = replacement.State(ctx)
+		id = state.ID
+		return err
+	})
+	if cwd, ok := pending.CWD(key); restarted && ok {
+		pending.Remember(key, cwd, id)
+	}
+	if errors.Is(err, errRunning) {
+		return false, nil
+	}
+	return restarted, err
+}
+
+var errRunning = errors.New("the session is running")
 
 // BranchSession runs branch on the client of the session previous and moves the client to the session it creates.
 // It returns the key that the client serves afterwards, which stays previous when the agent refused or cancelled the

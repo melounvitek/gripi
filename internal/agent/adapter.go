@@ -2,7 +2,7 @@ package agent
 
 // Adapter starts session clients for one agent and answers what the gateway needs to know about it.
 type Adapter interface {
-	// Start starts a client for an existing session.
+	// Start starts a client for an existing session, or for an unsaved one under its key in options.CWD.
 	Start(key string, options StartOptions) (Client, error)
 	// StartInCWD starts a client for a new session in cwd, optionally copying the session forkFrom.
 	StartInCWD(cwd, forkFrom string, options StartOptions) (Client, error)
@@ -19,6 +19,8 @@ type Adapter interface {
 }
 
 type StartOptions struct {
+	// CWD is the folder of a session that the agent has not saved yet, which starts there empty.
+	CWD string
 	// Env holds extra NAME=value variables for the agent.
 	Env         []string
 	Diagnostics *Diagnostics

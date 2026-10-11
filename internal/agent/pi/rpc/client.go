@@ -222,10 +222,11 @@ type Client struct {
 	sampleInterval     time.Duration
 }
 
-// Start runs Pi with the gateway's scrubbed environment and the given NAME=value variables on top.
-func Start(sessionPath string, command []string, extensionPath string, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+// Start runs Pi with the gateway's scrubbed environment and the given NAME=value variables on top. Pi starts a new
+// session in cwd when sessionPath does not exist yet, and saves it there.
+func Start(sessionPath, cwd string, command []string, extensionPath string, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath, "--session", sessionPath}
-	return startProcess("", command, args, variables, diagnostics, observer)
+	return startProcess(cwd, command, args, variables, diagnostics, observer)
 }
 
 // StartInCWD starts a new session in cwd, or a copy of the session file forkFrom when that is set.

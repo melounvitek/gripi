@@ -84,7 +84,7 @@ func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Cli
 		return nil, err
 	}
 	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
-		return rpc.Start(key, adapter.command, extensionPath, options.Env, options.Diagnostics, observer)
+		return rpc.Start(key, options.CWD, adapter.command, extensionPath, options.Env, options.Diagnostics, observer)
 	})
 }
 

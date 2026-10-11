@@ -115,7 +115,7 @@ In single-user mode, the variables apply to every Gripi session. In [multi-user 
 
 A change applies from the next message or `!` command in each session. If the session’s Pi process is idle and started before the change, Gripi restarts it first, which loses process-only state in the same way as [stopping an idle process](#pi-process-lifetime). A running turn keeps the old values until it ends, and so do messages steered or queued during it.
 
-A new session that has no message yet keeps the values it started with, so its first message still uses them. Pi CLI in a terminal does not get the variables; `gripi send` does, because it goes through the same path as a message from the browser.
+A new session that Pi has not saved yet exists only in its Pi process, so Gripi starts it again in the same folder and under the same path, with the model, thinking level and name chosen in it so far. Nothing else carries over: the output of `!` commands run in it before the change leaves Pi’s context, and a session forked from its first message loses its link to the session it came from. If the new Pi process refuses the chosen model, for example because its API key is gone, the message fails with Pi’s reason and the session keeps the old values. Pi CLI in a terminal does not get the variables; `gripi send` does, because it goes through the same path as a message from the browser.
 
 Names consist of letters, digits, and `_`, and cannot start with a digit. `HOME`, `GRIPI_*`, and `PI_CODING_AGENT_*` are refused, because they move Gripi’s or Pi’s directories. A value cannot be empty and is at most 16 KiB long. Each user can save at most 100 variables.
 

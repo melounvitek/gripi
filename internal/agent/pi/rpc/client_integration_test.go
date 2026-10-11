@@ -43,7 +43,7 @@ func TestClientUsesNativeFakePiRPCWithoutRewritingSessionOnReads(t *testing.T) {
 	logPath := filepath.Join(root, "fake.log")
 	t.Setenv("GRIPI_E2E_FAKE_PI_LOG", logPath)
 	t.Setenv("GRIPI_E2E_SESSIONS_ROOT", root)
-	client, err := Start(path, []string{node, filepath.Join(repo, "e2e", "support", "fake_pi.mjs")}, filepath.Join(repo, "pi_extensions", "gripi-tree.ts"), nil, nil, nil)
+	client, err := Start(path, "", []string{node, filepath.Join(repo, "e2e", "support", "fake_pi.mjs")}, filepath.Join(repo, "pi_extensions", "gripi-tree.ts"), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestProcessClientPreservesFinalResponseBeforeImmediateExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for iteration := 0; iteration < 20; iteration++ {
-		client, err := Start(filepath.Join(root, "unused.jsonl"), []string{node, script}, script, nil, nil, nil)
+		client, err := Start(filepath.Join(root, "unused.jsonl"), "", []string{node, script}, script, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1316,7 +1316,7 @@ func TestPiStartsWithoutGatewaySettingsAndASavedVariableWins(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("GRIPI_PORT", "4567")
 	dump := filepath.Join(t.TempDir(), "environment")
-	client, err := Start("unused.jsonl", []string{"/bin/sh", "-c", `env > "$0"`, dump}, "unused.ts", []string{"APP_ENV=saved"}, nil, nil)
+	client, err := Start("unused.jsonl", "", []string{"/bin/sh", "-c", `env > "$0"`, dump}, "unused.ts", []string{"APP_ENV=saved"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

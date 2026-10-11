@@ -631,11 +631,61 @@ func (registry *Registry) CloseClientIfExpired(path string, idle time.Duration, 
 
 // CloseClientIfStartedBefore retires an idle client that started no later than the given time.
 func (registry *Registry) CloseClientIfStartedBefore(path string, moment time.Time) (bool, error) {
-	return registry.closeIdleWhen(path, func(entry *clientEntry) bool {
-		// Prompts deferred during a compaction exist only in the process until they are delivered.
-		state, ok := entry.client.(CompactionPromptDeferrer)
-		return !entry.startedAt.After(moment) && !(ok && state.DeferringCompactionPrompts())
-	}, nil)
+	return registry.closeIdleWhen(path, func(entry *clientEntry) bool { return startedBefore(entry, moment) }, nil)
+}
+
+func startedBefore(entry *clientEntry, moment time.Time) bool {
+	// Prompts deferred during a compaction exist only in the process until they are delivered.
+	state, ok := entry.client.(CompactionPromptDeferrer)
+	return !entry.startedAt.After(moment) && !(ok && state.DeferringCompactionPrompts())
+}
+
+// restartIfStartedBefore replaces an idle client that started no later than moment with a new one from the factory,
+// which ready prepares from the old one before anyone else reaches it. The old client keeps the session when the new
+// one cannot start or get ready.
+func (registry *Registry) restartIfStartedBefore(path string, moment time.Time, ready func(old, replacement Client) error) (bool, error) {
+	registry.mu.Lock()
+	entry := registry.clients[path]
+	// Observers only read, and the old client keeps answering them until the new one is ready.
+	if registry.closed || entry == nil || entry.retiring || entry.activeRequests > entry.observers || entry.client.Busy() || !startedBefore(entry, moment) {
+		registry.mu.Unlock()
+		return false, nil
+	}
+	entry.retiring = true
+	// Polls during the restart missed nothing at the old client's last event, which the new one continues from.
+	registry.retiredSequences[path] = entry.client.EventSequence()
+	registry.factoryWG.Add(1)
+	defer registry.factoryWG.Done()
+	startedAt := registry.clock()
+	diagnostics := registry.diagnostics
+	registry.mu.Unlock()
+
+	replacement, err := registry.factory(path)
+	if err == nil {
+		err = ready(entry.client, replacement)
+	}
+	registry.mu.Lock()
+	if err == nil && registry.closed {
+		err = ErrClientRetiring
+	}
+	if err == nil {
+		registry.continueRetiredEventsLocked(path, replacement)
+		registry.clients[path] = newClientEntry(replacement, startedAt, registry.clock())
+	} else {
+		delete(registry.retiredSequences, path)
+		entry.retiring = false
+	}
+	registry.mu.Unlock()
+	if err != nil {
+		if replacement != nil {
+			_ = replacement.Close()
+		}
+		return false, err
+	}
+	if err := entry.client.Close(); err != nil {
+		diagnostics.Log("replaced_client_close_failed", map[string]any{"session": path, "error": err.Error()})
+	}
+	return true, nil
 }
 
 // closeIdleWhen closes an idle client that is due and keeps its last event sequence for EventsAfter.

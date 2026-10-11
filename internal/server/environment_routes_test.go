@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -347,7 +348,7 @@ func TestChangedVariablesDoNotRestartABusyPi(t *testing.T) {
 	fixture.assertTokens(t, session, "first", "second")
 }
 
-func TestChangedVariablesLeaveAnUnsavedNewSessionAlone(t *testing.T) {
+func TestChangedVariablesApplyToAnUnsavedNewSessionWithWhatWasChosenInIt(t *testing.T) {
 	fixture := newEnvironmentFixture(t, false)
 	fixture.save(t, "", "ENVTEST_TOKEN", "first")
 	created := fixture.post("/sessions/new_at_cwd", url.Values{"cwd": {fixture.project}}, "")
@@ -357,15 +358,45 @@ func TestChangedVariablesLeaveAnUnsavedNewSessionAlone(t *testing.T) {
 	if created.Code != http.StatusOK || json.Unmarshal(created.Body.Bytes(), &payload) != nil || payload.Session == "" {
 		t.Fatalf("new session = %d %s", created.Code, created.Body.String())
 	}
+	session := payload.Session
+	if response := fixture.post("/sessions/model_settings", url.Values{"session": {session}, "provider": {"e2e"}, "model": {"contract-model"}, "thinking": {"high"}}, ""); response.Code != http.StatusOK {
+		t.Fatalf("model settings = %d %s", response.Code, response.Body.String())
+	}
+	fixture.prompt(t, session, "/name Release plan", "")
+	cursor := fakePiEventCursor(t, fixture.handler, session)
 
 	fixture.save(t, "", "ENVTEST_TOKEN", "second")
-	fixture.prompt(t, payload.Session, "Create the first deterministic response", "")
-	fixture.assertTokens(t, "", "first")
-	waitForFakePiSettled(t, fixture.handler, payload.Session, 0)
-
-	// Pi has saved the session now, so a new process can resume it.
-	fixture.prompt(t, payload.Session, "Use the second token", "")
+	fixture.prompt(t, session, "Create the first deterministic response", "")
 	fixture.assertTokens(t, "", "first", "second")
+	if restarted := fixture.piStarts(t)[1].arguments; !strings.Contains(restarted, "--session "+session) {
+		t.Fatalf("the new Pi started with %q, want session %s", restarted, session)
+	}
+	waitForFakePiSettled(t, fixture.handler, session, cursor)
+
+	// Pi saved the session where the gateway expected it, from the session's folder and with what was chosen in it.
+	contents, err := os.ReadFile(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header map[string]any
+	chosen := map[string]string{}
+	for index, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatal(err)
+		}
+		if index == 0 {
+			header = record
+		}
+		for _, field := range []string{"modelId", "thinkingLevel", "name"} {
+			if value, ok := record[field].(string); ok {
+				chosen[field] = value
+			}
+		}
+	}
+	if header["cwd"] != fixture.project || !maps.Equal(chosen, map[string]string{"modelId": "contract-model", "thinkingLevel": "high", "name": "Release plan"}) {
+		t.Fatalf("saved session in %v with %v", header["cwd"], chosen)
+	}
 }
 
 type environmentFixture struct {
