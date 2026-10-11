@@ -1450,6 +1450,11 @@ function renderEvent(event) {
     return;
   }
 
+  if (event.type === "bash_update") {
+    liveMessageRenderer.renderBashEvent(event);
+    return;
+  }
+
   if (["bash_end", "bash_error"].includes(event.type)) {
     finishLiveBash(event);
     return;
@@ -1926,12 +1931,17 @@ async function submitBashPrompt(rawMessage, bashCommand) {
   commandList?.removeAttribute("open");
   resetCommandSelection();
   resizePromptTextarea();
+  // Like Pi CLI, show the command running at once; the running state also polls fast enough to bring its card soon.
+  if (composerState?.dataset.state !== "running") setComposerState("bash", "Shell command running…");
   resetEventPollBackoff();
   scheduleNextEventPoll(0);
 
-  const restoreSubmittedBashInput = () => {
+  const restoreSubmittedBashInput = (errorMessage) => {
+    showStatus(errorMessage, true);
     if (submittedViewChanged()) return;
     restoreSubmittedComposerInput(rawMessage, submittedImageFiles);
+    // A prompt sent meanwhile owns the composer state.
+    if (!["sending", "exporting"].includes(composerState?.dataset.state)) showCurrentActiveTask("error", errorMessage);
   };
 
   try {
@@ -1946,9 +1956,7 @@ async function submitBashPrompt(rawMessage, bashCommand) {
       return;
     }
     if (!response.ok || !payload?.bash_id) {
-      restoreSubmittedBashInput();
-      const errorMessage = payload?.error || (payload?.code === "session_operation_pending" ? "Another session operation is pending. Please retry." : "Shell command failed to start");
-      showStatus(errorMessage, true);
+      restoreSubmittedBashInput(payload?.error || (payload?.code === "session_operation_pending" ? "Another session operation is pending. Please retry." : "Shell command failed to start"));
       return;
     }
 
@@ -1963,8 +1971,7 @@ async function submitBashPrompt(rawMessage, bashCommand) {
     };
     finishLiveBash(completionEvent);
   } catch (_error) {
-    restoreSubmittedBashInput();
-    showStatus("Shell command failed to start", true);
+    restoreSubmittedBashInput("Shell command failed to start");
   } finally {
     scheduleNextEventPoll(0);
   }

@@ -171,6 +171,8 @@ type Shell struct {
 	Command            string
 	ExcludeFromContext bool
 	StartedAt          time.Time
+	// Output is what the command printed, or the end of it that the agent keeps while the command runs.
+	Output string
 }
 
 type CompletedShell struct {
@@ -178,7 +180,6 @@ type CompletedShell struct {
 	// Ended says the command ran to its end with the result below, which the session saves. A command that failed to
 	// run has none.
 	Ended     bool
-	Output    string
 	ExitCode  *int
 	Cancelled bool
 	Truncated bool

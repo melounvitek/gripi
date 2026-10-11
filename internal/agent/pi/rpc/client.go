@@ -207,6 +207,7 @@ type Client struct {
 	activeBashCommand           string
 	activeBashExclude           bool
 	activeBashStartedAt         *time.Time
+	activeBashOutput            string
 	completedBashEvents         map[string]map[string]any
 	completedBashOrder          []string
 	compacting                  bool
@@ -1123,7 +1124,14 @@ func (client *Client) storeResponse(response map[string]any, serializedBytes int
 	} else if typeName == "response" && stringValue(response["id"]) != "" {
 		// A response whose request timed out is intentionally discarded.
 	} else if typeName == "bash_execution_update" {
-		// Output chunks of a shell command repeat its ID. Gripi shows the output from the final response.
+		// Output chunks of a shell command repeat its ID, and can come before the command counts as started. Like an
+		// active tool's snapshot, only the end of the output is kept, copied so that a large chunk is not kept with it.
+		if token := client.activeBashToken; token != nil && token.id == stringValue(response["id"]) {
+			client.activeBashOutput = strings.Clone(validSuffix(client.activeBashOutput+stringValue(response["delta"]), MaxActiveToolSnapshotBytes))
+			if token.started {
+				client.appendBashUpdateLocked()
+			}
+		}
 	} else {
 		storeAsEvent = true
 	}
@@ -1290,7 +1298,7 @@ func (client *Client) LiveSnapshot() LiveSnapshot {
 	result.AgentBusySince = copyTime(client.busySince)
 	result.AgentRunning = client.agentRunning
 	if client.activeBashStartedAt != nil {
-		result.ActiveBash = map[string]any{"bash_id": client.activeBashID, "command": client.activeBashCommand, "exclude_from_context": client.activeBashExclude, "started_at": *client.activeBashStartedAt}
+		result.ActiveBash = map[string]any{"bash_id": client.activeBashID, "command": client.activeBashCommand, "exclude_from_context": client.activeBashExclude, "started_at": *client.activeBashStartedAt, "output": client.activeBashOutput}
 	}
 	for _, id := range client.completedBashOrder {
 		if event := client.completedBashEvents[id]; event != nil {
@@ -1656,6 +1664,15 @@ func (client *Client) snapshotDialogLocked(dialog *extensionDialog) map[string]a
 }
 func (client *Client) eventForDeliveryLocked(event map[string]any) map[string]any {
 	event = client.extensionUIEventForDeliveryLocked(event)
+	if event != nil && event["type"] == "bash_update" {
+		// Once the command ends, its final event carries the output instead.
+		if stringValue(event["bashId"]) != client.activeBashID {
+			return nil
+		}
+		result := cloneMap(event)
+		result["output"] = client.activeBashOutput
+		return result
+	}
 	if event == nil || event["type"] != "message_update" || event["message"] != nil {
 		return event
 	}
@@ -1762,7 +1779,10 @@ func (client *Client) discardSupersededLocked(response map[string]any) {
 		}
 	case "agent_end":
 		for key := range client.coalesced {
-			client.removeCoalescedLocked(key)
+			// A shell command runs apart from the agent.
+			if key != "bash_update" {
+				client.removeCoalescedLocked(key)
+			}
 		}
 	}
 }
@@ -2246,6 +2266,17 @@ func (client *Client) startBash(token *bashToken) {
 		client.activeBashStartedAt = &started
 	}
 	client.appendGatewayEventLocked(map[string]any{"type": "bash_start", "bashId": token.id, "command": token.command, "excludeFromContext": token.excludeFromContext, "gatewayTimestamp": token.startedAt.UnixMilli()})
+	if client.activeBashToken == token && client.activeBashOutput != "" {
+		client.appendBashUpdateLocked()
+	}
+}
+
+// appendBashUpdateLocked replaces the running command's update in the replay. The update gets the output so far when
+// it is delivered.
+func (client *Client) appendBashUpdateLocked() {
+	update := map[string]any{"type": "bash_update", "bashId": client.activeBashID, "command": client.activeBashCommand, "excludeFromContext": client.activeBashExclude, "gatewayTimestamp": client.activeBashStartedAt.UnixMilli()}
+	client.eventSequence++
+	client.appendReplayLocked(update, jsonSize(update), "bash_update")
 }
 func (client *Client) completeBash(token *bashToken, typeName, valueKey string, value any) {
 	client.mu.Lock()
@@ -2273,6 +2304,7 @@ func (client *Client) clearActiveBashLocked() {
 	client.activeBashCommand = ""
 	client.activeBashExclude = false
 	client.activeBashStartedAt = nil
+	client.activeBashOutput = ""
 }
 func (client *Client) appendGatewayEventLocked(event map[string]any) {
 	client.eventSequence++

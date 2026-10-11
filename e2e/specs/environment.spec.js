@@ -307,6 +307,8 @@ test("Pi gets a saved variable from the next message, without the gateway's own 
   const printed = (name) => page.locator('article[data-role="bashExecution"]').filter({ hasText: `$ printenv ${name}` });
   await sendPrompt(page, "!printenv E2E_ENVIRONMENT_TOKEN");
   await expect(printed("E2E_ENVIRONMENT_TOKEN")).toContainText("fake-token-for-pi");
+  // The output shows while the command runs, and the next command can start only after it ends.
+  await expectRunFinished(page);
 
   await sendPrompt(page, "!printenv GRIPI_PORT");
   await expect(printed("GRIPI_PORT")).toBeVisible();

@@ -386,11 +386,12 @@ export class LiveMessageRenderer {
 
   renderBashEvent(event) {
     const bashId = event?.bashId || event?.bash_id;
-    if (!bashId || !["bash_start", "bash_end", "bash_error"].includes(event.type)) return null;
+    if (!bashId || !["bash_start", "bash_update", "bash_end", "bash_error"].includes(event.type)) return null;
     if (this.completedBashExecutionIds.has(bashId)) return this.liveBashExecutions.get(bashId) || null;
 
     const timestamp = eventTimestamp(event);
-    if (event.type !== "bash_start") this.completedBashExecutionIds.add(bashId);
+    const running = ["bash_start", "bash_update"].includes(event.type);
+    if (!running) this.completedBashExecutionIds.add(bashId);
     const result = event.result && typeof event.result === "object" ? event.result : {};
     const command = String(event.command || "");
     const excluded = event.excludeFromContext === true || event.exclude_from_context === true;
@@ -400,13 +401,14 @@ export class LiveMessageRenderer {
     const fullOutputPath = truncated && typeof result.fullOutputPath === "string" ? this.parser.displayHomePath(result.fullOutputPath) : "";
     const statusItems = [];
     if (excluded) statusItems.push("excluded from model context");
-    if (event.type === "bash_start") statusItems.push("running");
+    if (running) statusItems.push("running");
     if (event.type === "bash_end" && Number.isInteger(result.exitCode) && result.exitCode !== 0) statusItems.push(`exit ${result.exitCode}`);
     if (cancelled) statusItems.push("cancelled");
     if (truncated) statusItems.push("output truncated");
     if (fullOutputPath) statusItems.push(`full output: ${fullOutputPath}`);
     if (event.type === "bash_error") statusItems.push("failed");
-    const output = event.type === "bash_error" ? String(event.error || "Bash command failed") : String(result.output || "");
+    // A running command's events carry its output so far.
+    const output = event.type === "bash_error" ? String(event.error || "Bash command failed") : String((running ? event.output : result.output) || "");
     const summary = `$ ${this.parser.displayHomePath(command)}`;
 
     let entry = this.liveBashExecutions.get(bashId);
@@ -429,7 +431,7 @@ export class LiveMessageRenderer {
 
     entry.article.dataset.bashId = bashId;
     entry.summaryText.textContent = summary;
-    if (event.type !== "bash_start") {
+    if (!running) {
       const timestampKey = messageTimestampKey(timestamp);
       entry.article.dataset.messageTimestamp = timestampKey;
       entry.article.dataset.messageFingerprint = messageFingerprint("bashExecution", output, timestampKey);
@@ -463,6 +465,7 @@ export class LiveMessageRenderer {
         bashId: active.bash_id,
         command: active.command,
         excludeFromContext: active.exclude_from_context === true,
+        output: active.output,
         ...(Number.isFinite(startedAt) ? { gatewayTimestamp: startedAt } : {})
       };
       this.renderBashEvent(event);

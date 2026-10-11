@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/melounvitek/gripi/internal/agent"
 )
@@ -1196,6 +1197,103 @@ func TestClientRejectsBashDuringReload(t *testing.T) {
 		t.Fatalf("bash error = %v", err)
 	}
 }
+
+func TestClientStreamsTheEndOfARunningShellsOutput(t *testing.T) {
+	stdoutReader, stdoutWriter := io.Pipe()
+	var client *Client
+	requests := make(chan map[string]any, 1)
+	// Pi prints the first line before the client learns that it has written the command.
+	stdin := stdinFunc(func(value []byte) (int, error) {
+		var request map[string]any
+		if err := json.Unmarshal(value, &request); err != nil {
+			return 0, err
+		}
+		if _, err := io.WriteString(stdoutWriter, `{"type":"bash_execution_update","id":`+quoted(request["id"].(string))+`,"delta":"zero\n"}`+"\n"); err != nil {
+			return 0, err
+		}
+		for deadline := time.Now().Add(time.Second); ; time.Sleep(time.Millisecond) {
+			client.mu.Lock()
+			stored := client.activeBashOutput != ""
+			client.mu.Unlock()
+			if stored {
+				break
+			}
+			if time.Now().After(deadline) {
+				return 0, errors.New("output printed before the start was not kept")
+			}
+		}
+		requests <- request
+		return len(value), nil
+	})
+	client = NewClient(stdin, stdoutReader, nil, ClientOptions{})
+	t.Cleanup(func() { _ = client.Close(); _ = stdoutWriter.Close() })
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.Bash(context.Background(), "make", true)
+		done <- err
+	}()
+	var id string
+	select {
+	case request := <-requests:
+		id = request["id"].(string)
+	case err := <-done:
+		t.Fatalf("shell did not start: %v", err)
+	}
+	for deadline := time.Now().Add(time.Second); client.ActiveBashCommand() == ""; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("shell did not start")
+		}
+	}
+	if events := client.EventsAfter(0).Events; len(events) != 2 || events[0]["type"] != "bash_start" || events[1]["type"] != "bash_update" || events[1]["output"] != "zero\n" {
+		t.Fatalf("start events = %#v", events)
+	}
+	cursor := client.EventSequence()
+	updates := func() []map[string]any {
+		t.Helper()
+		var result []map[string]any
+		for _, event := range client.EventsAfter(cursor).Events {
+			if event["type"] == "bash_update" {
+				result = append(result, event)
+			}
+		}
+		return result
+	}
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "bash_execution_update", "id": id, "delta": "one\n"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "bash_execution_update", "id": "bash-other", "delta": "elsewhere\n"})
+	writeRecord(t, stdoutWriter, map[string]any{"type": "bash_execution_update", "id": id, "delta": "two\n"})
+	// The end of an agent run that overlaps the command leaves the command's update alone.
+	writeRecord(t, stdoutWriter, map[string]any{"type": "agent_end", "messages": []any{}})
+	waitSequence(t, client, cursor+3)
+	// The update stands on its own, like the command's start.
+	if got := updates(); len(got) != 1 || got[0]["bashId"] != id || got[0]["command"] != "make" || got[0]["excludeFromContext"] != true || got[0]["output"] != "zero\none\ntwo\n" {
+		t.Fatalf("updates = %#v", got)
+	}
+	if output := client.LiveSnapshot().ActiveBash["output"]; output != "zero\none\ntwo\n" {
+		t.Fatalf("snapshot output = %#v", output)
+	}
+
+	// Like an active tool's snapshot, a large output keeps only its end, cut between characters.
+	writeRecord(t, stdoutWriter, map[string]any{"type": "bash_execution_update", "id": id, "delta": strings.Repeat("é", MaxActiveToolSnapshotBytes) + "last"})
+	waitSequence(t, client, cursor+4)
+	output := client.LiveSnapshot().ActiveBash["output"].(string)
+	if len(output) > MaxActiveToolSnapshotBytes || len(output) < MaxActiveToolSnapshotBytes-1 || !utf8.ValidString(output) || !strings.HasSuffix(output, "élast") {
+		t.Fatalf("bounded output = %d bytes, valid %v, ends %q", len(output), utf8.ValidString(output), output[max(0, len(output)-8):])
+	}
+
+	writeRecord(t, stdoutWriter, map[string]any{"type": "response", "id": id, "command": "bash", "success": true, "data": map[string]any{"output": "last", "exitCode": 0}})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := updates(); len(got) != 0 || !containsEvent(client.EventsAfter(cursor).Events, "bash_end") || client.LiveSnapshot().ActiveBash != nil {
+		t.Fatalf("ended shell still streams: %#v", client.EventsAfter(cursor).Events)
+	}
+}
+
+type stdinFunc func([]byte) (int, error)
+
+func (write stdinFunc) Write(value []byte) (int, error) { return write(value) }
+func (stdinFunc) Close() error                          { return nil }
 
 func TestClientTimesOutResponsesAndDiscardsLateRPCReplies(t *testing.T) {
 	stdinReader, stdinWriter := io.Pipe()
