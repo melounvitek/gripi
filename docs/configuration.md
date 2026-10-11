@@ -210,7 +210,7 @@ GRIPI_HERMES=/home/me/.local/bin/hermes
 
 The path can also be a Hermes profile wrapper, which `hermes profile alias <name>` creates, to run that profile with its own sessions, memory and model. Gripi runs `<path> acp`, Hermes's Agent Client Protocol server, so that Hermes must already work and be authenticated for the gateway's OS user. Gripi doesn't install, configure or update Hermes, and `gripi check` checks it too once it is set.
 
-With Hermes on, every session in the sidebar is marked with its agent, a filter shows one agent's sessions, and the New session dialog first asks for the agent. A Hermes session can also start without a project: it then runs in your home folder.
+With Hermes on, every session in the sidebar is marked with its agent, a filter shows one agent's sessions, and the New session dialog first asks for the agent. A Hermes session belongs to no project: it always runs in your home folder, and shows no folder in the sidebar or its header.
 
 What to expect:
 
