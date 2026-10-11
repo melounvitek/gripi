@@ -540,7 +540,9 @@
       .quote-selection-button svg { width: 15px; height: 15px; }
       .quote-selection-touch-label { display: inline; }
     }
-    .code-block-copy-button { -webkit-user-select: none; user-select: none; position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; background: #18181ee0; }
+    .code-block-copy-button { -webkit-user-select: none; user-select: none; position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; }
+    /* Like the fence line above a code block in Pi CLI, a top row holds the Copy button, so it never covers code. */
+    .message-body--markdown:not(.message-body--thinking) .message-code-block pre { padding-top: 1.5rem; }
     .message-body--markdown a, .message--user > .message-body a { color: var(--link); }
     .message-images { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.65rem; }
     .message-image-button { display: inline-flex; min-width: 2.75rem; max-width: min(100%, 28rem); min-height: 2.75rem; padding: 0; overflow: hidden; border: 0; border-radius: 0.3rem; background: var(--panel-soft); cursor: zoom-in; }
@@ -934,6 +936,8 @@
       .message { margin-bottom: 0.9rem; }
       .message-header { flex-wrap: wrap; }
       .copy-button { min-height: 2rem; }
+      .code-block-copy-button { top: 0; }
+      .message-body--markdown:not(.message-body--thinking) .message-code-block pre { padding-top: 2rem; }
       .message-body--markdown { line-height: 1.5; }
       .message-body--markdown pre { font-size: 0.82rem; }
       .message, .message-body--markdown, .message--tool-transcript .message-body, pre { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
