@@ -12,7 +12,7 @@ Investigation reports (read the parts relevant to your step):
 ```
 cmd/gripi             wiring: builds the Pi adapter from config, passes it to the server
 internal/server   ──► internal/agent        core: neutral types, small interfaces, generic session machinery
-internal/agent/pi ──► internal/agent        Pi adapter: RPC client, JSONL reader, synchronizer, Pi settings, command catalog
+internal/agent/pi ──► internal/agent        Pi adapter: composer, store, client wrapper; subpackages rpc, settings, sessionfile
 internal/sessions     gateway-owned session data only (tags, pins, read state, completions, attachments, projects, suggestions)
 ```
 
@@ -95,17 +95,13 @@ They run one after the other because they share `rpc/client.go`, `local_routes.g
 
 Optional interfaces are asserted on the client the adapter factory actually returns, not only on the concrete type. **e2e.** Sol review.
 
-### Round 5 (one worker, two commits, each green on its own)
-- **S8a:** move the sessions reader and synchronizer into `internal/agent/pi`.
-- **S8b:** move the `internal/rpc` client, `internal/pi` and `prompts/commands.go` into it.
+### Rounds 5 and 6 (one worker)
+Move the Pi code into subpackages of the adapter instead of merging namespaces, which avoids name collisions:
+- `internal/rpc` → `internal/agent/pi/rpc`;
+- `internal/pi` → `internal/agent/pi/settings`;
+- the Pi JSONL reader and synchronizer → `internal/agent/pi/sessionfile`. `internal/sessions` keeps only gateway-owned data.
 
-Known name collisions, plus any others the compiler finds:
-- `stringValue`: identical, keep one.
-- `numberValue`: different signatures, rename the rpc one.
-- `writeJSON`: rename the test helper in `internal/pi/settings_test.go`.
-
-### Round 6
-S9: remove the aliases and the old packages, empty the allow-list, and update `docs/` and `AGENTS.md` where they describe the structure. **e2e.**
+Then remove the aliases and the allow-list, and document the layers. **e2e.**
 
 ### Round 7: final verification
 - Full `mise run test`, `go test -race ./...`, `go vet ./...` and e2e.
