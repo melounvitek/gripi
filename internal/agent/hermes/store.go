@@ -45,12 +45,15 @@ func (adapter *Adapter) listing() []listedSession {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 	defer cancel()
-	listed, err := adapter.list(ctx)
 	adapter.listedAt = time.Now()
+	// connected logs why Hermes cannot start.
+	conn, err := adapter.connected(ctx)
 	if err != nil {
-		if !errors.Is(err, adapter.failure) {
-			log.Printf("list Hermes sessions: %v", err)
-		}
+		return adapter.listed
+	}
+	listed, err := adapter.list(ctx, conn)
+	if err != nil {
+		log.Printf("list Hermes sessions: %v", err)
 		return adapter.listed
 	}
 	adapter.listed = listed
@@ -64,11 +67,7 @@ func (adapter *Adapter) relist() {
 	adapter.listedAt = time.Time{}
 }
 
-func (adapter *Adapter) list(ctx context.Context) ([]listedSession, error) {
-	conn, err := adapter.connected(ctx)
-	if err != nil {
-		return nil, err
-	}
+func (adapter *Adapter) list(ctx context.Context, conn *connection) ([]listedSession, error) {
 	var all []listedSession
 	cursor := ""
 	for {
@@ -135,9 +134,9 @@ func (adapter *Adapter) described(listed listedSession) *agent.Session {
 	adapter.sessionsMu.Lock()
 	session := adapter.sessions[listed.SessionID]
 	adapter.sessionsMu.Unlock()
+	result.AssistantResponseCount = adapter.replyCount(listed.SessionID)
 	if session != nil {
 		session.mu.Lock()
-		result.AssistantResponseCount = session.replies
 		result.LatestAssistantResponsePreview = agent.NotificationPreview(session.transcript.lastReply())
 		session.mu.Unlock()
 	}
@@ -153,7 +152,7 @@ func (store store) Window(key, _ string, _ bool, cursor, after *int) (agent.Wind
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
-	session, err := store.adapter.load(ctx, listed)
+	session, _, err := store.adapter.load(ctx, listed)
 	if err != nil {
 		return agent.Window{}, err
 	}

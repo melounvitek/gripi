@@ -40,6 +40,8 @@ test("a Hermes reply streams with its thinking and tool, and stays after a reloa
 
 test("stopping Hermes ends its run", async ({ page }) => {
   await sendPrompt(page, hermes.stopPrompt);
+  // A finished paragraph shows while Hermes still works.
+  await expect(page.locator("#live-output article.message--thinking").filter({ hasText: hermes.stopThought })).toBeVisible();
   // Hermes would take another message as a correction of its turn, which Gripi doesn't offer: only Stop is left.
   const composer = page.getByLabel("Message to Hermes");
   await expect(composer).toBeDisabled();
@@ -77,4 +79,12 @@ test("the agent filter shows only Hermes's sessions, each marked as Hermes's", a
   await expect(rows.first()).toBeVisible();
   await expect(page.locator('.session-row[data-agent="pi"]')).toHaveCount(0);
   await expect(page.locator(".session-row").filter({ hasText: hermes.saved.title }).locator('.session-agent[data-agent="hermes"]')).toBeVisible();
+});
+
+test("Hermes reads its own / and ! commands", async ({ page }) => {
+  for (const command of ["/export", "!ls"]) {
+    await sendPrompt(page, command);
+    await expect(liveMessage(page, "assistant", `${hermes.run.replyPrefix}${command}`)).toBeVisible();
+    await expectRunFinished(page);
+  }
 });

@@ -42,7 +42,6 @@ func (router *Router) Names() []string {
 
 var errNoAgent = errors.New("no agent serves this session")
 
-// owner returns the index of the agent whose keys look like key, or -1.
 func (router *Router) owner(key string) int {
 	for index, routed := range router.agents {
 		if routed.Adapter.Store().ValidKey(key) {

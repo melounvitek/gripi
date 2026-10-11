@@ -1137,7 +1137,8 @@ function renderAttachments() {
 }
 
 function addImageFiles(files, { restore = false } = {}) {
-  if (!restore && promptTextarea?.disabled) return false;
+  // Gripi sends Hermes no images yet.
+  if (!restore && (promptTextarea?.disabled || hermesSession())) return false;
 
   const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
   if (imageFiles.length === 0) return false;
@@ -2092,14 +2093,15 @@ async function submitPrompt(event) {
   if (promptTextarea?.disabled) return;
 
   const rawMessage = promptTextarea.value;
-  const bashCommand = parseNativeBash(rawMessage);
+  // Hermes reads ! and / itself.
+  const bashCommand = !hermesSession() && parseNativeBash(rawMessage);
   if (bashCommand) return submitBashPrompt(rawMessage, bashCommand);
   return sendPrompt(rawMessage, submittedStreamingBehavior());
 }
 
 // Without the composer, the message goes alone: the draft and attachments are neither sent, cleared nor restored.
 async function sendPrompt(rawMessage, streamingBehavior, { composer = true } = {}) {
-  const handleBuiltinCommand = streamingBehavior !== "follow_up";
+  const handleBuiltinCommand = streamingBehavior !== "follow_up" && !hermesSession();
   const exportCommand = handleBuiltinCommand ? sessionExportSlashCommand(rawMessage) : null;
   if (exportCommand) return submitExportPrompt(rawMessage, exportCommand, { composer });
 

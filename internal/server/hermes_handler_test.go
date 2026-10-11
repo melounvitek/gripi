@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -321,12 +322,16 @@ func TestSavedVariablesReachHermesBeforeItsNextMessage(t *testing.T) {
 	handler := hermesHandler(t)
 	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
 	key := payload["session"].(string)
-	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}})
-	_, cursor := eventsAfterUntil(t, handler, key, 0, "agent_settled")
-
+	// A session that Hermes hasn't saved lives only in the running Hermes, so its first message runs there.
 	if code, payload := postJSON(t, handler, "/environment/variable", url.Values{"name": {"FAKE_HERMES_PROBE"}, "value": {"saved in Gripi"}}); code != http.StatusOK {
 		t.Fatalf("save variable = %d %v", code, payload)
 	}
+	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}})
+	_, cursor := eventsAfterUntil(t, handler, key, 0, "agent_settled")
+	if starts := hermesStarts(t, log); len(starts) != 1 {
+		t.Fatalf("Hermes restarted with a session it hadn't saved: %v", starts)
+	}
+
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files again"}}); code != http.StatusOK {
 		t.Fatalf("prompt after saving a variable = %d %v", code, payload)
 	}
@@ -401,5 +406,52 @@ func TestPagesTellAgentsApartOnlyWhenTheGatewayRunsHermes(t *testing.T) {
 	page = getPage(t, both, "/?agent=hermes")
 	if !strings.Contains(page, "Hermes chat") || strings.Contains(page, `data-session-name="Pi chat"`) {
 		t.Error("the agent filter does not show only Hermes's sessions")
+	}
+}
+
+func TestAQuestionHermesStopsWaitingForCloses(t *testing.T) {
+	handler := hermesHandler(t)
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Delete the build folder unless I am too slow"}})
+
+	types := []string{}
+	for _, event := range eventsUntil(t, handler, key, "agent_settled") {
+		types = append(types, event.Type)
+	}
+	asked, closed, toolEnded := slices.Index(types, "extension_ui_request"), slices.Index(types, "extension_ui_reset"), slices.Index(types, "tool_execution_end")
+	// The question closes as Hermes's check ends, before the tool call that it asked about.
+	if asked < 0 || closed < asked || toolEnded < closed {
+		t.Fatalf("events %v", types)
+	}
+}
+
+func TestAHermesThatExitsIsReplacedForTheNextMessage(t *testing.T) {
+	handler := hermesHandler(t)
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}})
+	_, cursor := eventsAfterUntil(t, handler, key, 0, "agent_settled")
+	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Exit now"}})
+	events, _ := eventsAfterUntil(t, handler, key, cursor, "agent_settled")
+	if settled := events[len(events)-1]; settled.Type != "agent_settled" {
+		t.Fatalf("events after Hermes exited = %+v", events)
+	}
+
+	// As after every run, the browser asks for the session's status, which finds Hermes gone.
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/status?session="+url.QueryEscape(key), nil))
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files again"}}); code != http.StatusOK {
+		t.Fatalf("prompt after Hermes exited = %d %v", code, payload)
+	}
+	var text strings.Builder
+	events, _ = eventsAfterUntil(t, handler, key, 0, "agent_settled")
+	for _, event := range events {
+		if event.AssistantMessageEvent.Type == "text_delta" {
+			text.WriteString(event.AssistantMessageEvent.Delta)
+		}
+	}
+	if !strings.HasSuffix(text.String(), "Hermes says: List the files again") {
+		t.Fatalf("the restarted Hermes streamed %q", text.String())
 	}
 }

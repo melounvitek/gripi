@@ -18,3 +18,12 @@ test("a new Hermes session without a folder starts from the dialog on the first 
   await expect(page.locator('#live-output article[data-role="assistant"]').filter({ hasText: `${hermes.run.replyPrefix}Say hello from a phone` })).toBeVisible();
   await expectRunFinished(page);
 });
+
+test("the agent filter works on the first taps", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('label[aria-label="Open sessions"]').tap();
+  await page.getByRole("combobox", { name: "Filter sessions by agent" }).tap();
+  await page.getByRole("option", { name: "hermes" }).tap();
+  await expect(page.locator(".session-row").filter({ hasText: hermes.saved.title })).toBeVisible();
+  await expect(page.locator('.session-row[data-agent="pi"]')).toHaveCount(0);
+});

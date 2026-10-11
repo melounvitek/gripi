@@ -22,19 +22,23 @@ type client struct {
 	observe   func(agent.Client, agent.Lifecycle)
 	closeOnce sync.Once
 
-	mu        sync.Mutex
-	events    events
-	running   bool
+	mu      sync.Mutex
+	events  events
+	running bool
+	// settling holds the client busy after a run ends, until the gateway has heard about its end.
+	settling  bool
 	busySince *time.Time
 	settledAt *time.Time
 	// reply is the assistant message that streams, in Pi's format, and replyID the ACP message it shows.
 	reply   *piMessage
 	replyID string
-	// tools are the calls that run, in the order they started, with their latest event.
+	// tools are the calls that run, in the order they started, with their latest event and output.
 	tools []runningTool
 	// questions are Hermes's permission requests that wait for the user, in the order Hermes asked them.
 	questions []question
-	lastReply agent.Reply
+	// lastReply is the run's last reply that ended normally with text, and lastMessage that reply in Pi's format.
+	lastReply   agent.Reply
+	lastMessage *piMessage
 }
 
 var (
@@ -46,8 +50,9 @@ var (
 type permissionRequest struct {
 	SessionID string `json:"sessionId"`
 	ToolCall  struct {
-		Title   string          `json:"title"`
-		Content json.RawMessage `json:"content"`
+		ToolCallID string          `json:"toolCallId"`
+		Title      string          `json:"title"`
+		Content    json.RawMessage `json:"content"`
 	} `json:"toolCall"`
 	Options []permissionOption `json:"options"`
 }
@@ -66,8 +71,8 @@ type question struct {
 }
 
 type runningTool struct {
-	id, name string
-	event    json.RawMessage
+	id, name, output string
+	event            json.RawMessage
 }
 
 // piMessage and piPart are a message in Pi's format.
@@ -121,10 +126,18 @@ func (client *client) Close() error {
 	return nil
 }
 
+// exited fails a request to a Hermes that has exited, which the registry recognizes, so that it replaces the client.
+func (client *client) exited() error {
+	if client.conn.hasExited() {
+		return client.conn.exitErr
+	}
+	return nil
+}
+
 func (client *client) Busy() bool {
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	return client.running
+	return client.running || client.settling
 }
 
 func (client *client) BusySince() *time.Time {
@@ -155,10 +168,23 @@ func (client *client) EventReplayCursor() int64 {
 	return client.events.floor
 }
 
+// EventsAfter adds the reply as it streams so far to each of its updates, as Pi's client does, because an update
+// carries only the text it adds.
 func (client *client) EventsAfter(after int64) agent.EventBatch {
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	return client.events.after(after)
+	batch := client.events.after(after)
+	if client.reply == nil {
+		return batch
+	}
+	for index, event := range batch.Events {
+		var fields map[string]any
+		if json.Unmarshal(event, &fields) == nil && fields["type"] == "message_update" && fields["message"] == nil {
+			fields["gatewayPartialMessage"] = client.reply
+			batch.Events[index], _ = json.Marshal(fields)
+		}
+	}
+	return batch
 }
 
 func (client *client) ContinueEventsAfter(sequence int64) {
@@ -208,7 +234,6 @@ func (client *client) ask(rpcID json.RawMessage, request permissionRequest) bool
 	return true
 }
 
-// Answer passes the user's choice on to Hermes.
 func (client *client) Answer(_ context.Context, id string, answer agent.Answer) error {
 	client.mu.Lock()
 	index := slices.IndexFunc(client.questions, func(question question) bool { return question.id == id })
@@ -235,6 +260,9 @@ func (client *client) Answer(_ context.Context, id string, answer agent.Answer) 
 }
 
 func (client *client) State(context.Context) (agent.State, error) {
+	if err := client.exited(); err != nil {
+		return agent.State{}, err
+	}
 	state := agent.State{Key: client.key, ID: client.session.id, Streaming: client.Busy()}
 	if listed, ok := client.adapter.find(client.key); ok {
 		state.Name = listed.Title
@@ -243,6 +271,9 @@ func (client *client) State(context.Context) (agent.State, error) {
 }
 
 func (client *client) LiveStatus(context.Context) (agent.LiveStatus, error) {
+	if err := client.exited(); err != nil {
+		return agent.LiveStatus{}, err
+	}
 	status := client.session.status()
 	live := agent.LiveStatus{Provider: status.Provider, ModelID: status.ModelID}
 	if status.HasContextTokens || status.HasContextLimit {
@@ -252,6 +283,9 @@ func (client *client) LiveStatus(context.Context) (agent.LiveStatus, error) {
 }
 
 func (client *client) Commands(context.Context) ([]agent.Command, error) {
+	if err := client.exited(); err != nil {
+		return nil, err
+	}
 	client.session.mu.Lock()
 	defer client.session.mu.Unlock()
 	return append([]agent.Command(nil), client.session.commands...), nil
@@ -263,13 +297,16 @@ func (client *client) Prompt(_ context.Context, prompt agent.Prompt) (agent.Prom
 	if prompt.Images != nil {
 		return agent.PromptResult{}, &agent.RequestError{Message: "Gripi cannot send images to Hermes yet."}
 	}
+	if err := client.exited(); err != nil {
+		return agent.PromptResult{}, err
+	}
 	client.mu.Lock()
-	if client.running {
+	if client.running || client.settling {
 		client.mu.Unlock()
 		return agent.PromptResult{}, &agent.RequestError{Message: "Hermes is working. Stop it before you send another message."}
 	}
 	now := time.Now()
-	client.running, client.busySince, client.lastReply = true, &now, agent.Reply{}
+	client.running, client.busySince, client.lastReply, client.lastMessage = true, &now, agent.Reply{}, nil
 	client.emit(map[string]any{"type": "agent_start"})
 	user := &piMessage{Role: "user", Content: []piPart{{Type: "text", Text: prompt.Text}}, Timestamp: now.UnixMilli()}
 	client.emit(map[string]any{"type": "message_start", "message": user})
@@ -347,20 +384,7 @@ func (client *client) apply(value update) {
 		event := client.emit(map[string]any{"type": "tool_execution_start", "toolCallId": value.ToolCallID, "toolName": value.Title, "args": map[string]any{}})
 		client.tools = append(client.tools, runningTool{id: value.ToolCallID, name: value.Title, event: event})
 	case "tool_call_update":
-		for index, tool := range client.tools {
-			if tool.id != value.ToolCallID {
-				continue
-			}
-			result := map[string]any{"content": []any{map[string]any{"type": "text", "text": contentText(value.Content)}}}
-			switch value.Status {
-			case "completed", "failed":
-				client.emit(map[string]any{"type": "tool_execution_end", "toolCallId": tool.id, "toolName": tool.name, "result": result, "isError": value.Status == "failed"})
-				client.tools = append(client.tools[:index], client.tools[index+1:]...)
-			default:
-				client.tools[index].event = client.emit(map[string]any{"type": "tool_execution_update", "toolCallId": tool.id, "toolName": tool.name, "partialResult": result})
-			}
-			break
-		}
+		client.updateTool(value)
 	}
 	client.mu.Unlock()
 	if ended != nil {
@@ -368,7 +392,37 @@ func (client *client) apply(value update) {
 	}
 }
 
-// finish ends the run once Hermes answers its prompt.
+// updateTool follows a tool call of the run. The caller holds client.mu.
+func (client *client) updateTool(value update) {
+	// Hermes ends the check behind a permission request once it has an answer or stops waiting for one.
+	if index := slices.IndexFunc(client.questions, func(question question) bool {
+		return question.request.ToolCall.ToolCallID == value.ToolCallID
+	}); index >= 0 && (value.Status == "completed" || value.Status == "failed") {
+		client.questions = slices.Delete(client.questions, index, index+1)
+		client.emit(map[string]any{"type": "extension_ui_reset"})
+		return
+	}
+	index := slices.IndexFunc(client.tools, func(tool runningTool) bool { return tool.id == value.ToolCallID })
+	if index < 0 {
+		return
+	}
+	tool := &client.tools[index]
+	// Like the transcript, an update without contents keeps the output so far.
+	if text := contentText(value.Content); text != "" {
+		tool.output = text
+	}
+	result := map[string]any{"content": []any{map[string]any{"type": "text", "text": tool.output}}}
+	switch value.Status {
+	case "completed", "failed":
+		client.emit(map[string]any{"type": "tool_execution_end", "toolCallId": tool.id, "toolName": tool.name, "result": result, "isError": value.Status == "failed"})
+		client.tools = slices.Delete(client.tools, index, index+1)
+	default:
+		tool.event = client.emit(map[string]any{"type": "tool_execution_update", "toolCallId": tool.id, "toolName": tool.name, "partialResult": result})
+	}
+}
+
+// finish ends the run once Hermes answers its prompt. The client stays busy until the gateway has heard about the
+// end, so that neither a next prompt nor an idle retirement comes between.
 func (client *client) finish(stopReason string, err error) {
 	client.mu.Lock()
 	stop := "stop"
@@ -389,15 +443,13 @@ func (client *client) finish(stopReason string, err error) {
 		client.emit(map[string]any{"type": "extension_ui_reset"})
 	}
 	client.emit(map[string]any{"type": "turn_end"})
-	client.emit(map[string]any{"type": "agent_end", "messages": []any{}})
-	now := time.Now()
-	client.running, client.busySince, client.settledAt = false, nil, &now
-	last := client.lastReply
-	settled := map[string]any{"type": "agent_settled"}
-	if err != nil {
-		settled["errorMessage"] = err.Error()
+	messages := []any{}
+	if client.lastMessage != nil {
+		messages = append(messages, client.lastMessage)
 	}
-	client.emit(settled)
+	client.emit(map[string]any{"type": "agent_end", "messages": messages})
+	client.running, client.settling = false, true
+	last := client.lastReply
 	client.mu.Unlock()
 
 	client.session.mu.Lock()
@@ -411,6 +463,16 @@ func (client *client) finish(stopReason string, err error) {
 	}
 	client.notify(agent.RunEnded, last)
 	client.notify(agent.RunSettled, last)
+
+	client.mu.Lock()
+	now := time.Now()
+	client.settling, client.busySince, client.settledAt = false, nil, &now
+	settled := map[string]any{"type": "agent_settled"}
+	if err != nil {
+		settled["errorMessage"] = err.Error()
+	}
+	client.emit(settled)
+	client.mu.Unlock()
 }
 
 // endReply ends the reply that streams, and returns it when it has text. The caller holds client.mu.
@@ -428,9 +490,9 @@ func (client *client) endReply(stopReason string) *agent.Reply {
 	}
 	reply := agent.Reply{Text: text, Final: stopReason == "stop", ID: randomID()}
 	if reply.Final {
-		client.lastReply = reply
+		client.lastReply, client.lastMessage = reply, message
 	}
-	client.session.countReply()
+	client.adapter.countReply(client.session.id)
 	return &reply
 }
 

@@ -131,7 +131,7 @@ func newAdapter(cfg config.Config) (agent.Adapter, error) {
 	}
 	return agent.NewRouter(
 		agent.RoutedAgent{Name: "pi", Adapter: piAdapter},
-		agent.RoutedAgent{Name: "hermes", Adapter: hermes.New(hermes.Options{Path: cfg.HermesPath, Home: cfg.Home, IdleTimeout: cfg.RPCIdleTimeout})},
+		agent.RoutedAgent{Name: "hermes", Adapter: hermes.New(hermes.Options{Path: cfg.HermesPath, Home: cfg.Home, IdleTimeout: cfg.RPCIdleTimeout, StateDir: stateDir(cfg)})},
 	), nil
 }
 
@@ -140,15 +140,18 @@ func newPiAdapter(cfg config.Config) (*pi.Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
 	}
-	// The adapter's state lives with the gateway's.
-	stateDir := ""
-	if cfg.ReadStatePath != "" {
-		stateDir = filepath.Dir(cfg.ReadStatePath)
-	}
 	return pi.New(pi.Options{
 		Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension,
-		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir,
+		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg),
 	}), nil
+}
+
+// stateDir is where the adapters keep their state, which lives with the gateway's.
+func stateDir(cfg config.Config) string {
+	if cfg.ReadStatePath == "" {
+		return ""
+	}
+	return filepath.Dir(cfg.ReadStatePath)
 }
 
 // startupAddress is the URL to open where localhost reaches the gateway. Other

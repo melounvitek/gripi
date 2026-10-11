@@ -23,8 +23,6 @@ type session struct {
 	contextUsed float64
 	contextSize float64
 	commands    []agent.Command
-	// replies counts the replies that ended in this gateway, which is all a page compares to mark the session read.
-	replies int
 	// client serves the session while the gateway runs it, and turns its updates into live events.
 	client *client
 }
@@ -100,27 +98,25 @@ func (session *session) apply(value update) {
 	}
 }
 
-func (session *session) countReply() {
-	session.mu.Lock()
-	defer session.mu.Unlock()
-	session.replies++
-}
-
-// load has the running Hermes load the session, unless it has already, which replays the session's transcript.
-func (adapter *Adapter) load(ctx context.Context, listed listedSession) (*session, error) {
+// load has the running Hermes load the session, unless it has already, which replays the session's transcript. It
+// returns the session with the connection to the Hermes that loaded it.
+func (adapter *Adapter) load(ctx context.Context, listed listedSession) (*session, *connection, error) {
 	conn, err := adapter.connected(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	session := adapter.session(listed.SessionID)
 	session.loadMu.Lock()
 	defer session.loadMu.Unlock()
-	if session.conn == conn {
-		return session, nil
-	}
 	session.mu.Lock()
-	session.transcript = transcript{}
+	loaded := session.conn == conn
+	if !loaded {
+		session.transcript = transcript{}
+	}
 	session.mu.Unlock()
+	if loaded {
+		return session, conn, nil
+	}
 	var answer struct {
 		Models struct {
 			CurrentModelID string `json:"currentModelId"`
@@ -128,15 +124,14 @@ func (adapter *Adapter) load(ctx context.Context, listed listedSession) (*sessio
 	}
 	params := map[string]any{"sessionId": listed.SessionID, "cwd": listed.CWD, "mcpServers": []any{}}
 	if err := conn.request(ctx, "session/load", params, &answer); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	setEditMode(ctx, conn, listed.SessionID)
 	session.mu.Lock()
 	session.transcript.commit()
-	session.model = answer.Models.CurrentModelID
+	session.model, session.conn = answer.Models.CurrentModelID, conn
 	session.mu.Unlock()
-	session.conn = conn
-	return session, nil
+	return session, conn, nil
 }
 
 // messages returns copies of the transcript's messages, which later updates leave alone.

@@ -218,7 +218,7 @@ What to expect:
 - All Hermes sessions run in one Hermes process, which stops once nothing has used it for the [Pi process lifetime](#pi-process-lifetime).
 - While Hermes works, the composer waits: Stop is the only action. Gripi doesn't send Hermes images, choose its model, rename, delete, fork or tree its sessions yet, and `gripi open` refuses them.
 - Hermes asks before dangerous commands, as its `approvals.mode` setting says, and before editing sensitive files such as `.env` or keys. The question appears as a dialog in the session. Other edits go ahead without asking, as in Hermes's CLI.
-- Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next Hermes session starts, once no other Hermes session is open.
+- Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next Hermes session starts, once no other Hermes session is open. A new session's first message still runs with the variables from before, because the session lives only in the running Hermes until then.
 - [Multi-user mode](#multi-user-mode) refuses the setting, because every user would share the one Hermes, with its memory, skills and messaging accounts.
 
 ## Session location

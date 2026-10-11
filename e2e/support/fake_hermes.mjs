@@ -69,18 +69,24 @@ let requested = 0;
 const answers = new Map();
 
 // Asks the client like Hermes does before a dangerous command, and resolves with the option the client selected.
-function requestPermission(sessionId, toolCall, options) {
+function requestPermission(sessionId, toolCall, options, timeout) {
   requested += 1;
   const id = requested;
   send({ id, method: "session/request_permission", params: { sessionId, toolCall, options } });
-  return new Promise((resolve) => answers.set(id, resolve));
+  return new Promise((resolve) => {
+    answers.set(id, resolve);
+    if (timeout !== undefined) setTimeout(() => answers.delete(id) && resolve({}), timeout);
+  });
 }
 
 // The scripted run of a prompt: each step after the one before. A prompt asking to wait holds until session/cancel, and
 // a function step waits for what it returns.
 function scenario(prompt, turn, sessionId) {
   const { permission } = hermes;
-  if (prompt === permission.prompt) {
+  if (prompt === hermes.exitPrompt) {
+    return [text("agent_thought_chunk", "Exiting.", `thought-${turn}`), () => process.exit(3)];
+  }
+  if (prompt === permission.prompt || prompt === permission.expiringPrompt) {
     const id = `tc-${turn}`;
     return [
       { sessionUpdate: "tool_call", toolCallId: id, title: permission.tool, kind: "execute", content: toolContent("$ rm -rf build"), locations: [] },
@@ -91,7 +97,7 @@ function scenario(prompt, turn, sessionId) {
           { optionId: "deny", kind: "reject_once", name: permission.deny }
         ];
         const check = { toolCallId: `perm-check-${turn}`, title: permission.title, kind: "execute", status: "pending", content: toolContent("recursive delete\n$ rm -rf build") };
-        const { outcome } = await requestPermission(sessionId, check, options);
+        const { outcome } = await requestPermission(sessionId, check, options, prompt === permission.expiringPrompt ? 0 : undefined);
         const allowed = outcome?.outcome === "selected" && outcome.optionId === "allow_once";
         // Like Hermes, the check itself ends with an update for a call that was never announced.
         return [
@@ -103,7 +109,7 @@ function scenario(prompt, turn, sessionId) {
     ];
   }
   if (prompt === hermes.stopPrompt) {
-    return [text("agent_thought_chunk", "Waiting until stopped.", `thought-${turn}`), "hold"];
+    return [text("agent_thought_chunk", `${hermes.stopThought}\n\nStill waiting`, `thought-${turn}`), "hold"];
   }
   const { run } = hermes;
   const [thoughtStart, thoughtEnd] = [run.thought.slice(0, 9), run.thought.slice(9)];

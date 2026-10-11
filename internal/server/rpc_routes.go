@@ -535,6 +535,11 @@ func (app *application) retireStaleRPCClient(request *http.Request, path string)
 		return nil
 	}
 	if _, pending := app.pendingSessions.CWD(path); pending && !app.sessionStore.Exists(path) {
+		// An unsaved Hermes session lives only in the Hermes that all Hermes sessions share, so it gets the variables
+		// once saved, when its client retires like a saved session's.
+		if app.agentOf(path) == "hermes" {
+			return nil
+		}
 		_, err := agent.RestartUnsavedSession(request.Context(), path, changedAt, app.rpcClients, app.pendingSessions)
 		return err
 	}

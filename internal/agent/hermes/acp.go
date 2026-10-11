@@ -228,11 +228,11 @@ func (conn *connection) request(ctx context.Context, method string, params, resu
 	_, err = conn.stdin.Write(append(encoded, '\n'))
 	conn.writing.Unlock()
 	if err != nil {
-		// Hermes has exited or is exiting, which says more than the closed pipe.
+		// Hermes may be exiting, which says more than the closed pipe.
 		select {
 		case <-conn.exited:
 			return conn.exitErr
-		case <-ctx.Done():
+		case <-time.After(time.Second):
 			return err
 		}
 	}

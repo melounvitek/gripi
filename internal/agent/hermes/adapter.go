@@ -2,10 +2,12 @@ package hermes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -22,6 +24,9 @@ type Options struct {
 	// IdleTimeout stops Hermes once it has served nothing for that long, which frees the sessions it loaded.
 	// Zero keeps it running.
 	IdleTimeout time.Duration
+	// StateDir keeps how many replies of each session ended in the gateway, across restarts. Without it the adapter
+	// forgets.
+	StateDir string
 }
 
 // Adapter runs Hermes sessions in one `hermes acp` process, which ACP lets serve many sessions.
@@ -47,6 +52,12 @@ type Adapter struct {
 
 	sessionsMu sync.Mutex
 	sessions   map[string]*session
+
+	repliesMu   sync.Mutex
+	repliesPath string
+	// replies counts the replies of each session that ended in the gateway, which is all a page compares to mark the
+	// session read: Hermes doesn't list how many replies a session has.
+	replies map[string]int
 }
 
 var _ agent.Adapter = (*Adapter)(nil)
@@ -61,7 +72,14 @@ const (
 )
 
 func New(options Options) *Adapter {
-	return &Adapter{path: options.Path, home: options.Home, idleTimeout: options.IdleTimeout}
+	adapter := &Adapter{path: options.Path, home: options.Home, idleTimeout: options.IdleTimeout, replies: make(map[string]int)}
+	if options.StateDir != "" {
+		adapter.repliesPath = filepath.Join(options.StateDir, "hermes-replies.json")
+		if contents, err := os.ReadFile(adapter.repliesPath); err == nil {
+			_ = json.Unmarshal(contents, &adapter.replies)
+		}
+	}
+	return adapter
 }
 
 // Start serves a session that Hermes has saved, or one that the running Hermes started and hasn't saved yet.
@@ -70,18 +88,21 @@ func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Cli
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
 	if listed, ok := adapter.find(key); ok {
-		session, err := adapter.load(ctx, listed)
+		session, conn, err := adapter.load(ctx, listed)
 		if err != nil {
 			return nil, err
 		}
-		return adapter.newClient(session, session.conn, options), nil
+		return adapter.newClient(session, conn, options), nil
 	}
 	conn, err := adapter.connected(ctx)
 	if err != nil {
 		return nil, err
 	}
 	session := adapter.session(strings.TrimPrefix(key, keyPrefix))
-	if session.conn != conn {
+	session.mu.Lock()
+	started := session.conn == conn
+	session.mu.Unlock()
+	if !started {
 		return nil, fmt.Errorf("Hermes has no session %s", key)
 	}
 	return adapter.newClient(session, conn, options), nil
@@ -206,4 +227,23 @@ func (adapter *Adapter) stopWhenIdle(conn *connection) {
 			return
 		}
 	}
+}
+
+func (adapter *Adapter) countReply(id string) {
+	adapter.repliesMu.Lock()
+	defer adapter.repliesMu.Unlock()
+	adapter.replies[id]++
+	if adapter.repliesPath == "" {
+		return
+	}
+	encoded, _ := json.Marshal(adapter.replies)
+	if err := os.WriteFile(adapter.repliesPath, encoded, 0600); err != nil {
+		log.Printf("save Hermes reply counts: %v", err)
+	}
+}
+
+func (adapter *Adapter) replyCount(id string) int {
+	adapter.repliesMu.Lock()
+	defer adapter.repliesMu.Unlock()
+	return adapter.replies[id]
 }

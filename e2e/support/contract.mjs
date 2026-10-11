@@ -345,6 +345,9 @@ export const hermes = {
     replyPrefix: "Hermes says: "
   },
   stopPrompt: "Wait for stop",
+  // Its first paragraph streams while the turn holds until stopped.
+  stopThought: "Waiting until stopped.",
+  exitPrompt: "Exit now",
   // Hermes asks before it runs the command of this prompt, and runs it only if allowed.
   permission: {
     prompt: "Delete the build folder",
@@ -353,6 +356,8 @@ export const hermes = {
     allow: "Allow once",
     deny: "Deny",
     allowed: "removed build/",
-    denied: "Denied by the user"
+    denied: "Denied by the user",
+    // Hermes stops waiting for an answer to this one at once, as after its approvals.timeout.
+    expiringPrompt: "Delete the build folder unless I am too slow"
   }
 };
