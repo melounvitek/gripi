@@ -16,7 +16,6 @@ type importEdge struct{ from, to string }
 // The coordinator removes entries as steps land, and the list must end empty.
 // Entries that are no longer needed don't fail the test.
 var allowedImports = map[importEdge]bool{
-	{"internal/server", "internal/rpc"}:   true,
 	{"internal/sessions", "internal/rpc"}: true,
 }
 
