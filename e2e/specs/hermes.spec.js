@@ -38,6 +38,21 @@ test("a Hermes reply streams with its thinking and tool, and stays after a reloa
   await expect(message(page, "assistant", reply)).toHaveCount(1);
 });
 
+test("an attached image reaches Hermes and stays after a reload", async ({ page }) => {
+  const prompt = "Describe the attached image";
+  const chooser = page.waitForEvent("filechooser");
+  await page.locator(".attach-button").click();
+  await (await chooser).setFiles({ name: "hermes-image.png", mimeType: "image/png", buffer: await page.screenshot() });
+  await sendPrompt(page, prompt);
+
+  await expect(liveMessage(page, "assistant", `${hermes.run.replyPrefix}${prompt}`)).toBeVisible();
+  await expect(liveMessage(page, "user", prompt).locator(".message-image")).toBeVisible();
+  await expectRunFinished(page);
+
+  await page.reload();
+  await expect(message(page, "user", prompt).locator(".message-image")).toBeVisible();
+});
+
 test("stopping Hermes ends its run", async ({ page }) => {
   await sendPrompt(page, hermes.stopPrompt);
   // A finished paragraph shows while Hermes still works.
@@ -47,9 +62,11 @@ test("stopping Hermes ends its run", async ({ page }) => {
   await expect(composer).toBeDisabled();
   await expect(composer).toHaveAttribute("placeholder", "Hermes is working…");
   await expect(page.getByRole("button", { name: /^(Send|Steer)/ })).toBeHidden();
+  await expect(page.locator("#image-input")).toBeDisabled();
   await page.getByRole("button", { name: "Abort running Hermes" }).click();
   await expectRunFinished(page);
   await expect(composer).toHaveAttribute("placeholder", "Ask Hermes…");
+  await expect(page.locator("#image-input")).toBeEnabled();
 });
 
 test("Hermes asks in a dialog before a dangerous command, which a reload keeps", async ({ page }) => {

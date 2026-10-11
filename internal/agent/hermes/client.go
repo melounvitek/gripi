@@ -3,8 +3,10 @@ package hermes
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -89,6 +91,8 @@ type piPart struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
 	Thinking string `json:"thinking,omitempty"`
+	Data     string `json:"data,omitempty"`
+	MIMEType string `json:"mimeType,omitempty"`
 }
 
 func (message *piMessage) text() string {
@@ -287,14 +291,39 @@ func (client *client) Commands(context.Context) ([]agent.Command, error) {
 	return append([]agent.Command(nil), client.session.commands...), nil
 }
 
+// promptLimit keeps a prompt's request under the 50 MiB that Hermes reads on a line. Hermes stops reading its input
+// at a longer one, which would stall every Hermes session.
+const promptLimit = 49 << 20
+
 // Prompt starts a run. While one runs, Hermes would take the prompt as a correction of the run, which Gripi doesn't
 // offer yet: the user stops the run first.
 func (client *client) Prompt(_ context.Context, prompt agent.Prompt) (agent.PromptResult, error) {
-	if prompt.Images != nil {
-		return agent.PromptResult{}, &agent.RequestError{Message: "Gripi cannot send images to Hermes yet."}
-	}
 	if err := client.exited(); err != nil {
 		return agent.PromptResult{}, err
+	}
+	user := &piMessage{Role: "user", Content: []piPart{{Type: "text", Text: prompt.Text}}}
+	blocks := []any{map[string]any{"type": "text", "text": prompt.Text}}
+	if prompt.Images != nil {
+		images, err := prompt.Images()
+		if err != nil {
+			return agent.PromptResult{}, err
+		}
+		for _, image := range images {
+			data, err := os.ReadFile(image.Path)
+			if err != nil {
+				return agent.PromptResult{}, err
+			}
+			encoded := base64.StdEncoding.EncodeToString(data)
+			user.Content = append(user.Content, piPart{Type: "image", Data: encoded, MIMEType: image.MIMEType})
+			blocks = append(blocks, map[string]any{"type": "image", "mimeType": image.MIMEType, "data": encoded})
+		}
+	}
+	encoded, err := json.Marshal(blocks)
+	if err != nil {
+		return agent.PromptResult{}, err
+	}
+	if len(encoded) > promptLimit {
+		return agent.PromptResult{}, &agent.RequestError{Message: "This message is too large for Hermes, which takes up to about 36 MB of images in one message."}
 	}
 	client.mu.Lock()
 	if client.running || client.settling {
@@ -304,7 +333,7 @@ func (client *client) Prompt(_ context.Context, prompt agent.Prompt) (agent.Prom
 	now := time.Now()
 	client.running, client.busySince, client.lastReply, client.lastMessage = true, &now, agent.Reply{}, nil
 	client.emit(map[string]any{"type": "agent_start"})
-	user := &piMessage{Role: "user", Content: []piPart{{Type: "text", Text: prompt.Text}}, Timestamp: now.UnixMilli()}
+	user.Timestamp = now.UnixMilli()
 	client.emit(map[string]any{"type": "message_start", "message": user})
 	client.emit(map[string]any{"type": "message_end", "message": user})
 	client.emit(map[string]any{"type": "turn_start"})
@@ -314,17 +343,17 @@ func (client *client) Prompt(_ context.Context, prompt agent.Prompt) (agent.Prom
 	client.session.transcript.addUser(prompt.Text)
 	client.session.mu.Unlock()
 	client.notify(agent.RunStarted, agent.Reply{})
-	go client.run(prompt.Text)
+	go client.run(encoded)
 	// Hermes saves a new session with its first message.
 	client.adapter.relist()
 	return agent.PromptResult{Disposition: "started"}, nil
 }
 
-func (client *client) run(text string) {
+func (client *client) run(prompt json.RawMessage) {
 	var answer struct {
 		StopReason string `json:"stopReason"`
 	}
-	params := map[string]any{"sessionId": client.session.id, "prompt": []any{map[string]any{"type": "text", "text": text}}}
+	params := map[string]any{"sessionId": client.session.id, "prompt": prompt}
 	err := client.conn.request(context.Background(), "session/prompt", params, &answer)
 	client.adapter.relist()
 	client.finish(answer.StopReason, err)

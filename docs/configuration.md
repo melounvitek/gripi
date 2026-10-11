@@ -216,7 +216,8 @@ What to expect:
 
 - Gripi lists only the Hermes sessions that ACP clients created, such as Gripi itself or an editor. Hermes's CLI, desktop app, cron jobs and messaging platforms keep their sessions to themselves.
 - All Hermes sessions run in one Hermes process, which stops once nothing has used it for the [Pi process lifetime](#pi-process-lifetime).
-- While Hermes works, the composer waits: Stop is the only action. Gripi doesn't send Hermes images, choose its model, rename, delete, fork or tree its sessions yet, and `gripi open` refuses them.
+- While Hermes works, the composer waits: Stop is the only action. Gripi doesn't choose Hermes's model, rename, delete, fork or tree its sessions yet, and `gripi open` refuses them.
+- A message to Hermes takes up to about 36 MB of images, which Hermes reads encoded on one line of at most 50 MB.
 - Hermes asks before dangerous commands, as its `approvals.mode` setting says, and before editing sensitive files such as `.env` or keys. The question appears as a dialog in the session. Other edits go ahead without asking, as in Hermes's CLI. A dialog stays open after Hermes has stopped waiting for the answer, after its `approvals.timeout`, until you close it.
 - A session that another ACP client, such as an editor, continues keeps showing what Gripi's Hermes loaded, until that Hermes restarts.
 - Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next Hermes session starts, once no other Hermes session is open. A new session's first message still runs with the variables from before, because the session lives only in the running Hermes until then.

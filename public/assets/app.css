@@ -188,8 +188,6 @@
     .image-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     .attach-button { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; border: 0; border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; }
     .attach-button:hover { color: var(--text); background: #ffffff08; }
-    /* Gripi sends Hermes no images yet. */
-    .conversation-panel[data-agent="hermes"] .attach-button { display: none; }
     .image-input:focus-visible + .attach-button { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
     h1 { font-size: 1.1rem; line-height: 1.25; margin: 0 0 1rem; font-weight: 650; letter-spacing: -0.01em; }
     h2 { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; margin: 0; color: var(--gold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.14em; }

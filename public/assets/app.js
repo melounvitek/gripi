@@ -1034,7 +1034,7 @@ function setComposerState(state, label = "", { since = null, focus = true } = {}
     scheduleNextEventPoll(0);
     sidebarController.requestRefresh();
   }
-  const attachmentsDisabled = submitting || stopping || sessionSyncBlocked();
+  const attachmentsDisabled = submitting || stopping || waitingForHermes || sessionSyncBlocked();
   if (imageInput) imageInput.disabled = attachmentsDisabled;
   if (attachButton) {
     attachButton.classList.toggle("is-disabled", attachmentsDisabled);
@@ -1137,8 +1137,7 @@ function renderAttachments() {
 }
 
 function addImageFiles(files, { restore = false } = {}) {
-  // Gripi sends Hermes no images yet.
-  if (!restore && (promptTextarea?.disabled || hermesSession())) return false;
+  if (!restore && promptTextarea?.disabled) return false;
 
   const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
   if (imageFiles.length === 0) return false;

@@ -1,12 +1,15 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -235,6 +238,79 @@ func TestAHermesSessionRunsAPromptLive(t *testing.T) {
 		if !strings.Contains(page, expected) {
 			t.Errorf("page after the run lacks %q", expected)
 		}
+	}
+}
+
+func TestImagesReachHermesAndStayInTheConversation(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "hermes.log")
+	t.Setenv("FAKE_HERMES_LOG", log)
+	handler := hermesHandler(t)
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	request := multipartRequest(t, "/prompt", map[string]string{"session": key, "message": "What does this show?"}, "images[]", "shot.png", "image/png", []byte("fixture-image"))
+	request.Header.Set("Accept", "application/json")
+	if response := serveAction(handler, request); response.Code != http.StatusOK {
+		t.Fatalf("prompt = %d %s", response.Code, response.Body.String())
+	}
+
+	image := map[string]any{"type": "image", "mimeType": "image/png", "data": "Zml4dHVyZS1pbWFnZQ=="}
+	var shown []any
+	for _, event := range eventsUntil(t, handler, key, "agent_settled") {
+		if message, _ := event.Message.(map[string]any); event.Type == "message_end" && message["role"] == "user" {
+			shown = message["content"].([]any)
+		}
+	}
+	if len(shown) != 2 || fmt.Sprint(shown[1]) != fmt.Sprint(image) {
+		t.Fatalf("the live message shows %v", shown)
+	}
+	contents, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent []any
+	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+		var record struct {
+			Method string `json:"method"`
+			Params struct {
+				Prompt []any `json:"prompt"`
+			} `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &record) == nil && record.Method == "session/prompt" {
+			sent = record.Params.Prompt
+		}
+	}
+	if len(sent) != 2 || fmt.Sprint(sent[1]) != fmt.Sprint(image) {
+		t.Fatalf("Hermes got the prompt %v", sent)
+	}
+	if page := getPage(t, handler, "/?session="+url.QueryEscape(key)); !strings.Contains(page, "/attachments/") || !strings.Contains(page, `alt="Attached image"`) {
+		t.Fatal("the page after the run lacks the image")
+	}
+}
+
+func TestHermesRefusesAMessageTooLargeForIt(t *testing.T) {
+	handler := hermesHandler(t)
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("session", key)
+	_ = writer.WriteField("message", "Compare these")
+	// Four images of the most an upload takes are more than Hermes reads once encoded.
+	for index := range 4 {
+		part, err := writer.CreatePart(textproto.MIMEHeader{"Content-Disposition": {fmt.Sprintf(`form-data; name="images[]"; filename="%d.png"`, index)}, "Content-Type": {"image/png"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = part.Write(bytes.Repeat([]byte{'x'}, 10<<20))
+	}
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:4567/prompt", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Accept", "application/json")
+
+	response := serveAction(handler, request)
+	if response.Code == http.StatusOK || !strings.Contains(response.Body.String(), "too large for Hermes") {
+		t.Fatalf("prompt = %d %s", response.Code, response.Body.String())
 	}
 }
 
