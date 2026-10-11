@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -29,11 +30,39 @@ type client struct {
 	reply   *piMessage
 	replyID string
 	// tools are the calls that run, in the order they started, with their latest event.
-	tools     []runningTool
+	tools []runningTool
+	// questions are Hermes's permission requests that wait for the user, in the order Hermes asked them.
+	questions []question
 	lastReply agent.Reply
 }
 
-var _ agent.Client = (*client)(nil)
+var (
+	_ agent.Client    = (*client)(nil)
+	_ agent.Responder = (*client)(nil)
+)
+
+// permissionRequest is what Hermes asks before it runs a dangerous command or edits a sensitive file.
+type permissionRequest struct {
+	SessionID string `json:"sessionId"`
+	ToolCall  struct {
+		Title   string          `json:"title"`
+		Content json.RawMessage `json:"content"`
+	} `json:"toolCall"`
+	Options []permissionOption `json:"options"`
+}
+
+type permissionOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
+}
+
+// question is a permission request shown as a dialog of the kind Pi's extensions open, which the browser renders.
+type question struct {
+	id      string
+	rpcID   json.RawMessage
+	request permissionRequest
+	event   json.RawMessage
+}
 
 type runningTool struct {
 	id, name string
@@ -141,7 +170,58 @@ func (client *client) LiveSnapshot() agent.LiveSnapshot {
 	if client.reply != nil {
 		snapshot.ActiveAssistant = encodeEvent(map[string]any{"type": "message_update", "message": client.reply})
 	}
+	if len(client.questions) > 0 {
+		dialogs := make([]json.RawMessage, len(client.questions))
+		for index, question := range client.questions {
+			dialogs[index] = question.event
+		}
+		snapshot.PendingRequests = len(dialogs)
+		snapshot.ExtensionUI, _ = json.Marshal(map[string]any{"pending_dialogs": dialogs, "statuses": []any{}, "widgets": []any{}, "title": nil})
+	}
 	return snapshot
+}
+
+// ask shows a permission request of the run, and reports false when no run is there to ask about.
+func (client *client) ask(rpcID json.RawMessage, request permissionRequest) bool {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if !client.running {
+		return false
+	}
+	names := make([]string, len(request.Options))
+	for index, option := range request.Options {
+		names[index] = option.Name
+	}
+	id := "hermes-permission-" + string(rpcID)
+	event := client.emit(map[string]any{"type": "extension_ui_request", "id": id, "method": "select", "title": request.ToolCall.Title, "message": contentText(request.ToolCall.Content), "options": names})
+	client.questions = append(client.questions, question{id: id, rpcID: rpcID, request: request, event: event})
+	return true
+}
+
+// Answer passes the user's choice on to Hermes.
+func (client *client) Answer(_ context.Context, id string, answer agent.Answer) error {
+	client.mu.Lock()
+	index := slices.IndexFunc(client.questions, func(question question) bool { return question.id == id })
+	if index < 0 {
+		client.mu.Unlock()
+		return &agent.RequestError{Message: "Hermes no longer waits for this answer."}
+	}
+	asked := client.questions[index]
+	outcome := map[string]any{"outcome": "cancelled"}
+	if !answer.Cancelled {
+		option := -1
+		if answer.Value != nil {
+			option = slices.IndexFunc(asked.request.Options, func(option permissionOption) bool { return option.Name == *answer.Value })
+		}
+		if option < 0 {
+			client.mu.Unlock()
+			return &agent.RequestError{Message: "Hermes offered no such answer."}
+		}
+		outcome = map[string]any{"outcome": "selected", "optionId": asked.request.Options[option].OptionID}
+	}
+	client.questions = slices.Delete(client.questions, index, index+1)
+	client.mu.Unlock()
+	return client.conn.respond(asked.rpcID, map[string]any{"outcome": outcome})
 }
 
 func (client *client) State(context.Context) (agent.State, error) {
@@ -290,6 +370,14 @@ func (client *client) finish(stopReason string, err error) {
 		client.emit(map[string]any{"type": "tool_execution_end", "toolCallId": tool.id, "toolName": tool.name, "result": map[string]any{"content": []any{}}, "isError": true})
 	}
 	client.tools = nil
+	// Hermes has stopped waiting for what it asked during the run.
+	for _, asked := range client.questions {
+		_ = client.conn.respond(asked.rpcID, map[string]any{"outcome": map[string]any{"outcome": "cancelled"}})
+	}
+	if len(client.questions) > 0 {
+		client.questions = nil
+		client.emit(map[string]any{"type": "extension_ui_reset"})
+	}
 	client.emit(map[string]any{"type": "turn_end"})
 	client.emit(map[string]any{"type": "agent_end", "messages": []any{}})
 	now := time.Now()

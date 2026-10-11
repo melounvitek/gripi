@@ -126,11 +126,15 @@ func postJSON(t *testing.T, handler http.Handler, target string, values url.Valu
 }
 
 type liveEvent struct {
-	Type                  string         `json:"type"`
-	ToolCallID            string         `json:"toolCallId"`
-	ToolName              string         `json:"toolName"`
-	IsError               bool           `json:"isError"`
-	Message               map[string]any `json:"message"`
+	Type                  string   `json:"type"`
+	ID                    string   `json:"id"`
+	Method                string   `json:"method"`
+	Title                 string   `json:"title"`
+	Options               []string `json:"options"`
+	ToolCallID            string   `json:"toolCallId"`
+	ToolName              string   `json:"toolName"`
+	IsError               bool     `json:"isError"`
+	Message               any      `json:"message"`
 	AssistantMessageEvent struct {
 		Type  string `json:"type"`
 		Delta string `json:"delta"`
@@ -224,5 +228,54 @@ func TestStopEndsAHermesRunAndRefusesMessagesWhileItRuns(t *testing.T) {
 
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}}); code != http.StatusOK {
 		t.Fatalf("prompt after stop = %d %v", code, payload)
+	}
+}
+
+func TestHermesAsksBeforeADangerousCommandInADialog(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "hermes.log")
+	t.Setenv("FAKE_HERMES_LOG", log)
+	project := t.TempDir()
+	handler := hermesHandler(t)
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	key := payload["session"].(string)
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Delete the build folder"}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+
+	var question liveEvent
+	for _, event := range eventsUntil(t, handler, key, "extension_ui_request") {
+		if event.Type == "extension_ui_request" {
+			question = event
+		}
+	}
+	message, _ := question.Message.(string)
+	if question.Method != "select" || question.Title != "recursive delete: rm -rf build" || !strings.Contains(message, "$ rm -rf build") || strings.Join(question.Options, ", ") != "Allow once, Allow for session, Deny" {
+		t.Fatalf("question = %+v", question)
+	}
+	// A reload brings the question back.
+	if page := getPage(t, handler, "/?session="+url.QueryEscape(key)); !strings.Contains(page, question.ID) {
+		t.Fatalf("the page lacks the question %s", question.ID)
+	}
+
+	if code, payload := postJSON(t, handler, "/extension_ui_response", url.Values{"session": {key}, "id": {question.ID}, "value": {"Allow once"}}); code != http.StatusOK {
+		t.Fatalf("answer = %d %v", code, payload)
+	}
+	var toolEnd *liveEvent
+	events := eventsUntil(t, handler, key, "agent_settled")
+	for index, event := range events {
+		if event.Type == "tool_execution_end" {
+			toolEnd = &events[index]
+		}
+	}
+	if toolEnd == nil || toolEnd.ToolName != "terminal: rm -rf build" || toolEnd.IsError {
+		t.Fatalf("tool end = %+v", toolEnd)
+	}
+	// Hermes asks about sensitive files only, like its CLI, which never asks before an edit.
+	contents, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), `"method":"session/set_mode","params":{"modeId":"dont_ask"`) {
+		t.Fatalf("Gripi did not set Hermes's edit approval mode:\n%s", contents)
 	}
 }

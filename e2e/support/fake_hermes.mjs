@@ -64,8 +64,43 @@ function modelAnswer(session) {
   return { models: { currentModelId: model, availableModels: [{ modelId: model, name: model }] }, modes: { currentModeId: session.mode ?? "default", availableModes: [] } };
 }
 
-// The scripted run of a prompt: each step after the one before. A prompt asking to wait holds until session/cancel.
-function scenario(prompt, turn) {
+let requested = 0;
+const answers = new Map();
+
+// Asks the client like Hermes does before a dangerous command, and resolves with the option the client selected.
+function requestPermission(sessionId, toolCall, options) {
+  requested += 1;
+  const id = requested;
+  send({ id, method: "session/request_permission", params: { sessionId, toolCall, options } });
+  return new Promise((resolve) => answers.set(id, resolve));
+}
+
+// The scripted run of a prompt: each step after the one before. A prompt asking to wait holds until session/cancel, and
+// a function step waits for what it returns.
+function scenario(prompt, turn, sessionId) {
+  const { permission } = hermes;
+  if (prompt === permission.prompt) {
+    const id = `tc-${turn}`;
+    return [
+      { sessionUpdate: "tool_call", toolCallId: id, title: permission.tool, kind: "execute", content: toolContent("$ rm -rf build"), locations: [] },
+      async () => {
+        const options = [
+          { optionId: "allow_once", kind: "allow_once", name: permission.allow },
+          { optionId: "allow_session", kind: "allow_always", name: "Allow for session" },
+          { optionId: "deny", kind: "reject_once", name: permission.deny }
+        ];
+        const check = { toolCallId: `perm-check-${turn}`, title: permission.title, kind: "execute", status: "pending", content: toolContent("recursive delete\n$ rm -rf build") };
+        const { outcome } = await requestPermission(sessionId, check, options);
+        const allowed = outcome?.outcome === "selected" && outcome.optionId === "allow_once";
+        // Like Hermes, the check itself ends with an update for a call that was never announced.
+        return [
+          { sessionUpdate: "tool_call_update", toolCallId: check.toolCallId, kind: "execute", status: "completed", content: toolContent(allowed ? "allowed" : "denied") },
+          { sessionUpdate: "tool_call_update", toolCallId: id, kind: "execute", status: allowed ? "completed" : "failed", content: toolContent(allowed ? permission.allowed : permission.denied) },
+          text("agent_message_chunk", allowed ? "The build folder is gone." : "I left the build folder alone.", `reply-${turn}`)
+        ];
+      }
+    ];
+  }
   if (prompt === hermes.stopPrompt) {
     return [text("agent_thought_chunk", "Waiting until stopped.", `thought-${turn}`), "hold"];
   }
@@ -91,7 +126,7 @@ function runPrompt(session, request) {
   session.title ??= prompt.slice(0, 40);
   save(session);
   const turn = session.history.filter((value) => value.sessionUpdate === "user_message_chunk").length;
-  const steps = scenario(prompt, turn);
+  const steps = scenario(prompt, turn, session.sessionId);
   const finish = (stopReason) => {
     clearTimeout(run.timer);
     running.delete(session.sessionId);
@@ -101,9 +136,13 @@ function runPrompt(session, request) {
   };
   const run = { finish, timer: null };
   running.set(session.sessionId, run);
-  const next = (index) => {
+  const next = async (index) => {
     if (index === steps.length) return finish("end_turn");
     if (steps[index] === "hold") return;
+    if (typeof steps[index] === "function") {
+      steps.splice(index + 1, 0, ...await steps[index]());
+      return next(index + 1);
+    }
     update(session.sessionId, steps[index]);
     session.history.push(steps[index]);
     run.timer = setTimeout(() => next(index + 1), Number(process.env.FAKE_HERMES_STEP_MS ?? 30));
@@ -144,7 +183,12 @@ const methods = {
 createInterface({ input: process.stdin }).on("line", (line) => {
   if (!line.trim()) return;
   const request = JSON.parse(line);
-  log({ method: request.method, params: request.params });
+  log({ method: request.method, params: request.params, ...(request.method ? {} : { id: request.id, result: request.result }) });
+  if (!request.method && answers.has(request.id)) {
+    answers.get(request.id)(request.result ?? {});
+    answers.delete(request.id);
+    return;
+  }
   if (request.method === "session/cancel") {
     running.get(request.params.sessionId)?.finish("cancelled");
     return;

@@ -99,6 +99,7 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 	if answer.SessionID == "" {
 		return nil, errors.New("Hermes started no session")
 	}
+	setEditMode(ctx, conn, answer.SessionID)
 	session := adapter.session(answer.SessionID)
 	session.mu.Lock()
 	session.conn, session.model = conn, answer.Models.CurrentModelID
@@ -141,7 +142,7 @@ func (adapter *Adapter) connected(ctx context.Context) (*connection, error) {
 	if adapter.failure != nil && time.Since(adapter.failedAt) < retryAfter {
 		return nil, adapter.failure
 	}
-	conn, err := start(adapter.path, environment(os.Environ()), adapter.notified)
+	conn, err := start(adapter.path, environment(os.Environ()), adapter)
 	if err == nil {
 		if err = conn.initialize(ctx); err != nil {
 			_ = conn.Close()

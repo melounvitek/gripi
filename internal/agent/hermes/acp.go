@@ -30,8 +30,8 @@ type connection struct {
 	grace     time.Duration
 	closeOnce sync.Once
 
-	// notify receives Hermes's notifications in order, on the goroutine that reads them.
-	notify func(method string, params json.RawMessage)
+	// handler receives what Hermes sends of itself, in order, on the goroutine that reads it.
+	handler handler
 
 	mu      sync.Mutex
 	nextID  int64
@@ -69,7 +69,7 @@ func environment(gateway []string) []string {
 	})
 }
 
-func start(path string, env []string, notify func(method string, params json.RawMessage)) (*connection, error) {
+func start(path string, env []string, handler handler) (*connection, error) {
 	process := exec.Command(path, "acp")
 	process.Env = env
 	// Hermes runs tools and MCP servers in processes of its own, which stop with it.
@@ -89,7 +89,7 @@ func start(path string, env []string, notify func(method string, params json.Raw
 	if err := process.Start(); err != nil {
 		return nil, fmt.Errorf("Hermes could not start: %w", err)
 	}
-	conn := &connection{process: process, stdin: stdin, grace: 5 * time.Second, notify: notify, waiting: make(map[int64]chan message), exited: make(chan struct{})}
+	conn := &connection{process: process, stdin: stdin, grace: 5 * time.Second, handler: handler, waiting: make(map[int64]chan message), exited: make(chan struct{})}
 	stderrDone := make(chan struct{})
 	go func() {
 		_, _ = io.Copy(&conn.stderr, stderr)
@@ -112,8 +112,14 @@ func (conn *connection) read(stdout io.Reader) {
 			switch {
 			case received.Method == "":
 				conn.deliver(received)
-			case received.ID == nil && conn.notify != nil:
-				conn.notify(received.Method, received.Params)
+			case conn.handler == nil:
+				if received.ID != nil {
+					_ = conn.respondError(received.ID, received.Method)
+				}
+			case received.ID == nil:
+				conn.handler.notified(received.Method, received.Params)
+			default:
+				conn.handler.requested(conn, received.ID, received.Method, received.Params)
 			}
 		}
 		if err != nil {
@@ -149,6 +155,12 @@ func (conn *connection) finish(exit error) {
 	close(conn.exited)
 }
 
+// handler receives Hermes's notifications, and its requests, which the connection answers with respond later.
+type handler interface {
+	notified(method string, params json.RawMessage)
+	requested(conn *connection, id json.RawMessage, method string, params json.RawMessage)
+}
+
 // exitError says that Hermes exited, which the registry recognizes as agent.ErrProcessExited, whose text names Pi.
 type exitError struct{ status string }
 
@@ -166,7 +178,21 @@ func (conn *connection) hasExited() bool {
 
 // send sends a notification, which Hermes doesn't answer.
 func (conn *connection) send(method string, params any) error {
-	encoded, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+	return conn.write(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+}
+
+// respond answers a request of Hermes's.
+func (conn *connection) respond(id json.RawMessage, result any) error {
+	return conn.write(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
+}
+
+// respondError answers a request for something Gripi doesn't offer.
+func (conn *connection) respondError(id json.RawMessage, method string) error {
+	return conn.write(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": -32601, "message": "Gripi does not offer " + method}})
+}
+
+func (conn *connection) write(message any) error {
+	encoded, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}

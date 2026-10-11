@@ -3,6 +3,7 @@ package hermes
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"strings"
 	"sync"
 
@@ -38,6 +39,30 @@ func (adapter *Adapter) session(id string) *session {
 		adapter.sessions[id] = &session{id: id}
 	}
 	return adapter.sessions[id]
+}
+
+// requested asks the user what Hermes asks before a dangerous command or an edit of a sensitive file. A question
+// outside a run that the gateway follows is declined.
+func (adapter *Adapter) requested(conn *connection, id json.RawMessage, method string, params json.RawMessage) {
+	if method != "session/request_permission" {
+		_ = conn.respondError(id, method)
+		return
+	}
+	var request permissionRequest
+	if json.Unmarshal(params, &request) == nil {
+		adapter.sessionsMu.Lock()
+		session := adapter.sessions[request.SessionID]
+		adapter.sessionsMu.Unlock()
+		if session != nil {
+			session.mu.Lock()
+			client := session.client
+			session.mu.Unlock()
+			if client != nil && client.ask(id, request) {
+				return
+			}
+		}
+	}
+	_ = conn.respond(id, map[string]any{"outcome": map[string]any{"outcome": "cancelled"}})
 }
 
 // notified follows the updates of Hermes's sessions.
@@ -105,6 +130,7 @@ func (adapter *Adapter) load(ctx context.Context, listed listedSession) (*sessio
 	if err := conn.request(ctx, "session/load", params, &answer); err != nil {
 		return nil, err
 	}
+	setEditMode(ctx, conn, listed.SessionID)
 	session.mu.Lock()
 	session.transcript.commit()
 	session.model = answer.Models.CurrentModelID
@@ -156,4 +182,12 @@ func window(messages []*agent.Message, cursor, after *int, status agent.Status) 
 		end = min(start+windowMessages, end)
 	}
 	return agent.Window{Messages: messages[start:end], StartIndex: start, EndIndex: end, TotalMessageCount: total, Status: status}
+}
+
+// setEditMode lets Hermes edit files without asking, except sensitive ones, which comes closest to its CLI: the CLI
+// never asks before an edit, and ACP asks before every edit by default. Hermes forgets the mode with the process.
+func setEditMode(ctx context.Context, conn *connection, id string) {
+	if err := conn.request(ctx, "session/set_mode", map[string]any{"sessionId": id, "modeId": "dont_ask"}, nil); err != nil {
+		log.Printf("set Hermes's edit approval mode: %v", err)
+	}
 }

@@ -44,3 +44,23 @@ test("stopping Hermes ends its run", async ({ page }) => {
   await page.getByRole("button", { name: "Abort running Pi" }).click();
   await expectRunFinished(page);
 });
+
+test("Hermes asks in a dialog before a dangerous command, which a reload keeps", async ({ page }) => {
+  const { permission } = hermes;
+  await sendPrompt(page, permission.prompt);
+  let dialog = page.getByRole("dialog", { name: permission.title });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("$ rm -rf build");
+
+  await page.reload();
+  dialog = page.getByRole("dialog", { name: permission.title });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("option", { name: permission.deny }).click();
+  await expect(dialog).toBeHidden();
+
+  // The reload showed the call from the saved session, where it ends.
+  const tool = page.locator("article[data-tool-call-id]").filter({ hasText: permission.tool });
+  await expect(tool).toContainText(permission.denied);
+  await expect(tool).toHaveClass(/message--tool-error/);
+  await expectRunFinished(page);
+});

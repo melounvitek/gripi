@@ -344,5 +344,15 @@ export const hermes = {
     toolOutput: "README.md",
     replyPrefix: "Hermes says: "
   },
-  stopPrompt: "Wait for stop"
+  stopPrompt: "Wait for stop",
+  // Hermes asks before it runs the command of this prompt, and runs it only if allowed.
+  permission: {
+    prompt: "Delete the build folder",
+    tool: "terminal: rm -rf build",
+    title: "recursive delete: rm -rf build",
+    allow: "Allow once",
+    deny: "Deny",
+    allowed: "removed build/",
+    denied: "Denied by the user"
+  }
 };
