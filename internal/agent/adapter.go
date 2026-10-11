@@ -22,8 +22,8 @@ type StartOptions struct {
 	// Env holds extra NAME=value variables for the agent.
 	Env         []string
 	Diagnostics *Diagnostics
-	// Observe receives the agent's raw events. It must not wait for the client's responses.
-	Observe func(Client, map[string]any)
+	// Observe receives the steps of the agent's runs. It must not wait for the client's responses.
+	Observe func(Client, Lifecycle)
 }
 
 type DisplaySettings struct {

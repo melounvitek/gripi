@@ -34,7 +34,7 @@ type completedReply struct {
 
 type clientCompletionState struct {
 	pending *completedReply
-	// Preserve read suppression between message_end and agent_settled.
+	// Preserve read suppression between the reply's end and the run's settling.
 	message *completedReply
 	// Synthetic pending paths have no session file to count yet.
 	responseCount int
@@ -65,12 +65,7 @@ func newCompletionNotifier(app *application) *completionNotifier {
 	}
 }
 
-func (notifier *completionNotifier) Observe(client agent.Client, event map[string]any) {
-	switch event["type"] {
-	case "agent_start", "message_end", "agent_end", "agent_settled":
-	default:
-		return
-	}
+func (notifier *completionNotifier) Observe(client agent.Client, lifecycle agent.Lifecycle) {
 	notifier.mu.Lock()
 	notifier.pruneClientsLocked()
 	path := notifier.app.rpcClients.PathForClient(client)
@@ -84,49 +79,36 @@ func (notifier *completionNotifier) Observe(client agent.Client, event map[strin
 		notifier.clients[client] = state
 	}
 	var ready *completedReply
-	switch event["type"] {
-	case "agent_start":
+	reply := lifecycle.Reply
+	switch lifecycle.Step {
+	case agent.RunStarted:
 		state.pending, state.message = nil, nil
 		state.responseCount = notifier.responseCount(path, state.responseCount)
 		if err := notifier.app.gatewayState.BeginCompletion(path, state.responseCount); err != nil {
 			log.Printf("begin session completion: %v", err)
 		}
-	case "message_end":
-		message, _ := event["message"].(map[string]any)
-		if message["role"] != "assistant" {
-			break
-		}
+	case agent.ReplyEnded:
 		state.message = nil
-		if strings.TrimSpace(sessions.FinalAssistantText(message["content"])) != "" {
+		if reply.Text != "" {
 			state.responseCount++
 		}
-		if text, eligible := completedAssistantReply(event); eligible {
-			state.message = &completedReply{client: client, path: path, text: text, id: completedReplyID(event)}
+		if reply.Final {
+			state.message = &completedReply{client: client, path: path, text: reply.Text, id: reply.ID}
 			notifier.captureReadCount(state.message)
 		}
-	case "agent_end":
+	case agent.RunEnded:
 		state.pending = nil
-		messages, _ := event["messages"].([]any)
-		for index := len(messages) - 1; index >= 0; index-- {
-			message, _ := messages[index].(map[string]any)
-			if message["role"] != "assistant" {
-				continue
+		if reply.Final {
+			pending := &completedReply{client: client, path: path, text: reply.Text, id: reply.ID}
+			if state.message != nil && state.message.id == pending.id {
+				pending.path = state.message.path
+				pending.readCount, pending.readCountKnown = state.message.readCount, state.message.readCountKnown
+			} else {
+				notifier.captureReadCount(pending)
 			}
-			candidate := map[string]any{"type": "message_end", "message": message}
-			if text, eligible := completedAssistantReply(candidate); eligible {
-				reply := &completedReply{client: client, path: path, text: text, id: completedReplyID(candidate)}
-				if state.message != nil && state.message.id == reply.id {
-					reply.path = state.message.path
-					reply.readCount, reply.readCountKnown = state.message.readCount, state.message.readCountKnown
-				} else {
-					notifier.captureReadCount(reply)
-				}
-				state.pending = reply
-			}
-			// Never fall back to an earlier eligible assistant reply.
-			break
+			state.pending = pending
 		}
-	case "agent_settled":
+	case agent.RunSettled:
 		ready = state.pending
 		delete(notifier.clients, client)
 		if notifier.app.guard != nil {
@@ -461,39 +443,4 @@ func completedReplyURL(path string) string {
 func completedReplyTag(path, replyID string) string {
 	digest := sha256.Sum256([]byte(path + "\x00" + replyID))
 	return "gripi-final-reply:" + hex.EncodeToString(digest[:16])
-}
-
-func completedReplyID(event map[string]any) string {
-	message, _ := event["message"].(map[string]any)
-	for _, value := range []any{message["id"], message["messageId"], event["id"], event["messageId"]} {
-		if encoded, err := json.Marshal(value); err == nil && string(encoded) != "null" && string(encoded) != `""` {
-			digest := sha256.Sum256(encoded)
-			return hex.EncodeToString(digest[:16])
-		}
-	}
-	stable := any(message)
-	if len(message) == 0 {
-		stable = event
-	}
-	encoded, _ := json.Marshal(stable)
-	digest := sha256.Sum256(encoded)
-	return hex.EncodeToString(digest[:16])
-}
-
-func completedAssistantReply(event map[string]any) (string, bool) {
-	if event["type"] != "message_end" {
-		return "", false
-	}
-	message := event
-	if nested, ok := event["message"].(map[string]any); ok {
-		message = nested
-	}
-	if role, _ := message["role"].(string); role != "" && role != "assistant" {
-		return "", false
-	}
-	if stopReason, _ := message["stopReason"].(string); stopReason != "" && stopReason != "stop" && stopReason != "length" {
-		return "", false
-	}
-	text := sessions.FinalAssistantText(message["content"])
-	return text, text != ""
 }

@@ -58,11 +58,11 @@ func TestSidebarUnreadWaitsForSettledAndSurvivesRetirement(t *testing.T) {
 		t.Run(ending, func(t *testing.T) {
 			app, notifier, client, path := settledNotificationFixture(t)
 			assertSettledUnread(t, app, path, false)
-			notifier.Observe(client, map[string]any{"type": "agent_start"})
+			notifier.observePi(client, map[string]any{"type": "agent_start"})
 			progress := notificationMessage("progress", "Progress", "stop")
 			appendExternalSessionReply(t, path, "progress", "")
-			notifier.Observe(client, map[string]any{"type": "message_end", "message": progress})
-			notifier.Observe(client, notificationAgentEnd(progress))
+			notifier.observePi(client, map[string]any{"type": "message_end", "message": progress})
+			notifier.observePi(client, notificationAgentEnd(progress))
 			assertSettledUnread(t, app, path, false)
 			if ending == "read progress" {
 				if err := app.gatewayState.MarkRead(path, 1); err != nil {
@@ -74,8 +74,8 @@ func TestSidebarUnreadWaitsForSettledAndSurvivesRetirement(t *testing.T) {
 			if ending == "aborted" {
 				final["stopReason"] = "aborted"
 			}
-			notifier.Observe(client, map[string]any{"type": "message_end", "message": final})
-			notifier.Observe(client, notificationAgentEnd(progress, final))
+			notifier.observePi(client, map[string]any{"type": "message_end", "message": final})
+			notifier.observePi(client, notificationAgentEnd(progress, final))
 			if ending == "read final" {
 				// A selected page marks raw persisted responses read even before settled.
 				if _, err := app.preparePage(httptest.NewRequest("GET", "/?session="+url.QueryEscape(path), nil), false); err != nil {
@@ -83,7 +83,7 @@ func TestSidebarUnreadWaitsForSettledAndSurvivesRetirement(t *testing.T) {
 				}
 			}
 			assertSettledUnread(t, app, path, false)
-			notifier.Observe(client, map[string]any{"type": "agent_settled"})
+			notifier.observePi(client, map[string]any{"type": "agent_settled"})
 			want := ending == "eligible" || ending == "read progress"
 			assertSettledUnread(t, app, path, want)
 			if _, err := app.rpcClients.CloseClientWithoutOperations(path); err != nil {
@@ -106,7 +106,7 @@ func TestBusyRPCSidebarKeepsWorkingIndicatorAndReadFinalSuppression(t *testing.T
 	observed := make(chan struct{}, 1)
 	client := &agentpi.Client{}
 	client.Client = rpc.NewClient(input, output, nil, rpc.ClientOptions{EventObserver: func(_ *rpc.Client, event map[string]any) {
-		notifier.Observe(client, event)
+		notifier.observePi(client, event)
 		observed <- struct{}{}
 	}})
 	t.Cleanup(func() { _ = client.Close(); _ = in.Close(); _ = out.Close() })
@@ -172,13 +172,13 @@ func TestPendingCompletionMigratesWithoutLosingUnreadOrReadSuppression(t *testin
 			app.pendingSessions.Remember(pending, app.config.SessionsRoot, "")
 			app.config.AttachmentsRoot = t.TempDir()
 			client := notificationRPCClient(t, app, pending)
-			notifier.Observe(client, map[string]any{"type": "agent_start"})
+			notifier.observePi(client, map[string]any{"type": "agent_start"})
 			appendExternalSessionReply(t, path, "final", "")
 			final := notificationMessage("final", "Final", "stop")
-			notifier.Observe(client, map[string]any{"type": "message_end", "message": final})
-			notifier.Observe(client, notificationAgentEnd(final))
+			notifier.observePi(client, map[string]any{"type": "message_end", "message": final})
+			notifier.observePi(client, notificationAgentEnd(final))
 			if timing != "running" {
-				notifier.Observe(client, map[string]any{"type": "agent_settled"})
+				notifier.observePi(client, map[string]any{"type": "agent_settled"})
 			}
 			if timing == "read settled" {
 				if err := app.gatewayState.MarkRead(pending, 1); err != nil {
@@ -190,14 +190,14 @@ func TestPendingCompletionMigratesWithoutLosingUnreadOrReadSuppression(t *testin
 			}
 			if timing == "running" {
 				assertSettledUnread(t, app, path, false)
-				notifier.Observe(client, map[string]any{"type": "agent_settled"})
+				notifier.observePi(client, map[string]any{"type": "agent_settled"})
 			}
 			assertSettledUnread(t, app, path, timing != "read settled")
 			view, err := app.preparePage(httptest.NewRequest("GET", "/sidebar?no_session=1", nil), false)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if view.CompletedReplies[path].ID != completedReplyID(map[string]any{"message": final}) {
+			if view.CompletedReplies[path].ID != piReplyID(final) {
 				t.Fatal("completion did not follow pending remap")
 			}
 		})
@@ -246,7 +246,7 @@ func TestUnresolvedPendingSidebarDoesNotExposeProgressOrReadIt(t *testing.T) {
 					}
 				}
 			}()
-			notifier.Observe(client, map[string]any{"type": "agent_start"})
+			notifier.observePi(client, map[string]any{"type": "agent_start"})
 			writeNotificationSession(t, app.config.SessionsRoot, "Pending run")
 			poll := func() error {
 				for _, target := range []string{"/sidebar?no_session=1", "/?no_session=1"} {
@@ -264,7 +264,7 @@ func TestUnresolvedPendingSidebarDoesNotExposeProgressOrReadIt(t *testing.T) {
 			for _, id := range []string{"progress-one", "progress-two"} {
 				appendExternalSessionReply(t, path, id, parent)
 				parent = id
-				notifier.Observe(client, map[string]any{"type": "message_end", "message": notificationMessage(id, id, "stop")})
+				notifier.observePi(client, map[string]any{"type": "message_end", "message": notificationMessage(id, id, "stop")})
 				var err error
 				if unavailable == "rpc lane busy" {
 					err = app.rpcClients.WithExistingClient(context.Background(), pending, false, func(agent.Client) error { return poll() })
@@ -295,9 +295,9 @@ func TestUnresolvedPendingSidebarDoesNotExposeProgressOrReadIt(t *testing.T) {
 
 func TestInterruptedRunRetirementDoesNotRetainClientOrExposeProgress(t *testing.T) {
 	app, notifier, client, path := settledNotificationFixture(t)
-	notifier.Observe(client, map[string]any{"type": "agent_start"})
+	notifier.observePi(client, map[string]any{"type": "agent_start"})
 	appendExternalSessionReply(t, path, "progress", "")
-	notifier.Observe(client, map[string]any{"type": "message_end", "message": notificationMessage("progress", "Progress", "stop")})
+	notifier.observePi(client, map[string]any{"type": "message_end", "message": notificationMessage("progress", "Progress", "stop")})
 	if _, err := app.rpcClients.CloseClientWithoutOperations(path); err != nil {
 		t.Fatal(err)
 	}
@@ -310,17 +310,17 @@ func TestInterruptedRunRetirementDoesNotRetainClientOrExposeProgress(t *testing.
 func TestSidebarKeepsOlderUnreadDuringAbortedRun(t *testing.T) {
 	app, notifier, client, path := settledNotificationFixture(t)
 	assertSettledUnread(t, app, path, false)
-	notifier.Observe(client, map[string]any{"type": "agent_start"})
+	notifier.observePi(client, map[string]any{"type": "agent_start"})
 	appendExternalSessionReply(t, path, "old", "")
-	notifier.Observe(client, notificationAgentEnd(notificationMessage("old", "Older reply", "stop")))
-	notifier.Observe(client, map[string]any{"type": "agent_settled"})
+	notifier.observePi(client, notificationAgentEnd(notificationMessage("old", "Older reply", "stop")))
+	notifier.observePi(client, map[string]any{"type": "agent_settled"})
 	assertSettledUnread(t, app, path, true)
-	notifier.Observe(client, map[string]any{"type": "agent_start"})
+	notifier.observePi(client, map[string]any{"type": "agent_start"})
 	appendExternalSessionReply(t, path, "progress", "old")
-	notifier.Observe(client, map[string]any{"type": "message_end", "message": notificationMessage("progress", "Progress", "stop")})
+	notifier.observePi(client, map[string]any{"type": "message_end", "message": notificationMessage("progress", "Progress", "stop")})
 	assertSettledUnread(t, app, path, true)
-	notifier.Observe(client, notificationAgentEnd(notificationMessage("aborted", "", "aborted")))
-	notifier.Observe(client, map[string]any{"type": "agent_settled"})
+	notifier.observePi(client, notificationAgentEnd(notificationMessage("aborted", "", "aborted")))
+	notifier.observePi(client, map[string]any{"type": "agent_settled"})
 	assertSettledUnread(t, app, path, true)
 	// Reading only the previous completion must clear unread, not expose aborted progress.
 	if err := app.gatewayState.MarkRead(path, 1); err != nil {

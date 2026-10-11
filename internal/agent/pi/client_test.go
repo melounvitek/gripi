@@ -30,7 +30,7 @@ func TestStartedClientsNameThemselvesInTheirEvents(t *testing.T) {
 	stdoutReader, stdoutWriter := io.Pipe()
 	t.Cleanup(func() { _ = stdinReader.Close(); _ = stdoutWriter.Close() })
 	observed := make(chan agent.Client, 1)
-	client, err := start(func(client agent.Client, _ map[string]any) { observed <- client }, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
+	client, err := start(func(client agent.Client, _ agent.Lifecycle) { observed <- client }, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
 		return rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: observer}), nil
 	})
 	if err != nil {

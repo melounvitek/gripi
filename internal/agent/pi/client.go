@@ -36,12 +36,16 @@ var (
 	_ rpc.SessionEntriesReader       = (*Client)(nil)
 )
 
-// start runs a Pi RPC client whose events name the Client that serves it, even those Pi sends before run returns.
-func start(observe func(agent.Client, map[string]any), run func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error)) (agent.Client, error) {
+// start runs a Pi RPC client whose run steps name the Client that serves it, even those Pi sends before run returns.
+func start(observe func(agent.Client, agent.Lifecycle), run func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error)) (agent.Client, error) {
 	client := &Client{}
 	var observer func(*rpc.Client, map[string]any)
 	if observe != nil {
-		observer = func(_ *rpc.Client, event map[string]any) { observe(client, event) }
+		observer = func(_ *rpc.Client, event map[string]any) {
+			if lifecycle, ok := Lifecycle(event); ok {
+				observe(client, lifecycle)
+			}
+		}
 	}
 	rpcClient, err := run(observer)
 	if err != nil {

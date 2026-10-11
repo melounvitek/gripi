@@ -23,37 +23,6 @@ import (
 	"github.com/melounvitek/gripi/internal/sessions"
 )
 
-func TestCompletedAssistantReplyAcceptsOnlyFinalTextFromCompletedAssistantMessages(t *testing.T) {
-	commentarySignature := `{"v":1,"id":"commentary","phase":"commentary"}`
-	tests := []struct {
-		name  string
-		event map[string]any
-		text  string
-		ok    bool
-	}{
-		{name: "final reply", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "content": []any{
-			map[string]any{"type": "text", "text": "working", "textSignature": commentarySignature},
-			map[string]any{"type": "text", "text": "completed"},
-		}}}, text: "completed", ok: true},
-		{name: "partial update", event: map[string]any{"type": "message_update", "message": map[string]any{"role": "assistant", "content": []any{"partial"}}}},
-		{name: "commentary only", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "working", "textSignature": commentarySignature}}}}},
-		{name: "tool-use stop", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "toolUse", "content": []any{"working"}}}},
-		{name: "aborted stop", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "aborted", "content": []any{"partial"}}}},
-		{name: "error stop", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "error", "content": []any{"failed"}}}},
-		{name: "tool message", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "toolResult", "content": []any{"done"}}}},
-		{name: "user message", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "user", "content": []any{"done"}}}},
-		{name: "empty final", event: map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "content": []any{"  "}}}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			text, ok := completedAssistantReply(test.event)
-			if text != test.text || ok != test.ok {
-				t.Fatalf("completedAssistantReply() = %q, %t", text, ok)
-			}
-		})
-	}
-}
-
 func TestRPCSettledReplyFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) {
 	root := t.TempDir()
 	path := writeNotificationSession(t, root, "RPC session")
@@ -82,7 +51,7 @@ func TestRPCSettledReplyFlowsThroughSyncInspectionAndPushDelivery(t *testing.T) 
 	observed := make(chan struct{}, 10)
 	client := &agentpi.Client{}
 	client.Client = rpc.NewClient(stdinWriter, stdoutReader, nil, rpc.ClientOptions{EventObserver: func(_ *rpc.Client, event map[string]any) {
-		notifier.Observe(client, event)
+		notifier.observePi(client, event)
 		observed <- struct{}{}
 	}})
 	t.Cleanup(func() { _ = client.Close() })
@@ -513,25 +482,6 @@ func TestCompletionNotifierCloseCancelsRepliesWaitingForTheGracePeriod(t *testin
 	case <-delivered:
 		t.Fatal("reply delivered while closing during its grace period")
 	default:
-	}
-}
-
-func TestCompletedReplyIDIsStableWithoutNativeMessageIDs(t *testing.T) {
-	event := map[string]any{"type": "message_end", "message": map[string]any{
-		"role": "assistant", "timestamp": float64(1_750_000_000_000), "content": []any{"same reply"},
-	}}
-	first := completedReplyID(event)
-	if second := completedReplyID(event); second != first {
-		t.Fatalf("same reply IDs = %q and %q", first, second)
-	}
-	event["message"].(map[string]any)["timestamp"] = float64(1_750_000_000_001)
-	if next := completedReplyID(event); next == first {
-		t.Fatalf("distinct timestamp reused reply ID %q", next)
-	}
-
-	delete(event["message"].(map[string]any), "timestamp")
-	if fallback := completedReplyID(event); fallback != completedReplyID(event) {
-		t.Fatalf("content fallback is unstable: %q", fallback)
 	}
 }
 
