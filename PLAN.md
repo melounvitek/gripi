@@ -44,7 +44,8 @@ The test starts with an allow-list of today's violations. The list belongs to th
 8. Idiomatic Go: a few small interfaces and typed structs, no layers of ceremony, no speculative features.
 9. **Don't bake in Pi's process model.** The contract must not make an ACP adapter rework it later:
    - A core `Client` is one *session*, not necessarily a process, and `Close` releases that session.
-   - Branching (new/fork/clone) returns a result that says whether the same client now serves another session (`Moved`, as with Pi). The neutral orchestration must not assume it always does; ACP forks create a separate session.
+   - Branching (new/fork/clone) returns a result that says whether the same client now serves another session (`Moved`, as with Pi). The neutral orchestration must not assume it always does; ACP forks create a separate session. For now it fails explicitly on `Moved=false` (see below).
+   - Known ACP prerequisites, deliberately left for the ACP PR because no current adapter exercises them: branches that create a session the client does not serve (`Moved=false`) fail explicitly instead of opening the new session, and `Cancel` doesn't yet report the prompts it dropped (`Cancelled{Restored, Forced}`). Pi's restore stays in the registry's `QueueRestorer`.
    - Submitting a prompt returns once the adapter has accepted it and never waits for the turn to end. ACP has no Pi-style early acknowledgement, so acceptance means the adapter took the prompt, not necessarily that the agent confirmed it.
 
 ## Steps
