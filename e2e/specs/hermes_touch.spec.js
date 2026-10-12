@@ -7,7 +7,7 @@ test("a new Hermes session starts from the dialog on the first tap", async ({ pa
   await page.locator('label[aria-label="Open sessions"]').tap();
   await page.getByRole("button", { name: "New session", exact: true }).tap();
   const dialog = page.getByRole("dialog", { name: "New session", exact: true });
-  await expect(dialog.getByRole("option", { name: /^pi\b/ })).toBeVisible();
+  await expect(dialog.locator("[data-new-session-project]").first()).toBeVisible();
 
   await dialog.getByRole("option", { name: /hermes/ }).tap();
   await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
