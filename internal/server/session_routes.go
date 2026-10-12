@@ -200,6 +200,9 @@ func sessionViewURL(view *pageView) string {
 	if view.SelectedProject != "" {
 		values.Set("project", view.SelectedProject)
 	}
+	if view.SelectedAgent != "" {
+		values.Set("agent", view.SelectedAgent)
+	}
 	if view.SearchQuery != "" {
 		values.Set("session_search", view.SearchQuery)
 	}
