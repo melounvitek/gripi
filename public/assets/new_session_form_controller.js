@@ -43,8 +43,6 @@ export class NewSessionFormController {
     if (!form?._newSessionFormState) return;
     Object.assign(form._newSessionFormState, { expanded: false, fork });
     form.querySelector("[data-new-session-fork-from]").value = fork?.path || "";
-    const agentValue = form.querySelector("[data-new-session-agent-value]");
-    if (agentValue) agentValue.value = "";
     form.closest("[data-modal]").querySelector("#new-session-modal-title").textContent = fork ? "Continue in another folder" : "New session";
     const note = form.querySelector("[data-new-session-fork-note]");
     note.textContent = fork ? `Pi forks “${fork.name}” into the folder you pick. The original stays as it is.` : "";
@@ -210,7 +208,7 @@ export class NewSessionFormController {
       if (state.listing && !state.listing.error) list.append(this.row("start", "·", `${state.fork ? "Continue" : "Start"} in ${where} itself`, state.folder));
       const up = this.parent(state.folder);
       if (up !== state.folder) list.append(this.row("up", "↑", `Up to ${this.displayPath(form, up)}`, up));
-      if (projects.length) list.append(this.row("back", "←", "Back to projects"));
+      if (projects.length || (hermes && !state.fork)) list.append(this.row("back", "←", "Back to projects"));
 
       const place = this.document.createElement("span");
       place.className = "new-session-where";
@@ -240,13 +238,12 @@ export class NewSessionFormController {
 
   activate(form, option) {
     const { newSessionAction: action, newSessionPath: path, newSessionProject: project, newSessionAgent: agentName } = option.dataset;
-    if (agentName) {
+    if (agentName || project || action === "folder" || action === "start") {
+      // Any start sets the agent, so a project picked after Hermes failed to start gets Pi.
+      const agentValue = form.querySelector("[data-new-session-agent-value]");
+      if (agentValue) agentValue.value = agentName || "";
       // A Hermes session belongs to no project, so it starts in the home folder.
-      form.querySelector("[data-new-session-agent-value]").value = agentName;
-      form.querySelector("[data-new-session-cwd-value]").value = form.dataset.home;
-      form.requestSubmit();
-    } else if (project || action === "folder" || action === "start") {
-      form.querySelector("[data-new-session-cwd-value]").value = project || path;
+      form.querySelector("[data-new-session-cwd-value]").value = agentName ? form.dataset.home : project || path;
       form.requestSubmit();
     } else if (action === "more") {
       form._newSessionFormState.expanded = true;

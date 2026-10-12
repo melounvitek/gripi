@@ -255,7 +255,12 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	view.ExternalFollow = externalFollow
 	if router, ok := app.adapter.(*agent.Router); ok {
 		view.Agents = router.Names()
-		view.HermesProfile = hermesProfile(app.config.HermesPath)
+		// Hermes itself runs the default profile, and the wrapper that `hermes profile alias` creates is named after its
+		// profile.
+		view.HermesProfile = filepath.Base(app.config.HermesPath)
+		if view.HermesProfile == "hermes" {
+			view.HermesProfile = "default"
+		}
 		if selected := params.Get("agent"); slices.Contains(view.Agents, selected) {
 			view.SelectedAgent = selected
 		}
@@ -1154,15 +1159,6 @@ func agentLabel(name string) string {
 		return "Hermes"
 	}
 	return "Pi"
-}
-
-// hermesProfile names the profile that GRIPI_HERMES runs: Hermes itself runs the default one, and the wrapper that
-// `hermes profile alias` creates is named after its profile.
-func hermesProfile(path string) string {
-	if name := filepath.Base(path); name != "hermes" {
-		return name
-	}
-	return "default"
 }
 
 // agentGlyph marks an agent in the sidebar and the session header: π for Pi, and Hermes's caduceus.

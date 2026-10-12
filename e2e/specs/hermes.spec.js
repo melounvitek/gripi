@@ -144,6 +144,25 @@ test("typing its name in the new session dialog starts Hermes", async ({ page })
   await expect(page.locator(".session-header-agent")).toHaveText("hermes");
 });
 
+test("a project picked after Hermes failed to start starts Pi", async ({ page }) => {
+  let failed = false;
+  await page.route("**/sessions/new_at_cwd", (route) => {
+    if (failed) return route.continue();
+    failed = true;
+    return route.fulfill({ status: 502, json: { error: "Hermes could not start" } });
+  });
+  await page.keyboard.press("Control+n");
+  const dialog = page.getByRole("dialog", { name: "New session", exact: true });
+  await dialog.getByRole("option", { name: /^hermes\s*Hermes Agent$/ }).click();
+  await expect(dialog).toContainText("Hermes could not start");
+
+  await dialog.locator("[data-new-session-project]").first().click();
+  await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
+  await expect(page.locator(".session-header-agent")).toHaveAttribute("data-agent", "pi");
+  const deleted = await page.request.post("/sessions/delete", { form: { session: new URL(page.url()).searchParams.get("session") } });
+  expect(deleted.ok()).toBe(true);
+});
+
 test("Hermes reads its own / and ! commands", async ({ page }) => {
   for (const command of ["/export", "!ls"]) {
     await sendPrompt(page, command);
