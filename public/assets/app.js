@@ -1649,7 +1649,7 @@ function renderEvent(event) {
 
 function nextEventPollDelay(failed = false) {
   // A voice call waiting for Hermes's reply polls at the usual pace even while hidden, such as in a window behind others.
-  const delay = eventPollingDelay(document.hidden && voiceCallController.awaitedReply === null, composerState?.dataset.state, emptyEventPollCount, failed);
+  const delay = eventPollingDelay(document.hidden && !voiceCallController.waiting, composerState?.dataset.state, emptyEventPollCount, failed);
   return !document.hidden && sessionSyncBlocked() ? Math.min(delay, 1000) : delay;
 }
 
@@ -1793,7 +1793,6 @@ function sessionSyncRefreshRequired(sync) {
 // Unlike switching sessions, this leaves the composer alone, so typing carries on while the conversation catches up.
 async function refreshSessionInBackground(controller, generation) {
   const session = currentSessionPath();
-  const awaitedReply = voiceCallController.awaitedReply;
   const switchGeneration = sessionSwitchGeneration.capture();
   const current = () => !controller.signal.aborted && generation === sessionViewGeneration &&
     sessionSwitchGeneration.current(switchGeneration) && session === currentSessionPath();
@@ -1845,7 +1844,7 @@ async function refreshSessionInBackground(controller, generation) {
   liveMessageRenderer.bind();
   restoreSessionLiveState({ resetIdleState: true });
   // The refresh skipped the events that would end a voice call's wait, so the reply comes from the page.
-  if (!liveAgentRunning) voiceCallController.replyFinishedOnPage(awaitedReply, [...conversationScroll.querySelectorAll("article.message")].at(-1));
+  if (!liveAgentRunning) voiceCallController.replyFinishedOnPage([...conversationScroll.querySelectorAll("article.message")]);
   resetEventCursor();
   updateSessionHeaderName(payload.title);
   refreshSessionStatus(generation).catch(() => {});

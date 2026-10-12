@@ -40,8 +40,8 @@ export class VoiceConversation {
     this.levelAt = 0;
     this.muted = false;
     this.error = null;
-    // Whether Hermes is working on a turn whose reply the call waits for: its prompt was taken, or it was already running.
-    this.awaitingReply = false;
+    // What the call last said to Hermes, whose reply it waits for while thinking; null when it waits for a turn it found running.
+    this.transcript = null;
     // Bumped on every state change; async work started in a state is dropped once it has moved on.
     this.generation = 0;
     this.audioContext = null;
@@ -94,12 +94,8 @@ export class VoiceConversation {
     this.timer = setInterval(() => this.tick(), SAMPLE_MS);
     this.window.document.addEventListener("visibilitychange", this.onVisibilityChange);
     this.lockScreen();
-    if (busy()) {
-      this.setState("thinking");
-      this.awaitingReply = true;
-    } else {
-      this.listen();
-    }
+    if (busy()) this.setState("thinking");
+    else this.listen();
   }
 
   setMuted(muted) {
@@ -231,11 +227,11 @@ export class VoiceConversation {
   }
 
   async ask(transcript) {
+    this.transcript = transcript;
     this.setState("thinking");
     const generation = this.generation;
     try {
       await this.send(VOICE_PREFIX + transcript);
-      if (generation === this.generation) this.awaitingReply = true;
     } catch (error) {
       if (generation === this.generation) this.listen(error.message);
     }
@@ -305,7 +301,6 @@ export class VoiceConversation {
 
   setState(state, error = null) {
     this.generation += 1;
-    this.awaitingReply = false;
     this.state = state;
     this.error = error;
     this.level = 0;

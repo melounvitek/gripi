@@ -39,9 +39,9 @@ export class VoiceCallController {
     this.elements.end.addEventListener("click", () => this.end());
   }
 
-  // Names the call's wait for the reply to a turn Hermes is working on, or null when it isn't waiting.
-  get awaitedReply() {
-    return this.conversation?.awaitingReply ? this.conversation.generation : null;
+  // Whether the call waits for Hermes's reply.
+  get waiting() {
+    return this.conversation?.state === "thinking";
   }
 
   start() {
@@ -55,16 +55,19 @@ export class VoiceCallController {
     this.conversation?.replyFinished(text);
   }
 
-  // Ends the wait with the page's last message, for a refresh that skipped the events that would end it. Only a wait that
-  // began before the refresh counts: an older page can't hold the reply to a later turn.
-  replyFinishedOnPage(awaitedReply, lastMessage) {
-    if (awaitedReply === null || awaitedReply !== this.awaitedReply) return;
-    const reply = lastMessage?.dataset.finalAssistantResponse === "true" ? lastMessage.querySelector(".message-body").cloneNode(true) : null;
+  // Ends the wait with the reply on the page, for a refresh that skipped the events that would end it. The page must end
+  // with the reply to what the call said, because a page from before Hermes took the message ends with an older turn.
+  replyFinishedOnPage(messages) {
+    const transcript = this.conversation?.transcript;
+    const said = messages.findLast((message) => message.dataset.role === "user")?.querySelector(".message-body")?.textContent.trim();
+    const last = messages.at(-1);
+    if (!this.waiting || (transcript !== null && said !== transcript) || last?.dataset.finalAssistantResponse !== "true") return;
+    const reply = last.querySelector(".message-body").cloneNode(true);
     // Code and tables are left out, as speaking a reply's Markdown leaves them out.
-    reply?.querySelectorAll("pre, table, .code-block-copy-button").forEach((element) => element.remove());
+    reply.querySelectorAll("pre, table, .code-block-copy-button").forEach((element) => element.remove());
     // A copy has no layout to separate its blocks, so each one ends a paragraph.
-    reply?.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6").forEach((block) => block.append("\n\n"));
-    this.replyFinished(reply?.textContent ?? "");
+    reply.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6").forEach((block) => block.append("\n\n"));
+    this.replyFinished(reply.textContent);
   }
 
   end() {

@@ -118,20 +118,6 @@ test("a call whose microphone arrives after Hermes finished listens", async (t) 
   assert.equal(call.state(), "listening");
 });
 
-test("the call waits for a reply only once Hermes took the message", async (t) => {
-  const taken = deferred();
-  const call = voiceCall(t, { transcripts: ["Check the backups"], send: () => taken.promise });
-  await call.conversation.start();
-
-  await call.utter();
-  assert.equal(call.state(), "thinking");
-  assert.equal(call.conversation.awaitingReply, false);
-
-  taken.resolve();
-  await flush();
-  assert.equal(call.conversation.awaitingReply, true);
-});
-
 test("talking over the reply stops it and listens", async (t) => {
   const call = voiceCall(t);
   await call.conversation.start({ busy: () => true });

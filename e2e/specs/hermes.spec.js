@@ -197,21 +197,27 @@ test("a refused microphone ends the call and the composer says why", async ({ pa
   await expect(page.getByLabel("Message to Hermes")).toBeVisible();
 });
 
-test("a refresh that skipped a voice call's events speaks the reply on the page, for a wait that began before it", async ({ page }) => {
+test("a refresh that skipped a voice call's events speaks the reply to what the call said", async ({ page }) => {
   const spoken = await page.evaluate(async () => {
     const { VoiceCallController } = await import("/assets/voice_call_controller.js");
     const controller = new VoiceCallController(window, {});
     const replies = [];
-    controller.conversation = { awaitingReply: true, generation: 4, replyFinished: (text) => replies.push(text) };
-    const reply = document.createElement("article");
-    reply.dataset.finalAssistantResponse = "true";
-    reply.innerHTML = '<div class="message-body"><p>The backup finished.</p><blockquote><p>Run it again with</p>' +
+    controller.conversation = { state: "thinking", transcript: "Run the backup", replyFinished: (text) => replies.push(text) };
+    const message = (role, html, final = false) => {
+      const article = document.createElement("article");
+      article.dataset.role = role;
+      if (final) article.dataset.finalAssistantResponse = "true";
+      article.innerHTML = `<div class="message-body">${html}</div>`;
+      return article;
+    };
+    const reply = message("assistant", "<p>The backup finished.</p><blockquote><p>Run it again with</p>" +
       '<div class="message-code-block"><pre>npm run backup</pre><button class="code-block-copy-button">Copy</button></div>' +
-      "<p>It takes ten minutes.</p></blockquote><table><tr><td>photos</td></tr></table></div>";
+      "<p>It takes ten minutes.</p></blockquote><table><tr><td>photos</td></tr></table>", true);
 
-    controller.replyFinishedOnPage(null, reply);
-    controller.replyFinishedOnPage(3, reply);
-    controller.replyFinishedOnPage(4, reply);
+    // A page from before Hermes took the message ends with the turn before.
+    controller.replyFinishedOnPage([message("user", "Check the disks"), message("assistant", "<p>The disks are fine.</p>", true)]);
+    controller.replyFinishedOnPage([message("user", "Run the backup")]);
+    controller.replyFinishedOnPage([message("user", "Run the backup"), reply]);
     return replies;
   });
 
