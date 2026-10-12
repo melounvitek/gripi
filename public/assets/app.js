@@ -55,6 +55,7 @@ import { TreeSessionController } from "./tree_session_controller.js";
 import { ImageViewerController } from "./image_viewer_controller.js";
 import { NotificationPresenceController } from "./notification_presence.js";
 import { WebPushController } from "./web_push.js";
+import { VoiceCallController } from "./voice_call_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
@@ -221,6 +222,15 @@ const commandPaletteController = new CommandPaletteController(document, {
   piCommands: piPaletteCommands
 });
 const environmentController = new EnvironmentController(document, window, { openModal });
+const voiceCallController = new VoiceCallController(window, {
+  // Like the palette's commands, without the composer's draft and attachments.
+  send: async (text) => {
+    const sent = await sendPrompt(text, null, { composer: false });
+    if (sent !== true) throw new Error(sent || "The message was not sent");
+  },
+  busy: () => liveAgentRunning,
+  failed: (message) => showCurrentActiveTask("error", message)
+});
 const treeSessionController = new TreeSessionController(document, window, {
   currentSessionPath: () => currentSessionPath(),
   addSessionViewFormParams: (formData) => addSessionViewFormParams(formData),
@@ -287,6 +297,7 @@ function bindSessionDom() {
   conversationScroll = conversationController.element;
   liveMessageRenderer.bind();
   currentSessionFindController.bind();
+  voiceCallController.bind(promptForm);
   sessionStatusBar = document.getElementById("session-status-bar");
   const boundSessionPath = currentSessionPath();
   if (boundSessionPath !== lastBoundSessionPath) {
@@ -1614,6 +1625,7 @@ function renderEvent(event) {
     const reply = pendingFinalAssistantReply;
     pendingFinalAssistantReply = null;
     notifyFinalAssistantReply(reply);
+    voiceCallController.replyFinished(reply ? liveMessageParser.finalAssistantReplyText(reply) : "");
     liveAgentRunning = false;
     liveBusySince = null;
     if (renderErrorEvent(event)) {
@@ -1636,7 +1648,8 @@ function renderEvent(event) {
 }
 
 function nextEventPollDelay(failed = false) {
-  const delay = eventPollingDelay(document.hidden, composerState?.dataset.state, emptyEventPollCount, failed);
+  // A voice call waiting for Hermes's reply polls at the usual pace even while hidden, such as in a window behind others.
+  const delay = eventPollingDelay(document.hidden && !voiceCallController.waiting, composerState?.dataset.state, emptyEventPollCount, failed);
   return !document.hidden && sessionSyncBlocked() ? Math.min(delay, 1000) : delay;
 }
 
@@ -1830,6 +1843,11 @@ async function refreshSessionInBackground(controller, generation) {
   if (clearQueue) clearQueue.disabled = sessionSyncBlocked();
   liveMessageRenderer.bind();
   restoreSessionLiveState({ resetIdleState: true });
+  // The refresh skipped the events that would end a voice call's wait, so the reply comes from the page: its last message.
+  if (voiceCallController.waiting && !liveAgentRunning) {
+    const last = [...conversationScroll.querySelectorAll("article.message")].at(-1);
+    voiceCallController.replyFinished(last?.dataset.finalAssistantResponse === "true" ? last.querySelector(".message-body").innerText : "");
+  }
   resetEventCursor();
   updateSessionHeaderName(payload.title);
   refreshSessionStatus(generation).catch(() => {});
@@ -2099,6 +2117,8 @@ async function submitPrompt(event) {
 }
 
 // Without the composer, the message goes alone: the draft and attachments are neither sent, cleared nor restored.
+// It resolves to true once the gateway takes the message, to the error it shows when the gateway refuses it, and to
+// nothing when the message is abandoned, such as for another view.
 async function sendPrompt(rawMessage, streamingBehavior, { composer = true } = {}) {
   const handleBuiltinCommand = streamingBehavior !== "follow_up" && !hermesSession();
   const exportCommand = handleBuiltinCommand ? sessionExportSlashCommand(rawMessage) : null;
@@ -2194,7 +2214,9 @@ async function sendPrompt(rawMessage, streamingBehavior, { composer = true } = {
     showStatus(message, true);
   };
 
+  let refusal = null;
   const showPromptFailure = (errorMessage, { retryableContention = false } = {}) => {
+    refusal = errorMessage;
     restoreSubmittedPromptInput();
     clearPendingCompaction();
     if (queuedPrompt) {
@@ -2239,7 +2261,7 @@ async function sendPrompt(rawMessage, streamingBehavior, { composer = true } = {
       return;
     }
     showPromptFailure("Prompt failed to send");
-    return;
+    return refusal;
   }
   if (stopHandlingChangedSubmittedView()) return;
   if (submittedPromptSuperseded()) return;
@@ -2356,6 +2378,7 @@ async function sendPrompt(rawMessage, streamingBehavior, { composer = true } = {
     setComposerState("running", WORKING_LABEL);
   }
   conversationController.scrollToBottom();
+  return refusal ?? true;
 }
 
 async function clearQueuedMessages(event) {
@@ -2753,6 +2776,7 @@ async function copyText(text) {
 }
 
 function resetSessionViewState() {
+  voiceCallController.end();
   pendingFinalAssistantReply = null;
   currentSessionFindController.close({ restoreFocus: false });
   imageViewerController.close();

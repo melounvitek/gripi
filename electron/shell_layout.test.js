@@ -92,8 +92,17 @@ test("desktop gateway webviews allow same-origin clipboard writes", () => {
   const main = read("electron/main.js");
 
   assert.match(main, /const allowedGatewayPermissions = new Set\(\["notifications", "clipboard-sanitized-write"\]\);/);
-  assert.match(main, /allowedGatewayPermissions\.has\(permission\) && requestingOrigin === allowedOrigin/);
-  assert.match(main, /allowedGatewayPermissions\.has\(permission\) && details\.requestingOrigin === allowedOrigin/);
+  assert.match(main, /\(allowedGatewayPermissions\.has\(permission\) \|\| microphone\) && requestingOrigin === allowedOrigin/);
+  assert.match(main, /\(allowedGatewayPermissions\.has\(permission\) \|\| microphone\) && details\.requestingOrigin === allowedOrigin/);
+});
+
+test("desktop gateway webviews allow the gateway the microphone but never the camera", () => {
+  const main = read("electron/main.js");
+  const build = JSON.parse(read("package.json")).build;
+
+  assert.match(main, /const microphone = permission === "media" && details\.mediaType === "audio";/);
+  assert.match(main, /const microphone = permission === "media" && details\.mediaTypes\?\.length > 0 && details\.mediaTypes\.every\(\(type\) => type === "audio"\);/);
+  assert.match(build.mac.extendInfo.NSMicrophoneUsageDescription, /voice conversations/);
 });
 
 test("desktop gateway webviews install an app clipboard bridge", () => {

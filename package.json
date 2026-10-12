@@ -43,6 +43,9 @@
       "icon": "electron/assets/icon.icns",
       "identity": "-",
       "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Gripi uses the microphone for voice conversations with Hermes."
+      },
       "target": [
         "dmg",
         "zip"

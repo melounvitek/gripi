@@ -3,6 +3,7 @@ import { renderTextWithLinks } from "./dom.js";
 import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimeLabel, messageTimestampKey, normalizedMessageText, stableTextHash } from "./formatting.js";
 import { finishedMarkdownBlocks } from "./paragraph_streaming.js";
 import { hasTerminalControls, renderTerminalOutput } from "./terminal_output_renderer.js";
+import { spokenText } from "./voice_conversation.js";
 
 const TERMINAL_OUTPUT_EXCLUDED_TOOLS = new Set(["read", "edit", "write"]);
 const PERSISTED_TOOL_REPLAY_LIMIT = 16;
@@ -234,7 +235,8 @@ export class LiveMessageRenderer {
     role.textContent = options.customType ? `[${options.customType}]` : messageRoleLabel(roleName);
 
     const markdownMessage = ["assistant", "custom"].includes(roleName) || options.markdown;
-    const displayText = options.thinking && this.hideThinkingBlock ? "Thinking..." : text;
+    const spoken = roleName === "user" ? spokenText(text) : null;
+    const displayText = options.thinking && this.hideThinkingBlock ? "Thinking..." : spoken ?? text;
     const body = this.document.createElement(markdownMessage ? "div" : "pre");
     body.className = activity ? "message-body message-body--thinking message-body--markdown" : (markdownMessage ? "message-body message-body--markdown" : "message-body");
     if (options.toolPreparation) {
@@ -253,6 +255,12 @@ export class LiveMessageRenderer {
 
     header.append(role);
     if (meta.textContent) header.append(meta);
+    if (spoken !== null) {
+      const mark = this.document.createElement("span");
+      mark.className = "message-voice-mark";
+      mark.textContent = "voice";
+      header.append(mark);
+    }
     if (roleName === "assistant" && !activity) header.append(this.makeCopyButton());
     article.append(header);
     article.append(body);
@@ -905,7 +913,7 @@ export class LiveMessageRenderer {
     if (entry.compact !== segment.compact) return null;
     const displayText = segment.thinking && this.hideThinkingBlock ?
       "Thinking..." :
-      (roleName === "user" && entry.userDisplayText ? entry.userDisplayText : segment.text);
+      (roleName === "user" ? entry.userDisplayText || (spokenText(segment.text) ?? segment.text) : segment.text);
 
     if (segment.compact) {
       this.renderToolSummary(entry.summaryText, segment.summaryParts, segment.summary);

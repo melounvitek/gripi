@@ -1,6 +1,6 @@
 import { speechSentences } from "./speech_text.js";
 
-// Hermes CLI's voice prefix, so Hermes answers spoken messages briefly.
+// Hermes CLI's voice prefix, so Hermes answers spoken messages briefly. voicePrefix in internal/server/views.go is the same.
 export const VOICE_PREFIX = "[Voice input — respond concisely and conversationally, 2-3 sentences max. No code blocks or markdown.] ";
 
 // Timings and levels follow Hermes Desktop's voice conversation.
@@ -53,7 +53,12 @@ export class VoiceConversation {
     this.recorder = null;
     this.source = null;
     this.wakeLock = null;
-    this.onVisibilityChange = () => (this.window.document.hidden ? this.pause() : this.resume());
+    // A hidden page releases the wake lock and may suspend audio, so a visible one takes them back.
+    this.onVisibilityChange = () => {
+      if (this.window.document.hidden) return;
+      this.lockScreen();
+      this.audioContext.resume().catch(() => {});
+    };
   }
 
   get active() {
@@ -84,6 +89,10 @@ export class VoiceConversation {
     this.analyser.fftSize = 256;
     this.samples = new Uint8Array(this.analyser.fftSize);
     audioContext.createMediaStreamSource(stream).connect(this.analyser);
+    // Replies play through their own analyser, so the meter can show Hermes speaking.
+    this.playbackAnalyser = audioContext.createAnalyser();
+    this.playbackAnalyser.fftSize = 256;
+    this.playbackAnalyser.connect(audioContext.destination);
     // A timer rather than requestAnimationFrame, which stops whenever the page isn't rendered.
     this.timer = setInterval(() => this.tick(), SAMPLE_MS);
     this.window.document.addEventListener("visibilitychange", this.onVisibilityChange);
@@ -122,35 +131,22 @@ export class VoiceConversation {
   }
 
   listen(error = null) {
-    if (this.window.document.hidden) {
-      this.setState("paused", error);
-      return;
-    }
     this.setState("listening", error);
     if (!this.muted) this.record();
   }
 
-  // Hiding the page (a locked iPhone stops the microphone) pauses listening and speaking;
-  // transcribing and thinking carry on, and pause when they would record or speak next.
-  pause() {
-    if (this.state !== "listening" && this.state !== "speaking") return;
-    this.discardRecording();
-    this.stopPlayback();
-    this.setState("paused");
-  }
-
-  resume() {
-    this.lockScreen();
-    this.audioContext.resume().catch(() => {});
-    if (this.state === "paused") this.listen();
-  }
-
   tick() {
+    // iOS may end the microphone while the screen is locked, and only a tap can ask for it again.
+    if (this.stream.getAudioTracks().every((track) => track.readyState === "ended")) {
+      this.end("The microphone stopped. Start the call again.");
+      return;
+    }
     const now = Date.now();
     const sampling = !this.muted && (this.state === "listening" || this.state === "speaking");
-    const level = sampling ? this.measure() : 0;
-    if (level !== this.level && now - this.levelAt >= LEVEL_REPORT_MS) {
-      this.level = level;
+    const level = sampling ? this.measure(this.analyser) : 0;
+    const shown = this.state === "speaking" ? this.measure(this.playbackAnalyser) : level;
+    if (shown !== this.level && now - this.levelAt >= LEVEL_REPORT_MS) {
+      this.level = shown;
       this.levelAt = now;
       this.emit();
     }
@@ -158,8 +154,8 @@ export class VoiceConversation {
     else if (this.state === "speaking") this.detectBargeIn(level, now);
   }
 
-  measure() {
-    this.analyser.getByteTimeDomainData(this.samples);
+  measure(analyser) {
+    analyser.getByteTimeDomainData(this.samples);
     let sum = 0;
     for (const sample of this.samples) sum += (sample - 128) ** 2;
     return Math.min(1, Math.sqrt(sum / this.samples.length) / 42);
@@ -244,7 +240,7 @@ export class VoiceConversation {
 
   async speak(text) {
     const sentences = speechSentences(text);
-    if (!sentences.length || this.window.document.hidden) {
+    if (!sentences.length) {
       this.listen();
       return;
     }
@@ -279,7 +275,7 @@ export class VoiceConversation {
     return new Promise((resolve) => {
       this.source = this.audioContext.createBufferSource();
       this.source.buffer = buffer;
-      this.source.connect(this.audioContext.destination);
+      this.source.connect(this.playbackAnalyser);
       this.source.onended = resolve;
       this.source.start();
     });

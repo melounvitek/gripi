@@ -362,5 +362,7 @@ export const hermes = {
     denied: "Denied by the user",
     // Hermes stops waiting for an answer to this one at once, as after its approvals.timeout.
     expiringPrompt: "Delete the build folder unless I am too slow"
-  }
+  },
+  // What the fake dashboard hears in every recording.
+  voice: { transcript: "What is in the fixture project?" }
 };

@@ -297,11 +297,14 @@ function installGatewayNavigationGuard(guestContents, allowedOrigin, partition) 
 function installGatewayPermissionHandlers(partition, allowedOrigin) {
   const gatewaySession = partition ? session.fromPartition(partition) : session.defaultSession;
   const allowedGatewayPermissions = new Set(["notifications", "clipboard-sanitized-write"]);
-  gatewaySession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
-    return allowedGatewayPermissions.has(permission) && requestingOrigin === allowedOrigin;
+  // Voice conversations need the microphone, and nothing needs the camera.
+  gatewaySession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
+    const microphone = permission === "media" && details.mediaType === "audio";
+    return (allowedGatewayPermissions.has(permission) || microphone) && requestingOrigin === allowedOrigin;
   });
   gatewaySession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
-    callback(allowedGatewayPermissions.has(permission) && details.requestingOrigin === allowedOrigin);
+    const microphone = permission === "media" && details.mediaTypes?.length > 0 && details.mediaTypes.every((type) => type === "audio");
+    callback((allowedGatewayPermissions.has(permission) || microphone) && details.requestingOrigin === allowedOrigin);
   });
 }
 

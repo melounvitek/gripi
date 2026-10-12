@@ -91,6 +91,26 @@ func TestMessageTemplateShowsShortTimeWithFullTitle(t *testing.T) {
 	}
 }
 
+func TestMessageTemplateShowsASpokenMessageWithoutItsPrefixAndWithAVoiceMark(t *testing.T) {
+	timestamp := time.Now().Add(-time.Minute)
+	message := &agent.Message{Role: "user", Text: voicePrefix + "What time is it?", Timestamp: timestamp}
+	templates, err := template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rendered strings.Builder
+	if err := templates.ExecuteTemplate(&rendered, "message", messageData{View: &pageView{}, Message: message}); err != nil {
+		t.Fatal(err)
+	}
+
+	html := rendered.String()
+	mark := messageTimeLabel(timestamp, time.Now()) + `</div><span class="message-voice-mark">voice</span>`
+	if !strings.Contains(html, `<pre class="message-body">What time is it?</pre>`) || strings.Contains(html, "Voice input") || !strings.Contains(html, mark) {
+		t.Fatalf("spoken message = %s", html)
+	}
+}
+
 func TestMessageTemplateCollapsesLongSingleLineToolOutput(t *testing.T) {
 	message := &agent.Message{
 		Role:     "toolResult",

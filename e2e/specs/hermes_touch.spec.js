@@ -18,6 +18,17 @@ test("a new Hermes session starts from the dialog on the first tap", async ({ pa
   await expectRunFinished(page);
 });
 
+test("a voice conversation starts and ends on the first taps", async ({ page }) => {
+  await page.goto(`/?session=${encodeURIComponent(`hermes:${hermes.saved.id}`)}`);
+  const call = page.getByRole("group", { name: "Voice conversation with Hermes" });
+  await page.getByRole("button", { name: "Start a voice conversation" }).tap();
+  await expect(call.locator("[data-voice-call-state]")).toHaveText("listening");
+
+  await call.getByRole("button", { name: "end", exact: true }).tap();
+  await expect(call).toBeHidden();
+  await expect(page.getByLabel("Message to Hermes")).toBeVisible();
+});
+
 test("the agent filter works on the first taps", async ({ page }) => {
   await page.goto("/");
   await page.locator('label[aria-label="Open sessions"]').tap();

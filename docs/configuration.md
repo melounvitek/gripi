@@ -245,6 +245,8 @@ Gripi logs in with the dashboard's password login, its `basic` provider, which `
 
 Browsers allow the microphone only over HTTPS or on `localhost`, so other devices need [HTTPS](examples.md#https-through-tailscale-serve).
 
+The waveform button next to ＋ in a Hermes session's composer starts a conversation. Pause to send what you said, talk over a reply to interrupt it, and say “stop” or press `end` to finish.
+
 ## Session location
 
 Gripi lists sessions from `~/.pi/agent/sessions`. If Pi stores sessions somewhere else, for example because `PI_CODING_AGENT_DIR` is set, point Gripi there:

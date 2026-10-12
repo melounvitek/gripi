@@ -145,35 +145,40 @@ test("muting stops recording until the microphone is back", async (t) => {
   assert.equal(call.recorders.at(-1).state, "recording");
 });
 
-test("hiding the page pauses listening and speaking, and showing it listens again", async (t) => {
+test("the meter follows Hermes's voice while it speaks", async (t) => {
   const call = voiceCall(t);
   await call.conversation.start({ busy: true });
-
-  call.hide();
-  call.show();
-  assert.equal(call.state(), "thinking");
-
   call.conversation.replyFinished("A reply that is long enough to be spoken on its own.");
   await flush();
-  call.hide();
-  assert.equal(call.state(), "paused");
-  assert.equal(call.playing.stopped, true);
 
-  call.show();
-  assert.equal(call.state(), "listening");
-  call.level = 0.5;
-  await call.wait(300);
+  call.playbackLevel = 0.5;
+  await call.wait(500);
+  assert.equal(call.changes.at(-1).level, 0.5);
+  assert.equal(call.state(), "speaking");
+});
+
+test("a hidden page keeps the call going and takes the wake lock back when shown", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Are you still there?"] });
+  await call.conversation.start();
+
   call.hide();
-  assert.equal(call.state(), "paused");
-  assert.equal(call.recorders[0].state, "inactive");
-  await call.wait(2000);
-  assert.deepEqual(call.requests.filter((request) => request.url === "/voice/transcribe"), []);
+  await call.utter();
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Are you still there?`]);
 
   const locks = call.locks.length;
   call.show();
+  await flush();
   assert.equal(call.locks.length, locks + 1);
-  assert.equal(call.state(), "listening");
-  assert.equal(call.recorders.at(-1).state, "recording");
+});
+
+test("a microphone that stops ends the call", async (t) => {
+  const call = voiceCall(t);
+  await call.conversation.start();
+
+  call.track.readyState = "ended";
+  await call.wait(50);
+  assert.equal(call.state(), "off");
+  assert.equal(call.changes.at(-1).error, "The microphone stopped. Start the call again.");
 });
 
 test("ending the call releases the microphone and wake lock and ignores late results", async (t) => {
@@ -254,8 +259,8 @@ test("spoken messages are recognised by the voice prefix", () => {
 
 function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=opus"], send, speakError, microphoneError } = {}) {
   t.mock.timers.enable({ apis: ["setInterval", "Date"] });
-  const call = { level: 0, sequence: [], requests: [], sent: [], played: [], changes: [], recorders: [], locks: [] };
-  const track = { enabled: true, stopped: false, stop() { this.stopped = true; } };
+  const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], played: [], changes: [], recorders: [], locks: [] };
+  const track = { enabled: true, readyState: "live", stopped: false, stop() { this.stopped = true; } };
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
   const document = new FakeEventTarget();
   document.hidden = false;
@@ -270,7 +275,12 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
     async resume() { call.sequence.push("resume-audio"); this.state = "running"; }
     async close() { this.state = "closed"; }
     createAnalyser() {
-      return { getByteTimeDomainData: (samples) => samples.fill(128 + Math.round(call.level * 42)) };
+      const analyser = {
+        // The analyser that plays into the speakers measures the reply, the other the microphone.
+        connect(node) { analyser.playback = node === call.audioContext.destination; },
+        getByteTimeDomainData: (samples) => samples.fill(128 + Math.round((analyser.playback ? call.playbackLevel : call.level) * 42))
+      };
+      return analyser;
     }
     createMediaStreamSource() { return { connect() {} }; }
     async decodeAudioData(buffer) { return { text: new TextDecoder().decode(buffer) }; }

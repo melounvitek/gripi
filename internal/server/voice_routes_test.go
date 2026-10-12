@@ -8,10 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	gripi "github.com/melounvitek/gripi"
+	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
@@ -74,6 +77,39 @@ func TestVoiceRoutesExistOnlyWhenVoiceIsOn(t *testing.T) {
 	}
 	if response := postVoice(handler, "/voice/speak", "application/x-www-form-urlencoded", "text=Hello"); response.Code != http.StatusNotFound {
 		t.Fatalf("speak without voice = %d", response.Code)
+	}
+}
+
+func TestOnlyHermesSessionsOfferAVoiceConversationWhenVoiceIsOn(t *testing.T) {
+	cfg := hermesConfig(t, map[string]any{"sessionId": "hermes-chat", "cwd": t.TempDir(), "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z"})
+	piSession := filepath.Join(cfg.SessionsRoot, "pi.jsonl")
+	if err := os.MkdirAll(cfg.SessionsRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	records := `{"type":"session","version":3,"id":"pi-chat","timestamp":"2026-02-01T10:00:00Z","cwd":"` + cfg.Home + `"}` + "\n" +
+		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-02-01T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"Pi chat"}]}}` + "\n"
+	if err := os.WriteFile(piSession, []byte(records), 0600); err != nil {
+		t.Fatal(err)
+	}
+	page := func(cfg config.Config, session string) string {
+		handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+		return getPage(t, handler, "/?session="+url.QueryEscape(session))
+	}
+	const button = `aria-label="Start a voice conversation"`
+
+	if strings.Contains(page(cfg, "hermes:hermes-chat"), button) {
+		t.Error("a Hermes session offers voice while it is off")
+	}
+	cfg.HermesDashboardURL, cfg.HermesDashboardUsername, cfg.HermesDashboardPassword = "http://127.0.0.1:8787", "me", "secret"
+	if hermes := page(cfg, "hermes:hermes-chat"); !strings.Contains(hermes, button) || !strings.Contains(hermes, `aria-label="Voice conversation with Hermes" data-voice-call hidden`) {
+		t.Error("a Hermes session lacks the voice button or the hidden call line")
+	}
+	if strings.Contains(page(cfg, piSession), button) {
+		t.Error("a Pi session offers voice")
 	}
 }
 
