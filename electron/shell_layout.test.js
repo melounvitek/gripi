@@ -92,8 +92,7 @@ test("desktop gateway webviews ask permissions.js for every permission", () => {
   const main = read("electron/main.js");
   const build = JSON.parse(read("package.json")).build;
 
-  assert.match(main, /return allowsGatewayPermission\(permission, requestingOrigin, details\.mediaType \? \[details\.mediaType\] : \[\], allowedOrigin\);/);
-  assert.match(main, /callback\(allowsGatewayPermission\(permission, details\.requestingOrigin, details\.mediaTypes \?\? \[\], allowedOrigin\)\);/);
+  assert.match(main, /installGatewayPermissionHandlers\(partition \? session\.fromPartition\(partition\) : session\.defaultSession, allowedOrigin\);/);
   assert.match(build.mac.extendInfo.NSMicrophoneUsageDescription, /voice conversations/);
 });
 
