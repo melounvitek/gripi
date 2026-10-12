@@ -31,7 +31,7 @@ import {
   recentSessionShortcutFromEvent,
   sessionSearchShortcut
 } from "./shortcuts.js";
-import { sessionFragmentUrl, sessionUrl } from "./urls.js";
+import { sessionFragmentUrl, sessionUrl, withReadState } from "./urls.js";
 import { GatewayUpdateController } from "./gateway_update_controller.js";
 import { ResourceUsageController } from "./resource_usage_controller.js";
 import { BrowserAccessRequestController, WorkspaceAccessRequestController } from "./access_request_controllers.js";
@@ -1739,10 +1739,10 @@ function restoreComposerDraft(draft) {
   if (draft.images.length > 0) addImageFiles(draft.images, { restore: true });
 }
 
-async function refreshCurrentSessionPreservingComposer() {
+async function refreshCurrentSessionPreservingComposer(url = window.location.href) {
   const draft = composerDraft();
 
-  const refreshed = await switchSession(window.location.href, { push: false, focus: false, preserveScroll: true });
+  const refreshed = await switchSession(url, { push: false, focus: false, preserveScroll: true });
 
   if (refreshed) restoreComposerDraft(draft);
   return refreshed;
@@ -1783,7 +1783,7 @@ async function refreshSessionInBackground(controller, generation) {
   const switchGeneration = sessionSwitchGeneration.capture();
   const current = () => !controller.signal.aborted && generation === sessionViewGeneration &&
     sessionSwitchGeneration.current(switchGeneration) && session === currentSessionPath();
-  const response = await fetch(sessionFragmentUrl(window.location.href), {
+  const response = await fetch(withReadState(sessionFragmentUrl(window.location.href)), {
     headers: { "Accept": "application/json" }, signal: controller.signal
   });
   if (!response.ok) throw new Error("Session refresh failed");
@@ -1791,7 +1791,7 @@ async function refreshSessionInBackground(controller, generation) {
   // Whatever supersedes the refresh also aborts its poll, so failing here stays silent unless the poll timed out.
   if (!current()) throw new Error("Session refresh superseded");
   // A new session gets its own path once Pi saves it, which only a full refresh picks up.
-  if (payload.session !== session) return refreshCurrentSessionPreservingComposer();
+  if (payload.session !== session) return refreshCurrentSessionPreservingComposer(withReadState(new URL(window.location.href)).href);
   const template = document.createElement("template");
   template.innerHTML = payload.conversation_html;
   const snapshot = template.content.querySelector("#conversation-scroll");
@@ -3705,7 +3705,9 @@ window.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("pageshow", () => resumeEventPolling());
 window.addEventListener("focus", () => {
-  if (markReadAfterVisible) markCurrentSessionReadAfterVisible();
+  // Refreshes without focus left the current session unread.
+  sidebarController.scheduleRefresh(0);
+  markCurrentSessionRead();
   resumeEventPolling();
 });
 window.addEventListener("online", () => resumeEventPolling());

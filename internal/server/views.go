@@ -246,7 +246,8 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			}
 		}
 	}
-	markRead := request.URL.Path != "/sidebar" || params.Get("session") != ""
+	// Browsers ask with mark_read=0 while their window has no focus.
+	markRead := (request.URL.Path != "/sidebar" || params.Get("session") != "") && params.Get("mark_read") != "0"
 	unread, pinned, err := app.gatewayState.ReadAndObservePending(all, selected, markRead, externalFollow, unresolvedPendingCWDs)
 	if err != nil {
 		return nil, err

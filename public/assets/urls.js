@@ -17,6 +17,14 @@ export function sessionUrl(sessionPath, location = window.location) {
   return `${url.pathname}${url.search}`;
 }
 
+// Without focus, nobody may be looking, so a load or refresh shows the session without marking it read. Focus
+// returning refreshes again to mark it.
+export function withReadState(url, documentObject = document) {
+  if (documentObject.hidden || !documentObject.hasFocus()) url.searchParams.set("mark_read", "0");
+  else url.searchParams.delete("mark_read");
+  return url;
+}
+
 export function sessionFragmentUrl(url, location = window.location) {
   return endpointUrl(url, "/session_fragment", location);
 }

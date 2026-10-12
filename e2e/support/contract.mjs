@@ -24,6 +24,7 @@ export const sessions = {
   toolSummary: "E2E Tool Summary Desktop",
   toolReload: "E2E Tool Reload Desktop",
   markRead: "E2E Mark Read Desktop",
+  unfocusedRead: "E2E Unfocused Read Desktop",
   idleClient: "E2E Idle Client Desktop",
   idleTyping: "E2E Idle Typing Desktop",
   promptRetry: "E2E Prompt Retry Desktop",

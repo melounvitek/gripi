@@ -143,6 +143,7 @@ test("obsolete sidebar filter failure does not cancel a newer filter", async () 
     body: { classList: { contains: () => false } },
     activeElement: null,
     dispatchEvent() {},
+    hasFocus: () => true,
     querySelector: () => null,
   };
   const replaced = [];

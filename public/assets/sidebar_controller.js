@@ -1,5 +1,5 @@
 import { notificationReplyPreview } from "./formatting.js";
-import { newSessionModalUrl, sessionUrl } from "./urls.js";
+import { newSessionModalUrl, sessionUrl, withReadState } from "./urls.js";
 
 const DESKTOP_SIDEBAR_HIDDEN_KEY = "gripi:desktop-sidebar-hidden";
 const DESKTOP_SIDEBAR_MEDIA = "(min-width: 761px)";
@@ -174,7 +174,7 @@ export class SidebarController {
       const selectedSession = this.element?.querySelector("a.session.selected[data-session-path]")?.dataset.sessionPath;
       if (selectedSession) sidebarUrl.searchParams.set("session", selectedSession);
     }
-    return sidebarUrl;
+    return withReadState(sidebarUrl, this.document);
   }
 
   scheduleRefresh(delay = this.refreshDelay()) {
