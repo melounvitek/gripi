@@ -91,6 +91,16 @@ test("failed requests are reported and the call listens again", async (t) => {
   assert.equal(call.recorders.at(-1).state, "recording");
 });
 
+test("a Bluetooth headset's microphone is heard, which iOS asks to play and record for", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Can you hear me?"] });
+  await call.conversation.start();
+  assert.equal(call.audioSession.type, "play-and-record");
+
+  await call.utter();
+
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Can you hear me?`]);
+});
+
 test("a call started while Hermes works waits for its reply", async (t) => {
   const call = voiceCall(t);
   await call.conversation.start({ working: () => "What is left to do?" });
@@ -248,7 +258,8 @@ test("ending the call releases the microphone and wake lock and ignores late res
   assert.equal(call.conversation.active, false);
   assert.equal(call.track.stopped, true);
   assert.equal(call.locks[0].released, true);
-  assert.equal(call.audioContext.state, "closed");
+  assert.deepEqual(call.audioContexts.map((context) => context.state), ["closed", "closed"]);
+  assert.equal(call.audioSession.type, "auto");
 
   const changes = call.changes.length;
   call.conversation.end();
@@ -329,7 +340,7 @@ test("spoken messages are recognised by the voice prefix", () => {
 
 function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=opus"], send, speakError, microphoneError, microphoneReady, recordingReady } = {}) {
   t.mock.timers.enable({ apis: ["setInterval", "Date"] });
-  const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], played: [], blips: [], changes: [], recorders: [], locks: [] };
+  const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], played: [], blips: [], changes: [], recorders: [], locks: [], audioContexts: [] };
   const track = { enabled: true, readyState: "live", stopped: false, stop() { this.stopped = true; } };
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
   const document = new FakeEventTarget();
@@ -338,7 +349,10 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
   class AudioContext {
     constructor() {
       call.sequence.push("audio-context");
-      call.audioContext = this;
+      call.audioContexts.push(this);
+      // The first context, made in the tap, plays the call.
+      call.audioContext ??= this;
+      this.madeAfterMicrophone = call.microphoneGranted === true;
       this.state = "suspended";
       this.destination = {};
       this.currentTime = 0;
@@ -349,11 +363,17 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
       const analyser = {
         // The analyser that plays into the speakers measures the reply, the other the microphone.
         connect(node) { analyser.playback = node === call.audioContext.destination; },
-        getByteTimeDomainData: (samples) => samples.fill(128 + Math.round((analyser.playback ? call.playbackLevel : call.level) * 42))
+        getByteTimeDomainData: (samples) => {
+          const level = analyser.playback ? call.playbackLevel : (analyser.hearsMicrophone ? call.level : 0);
+          samples.fill(128 + Math.round(level * 42));
+        }
       };
       return analyser;
     }
-    createMediaStreamSource() { return { connect() {} }; }
+    createMediaStreamSource() {
+      // Like iOS with AirPods (WebKit bug 212653), a context made before the microphone was granted hears silence.
+      return { connect: (analyser) => { analyser.hearsMicrophone = this.madeAfterMicrophone; } };
+    }
     createOscillator() {
       const oscillator = {
         frequency: { setValueAtTime(value) { oscillator.pitch = value; }, exponentialRampToValueAtTime() {} },
@@ -398,9 +418,11 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
         call.constraints = constraints;
         await microphoneReady;
         if (microphoneError) throw microphoneError;
+        call.microphoneGranted = true;
         return stream;
       }
     },
+    audioSession: { type: "auto" },
     wakeLock: {
       async request(type) {
         const lock = { type, released: false, async release() { lock.released = true; } };
@@ -419,6 +441,7 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
 
   return Object.assign(call, {
     track,
+    audioSession: navigator.audioSession,
     conversation: new VoiceConversation({
       window: { AudioContext, MediaRecorder, document },
       navigator,

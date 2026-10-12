@@ -59,6 +59,7 @@ export class VoiceConversation {
       if (this.window.document.hidden) return;
       this.lockScreen();
       this.audioContext.resume().catch(() => {});
+      this.microphoneContext.resume().catch(() => {});
     };
   }
 
@@ -87,10 +88,16 @@ export class VoiceConversation {
     }
 
     this.stream = stream;
-    this.analyser = audioContext.createAnalyser();
+    // iOS may leave a Bluetooth headset, such as AirPods, out of the call until the page asks to play and record (WebKit bug 282939).
+    if (this.navigator.audioSession) this.navigator.audioSession.type = "play-and-record";
+    // iOS may feed silence to an analyser whose context was made before a Bluetooth headset took the microphone (WebKit
+    // bug 212653), so the microphone is measured in a context of its own, made now. A capturing page may start it outside a tap.
+    this.microphoneContext = new this.window.AudioContext();
+    this.microphoneContext.resume().catch(() => {});
+    this.analyser = this.microphoneContext.createAnalyser();
     this.analyser.fftSize = 256;
     this.samples = new Uint8Array(this.analyser.fftSize);
-    audioContext.createMediaStreamSource(stream).connect(this.analyser);
+    this.microphoneContext.createMediaStreamSource(stream).connect(this.analyser);
     // Replies play through their own analyser, so the meter can show Hermes speaking.
     this.playbackAnalyser = audioContext.createAnalyser();
     this.playbackAnalyser.fftSize = 256;
@@ -128,8 +135,10 @@ export class VoiceConversation {
     this.stream?.getTracks().forEach((track) => track.stop());
     this.wakeLock?.release();
     this.audioContext.close().catch(() => {});
+    this.microphoneContext?.close().catch(() => {});
+    if (this.navigator.audioSession) this.navigator.audioSession.type = "auto";
     this.window.document.removeEventListener("visibilitychange", this.onVisibilityChange);
-    this.audioContext = this.stream = this.wakeLock = null;
+    this.audioContext = this.microphoneContext = this.stream = this.wakeLock = null;
     this.setState("off", error);
   }
 
