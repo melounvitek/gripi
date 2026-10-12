@@ -122,6 +122,8 @@ type pageView struct {
 	// Agents names the agents when the gateway runs several, which the page then tells apart. It is empty otherwise.
 	Agents        []string
 	SelectedAgent string
+	// HermesProfile names the profile Hermes runs, which a Hermes session shows where a Pi session shows its project.
+	HermesProfile string
 }
 
 func (app *application) preparePage(request *http.Request, includeConversation bool) (*pageView, error) {
@@ -253,6 +255,12 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	view.ExternalFollow = externalFollow
 	if router, ok := app.adapter.(*agent.Router); ok {
 		view.Agents = router.Names()
+		// Hermes itself runs the default profile, and the wrapper that `hermes profile alias` creates is named after its
+		// profile.
+		view.HermesProfile = filepath.Base(app.config.HermesPath)
+		if view.HermesProfile == "hermes" {
+			view.HermesProfile = "default"
+		}
 		if selected := params.Get("agent"); slices.Contains(view.Agents, selected) {
 			view.SelectedAgent = selected
 		}

@@ -641,9 +641,32 @@ func TestHermesSessionsStartInTheHomeFolderAndShowNoFolder(t *testing.T) {
 
 	page := getPage(t, handler, "/?session="+url.QueryEscape("hermes:hermes-chat"))
 	// Neither the sidebar nor the header shows a Hermes session's folder.
-	for _, absent := range []string{`class="session-project"`, "session-header-project-label"} {
+	for _, absent := range []string{`class="session-project-label">` + filepath.Base(project), "session-header-project-label"} {
 		if strings.Contains(page, absent) {
 			t.Errorf("the Hermes session's page contains %q", absent)
+		}
+	}
+}
+
+func TestHermesRowsShowTheirProfileWhereProjectsShowTheirLetters(t *testing.T) {
+	// Hermes runs its default profile, and a wrapper that `hermes profile alias` creates runs the profile it is named after.
+	for _, profile := range []struct{ path, name, letters string }{{"hermes", "default", "de"}, {"work", "work", "wo"}} {
+		cfg := hermesConfig(t, map[string]any{"sessionId": "hermes-chat", "cwd": t.TempDir(), "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z"})
+		wrapper := filepath.Join(t.TempDir(), profile.path)
+		if err := os.Symlink(cfg.HermesPath, wrapper); err != nil {
+			t.Fatal(err)
+		}
+		cfg.HermesPath = wrapper
+		handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+
+		page := getPage(t, handler, "/")
+		mark := regexp.MustCompile(`<div class="session-project" title="Hermes profile: ` + profile.name + `"[^>]*><span class="project-monogram" aria-hidden="true">` + profile.letters + `</span>`)
+		if !mark.MatchString(page) {
+			t.Errorf("the Hermes row of %s does not show the %s profile's letters %q", profile.path, profile.name, profile.letters)
 		}
 	}
 }
