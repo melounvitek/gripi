@@ -18,6 +18,7 @@ Boolean settings accept `1`, `true`, `yes`, or `on` for true and `0`, `false`, `
 | `GRIPI_AUTO_APPROVE_PROJECTS` | on | [Project resource approval](#project-resource-approval) |
 | `GRIPI_NODE`, `GRIPI_PI` | `pi` from `PATH` | [Custom Pi runtime](#custom-pi-runtime) |
 | `GRIPI_HERMES` | off | [Hermes Agent (experimental)](#hermes-agent-experimental) |
+| `GRIPI_HERMES_DASHBOARD_URL`, `GRIPI_HERMES_DASHBOARD_USERNAME`, `GRIPI_HERMES_DASHBOARD_PASSWORD` | none | [Voice conversations](#voice-conversations) |
 | `GRIPI_SESSIONS_ROOT` | `~/.pi/agent/sessions` | [Session location](#session-location) |
 | `GRIPI_RPC_IDLE_TIMEOUT_SECONDS` | `300` | [Pi process lifetime](#pi-process-lifetime) |
 | `GRIPI_RPC_IDLE_SWEEP_SECONDS` | `30` | [Pi process lifetime](#pi-process-lifetime) |
@@ -229,6 +230,20 @@ What to expect:
 - A session that another ACP client, such as an editor, continues keeps showing what Gripi's Hermes loaded, until that Hermes restarts.
 - Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next Hermes session starts, once no other Hermes session is open. A new session's first message still runs with the variables from before, because the session lives only in the running Hermes until then.
 - [Multi-user mode](#multi-user-mode) refuses the setting, because every user would share the one Hermes, with its memory, skills and messaging accounts.
+
+### Voice conversations
+
+You can talk with a Hermes session: Gripi listens, sends what you say as a message, and reads Hermes's reply aloud. It uses Hermes's own speech recognition and voice, which the `stt:` and `tts:` settings in Hermes's `config.yaml` choose, and reaches them through Hermes's dashboard, which `hermes dashboard` or `hermes serve` runs. Voice is on when Gripi knows the dashboard's address, username and password:
+
+```sh
+GRIPI_HERMES_DASHBOARD_URL=http://127.0.0.1:8787
+GRIPI_HERMES_DASHBOARD_USERNAME=me
+GRIPI_HERMES_DASHBOARD_PASSWORD=...
+```
+
+Gripi logs in with the dashboard's password login, its `basic` provider, which `dashboard.basic_auth` in Hermes's `config.yaml` sets up. The dashboard asks for a login only when it listens on more than localhost or has a `dashboard.public_url`; otherwise Gripi can't use it. Only the gateway talks to the dashboard, never the browser.
+
+Browsers allow the microphone only over HTTPS or on `localhost`, so other devices need [HTTPS](examples.md#https-through-tailscale-serve).
 
 ## Session location
 
