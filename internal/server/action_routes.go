@@ -664,8 +664,17 @@ func (app *application) renameSession(response http.ResponseWriter, request *htt
 	if !parseForm(response, request) {
 		return
 	}
-	session, ok := app.persistedActionSession(response, request, request.FormValue("session"))
+	path, ok := app.actionSessionPath(response, request, request.FormValue("session"), true)
 	if !ok {
+		return
+	}
+	session, persisted := app.sessionStore.Session(path)
+	if !persisted {
+		if _, pending := app.pendingSessions.CWD(path); pending {
+			writeText(response, http.StatusConflict, "A new session can be renamed once Pi has replied to its first message")
+		} else {
+			http.NotFound(response, request)
+		}
 		return
 	}
 	name := strings.TrimSpace(request.FormValue("name"))

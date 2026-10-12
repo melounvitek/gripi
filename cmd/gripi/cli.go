@@ -25,6 +25,7 @@ Session commands (need a running gateway on this machine):
   show      Print the latest reply or the conversation of a session
   stop      Stop what a session is working on
   open      Continue a session in Pi CLI
+  rename    Name a session
   pin       Pin a session in the browser's sidebar
   unpin     Unpin a session
   tag       Add tags to a session
@@ -56,6 +57,7 @@ var commands = []command{
 	{name: "show", summary: "Print the latest reply or the conversation of a session", run: showConversation, help: showHelp},
 	{name: "stop", summary: "Stop what a session is working on", run: stopSession, help: stopHelp},
 	{name: "open", summary: "Continue a session in Pi CLI", run: openSession, help: openHelp},
+	{name: "rename", summary: "Name a session", run: renameSession, help: renameHelp},
 	{name: "pin", summary: "Pin a session in the browser's sidebar", run: pinSession("pin", true), help: pinHelp},
 	{name: "unpin", summary: "Unpin a session", run: pinSession("unpin", false), help: unpinHelp},
 	{name: "tag", summary: "Add tags to a session", run: tagSession("tag", true), help: tagHelp},
