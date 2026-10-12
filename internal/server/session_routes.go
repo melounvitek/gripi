@@ -179,7 +179,7 @@ func (app *application) sessionFragment(response http.ResponseWriter, request *h
 	// Packed only when the URL has nothing but these parameters: a session and a project are repeated only when they match existing ones.
 	// Anything else stays plain, because the sidebar repeats the search text, tag and session limit.
 	for name := range request.URL.Query() {
-		if name != "session" && name != "session_only" && name != "project" {
+		if name != "session" && name != "session_only" && name != "project" && name != "mark_read" {
 			writeJSON(response, values)
 			return
 		}

@@ -310,6 +310,69 @@ test("mark a final reply read without a sidebar refresh", async ({ page }) => {
   await expect(sessionLink).not.toHaveClass(/unread/);
 });
 
+test("a window left open without focus keeps a finished reply unread until it gets focus", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto("/");
+  await selectSession(page, sessions.history);
+  const elsewhereUrl = page.url();
+  const link = page.locator("a.session", { hasText: sessions.unfocusedRead });
+  const expectUnreadElsewhere = async (unread) => {
+    await page.goto(elsewhereUrl);
+    if (unread) await expect(link).toHaveClass(/\bunread\b/);
+    else await expect(link).not.toHaveClass(/\bunread\b/);
+  };
+
+  // Another computer, still showing the session on screen while its window has no focus.
+  const unattended = await page.context().newPage();
+  await unattended.addInitScript(() => { document.hasFocus = () => window.gripiTestFocused === true; });
+  await unattended.goto(elsewhereUrl);
+  await selectSession(unattended, sessions.unfocusedRead);
+  const unattendedLink = unattended.locator("a.session", { hasText: sessions.unfocusedRead });
+  const responseCount = Number(await unattendedLink.getAttribute("data-assistant-response-count"));
+  await sendPrompt(unattended, prompts.standard);
+  await expect(message(unattended, "assistant", replies.standard)).toBeVisible();
+  await expectRunFinished(unattended);
+  // Its sidebar refreshes have seen the reply.
+  await expect(unattendedLink).toHaveAttribute("data-assistant-response-count", String(responseCount + 1), { timeout: 15_000 });
+  await expectUnreadElsewhere(true);
+
+  // So has a background refresh of its conversation.
+  let missed = true;
+  await unattended.route(/\/events(?:\?|$)/, (route) => {
+    if (!missed) return route.continue();
+    missed = false;
+    return route.fulfill({ json: { events: [], last_seq: 0, missed: true } });
+  });
+  await unattended.waitForResponse((response) => new URL(response.url()).pathname === "/session_fragment", { timeout: 15_000 });
+  await expectUnreadElsewhere(true);
+
+  // And its reload after a gateway restart.
+  let restarted = false;
+  await unattended.route(/\/gateway-update\/check$/, (route) => {
+    if (restarted) return route.continue();
+    restarted = true;
+    return route.fulfill({ json: { state: "up_to_date", instanceId: "restarted-instance" } });
+  });
+  const reloaded = unattended.waitForEvent("load");
+  await unattended.evaluate(() => window.dispatchEvent(new Event("online")));
+  await reloaded;
+  await expect(unattended.getByRole("heading", { level: 1, name: sessions.unfocusedRead })).toBeVisible();
+  await expect(unattended).not.toHaveURL(/mark_read/);
+  await expectUnreadElsewhere(true);
+
+  const markedRead = unattended.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/sidebar" && !url.searchParams.has("mark_read");
+  });
+  await unattended.evaluate(() => {
+    window.gripiTestFocused = true;
+    window.dispatchEvent(new Event("focus"));
+  });
+  await markedRead;
+  await expectUnreadElsewhere(false);
+  await unattended.close();
+});
+
 test("show an active run in the sidebar and abort it", async ({ page }) => {
   await page.goto("/");
   await selectSession(page, sessions.controlsAbort);

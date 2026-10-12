@@ -1,3 +1,5 @@
+import { withReadState } from "./urls.js";
+
 const PROGRESS_STATES = ["waiting", "updating", "restarting"];
 
 const failedStep = (failure) => `${failure.step} · ${failure.timedOut ? "timed out" : `exit ${failure.exitStatus}`}`;
@@ -137,8 +139,9 @@ export class GatewayUpdateController {
 
   cleanNavigation() {
     const cleanUrl = new URL(this.window.location.href);
-    if (!cleanUrl.searchParams.has("_gateway_updated")) return;
+    if (!cleanUrl.searchParams.has("_gateway_updated") && !cleanUrl.searchParams.has("mark_read")) return;
     cleanUrl.searchParams.delete("_gateway_updated");
+    cleanUrl.searchParams.delete("mark_read");
     this.window.history.replaceState(this.window.history.state, "", cleanUrl.href);
   }
 
@@ -158,6 +161,6 @@ export class GatewayUpdateController {
     cleanUrl.searchParams.delete("_gateway_updated");
     const updateUrl = new URL(cleanUrl.href);
     updateUrl.searchParams.set("_gateway_updated", targetSha);
-    this.window.location.replace(updateUrl.href);
+    this.window.location.replace(withReadState(updateUrl, this.document).href);
   }
 }
