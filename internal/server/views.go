@@ -336,10 +336,20 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)
 		window := agent.Window{}
 		if saved {
-			var err error
-			window, err = app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
-			if err != nil {
-				return nil, err
+			// A run that starts or ends during the read would pair its messages with the other run state, so read
+			// again until the state holds across a read. The snapshot stays the earlier one: its event cursor must
+			// not skip anything the window lacks.
+			for attempt := 1; ; attempt++ {
+				var err error
+				window, err = app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
+				if err != nil {
+					return nil, err
+				}
+				latest := app.rpcClients.LiveSnapshot(selected.Path)
+				if latest.AgentRunning == snapshot.AgentRunning || attempt == 3 {
+					break
+				}
+				snapshot = latest
 			}
 		}
 		view.Window = window
