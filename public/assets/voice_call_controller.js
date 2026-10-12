@@ -39,9 +39,9 @@ export class VoiceCallController {
     this.elements.end.addEventListener("click", () => this.end());
   }
 
-  // Whether the call waits for the reply to a turn Hermes is working on.
-  get waiting() {
-    return !!this.conversation?.awaitingReply;
+  // Names the call's wait for the reply to a turn Hermes is working on, or null when it isn't waiting.
+  get awaitedReply() {
+    return this.conversation?.awaitingReply ? this.conversation.generation : null;
   }
 
   start() {
@@ -53,6 +53,18 @@ export class VoiceCallController {
 
   replyFinished(text) {
     this.conversation?.replyFinished(text);
+  }
+
+  // Ends the wait with the page's last message, for a refresh that skipped the events that would end it. Only a wait that
+  // began before the refresh counts: an older page can't hold the reply to a later turn.
+  replyFinishedOnPage(awaitedReply, lastMessage) {
+    if (awaitedReply === null || awaitedReply !== this.awaitedReply) return;
+    const reply = lastMessage?.dataset.finalAssistantResponse === "true" ? lastMessage.querySelector(".message-body").cloneNode(true) : null;
+    // Code and tables are left out, as speaking a reply's Markdown leaves them out.
+    reply?.querySelectorAll("pre, table, .code-block-copy-button").forEach((element) => element.remove());
+    // A copy has no layout to separate its blocks, so each one ends a paragraph.
+    reply?.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6").forEach((block) => block.append("\n\n"));
+    this.replyFinished(reply?.textContent ?? "");
   }
 
   end() {

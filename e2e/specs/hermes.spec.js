@@ -197,6 +197,27 @@ test("a refused microphone ends the call and the composer says why", async ({ pa
   await expect(page.getByLabel("Message to Hermes")).toBeVisible();
 });
 
+test("a refresh that skipped a voice call's events speaks the reply on the page, for a wait that began before it", async ({ page }) => {
+  const spoken = await page.evaluate(async () => {
+    const { VoiceCallController } = await import("/assets/voice_call_controller.js");
+    const controller = new VoiceCallController(window, {});
+    const replies = [];
+    controller.conversation = { awaitingReply: true, generation: 4, replyFinished: (text) => replies.push(text) };
+    const reply = document.createElement("article");
+    reply.dataset.finalAssistantResponse = "true";
+    reply.innerHTML = '<div class="message-body"><p>The backup finished.</p><blockquote><p>Run it again with</p>' +
+      '<div class="message-code-block"><pre>npm run backup</pre><button class="code-block-copy-button">Copy</button></div>' +
+      "<p>It takes ten minutes.</p></blockquote><table><tr><td>photos</td></tr></table></div>";
+
+    controller.replyFinishedOnPage(null, reply);
+    controller.replyFinishedOnPage(3, reply);
+    controller.replyFinishedOnPage(4, reply);
+    return replies;
+  });
+
+  expect(spoken.map((text) => text.replace(/\s+/g, " ").trim())).toEqual(["The backup finished. Run it again with It takes ten minutes."]);
+});
+
 test("only Hermes sessions offer a voice conversation", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Start a voice conversation" })).toBeVisible();
   await selectSession(page, sessions.marker);
