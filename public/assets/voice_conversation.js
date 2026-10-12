@@ -11,6 +11,8 @@ const MAX_UTTERANCE_MS = 60_000;
 const BARGE_IN_LEVEL = 0.14;
 const BARGE_IN_MS = 300;
 const BARGE_IN_SHARE = 0.8;
+const FIRST_BLIP_MS = 400;
+const BLIP_PITCHES = [392, 329.6];
 const RECORDING_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", "audio/ogg", "audio/wav"];
 const ADDRESSES = ["hey hermes", "hermes", "ok", "okay", "hey"];
 const STOP_PHRASES = new Set([
@@ -50,6 +52,8 @@ export class VoiceConversation {
     this.recorder = null;
     this.source = null;
     this.wakeLock = null;
+    this.blips = 0;
+    this.blipAt = null;
     // A hidden page releases the wake lock and may suspend audio, so a visible one takes them back.
     this.onVisibilityChange = () => {
       if (this.window.document.hidden) return;
@@ -151,6 +155,11 @@ export class VoiceConversation {
     }
     if (this.state === "listening" && this.recorder) this.detectUtterance(level, now);
     else if (this.state === "speaking") this.detectBargeIn(level, now);
+    // Unlike Hermes Desktop's thinking sound, the blips start with transcribing, which takes a request to Hermes.
+    if (this.state !== "transcribing" && this.state !== "thinking") this.blipAt = null;
+    else if (this.blipAt === null) this.blipAt = now + FIRST_BLIP_MS;
+    // A suspended context's clock stands still, so blips scheduled meanwhile would all play at once when it resumes.
+    else if (now >= this.blipAt && this.audioContext.state === "running") this.blip(now);
   }
 
   measure(analyser) {
@@ -185,6 +194,25 @@ export class VoiceConversation {
       this.stopPlayback();
       this.listen();
     }
+  }
+
+  // A quiet, falling tone that tells the call still waits, alternating two pitches like Hermes's thinking sound.
+  blip(now) {
+    const start = this.audioContext.currentTime + 0.01;
+    const duration = 0.16;
+    const pitch = BLIP_PITCHES[this.blips++ % BLIP_PITCHES.length];
+    const oscillator = this.audioContext.createOscillator();
+    const envelope = this.audioContext.createGain();
+    oscillator.frequency.setValueAtTime(pitch, start);
+    oscillator.frequency.exponentialRampToValueAtTime(pitch * 0.72, start + duration);
+    envelope.gain.setValueAtTime(0.0001, start);
+    envelope.gain.exponentialRampToValueAtTime(0.08, start + 0.02);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(envelope).connect(this.audioContext.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.02);
+    // A slightly uneven pace sounds less mechanical.
+    this.blipAt = now + 800 + Math.random() * 400;
   }
 
   record() {

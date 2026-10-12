@@ -100,6 +100,7 @@ test("a call started while Hermes works waits for its reply", async (t) => {
   await call.wait(2000);
   assert.equal(call.state(), "thinking");
   assert.deepEqual(call.recorders, []);
+  assert.deepEqual(call.blips.slice(0, 2), [392, 329.6]);
 
   call.conversation.replyFinished("```sh\nnpm test\n```");
   assert.equal(call.state(), "listening");
@@ -137,6 +138,45 @@ test("talking over the reply stops it and listens", async (t) => {
   await call.wait(100);
   assert.deepEqual(call.played, ["The first sentence is long enough to stand alone."]);
   assert.equal(call.recorders.at(-1).state, "recording");
+});
+
+test("quiet blips fill the wait from the end of an utterance until the reply is spoken", async (t) => {
+  const transcript = deferred();
+  const call = voiceCall(t, { transcripts: [transcript.promise] });
+  await call.conversation.start();
+  await call.wait(2000);
+  assert.deepEqual(call.blips, []);
+
+  await call.utter();
+  await call.wait(1000);
+  assert.equal(call.state(), "transcribing");
+  assert.deepEqual(call.blips, [392]);
+
+  transcript.resolve("How long will the build take?");
+  await call.wait(2000);
+  assert.equal(call.state(), "thinking");
+  assert.deepEqual(call.blips.slice(0, 3), [392, 329.6, 392]);
+
+  call.conversation.replyFinished("About ten minutes, give or take a few.");
+  const blips = call.blips.length;
+  await call.wait(3000);
+  assert.equal(call.state(), "speaking");
+  assert.equal(call.blips.length, blips);
+});
+
+test("blips wait for suspended audio instead of piling up", async (t) => {
+  const call = voiceCall(t);
+  await call.conversation.start({ working: () => "What is left to do?" });
+  await call.wait(1000);
+  assert.deepEqual(call.blips, [392]);
+
+  call.audioContext.state = "suspended";
+  await call.wait(5000);
+  assert.deepEqual(call.blips, [392]);
+
+  call.audioContext.state = "running";
+  await call.wait(50);
+  assert.deepEqual(call.blips, [392, 329.6]);
 });
 
 test("muting stops recording until the microphone is back", async (t) => {
@@ -289,7 +329,7 @@ test("spoken messages are recognised by the voice prefix", () => {
 
 function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=opus"], send, speakError, microphoneError, microphoneReady, recordingReady } = {}) {
   t.mock.timers.enable({ apis: ["setInterval", "Date"] });
-  const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], played: [], changes: [], recorders: [], locks: [] };
+  const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], played: [], blips: [], changes: [], recorders: [], locks: [] };
   const track = { enabled: true, readyState: "live", stopped: false, stop() { this.stopped = true; } };
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
   const document = new FakeEventTarget();
@@ -301,6 +341,7 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
       call.audioContext = this;
       this.state = "suspended";
       this.destination = {};
+      this.currentTime = 0;
     }
     async resume() { call.sequence.push("resume-audio"); this.state = "running"; }
     async close() { this.state = "closed"; }
@@ -313,6 +354,18 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
       return analyser;
     }
     createMediaStreamSource() { return { connect() {} }; }
+    createOscillator() {
+      const oscillator = {
+        frequency: { setValueAtTime(value) { oscillator.pitch = value; }, exponentialRampToValueAtTime() {} },
+        connect: (node) => node,
+        start() { call.blips.push(oscillator.pitch); },
+        stop() {}
+      };
+      return oscillator;
+    }
+    createGain() {
+      return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (node) => node };
+    }
     async decodeAudioData(buffer) { return { text: new TextDecoder().decode(buffer) }; }
     createBufferSource() {
       return {
