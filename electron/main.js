@@ -11,6 +11,7 @@ const {
 const { gatewayUrl } = require("./gateway_url");
 const { configureSessionExportDownload } = require("./downloads");
 const { allowsGatewayNavigation } = require("./navigation");
+const { allowsGatewayPermission } = require("./permissions");
 
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 const GATEWAY_PRELOAD_PATH = path.join(__dirname, "gateway_preload.js");
@@ -296,15 +297,11 @@ function installGatewayNavigationGuard(guestContents, allowedOrigin, partition) 
 
 function installGatewayPermissionHandlers(partition, allowedOrigin) {
   const gatewaySession = partition ? session.fromPartition(partition) : session.defaultSession;
-  const allowedGatewayPermissions = new Set(["notifications", "clipboard-sanitized-write"]);
-  // Voice conversations need the microphone, and nothing needs the camera.
   gatewaySession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
-    const microphone = permission === "media" && details.mediaType === "audio";
-    return (allowedGatewayPermissions.has(permission) || microphone) && requestingOrigin === allowedOrigin;
+    return allowsGatewayPermission(permission, requestingOrigin, details.mediaType ? [details.mediaType] : [], allowedOrigin);
   });
   gatewaySession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
-    const microphone = permission === "media" && details.mediaTypes?.length > 0 && details.mediaTypes.every((type) => type === "audio");
-    callback((allowedGatewayPermissions.has(permission) || microphone) && details.requestingOrigin === allowedOrigin);
+    callback(allowsGatewayPermission(permission, details.requestingOrigin, details.mediaTypes ?? [], allowedOrigin));
   });
 }
 

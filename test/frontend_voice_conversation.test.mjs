@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { speechSentences } from "../public/assets/speech_text.js";
-import { isStopPhrase, spokenText, VOICE_PREFIX, VoiceConversation } from "../public/assets/voice_conversation.js";
+import { spokenText, VOICE_PREFIX } from "../public/assets/formatting.js";
+import { isStopPhrase, VoiceConversation } from "../public/assets/voice_conversation.js";
 import { deferred, FakeEventTarget } from "./helpers/fake_dom.mjs";
 
 test("a spoken turn is sent with the voice prefix and the reply is spoken sentence by sentence", async (t) => {
@@ -79,7 +80,7 @@ test("failed requests are reported and the call listens again", async (t) => {
     speakError: "Piper is not running",
     send: async () => { throw new Error("Hermes is busy"); }
   });
-  await call.conversation.start({ busy: true });
+  await call.conversation.start({ busy: () => true });
 
   call.conversation.replyFinished("Here is the answer you asked for a moment ago.");
   await flush();
@@ -92,7 +93,7 @@ test("failed requests are reported and the call listens again", async (t) => {
 
 test("a call started while Hermes works waits for its reply", async (t) => {
   const call = voiceCall(t);
-  await call.conversation.start({ busy: true });
+  await call.conversation.start({ busy: () => true });
 
   call.level = 0.5;
   await call.wait(2000);
@@ -104,9 +105,36 @@ test("a call started while Hermes works waits for its reply", async (t) => {
   assert.equal(call.recorders.length, 1);
 });
 
+test("a call whose microphone arrives after Hermes finished listens", async (t) => {
+  const microphone = deferred();
+  let working = true;
+  const call = voiceCall(t, { microphoneReady: microphone.promise });
+
+  const starting = call.conversation.start({ busy: () => working });
+  working = false;
+  microphone.resolve();
+  await starting;
+
+  assert.equal(call.state(), "listening");
+});
+
+test("the call waits for a reply only once Hermes took the message", async (t) => {
+  const taken = deferred();
+  const call = voiceCall(t, { transcripts: ["Check the backups"], send: () => taken.promise });
+  await call.conversation.start();
+
+  await call.utter();
+  assert.equal(call.state(), "thinking");
+  assert.equal(call.conversation.awaitingReply, false);
+
+  taken.resolve();
+  await flush();
+  assert.equal(call.conversation.awaitingReply, true);
+});
+
 test("talking over the reply stops it and listens", async (t) => {
   const call = voiceCall(t);
-  await call.conversation.start({ busy: true });
+  await call.conversation.start({ busy: () => true });
   call.conversation.replyFinished("The first sentence is long enough to stand alone. The second one should never be heard.");
   await flush();
   assert.deepEqual(call.played, ["The first sentence is long enough to stand alone."]);
@@ -147,7 +175,7 @@ test("muting stops recording until the microphone is back", async (t) => {
 
 test("the meter follows Hermes's voice while it speaks", async (t) => {
   const call = voiceCall(t);
-  await call.conversation.start({ busy: true });
+  await call.conversation.start({ busy: () => true });
   call.conversation.replyFinished("A reply that is long enough to be spoken on its own.");
   await flush();
 
@@ -206,6 +234,19 @@ test("ending the call releases the microphone and wake lock and ignores late res
   assert.deepEqual(call.sent, []);
 });
 
+test("ending the call while the recording is handed over sends nothing", async (t) => {
+  const recording = deferred();
+  const call = voiceCall(t, { transcripts: ["Never sent"], recordingReady: recording.promise });
+  await call.conversation.start();
+  await call.utter();
+  assert.equal(call.state(), "transcribing");
+
+  call.conversation.end();
+  recording.resolve();
+  await flush();
+  assert.deepEqual(call.requests, []);
+});
+
 test("a refused microphone ends the call with an error", async (t) => {
   const call = voiceCall(t, { microphoneError: new DOMException("Permission denied", "NotAllowedError") });
 
@@ -257,7 +298,7 @@ test("spoken messages are recognised by the voice prefix", () => {
   assert.equal(spokenText(`${VOICE_PREFIX.trimEnd()}What time is it?`), null);
 });
 
-function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=opus"], send, speakError, microphoneError } = {}) {
+function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=opus"], send, speakError, microphoneError, microphoneReady, recordingReady } = {}) {
   t.mock.timers.enable({ apis: ["setInterval", "Date"] });
   const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], played: [], changes: [], recorders: [], locks: [] };
   const track = { enabled: true, readyState: "live", stopped: false, stop() { this.stopped = true; } };
@@ -304,7 +345,7 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
     start() { this.state = "recording"; }
     stop() {
       this.state = "inactive";
-      queueMicrotask(() => this.ondataavailable?.({ data: new Blob(["voice"], { type: this.mimeType }) }));
+      Promise.resolve(recordingReady).then(() => this.ondataavailable?.({ data: new Blob(["voice"], { type: this.mimeType }) }));
     }
   }
 
@@ -313,6 +354,7 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
       async getUserMedia(constraints) {
         call.sequence.push("get-user-media");
         call.constraints = constraints;
+        await microphoneReady;
         if (microphoneError) throw microphoneError;
         return stream;
       }

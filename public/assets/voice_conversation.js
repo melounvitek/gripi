@@ -1,7 +1,5 @@
+import { VOICE_PREFIX } from "./formatting.js";
 import { speechSentences } from "./speech_text.js";
-
-// Hermes CLI's voice prefix, so Hermes answers spoken messages briefly. voicePrefix in internal/server/views.go is the same.
-export const VOICE_PREFIX = "[Voice input — respond concisely and conversationally, 2-3 sentences max. No code blocks or markdown.] ";
 
 // Timings and levels follow Hermes Desktop's voice conversation.
 const SAMPLE_MS = 50;
@@ -19,10 +17,6 @@ const STOP_PHRASES = new Set([
   "stop", "stop listening", "stop it", "stop please", "please stop", "stop stop", "that is all", "that's all",
   "never mind", "nevermind", "end conversation", "end the conversation", "goodbye", "good bye", "bye", "cancel"
 ].map(normalizePhrase));
-
-export function spokenText(text) {
-  return text.startsWith(VOICE_PREFIX) ? text.slice(VOICE_PREFIX.length) : null;
-}
 
 export function isStopPhrase(text) {
   const phrase = normalizePhrase(text);
@@ -46,6 +40,8 @@ export class VoiceConversation {
     this.levelAt = 0;
     this.muted = false;
     this.error = null;
+    // Whether Hermes is working on a turn whose reply the call waits for: its prompt was taken, or it was already running.
+    this.awaitingReply = false;
     // Bumped on every state change; async work started in a state is dropped once it has moved on.
     this.generation = 0;
     this.audioContext = null;
@@ -65,7 +61,8 @@ export class VoiceConversation {
     return this.state !== "off";
   }
 
-  async start({ busy = false } = {}) {
+  // busy tells, once the microphone is ready, whether Hermes is working, whose reply the call then waits for.
+  async start({ busy = () => false } = {}) {
     if (this.audioContext) return;
     // iOS only lets a page play audio from a context created inside the user's tap, so before any await.
     const audioContext = new this.window.AudioContext();
@@ -97,8 +94,12 @@ export class VoiceConversation {
     this.timer = setInterval(() => this.tick(), SAMPLE_MS);
     this.window.document.addEventListener("visibilitychange", this.onVisibilityChange);
     this.lockScreen();
-    if (busy) this.setState("thinking");
-    else this.listen();
+    if (busy()) {
+      this.setState("thinking");
+      this.awaitingReply = true;
+    } else {
+      this.listen();
+    }
   }
 
   setMuted(muted) {
@@ -213,6 +214,7 @@ export class VoiceConversation {
         recorder.ondataavailable = (event) => resolve(event.data);
         recorder.stop();
       });
+      if (generation !== this.generation) return;
       const response = await this.request("/voice/transcribe", {
         method: "POST",
         body: recording,
@@ -233,6 +235,7 @@ export class VoiceConversation {
     const generation = this.generation;
     try {
       await this.send(VOICE_PREFIX + transcript);
+      if (generation === this.generation) this.awaitingReply = true;
     } catch (error) {
       if (generation === this.generation) this.listen(error.message);
     }
@@ -302,6 +305,7 @@ export class VoiceConversation {
 
   setState(state, error = null) {
     this.generation += 1;
+    this.awaitingReply = false;
     this.state = state;
     this.error = error;
     this.level = 0;

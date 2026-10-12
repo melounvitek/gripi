@@ -5,7 +5,7 @@ import { eventTimestamp, messageFingerprint } from "../public/assets/formatting.
 import { LiveMessageParser } from "../public/assets/live_message_parser.js";
 import { LiveMessageRenderer } from "../public/assets/live_message_renderer.js";
 import { ServerMarkdownRenderer } from "../public/assets/server_markdown_renderer.js";
-import { VOICE_PREFIX } from "../public/assets/voice_conversation.js";
+import { VOICE_PREFIX } from "../public/assets/formatting.js";
 import { FakeDocument, FakeElement, deferred, settle } from "./helpers/fake_dom.mjs";
 
 test("queue controls follow the initial snapshot and live queue updates", () => {

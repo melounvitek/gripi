@@ -39,16 +39,16 @@ export class VoiceCallController {
     this.elements.end.addEventListener("click", () => this.end());
   }
 
-  // Whether the call waits for Hermes's reply.
+  // Whether the call waits for the reply to a turn Hermes is working on.
   get waiting() {
-    return this.conversation?.state === "thinking";
+    return !!this.conversation?.awaitingReply;
   }
 
   start() {
     if (this.conversation) return;
     this.conversation = new VoiceConversation({ window: this.window, send: this.send, onChange: (change) => this.render(change) });
     // Nothing may be awaited before this: iOS plays only audio started within the tap.
-    this.conversation.start({ busy: this.busy() });
+    this.conversation.start({ busy: this.busy });
   }
 
   replyFinished(text) {

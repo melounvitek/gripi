@@ -88,20 +88,12 @@ test("desktop gateway downloads open a native save dialog for trusted session ex
   assert.match(downloads, /defaultPath:/);
 });
 
-test("desktop gateway webviews allow same-origin clipboard writes", () => {
-  const main = read("electron/main.js");
-
-  assert.match(main, /const allowedGatewayPermissions = new Set\(\["notifications", "clipboard-sanitized-write"\]\);/);
-  assert.match(main, /\(allowedGatewayPermissions\.has\(permission\) \|\| microphone\) && requestingOrigin === allowedOrigin/);
-  assert.match(main, /\(allowedGatewayPermissions\.has\(permission\) \|\| microphone\) && details\.requestingOrigin === allowedOrigin/);
-});
-
-test("desktop gateway webviews allow the gateway the microphone but never the camera", () => {
+test("desktop gateway webviews ask permissions.js for every permission", () => {
   const main = read("electron/main.js");
   const build = JSON.parse(read("package.json")).build;
 
-  assert.match(main, /const microphone = permission === "media" && details\.mediaType === "audio";/);
-  assert.match(main, /const microphone = permission === "media" && details\.mediaTypes\?\.length > 0 && details\.mediaTypes\.every\(\(type\) => type === "audio"\);/);
+  assert.match(main, /return allowsGatewayPermission\(permission, requestingOrigin, details\.mediaType \? \[details\.mediaType\] : \[\], allowedOrigin\);/);
+  assert.match(main, /callback\(allowsGatewayPermission\(permission, details\.requestingOrigin, details\.mediaTypes \?\? \[\], allowedOrigin\)\);/);
   assert.match(build.mac.extendInfo.NSMicrophoneUsageDescription, /voice conversations/);
 });
 

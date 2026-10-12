@@ -128,7 +128,7 @@ type pageView struct {
 	VoiceEnabled bool
 }
 
-// voicePrefix starts the messages of a voice conversation, as VOICE_PREFIX in public/assets/voice_conversation.js.
+// voicePrefix starts the messages of a voice conversation, as VOICE_PREFIX in public/assets/formatting.js.
 const voicePrefix = "[Voice input — respond concisely and conversationally, 2-3 sentences max. No code blocks or markdown.] "
 
 func (app *application) preparePage(request *http.Request, includeConversation bool) (*pageView, error) {
@@ -677,8 +677,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			}
 			return template.HTML(template.HTMLEscapeString(message.Text))
 		},
-		"spokenMessage": spokenMessage,
-		"compactBody": compactBody, "compactTail": compactTail, "toolSummary": func(value string) template.HTML { return template.HTML(value) },
+		"spokenMessage": spokenMessage, "compactBody": compactBody, "compactTail": compactTail, "toolSummary": func(value string) template.HTML { return template.HTML(value) },
 		"imageSource": imageSource,
 		"statusItems": statusItems, "bashStatusItems": bashStatusItems, "attachmentLabel": attachmentLabel,
 		"visibleImages": visibleImages, "attachmentCount": attachmentCount, "collapsible": collapsible, "toolOutputHiddenLabel": toolOutputHiddenLabel,

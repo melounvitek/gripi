@@ -86,7 +86,7 @@ function tableCells(line) {
   return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
 }
 
-// Filenames, paths, hashes, UUIDs and version IDs are read out character by character.
+// Filenames, paths, hashes, UUIDs and version IDs are left out, because a voice would spell them character by character.
 function isDenseIdentifier(token) {
   if (token.includes("@") || DATE_RE.test(token)) return false;
   if (/^(?:~\/|\.\.?\/|\/)/.test(token)) return true;

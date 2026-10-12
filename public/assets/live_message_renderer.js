@@ -1,9 +1,8 @@
 import { PAIRED_TOOL_NAMES, THINKING_PLACEHOLDER, TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES, TOOL_OUTPUT_TAIL_CHARACTERS } from "./constants.js";
 import { renderTextWithLinks } from "./dom.js";
-import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimeLabel, messageTimestampKey, normalizedMessageText, stableTextHash } from "./formatting.js";
+import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimeLabel, messageTimestampKey, normalizedMessageText, spokenText, stableTextHash } from "./formatting.js";
 import { finishedMarkdownBlocks } from "./paragraph_streaming.js";
 import { hasTerminalControls, renderTerminalOutput } from "./terminal_output_renderer.js";
-import { spokenText } from "./voice_conversation.js";
 
 const TERMINAL_OUTPUT_EXCLUDED_TOOLS = new Set(["read", "edit", "write"]);
 const PERSISTED_TOOL_REPLAY_LIMIT = 16;

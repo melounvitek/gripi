@@ -7,6 +7,14 @@ export function formatWaitDuration(milliseconds) {
   return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
+// Hermes CLI's voice prefix, so Hermes answers spoken messages briefly. voicePrefix in internal/server/views.go is the same.
+export const VOICE_PREFIX = "[Voice input — respond concisely and conversationally, 2-3 sentences max. No code blocks or markdown.] ";
+
+// The transcript of a message spoken in a voice conversation, or null for a typed one.
+export function spokenText(text) {
+  return text.startsWith(VOICE_PREFIX) ? text.slice(VOICE_PREFIX.length) : null;
+}
+
 export function imageAttachmentLabel(count) {
   return `${count} image${count === 1 ? "" : "s"} attached`;
 }

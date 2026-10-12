@@ -1843,10 +1843,13 @@ async function refreshSessionInBackground(controller, generation) {
   if (clearQueue) clearQueue.disabled = sessionSyncBlocked();
   liveMessageRenderer.bind();
   restoreSessionLiveState({ resetIdleState: true });
-  // The refresh skipped the events that would end a voice call's wait, so the reply comes from the page: its last message.
+  // The refresh skipped the events that would end a voice call's wait, so the reply comes from the page: its last message,
+  // without code and tables, which the reply's Markdown would have spoken as silence or by their headers.
   if (voiceCallController.waiting && !liveAgentRunning) {
     const last = [...conversationScroll.querySelectorAll("article.message")].at(-1);
-    voiceCallController.replyFinished(last?.dataset.finalAssistantResponse === "true" ? last.querySelector(".message-body").innerText : "");
+    const blocks = last?.dataset.finalAssistantResponse === "true" ? [...last.querySelector(".message-body").children] : [];
+    const spoken = blocks.filter((block) => !block.matches("pre, table") && !block.querySelector("pre, table"));
+    voiceCallController.replyFinished(spoken.map((block) => block.innerText).join("\n\n"));
   }
   resetEventCursor();
   updateSessionHeaderName(payload.title);
