@@ -652,10 +652,14 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		forkFrom = source.Path
 	}
 	request.Form.Del("project")
-	newPath, err := app.startNewSession(request, cwd, forkFrom, request.FormValue("agent"))
+	newPath, err := app.startNewSession(request, cwd, forkFrom, request.FormValue("new_session_agent"))
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
+	}
+	// The agent filter would hide a new session of another agent.
+	if request.FormValue("agent") != app.agentOf(newPath) {
+		request.Form.Del("agent")
 	}
 	app.redirectToNewSession(response, request, newPath, "")
 }
@@ -1742,7 +1746,7 @@ func (app *application) writePromptResult(response http.ResponseWriter, request 
 
 func (app *application) sessionRedirectPath(request *http.Request, path string) string {
 	values := url.Values{"session": []string{path}}
-	for _, key := range []string{"project", "session_search", "session_only", "tag"} {
+	for _, key := range []string{"project", "agent", "session_search", "session_only", "tag"} {
 		if value := request.FormValue(key); value != "" && (key != "session_only" || value == "1") {
 			values.Set(key, value)
 		}
