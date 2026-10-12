@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -716,47 +717,66 @@ func TestPreparePageUsesManagedRPCLeafAndLiveSnapshot(t *testing.T) {
 	}
 }
 
-func TestPreparePageShowsARunThatStartsWhileTheWindowIsReadAsRunning(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "session.jsonl")
-	writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": root}})
-	client := &remapClient{}
-	registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
-	if err := registry.Register(path, client); err != nil {
-		t.Fatal(err)
-	}
-	store := &runStartingStore{Store: NewPiStore(root, root), t: t, path: path, client: client}
-	app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: store, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(root, "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
+func TestPreparePagePairsTheConversationWithTheRunStateOfTheSameMoment(t *testing.T) {
+	for _, finishes := range []bool{false, true} {
+		root := t.TempDir()
+		path := filepath.Join(root, "session.jsonl")
+		writeSessionRecords(t, path, []map[string]any{{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": root}})
+		client := &remapClient{}
+		registry := agent.NewRegistry(func(string) (agent.Client, error) { return client, nil }, nil)
+		if err := registry.Register(path, client); err != nil {
+			t.Fatal(err)
+		}
+		store := &runStartingStore{Store: NewPiStore(root, root), t: t, path: path, client: client, finishes: finishes}
+		app := &application{config: config.Config{SessionsRoot: root, Home: root, AttachmentsRoot: filepath.Join(root, "attachments")}, adapter: agentpi.New(agentpi.Options{}), sessionStore: store, gatewayState: sessions.NewGatewayState(filepath.Join(root, "read.json"), filepath.Join(root, "pinned.json"), filepath.Join(root, "tags.json"), NewPiStore(root, "")), rpcClients: registry, pendingSessions: agent.NewPendingSessionRegistry(nil), instanceID: "test"}
 
-	view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	messages := view.Window.Messages
-	if len(messages) != 1 || messages[0].Text != "Hello" || !view.LiveOutput.AgentRunning {
-		t.Fatalf("agent running = %v with messages %#v", view.LiveOutput.AgentRunning, messages)
+		view, err := app.preparePage(httptest.NewRequest(http.MethodGet, "http://app.test/?session="+url.QueryEscape(path), nil), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A run that starts during the read shows as running with its prompt; one that also ends shows its reply.
+		var texts []string
+		for _, message := range view.Window.Messages {
+			texts = append(texts, message.Text)
+		}
+		want := []string{"Hello"}
+		if finishes {
+			want = append(want, "Hi")
+		}
+		if !slices.Equal(texts, want) || view.LiveOutput.AgentRunning == finishes {
+			t.Fatalf("run that finishes = %v: agent running = %v with messages %q", finishes, view.LiveOutput.AgentRunning, texts)
+		}
 	}
 }
 
-// runStartingStore starts a run, which saves its prompt, when the window is first read.
+// runStartingStore starts a run, which saves its prompt, while the window is first read, and finishes it when finishes is set.
 type runStartingStore struct {
 	agent.Store
-	t       *testing.T
-	path    string
-	client  *remapClient
-	started bool
+	t        *testing.T
+	path     string
+	client   *remapClient
+	finishes bool
+	started  bool
 }
 
 func (store *runStartingStore) Window(key, leafID string, leafSupplied bool, cursor, after *int) (agent.Window, error) {
-	if !store.started {
-		store.started = true
-		writeSessionRecords(store.t, store.path, []map[string]any{
-			{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": filepath.Dir(store.path)},
-			{"type": "message", "id": "prompt", "parentId": nil, "timestamp": "2026-01-01T00:00:01Z", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Hello"}}}},
-		})
-		store.client.live = agent.LiveSnapshot{EventSequence: 1, Busy: true, AgentRunning: true}
+	if store.started {
+		return store.Store.Window(key, leafID, leafSupplied, cursor, after)
 	}
-	return store.Store.Window(key, leafID, leafSupplied, cursor, after)
+	store.started = true
+	records := []map[string]any{
+		{"type": "session", "version": 3, "id": "session", "timestamp": "2026-01-01T00:00:00Z", "cwd": filepath.Dir(store.path)},
+		{"type": "message", "id": "prompt", "parentId": nil, "timestamp": "2026-01-01T00:00:01Z", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Hello"}}}},
+	}
+	writeSessionRecords(store.t, store.path, records)
+	store.client.live = agent.LiveSnapshot{EventSequence: 1, Busy: true, AgentRunning: true}
+	window, err := store.Store.Window(key, leafID, leafSupplied, cursor, after)
+	if store.finishes {
+		records = append(records, map[string]any{"type": "message", "id": "reply", "parentId": "prompt", "timestamp": "2026-01-01T00:00:02Z", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "Hi"}}}})
+		writeSessionRecords(store.t, store.path, records)
+		store.client.live = agent.LiveSnapshot{EventSequence: 4}
+	}
+	return window, err
 }
 
 func TestPreparePageExposesExternalFollowAndUsesPersistedLeaf(t *testing.T) {

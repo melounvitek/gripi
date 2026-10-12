@@ -337,8 +337,9 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		window := agent.Window{}
 		if saved {
 			// A run that starts or ends during the read would pair its messages with the other run state, so read
-			// again until the state holds across a read. The snapshot stays the earlier one: its event cursor must
-			// not skip anything the window lacks.
+			// again until the state holds across a read. An idle agent also must not have had events, which a whole
+			// run would leave; a running one has them for every streamed delta. The snapshot stays the earlier one:
+			// its event cursor must not skip anything the window lacks.
 			for attempt := 1; ; attempt++ {
 				var err error
 				window, err = app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
@@ -346,7 +347,8 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 					return nil, err
 				}
 				latest := app.rpcClients.LiveSnapshot(selected.Path)
-				if latest.AgentRunning == snapshot.AgentRunning || attempt == 3 {
+				settled := latest.AgentRunning == snapshot.AgentRunning && (snapshot.AgentRunning || latest.EventSequence == snapshot.EventSequence)
+				if settled || attempt == 3 {
 					break
 				}
 				snapshot = latest
