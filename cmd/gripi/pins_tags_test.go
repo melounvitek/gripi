@@ -64,6 +64,39 @@ func TestPinExplainsWhatItCannotPin(t *testing.T) {
 	}
 }
 
+func TestRenameNamesASession(t *testing.T) {
+	fakePiGateway(t)
+
+	code, stdout, stderr := runCLI("rename", "0a1-a", "Release planning", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.ID != "0a1-alpha" || session.Name != "Release planning" {
+		t.Fatalf("gripi rename = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if name := listedSession(t, "0a1-alpha").Name; name != "Release planning" {
+		t.Fatalf("listed name = %q", name)
+	}
+}
+
+func TestRenameExplainsWhatItCannotRename(t *testing.T) {
+	fakePiGateway(t)
+	for _, usage := range [][]string{{"rename"}, {"rename", "0a1-a"}, {"rename", "", "name"}, {"rename", "0a1-a", "two", "words"}, {"rename", "0a1-a", "name", "--bogus"}} {
+		if code, stdout, stderr := runCLI(usage...); code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help rename") {
+			t.Fatalf("gripi %q = %d, stdout %q, stderr %q", usage, code, stdout, stderr)
+		}
+	}
+	if code, stdout, stderr := runCLI("rename", "zzz", "name"); code != 1 || stdout != "" || !strings.Contains(stderr, "gripi list") {
+		t.Fatalf("gripi rename on an unknown session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if code, stdout, stderr := runCLI("rename", "0a1-a", " "); code != 1 || stdout != "" || !strings.Contains(stderr, "cannot be empty") {
+		t.Fatalf("gripi rename to a blank name = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+
+	_, stdout, _ := runCLI("new", t.TempDir(), "--json")
+	started := decodeSession(t, stdout)
+	if code, stdout, stderr := runCLI("rename", started.ID, "Too early"); code != 1 || stdout != "" || !strings.Contains(stderr, "once Pi has replied to its first message") {
+		t.Fatalf("gripi rename on a new session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
 func TestTagAndUntagChangeTheTagsOfASession(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 

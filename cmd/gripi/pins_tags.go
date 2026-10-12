@@ -78,6 +78,54 @@ func pinSession(name string, pinned bool) func([]string, io.Reader, io.Writer, i
 	}
 }
 
+const renameHelp = `Usage:
+  gripi rename <session> <name> [--json]
+
+Names a session, as /name does in Pi CLI and in the browser's composer, then
+prints the session. The name replaces the first message as the session's
+title in listings and in the browser's sidebar.
+
+A session from 'gripi new' takes a name only once Pi has replied to its first
+message. A session in state external or conflict cannot be renamed.
+
+Arguments:
+  session  Session ID, a unique prefix of it, or the session file path
+  name     The new name; quote a name that has spaces
+
+Flags:
+  --json  Print the session as a JSON object instead of a table
+
+` + sessionFields + `
+Example:
+  gripi rename 01a107aa "Release planning"
+
+Exit codes:
+` + sessionExitCodes
+
+func renameSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("rename", flag.ContinueOnError)
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "rename", err.Error())
+	}
+	if len(positional) != 2 || positional[0] == "" {
+		return usageError(stderr, "rename", "takes a session and one name; quote a name that has spaces")
+	}
+	client, session, err := connect(positional[0])
+	if err != nil {
+		return failure(stderr, "rename", err)
+	}
+	var answer struct {
+		Name string `json:"name"`
+	}
+	if err := client.post("/sessions/rename", url.Values{"session": {session.Path}, "name": {positional[1]}}, &answer); err != nil {
+		return failure(stderr, "rename", err)
+	}
+	session.Name = answer.Name
+	return printSession(stdout, stderr, "rename", session, *asJSON)
+}
+
 const tagHelp = `Usage:
   gripi tag <session> <tag>... [--json]
 
