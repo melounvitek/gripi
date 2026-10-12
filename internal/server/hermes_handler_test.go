@@ -211,7 +211,7 @@ func TestAHermesSessionRunsAPromptLive(t *testing.T) {
 	project := t.TempDir()
 	handler := hermesHandler(t)
 
-	code, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	code, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
 	key, _ := payload["session"].(string)
 	if code != http.StatusOK || !strings.HasPrefix(key, "hermes:") {
 		t.Fatalf("new Hermes session = %d %v", code, payload)
@@ -249,7 +249,7 @@ func TestImagesReachHermesAndStayInTheConversation(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "hermes.log")
 	t.Setenv("FAKE_HERMES_LOG", log)
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	request := multipartRequest(t, "/prompt", map[string]string{"session": key, "message": "What does this show?"}, "images[]", "shot.png", "image/png", []byte("fixture-image"))
 	request.Header.Set("Accept", "application/json")
@@ -372,7 +372,7 @@ func TestAnImageHermesSharesShowsInPlaceOfItsTag(t *testing.T) {
 func TestAnImageHermesSharesShowsLiveAndAfterTheRun(t *testing.T) {
 	image, _, contents := sharedFiles(t)
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	// The fake Hermes repeats the prompt in its reply.
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {`Look: **MEDIA:"` + image + `"**`}}); code != http.StatusOK {
@@ -396,7 +396,7 @@ func TestAnImageHermesSharesShowsLiveAndAfterTheRun(t *testing.T) {
 
 func TestHermesRefusesAMessageTooLargeForIt(t *testing.T) {
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -424,7 +424,7 @@ func TestHermesRefusesAMessageTooLargeForIt(t *testing.T) {
 func TestStopEndsAHermesRunAndRefusesMessagesWhileItRuns(t *testing.T) {
 	project := t.TempDir()
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Wait for stop"}}); code != http.StatusOK {
 		t.Fatalf("prompt = %d %v", code, payload)
@@ -449,7 +449,7 @@ func TestHermesAsksBeforeADangerousCommandInADialog(t *testing.T) {
 	t.Setenv("FAKE_HERMES_LOG", log)
 	project := t.TempDir()
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Delete the build folder"}}); code != http.StatusOK {
 		t.Fatalf("prompt = %d %v", code, payload)
@@ -515,7 +515,7 @@ func TestSavedVariablesReachHermesBeforeItsNextMessage(t *testing.T) {
 	t.Setenv("FAKE_HERMES_LOG", log)
 	project := t.TempDir()
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	// A session that Hermes hasn't saved lives only in the running Hermes, so its first message runs there.
 	if code, payload := postJSON(t, handler, "/environment/variable", url.Values{"name": {"FAKE_HERMES_PROBE"}, "value": {"saved in Gripi"}}); code != http.StatusOK {
@@ -673,7 +673,7 @@ func TestHermesRowsShowTheirProfileWhereProjectsShowTheirLetters(t *testing.T) {
 
 func TestAQuestionHermesStopsWaitingForCloses(t *testing.T) {
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Delete the build folder unless I am too slow"}})
 
@@ -690,7 +690,7 @@ func TestAQuestionHermesStopsWaitingForCloses(t *testing.T) {
 
 func TestAHermesThatExitsIsReplacedForTheNextMessage(t *testing.T) {
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}})
 	_, cursor := eventsAfterUntil(t, handler, key, 0, "agent_settled")
@@ -719,7 +719,7 @@ func TestAHermesThatExitsIsReplacedForTheNextMessage(t *testing.T) {
 func TestAStreamingReplyIsDeliveredOnceHoweverLateThePageAsks(t *testing.T) {
 	t.Setenv("FAKE_HERMES_STEP_MS", "1")
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Think at length, then wait for stop"}})
 
@@ -759,7 +759,7 @@ func TestAHermesSessionReadBeforeARestartTurnsUnreadWithItsNextReply(t *testing.
 		return handler
 	}
 	handler := start()
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "agent": {"hermes"}})
+	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
 	key := payload["session"].(string)
 	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}})
 	eventsUntil(t, handler, key, "agent_settled")
