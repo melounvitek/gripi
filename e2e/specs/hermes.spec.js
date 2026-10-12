@@ -197,12 +197,13 @@ test("a refused microphone ends the call and the composer says why", async ({ pa
   await expect(page.getByLabel("Message to Hermes")).toBeVisible();
 });
 
-test("a refresh that skipped a voice call's events speaks the reply to what the call said", async ({ page }) => {
+test("a refresh that skipped a voice call's events ends its wait with the reply to the awaited message", async ({ page }) => {
   const spoken = await page.evaluate(async () => {
     const { VoiceCallController } = await import("/assets/voice_call_controller.js");
-    const controller = new VoiceCallController(window, {});
+    let messages = [];
+    const controller = new VoiceCallController(window, { messages: () => messages });
     const replies = [];
-    controller.conversation = { state: "thinking", transcript: "Run the backup", replyFinished: (text) => replies.push(text) };
+    controller.conversation = { state: "thinking", awaited: "Run the backup", replyFinished: (text) => replies.push(text) };
     const message = (role, html, final = false) => {
       const article = document.createElement("article");
       article.dataset.role = role;
@@ -210,18 +211,24 @@ test("a refresh that skipped a voice call's events speaks the reply to what the 
       article.innerHTML = `<div class="message-body">${html}</div>`;
       return article;
     };
-    const reply = message("assistant", "<p>The backup finished.</p><blockquote><p>Run it again with</p>" +
-      '<div class="message-code-block"><pre>npm run backup</pre><button class="code-block-copy-button">Copy</button></div>' +
-      "<p>It takes ten minutes.</p></blockquote><table><tr><td>photos</td></tr></table>", true);
+    const finished = () => {
+      controller.replyFinishedOnPage();
+      return replies.splice(0);
+    };
 
-    // A page from before Hermes took the message ends with the turn before.
-    controller.replyFinishedOnPage([message("user", "Check the disks"), message("assistant", "<p>The disks are fine.</p>", true)]);
-    controller.replyFinishedOnPage([message("user", "Run the backup")]);
-    controller.replyFinishedOnPage([message("user", "Run the backup"), reply]);
-    return replies;
+    // A page from before Hermes took the message shows the turn before, also to a call that joined a running turn.
+    messages = [message("user", "Check the disks"), message("assistant", "<p>The disks are fine.</p>", true)];
+    const earlier = finished();
+    // A turn that ended without a reply, such as a stopped one, leaves nothing to say.
+    messages = [message("user", "Run the backup"), message("toolResult", "backup: interrupted")];
+    const stopped = finished();
+    messages = [message("user", "Run the backup"), message("assistant", "<p>The backup finished.</p><blockquote><p>Run it again with</p>" +
+      '<div class="message-code-block"><pre>npm run backup</pre><button class="code-block-copy-button">Copy</button></div>' +
+      "<p>It takes ten minutes.</p></blockquote><table><tr><td>photos</td></tr></table>", true)];
+    return { earlier, stopped, answered: finished().map((text) => text.replace(/\s+/g, " ").trim()) };
   });
 
-  expect(spoken.map((text) => text.replace(/\s+/g, " ").trim())).toEqual(["The backup finished. Run it again with It takes ten minutes."]);
+  expect(spoken).toEqual({ earlier: [], stopped: [""], answered: ["The backup finished. Run it again with It takes ten minutes."] });
 });
 
 test("only Hermes sessions offer a voice conversation", async ({ page }) => {

@@ -7,10 +7,11 @@ const METER_LENGTH = 12;
 
 // Owns a Hermes session's voice button and call line, and the voice conversation they run.
 export class VoiceCallController {
-  constructor(window, { send, busy, failed }) {
+  constructor(window, { send, busy, messages, failed }) {
     this.window = window;
     this.send = send;
     this.busy = busy;
+    this.messages = messages;
     this.failed = failed;
     this.conversation = null;
     this.elements = null;
@@ -48,20 +49,24 @@ export class VoiceCallController {
     if (this.conversation) return;
     this.conversation = new VoiceConversation({ window: this.window, send: this.send, onChange: (change) => this.render(change) });
     // Nothing may be awaited before this: iOS plays only audio started within the tap.
-    this.conversation.start({ busy: this.busy });
+    this.conversation.start({ working: () => (this.busy() ? lastSaid(this.messages()) : null) });
   }
 
   replyFinished(text) {
     this.conversation?.replyFinished(text);
   }
 
-  // Ends the wait with the reply on the page, for a refresh that skipped the events that would end it. The page must end
-  // with the reply to what the call said, because a page from before Hermes took the message ends with an older turn.
-  replyFinishedOnPage(messages) {
-    const transcript = this.conversation?.transcript;
-    const said = messages.findLast((message) => message.dataset.role === "user")?.querySelector(".message-body")?.textContent.trim();
+  // Ends the wait with the page of an idle Hermes, for a refresh that skipped the events that would end it. The page must
+  // hold the awaited message, because a page from before Hermes took it shows an older turn. A turn that ended without a
+  // reply, such as a stopped one, ends the wait with nothing to say.
+  replyFinishedOnPage() {
+    const messages = this.messages();
+    if (!this.waiting || lastSaid(messages) !== this.conversation.awaited) return;
     const last = messages.at(-1);
-    if (!this.waiting || (transcript !== null && said !== transcript) || last?.dataset.finalAssistantResponse !== "true") return;
+    if (last?.dataset.finalAssistantResponse !== "true") {
+      this.replyFinished("");
+      return;
+    }
     const reply = last.querySelector(".message-body").cloneNode(true);
     // Code and tables are left out, as speaking a reply's Markdown leaves them out.
     reply.querySelectorAll("pre, table, .code-block-copy-button").forEach((element) => element.remove());
@@ -104,4 +109,8 @@ export class VoiceCallController {
     note.classList.toggle("is-error", !!error);
     mute.textContent = muted ? "unmute" : "mute";
   }
+}
+
+function lastSaid(messages) {
+  return messages.findLast((message) => message.dataset.role === "user")?.querySelector(".message-body")?.textContent.trim() ?? "";
 }

@@ -229,6 +229,7 @@ const voiceCallController = new VoiceCallController(window, {
     if (sent !== true) throw new Error(sent || "The message was not sent");
   },
   busy: () => liveAgentRunning,
+  messages: () => [...conversationScroll.querySelectorAll("article.message")],
   failed: (message) => showCurrentActiveTask("error", message)
 });
 const treeSessionController = new TreeSessionController(document, window, {
@@ -1844,7 +1845,7 @@ async function refreshSessionInBackground(controller, generation) {
   liveMessageRenderer.bind();
   restoreSessionLiveState({ resetIdleState: true });
   // The refresh skipped the events that would end a voice call's wait, so the reply comes from the page.
-  if (!liveAgentRunning) voiceCallController.replyFinishedOnPage([...conversationScroll.querySelectorAll("article.message")]);
+  if (!liveAgentRunning) voiceCallController.replyFinishedOnPage();
   resetEventCursor();
   updateSessionHeaderName(payload.title);
   refreshSessionStatus(generation).catch(() => {});

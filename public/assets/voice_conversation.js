@@ -40,8 +40,8 @@ export class VoiceConversation {
     this.levelAt = 0;
     this.muted = false;
     this.error = null;
-    // What the call last said to Hermes, whose reply it waits for while thinking; null when it waits for a turn it found running.
-    this.transcript = null;
+    // The message whose reply the call waits for while thinking: what it said, or what Hermes was working on when it started.
+    this.awaited = null;
     // Bumped on every state change; async work started in a state is dropped once it has moved on.
     this.generation = 0;
     this.audioContext = null;
@@ -61,8 +61,8 @@ export class VoiceConversation {
     return this.state !== "off";
   }
 
-  // busy tells, once the microphone is ready, whether Hermes is working, whose reply the call then waits for.
-  async start({ busy = () => false } = {}) {
+  // working tells, once the microphone is ready, what Hermes is working on, whose reply the call then waits for, or null.
+  async start({ working = () => null } = {}) {
     if (this.audioContext) return;
     // iOS only lets a page play audio from a context created inside the user's tap, so before any await.
     const audioContext = new this.window.AudioContext();
@@ -94,8 +94,9 @@ export class VoiceConversation {
     this.timer = setInterval(() => this.tick(), SAMPLE_MS);
     this.window.document.addEventListener("visibilitychange", this.onVisibilityChange);
     this.lockScreen();
-    if (busy()) this.setState("thinking");
-    else this.listen();
+    this.awaited = working();
+    if (this.awaited === null) this.listen();
+    else this.setState("thinking");
   }
 
   setMuted(muted) {
@@ -227,7 +228,7 @@ export class VoiceConversation {
   }
 
   async ask(transcript) {
-    this.transcript = transcript;
+    this.awaited = transcript;
     this.setState("thinking");
     const generation = this.generation;
     try {

@@ -80,7 +80,7 @@ test("failed requests are reported and the call listens again", async (t) => {
     speakError: "Piper is not running",
     send: async () => { throw new Error("Hermes is busy"); }
   });
-  await call.conversation.start({ busy: () => true });
+  await call.conversation.start({ working: () => "What is left to do?" });
 
   call.conversation.replyFinished("Here is the answer you asked for a moment ago.");
   await flush();
@@ -93,7 +93,8 @@ test("failed requests are reported and the call listens again", async (t) => {
 
 test("a call started while Hermes works waits for its reply", async (t) => {
   const call = voiceCall(t);
-  await call.conversation.start({ busy: () => true });
+  await call.conversation.start({ working: () => "What is left to do?" });
+  assert.equal(call.conversation.awaited, "What is left to do?");
 
   call.level = 0.5;
   await call.wait(2000);
@@ -107,11 +108,11 @@ test("a call started while Hermes works waits for its reply", async (t) => {
 
 test("a call whose microphone arrives after Hermes finished listens", async (t) => {
   const microphone = deferred();
-  let working = true;
+  let working = "What is left to do?";
   const call = voiceCall(t, { microphoneReady: microphone.promise });
 
-  const starting = call.conversation.start({ busy: () => working });
-  working = false;
+  const starting = call.conversation.start({ working: () => working });
+  working = null;
   microphone.resolve();
   await starting;
 
@@ -120,7 +121,7 @@ test("a call whose microphone arrives after Hermes finished listens", async (t) 
 
 test("talking over the reply stops it and listens", async (t) => {
   const call = voiceCall(t);
-  await call.conversation.start({ busy: () => true });
+  await call.conversation.start({ working: () => "What is left to do?" });
   call.conversation.replyFinished("The first sentence is long enough to stand alone. The second one should never be heard.");
   await flush();
   assert.deepEqual(call.played, ["The first sentence is long enough to stand alone."]);
@@ -161,7 +162,7 @@ test("muting stops recording until the microphone is back", async (t) => {
 
 test("the meter follows Hermes's voice while it speaks", async (t) => {
   const call = voiceCall(t);
-  await call.conversation.start({ busy: () => true });
+  await call.conversation.start({ working: () => "What is left to do?" });
   call.conversation.replyFinished("A reply that is long enough to be spoken on its own.");
   await flush();
 
