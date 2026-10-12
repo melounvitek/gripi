@@ -137,6 +137,7 @@ test("native bash, polling, shortcut, and URL helpers remain directly importable
 
   const location = { href: "https://example.test/?project=demo&session=old", origin: "https://example.test", search: "?project=demo&session=old" };
   assert.equal(sessionUrl("new path", location), "/?session=new+path&project=demo");
+  assert.equal(sessionUrl("new path", { ...location, search: "?agent=pi&session=old" }), "/?session=new+path&agent=pi");
   assert.equal(sessionFragmentUrl("/?session=next&project=demo", location).href, "https://example.test/session_fragment?session=next&project=demo");
   assert.equal(newSessionModalUrl(undefined, location).href, "https://example.test/new_session_modal?project=demo&session=old");
 });

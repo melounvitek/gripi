@@ -120,6 +120,19 @@ test("the agent filter shows only Hermes's sessions, each marked as Hermes's", a
   await expect(page.locator(".session-row").filter({ hasText: hermes.saved.title }).locator('.session-agent[data-agent="hermes"]')).toBeVisible();
 });
 
+test("the agent filter stays after switching to another session", async ({ page }) => {
+  await page.getByRole("combobox", { name: "Filter sessions by agent" }).click();
+  await page.getByRole("option", { name: "pi" }).click();
+  await expect(page.locator('.sessions-list .session-row[data-agent="hermes"]')).toHaveCount(0);
+  await page.locator('.sessions-list .session-row[data-agent="pi"] a.session').first().click();
+  await expect(page.locator(".session-header-agent")).toHaveAttribute("data-agent", "pi");
+
+  // The sidebar's refreshes read the filters from the address, as a reload does.
+  await page.reload();
+  await expect(page.locator('select[name="agent"]')).toHaveValue("pi");
+  await expect(page.locator('.session-row[data-agent="hermes"]')).toHaveCount(0);
+});
+
 test("a new session starts Pi in the first project, as without Hermes", async ({ page }) => {
   await page.keyboard.press("Control+n");
   const dialog = page.getByRole("dialog", { name: "New session", exact: true });
