@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ADMIN_PASSWORD, hermes } from "./contract.mjs";
+import { microphoneRecording, startFakeHermesDashboard } from "./fake_hermes_dashboard.mjs";
 import { seedFixtures } from "../fixtures/seed.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -32,6 +33,11 @@ const fakePiPath = path.join(repoRoot, "e2e", "support", "fake_pi.mjs");
 const fakeHermesLogPath = path.join(runtimeRoot, "fake-hermes.log");
 const fakeHermesStatePath = path.join(runtimeRoot, "fake-hermes-state.json");
 if (withHermes) await writeFile(fakeHermesStatePath, JSON.stringify({ sessions: [savedHermesSession(fixture.projects["prompt-project"])] }));
+// With Hermes come voice conversations, through a fake of Hermes's dashboard, and the fake microphone the browser hears.
+const dashboardLogin = { username: "e2e", password: "e2e-dashboard-password" };
+const dashboard = withHermes ? await startFakeHermesDashboard(dashboardLogin) : null;
+const microphonePath = path.join(runtimeRoot, "microphone.wav");
+if (withHermes) await writeFile(microphonePath, microphoneRecording());
 let serverSpawnError = null;
 let stopping = false;
 let serverLogClosed = false;
@@ -66,7 +72,11 @@ const serverEnv = {
   GRIPI_NODE: realPi ? "" : process.execPath,
   GRIPI_PI: realPi ? "" : fakePiPath,
   GRIPI_HERMES: withHermes ? path.join(repoRoot, "e2e", "support", "fake_hermes.mjs") : "",
-  ...(withHermes ? { FAKE_HERMES_STATE: fakeHermesStatePath, FAKE_HERMES_LOG: fakeHermesLogPath } : {}),
+  ...(withHermes ? {
+    FAKE_HERMES_STATE: fakeHermesStatePath, FAKE_HERMES_LOG: fakeHermesLogPath,
+    GRIPI_HERMES_DASHBOARD_URL: `http://127.0.0.1:${dashboard.address().port}`,
+    GRIPI_HERMES_DASHBOARD_USERNAME: dashboardLogin.username, GRIPI_HERMES_DASHBOARD_PASSWORD: dashboardLogin.password
+  } : {}),
   GRIPI_E2E_SESSIONS_ROOT: fixture.sessionsRoot,
   GRIPI_E2E_FAKE_PI_LOG: fakeLogPath,
   ...(realPi ? {
@@ -112,7 +122,8 @@ try {
       GRIPI_E2E_AUTH_STATE: authStatePath,
       GRIPI_E2E_EXPECT_ACCESS: realPi ? "" : "1",
       GRIPI_E2E_REAL_PI: realPi ? "1" : "",
-      GRIPI_E2E_FAKE_PI_LOG: fakeLogPath
+      GRIPI_E2E_FAKE_PI_LOG: fakeLogPath,
+      GRIPI_E2E_FAKE_MICROPHONE: withHermes ? microphonePath : ""
     },
     stdio: "inherit"
   });

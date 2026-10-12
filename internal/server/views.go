@@ -124,7 +124,12 @@ type pageView struct {
 	SelectedAgent string
 	// HermesProfile names the profile Hermes runs, which a Hermes session shows where a Pi session shows its project.
 	HermesProfile string
+	// VoiceEnabled offers Hermes sessions a voice conversation.
+	VoiceEnabled bool
 }
+
+// voicePrefix starts the messages of a voice conversation, as VOICE_PREFIX in public/assets/formatting.js.
+const voicePrefix = "[Voice input — respond concisely and conversationally, 2-3 sentences max. No code blocks or markdown.] "
 
 func (app *application) preparePage(request *http.Request, includeConversation bool) (*pageView, error) {
 	// A managed session may still be registered under its synthetic pending path.
@@ -252,7 +257,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if err != nil {
 		return nil, err
 	}
-	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity)}
+	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), VoiceEnabled: app.voice != nil}
 	view.ExternalFollow = externalFollow
 	if router, ok := app.adapter.(*agent.Router); ok {
 		view.Agents = router.Names()
@@ -331,10 +336,22 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		snapshot := app.rpcClients.LiveSnapshot(selected.Path)
 		window := agent.Window{}
 		if saved {
-			var err error
-			window, err = app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
-			if err != nil {
-				return nil, err
+			// A run that starts or ends during the read would pair its messages with the other run state, so read
+			// again until the state holds across a read. An idle agent also must not have had events, which a whole
+			// run would leave; a running one has them for every streamed delta. The snapshot stays the earlier one:
+			// its event cursor must not skip anything the window lacks.
+			for attempt := 1; ; attempt++ {
+				var err error
+				window, err = app.sessionStore.Window(selected.Path, leafID, leafSupplied, nil, nil)
+				if err != nil {
+					return nil, err
+				}
+				latest := app.rpcClients.LiveSnapshot(selected.Path)
+				settled := latest.AgentRunning == snapshot.AgentRunning && (snapshot.AgentRunning || latest.EventSequence == snapshot.EventSequence)
+				if settled || attempt == 3 {
+					break
+				}
+				snapshot = latest
 			}
 		}
 		view.Window = window
@@ -667,9 +684,12 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
 				return template.HTML(markdownRenderer.Render(message.Text))
 			}
+			if spokenMessage(message) {
+				return template.HTML(template.HTMLEscapeString(strings.TrimPrefix(message.Text, voicePrefix)))
+			}
 			return template.HTML(template.HTMLEscapeString(message.Text))
 		},
-		"compactBody": compactBody, "compactTail": compactTail, "toolSummary": func(value string) template.HTML { return template.HTML(value) },
+		"spokenMessage": spokenMessage, "compactBody": compactBody, "compactTail": compactTail, "toolSummary": func(value string) template.HTML { return template.HTML(value) },
 		"imageSource": imageSource,
 		"statusItems": statusItems, "bashStatusItems": bashStatusItems, "attachmentLabel": attachmentLabel,
 		"visibleImages": visibleImages, "attachmentCount": attachmentCount, "collapsible": collapsible, "toolOutputHiddenLabel": toolOutputHiddenLabel,
@@ -974,6 +994,9 @@ func messageFingerprint(message *agent.Message) string {
 		hash = ((hash << 5) + hash) + uint32(value)
 	}
 	return fmt.Sprintf("%s:%d:%x", messageRoleKey(message.Role), message.Timestamp.Unix(), hash)
+}
+func spokenMessage(message *agent.Message) bool {
+	return message.Role == "user" && strings.HasPrefix(message.Text, voicePrefix)
 }
 func compactBody(view *pageView, message *agent.Message) template.HTML {
 	return renderCompactLines(message, strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n"), 0, view.Home)

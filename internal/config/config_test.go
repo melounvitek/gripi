@@ -136,6 +136,23 @@ func TestLoadEnablesHermesWithItsPathFromTheGatewayEnv(t *testing.T) {
 	}
 }
 
+func TestLoadReadsTheHermesDashboardForVoiceFromTheGatewayEnv(t *testing.T) {
+	home := t.TempDir()
+	envPath := filepath.Join(home, "gateway.env")
+	settings := "GRIPI_ADMIN_PASSWORD=secret\nGRIPI_HERMES=/opt/hermes\nGRIPI_HERMES_DASHBOARD_URL=http://127.0.0.1:8787\nGRIPI_HERMES_DASHBOARD_USERNAME=me\nGRIPI_HERMES_DASHBOARD_PASSWORD=hunter2\n"
+	if err := os.WriteFile(envPath, []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load([]string{"HOME=" + home, "GRIPI_ENV_PATH=" + envPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HermesDashboardURL != "http://127.0.0.1:8787" || cfg.HermesDashboardUsername != "me" || cfg.HermesDashboardPassword != "hunter2" {
+		t.Fatalf("dashboard = %q, %q, %q", cfg.HermesDashboardURL, cfg.HermesDashboardUsername, cfg.HermesDashboardPassword)
+	}
+}
+
 func TestLoadUsesConfiguredWebPushStatePaths(t *testing.T) {
 	home := t.TempDir()
 	cfg, err := config.Load([]string{
@@ -311,6 +328,11 @@ func TestLoadValidatesRuntimeConfiguration(t *testing.T) {
 		{"overflowing sweep", []string{"GRIPI_RPC_IDLE_SWEEP_SECONDS=1e20"}},
 		{"invalid port", []string{"GRIPI_PORT=70000"}},
 		{"Hermes in multi-user mode", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_MULTI_USER_MODE=1"}},
+		{"Hermes dashboard without Hermes", []string{"GRIPI_HERMES_DASHBOARD_URL=http://127.0.0.1:8787", "GRIPI_HERMES_DASHBOARD_USERNAME=me", "GRIPI_HERMES_DASHBOARD_PASSWORD=secret"}},
+		{"Hermes dashboard without a password", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_HERMES_DASHBOARD_URL=http://127.0.0.1:8787", "GRIPI_HERMES_DASHBOARD_USERNAME=me"}},
+		{"Hermes dashboard without a username", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_HERMES_DASHBOARD_URL=http://127.0.0.1:8787", "GRIPI_HERMES_DASHBOARD_PASSWORD=secret"}},
+		{"relative Hermes dashboard URL", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_HERMES_DASHBOARD_URL=127.0.0.1:8787", "GRIPI_HERMES_DASHBOARD_USERNAME=me", "GRIPI_HERMES_DASHBOARD_PASSWORD=secret"}},
+		{"Hermes dashboard URL of another scheme", []string{"GRIPI_HERMES=/opt/hermes", "GRIPI_HERMES_DASHBOARD_URL=ftp://127.0.0.1:8787", "GRIPI_HERMES_DASHBOARD_USERNAME=me", "GRIPI_HERMES_DASHBOARD_PASSWORD=secret"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { hermes } from "../support/contract.mjs";
+import { hermes, sessions } from "../support/contract.mjs";
 import { expectRunFinished, liveMessage, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
 test.beforeEach(async ({ page }) => {
@@ -161,6 +161,81 @@ test("a project picked after Hermes failed to start starts Pi", async ({ page })
   await expect(page.locator(".session-header-agent")).toHaveAttribute("data-agent", "pi");
   const deleted = await page.request.post("/sessions/delete", { form: { session: new URL(page.url()).searchParams.get("session") } });
   expect(deleted.ok()).toBe(true);
+});
+
+test("a voice conversation sends what was said and speaks Hermes's reply", async ({ page }) => {
+  const { transcript } = hermes.voice;
+  const speech = page.waitForResponse((response) => response.url().endsWith("/voice/speak") && response.ok());
+  await page.getByRole("button", { name: "Start a voice conversation" }).click();
+  const call = page.getByRole("group", { name: "Voice conversation with Hermes" });
+  const state = call.locator("[data-voice-call-state]");
+  await expect(state).toHaveText("listening");
+  await expect(page.getByLabel("Message to Hermes")).toBeHidden();
+
+  // The fake microphone says something for a second, and the fake dashboard hears the transcript.
+  const spoken = message(page, "user", transcript).last();
+  await expect(spoken.locator(".message-body")).toHaveText(transcript);
+  await expect(spoken.locator(".message-voice-mark")).toHaveText("voice");
+  expect(new URLSearchParams((await speech).request().postData()).get("text")).toContain(hermes.run.replyPrefix.trim());
+  await expect(state).toHaveText("listening");
+
+  await call.getByRole("button", { name: "end", exact: true }).click();
+  await expect(call).toBeHidden();
+  await expect(page.getByLabel("Message to Hermes")).toBeVisible();
+
+  await page.reload();
+  await expect(spoken.locator(".message-body")).toHaveText(transcript);
+  await expect(spoken.locator(".message-voice-mark")).toHaveText("voice");
+});
+
+test("a refused microphone ends the call and the composer says why", async ({ page }) => {
+  await page.evaluate(() => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+  });
+  await page.getByRole("button", { name: "Start a voice conversation" }).click();
+  await expect(page.locator(".composer-state")).toHaveText("Microphone access was denied");
+  await expect(page.getByLabel("Message to Hermes")).toBeVisible();
+});
+
+test("a refresh that skipped a voice call's events ends its wait with the reply to the awaited message", async ({ page }) => {
+  const spoken = await page.evaluate(async () => {
+    const { VoiceCallController } = await import("/assets/voice_call_controller.js");
+    let messages = [];
+    const controller = new VoiceCallController(window, { messages: () => messages });
+    const replies = [];
+    controller.conversation = { state: "thinking", awaited: "Run the backup", replyFinished: (text) => replies.push(text) };
+    const message = (role, html, final = false) => {
+      const article = document.createElement("article");
+      article.dataset.role = role;
+      if (final) article.dataset.finalAssistantResponse = "true";
+      article.innerHTML = `<div class="message-body">${html}</div>`;
+      return article;
+    };
+    const finished = () => {
+      controller.replyFinishedOnPage();
+      return replies.splice(0);
+    };
+
+    // A page from before Hermes took the message shows the turn before, also to a call that joined a running turn.
+    messages = [message("user", "Check the disks"), message("assistant", "<p>The disks are fine.</p>", true)];
+    const earlier = finished();
+    // A turn that ended without a reply, such as a stopped one, leaves nothing to say.
+    messages = [message("user", "Run the backup"), message("toolResult", "backup: interrupted")];
+    const stopped = finished();
+    messages = [message("user", "Run the backup"), message("assistant", "<p>The backup finished.</p><blockquote><p>Run it again with</p>" +
+      '<div class="message-code-block"><pre>npm run backup</pre><button class="code-block-copy-button">Copy</button></div>' +
+      "<p>It takes ten minutes.</p></blockquote><table><tr><td>photos</td></tr></table>", true)];
+    return { earlier, stopped, answered: finished().map((text) => text.replace(/\s+/g, " ").trim()) };
+  });
+
+  expect(spoken).toEqual({ earlier: [], stopped: [""], answered: ["The backup finished. Run it again with It takes ten minutes."] });
+});
+
+test("only Hermes sessions offer a voice conversation", async ({ page }) => {
+  await expect(page.getByRole("button", { name: "Start a voice conversation" })).toBeVisible();
+  await selectSession(page, sessions.marker);
+  await expect(page.getByLabel("Message to Pi")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start a voice conversation" })).toHaveCount(0);
 });
 
 test("Hermes reads its own / and ! commands", async ({ page }) => {

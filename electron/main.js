@@ -11,6 +11,7 @@ const {
 const { gatewayUrl } = require("./gateway_url");
 const { configureSessionExportDownload } = require("./downloads");
 const { allowsGatewayNavigation } = require("./navigation");
+const { allowsGatewayPermission } = require("./permissions");
 
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 const GATEWAY_PRELOAD_PATH = path.join(__dirname, "gateway_preload.js");
@@ -296,12 +297,11 @@ function installGatewayNavigationGuard(guestContents, allowedOrigin, partition) 
 
 function installGatewayPermissionHandlers(partition, allowedOrigin) {
   const gatewaySession = partition ? session.fromPartition(partition) : session.defaultSession;
-  const allowedGatewayPermissions = new Set(["notifications", "clipboard-sanitized-write"]);
-  gatewaySession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
-    return allowedGatewayPermissions.has(permission) && requestingOrigin === allowedOrigin;
+  gatewaySession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
+    return allowsGatewayPermission(permission, requestingOrigin, details.mediaType ? [details.mediaType] : [], allowedOrigin);
   });
   gatewaySession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
-    callback(allowedGatewayPermissions.has(permission) && details.requestingOrigin === allowedOrigin);
+    callback(allowsGatewayPermission(permission, details.requestingOrigin, details.mediaTypes ?? [], allowedOrigin));
   });
 }
 

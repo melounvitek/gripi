@@ -5,6 +5,7 @@ import { eventTimestamp, messageFingerprint } from "../public/assets/formatting.
 import { LiveMessageParser } from "../public/assets/live_message_parser.js";
 import { LiveMessageRenderer } from "../public/assets/live_message_renderer.js";
 import { ServerMarkdownRenderer } from "../public/assets/server_markdown_renderer.js";
+import { VOICE_PREFIX } from "../public/assets/formatting.js";
 import { FakeDocument, FakeElement, deferred, settle } from "./helpers/fake_dom.mjs";
 
 test("queue controls follow the initial snapshot and live queue updates", () => {
@@ -299,6 +300,25 @@ test("live message times use the short label with the full date as a tooltip", (
   const tool = renderer.appendCompactMessage("toolResult", "bash", "ok", false, false, null, { timestampFallback: false });
   assert.equal(tool.meta.textContent, "");
   assert.equal(tool.meta.getAttribute("title"), null);
+});
+
+test("a spoken message shows what was said with a voice mark, and keeps the fingerprint of what was sent", () => {
+  const document = new FakeDocument();
+  const conversation = { followLiveOutput: () => false, afterLiveOutputChange() {} };
+  const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser(), { bind() {} });
+  renderer.liveOutput = new FakeElement("div");
+  const sent = `${VOICE_PREFIX}What time is it?`;
+  const event = (type) => ({ type, message: { role: "user", content: [{ type: "text", text: sent }], timestamp: Date.now() } });
+
+  renderer.renderMessageEvent(event("message_start"));
+  renderer.renderMessageEvent(event("message_end"));
+
+  assert.equal(renderer.liveOutput.children.length, 1);
+  const [article] = renderer.liveOutput.children;
+  assert.equal(article.querySelector(".message-body").textContent, "What time is it?");
+  assert.deepEqual(article.querySelector(".message-header").children.map((child) => child.textContent).slice(-1), ["voice"]);
+  assert.ok(article.dataset.messageTimestamp);
+  assert.equal(article.dataset.messageFingerprint, messageFingerprint("user", sent, article.dataset.messageTimestamp));
 });
 
 test("tool preparation is visible with hidden thinking and is removed on reset or rebind", () => {

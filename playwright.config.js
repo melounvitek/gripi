@@ -6,6 +6,11 @@ const baseURL = process.env.GRIPI_E2E_BASE_URL;
 if (!baseURL) throw new Error("GRIPI_E2E_BASE_URL is required. Use `npm run test:e2e` for a managed target.");
 
 const storageState = process.env.GRIPI_E2E_AUTH_STATE || path.join(os.tmpdir(), `gripi-e2e-auth-${process.pid}.json`);
+// The managed runner's recording for the voice conversations of the hermes projects, which Chromium plays as its microphone.
+const fakeMicrophone = process.env.GRIPI_E2E_FAKE_MICROPHONE ? {
+  launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${process.env.GRIPI_E2E_FAKE_MICROPHONE}%noloop`] },
+  permissions: ["microphone"]
+} : {};
 
 export default defineConfig({
   testDir: "./e2e/specs",
@@ -62,7 +67,8 @@ export default defineConfig({
       testMatch: /specs\/hermes\.spec\.js$/,
       use: {
         storageState,
-        viewport: { width: 1440, height: 900 }
+        viewport: { width: 1440, height: 900 },
+        ...fakeMicrophone
       }
     },
     {
@@ -71,7 +77,8 @@ export default defineConfig({
       testMatch: /specs\/hermes_touch\.spec\.js$/,
       use: {
         ...devices["Pixel 7"],
-        storageState
+        storageState,
+        ...fakeMicrophone
       }
     },
     {

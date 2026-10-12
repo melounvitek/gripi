@@ -176,7 +176,9 @@
     .prompt-form[data-thinking-level="xhigh"] { --editor-border: #d183e8; }
     .prompt-form[data-thinking-level="max"] { --editor-border: #ff5fff; }
     .prompt-form[data-bash-mode] { --editor-border: var(--success); }
+    .prompt-form[data-voice-call] { --editor-border: var(--accent); }
     .composer-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; padding: 0.25rem 0; border-block: 1px solid color-mix(in srgb, var(--editor-border) 50%, transparent); }
+    .composer-input-row:has(.voice-button:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto auto auto; }
     .prompt-form:focus-within .composer-input-row { border-color: var(--editor-border); }
     .composer-textarea-wrap { position: relative; min-width: 0; }
     .composer-textarea-wrap textarea { display: block; padding-inline: var(--text-inset); border: 0; background: transparent; }
@@ -186,9 +188,29 @@
     .composer-path-option { width: 100%; min-height: 0; display: block; padding: 0.48rem 0.55rem; border: 0; background: transparent; color: var(--copy); font-family: var(--mono); font-size: 0.78rem; font-weight: 400; letter-spacing: normal; line-height: 1.35; text-align: left; text-transform: none; overflow-wrap: anywhere; }
     .composer-path-option:hover, .composer-path-option[aria-selected="true"] { background: var(--accent-tint-08); color: var(--text); }
     .image-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-    .attach-button { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; border: 0; border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; }
+    .attach-button, .voice-button { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; border: 0; border-radius: 0.3rem; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; }
     .attach-button:hover { color: var(--text); background: #ffffff08; }
     .image-input:focus-visible + .attach-button { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    .voice-button:hover, .voice-button:disabled:hover { background: transparent; }
+    @media (hover: hover) and (pointer: fine) { .voice-button:not(:disabled):hover { color: var(--text); background: #ffffff08; } }
+    .voice-button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+    /* A voice call takes the textarea row's place and height: one mono line with the state, a level meter and the call's controls. */
+    .voice-call { display: flex; align-items: center; gap: 0.75rem; min-width: 0; min-height: calc(2.75rem + 0.5rem + 2px); padding: 0.25rem 0.35rem 0.25rem var(--text-inset); border-block: 1px solid var(--editor-border); color: var(--text); font-family: var(--mono); font-size: 0.84rem; }
+    .prompt-form[data-voice-call] .composer-state { display: none; }
+    .voice-call-state { display: inline-flex; flex: none; align-items: center; gap: 0.6rem; white-space: nowrap; }
+    .voice-call-state::before { content: ""; width: 0.48rem; height: 0.48rem; border-radius: 999px; background: var(--accent); }
+    .voice-call[data-state="listening"] .voice-call-state::before { box-shadow: 0 0 0 3px var(--accent-tint-14); }
+    .voice-call:is([data-state="transcribing"], [data-state="thinking"]) .voice-call-state::before { animation: progress-blink 1000ms ease-in-out infinite; }
+    .voice-call[data-state="speaking"] .voice-call-state::before { background: var(--gold); box-shadow: 0 0 0 3px #f0c67426; }
+    .voice-call-meter { flex: none; color: var(--accent); letter-spacing: 0.04em; line-height: 1; white-space: pre; }
+    .voice-call[data-state="speaking"] .voice-call-meter { color: var(--gold); }
+    .voice-call:not([data-state="listening"], [data-state="speaking"]) .voice-call-meter { display: none; }
+    .voice-call-note { min-width: 0; overflow: hidden; color: var(--muted-soft); font-size: 0.74rem; text-overflow: ellipsis; white-space: nowrap; }
+    .voice-call-note.is-error { color: color-mix(in srgb, var(--danger) 75%, var(--muted)); }
+    .voice-call .voice-call-actions { flex: none; margin-left: auto; font-size: 0.8rem; }
+    .voice-call-actions .voice-call-end { color: var(--danger); }
+    @media (hover: hover) and (pointer: fine) { .voice-call .voice-call-actions .voice-call-end:hover { color: #e08888; } }
+    @media (max-width: 760px), (pointer: coarse) { .voice-call .voice-call-actions { gap: 0; } .voice-call-actions .picker-separator { display: none; } }
     h1 { font-size: 1.1rem; line-height: 1.25; margin: 0 0 1rem; font-weight: 650; letter-spacing: -0.01em; }
     h2 { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; margin: 0; color: var(--gold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.14em; }
     .session-sidebar-header { display: block; }
@@ -437,6 +459,9 @@
     .message-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); }
     /* Other messages keep their time for desktop hover, at the end of the first line; touch never shows it. */
     .message-header > .message-meta { display: none; grid-area: 1 / 2; padding-left: 0.75rem; }
+    .message-voice-mark { color: var(--muted-soft); font-family: var(--mono); font-size: 0.68rem; }
+    .message-meta + .message-voice-mark { margin-left: -0.35rem; }
+    .message-meta + .message-voice-mark::before { content: "· " / ""; }
     :is(.message--user, .message[data-final-assistant-response="true"]) > .message-header > .message-meta { display: block; padding-left: 0; }
     @media (hover: hover) and (pointer: fine) {
       .message-header > .message-meta { display: block; visibility: hidden; }
@@ -856,7 +881,7 @@
     /* revealGrowth in dom.js wipes newly streamed blocks in from the top by animating this soft edge. */
     @property --reveal-edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
     .message-body--revealing { -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); }
-    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .voice-call-state::before, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (max-width: 760px), (pointer: coarse) {
       /* Touch rows: one line with the leading slot, title, tags, time and the 44px actions button, whose menu holds Pin. */
       .session-row { min-height: 2.75rem; padding: 0 2.9rem 0 0.5rem; }
@@ -936,6 +961,10 @@
       .composer-input-row { width: 100%; max-width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr) 2.75rem auto; }
       .attach-button, .send-button { min-width: 0; min-height: 2.75rem; padding: 0; }
       .attach-button { width: 100%; font-size: 1.3rem; }
+      .composer-input-row:has(.voice-button:not([hidden])) { grid-template-columns: minmax(0, 1fr) 2.75rem 2.75rem auto; }
+      .voice-button svg { width: 22px; height: 22px; }
+      .voice-call { gap: 0.6rem; padding-right: 0; font-size: 0.8rem; }
+      .voice-call-note:not(.is-error) { display: none; }
       .send-control { min-width: 2.75rem; }
       .send-button { display: inline-flex; width: 2.75rem; align-items: center; justify-content: center; font-size: 0; }
       .send-menu-toggle { min-height: 2.75rem; }

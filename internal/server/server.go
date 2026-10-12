@@ -23,6 +23,7 @@ import (
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/environment"
+	"github.com/melounvitek/gripi/internal/hermesdashboard"
 	"github.com/melounvitek/gripi/internal/keyedlock"
 	"github.com/melounvitek/gripi/internal/push"
 	"github.com/melounvitek/gripi/internal/rendering"
@@ -77,6 +78,8 @@ type application struct {
 	ownsSession             func(*http.Request, string) bool
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
+	// voice reaches Hermes's dashboard for voice conversations, which are off when it is nil.
+	voice *hermesdashboard.Client
 }
 
 var errSessionFolderMissing = &agent.SyncBlockedError{Mode: agent.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
@@ -221,6 +224,9 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		knownSessionHashes:   make(map[string]bool),
 		pendingSessions:      agent.NewPendingSessionRegistry(nil),
 	}
+	if cfg.HermesDashboardURL != "" {
+		app.voice = hermesdashboard.New(cfg.HermesDashboardURL, cfg.HermesDashboardUsername, cfg.HermesDashboardPassword)
+	}
 	if cfg.ReadStatePath != "" {
 		existing, err := store.Sessions()
 		if err != nil {
@@ -311,6 +317,9 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	app.registerSessionRoutes(mux)
 	app.registerActionRoutes(mux)
 	app.registerEnvironmentRoutes(mux)
+	if app.voice != nil {
+		app.registerVoiceRoutes(mux)
+	}
 
 	var handler http.Handler = mux
 	handler = app.enforceWorkspaceAccess(handler)

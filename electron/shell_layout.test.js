@@ -88,12 +88,13 @@ test("desktop gateway downloads open a native save dialog for trusted session ex
   assert.match(downloads, /defaultPath:/);
 });
 
-test("desktop gateway webviews allow same-origin clipboard writes", () => {
+test("desktop gateway webviews ask permissions.js for every permission", () => {
   const main = read("electron/main.js");
+  const build = JSON.parse(read("package.json")).build;
 
-  assert.match(main, /const allowedGatewayPermissions = new Set\(\["notifications", "clipboard-sanitized-write"\]\);/);
-  assert.match(main, /allowedGatewayPermissions\.has\(permission\) && requestingOrigin === allowedOrigin/);
-  assert.match(main, /allowedGatewayPermissions\.has\(permission\) && details\.requestingOrigin === allowedOrigin/);
+  assert.match(main, /return allowsGatewayPermission\(permission, requestingOrigin, details\.mediaType \? \[details\.mediaType\] : \[\], allowedOrigin\);/);
+  assert.match(main, /callback\(allowsGatewayPermission\(permission, details\.requestingOrigin, details\.mediaTypes \?\? \[\], allowedOrigin\)\);/);
+  assert.match(build.mac.extendInfo.NSMicrophoneUsageDescription, /voice conversations/);
 });
 
 test("desktop gateway webviews install an app clipboard bridge", () => {
