@@ -15,7 +15,8 @@ const RECORDING_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "a
 const ADDRESSES = ["hey hermes", "hermes", "ok", "okay", "hey"];
 const STOP_PHRASES = new Set([
   "stop", "stop listening", "stop it", "stop please", "please stop", "stop stop", "that is all", "that's all",
-  "never mind", "nevermind", "end conversation", "end the conversation", "goodbye", "good bye", "bye", "cancel"
+  "never mind", "nevermind", "end conversation", "end the conversation", "goodbye", "good bye", "bye", "cancel",
+  "konec", "konec hovoru", "ukonči hovor", "to je vše", "to je všechno", "nashledanou", "na shledanou"
 ].map(normalizePhrase));
 
 export function isStopPhrase(text) {

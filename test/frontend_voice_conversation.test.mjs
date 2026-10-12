@@ -271,6 +271,8 @@ test("stop phrases match whole utterances only", () => {
     ["OK, never mind.", true],
     ["That’s all", true],
     ["Ｇｏｏｄｂｙｅ", true],
+    ["Hermes, to je všechno.", true],
+    ["Konec hovoru!", true],
     ["hermes", false],
     ["Stop the Docker container.", false],
     ["How do I stop a process?", false],
