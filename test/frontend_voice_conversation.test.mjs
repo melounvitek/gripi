@@ -38,11 +38,14 @@ test("a spoken turn is sent with the voice prefix and the reply is spoken senten
   const second = "Rain arrives tomorrow, so take an umbrella.";
   assert.deepEqual(call.spoken(), [first, second]);
   assert.deepEqual(call.played, [first]);
+  assert.equal(call.changes.at(-1).sentence, first);
   await call.finishSentence();
   assert.deepEqual(call.played, [first, second]);
+  assert.equal(call.changes.at(-1).sentence, second);
   await call.finishSentence();
 
   assert.deepEqual(call.states(), ["listening", "transcribing", "thinking", "speaking", "listening"]);
+  assert.equal(call.changes.at(-1).sentence, null);
   assert.equal(call.recorders.at(-1).state, "recording");
 });
 
@@ -84,10 +87,10 @@ test("failed requests are reported and the call listens again", async (t) => {
 
   call.conversation.replyFinished("Here is the answer you asked for a moment ago.");
   await flush();
-  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Piper is not running" });
+  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Piper is not running", sentence: null });
 
   await call.utter();
-  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Hermes is busy" });
+  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Hermes is busy", sentence: null });
   assert.equal(call.recorders.at(-1).state, "recording");
 });
 
@@ -196,7 +199,7 @@ test("muting stops recording until the microphone is back", async (t) => {
   call.conversation.setMuted(true);
   assert.equal(call.track.enabled, false);
   assert.equal(call.recorders[0].state, "inactive");
-  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: true, error: null });
+  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: true, error: null, sentence: null });
 
   const muted = call.changes.length;
   call.level = 0.5;
@@ -290,7 +293,7 @@ test("a refused microphone ends the call with an error", async (t) => {
 
   await call.conversation.start();
 
-  assert.deepEqual(call.changes, [{ state: "off", level: 0, muted: false, error: "Microphone access was denied" }]);
+  assert.deepEqual(call.changes, [{ state: "off", level: 0, muted: false, error: "Microphone access was denied", sentence: null }]);
   assert.equal(call.audioContext.state, "closed");
 });
 

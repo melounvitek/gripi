@@ -245,7 +245,7 @@ Gripi logs in with the dashboard's password login, its `basic` provider, which `
 
 Browsers allow the microphone only over HTTPS or on `localhost`, so other devices need [HTTPS](examples.md#https-through-tailscale-serve).
 
-The waveform button next to ＋ in a Hermes session's composer starts a conversation. Pause to send what you said; quiet blips play until Hermes's reply starts. Talk over a reply to interrupt it. Saying “stop” finishes the conversation while it listens; `end` finishes it at any time, and Stop still stops Hermes.
+The waveform button next to ＋ in a Hermes session's composer starts a conversation, which takes the place of the session's messages until it ends: bars follow your voice and Hermes's, with the sentence Hermes is speaking underneath. Pause to send what you said; quiet blips play until Hermes's reply starts. Talk over a reply to interrupt it. Saying “stop” finishes the conversation while it listens; `end` finishes it at any time, and Stop still stops Hermes.
 
 ## Session location
 

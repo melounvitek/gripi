@@ -202,30 +202,46 @@ test("a project picked after Hermes failed to start starts Pi", async ({ page })
   expect(deleted.ok()).toBe(true);
 });
 
-test("a voice conversation sends what was said and speaks Hermes's reply", async ({ page }) => {
+test("a voice conversation takes the conversation's place, sends what was said and speaks Hermes's reply", async ({ page }) => {
   const { transcript } = hermes.voice;
   const speech = page.waitForResponse((response) => response.url().endsWith("/voice/speak") && response.ok());
   await page.getByRole("button", { name: "Start a voice conversation" }).click();
   const call = page.getByRole("group", { name: "Voice conversation with Hermes" });
-  const state = call.locator("[data-voice-call-state]");
+  const view = page.locator("[data-voice-call-view]");
+  const state = view.locator("[data-voice-call-state]");
   await expect(state).toHaveText("listening");
   await expect(page.getByLabel("Message to Hermes")).toBeHidden();
+  expect(await conversationCovered(page)).toBe(true);
 
   // The fake microphone says something for a second, and the fake dashboard hears the transcript.
   const spoken = message(page, "user", transcript).last();
   await expect(spoken.locator(".message-body")).toHaveText(transcript);
   await expect(spoken.locator(".message-voice-mark")).toHaveText("voice");
   expect(new URLSearchParams((await speech).request().postData()).get("text")).toContain(hermes.run.replyPrefix.trim());
+  await expect(state).toHaveText("speaking");
+  await expect(view.locator("[data-voice-call-sentence]")).toContainText(hermes.run.replyPrefix.trim());
   await expect(state).toHaveText("listening");
+  await expect(view.locator("[data-voice-call-sentence]")).toBeEmpty();
 
   await call.getByRole("button", { name: "end", exact: true }).click();
   await expect(call).toBeHidden();
+  await expect(view).toBeHidden();
   await expect(page.getByLabel("Message to Hermes")).toBeVisible();
+  expect(await conversationCovered(page)).toBe(false);
 
   await page.reload();
   await expect(spoken.locator(".message-body")).toHaveText(transcript);
   await expect(spoken.locator(".message-voice-mark")).toHaveText("voice");
 });
+
+// Whether something other than the conversation shows at its centre.
+function conversationCovered(page) {
+  return page.evaluate(() => {
+    const conversation = document.querySelector("#conversation-scroll");
+    const box = conversation.getBoundingClientRect();
+    return !conversation.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+  });
+}
 
 test("a refused microphone ends the call and the composer says why", async ({ page }) => {
   await page.evaluate(() => {
