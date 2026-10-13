@@ -242,6 +242,11 @@ test("a voice conversation takes the conversation's place, sends what was said a
   await expect(spoken.locator(".message-voice-mark")).toHaveText("voice");
   await expect(bars).toHaveText(liveBars);
   await expect(spoken.locator(".message-body")).toBeHidden();
+
+  // Finding what was said opens its transcript.
+  await page.keyboard.press("Control+f");
+  await page.getByRole("searchbox", { name: "Find in conversation" }).fill(transcript);
+  await expect(spoken.locator(".message-body")).toBeVisible();
 });
 
 // Whether something other than the conversation shows at its centre.

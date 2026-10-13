@@ -2,8 +2,6 @@ import { VoiceConversation } from "./voice_conversation.js";
 
 const LABELS = { listening: "listening", transcribing: "transcribing", thinking: "hermes is working", speaking: "speaking" };
 const HINTS = { listening: "speak, pause to send", speaking: "talk to interrupt" };
-// The middle bar shows the newest level, which moves outwards to the bars beside it, so the bars ripple.
-const BAR_AGES = [2, 1, 0, 1, 2];
 
 // Owns a Hermes session's voice button, the call view in the conversation's place and the call line with its controls,
 // and the voice conversation they run.
@@ -27,8 +25,9 @@ export class VoiceCallController {
       button,
       line,
       view,
+      conversation: this.window.document.getElementById("conversation-scroll"),
       inputRow: form.querySelector(".composer-input-row"),
-      bars: [...view.querySelector("[data-voice-call-bars]").children],
+      bars: view.querySelector("[data-voice-call-bars]"),
       state: view.querySelector("[data-voice-call-state]"),
       note: view.querySelector("[data-voice-call-note]"),
       caption: view.querySelector("[data-voice-call-sentence]"),
@@ -84,11 +83,13 @@ export class VoiceCallController {
   }
 
   render({ state, level, muted, error, sentence }) {
-    const { form, button, line, view, inputRow, bars, note, caption, mute, end } = this.elements;
+    const { form, button, line, view, conversation, inputRow, bars, note, caption, mute, end } = this.elements;
     const active = state !== "off";
     const focused = this.window.document.activeElement;
     form.toggleAttribute("data-voice-call", active);
     line.hidden = view.hidden = !active;
+    // The covered conversation can't be focused, also by the composer's own focus handling while Hermes works.
+    conversation.inert = active;
     inputRow.hidden = active;
     if (!active) {
       this.conversation = null;
@@ -102,10 +103,8 @@ export class VoiceCallController {
     if (view.dataset.state !== state) {
       view.dataset.state = state;
       this.elements.state.textContent = LABELS[state];
-      this.levels = [];
     }
-    this.levels = muted ? [] : [level, ...this.levels].slice(0, 3);
-    bars.forEach((bar, index) => bar.style.setProperty("--level", Math.sqrt(this.levels[BAR_AGES[index]] ?? 0).toFixed(3)));
+    bars.style.setProperty("--level", Math.sqrt(level).toFixed(3));
     // Only changes are set, so that screen readers announce nothing at every level.
     const noteText = error || (muted ? "muted" : HINTS[state] || "");
     if (note.textContent !== noteText) note.textContent = noteText;

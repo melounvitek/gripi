@@ -223,6 +223,12 @@ test("the meter follows Hermes's voice while it speaks", async (t) => {
   await call.wait(500);
   assert.equal(call.changes.at(-1).level, 0.5);
   assert.equal(call.state(), "speaking");
+
+  // Muting silences the microphone, not Hermes.
+  call.conversation.setMuted(true);
+  call.playbackLevel = 1;
+  await call.wait(500);
+  assert.equal(call.changes.at(-1).level, 1);
 });
 
 test("a hidden page keeps the call going and takes the wake lock back when shown", async (t) => {

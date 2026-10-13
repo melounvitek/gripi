@@ -199,7 +199,7 @@
     .prompt-form[data-voice-call] .composer-state { display: none; }
     /* It also takes the conversation's place, above its find bar and jump buttons but below the phone's session drawer:
        bars that follow the voice, the call's state, and the sentence Hermes speaks. */
-    .voice-call-view { position: relative; z-index: 6; display: grid; grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr); justify-items: center; min-height: 0; padding: 1.5rem; overflow: hidden; background: var(--bg); font-family: var(--mono); }
+    .voice-call-view { position: relative; z-index: 6; display: grid; grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr); justify-items: center; min-height: 0; padding: 1.5rem; overflow-y: auto; background: var(--bg); font-family: var(--mono); }
     /* Both share the conversation's cell, because an explicitly placed view alone would push the conversation to the next row. */
     .voice-call-view, .conversation-panel:has(> .voice-call-view:not([hidden])) > .conversation-scroll { grid-area: 2 / 1; }
     .voice-call-status { grid-row: 2; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
@@ -575,7 +575,7 @@
     .code-block-copy-button { -webkit-user-select: none; user-select: none; position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; }
     /* Like the fence line above a code block in Pi CLI, a top row holds the Copy button, so it never covers code. */
     .message-body--markdown:not(.message-body--thinking) .message-code-block pre { padding-top: 1.5rem; }
-    .message-body--markdown a, .message--user > .message-body a { color: var(--link); }
+    .message-body--markdown a, .message--user .message-body a { color: var(--link); }
     .message-images { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.65rem; }
     .message-image-button { display: inline-flex; min-width: 2.75rem; max-width: min(100%, 28rem); min-height: 2.75rem; padding: 0; overflow: hidden; border: 0; border-radius: 0.3rem; background: var(--panel-soft); cursor: zoom-in; }
     .message-image-button:hover { background: var(--panel-soft); }
@@ -900,7 +900,7 @@
     /* revealGrowth in dom.js wipes newly streamed blocks in from the top by animating this soft edge. */
     @property --reveal-edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
     .message-body--revealing { -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); }
-    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .voice-call-state::before, .voice-call-bars span, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .voice-call-view[data-state] .voice-call-state::before, .voice-call-view[data-state] .voice-call-bars span, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (max-width: 760px), (pointer: coarse) {
       /* Touch rows: one line with the leading slot, title, tags, time and the 44px actions button, whose menu holds Pin. */
       .session-row { min-height: 2.75rem; padding: 0 2.9rem 0 0.5rem; }
