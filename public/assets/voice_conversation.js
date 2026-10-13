@@ -129,10 +129,10 @@ export class VoiceConversation {
     this.muted = muted;
     this.stream.getAudioTracks().forEach((track) => { track.enabled = !muted; });
     if (muted) {
-      const talking = this.heardSpeech;
+      const waiting = this.heardSpeech || this.due;
       this.discardRecording();
-      // What was said before muting goes on without the rest.
-      if (talking) this.proceed();
+      // What waited for your voice goes on without it.
+      if (waiting) this.proceed();
     } else if (this.state !== "speaking") {
       this.record();
     }
@@ -314,7 +314,7 @@ export class VoiceConversation {
     if (!said) {
       this.said = [];
       if (this.awaited !== null) this.setState("thinking", error);
-      else if (this.reply) this.speak();
+      else if (this.reply) this.speak(error);
       else this.listen(error);
     } else if (isStopPhrase(said)) {
       this.end();
@@ -342,15 +342,15 @@ export class VoiceConversation {
     }
   }
 
-  async speak() {
+  async speak(error) {
     const sentences = speechSentences(this.reply);
     this.reply = null;
     if (!sentences.length) {
-      this.listen();
+      this.listen(error);
       return;
     }
     this.recentLevels = [];
-    this.setState("speaking");
+    this.setState("speaking", error);
     const generation = this.generation;
     try {
       let next = this.speech(sentences[0]);

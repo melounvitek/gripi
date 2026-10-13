@@ -231,6 +231,37 @@ test("a reply that comes during a cough is spoken once it's over", async (t) => 
   assert.deepEqual(call.played, ["The production database is fine."]);
 });
 
+test("muting moves on from a voice that may have been starting", async (t) => {
+  const call = voiceCall(t);
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  call.level = 0.5;
+  await call.wait(150);
+  call.conversation.replyFinished("The production database is fine.");
+  call.conversation.setMuted(true);
+  await flush();
+
+  assert.deepEqual(call.played, ["The production database is fine."]);
+});
+
+test("a reply that waited for talk that failed to be transcribed is spoken with the error", async (t) => {
+  const transcript = deferred();
+  const call = voiceCall(t, { transcripts: [transcript.promise] });
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  call.level = 0.5;
+  await call.wait(1000);
+  call.conversation.replyFinished("The production database is fine.");
+  call.level = 0;
+  await call.wait(1300);
+  transcript.reject(new Error("Transcription failed"));
+  await flush();
+
+  assert.deepEqual(call.sent, []);
+  assert.deepEqual(call.played, ["The production database is fine."]);
+  assert.equal(call.changes.at(-1).error, "Transcription failed");
+});
+
 test("a voice that starts as an idle recording is renewed keeps the recording", async (t) => {
   const call = voiceCall(t);
   await call.conversation.start({ working: () => "Check the production database." });
