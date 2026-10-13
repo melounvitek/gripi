@@ -32,11 +32,13 @@ function normalizePhrase(text) {
 }
 
 export class VoiceConversation {
-  constructor({ window, navigator = window.navigator, fetch = window.fetch.bind(window), send, onChange }) {
+  // send hands Hermes a message, and stop stops Hermes's run.
+  constructor({ window, navigator = window.navigator, fetch = window.fetch.bind(window), send, stop, onChange }) {
     this.window = window;
     this.navigator = navigator;
     this.fetch = fetch;
     this.send = send;
+    this.stop = stop;
     this.onChange = onChange;
     this.state = "off";
     this.level = 0;
@@ -45,13 +47,21 @@ export class VoiceConversation {
     this.error = null;
     // The sentence of the reply that is playing.
     this.sentence = null;
-    // The message whose reply the call waits for while thinking: what it said, or what Hermes was working on when it started.
+    // The message whose reply the call waits for while Hermes works on it: what it said, or what Hermes was working on
+    // when it started. Null while Hermes doesn't work for the call.
     this.awaited = null;
+    // What was said and not sent yet, an utterance at a time: its transcript, or null while it's being transcribed.
+    this.said = [];
+    // Hermes's reply, kept while you talk, and spoken unless you said something.
+    this.reply = null;
+    // Whether Hermes was asked to stop, so that what was said can be sent.
+    this.stopping = false;
     // Bumped on every state change; async work started in a state is dropped once it has moved on.
     this.generation = 0;
     this.audioContext = null;
     this.stream = null;
     this.recorder = null;
+    this.heardSpeech = false;
     this.source = null;
     this.wakeLock = null;
     this.blips = 0;
@@ -117,16 +127,24 @@ export class VoiceConversation {
     if (!this.stream || muted === this.muted) return;
     this.muted = muted;
     this.stream.getAudioTracks().forEach((track) => { track.enabled = !muted; });
-    if (this.state === "listening") {
-      if (muted) this.discardRecording();
-      else this.record();
+    if (muted) {
+      const talking = this.heardSpeech;
+      this.discardRecording();
+      // What was said before muting goes on without the rest.
+      if (talking) this.proceed();
+    } else if (this.state !== "speaking") {
+      this.record();
     }
     this.level = 0;
     this.emit();
   }
 
   replyFinished(text) {
-    if (this.state === "thinking") this.speak(text);
+    if (this.awaited === null) return;
+    this.awaited = null;
+    this.stopping = false;
+    this.reply = text;
+    this.proceed();
   }
 
   end(error = null) {
@@ -140,13 +158,13 @@ export class VoiceConversation {
     this.microphoneContext?.close().catch(() => {});
     if (this.navigator.audioSession) this.navigator.audioSession.type = "auto";
     this.window.document.removeEventListener("visibilitychange", this.onVisibilityChange);
-    this.audioContext = this.microphoneContext = this.stream = this.wakeLock = null;
+    this.audioContext = this.microphoneContext = this.stream = this.wakeLock = this.awaited = null;
+    this.said = [];
     this.setState("off", error);
   }
 
   listen(error = null) {
     this.setState("listening", error);
-    if (!this.muted) this.record();
   }
 
   tick() {
@@ -156,7 +174,7 @@ export class VoiceConversation {
       return;
     }
     const now = Date.now();
-    const sampling = !this.muted && (this.state === "listening" || this.state === "speaking");
+    const sampling = this.recorder !== null || (!this.muted && this.state === "speaking");
     const level = sampling ? this.measure(this.analyser) : 0;
     const shown = this.state === "speaking" ? this.measure(this.playbackAnalyser) : level;
     if (shown !== this.level && now - this.levelAt >= LEVEL_REPORT_MS) {
@@ -164,10 +182,14 @@ export class VoiceConversation {
       this.levelAt = now;
       this.emit();
     }
-    if (this.state === "listening" && this.recorder) this.detectUtterance(level, now);
-    else if (this.state === "speaking") this.detectBargeIn(level, now);
+    if (this.recorder) {
+      this.detectUtterance(level, now);
+    } else if (this.state === "speaking" && this.sustained(level, now)) {
+      this.stopPlayback();
+      this.listen();
+    }
     // Unlike Hermes Desktop's thinking sound, the blips start with transcribing, which takes a request to Hermes.
-    if (this.state !== "transcribing" && this.state !== "thinking") this.blipAt = null;
+    if (!["transcribing", "thinking", "stopping"].includes(this.state)) this.blipAt = null;
     else if (this.blipAt === null) this.blipAt = now + FIRST_BLIP_MS;
     // A suspended context's clock stands still, so blips scheduled meanwhile would all play at once when it resumes.
     else if (now >= this.blipAt && this.audioContext.state === "running") this.blip(now);
@@ -181,7 +203,9 @@ export class VoiceConversation {
   }
 
   detectUtterance(level, now) {
-    if (level >= SPEECH_LEVEL) {
+    // Unless the call listens, blips may play and talk may stop Hermes, so only a voice that keeps on starts an utterance.
+    if ((this.heardSpeech || this.state === "listening") ? level >= SPEECH_LEVEL : this.sustained(level, now)) {
+      if (this.state !== "listening") this.setState("listening");
       this.heardSpeech = true;
       this.quietSince = null;
     } else if (this.heardSpeech) {
@@ -196,15 +220,13 @@ export class VoiceConversation {
     }
   }
 
-  detectBargeIn(level, now) {
+  // Whether a voice has been loud for a while, which a blip, a short noise or an echo of Hermes's voice isn't.
+  sustained(level, now) {
     this.recentLevels.push({ at: now, loud: level >= BARGE_IN_LEVEL });
     while (now - this.recentLevels[0].at > BARGE_IN_MS) this.recentLevels.shift();
     const span = now - this.recentLevels[0].at;
     const loud = this.recentLevels.filter((sample) => sample.loud).length;
-    if (span >= BARGE_IN_MS * BARGE_IN_SHARE && loud >= this.recentLevels.length * BARGE_IN_SHARE) {
-      this.stopPlayback();
-      this.listen();
-    }
+    return span >= BARGE_IN_MS * BARGE_IN_SHARE && loud >= this.recentLevels.length * BARGE_IN_SHARE;
   }
 
   // A quiet, falling tone that tells the call still waits, alternating two pitches like Hermes's thinking sound.
@@ -233,53 +255,82 @@ export class VoiceConversation {
     this.recordingSince = Date.now();
     this.heardSpeech = false;
     this.quietSince = null;
+    this.recentLevels = [];
   }
 
   discardRecording() {
     if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
     this.recorder = null;
+    this.heardSpeech = false;
   }
 
   async transcribe() {
     const recorder = this.recorder;
+    const said = { transcript: null };
+    this.said.push(said);
     this.recorder = null;
+    // The call records on, so that what is said after a pause adds to what was said before it.
     this.setState("transcribing");
-    const generation = this.generation;
+    let error = null;
     try {
       // Without a timeslice, the recorder hands over the whole recording in one blob when it stops.
       const recording = await new Promise((resolve) => {
         recorder.ondataavailable = (event) => resolve(event.data);
         recorder.stop();
       });
-      if (generation !== this.generation) return;
+      if (!this.said.includes(said)) return;
       const response = await this.request("/voice/transcribe", {
         method: "POST",
         body: recording,
         headers: { "Content-Type": recording.type, Accept: "application/json" }
       });
-      const transcript = (await response.json()).transcript?.trim();
-      if (generation !== this.generation) return;
-      if (!transcript) this.listen();
-      else if (isStopPhrase(transcript)) this.end();
-      else this.ask(transcript);
-    } catch (error) {
-      if (generation === this.generation) this.listen(error.message);
+      said.transcript = (await response.json()).transcript?.trim() ?? "";
+    } catch (failure) {
+      said.transcript = "";
+      error = failure.message;
+    }
+    if (this.said.includes(said)) this.proceed(error);
+  }
+
+  // Moves on once nothing is being said or transcribed: sends what was said, after stopping Hermes if it works, or
+  // else waits for Hermes, speaks its reply or listens.
+  proceed(error = null) {
+    if (this.heardSpeech || this.said.some((said) => said.transcript === null)) return;
+    const said = this.said.map((said) => said.transcript).filter(Boolean).join(" ");
+    if (!said) {
+      this.said = [];
+      if (this.awaited !== null) this.setState("thinking", error);
+      else if (this.reply) this.speak();
+      else this.listen(error);
+    } else if (isStopPhrase(said)) {
+      this.end();
+    } else if (this.awaited === null) {
+      this.ask(said);
+    } else {
+      // The stopped run's end, which replyFinished hears, sends what was said.
+      if (!this.stopping) this.stop();
+      this.stopping = true;
+      this.setState("stopping", error);
     }
   }
 
   async ask(transcript) {
+    this.said = [];
+    this.reply = null;
     this.awaited = transcript;
     this.setState("thinking");
-    const generation = this.generation;
     try {
       await this.send(VOICE_PREFIX + transcript);
     } catch (error) {
-      if (generation === this.generation) this.listen(error.message);
+      if (this.awaited !== transcript) return;
+      this.awaited = null;
+      this.proceed(error.message);
     }
   }
 
-  async speak(text) {
-    const sentences = speechSentences(text);
+  async speak() {
+    const sentences = speechSentences(this.reply);
+    this.reply = null;
     if (!sentences.length) {
       this.listen();
       return;
@@ -348,6 +399,9 @@ export class VoiceConversation {
     this.error = error;
     this.level = 0;
     this.sentence = null;
+    // The call hears you all along, except while Hermes speaks, when the recording would hear Hermes too.
+    if (state === "speaking" || state === "off") this.discardRecording();
+    else if (!this.muted && !this.recorder) this.record();
     this.emit();
   }
 

@@ -109,15 +109,87 @@ test("a call started while Hermes works waits for its reply", async (t) => {
   await call.conversation.start({ working: () => "What is left to do?" });
   assert.equal(call.conversation.awaited, "What is left to do?");
 
-  call.level = 0.5;
   await call.wait(2000);
   assert.equal(call.state(), "thinking");
-  assert.deepEqual(call.recorders, []);
   assert.deepEqual(call.blips.slice(0, 2), [392, 329.6]);
 
   call.conversation.replyFinished("```sh\nnpm test\n```");
   assert.equal(call.state(), "listening");
-  assert.equal(call.recorders.length, 1);
+  assert.equal(call.recorders.at(-1).state, "recording");
+});
+
+test("talking while Hermes works stops it and sends what was said once its run has ended", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Check the staging database instead."] });
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  await call.utter(1000);
+  assert.deepEqual(call.states(), ["thinking", "listening", "transcribing", "stopping"]);
+  assert.equal(call.stops, 1);
+  assert.deepEqual(call.sent, []);
+
+  // The stopped run ends without a reply.
+  call.conversation.replyFinished("");
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Check the staging database instead.`]);
+  assert.equal(call.state(), "thinking");
+  assert.equal(call.conversation.awaited, "Check the staging database instead.");
+});
+
+test("noise and talk without words leave Hermes working", async (t) => {
+  const call = voiceCall(t, { transcripts: [""] });
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  // A cough is too short to be taken for talk.
+  call.level = 0.5;
+  await call.wait(150);
+  call.level = 0;
+  await call.wait(2000);
+  assert.deepEqual(call.states(), ["thinking"]);
+  assert.deepEqual(call.requests, []);
+
+  call.level = 0.5;
+  await call.wait(1000);
+  assert.equal(call.state(), "listening");
+  call.conversation.replyFinished("The production database is fine.");
+  call.level = 0;
+  await call.wait(1300);
+
+  assert.equal(call.stops, 0);
+  assert.deepEqual(call.sent, []);
+  assert.deepEqual(call.played, ["The production database is fine."]);
+});
+
+test("a reply that comes while you talk over Hermes is skipped for what you said", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Use the staging database."] });
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  call.level = 0.5;
+  await call.wait(1000);
+  call.conversation.replyFinished("The production database is fine.");
+  call.level = 0;
+  await call.wait(1300);
+
+  assert.equal(call.stops, 0);
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Use the staging database.`]);
+  assert.deepEqual(call.spoken(), []);
+});
+
+test("talking on after a pause adds to what was said before", async (t) => {
+  const first = deferred();
+  const call = voiceCall(t, { transcripts: [first.promise, "on the staging server."] });
+  await call.conversation.start();
+  await call.utter();
+  assert.equal(call.state(), "transcribing");
+
+  call.level = 0.5;
+  await call.wait(1000);
+  assert.equal(call.state(), "listening");
+  first.resolve("Run the migrations");
+  await flush();
+  assert.deepEqual(call.sent, []);
+
+  call.level = 0;
+  await call.wait(1300);
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Run the migrations on the staging server.`]);
 });
 
 test("a call whose microphone arrives after Hermes finished listens", async (t) => {
@@ -358,7 +430,7 @@ test("spoken messages show bars that follow the words that were said", () => {
 
 function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=opus"], send, speakError, microphoneError, microphoneReady, recordingReady } = {}) {
   t.mock.timers.enable({ apis: ["setInterval", "Date"] });
-  const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], played: [], blips: [], changes: [], recorders: [], locks: [], audioContexts: [] };
+  const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], stops: 0, played: [], blips: [], changes: [], recorders: [], locks: [], audioContexts: [] };
   const track = { enabled: true, readyState: "live", stopped: false, stop() { this.stopped = true; } };
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
   const document = new FakeEventTarget();
@@ -465,6 +537,7 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
       navigator,
       fetch,
       send: send ?? (async (text) => { call.sent.push(text); }),
+      stop: () => { call.stops += 1; },
       onChange: (change) => call.changes.push(change)
     }),
     state: () => call.changes.at(-1)?.state,
@@ -476,9 +549,9 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
         await flush();
       }
     },
-    async utter() {
+    async utter(milliseconds = 300) {
       call.level = 0.5;
-      await call.wait(300);
+      await call.wait(milliseconds);
       call.level = 0;
       await call.wait(1300);
     },
