@@ -228,6 +228,7 @@ const voiceCallController = new VoiceCallController(window, {
     const sent = await sendPrompt(text, null, { composer: false });
     if (sent !== true) throw new Error(sent || "The message was not sent");
   },
+  stop: () => abortForm?.requestSubmit(),
   busy: () => liveAgentRunning,
   messages: () => [...conversationScroll.querySelectorAll("article.message")],
   failed: (message) => showCurrentActiveTask("error", message),
@@ -1628,22 +1629,20 @@ function renderEvent(event) {
     const reply = pendingFinalAssistantReply;
     pendingFinalAssistantReply = null;
     notifyFinalAssistantReply(reply);
-    voiceCallController.replyFinished(reply ? liveMessageParser.finalAssistantReplyText(reply) : "");
     liveAgentRunning = false;
     liveBusySince = null;
-    if (renderErrorEvent(event)) {
-      liveMessageRenderer.clearLiveAssistantStreaming();
-      liveMessageRenderer.resetLiveAssistantTracking();
-      return;
-    }
-    if (!liveErrorText) {
-      if (liveMessageRenderer.liveAssistantSeen) showStatus("Done");
-      showCurrentActiveTask();
-    } else {
-      showCurrentActiveTask("error", liveErrorText);
+    if (!renderErrorEvent(event)) {
+      if (!liveErrorText) {
+        if (liveMessageRenderer.liveAssistantSeen) showStatus("Done");
+        showCurrentActiveTask();
+      } else {
+        showCurrentActiveTask("error", liveErrorText);
+      }
     }
     liveMessageRenderer.clearLiveAssistantStreaming();
     liveMessageRenderer.resetLiveAssistantTracking();
+    // Last, because a voice call may send at once what was said over the run, which needs the page to show it ended.
+    voiceCallController.replyFinished(reply ? liveMessageParser.finalAssistantReplyText(reply) : "");
     return;
   }
 

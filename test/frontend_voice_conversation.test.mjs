@@ -109,13 +109,167 @@ test("a call started while Hermes works waits for its reply", async (t) => {
   await call.conversation.start({ working: () => "What is left to do?" });
   assert.equal(call.conversation.awaited, "What is left to do?");
 
-  call.level = 0.5;
   await call.wait(2000);
   assert.equal(call.state(), "thinking");
-  assert.deepEqual(call.recorders, []);
   assert.deepEqual(call.blips.slice(0, 2), [392, 329.6]);
 
   call.conversation.replyFinished("```sh\nnpm test\n```");
+  assert.equal(call.state(), "listening");
+  assert.equal(call.recorders.at(-1).state, "recording");
+});
+
+test("talking while Hermes works stops it and sends what was said once its run has ended", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Check the staging database instead.", "And the replica."] });
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  await call.utter(1000);
+  assert.deepEqual(call.states(), ["thinking", "listening", "transcribing", "stopping"]);
+  assert.equal(call.stops, 1);
+  assert.deepEqual(call.sent, []);
+
+  // More said while Hermes stops joins what was said, and asks Hermes again, in case the first stop failed.
+  await call.utter(1000);
+  assert.equal(call.state(), "stopping");
+  assert.equal(call.stops, 2);
+
+  // The stopped run ends without a reply.
+  call.conversation.replyFinished("");
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Check the staging database instead. And the replica.`]);
+  assert.equal(call.state(), "thinking");
+  assert.equal(call.conversation.awaited, "Check the staging database instead. And the replica.");
+});
+
+test("noise and talk without words leave Hermes working", async (t) => {
+  const call = voiceCall(t, { transcripts: [""] });
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  // A cough is too short to be taken for talk.
+  call.level = 0.5;
+  await call.wait(150);
+  call.level = 0;
+  await call.wait(2000);
+  assert.deepEqual(call.states(), ["thinking"]);
+  assert.deepEqual(call.requests, []);
+
+  call.level = 0.5;
+  await call.wait(1000);
+  assert.equal(call.state(), "listening");
+  call.conversation.replyFinished("The production database is fine.");
+  call.level = 0;
+  await call.wait(1300);
+
+  assert.equal(call.stops, 0);
+  assert.deepEqual(call.sent, []);
+  assert.deepEqual(call.played, ["The production database is fine."]);
+});
+
+test("a reply that comes while you talk over Hermes is skipped for what you said", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Use the staging database."] });
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  // The reply comes before the voice has gone on long enough to be taken for talk.
+  call.level = 0.5;
+  await call.wait(150);
+  call.conversation.replyFinished("The production database is fine.");
+  await call.wait(850);
+  call.level = 0;
+  await call.wait(1300);
+
+  assert.equal(call.stops, 0);
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Use the staging database.`]);
+  assert.deepEqual(call.spoken(), []);
+});
+
+test("talking on after a pause adds to what was said before", async (t) => {
+  const first = deferred();
+  const call = voiceCall(t, { transcripts: [first.promise, "on the staging server."] });
+  await call.conversation.start();
+  await call.utter();
+  assert.equal(call.state(), "transcribing");
+
+  // The first part is transcribed before the voice has gone on long enough to be taken for talk.
+  call.level = 0.5;
+  await call.wait(150);
+  first.resolve("Run the migrations");
+  await call.wait(850);
+  assert.equal(call.state(), "listening");
+  assert.deepEqual(call.sent, []);
+
+  call.level = 0;
+  await call.wait(1300);
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Run the migrations on the staging server.`]);
+});
+
+test("a part that fails to be transcribed keeps the rest from being sent", async (t) => {
+  const first = deferred();
+  const call = voiceCall(t, { transcripts: [first.promise, "on the staging server."] });
+  await call.conversation.start();
+  await call.utter();
+
+  call.level = 0.5;
+  await call.wait(1000);
+  first.reject(new Error("Transcription failed"));
+  call.level = 0;
+  await call.wait(1300);
+
+  assert.deepEqual(call.sent, []);
+  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Transcription failed", sentence: null });
+});
+
+test("a reply that comes during a cough is spoken once it's over", async (t) => {
+  const call = voiceCall(t);
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  call.level = 0.5;
+  await call.wait(100);
+  call.conversation.replyFinished("The production database is fine.");
+  await call.wait(50);
+  assert.equal(call.state(), "thinking");
+  call.level = 0;
+  await call.wait(400);
+
+  assert.deepEqual(call.played, ["The production database is fine."]);
+});
+
+test("muting moves on from a voice that may have been starting", async (t) => {
+  const call = voiceCall(t);
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  call.level = 0.5;
+  await call.wait(150);
+  call.conversation.replyFinished("The production database is fine.");
+  call.conversation.setMuted(true);
+  await flush();
+
+  assert.deepEqual(call.played, ["The production database is fine."]);
+});
+
+test("a reply that waited for talk that failed to be transcribed is spoken with the error", async (t) => {
+  const transcript = deferred();
+  const call = voiceCall(t, { transcripts: [transcript.promise] });
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  call.level = 0.5;
+  await call.wait(1000);
+  call.conversation.replyFinished("The production database is fine.");
+  call.level = 0;
+  await call.wait(1300);
+  transcript.reject(new Error("Transcription failed"));
+  await flush();
+
+  assert.deepEqual(call.sent, []);
+  assert.deepEqual(call.played, ["The production database is fine."]);
+  assert.equal(call.changes.at(-1).error, "Transcription failed");
+});
+
+test("a voice that starts as an idle recording is renewed keeps the recording", async (t) => {
+  const call = voiceCall(t);
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  await call.wait(11_850);
+  call.level = 0.5;
+  await call.wait(300);
+
   assert.equal(call.state(), "listening");
   assert.equal(call.recorders.length, 1);
 });
@@ -133,24 +287,55 @@ test("a call whose microphone arrives after Hermes finished listens", async (t) 
   assert.equal(call.state(), "listening");
 });
 
-test("talking over the reply stops it and listens", async (t) => {
-  const call = voiceCall(t);
+test("talking over the reply stops it and sends what was said from its first word", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Wait, use the staging database."] });
   await call.conversation.start({ working: () => "What is left to do?" });
   call.conversation.replyFinished("The first sentence is long enough to stand alone. The second one should never be heard.");
   await flush();
   assert.deepEqual(call.played, ["The first sentence is long enough to stand alone."]);
 
+  // The recording is renewed every few seconds, so that it holds little of Hermes's voice.
   call.level = 0.1;
-  await call.wait(1000);
+  await call.wait(6000);
   assert.equal(call.state(), "speaking");
+  assert.equal(call.recorders.length, 2);
+  assert.equal(call.recorders[0].state, "inactive");
 
+  const recording = call.recorders.at(-1);
   call.level = 0.3;
   await call.wait(300);
   assert.equal(call.state(), "listening");
   assert.equal(call.playing.stopped, true);
-  await call.wait(100);
+  assert.equal(call.recorders.at(-1), recording);
+
+  call.level = 0;
+  await call.wait(1300);
   assert.deepEqual(call.played, ["The first sentence is long enough to stand alone."]);
+  assert.equal(recording.state, "inactive");
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Wait, use the staging database.`]);
+});
+
+test("a reply that ends untouched is left out of what is heard next, unless a voice is starting", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Thanks."] });
+  await call.conversation.start({ working: () => "What is left to do?" });
+  call.conversation.replyFinished("A reply that is long enough to be spoken on its own.");
+  await flush();
+  const recording = call.recorders.at(-1);
+  await call.finishSentence();
+  assert.equal(call.state(), "listening");
+  assert.equal(recording.state, "inactive");
   assert.equal(call.recorders.at(-1).state, "recording");
+
+  await call.utter();
+  call.conversation.replyFinished("Another reply that is long enough to stand alone.");
+  await flush();
+  call.level = 0.5;
+  await call.wait(100);
+  const starting = call.recorders.at(-1);
+  await call.finishSentence();
+  assert.equal(call.state(), "listening");
+  assert.equal(call.recorders.at(-1), starting);
+  assert.equal(starting.state, "recording");
 });
 
 test("quiet blips fill the wait from the end of an utterance until the reply is spoken", async (t) => {
@@ -358,7 +543,7 @@ test("spoken messages show bars that follow the words that were said", () => {
 
 function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=opus"], send, speakError, microphoneError, microphoneReady, recordingReady } = {}) {
   t.mock.timers.enable({ apis: ["setInterval", "Date"] });
-  const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], played: [], blips: [], changes: [], recorders: [], locks: [], audioContexts: [] };
+  const call = { level: 0, playbackLevel: 0, sequence: [], requests: [], sent: [], stops: 0, played: [], blips: [], changes: [], recorders: [], locks: [], audioContexts: [] };
   const track = { enabled: true, readyState: "live", stopped: false, stop() { this.stopped = true; } };
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
   const document = new FakeEventTarget();
@@ -465,6 +650,7 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
       navigator,
       fetch,
       send: send ?? (async (text) => { call.sent.push(text); }),
+      stop: () => { call.stops += 1; },
       onChange: (change) => call.changes.push(change)
     }),
     state: () => call.changes.at(-1)?.state,
@@ -476,9 +662,9 @@ function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=o
         await flush();
       }
     },
-    async utter() {
+    async utter(milliseconds = 300) {
       call.level = 0.5;
-      await call.wait(300);
+      await call.wait(milliseconds);
       call.level = 0;
       await call.wait(1300);
     },
