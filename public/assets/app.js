@@ -230,7 +230,8 @@ const voiceCallController = new VoiceCallController(window, {
   },
   busy: () => liveAgentRunning,
   messages: () => [...conversationScroll.querySelectorAll("article.message")],
-  failed: (message) => showCurrentActiveTask("error", message)
+  failed: (message) => showCurrentActiveTask("error", message),
+  callChanged: (calling) => notificationPresenceController.callChanged(calling)
 });
 const treeSessionController = new TreeSessionController(document, window, {
   currentSessionPath: () => currentSessionPath(),
@@ -877,8 +878,9 @@ async function showGripiNotification(title, body, url, tag) {
   }
 }
 
+// Like Web Push, which the server leaves out for a session a page reports.
 function sessionIsActivelyViewed(sessionPath) {
-  return sessionPath && sessionPath === currentSessionPath() && !document.hidden && document.hasFocus();
+  return sessionPath && sessionPath === notificationPresenceController.current().session;
 }
 
 function finalAssistantReplyKey(sessionPath, message) {

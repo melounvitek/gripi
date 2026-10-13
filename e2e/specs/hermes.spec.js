@@ -249,6 +249,30 @@ test("a voice conversation takes the conversation's place, sends what was said a
   await expect(spoken.locator(".message-body")).toBeVisible();
 });
 
+test("a voice call keeps its session from notifying while the page is away", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.replyNotifications = [];
+    document.hasFocus = () => false;
+    localStorage.removeItem("gripi:notifications-disabled");
+    window.gripiElectron = { showNotification: async (notification) => window.replyNotifications.push(notification) };
+  });
+  const presence = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/web-push/presence")) presence.push(request.postDataJSON());
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Start a voice conversation" }).click();
+  await expect.poll(() => presence.at(-1)?.focused).toBe(true);
+
+  const state = page.locator("[data-voice-call-view] [data-voice-call-state]");
+  await expect(state).toHaveText("speaking");
+  await expect(state).toHaveText("listening");
+  expect(await page.evaluate(() => window.replyNotifications)).toEqual([]);
+
+  await page.getByRole("group", { name: "Voice conversation with Hermes" }).getByRole("button", { name: "end", exact: true }).click();
+  await expect.poll(() => presence.at(-1)?.focused).toBe(false);
+});
+
 // Whether something other than the conversation shows at its centre.
 function conversationCovered(page) {
   return page.evaluate(() => {

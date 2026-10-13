@@ -6,12 +6,13 @@ const HINTS = { listening: "speak, pause to send", speaking: "talk to interrupt"
 // Owns a Hermes session's voice button, the call view in the conversation's place and the call line with its controls,
 // and the voice conversation they run.
 export class VoiceCallController {
-  constructor(window, { send, busy, messages, failed }) {
+  constructor(window, { send, busy, messages, failed, callChanged }) {
     this.window = window;
     this.send = send;
     this.busy = busy;
     this.messages = messages;
     this.failed = failed;
+    this.callChanged = callChanged;
     this.conversation = null;
     this.elements = null;
   }
@@ -53,6 +54,7 @@ export class VoiceCallController {
     this.conversation = new VoiceConversation({ window: this.window, send: this.send, onChange: (change) => this.render(change) });
     // Nothing may be awaited before this: iOS plays only audio started within the tap.
     this.conversation.start({ working: () => (this.busy() ? lastSaid(this.messages()) : null) });
+    this.callChanged(true);
   }
 
   replyFinished(text) {
@@ -93,6 +95,7 @@ export class VoiceCallController {
     inputRow.hidden = active;
     if (!active) {
       this.conversation = null;
+      this.callChanged(false);
       delete view.dataset.state;
       if (line.contains(focused)) button.focus();
       if (error) this.failed(error);

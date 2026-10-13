@@ -13,6 +13,7 @@ export class NotificationPresenceController {
     this.started = false;
     this.lastSession = null;
     this.lastFocused = null;
+    this.calling = false;
   }
 
   start() {
@@ -34,6 +35,12 @@ export class NotificationPresenceController {
     this.reportCurrent();
   }
 
+  // A voice call is in its session as much as looking at it, also with the screen off or the window in the background.
+  callChanged(calling) {
+    this.calling = calling;
+    this.reportCurrent();
+  }
+
   reportCurrent(force = false) {
     const current = this.current();
     if (!force && current.session === this.lastSession && current.focused === this.lastFocused) return;
@@ -42,7 +49,7 @@ export class NotificationPresenceController {
 
   current() {
     const session = String(this.sessionPath() || "");
-    const focused = session !== "" && !this.document.hidden && (this.document.hasFocus?.() ?? true);
+    const focused = session !== "" && (this.calling || (!this.document.hidden && (this.document.hasFocus?.() ?? true)));
     return { session: focused ? session : "", focused };
   }
 

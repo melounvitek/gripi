@@ -81,6 +81,36 @@ test("notification presence does not claim focus without a selected session", as
   assert.deepEqual(requests, [{ client_id: "empty-window", session: "", focused: false, sequence: 1 }]);
 });
 
+test("a voice call keeps its session in use while the page is away", async () => {
+  const requests = [];
+  const document = eventTarget({ hidden: false });
+  document.hasFocus = () => true;
+  let heartbeat;
+  const window = eventTarget({ setInterval(callback) { heartbeat = callback; return 1; } });
+  const controller = new NotificationPresenceController(
+    document,
+    window,
+    () => "/sessions/call.jsonl",
+    async (_url, options) => { requests.push(JSON.parse(options.body)); },
+    "phone"
+  );
+  controller.start();
+  controller.callChanged(true);
+
+  document.hidden = true;
+  document.dispatch("visibilitychange");
+  await flush();
+  assert.deepEqual(requests.at(-1), { client_id: "phone", session: "/sessions/call.jsonl", focused: true, sequence: 2 });
+  heartbeat();
+  await flush();
+  assert.equal(requests.at(-1).sequence, 3);
+  assert.equal(requests.at(-1).focused, true);
+
+  controller.callChanged(false);
+  await flush();
+  assert.deepEqual(requests.at(-1), { client_id: "phone", session: "", focused: false, sequence: 4 });
+});
+
 function eventTarget(properties) {
   const listeners = new Map();
   return {
