@@ -1,14 +1,15 @@
 import { VoiceConversation } from "./voice_conversation.js";
 
-const LABELS = { listening: "listening", transcribing: "transcribing", thinking: "hermes is working", speaking: "speaking" };
-const HINTS = { listening: "speak, pause to send", speaking: "talk to interrupt" };
+const LABELS = { listening: "listening", transcribing: "transcribing", thinking: "hermes is working", stopping: "stopping hermes", speaking: "speaking" };
+const HINTS = { listening: "speak, pause to send", thinking: "talk to interrupt", speaking: "talk to interrupt" };
 
 // Owns a Hermes session's voice button, the call view in the conversation's place and the call line with its controls,
 // and the voice conversation they run.
 export class VoiceCallController {
-  constructor(window, { send, busy, messages, failed, callChanged }) {
+  constructor(window, { send, stop, busy, messages, failed, callChanged }) {
     this.window = window;
     this.send = send;
+    this.stop = stop;
     this.busy = busy;
     this.messages = messages;
     this.failed = failed;
@@ -46,12 +47,12 @@ export class VoiceCallController {
 
   // Whether the call waits for Hermes's reply.
   get waiting() {
-    return this.conversation?.state === "thinking";
+    return !!this.conversation && this.conversation.awaited !== null;
   }
 
   start() {
     if (this.conversation) return;
-    this.conversation = new VoiceConversation({ window: this.window, send: this.send, onChange: (change) => this.render(change) });
+    this.conversation = new VoiceConversation({ window: this.window, send: this.send, stop: this.stop, onChange: (change) => this.render(change) });
     // Nothing may be awaited before this: iOS plays only audio started within the tap.
     this.conversation.start({ working: () => (this.busy() ? lastSaid(this.messages()) : null) });
     this.callChanged(true);

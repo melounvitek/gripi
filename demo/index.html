@@ -228,7 +228,7 @@
     .voice-call-bars span:is(:nth-child(2), :nth-child(4)) { --reach: 5.5rem; }
     .voice-call-bars span:is(:first-child, :last-child) { --reach: 3rem; }
     .voice-call-view[data-state="speaking"] .voice-call-bars span { background: var(--gold); }
-    .voice-call-view:is([data-state="transcribing"], [data-state="thinking"]) .voice-call-bars span { height: 1.25rem; background: var(--muted); animation: progress-blink 1000ms ease-in-out infinite; }
+    .voice-call-view:is([data-state="transcribing"], [data-state="thinking"], [data-state="stopping"]) .voice-call-bars span { height: 1.25rem; background: var(--muted); animation: progress-blink 1000ms ease-in-out infinite; }
     .voice-call-bars span:nth-child(2) { animation-delay: 150ms; }
     .voice-call-bars span:nth-child(3) { animation-delay: 300ms; }
     .voice-call-bars span:nth-child(4) { animation-delay: 450ms; }
@@ -236,7 +236,7 @@
     .voice-call-state { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--text); font-size: 0.84rem; white-space: nowrap; }
     .voice-call-state::before { content: ""; width: 0.48rem; height: 0.48rem; border-radius: 999px; background: var(--accent); }
     .voice-call-view[data-state="listening"] .voice-call-state::before { box-shadow: 0 0 0 3px var(--accent-tint-14); }
-    .voice-call-view:is([data-state="transcribing"], [data-state="thinking"]) .voice-call-state::before { animation: progress-blink 1000ms ease-in-out infinite; }
+    .voice-call-view:is([data-state="transcribing"], [data-state="thinking"], [data-state="stopping"]) .voice-call-state::before { animation: progress-blink 1000ms ease-in-out infinite; }
     .voice-call-view[data-state="speaking"] .voice-call-state::before { background: var(--gold); box-shadow: 0 0 0 3px #f0c67426; }
     .voice-call-note { max-width: 32rem; color: var(--muted-soft); font-size: 0.74rem; text-align: center; }
     .voice-call-note.is-error { color: color-mix(in srgb, var(--danger) 75%, var(--muted)); }

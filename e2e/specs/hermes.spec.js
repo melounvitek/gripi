@@ -249,6 +249,19 @@ test("a voice conversation takes the conversation's place, sends what was said a
   await expect(spoken.locator(".message-body")).toBeVisible();
 });
 
+test("talking over Hermes's work in a voice call stops it and sends what was said", async ({ page }) => {
+  await sendPrompt(page, hermes.longPrompt);
+  await expect(page.getByRole("button", { name: "Abort running Hermes" })).toBeVisible();
+
+  // The fake microphone talks while Hermes works on a prompt that holds until it's stopped.
+  await page.getByRole("button", { name: "Start a voice conversation" }).click();
+  await expect(liveMessage(page, "user", hermes.voice.transcript)).toHaveCount(1);
+  await expect(page.locator("[data-voice-call-view] [data-voice-call-state]")).toHaveText("speaking");
+
+  await page.getByRole("group", { name: "Voice conversation with Hermes" }).getByRole("button", { name: "end", exact: true }).click();
+  await expectRunFinished(page);
+});
+
 test("a voice call keeps its session from notifying while the page is away", async ({ page }) => {
   await page.addInitScript(() => {
     window.replyNotifications = [];
