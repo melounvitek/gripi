@@ -7,6 +7,8 @@ const LEVEL_REPORT_MS = 100;
 const SPEECH_LEVEL = 0.075;
 const END_SILENCE_MS = 1250;
 const IDLE_MS = 12_000;
+// While Hermes speaks, a quiet recording is renewed this often, so that what you say over Hermes holds little of its voice.
+const PRE_ROLL_MS = 5_000;
 const MAX_UTTERANCE_MS = 60_000;
 const BARGE_IN_LEVEL = 0.14;
 const BARGE_IN_MS = 300;
@@ -133,7 +135,7 @@ export class VoiceConversation {
       this.discardRecording();
       // What waited for your voice goes on without it.
       if (waiting) this.proceed();
-    } else if (this.state !== "speaking") {
+    } else {
       this.record();
     }
     this.level = 0;
@@ -174,20 +176,14 @@ export class VoiceConversation {
       return;
     }
     const now = Date.now();
-    const sampling = this.recorder !== null || (!this.muted && this.state === "speaking");
-    const level = sampling ? this.measure(this.analyser) : 0;
+    const level = this.recorder ? this.measure(this.analyser) : 0;
     const shown = this.state === "speaking" ? this.measure(this.playbackAnalyser) : level;
     if (shown !== this.level && now - this.levelAt >= LEVEL_REPORT_MS) {
       this.level = shown;
       this.levelAt = now;
       this.emit();
     }
-    if (this.recorder) {
-      this.detectUtterance(level, now);
-    } else if (this.state === "speaking" && this.sustained(level, now)) {
-      this.stopPlayback();
-      this.listen();
-    }
+    if (this.recorder) this.detectUtterance(level, now);
     // Unlike Hermes Desktop's thinking sound, the blips start with transcribing, which takes a request to Hermes.
     if (!["transcribing", "thinking", "stopping"].includes(this.state)) this.blipAt = null;
     else if (this.blipAt === null) this.blipAt = now + FIRST_BLIP_MS;
@@ -204,8 +200,10 @@ export class VoiceConversation {
 
   detectUtterance(level, now) {
     const sustained = this.sustained(level, now);
-    // Unless the call listens, blips may play and talk may stop Hermes, so only a voice that keeps on starts an utterance.
+    // Unless the call listens, blips or Hermes's voice may play and talk may stop Hermes, so only a voice that keeps on
+    // starts an utterance.
     if ((this.heardSpeech || this.state === "listening") ? level >= SPEECH_LEVEL : sustained) {
+      if (this.state === "speaking") this.stopPlayback();
       if (this.state !== "listening") this.setState("listening");
       this.heardSpeech = true;
       this.quietSince = null;
@@ -216,7 +214,7 @@ export class VoiceConversation {
       return;
     }
     const length = now - this.recordingSince;
-    if (!this.heardSpeech && length >= IDLE_MS && !this.mayBeTalking()) {
+    if (!this.heardSpeech && length >= (this.state === "speaking" ? PRE_ROLL_MS : IDLE_MS) && !this.mayBeTalking()) {
       this.discardRecording();
       this.record();
     } else if (this.heardSpeech && ((this.quietSince !== null && now - this.quietSince >= END_SILENCE_MS) || length >= MAX_UTTERANCE_MS)) {
@@ -413,9 +411,8 @@ export class VoiceConversation {
     this.error = error;
     this.level = 0;
     this.sentence = null;
-    // The call hears you all along, except while Hermes speaks, when the recording would hear Hermes too.
-    if (state === "speaking" || state === "off") this.discardRecording();
-    else if (!this.muted && !this.recorder) this.record();
+    // The call records all along, also while Hermes speaks, so that talking over a reply keeps its first words.
+    if (state !== "off" && !this.muted && !this.recorder) this.record();
     this.emit();
   }
 

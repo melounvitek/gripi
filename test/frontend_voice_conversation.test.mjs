@@ -287,24 +287,32 @@ test("a call whose microphone arrives after Hermes finished listens", async (t) 
   assert.equal(call.state(), "listening");
 });
 
-test("talking over the reply stops it and listens", async (t) => {
-  const call = voiceCall(t);
+test("talking over the reply stops it and sends what was said from its first word", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Wait, use the staging database."] });
   await call.conversation.start({ working: () => "What is left to do?" });
   call.conversation.replyFinished("The first sentence is long enough to stand alone. The second one should never be heard.");
   await flush();
   assert.deepEqual(call.played, ["The first sentence is long enough to stand alone."]);
 
+  // The recording is renewed every few seconds, so that it holds little of Hermes's voice.
   call.level = 0.1;
-  await call.wait(1000);
+  await call.wait(6000);
   assert.equal(call.state(), "speaking");
+  assert.equal(call.recorders.length, 2);
+  assert.equal(call.recorders[0].state, "inactive");
 
+  const recording = call.recorders.at(-1);
   call.level = 0.3;
   await call.wait(300);
   assert.equal(call.state(), "listening");
   assert.equal(call.playing.stopped, true);
-  await call.wait(100);
+  assert.equal(call.recorders.at(-1), recording);
+
+  call.level = 0;
+  await call.wait(1300);
   assert.deepEqual(call.played, ["The first sentence is long enough to stand alone."]);
-  assert.equal(call.recorders.at(-1).state, "recording");
+  assert.equal(recording.state, "inactive");
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Wait, use the staging database.`]);
 });
 
 test("quiet blips fill the wait from the end of an utterance until the reply is spoken", async (t) => {
