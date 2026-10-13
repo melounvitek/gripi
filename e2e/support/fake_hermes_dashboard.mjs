@@ -23,7 +23,8 @@ export function startFakeHermesDashboard({ username, password }) {
       return answer(200, { ok: true, transcript: hermes.voice.transcript, provider: "fake" });
     }
     if (request.method === "POST" && request.url === "/api/audio/speak") {
-      const speech = wav(new Float32Array(RATE / 5));
+      // A second and a half of silence, long enough for a test to see the call speaking.
+      const speech = wav(new Float32Array(RATE * 1.5));
       return answer(200, { ok: true, data_url: `data:audio/wav;base64,${speech.toString("base64")}`, mime_type: "audio/wav", provider: "fake" });
     }
     answer(404, { detail: "Not Found" });

@@ -226,6 +226,8 @@ export class CurrentSessionFindController {
     const activeMatch = this.matches[this.index];
     this.restoreToolOutput(activeMatch?.collapse);
     this.revealToolOutput(activeMatch);
+    const spoken = activeMatch?.root.closest(".message-spoken");
+    if (spoken) spoken.open = true;
     if (activeMatch && activeMatch.collapse?.dataset.collapsed !== "true") {
       this.highlight(activeMatch);
       this.highlightedMatch = activeMatch;

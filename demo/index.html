@@ -213,19 +213,34 @@
     .voice-button:hover, .voice-button:disabled:hover { background: transparent; }
     @media (hover: hover) and (pointer: fine) { .voice-button:not(:disabled):hover { color: var(--text); background: #ffffff08; } }
     .voice-button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
-    /* A voice call takes the textarea row's place and height: one mono line with the state, a level meter and the call's controls. */
-    .voice-call { display: flex; align-items: center; gap: 0.75rem; min-width: 0; min-height: calc(2.75rem + 0.5rem + 2px); padding: 0.25rem 0.35rem 0.25rem var(--text-inset); border-block: 1px solid var(--editor-border); color: var(--text); font-family: var(--mono); font-size: 0.84rem; }
+    /* A voice call takes the textarea row's place and height with a mono line of the call's controls. */
+    .voice-call { display: flex; align-items: center; min-width: 0; min-height: calc(2.75rem + 0.5rem + 2px); padding: 0.25rem 0.35rem 0.25rem var(--text-inset); border-block: 1px solid var(--editor-border); color: var(--text); font-family: var(--mono); font-size: 0.84rem; }
     .prompt-form[data-voice-call] .composer-state { display: none; }
-    .voice-call-state { display: inline-flex; flex: none; align-items: center; gap: 0.6rem; white-space: nowrap; }
+    /* It also takes the conversation's place, above its find bar and jump buttons but below the phone's session drawer:
+       bars that follow the voice, the call's state, and the sentence Hermes speaks. */
+    .voice-call-view { position: relative; z-index: 6; display: grid; grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr); justify-items: center; min-height: 0; padding: 1.5rem; overflow-y: auto; background: var(--bg); font-family: var(--mono); }
+    /* Both share the conversation's cell, because an explicitly placed view alone would push the conversation to the next row. */
+    .voice-call-view, .conversation-panel:has(> .voice-call-view:not([hidden])) > .conversation-scroll { grid-area: 2 / 1; }
+    .voice-call-status { grid-row: 2; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+    .voice-call-bars { display: flex; align-items: center; gap: 0.875rem; height: 9.5rem; margin-bottom: 1rem; }
+    .voice-call-bars span { width: 1.25rem; height: calc(1.25rem + var(--level, 0) * var(--reach)); border-radius: 0.625rem; background: var(--accent); transition: height 100ms linear; }
+    .voice-call-bars span:nth-child(3) { --reach: 8.25rem; }
+    .voice-call-bars span:is(:nth-child(2), :nth-child(4)) { --reach: 5.5rem; }
+    .voice-call-bars span:is(:first-child, :last-child) { --reach: 3rem; }
+    .voice-call-view[data-state="speaking"] .voice-call-bars span { background: var(--gold); }
+    .voice-call-view:is([data-state="transcribing"], [data-state="thinking"]) .voice-call-bars span { height: 1.25rem; background: var(--muted); animation: progress-blink 1000ms ease-in-out infinite; }
+    .voice-call-bars span:nth-child(2) { animation-delay: 150ms; }
+    .voice-call-bars span:nth-child(3) { animation-delay: 300ms; }
+    .voice-call-bars span:nth-child(4) { animation-delay: 450ms; }
+    .voice-call-bars span:nth-child(5) { animation-delay: 600ms; }
+    .voice-call-state { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--text); font-size: 0.84rem; white-space: nowrap; }
     .voice-call-state::before { content: ""; width: 0.48rem; height: 0.48rem; border-radius: 999px; background: var(--accent); }
-    .voice-call[data-state="listening"] .voice-call-state::before { box-shadow: 0 0 0 3px var(--accent-tint-14); }
-    .voice-call:is([data-state="transcribing"], [data-state="thinking"]) .voice-call-state::before { animation: progress-blink 1000ms ease-in-out infinite; }
-    .voice-call[data-state="speaking"] .voice-call-state::before { background: var(--gold); box-shadow: 0 0 0 3px #f0c67426; }
-    .voice-call-meter { flex: none; color: var(--accent); letter-spacing: 0.04em; line-height: 1; white-space: pre; }
-    .voice-call[data-state="speaking"] .voice-call-meter { color: var(--gold); }
-    .voice-call:not([data-state="listening"], [data-state="speaking"]) .voice-call-meter { display: none; }
-    .voice-call-note { min-width: 0; overflow: hidden; color: var(--muted-soft); font-size: 0.74rem; text-overflow: ellipsis; white-space: nowrap; }
+    .voice-call-view[data-state="listening"] .voice-call-state::before { box-shadow: 0 0 0 3px var(--accent-tint-14); }
+    .voice-call-view:is([data-state="transcribing"], [data-state="thinking"]) .voice-call-state::before { animation: progress-blink 1000ms ease-in-out infinite; }
+    .voice-call-view[data-state="speaking"] .voice-call-state::before { background: var(--gold); box-shadow: 0 0 0 3px #f0c67426; }
+    .voice-call-note { max-width: 32rem; color: var(--muted-soft); font-size: 0.74rem; text-align: center; }
     .voice-call-note.is-error { color: color-mix(in srgb, var(--danger) 75%, var(--muted)); }
+    .voice-call-sentence { grid-row: 3; max-width: 32rem; margin: 1.25rem 0 0; color: var(--muted); font-family: var(--sans); font-size: 0.95rem; line-height: 1.5; text-align: center; }
     .voice-call .voice-call-actions { flex: none; margin-left: auto; font-size: 0.8rem; }
     .voice-call-actions .voice-call-end { color: var(--danger); }
     @media (hover: hover) and (pointer: fine) { .voice-call .voice-call-actions .voice-call-end:hover { color: #e08888; } }
@@ -481,6 +496,10 @@
     .message-voice-mark { color: var(--muted-soft); font-family: var(--mono); font-size: 0.68rem; }
     .message-meta + .message-voice-mark { margin-left: -0.35rem; }
     .message-meta + .message-voice-mark::before { content: "· " / ""; }
+    /* A spoken message shows as bars like the call's, which open to its transcript. */
+    .message-spoken > summary { display: block; width: fit-content; max-width: 100%; color: var(--accent); font-family: var(--mono); font-size: 0.84rem; letter-spacing: 0.04em; line-height: 1.2; overflow-wrap: anywhere; cursor: pointer; }
+    .message-spoken > summary::-webkit-details-marker { display: none; }
+    .message-spoken > .message-body { margin-top: 0.45rem; color: var(--muted); font-size: 0.82rem; font-style: italic; }
     :is(.message--user, .message[data-final-assistant-response="true"]) > .message-header > .message-meta { display: block; padding-left: 0; }
     @media (hover: hover) and (pointer: fine) {
       .message-header > .message-meta { display: block; visibility: hidden; }
@@ -575,7 +594,7 @@
     .code-block-copy-button { -webkit-user-select: none; user-select: none; position: absolute; top: 0.45rem; right: 0.45rem; margin-left: 0; }
     /* Like the fence line above a code block in Pi CLI, a top row holds the Copy button, so it never covers code. */
     .message-body--markdown:not(.message-body--thinking) .message-code-block pre { padding-top: 1.5rem; }
-    .message-body--markdown a, .message--user > .message-body a { color: var(--link); }
+    .message-body--markdown a, .message--user .message-body a { color: var(--link); }
     .message-images { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.65rem; }
     .message-image-button { display: inline-flex; min-width: 2.75rem; max-width: min(100%, 28rem); min-height: 2.75rem; padding: 0; overflow: hidden; border: 0; border-radius: 0.3rem; background: var(--panel-soft); cursor: zoom-in; }
     .message-image-button:hover { background: var(--panel-soft); }
@@ -900,7 +919,7 @@
     /* revealGrowth in dom.js wipes newly streamed blocks in from the top by animating this soft edge. */
     @property --reveal-edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
     .message-body--revealing { -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); mask-image: linear-gradient(to bottom, #000 calc(var(--reveal-edge) - 32px), transparent var(--reveal-edge)); }
-    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .voice-call-state::before, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .jump-button.is-loading::after, .session-pin-toggle.is-loading::after, .voice-call-view[data-state] .voice-call-state::before, .voice-call-view[data-state] .voice-call-bars span, .composer-stop-button.is-visible:not(:disabled)::before, .session-running-indicator::before, .session-compacting-indicator::before, .message--assistant.message--streaming .message-body--markdown > :last-child:not(.message-code-block):not(ul):not(ol)::after, .message--assistant.message--streaming .message-body--markdown > ul:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > ol:last-child > li:last-child::after, .message--assistant.message--streaming .message-body--markdown > blockquote:last-child > :last-child::after { animation: none; opacity: 1; } }
     @media (max-width: 760px), (pointer: coarse) {
       /* Touch rows: one line with the leading slot, title, tags, time and the 44px actions button, whose menu holds Pin. */
       .session-row { min-height: 2.75rem; padding: 0 2.9rem 0 0.5rem; }
@@ -982,8 +1001,7 @@
       .attach-button { width: 100%; font-size: 1.3rem; }
       .composer-input-row:has(.voice-button:not([hidden])) { grid-template-columns: minmax(0, 1fr) 2.75rem 2.75rem auto; }
       .voice-button svg { width: 22px; height: 22px; }
-      .voice-call { gap: 0.6rem; padding-right: 0; font-size: 0.8rem; }
-      .voice-call-note:not(.is-error) { display: none; }
+      .voice-call { padding-right: 0; font-size: 0.8rem; }
       .send-control { min-width: 2.75rem; }
       .send-button { display: inline-flex; width: 2.75rem; align-items: center; justify-content: center; font-size: 0; }
       .send-menu-toggle { min-height: 2.75rem; }

@@ -2,10 +2,9 @@ import { VoiceConversation } from "./voice_conversation.js";
 
 const LABELS = { listening: "listening", transcribing: "transcribing", thinking: "hermes is working", speaking: "speaking" };
 const HINTS = { listening: "speak, pause to send", speaking: "talk to interrupt" };
-const METER_BARS = "▁▂▃▄▅▆▇█";
-const METER_LENGTH = 12;
 
-// Owns a Hermes session's voice button and call line, and the voice conversation they run.
+// Owns a Hermes session's voice button, the call view in the conversation's place and the call line with its controls,
+// and the voice conversation they run.
 export class VoiceCallController {
   constructor(window, { send, busy, messages, failed }) {
     this.window = window;
@@ -20,14 +19,18 @@ export class VoiceCallController {
   bind(form) {
     const button = form?.querySelector("[data-voice-button]");
     const line = form?.querySelector("[data-voice-call]");
-    this.elements = button && line ? {
+    const view = this.window.document.querySelector("[data-voice-call-view]");
+    this.elements = button && line && view ? {
       form,
       button,
       line,
+      view,
+      conversation: this.window.document.getElementById("conversation-scroll"),
       inputRow: form.querySelector(".composer-input-row"),
-      state: line.querySelector("[data-voice-call-state]"),
-      meter: line.querySelector("[data-voice-call-meter]"),
-      note: line.querySelector("[data-voice-call-note]"),
+      bars: view.querySelector("[data-voice-call-bars]"),
+      state: view.querySelector("[data-voice-call-state]"),
+      note: view.querySelector("[data-voice-call-note]"),
+      caption: view.querySelector("[data-voice-call-sentence]"),
       mute: line.querySelector("[data-voice-call-mute]"),
       end: line.querySelector("[data-voice-call-end]")
     } : null;
@@ -79,34 +82,34 @@ export class VoiceCallController {
     this.conversation?.end();
   }
 
-  render({ state, level, muted, error }) {
-    const { form, button, line, inputRow, meter, note, mute, end } = this.elements;
+  render({ state, level, muted, error, sentence }) {
+    const { form, button, line, view, conversation, inputRow, bars, note, caption, mute, end } = this.elements;
     const active = state !== "off";
     const focused = this.window.document.activeElement;
     form.toggleAttribute("data-voice-call", active);
-    line.hidden = !active;
+    line.hidden = view.hidden = !active;
+    // The covered conversation can't be focused, also by the composer's own focus handling while Hermes works.
+    conversation.inert = active;
     inputRow.hidden = active;
     if (!active) {
       this.conversation = null;
-      delete line.dataset.state;
+      delete view.dataset.state;
       if (line.contains(focused)) button.focus();
       if (error) this.failed(error);
       return;
     }
     if (focused === button) end.focus();
 
-    if (line.dataset.state !== state) {
-      line.dataset.state = state;
+    if (view.dataset.state !== state) {
+      view.dataset.state = state;
       this.elements.state.textContent = LABELS[state];
-      this.levels = [];
     }
-    this.levels = muted ? [] : [...this.levels, level].slice(-METER_LENGTH);
-    meter.textContent = this.levels.map((value) => METER_BARS[Math.round(Math.sqrt(value) * (METER_BARS.length - 1))]).join("").padStart(METER_LENGTH, METER_BARS[0]);
+    bars.style.setProperty("--level", Math.sqrt(level).toFixed(3));
     // Only changes are set, so that screen readers announce nothing at every level.
-    const noteText = error || (muted ? "" : HINTS[state] || "");
+    const noteText = error || (muted ? "muted" : HINTS[state] || "");
     if (note.textContent !== noteText) note.textContent = noteText;
-    note.title = error || "";
     note.classList.toggle("is-error", !!error);
+    if (caption.textContent !== (sentence ?? "")) caption.textContent = sentence ?? "";
     mute.textContent = muted ? "unmute" : "mute";
   }
 }

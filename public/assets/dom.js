@@ -61,7 +61,7 @@ export function renderTextWithLinks(element, text, document = element?.ownerDocu
 }
 
 export function enhanceMessageLinks(root, document = root?.ownerDocument || globalThis.document) {
-  root?.querySelectorAll?.(".message--user:not(.message--compact) > .message-body:not(.message-body--markdown)").forEach((body) => {
+  root?.querySelectorAll?.(".message--user:not(.message--compact) .message-body:not(.message-body--markdown)").forEach((body) => {
     renderTextWithLinks(body, body.textContent, document);
   });
 }

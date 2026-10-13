@@ -302,7 +302,7 @@ test("live message times use the short label with the full date as a tooltip", (
   assert.equal(tool.meta.getAttribute("title"), null);
 });
 
-test("a spoken message shows what was said with a voice mark, and keeps the fingerprint of what was sent", () => {
+test("a spoken message shows as bars that open to its transcript, with a voice mark, and keeps the fingerprint of what was sent", () => {
   const document = new FakeDocument();
   const conversation = { followLiveOutput: () => false, afterLiveOutputChange() {} };
   const renderer = new LiveMessageRenderer(document, conversation, new LiveMessageParser(), { bind() {} });
@@ -315,7 +315,12 @@ test("a spoken message shows what was said with a voice mark, and keeps the fing
 
   assert.equal(renderer.liveOutput.children.length, 1);
   const [article] = renderer.liveOutput.children;
-  assert.equal(article.querySelector(".message-body").textContent, "What time is it?");
+  const spoken = article.querySelector(".message-spoken");
+  const bars = spoken.querySelector(".message-spoken-bars");
+  assert.deepEqual([spoken.tagName, bars.tagName], ["DETAILS", "SUMMARY"]);
+  assert.equal(bars.textContent, "█▄ ▇▇ ▇ ▅");
+  assert.equal(bars.getAttribute("aria-label"), "Transcript");
+  assert.equal(spoken.querySelector(".message-body").textContent, "What time is it?");
   assert.deepEqual(article.querySelector(".message-header").children.map((child) => child.textContent).slice(-1), ["voice"]);
   assert.ok(article.dataset.messageTimestamp);
   assert.equal(article.dataset.messageFingerprint, messageFingerprint("user", sent, article.dataset.messageTimestamp));

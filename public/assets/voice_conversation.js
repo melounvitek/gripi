@@ -43,6 +43,8 @@ export class VoiceConversation {
     this.levelAt = 0;
     this.muted = false;
     this.error = null;
+    // The sentence of the reply that is playing.
+    this.sentence = null;
     // The message whose reply the call waits for while thinking: what it said, or what Hermes was working on when it started.
     this.awaited = null;
     // Bumped on every state change; async work started in a state is dropped once it has moved on.
@@ -295,6 +297,8 @@ export class VoiceConversation {
           // Nobody awaits it when playback stops early, so its failure must not go unhandled.
           next.catch(() => {});
         }
+        this.sentence = sentences[index];
+        this.emit();
         await this.play(audio);
         if (generation !== this.generation) return;
       }
@@ -343,11 +347,12 @@ export class VoiceConversation {
     this.state = state;
     this.error = error;
     this.level = 0;
+    this.sentence = null;
     this.emit();
   }
 
   emit() {
-    this.onChange({ state: this.state, level: this.level, muted: this.muted, error: this.error });
+    this.onChange({ state: this.state, level: this.level, muted: this.muted, error: this.error, sentence: this.sentence });
   }
 }
 

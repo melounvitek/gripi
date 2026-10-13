@@ -1,6 +1,6 @@
 import { PAIRED_TOOL_NAMES, THINKING_PLACEHOLDER, TOOL_OUTPUT_COLLAPSE_CHARACTERS, TOOL_OUTPUT_DESKTOP_TAIL_LINES, TOOL_OUTPUT_MOBILE_TAIL_LINES, TOOL_OUTPUT_TAIL_CHARACTERS } from "./constants.js";
 import { renderTextWithLinks } from "./dom.js";
-import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimeLabel, messageTimestampKey, normalizedMessageText, spokenText, stableTextHash } from "./formatting.js";
+import { eventTimestamp, formatTimestamp, messageFingerprint, messageRoleKey, messageRoleLabel, messageTimeLabel, messageTimestampKey, normalizedMessageText, spokenBars, spokenText, stableTextHash } from "./formatting.js";
 import { finishedMarkdownBlocks } from "./paragraph_streaming.js";
 import { hasTerminalControls, renderTerminalOutput } from "./terminal_output_renderer.js";
 
@@ -262,11 +262,23 @@ export class LiveMessageRenderer {
     }
     if (roleName === "assistant" && !activity) header.append(this.makeCopyButton());
     article.append(header);
-    article.append(body);
+    article.append(spoken === null ? body : this.spokenDetails(spoken, body));
     this.renderMessageImages(article, options.images);
     this.liveOutput.append(article);
     this.conversationController.afterLiveOutputChange(shouldScroll, live, true);
     return { article, body, compact: false };
+  }
+
+  // What was said shows as bars, which open to its transcript.
+  spokenDetails(text, body) {
+    const details = this.document.createElement("details");
+    details.className = "message-spoken";
+    const bars = this.document.createElement("summary");
+    bars.className = "message-spoken-bars";
+    bars.setAttribute("aria-label", "Transcript");
+    bars.textContent = spokenBars(text);
+    details.append(bars, body);
+    return details;
   }
 
   appendCompactMessage(roleName, summary, text, live = true, forceScroll = false, timestamp = null, options = {}) {

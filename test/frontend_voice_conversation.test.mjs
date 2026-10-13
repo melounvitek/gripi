@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { speechSentences } from "../public/assets/speech_text.js";
-import { spokenText, VOICE_PREFIX } from "../public/assets/formatting.js";
+import { spokenBars, spokenText, VOICE_PREFIX } from "../public/assets/formatting.js";
 import { isStopPhrase, VoiceConversation } from "../public/assets/voice_conversation.js";
 import { deferred, FakeEventTarget } from "./helpers/fake_dom.mjs";
 
@@ -38,11 +38,14 @@ test("a spoken turn is sent with the voice prefix and the reply is spoken senten
   const second = "Rain arrives tomorrow, so take an umbrella.";
   assert.deepEqual(call.spoken(), [first, second]);
   assert.deepEqual(call.played, [first]);
+  assert.equal(call.changes.at(-1).sentence, first);
   await call.finishSentence();
   assert.deepEqual(call.played, [first, second]);
+  assert.equal(call.changes.at(-1).sentence, second);
   await call.finishSentence();
 
   assert.deepEqual(call.states(), ["listening", "transcribing", "thinking", "speaking", "listening"]);
+  assert.equal(call.changes.at(-1).sentence, null);
   assert.equal(call.recorders.at(-1).state, "recording");
 });
 
@@ -84,10 +87,10 @@ test("failed requests are reported and the call listens again", async (t) => {
 
   call.conversation.replyFinished("Here is the answer you asked for a moment ago.");
   await flush();
-  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Piper is not running" });
+  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Piper is not running", sentence: null });
 
   await call.utter();
-  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Hermes is busy" });
+  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Hermes is busy", sentence: null });
   assert.equal(call.recorders.at(-1).state, "recording");
 });
 
@@ -196,7 +199,7 @@ test("muting stops recording until the microphone is back", async (t) => {
   call.conversation.setMuted(true);
   assert.equal(call.track.enabled, false);
   assert.equal(call.recorders[0].state, "inactive");
-  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: true, error: null });
+  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: true, error: null, sentence: null });
 
   const muted = call.changes.length;
   call.level = 0.5;
@@ -220,6 +223,12 @@ test("the meter follows Hermes's voice while it speaks", async (t) => {
   await call.wait(500);
   assert.equal(call.changes.at(-1).level, 0.5);
   assert.equal(call.state(), "speaking");
+
+  // Muting silences the microphone, not Hermes.
+  call.conversation.setMuted(true);
+  call.playbackLevel = 1;
+  await call.wait(500);
+  assert.equal(call.changes.at(-1).level, 1);
 });
 
 test("a hidden page keeps the call going and takes the wake lock back when shown", async (t) => {
@@ -290,7 +299,7 @@ test("a refused microphone ends the call with an error", async (t) => {
 
   await call.conversation.start();
 
-  assert.deepEqual(call.changes, [{ state: "off", level: 0, muted: false, error: "Microphone access was denied" }]);
+  assert.deepEqual(call.changes, [{ state: "off", level: 0, muted: false, error: "Microphone access was denied", sentence: null }]);
   assert.equal(call.audioContext.state, "closed");
 });
 
@@ -336,6 +345,15 @@ test("spoken messages are recognised by the voice prefix", () => {
   assert.equal(spokenText(`${VOICE_PREFIX}What time is it?`), "What time is it?");
   assert.equal(spokenText("What time is it?"), null);
   assert.equal(spokenText(`${VOICE_PREFIX.trimEnd()}What time is it?`), null);
+});
+
+// The gateway draws the same bars, in spokenBars in internal/server/views.go.
+test("spoken messages show bars that follow the words that were said", () => {
+  const cases = [
+    ["What time is it?", "█▄ ▇▇ ▇ ▅"],
+    ["ok přesuň Pavla na čtyři, jestli může, a řekni mu že it's about the gripy release and the the charger", "▃ ▆▇▅ ▃▇▄ █ ▂▅▄ ▁▃▄ ▃▇ ▄ ▂█▄ █ ▇ ▅ ▆ ▅▄▂ ▄▇ ▄▇▆ ▃▇▃▄ ▆▆ ▄▇ ▄▇ ▃▄"]
+  ];
+  for (const [text, bars] of cases) assert.equal(spokenBars(text), bars, text);
 });
 
 function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=opus"], send, speakError, microphoneError, microphoneReady, recordingReady } = {}) {
