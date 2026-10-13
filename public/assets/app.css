@@ -477,6 +477,10 @@
     .message-voice-mark { color: var(--muted-soft); font-family: var(--mono); font-size: 0.68rem; }
     .message-meta + .message-voice-mark { margin-left: -0.35rem; }
     .message-meta + .message-voice-mark::before { content: "· " / ""; }
+    /* A spoken message shows as bars like the call's, which open to its transcript. */
+    .message-spoken > summary { display: block; width: fit-content; max-width: 100%; color: var(--accent); font-family: var(--mono); font-size: 0.84rem; letter-spacing: 0.04em; line-height: 1.2; overflow-wrap: anywhere; cursor: pointer; }
+    .message-spoken > summary::-webkit-details-marker { display: none; }
+    .message-spoken > .message-body { margin-top: 0.45rem; color: var(--muted); font-size: 0.82rem; font-style: italic; }
     :is(.message--user, .message[data-final-assistant-response="true"]) > .message-header > .message-meta { display: block; padding-left: 0; }
     @media (hover: hover) and (pointer: fine) {
       .message-header > .message-meta { display: block; visibility: hidden; }

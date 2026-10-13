@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/melounvitek/gripi/internal/agent"
@@ -689,7 +690,8 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			}
 			return template.HTML(template.HTMLEscapeString(message.Text))
 		},
-		"spokenMessage": spokenMessage, "compactBody": compactBody, "compactTail": compactTail, "toolSummary": func(value string) template.HTML { return template.HTML(value) },
+		"spokenMessage": spokenMessage, "spokenBars": func(message *agent.Message) string { return spokenBars(strings.TrimPrefix(message.Text, voicePrefix)) },
+		"compactBody": compactBody, "compactTail": compactTail, "toolSummary": func(value string) template.HTML { return template.HTML(value) },
 		"imageSource": imageSource,
 		"statusItems": statusItems, "bashStatusItems": bashStatusItems, "attachmentLabel": attachmentLabel,
 		"visibleImages": visibleImages, "attachmentCount": attachmentCount, "collapsible": collapsible, "toolOutputHiddenLabel": toolOutputHiddenLabel,
@@ -997,6 +999,31 @@ func messageFingerprint(message *agent.Message) string {
 }
 func spokenMessage(message *agent.Message) bool {
 	return message.Role == "user" && strings.HasPrefix(message.Text, voicePrefix)
+}
+
+// spokenBars draws what was said in a voice conversation as level bars like the call's, so that its transcript can stay
+// hidden: a bar for every two letters of a word, softer at the ends of longer words. The height comes from the word, so
+// spokenBars in public/assets/formatting.js draws the same bars for the messages that the browser renders.
+func spokenBars(text string) string {
+	levels := []rune("▁▂▃▄▅▆▇█")
+	var bars []rune
+	for _, word := range strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) }) {
+		hash := uint32(5381)
+		for _, r := range word {
+			hash = hash*33 + uint32(r)
+		}
+		count := (utf8.RuneCountInString(word) + 1) / 2
+		for index := range count {
+			hash = hash*1103515245 + 12345
+			level := 2 + int((hash>>16)%6)
+			if count > 2 && (index == 0 || index == count-1) {
+				level -= 2
+			}
+			bars = append(bars, levels[level])
+		}
+		bars = append(bars, ' ')
+	}
+	return strings.TrimRight(string(bars[:min(len(bars), 64)]), " ")
 }
 func compactBody(view *pageView, message *agent.Message) template.HTML {
 	return renderCompactLines(message, strings.Split(strings.TrimSuffix(message.Text, "\n"), "\n"), 0, view.Home)

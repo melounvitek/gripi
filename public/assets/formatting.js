@@ -15,6 +15,25 @@ export function spokenText(text) {
   return text.startsWith(VOICE_PREFIX) ? text.slice(VOICE_PREFIX.length) : null;
 }
 
+// What was said in a voice conversation as level bars like the call's, so that its transcript can stay hidden: a bar for
+// every two letters of a word, softer at the ends of longer words. spokenBars in internal/server/views.go draws the same.
+export function spokenBars(text) {
+  const levels = "▁▂▃▄▅▆▇█";
+  let bars = "";
+  for (const word of text.match(/[\p{L}\p{N}]+/gu) ?? []) {
+    let hash = 5381;
+    for (const character of word) hash = (Math.imul(hash, 33) + character.codePointAt(0)) >>> 0;
+    const count = Math.ceil([...word].length / 2);
+    for (let index = 0; index < count; index += 1) {
+      hash = (Math.imul(hash, 1103515245) + 12345) >>> 0;
+      const level = 2 + ((hash >>> 16) % 6);
+      bars += levels[count > 2 && (index === 0 || index === count - 1) ? level - 2 : level];
+    }
+    bars += " ";
+  }
+  return [...bars].slice(0, 64).join("").trimEnd();
+}
+
 export function imageAttachmentLabel(count) {
   return `${count} image${count === 1 ? "" : "s"} attached`;
 }

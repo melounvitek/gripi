@@ -91,7 +91,7 @@ func TestMessageTemplateShowsShortTimeWithFullTitle(t *testing.T) {
 	}
 }
 
-func TestMessageTemplateShowsASpokenMessageWithoutItsPrefixAndWithAVoiceMark(t *testing.T) {
+func TestMessageTemplateShowsASpokenMessageAsBarsThatOpenToItsTranscript(t *testing.T) {
 	timestamp := time.Now().Add(-time.Minute)
 	message := &agent.Message{Role: "user", Text: voicePrefix + "What time is it?", Timestamp: timestamp}
 	templates, err := template.New("").Funcs(templateFunctions(rendering.NewMarkdown())).ParseFS(templateFiles, "templates/*.html")
@@ -106,8 +106,22 @@ func TestMessageTemplateShowsASpokenMessageWithoutItsPrefixAndWithAVoiceMark(t *
 
 	html := rendered.String()
 	mark := messageTimeLabel(timestamp, time.Now()) + `</div><span class="message-voice-mark">voice</span>`
-	if !strings.Contains(html, `<pre class="message-body">What time is it?</pre>`) || strings.Contains(html, "Voice input") || !strings.Contains(html, mark) {
+	spoken := `<details class="message-spoken"><summary class="message-spoken-bars" aria-label="Transcript">█▄ ▇▇ ▇ ▅</summary><pre class="message-body">What time is it?</pre></details>`
+	if !strings.Contains(html, spoken) || strings.Contains(html, "Voice input") || !strings.Contains(html, mark) {
 		t.Fatalf("spoken message = %s", html)
+	}
+}
+
+// The browser draws the bars of a message spoken during a call the same way, in spokenBars in public/assets/formatting.js.
+func TestSpokenBarsFollowTheWordsThatWereSaid(t *testing.T) {
+	cases := map[string]string{
+		"What time is it?": "█▄ ▇▇ ▇ ▅",
+		"ok přesuň Pavla na čtyři, jestli může, a řekni mu že it's about the gripy release and the the charger": "▃ ▆▇▅ ▃▇▄ █ ▂▅▄ ▁▃▄ ▃▇ ▄ ▂█▄ █ ▇ ▅ ▆ ▅▄▂ ▄▇ ▄▇▆ ▃▇▃▄ ▆▆ ▄▇ ▄▇ ▃▄",
+	}
+	for text, want := range cases {
+		if got := spokenBars(text); got != want {
+			t.Errorf("spokenBars(%q) = %q, want %q", text, got, want)
+		}
 	}
 }
 

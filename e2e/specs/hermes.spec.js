@@ -229,9 +229,19 @@ test("a voice conversation takes the conversation's place, sends what was said a
   await expect(page.getByLabel("Message to Hermes")).toBeVisible();
   expect(await conversationCovered(page)).toBe(false);
 
+  // What was said shows as bars, which open to its transcript.
+  const bars = spoken.locator(".message-spoken-bars");
+  await expect(bars).toHaveText(/^[▁-█ ]+$/);
+  await expect(spoken.locator(".message-body")).toBeHidden();
+  const liveBars = await bars.textContent();
+  await bars.click();
+  await expect(spoken.locator(".message-body")).toBeVisible();
+
   await page.reload();
   await expect(spoken.locator(".message-body")).toHaveText(transcript);
   await expect(spoken.locator(".message-voice-mark")).toHaveText("voice");
+  await expect(bars).toHaveText(liveBars);
+  await expect(spoken.locator(".message-body")).toBeHidden();
 });
 
 // Whether something other than the conversation shows at its centre.

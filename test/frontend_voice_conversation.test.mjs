@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { speechSentences } from "../public/assets/speech_text.js";
-import { spokenText, VOICE_PREFIX } from "../public/assets/formatting.js";
+import { spokenBars, spokenText, VOICE_PREFIX } from "../public/assets/formatting.js";
 import { isStopPhrase, VoiceConversation } from "../public/assets/voice_conversation.js";
 import { deferred, FakeEventTarget } from "./helpers/fake_dom.mjs";
 
@@ -339,6 +339,15 @@ test("spoken messages are recognised by the voice prefix", () => {
   assert.equal(spokenText(`${VOICE_PREFIX}What time is it?`), "What time is it?");
   assert.equal(spokenText("What time is it?"), null);
   assert.equal(spokenText(`${VOICE_PREFIX.trimEnd()}What time is it?`), null);
+});
+
+// The gateway draws the same bars, in spokenBars in internal/server/views.go.
+test("spoken messages show bars that follow the words that were said", () => {
+  const cases = [
+    ["What time is it?", "█▄ ▇▇ ▇ ▅"],
+    ["ok přesuň Pavla na čtyři, jestli může, a řekni mu že it's about the gripy release and the the charger", "▃ ▆▇▅ ▃▇▄ █ ▂▅▄ ▁▃▄ ▃▇ ▄ ▂█▄ █ ▇ ▅ ▆ ▅▄▂ ▄▇ ▄▇▆ ▃▇▃▄ ▆▆ ▄▇ ▄▇ ▃▄"]
+  ];
+  for (const [text, bars] of cases) assert.equal(spokenBars(text), bars, text);
 });
 
 function voiceCall(t, { transcripts = [], recordingTypes = ["audio/webm;codecs=opus"], send, speakError, microphoneError, microphoneReady, recordingReady } = {}) {
