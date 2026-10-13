@@ -315,6 +315,29 @@ test("talking over the reply stops it and sends what was said from its first wor
   assert.deepEqual(call.sent, [`${VOICE_PREFIX}Wait, use the staging database.`]);
 });
 
+test("a reply that ends untouched is left out of what is heard next, unless a voice is starting", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Thanks."] });
+  await call.conversation.start({ working: () => "What is left to do?" });
+  call.conversation.replyFinished("A reply that is long enough to be spoken on its own.");
+  await flush();
+  const recording = call.recorders.at(-1);
+  await call.finishSentence();
+  assert.equal(call.state(), "listening");
+  assert.equal(recording.state, "inactive");
+  assert.equal(call.recorders.at(-1).state, "recording");
+
+  await call.utter();
+  call.conversation.replyFinished("Another reply that is long enough to stand alone.");
+  await flush();
+  call.level = 0.5;
+  await call.wait(100);
+  const starting = call.recorders.at(-1);
+  await call.finishSentence();
+  assert.equal(call.state(), "listening");
+  assert.equal(call.recorders.at(-1), starting);
+  assert.equal(starting.state, "recording");
+});
+
 test("quiet blips fill the wait from the end of an utterance until the reply is spoken", async (t) => {
   const transcript = deferred();
   const call = voiceCall(t, { transcripts: [transcript.promise] });

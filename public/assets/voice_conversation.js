@@ -7,7 +7,8 @@ const LEVEL_REPORT_MS = 100;
 const SPEECH_LEVEL = 0.075;
 const END_SILENCE_MS = 1250;
 const IDLE_MS = 12_000;
-// While Hermes speaks, a quiet recording is renewed this often, so that what you say over Hermes holds little of its voice.
+// While Hermes speaks, the recording is renewed this often while nothing loud is heard, so that what you say over Hermes
+// holds little of its voice.
 const PRE_ROLL_MS = 5_000;
 const MAX_UTTERANCE_MS = 60_000;
 const BARGE_IN_LEVEL = 0.14;
@@ -350,6 +351,7 @@ export class VoiceConversation {
     this.recentLevels = [];
     this.setState("speaking", error);
     const generation = this.generation;
+    let failure = null;
     try {
       let next = this.speech(sentences[0]);
       for (let index = 0; index < sentences.length; index += 1) {
@@ -365,10 +367,13 @@ export class VoiceConversation {
         await this.play(audio);
         if (generation !== this.generation) return;
       }
-      this.listen();
     } catch (error) {
-      if (generation === this.generation) this.listen(error.message);
+      if (generation !== this.generation) return;
+      failure = error.message;
     }
+    // The recording heard the reply, so unless a voice is starting, a new one keeps the reply from being taken for talk.
+    if (!this.mayBeTalking()) this.discardRecording();
+    this.listen(failure);
   }
 
   async speech(text) {
