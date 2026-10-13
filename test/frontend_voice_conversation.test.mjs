@@ -119,7 +119,7 @@ test("a call started while Hermes works waits for its reply", async (t) => {
 });
 
 test("talking while Hermes works stops it and sends what was said once its run has ended", async (t) => {
-  const call = voiceCall(t, { transcripts: ["Check the staging database instead."] });
+  const call = voiceCall(t, { transcripts: ["Check the staging database instead.", "And the replica."] });
   await call.conversation.start({ working: () => "Check the production database." });
 
   await call.utter(1000);
@@ -127,11 +127,16 @@ test("talking while Hermes works stops it and sends what was said once its run h
   assert.equal(call.stops, 1);
   assert.deepEqual(call.sent, []);
 
+  // More said while Hermes stops joins what was said, and asks Hermes again, in case the first stop failed.
+  await call.utter(1000);
+  assert.equal(call.state(), "stopping");
+  assert.equal(call.stops, 2);
+
   // The stopped run ends without a reply.
   call.conversation.replyFinished("");
-  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Check the staging database instead.`]);
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Check the staging database instead. And the replica.`]);
   assert.equal(call.state(), "thinking");
-  assert.equal(call.conversation.awaited, "Check the staging database instead.");
+  assert.equal(call.conversation.awaited, "Check the staging database instead. And the replica.");
 });
 
 test("noise and talk without words leave Hermes working", async (t) => {
@@ -162,9 +167,11 @@ test("a reply that comes while you talk over Hermes is skipped for what you said
   const call = voiceCall(t, { transcripts: ["Use the staging database."] });
   await call.conversation.start({ working: () => "Check the production database." });
 
+  // The reply comes before the voice has gone on long enough to be taken for talk.
   call.level = 0.5;
-  await call.wait(1000);
+  await call.wait(150);
   call.conversation.replyFinished("The production database is fine.");
+  await call.wait(850);
   call.level = 0;
   await call.wait(1300);
 
@@ -180,16 +187,60 @@ test("talking on after a pause adds to what was said before", async (t) => {
   await call.utter();
   assert.equal(call.state(), "transcribing");
 
+  // The first part is transcribed before the voice has gone on long enough to be taken for talk.
   call.level = 0.5;
-  await call.wait(1000);
-  assert.equal(call.state(), "listening");
+  await call.wait(150);
   first.resolve("Run the migrations");
-  await flush();
+  await call.wait(850);
+  assert.equal(call.state(), "listening");
   assert.deepEqual(call.sent, []);
 
   call.level = 0;
   await call.wait(1300);
   assert.deepEqual(call.sent, [`${VOICE_PREFIX}Run the migrations on the staging server.`]);
+});
+
+test("a part that fails to be transcribed keeps the rest from being sent", async (t) => {
+  const first = deferred();
+  const call = voiceCall(t, { transcripts: [first.promise, "on the staging server."] });
+  await call.conversation.start();
+  await call.utter();
+
+  call.level = 0.5;
+  await call.wait(1000);
+  first.reject(new Error("Transcription failed"));
+  call.level = 0;
+  await call.wait(1300);
+
+  assert.deepEqual(call.sent, []);
+  assert.deepEqual(call.changes.at(-1), { state: "listening", level: 0, muted: false, error: "Transcription failed", sentence: null });
+});
+
+test("a reply that comes during a cough is spoken once it's over", async (t) => {
+  const call = voiceCall(t);
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  call.level = 0.5;
+  await call.wait(100);
+  call.conversation.replyFinished("The production database is fine.");
+  await call.wait(50);
+  assert.equal(call.state(), "thinking");
+  call.level = 0;
+  await call.wait(400);
+
+  assert.deepEqual(call.played, ["The production database is fine."]);
+});
+
+test("a voice that starts as an idle recording is renewed keeps the recording", async (t) => {
+  const call = voiceCall(t);
+  await call.conversation.start({ working: () => "Check the production database." });
+
+  await call.wait(11_850);
+  call.level = 0.5;
+  await call.wait(300);
+
+  assert.equal(call.state(), "listening");
+  assert.equal(call.recorders.length, 1);
 });
 
 test("a call whose microphone arrives after Hermes finished listens", async (t) => {
