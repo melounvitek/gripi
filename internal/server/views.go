@@ -161,11 +161,22 @@ func (app *application) prepareView(request *http.Request, includeConversation, 
 			request.URL.RawQuery = params.Encode()
 		}
 	}
-	all, metadataDeferred, err := app.sessionStore.SessionsDeferringMetadata(func(path string) bool {
+	listing := app.pageStore()
+	if listHermes {
+		listing = app.sessionStore
+	}
+	all, metadataDeferred, err := listing.SessionsDeferringMetadata(func(path string) bool {
 		return request.URL.Path == "/sidebar" && app.rpcClients.Busy(path)
 	})
 	if err != nil {
 		return nil, err
+	}
+	hermesPanel := params.Get("session_only") == "1" && app.agentOf(params.Get("session")) == "hermes"
+	// Pages don't list Hermes's conversations, so the Hermes panel's page adds its own.
+	if hermesPanel && !listHermes {
+		if session, saved := app.sessionStore.Session(params.Get("session")); saved {
+			all = append(all, session)
+		}
 	}
 	projectCWDs, err := app.gatewayState.ProjectCWDs(all)
 	if err != nil {
@@ -211,7 +222,6 @@ func (app *application) prepareView(request *http.Request, includeConversation, 
 	}
 	app.rememberSessionHashes(all)
 	params = request.URL.Query()
-	hermesPanel := params.Get("session_only") == "1" && app.agentOf(params.Get("session")) == "hermes"
 	if !listHermes {
 		all = slices.DeleteFunc(all, func(session *agent.Session) bool {
 			return session.Agent == "hermes" && !(hermesPanel && session.Path == params.Get("session"))
@@ -1187,6 +1197,15 @@ func terminalSource(message *agent.Message) string {
 func base64Text(value string) string { return base64.StdEncoding.EncodeToString([]byte(value)) }
 
 // agentOf names the agent of a session when the gateway runs several, and is empty otherwise.
+// pageStore lists the sessions that pages show. It leaves out Hermes's, so that a page never waits for Hermes to start:
+// the Hermes panel opens its conversation itself.
+func (app *application) pageStore() agent.Store {
+	if router, ok := app.adapter.(*agent.Router); ok {
+		return router.StoreUnlisting("hermes")
+	}
+	return app.sessionStore
+}
+
 func (app *application) agentOf(key string) string {
 	if router, ok := app.adapter.(*agent.Router); ok {
 		return router.Agent(key)

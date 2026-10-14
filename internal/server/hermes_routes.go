@@ -4,13 +4,22 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 )
 
 // hermesConversation is the one Hermes conversation that every Hermes panel shows, until a new one replaces it. The
 // gateway forgets it when it stops; Hermes keeps its sessions in its own database.
 type hermesConversation struct {
-	mu  sync.Mutex
-	key string
+	// starting lets one conversation start at a time, which takes Hermes seconds.
+	starting sync.Mutex
+	key      atomic.Pointer[string]
+}
+
+func (conversation *hermesConversation) current() string {
+	if key := conversation.key.Load(); key != nil {
+		return *key
+	}
+	return ""
 }
 
 func (app *application) registerHermesRoutes(mux *http.ServeMux) {
@@ -22,35 +31,34 @@ func (app *application) registerHermesRoutes(mux *http.ServeMux) {
 // openHermesConversation opens the current conversation, and starts one when there is none or it is gone. A Hermes
 // conversation belongs to no project, so it starts in the home folder.
 func (app *application) openHermesConversation(response http.ResponseWriter, request *http.Request) {
-	app.hermes.mu.Lock()
-	defer app.hermes.mu.Unlock()
-	if !app.commandSessionAvailable(app.hermes.key) {
-		key, err := app.startNewSession(request, app.config.Home, "", "hermes")
-		if err != nil {
+	app.hermes.starting.Lock()
+	defer app.hermes.starting.Unlock()
+	key := app.hermes.current()
+	if !app.commandSessionAvailable(key) {
+		var err error
+		if key, err = app.startNewSession(request, app.config.Home, "", "hermes"); err != nil {
 			app.writeActionRPCError(response, err)
 			return
 		}
-		app.hermes.key = key
+		app.hermes.key.Store(&key)
 	}
-	app.showHermesConversation(response, request, app.hermes.key)
+	app.showHermesConversation(response, request, key)
 }
 
 func (app *application) newHermesConversation(response http.ResponseWriter, request *http.Request) {
-	app.hermes.mu.Lock()
-	defer app.hermes.mu.Unlock()
+	app.hermes.starting.Lock()
+	defer app.hermes.starting.Unlock()
 	key, err := app.startNewSession(request, app.config.Home, "", "hermes")
 	if err != nil {
 		app.writeActionRPCError(response, err)
 		return
 	}
-	app.hermes.key = key
+	app.hermes.key.Store(&key)
 	app.showHermesConversation(response, request, key)
 }
 
 func (app *application) currentHermesConversation(response http.ResponseWriter, _ *http.Request) {
-	app.hermes.mu.Lock()
-	defer app.hermes.mu.Unlock()
-	writeJSON(response, map[string]string{"session": app.hermes.key})
+	writeJSON(response, map[string]string{"session": app.hermes.current()})
 }
 
 // showHermesConversation sends the browser to the Hermes panel's page of the conversation.

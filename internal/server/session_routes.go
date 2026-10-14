@@ -341,6 +341,10 @@ func (app *application) sessionImage(response http.ResponseWriter, request *http
 }
 
 func (app *application) knownSessionHash(hash string) bool {
+	// The Hermes panel shows its conversation, which no page lists.
+	if key := app.hermes.current(); key != "" && sessions.SessionHash(key) == hash {
+		return true
+	}
 	app.sessionHashesMu.Lock()
 	fresh := time.Since(app.sessionHashesAt) < time.Second
 	known := app.knownSessionHashes[hash]
@@ -348,7 +352,7 @@ func (app *application) knownSessionHash(hash string) bool {
 	if fresh {
 		return known
 	}
-	all, err := app.sessionStore.Sessions()
+	all, err := app.pageStore().Sessions()
 	if err != nil {
 		return false
 	}

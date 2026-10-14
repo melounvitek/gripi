@@ -71,7 +71,13 @@ func (router *Router) Composer(key string) Composer {
 }
 
 func (router *Router) Store() Store {
-	return routerStore{router}
+	return routerStore{router: router}
+}
+
+// StoreUnlisting serves the same sessions as Store, but lists none of the named agent's, so that a listing never waits
+// for that agent to start.
+func (router *Router) StoreUnlisting(name string) Store {
+	return routerStore{router: router, unlisted: name}
 }
 
 func (router *Router) Guard(clients *Registry) (Guard, error) {
@@ -94,7 +100,10 @@ func (router *Router) Close() error {
 	return result
 }
 
-type routerStore struct{ router *Router }
+type routerStore struct {
+	router   *Router
+	unlisted string
+}
 
 // named tells the router's sessions apart by their agent.
 func named(sessions []*Session, name string) []*Session {
@@ -121,6 +130,9 @@ func (store routerStore) SessionsDeferringMetadata(deferFor func(key string) boo
 	var all []*Session
 	deferred := false
 	for _, routed := range store.router.agents {
+		if routed.Name == store.unlisted {
+			continue
+		}
 		sessions, deferredHere, err := routed.Adapter.Store().SessionsDeferringMetadata(deferFor)
 		if err != nil {
 			return nil, false, err

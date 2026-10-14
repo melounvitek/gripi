@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -295,8 +297,15 @@ func TestImagesReachHermesAndStayInTheConversation(t *testing.T) {
 	if len(sent) != 2 || fmt.Sprint(sent[1]) != fmt.Sprint(image) {
 		t.Fatalf("Hermes got the prompt %v", sent)
 	}
-	if page := getPage(t, handler, panelPage(key)); !strings.Contains(page, "/attachments/") || !strings.Contains(page, `alt="Attached image"`) {
+	page := getPage(t, handler, panelPage(key))
+	attachment := regexp.MustCompile(`src="(/attachments/[^"]+)"`).FindStringSubmatch(page)
+	if attachment == nil || !strings.Contains(page, `alt="Attached image"`) {
 		t.Fatal("the page after the run lacks the image")
+	}
+	// The page around the panel, which lists no Hermes conversation, doesn't keep the panel from showing the image.
+	getPage(t, handler, "/")
+	if response := serveRequest(handler, http.MethodGet, html.UnescapeString(attachment[1])); response.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d", attachment[1], response.Code)
 	}
 }
 
@@ -687,6 +696,26 @@ func TestHermesConversationsShowOnlyInTheHermesPanel(t *testing.T) {
 	}
 	if strings.Contains(panel.Body.String(), "Pi chat") {
 		t.Error("the panel shows the Pi session")
+	}
+}
+
+func TestPagesNeverWaitForHermesToStart(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "hermes.log")
+	t.Setenv("FAKE_HERMES_LOG", log)
+	handler := hermesHandler(t)
+
+	// An image of a session that the gateway hasn't listed yet makes it list the sessions.
+	serveRequest(handler, http.MethodGet, "/attachments/"+strings.Repeat("a", 64)+"/0.png")
+	for _, target := range []string{"/", "/sidebar", "/sessions/palette", "/tags"} {
+		getPage(t, handler, target)
+	}
+	if _, err := os.Stat(log); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the gateway or a page started Hermes: %v", hermesStarts(t, log))
+	}
+	// The Hermes panel does start it.
+	openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes"))
+	if starts := hermesStarts(t, log); len(starts) != 1 {
+		t.Fatalf("Hermes started %v", starts)
 	}
 }
 

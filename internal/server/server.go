@@ -229,7 +229,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 		app.voice = hermesdashboard.New(cfg.HermesDashboardURL, cfg.HermesDashboardUsername, cfg.HermesDashboardPassword)
 	}
 	if cfg.ReadStatePath != "" {
-		existing, err := store.Sessions()
+		existing, err := app.pageStore().Sessions()
 		if err != nil {
 			return nil, fmt.Errorf("list existing projects: %w", err)
 		}
