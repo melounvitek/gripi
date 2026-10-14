@@ -18,24 +18,23 @@ test("a voice conversation starts and ends, and what was said opens, on the firs
   await expect(spoken.locator(".message-body")).toBeVisible();
 });
 
-test("the Hermes panel opens from the sidebar over the whole screen and closes, on the first taps", async ({ page }) => {
+test("the Hermes tab opens the panel over the whole screen, which goes back to Gripi, on the first taps", async ({ page }) => {
   expect((await page.request.post("/hermes/new")).ok()).toBe(true);
   await page.goto("/");
-  await page.locator('label[aria-label="Open sessions"]').tap();
-  await page.getByRole("button", { name: "Hermes", exact: true }).tap();
+  const tab = page.getByRole("button", { name: "Hermes", exact: true });
+  await tab.tap();
   const panel = page.locator("#hermes-panel");
   await expect(page.frameLocator("#hermes-panel iframe").getByLabel("Message to Hermes")).toBeVisible();
   expect(await panel.boundingBox()).toEqual({ x: 0, y: 0, ...page.viewportSize() });
-  // Closing the panel goes back to the session, not to the sidebar it opened from.
-  await expect(page.locator("#mobile-session-toggle")).not.toBeChecked();
 
-  await page.frameLocator("#hermes-panel iframe").getByRole("button", { name: "Close Hermes" }).tap();
+  const back = page.frameLocator("#hermes-panel iframe").getByRole("button", { name: "Back to Gripi" });
+  const { width, height } = await back.boundingBox();
+  expect(Math.min(width, height)).toBeGreaterThanOrEqual(44);
+  await back.tap();
   await expect(panel).toBeHidden();
-  // The closed sidebar's Hermes button is off the screen.
-  await expect(page.locator("#conversation-scroll")).toBeFocused();
+  await expect(tab).toBeFocused();
 
-  // A reply while it is closed marks the sessions button, behind which the Hermes button is.
   const { session } = await (await page.request.get("/hermes/current")).json();
   expect((await page.request.post("/prompt", { form: { session, message: "Ping from the desk" } })).ok()).toBe(true);
-  await expect(page.locator('label[aria-label="Open sessions"] .hermes-reply-dot')).toBeVisible();
+  await expect(tab).toHaveAttribute("title", "Hermes replied");
 });

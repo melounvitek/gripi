@@ -211,9 +211,9 @@ GRIPI_HERMES=/home/me/.local/bin/hermes
 
 The path can also be a Hermes profile wrapper, which `hermes profile alias <name>` creates, to run that profile with its own sessions, memory and model. Gripi runs `<path> acp`, Hermes's Agent Client Protocol server, so that Hermes must already work and be authenticated for the gateway's OS user. Gripi doesn't install, configure or update Hermes, and `gripi check` checks it too once it is set.
 
-With Hermes on, the Hermes button among the sidebar's tools opens and closes the panel, which stays put while you switch sessions. On a wide screen it takes a column of its own, on a narrower one it lies over the conversation, and on a phone it fills the screen. `↗` opens it in a window of its own.
+With Hermes on, the Hermes tab on the window's right edge opens and closes the panel, as does `hermes` typed in the Ctrl+K palette. The panel stays put while you switch sessions. On a wide screen it takes a column of its own, and on a narrower one it lies over the conversation, with the tab on its edge. On a phone it fills the screen, and on a touch screen `‹ Gripi` closes it instead of `×`. `↗` opens it in a window of its own.
 
-The panel holds one conversation for quick questions, not sessions: `new` starts over, and every panel, window and device shows the same conversation. If Hermes replies after you close the panel, a dot on the button tells you, and on the sessions button while the sidebar is hidden. Gripi forgets the conversation when it restarts, and Hermes's conversations never show in the sidebar. Hermes still keeps them in its own database, and `gripi list` lists them. A conversation belongs to no project: it always runs in your home folder.
+The panel holds one conversation for quick questions, not sessions: `new` starts over, and every panel, window and device shows the same conversation. If Hermes replies after you close the panel, the tab's line turns orange. Gripi forgets the conversation when it restarts, and Hermes's conversations never show in the sidebar. Hermes still keeps them in its own database, and `gripi list` lists them. A conversation belongs to no project: it always runs in your home folder.
 
 What to expect:
 

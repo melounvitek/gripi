@@ -163,9 +163,13 @@ export class CommandPaletteController {
       matching.sort((left, right) => rank(right) - rank(left));
       const shown = matching.slice(0, words.length ? MATCHING_SESSIONS : RECENT_SESSIONS);
       this.more = matching.length - shown.length;
+      // A leading group comes before the sessions once something is typed, but not before Ctrl+K and Enter flips sessions.
+      const groups = [...this.callbacks.commands().filter(Boolean), ["Pi commands", this.piCommands || []]];
+      const leading = (group) => words.length && group[2]?.lead;
+      for (const [title, commands] of groups.filter(leading)) this.commandGroup(title, commands);
       this.group(words.length ? "Sessions" : "Recent sessions", shown.map((session) => this.sessionRow(session)));
       if (!this.piCommands && this.input.value.trimStart().startsWith("/")) this.loadPiCommands();
-      for (const [title, commands] of [...this.callbacks.commands(), ["Pi commands", this.piCommands || []]]) this.commandGroup(title, commands);
+      for (const [title, commands] of groups.filter((group) => !leading(group))) this.commandGroup(title, commands);
     }
     this.finish(0);
   }

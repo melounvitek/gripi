@@ -6,11 +6,11 @@ const HERMES_WINDOW_FEATURES = "popup,width=480,height=820";
 // switching sessions never touches it. On that page, the controller keeps to the current conversation, which a new one
 // in any window replaces.
 export class HermesPanelController {
-  constructor(documentObject, windowObject, currentSessionPath, closeSidebar) {
+  constructor(documentObject, windowObject, currentSessionPath, toggleCommandPalette) {
     this.document = documentObject;
     this.window = windowObject;
     this.currentSessionPath = currentSessionPath;
-    this.closeSidebar = closeSidebar;
+    this.toggleCommandPalette = toggleCommandPalette;
     this.panelPage = documentObject.body.classList.contains("hermes-panel-page");
     this.panel = null;
     this.frame = null;
@@ -37,13 +37,19 @@ export class HermesPanelController {
       if (event.origin !== this.window.location.origin || event.source !== this.frame.contentWindow) return;
       if (event.data === "gripi:hermes-close") this.close();
       if (event.data === "gripi:hermes-pop-out") this.popOut();
-      if (event.data === "gripi:hermes-replied" && this.panel.hidden) this.document.body.classList.add("hermes-replied");
+      if (event.data === "gripi:hermes-command-palette") this.toggleCommandPalette();
+      if (event.data === "gripi:hermes-replied" && this.panel.hidden) {
+        this.document.body.classList.add("hermes-replied");
+        this.sync();
+      }
     });
     if (this.storedOpen()) this.open();
   }
 
   sync() {
-    this.document.querySelector("[data-hermes-toggle]")?.setAttribute("aria-expanded", String(!this.panel.hidden));
+    const toggle = this.document.querySelector("[data-hermes-toggle]");
+    toggle.setAttribute("aria-expanded", String(!this.panel.hidden));
+    toggle.title = this.document.body.classList.contains("hermes-replied") ? "Hermes replied" : "Hermes";
   }
 
   toggle() {
@@ -62,26 +68,20 @@ export class HermesPanelController {
       this.frame.src = "/hermes";
     }
     this.panel.hidden = false;
-    // On a phone, the panel covers the sidebar it opened from, which closing it shouldn't bring back.
-    this.closeSidebar();
     this.document.body.classList.add("hermes-panel-open");
     this.document.body.classList.remove("hermes-replied");
     this.storeOpen(true);
     this.sync();
   }
 
-  // Closing only hides the panel, so a reply or a voice call carries on. Focus leaves it, or its hidden page would
-  // still count as looked at, which keeps Hermes's replies from notifying. It goes to the Hermes button, or to the
-  // conversation while the sidebar is hidden or a phone's sidebar is closed, off the screen.
+  // Closing only hides the panel, so a reply or a voice call carries on. Focus goes back to the Hermes tab, or the hidden
+  // page would still count as looked at, which keeps Hermes's replies from notifying.
   close() {
     this.panel.hidden = true;
     this.document.body.classList.remove("hermes-panel-open");
     this.storeOpen(false);
     this.sync();
-    const toggle = this.document.querySelector("[data-hermes-toggle]");
-    const box = toggle?.getBoundingClientRect();
-    const shown = box && box.width > 0 && box.right > 0 && box.left < this.window.innerWidth;
-    (shown ? toggle : this.document.getElementById("conversation-scroll"))?.focus({ preventScroll: true });
+    this.document.querySelector("[data-hermes-toggle]").focus({ preventScroll: true });
   }
 
   popOut() {
@@ -123,6 +123,13 @@ export class HermesPanelController {
     this.window.addEventListener("focus", follow);
     this.document.addEventListener("visibilitychange", follow);
     this.window.setInterval(follow, HERMES_FOLLOW_INTERVAL_MS);
+  }
+
+  // The panel's page has no palette, so Ctrl+K there opens the palette of the page around it, which can hide the panel.
+  requestCommandPalette() {
+    if (!this.document.body.classList.contains("hermes-panel-framed")) return false;
+    this.tellPanel("gripi:hermes-command-palette");
+    return true;
   }
 
   replied() {

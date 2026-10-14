@@ -86,16 +86,24 @@
     .session-header-tag-action svg, .tag-filter-toggle svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
     .session-header-tag-action:hover { background: transparent; color: var(--text); }
     .session-header-window-action:hover { color: var(--text); background: #ffffff08; }
-    /* The Hermes panel's button, its reply dot, and the header of the page that the panel shows. */
+    /* The Hermes tab on the window's edge opens and closes the panel, on whose edge it rides while the panel is open, beside
+       the conversation's scrollbar. Its line turns orange when Hermes replies while the panel is closed. */
+    .hermes-tab { position: fixed; z-index: 8; top: 50%; right: var(--conversation-gutter, 0px); display: flex; align-items: center; gap: 0.4rem; height: 3.2rem; padding: 0 0.35rem 0 0.4rem; border: 0; background: transparent; color: var(--gold); transform: translateY(-50%); }
+    .hermes-tab svg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .hermes-tab-line { width: 0.22rem; height: 2.4rem; border-radius: 1rem; background: var(--border-strong); transition: background 120ms ease; }
+    body.hermes-replied .hermes-tab-line { background: var(--accent); }
+    body.hermes-panel-open .hermes-tab { right: calc(min(30rem, 100vw) + var(--conversation-gutter, 0px)); }
+    .hermes-tab:hover, .hermes-panel-back:hover { background: transparent; }
+    @media (hover: hover) and (pointer: fine) { body:not(.hermes-replied) .hermes-tab:hover .hermes-tab-line { background: var(--muted); } }
+    /* The header of the page that the panel shows. */
     .hermes-panel-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; padding: 0 0.35rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.78rem; font-weight: 500; letter-spacing: 0; line-height: 1; text-transform: none; }
     .hermes-panel-header h1 svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--gold); }
-    [data-hermes-toggle] { position: relative; }
-    [data-hermes-toggle][aria-expanded="true"] { color: var(--accent); }
-    .hermes-reply-dot { display: none; position: absolute; top: 0.3rem; right: 0.3rem; width: 0.45rem; height: 0.45rem; border-radius: 999px; background: var(--accent); }
-    body.hermes-replied .hermes-reply-dot { display: block; }
-    :is(.mobile-sessions-button, .desktop-sessions-button) .hermes-reply-dot { top: auto; bottom: 0.2rem; right: 0.2rem; }
     .hermes-panel-header h1 { display: flex; align-items: center; gap: 0.45rem; }
     @media (hover: hover) and (pointer: fine) { .hermes-panel-action:hover { background: #ffffff08; color: var(--text); } }
+    .hermes-panel-back { display: none; align-items: center; gap: 0.15rem; min-height: 2.75rem; margin: 0 0.5rem 0 -0.4rem; padding: 0 0.5rem 0 0.15rem; border: 0; background: transparent; color: var(--accent); font: 500 0.9rem var(--mono); letter-spacing: 0; text-transform: none; }
+    .hermes-panel-back svg { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    /* On a touch screen, a big way back to Gripi takes the small ×'s place. */
+    @media (pointer: coarse) { body.hermes-panel-framed .hermes-panel-back { display: inline-flex; } .hermes-panel-action[data-hermes-close] { display: none; } }
     body:not(.hermes-panel-framed) :is([data-hermes-close], [data-hermes-pop-out]) { display: none; }
     /* The panel has a column of its own on wide screens, lies over the conversation on narrower ones, and fills a phone's screen. */
     .hermes-panel { position: fixed; inset: 0 0 0 auto; z-index: 50; width: min(30rem, 100vw); border-left: 1px solid var(--border); background: var(--bg); }
