@@ -32,7 +32,8 @@ test("the Hermes tab opens the panel over the whole screen, which goes back to G
   expect(Math.min(width, height)).toBeGreaterThanOrEqual(44);
   await back.tap();
   await expect(panel).toBeHidden();
-  await expect(tab).toBeFocused();
+  // Back in the session, without the keyboard.
+  await expect(page.locator("#conversation-scroll")).toBeFocused();
 
   const { session } = await (await page.request.get("/hermes/current")).json();
   expect((await page.request.post("/prompt", { form: { session, message: "Ping from the desk" } })).ok()).toBe(true);

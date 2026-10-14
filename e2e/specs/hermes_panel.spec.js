@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { hermes, sessions } from "../support/contract.mjs";
+import { hermes, prompts, replies, sessions } from "../support/contract.mjs";
 import { message, selectSession } from "../support/ui.mjs";
 
 // Each test talks in a new conversation, which every Hermes panel shows.
@@ -23,6 +23,16 @@ function scrollbarStart(page) {
 
 function panel(page) {
   return page.frameLocator("#hermes-panel iframe");
+}
+
+// Pi replies in the session open on the page.
+async function replyFromPi(page) {
+  const reply = message(page, "assistant", replies.standard);
+  const count = await reply.count();
+  const session = await page.locator('.prompt-form input[name="session"]').inputValue();
+  expect((await page.request.post("/prompt", { form: { session, message: prompts.standard } })).ok()).toBe(true);
+  await expect(reply).toHaveCount(count + 1);
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "done");
 }
 
 async function askInPanel(page, prompt) {
@@ -60,8 +70,8 @@ test("Hermes talks in a panel next to the session, which switching sessions and 
   await panel(page).getByRole("button", { name: "Close Hermes" }).click();
   await expect(page.locator("#hermes-panel")).toBeHidden();
   await expect(hermesButton(page)).toHaveAttribute("aria-expanded", "false");
-  // The hidden panel would otherwise keep the focus, and with it count as looked at.
-  await expect(hermesButton(page)).toBeFocused();
+  // The focus goes back to the session, or the hidden panel would keep it, and with it count as looked at.
+  await expect(page.getByLabel("Message to Pi")).toBeFocused();
 });
 
 test("the panel says Hermes is starting until its conversation shows", async ({ page }) => {
@@ -96,6 +106,52 @@ test("a reply while the panel is closed marks the Hermes tab", async ({ page }) 
   await expect(hermesButton(page)).toHaveAttribute("title", "Hermes");
 });
 
+test("Hermes starting leaves the cursor where you've put it meanwhile", async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await hermesButton(page).click();
+  await page.keyboard.press("Control+k");
+  const search = page.getByRole("dialog", { name: "Go to or run" }).getByRole("combobox");
+  await expect(search).toBeFocused();
+
+  release();
+  await expect(page.locator("#hermes-panel")).not.toHaveClass(/is-loading/);
+  await page.waitForTimeout(500);
+  await expect(search).toBeFocused();
+});
+
+test("Hermes starting takes the cursor though Pi replies meanwhile", async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await hermesButton(page).click();
+  await replyFromPi(page);
+
+  release();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+});
+
+test("shown again, Hermes gives the cursor to the dialog it asks in", async ({ page }) => {
+  await hermesButton(page).click();
+  const composer = panel(page).getByLabel("Message to Hermes");
+  await composer.fill(hermes.permission.prompt);
+  await composer.press("Enter");
+  const allow = panel(page).getByRole("dialog", { name: hermes.permission.title }).getByRole("option", { name: hermes.permission.allow });
+  await expect(allow).toBeFocused();
+
+  await hermesButton(page).click();
+  await expect(page.getByLabel("Message to Pi")).toBeFocused();
+  await hermesButton(page).click();
+  await expect(allow).toBeFocused();
+});
+
 test("typing hermes in Ctrl+K shows the panel, and hides it again from inside it", async ({ page }) => {
   // A session named after Hermes doesn't come first.
   await page.route("**/sessions/palette", async (route) => {
@@ -109,10 +165,20 @@ test("typing hermes in Ctrl+K shows the panel, and hides it again from inside it
     await expect(palette.getByRole("option").first()).toHaveAccessibleName(name);
     await page.keyboard.press("Enter");
   };
+  // Hermes takes the cursor, also while it starts, and Tab goes on to its conversation, as it does in Gripi.
   await run("Show Hermes");
-  await panel(page).getByLabel("Message to Hermes").click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(panel(page).locator("#conversation-scroll")).toBeFocused();
+
   await run("Hide Hermes");
   await expect(page.locator("#hermes-panel")).toBeHidden();
+  await expect(page.getByLabel("Message to Pi")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#conversation-scroll")).toBeFocused();
+
+  await run("Show Hermes");
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
 });
 
 test("a reply in the panel leaves what you type to Pi in Pi's composer", async ({ page }) => {
@@ -125,6 +191,16 @@ test("a reply in the panel leaves what you type to Pi in Pi's composer", async (
   expect((await page.request.post("/prompt", { form: { session, message: "Ping from the phone" } })).ok()).toBe(true);
   await expect(message(panel(page), "assistant", `${hermes.run.replyPrefix}Ping from the phone`)).toBeVisible();
   await expect(panel(page).getByLabel("Message to Hermes")).toBeEnabled();
+  await page.keyboard.type("Still typing");
+  await expect(composer).toHaveValue("Still typing");
+});
+
+test("a reply from Pi leaves what you type to Hermes in Hermes's composer", async ({ page }) => {
+  await hermesButton(page).click();
+  const composer = panel(page).getByLabel("Message to Hermes");
+  await expect(composer).toBeFocused();
+
+  await replyFromPi(page);
   await page.keyboard.type("Still typing");
   await expect(composer).toHaveValue("Still typing");
 });

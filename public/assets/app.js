@@ -60,7 +60,7 @@ import { HermesPanelController } from "./hermes_panel_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
-const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => commandPaletteController.toggle());
+const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => commandPaletteController.toggle(), focusConversation);
 // The Hermes panel's page shares sessionStorage with the page around it, so it keeps its notification identity apart.
 const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : "");
 const webPushController = new WebPushController(window, navigator);
@@ -465,8 +465,9 @@ function automaticComposerFocusEnabled() {
 
 function syncComposerFocus(state = composerState?.dataset.state) {
   if (!automaticComposerFocusEnabled() || modalIsOpen()) return;
-  // The Hermes panel's page keeps the focus, but doesn't take it from the page around it, such as from Pi's composer.
-  if (window.parent !== window && !document.hasFocus()) return;
+  // The Hermes panel's page and the page around it keep the focus each has, but don't take it from each other, such as
+  // while you type to Pi or to Hermes.
+  if (window.parent !== window ? !document.hasFocus() : hermesPanelController.keepsFocus()) return;
   if (document.activeElement?.matches?.('[data-tool-output-body][role="region"]')) return;
 
   const agentBusy = ["running", "sending", "exporting"].includes(state);
@@ -474,6 +475,15 @@ function syncComposerFocus(state = composerState?.dataset.state) {
 
   const target = agentBusy ? conversationScroll : promptTextarea;
   target?.focus({ preventScroll: true });
+}
+
+// Showing or hiding the Hermes panel puts the cursor in the conversation you're left in: in a dialog it asks in, or in its
+// composer, unless typing is off there or it would open a touch screen's keyboard.
+function focusConversation() {
+  const modal = document.querySelector("[data-modal]:not([hidden])");
+  if (modal) return modalFocusables(modal)[0]?.focus();
+  const composer = automaticComposerFocusEnabled() && promptTextarea && !promptTextarea.disabled;
+  (composer ? promptTextarea : conversationScroll)?.focus({ preventScroll: true });
 }
 
 function toggleConversationPromptFocus(event, nextElement) {
@@ -3427,12 +3437,17 @@ window.addEventListener("gripi:command-palette-requested", () => {
 });
 window.addEventListener("gripi:desktop-server-activated", focusPromptAfterDesktopServerActivation);
 
+// What Tab goes through in a dialog: a picker's options only through the one under its cursor.
+function modalFocusables(modal) {
+  return [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+    .filter((element) => element.tabIndex >= 0 && !element.closest("[hidden]"));
+}
+
 function handleModalTab(event) {
   if (event.key !== "Tab" || event.defaultPrevented) return;
   const modal = document.querySelector('dialog[open]') || document.querySelector('[data-modal]:not([hidden])');
   if (!modal) return;
-  const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
-    .filter((element) => element.tabIndex >= 0 && !element.closest("[hidden]"));
+  const focusable = modalFocusables(modal);
   if (focusable.length === 0) return;
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
