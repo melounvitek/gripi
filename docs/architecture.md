@@ -22,7 +22,7 @@ An adapter implements `agent.Adapter`, which starts a `Client` for each session 
 - The `Guard` keeps the gateway from writing a session that someone else writes, such as Pi CLI. An agent whose sessions nobody else writes can pass every call through.
 - The `Composer` says how the agent reads what the user types, such as Pi's `!` and `/` commands.
 
-A `Router` sends each session to the agent whose store accepts its key: Pi's keys are paths, Hermes's `hermes:<session ID>`. It names each session's agent in `Session.Agent`, which the page shows only when the gateway runs several agents, and starts a new session with the agent that `StartOptions.Agent` names. Without Hermes, the gateway gets the Pi adapter itself, and so works as it did before.
+A `Router` sends each session to the agent whose store accepts its key: Pi's keys are paths, Hermes's `hermes:<session ID>`. It names each session's agent in `Session.Agent`, which keeps Hermes's sessions out of the session list, and starts a new session with the agent that `StartOptions.Agent` names. The server keeps one current Hermes conversation, which the Hermes panel shows. Without Hermes, the gateway gets the Pi adapter itself, and so works as it did before.
 
 Features that only some agents have, such as the prompt queue, shell commands, tree navigation, model selection and extension dialogs, are optional interfaces in `internal/agent/capabilities.go`. The server checks for them with type assertions, and the Pi adapter asserts at compile time that its client implements them.
 

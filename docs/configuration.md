@@ -203,7 +203,7 @@ The selected runtime must already work, authenticated and configured, for the ga
 
 ## Hermes Agent (experimental)
 
-Gripi can also run [Hermes Agent](https://github.com/NousResearch/hermes-agent) sessions next to Pi's. It is off unless you name the Hermes to run:
+Gripi can also talk with [Hermes Agent](https://github.com/NousResearch/hermes-agent) in a panel next to Pi's sessions. It is off unless you name the Hermes to run:
 
 ```sh
 GRIPI_HERMES=/home/me/.local/bin/hermes
@@ -211,13 +211,15 @@ GRIPI_HERMES=/home/me/.local/bin/hermes
 
 The path can also be a Hermes profile wrapper, which `hermes profile alias <name>` creates, to run that profile with its own sessions, memory and model. Gripi runs `<path> acp`, Hermes's Agent Client Protocol server, so that Hermes must already work and be authenticated for the gateway's OS user. Gripi doesn't install, configure or update Hermes, and `gripi check` checks it too once it is set.
 
-With Hermes on, every session in the sidebar is marked with its agent, a filter shows one agent's sessions, and the New session dialog lists Hermes after Pi's projects. A Hermes session belongs to no project: it always runs in your home folder, and shows no folder in the sidebar or its header. In the sidebar, the letters of the Hermes profile take the place of the project's: `de` for the default profile, or those of the wrapper's name.
+With Hermes on, the Hermes button in the session header opens and closes the panel, which stays put while you switch sessions. On a wide screen it takes a column of its own, on a narrower one it lies over the conversation, and on a phone it fills the screen. `↗` opens it in a window of its own.
+
+The panel holds one conversation for quick questions, not sessions: `new` starts over, and every panel, window and device shows the same conversation. While the panel is closed, a dot on the button tells that Hermes replied. Gripi forgets the conversation when it restarts, and Hermes's conversations never show in the sidebar. Hermes still keeps them in its own database, and `gripi list` lists them. A conversation belongs to no project: it always runs in your home folder.
 
 What to expect:
 
 - Gripi lists only the Hermes sessions that ACP clients created, such as Gripi itself or an editor. Hermes's CLI, desktop app, cron jobs and messaging platforms keep their sessions to themselves.
 - All Hermes sessions run in one Hermes process, which stops once nothing has used it for the [Pi process lifetime](#pi-process-lifetime).
-- While Hermes works, the composer waits: Stop is the only action. Gripi doesn't choose Hermes's model, rename, delete, fork or tree its sessions yet, and `gripi open` refuses them.
+- While Hermes works, the composer waits: Stop is the only action. Gripi doesn't choose Hermes's model yet, and `gripi open` refuses Hermes's sessions.
 - A message to Hermes takes up to about 36 MB of images, which Hermes reads encoded on one line of at most 50 MB.
 - Hermes shares a file by writing `MEDIA:` and the file's absolute path in its reply. Gripi shows a PNG, JPEG, GIF or WebP image of up to 10 MB in place of the tag, for as long as the file exists. It leaves tags in code blocks and quotes, tags of other files, and the tags of a reply that has nothing else to say as they are. Hermes tells its model about the tag only in its screenshot tool, unless `~/.hermes/config.yaml` does so for every ACP client, which editors then show as plain text:
 
@@ -226,14 +228,14 @@ What to expect:
     acp: "You can send files natively: write MEDIA:/absolute/path/to/file in your response."
   ```
 
-- Hermes asks before dangerous commands, as its `approvals.mode` setting says, and before editing sensitive files such as `.env` or keys. The question appears as a dialog in the session. Other edits go ahead without asking, as in Hermes's CLI. A dialog stays open after Hermes has stopped waiting for the answer, after its `approvals.timeout`, until you close it.
+- Hermes asks before dangerous commands, as its `approvals.mode` setting says, and before editing sensitive files such as `.env` or keys. The question appears as a dialog in the panel. Other edits go ahead without asking, as in Hermes's CLI. A dialog stays open after Hermes has stopped waiting for the answer, after its `approvals.timeout`, until you close it.
 - A session that another ACP client, such as an editor, continues keeps showing what Gripi's Hermes loaded, until that Hermes restarts.
-- Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next Hermes session starts, once no other Hermes session is open. A new session's first message still runs with the variables from before, because the session lives only in the running Hermes until then.
+- Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next conversation starts, once no other Hermes session is open. A new conversation's first message still runs with the variables from before, because the conversation lives only in the running Hermes until then.
 - [Multi-user mode](#multi-user-mode) refuses the setting, because every user would share the one Hermes, with its memory, skills and messaging accounts.
 
 ### Voice conversations
 
-You can talk with a Hermes session: Gripi listens, sends what you say as a message, and reads Hermes's reply aloud. It uses Hermes's own speech recognition and voice, which the `stt:` and `tts:` settings in Hermes's `config.yaml` choose, and reaches them through Hermes's dashboard, which `hermes dashboard` or `hermes serve` runs. Voice is on when Gripi knows the dashboard's address, username and password:
+You can talk with Hermes: Gripi listens, sends what you say as a message, and reads Hermes's reply aloud. It uses Hermes's own speech recognition and voice, which the `stt:` and `tts:` settings in Hermes's `config.yaml` choose, and reaches them through Hermes's dashboard, which `hermes dashboard` or `hermes serve` runs. Voice is on when Gripi knows the dashboard's address, username and password:
 
 ```sh
 GRIPI_HERMES_DASHBOARD_URL=http://127.0.0.1:8787
@@ -245,7 +247,7 @@ Gripi logs in with the dashboard's password login, its `basic` provider, which `
 
 Browsers allow the microphone only over HTTPS or on `localhost`, so other devices need [HTTPS](examples.md#https-through-tailscale-serve).
 
-The waveform button next to ＋ in a Hermes session's composer starts a conversation, which takes the place of the session's messages until it ends: bars follow your voice and Hermes's, with the sentence Hermes is speaking underneath. In the session, what you said shows as bars too; tap them to read the transcript. Pause to send what you said; if you go on talking before Hermes gets it, the rest joins the same message. Quiet blips play until Hermes's reply starts. Talk over a reply to interrupt it, or over Hermes's work to stop it and send what you said instead; noise without words leaves Hermes working. Saying “stop” finishes the conversation without stopping Hermes; `end` finishes it at any time, and Stop still stops Hermes.
+The waveform button next to ＋ in the Hermes panel's composer starts a voice conversation, which takes the place of the panel's messages until it ends: bars follow your voice and Hermes's, with the sentence Hermes is speaking underneath. In the conversation, what you said shows as bars too; tap them to read the transcript. Pause to send what you said; if you go on talking before Hermes gets it, the rest joins the same message. Quiet blips play until Hermes's reply starts. Talk over a reply to interrupt it, or over Hermes's work to stop it and send what you said instead; noise without words leaves Hermes working. Saying “stop” finishes the conversation without stopping Hermes; `end` finishes it at any time, and Stop still stops Hermes.
 
 ## Session location
 
