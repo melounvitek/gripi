@@ -211,14 +211,14 @@ GRIPI_HERMES=/home/me/.local/bin/hermes
 
 The path can also be a Hermes profile wrapper, which `hermes profile alias <name>` creates, to run that profile with its own sessions, memory and model. Gripi runs `<path> acp`, Hermes's Agent Client Protocol server, so that Hermes must already work and be authenticated for the gateway's OS user. Gripi doesn't install, configure or update Hermes, and `gripi check` checks it too once it is set.
 
-With Hermes on, the Hermes button in the session header opens and closes the panel, which stays put while you switch sessions. On a wide screen it takes a column of its own, on a narrower one it lies over the conversation, and on a phone it fills the screen. `↗` opens it in a window of its own.
+With Hermes on, the Hermes button among the sidebar's tools opens and closes the panel, which stays put while you switch sessions. On a wide screen it takes a column of its own, on a narrower one it lies over the conversation, and on a phone it fills the screen. `↗` opens it in a window of its own.
 
-The panel holds one conversation for quick questions, not sessions: `new` starts over, and every panel, window and device shows the same conversation. If Hermes replies after you close the panel, a dot on the button tells you. Gripi forgets the conversation when it restarts, and Hermes's conversations never show in the sidebar. Hermes still keeps them in its own database, and `gripi list` lists them. A conversation belongs to no project: it always runs in your home folder.
+The panel holds one conversation for quick questions, not sessions: `new` starts over, and every panel, window and device shows the same conversation. If Hermes replies after you close the panel, a dot on the button tells you, and on the sessions button while the sidebar is hidden. Gripi forgets the conversation when it restarts, and Hermes's conversations never show in the sidebar. Hermes still keeps them in its own database, and `gripi list` lists them. A conversation belongs to no project: it always runs in your home folder.
 
 What to expect:
 
 - Gripi lists only the Hermes sessions that ACP clients created, such as Gripi itself or an editor. Hermes's CLI, desktop app, cron jobs and messaging platforms keep their sessions to themselves.
-- All Hermes sessions run in one Hermes process, which stops once nothing has used it for the [Pi process lifetime](#pi-process-lifetime).
+- All Hermes sessions run in one Hermes process. Gripi starts it only for the Hermes panel and `gripi` commands, which then wait a few seconds, and it stops once nothing has used it for the [Pi process lifetime](#pi-process-lifetime).
 - While Hermes works, the composer waits: Stop is the only action. Gripi doesn't choose Hermes's model yet, and `gripi open` refuses Hermes's sessions.
 - A message to Hermes takes up to about 36 MB of images, which Hermes reads encoded on one line of at most 50 MB.
 - Hermes shares a file by writing `MEDIA:` and the file's absolute path in its reply. Gripi shows a PNG, JPEG, GIF or WebP image of up to 10 MB in place of the tag, for as long as the file exists. It leaves tags in code blocks and quotes, tags of other files, and the tags of a reply that has nothing else to say as they are. Hermes tells its model about the tag only in its screenshot tool, unless `~/.hermes/config.yaml` does so for every ACP client, which editors then show as plain text:

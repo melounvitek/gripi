@@ -6,10 +6,11 @@ const HERMES_WINDOW_FEATURES = "popup,width=480,height=820";
 // switching sessions never touches it. On that page, the controller keeps to the current conversation, which a new one
 // in any window replaces.
 export class HermesPanelController {
-  constructor(documentObject, windowObject, currentSessionPath) {
+  constructor(documentObject, windowObject, currentSessionPath, closeSidebar) {
     this.document = documentObject;
     this.window = windowObject;
     this.currentSessionPath = currentSessionPath;
+    this.closeSidebar = closeSidebar;
     this.panelPage = documentObject.body.classList.contains("hermes-panel-page");
     this.panel = null;
     this.frame = null;
@@ -25,6 +26,10 @@ export class HermesPanelController {
     this.panel = this.document.getElementById("hermes-panel");
     if (!this.panel) return;
     this.frame = this.panel.querySelector("iframe");
+    // Popping out leaves the frame blank, which isn't the conversation either.
+    this.frame.addEventListener("load", () => {
+      if (this.frame.getAttribute("src") === "/hermes") this.panel.classList.remove("is-loading");
+    });
     this.document.addEventListener("click", (event) => {
       if (event.target.closest("[data-hermes-toggle]")) this.toggle();
     });
@@ -37,11 +42,8 @@ export class HermesPanelController {
     if (this.storedOpen()) this.open();
   }
 
-  // The page's header, with the button, is rendered again for every session.
   sync() {
-    this.document.querySelectorAll("[data-hermes-toggle]").forEach((button) => {
-      button.setAttribute("aria-expanded", String(Boolean(this.panel && !this.panel.hidden)));
-    });
+    this.document.querySelector("[data-hermes-toggle]")?.setAttribute("aria-expanded", String(!this.panel.hidden));
   }
 
   toggle() {
@@ -55,8 +57,13 @@ export class HermesPanelController {
   }
 
   open() {
-    if (this.frame.getAttribute("src") !== "/hermes") this.frame.src = "/hermes";
+    if (this.frame.getAttribute("src") !== "/hermes") {
+      this.panel.classList.add("is-loading");
+      this.frame.src = "/hermes";
+    }
     this.panel.hidden = false;
+    // On a phone, the panel covers the sidebar it opened from, which closing it shouldn't bring back.
+    this.closeSidebar();
     this.document.body.classList.add("hermes-panel-open");
     this.document.body.classList.remove("hermes-replied");
     this.storeOpen(true);
@@ -70,7 +77,9 @@ export class HermesPanelController {
     this.document.body.classList.remove("hermes-panel-open");
     this.storeOpen(false);
     this.sync();
-    this.document.querySelector("[data-hermes-toggle]")?.focus();
+    this.document.querySelector("[data-hermes-toggle]")?.focus({ preventScroll: true });
+    // A hidden sidebar's button takes no focus.
+    if (this.document.activeElement === this.frame) this.frame.blur();
   }
 
   popOut() {

@@ -60,7 +60,7 @@ import { HermesPanelController } from "./hermes_panel_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
-const hermesPanelController = new HermesPanelController(document, window, currentSessionPath);
+const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => sidebarController.closeMobile());
 // The Hermes panel's page shares sessionStorage with the page around it, so it keeps its notification identity apart.
 const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : "");
 const webPushController = new WebPushController(window, navigator);
@@ -3691,7 +3691,6 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
 function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery = null } = {}) {
   const generation = sessionViewGeneration;
   notificationPresenceController.sessionChanged();
-  hermesPanelController.sync();
   newSessionFormController.initialize();
   ensureNotificationWorker().catch(() => {});
   browserAccessController.resume();

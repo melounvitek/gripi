@@ -105,20 +105,25 @@
     .session-header-tag-action svg, .tag-filter-toggle svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
     .session-header-tag-action:hover { background: transparent; color: var(--text); }
     .session-header-window-action:hover { color: var(--text); background: #ffffff08; }
-    /* The Hermes panel's button, and the header of the page that the panel shows. */
-    .session-header-hermes-action, .hermes-panel-action { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; padding: 0 0.35rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.78rem; font-weight: 500; letter-spacing: 0; line-height: 1; text-transform: none; }
-    .session-header-hermes-action svg, .hermes-panel-header h1 svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-    .session-header-hermes-action[aria-expanded="true"] { color: var(--accent); }
+    /* The Hermes panel's button, its reply dot, and the header of the page that the panel shows. */
+    .hermes-panel-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; padding: 0 0.35rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.78rem; font-weight: 500; letter-spacing: 0; line-height: 1; text-transform: none; }
+    .hermes-panel-header h1 svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--gold); }
+    [data-hermes-toggle] { position: relative; }
+    [data-hermes-toggle][aria-expanded="true"] { color: var(--accent); }
     .hermes-reply-dot { display: none; position: absolute; top: 0.3rem; right: 0.3rem; width: 0.45rem; height: 0.45rem; border-radius: 999px; background: var(--accent); }
     body.hermes-replied .hermes-reply-dot { display: block; }
+    :is(.mobile-sessions-button, .desktop-sessions-button) .hermes-reply-dot { top: auto; bottom: 0.2rem; right: 0.2rem; }
     .hermes-panel-header h1 { display: flex; align-items: center; gap: 0.45rem; }
-    .hermes-panel-header h1 svg { color: var(--gold); }
-    @media (hover: hover) and (pointer: fine) { .session-header-hermes-action:hover, .hermes-panel-action:hover { background: #ffffff08; color: var(--text); } }
+    @media (hover: hover) and (pointer: fine) { .hermes-panel-action:hover { background: #ffffff08; color: var(--text); } }
     body:not(.hermes-panel-framed) :is([data-hermes-close], [data-hermes-pop-out]) { display: none; }
     /* The panel has a column of its own on wide screens, lies over the conversation on narrower ones, and fills a phone's screen. */
     .hermes-panel { position: fixed; inset: 0 0 0 auto; z-index: 50; width: min(30rem, 100vw); border-left: 1px solid var(--border); background: var(--bg); }
     .hermes-panel[hidden] { display: none; }
     .hermes-panel iframe { display: block; width: 100%; height: 100%; border: 0; }
+    /* Until its conversation shows, the panel says that Hermes is starting, which takes seconds after Gripi has started. */
+    .hermes-panel-loading { display: none; }
+    .hermes-panel.is-loading .hermes-panel-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin: 0; color: var(--muted); font-family: var(--mono); font-size: 0.86rem; }
+    .hermes-panel.is-loading iframe { visibility: hidden; }
     @media (min-width: 1280px) { body.hermes-panel-open .app-shell { margin-right: 30rem; } }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.75rem 1.5rem 1.5rem; }
     /* One readable column; long lines are hard to follow in a wide browser window. */

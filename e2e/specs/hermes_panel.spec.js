@@ -52,7 +52,22 @@ test("Hermes talks in a panel next to the session, which switching sessions and 
   await expect(hermesButton(page)).toBeFocused();
 });
 
-test("a reply while the panel is closed marks the Hermes button until it opens", async ({ page }) => {
+test("the panel says Hermes is starting until its conversation shows", async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await hermesButton(page).click();
+  await expect(page.locator("#hermes-panel").getByRole("status")).toHaveText("Starting Hermes…");
+
+  release();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
+  await expect(page.locator("#hermes-panel").getByRole("status")).toBeHidden();
+});
+
+test("a reply while the panel is closed marks the Hermes button, and the sessions button while the sidebar is hidden", async ({ page }) => {
   await hermesButton(page).click();
   await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
   await hermesButton(page).click();
@@ -64,6 +79,9 @@ test("a reply while the panel is closed marks the Hermes button until it opens",
   const { session } = await (await page.request.get("/hermes/current")).json();
   expect((await page.request.post("/prompt", { form: { session, message: "Ping from the phone" } })).ok()).toBe(true);
   await expect(dot).toBeVisible();
+  await page.getByRole("button", { name: "Hide sessions" }).click();
+  await expect(page.getByRole("button", { name: "Show sessions" }).locator(".hermes-reply-dot")).toBeVisible();
+  await page.getByRole("button", { name: "Show sessions" }).click();
 
   await hermesButton(page).click();
   await expect(message(panel(page), "assistant", `${hermes.run.replyPrefix}Ping from the phone`)).toBeVisible();
@@ -82,6 +100,16 @@ test("a new conversation in one window replaces it in every other", async ({ pag
   await expect(message(panel(page), "user", "Plan my week")).toHaveCount(0, { timeout: 10_000 });
   await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
   await other.close();
+});
+
+test("closing the panel while the sidebar is hidden takes the focus out of it", async ({ page }) => {
+  await hermesButton(page).click();
+  await panel(page).getByLabel("Message to Hermes").click();
+  await page.getByRole("button", { name: "Hide sessions" }).click();
+
+  await panel(page).getByRole("button", { name: "Close Hermes" }).click();
+  await expect(page.locator("#hermes-panel")).toBeHidden();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("IFRAME");
 });
 
 test("a window the browser blocks leaves the panel as it was", async ({ page }) => {
