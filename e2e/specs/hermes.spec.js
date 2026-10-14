@@ -213,6 +213,19 @@ test("a reply notification opens the current conversation, which a new one may h
   await expect.poll(() => page.evaluate(() => window.replyNotifications.map(({ title, url }) => ({ title, url })))).toEqual([{ title: "Hermes", url: "/hermes" }]);
 });
 
+test("Ctrl+N starts a new conversation rather than a session", async ({ page }) => {
+  await sendPrompt(page, "List the files");
+  await expectRunFinished(page);
+  const current = async () => (await (await page.request.get("/hermes/current")).json()).session;
+  const asked = await current();
+
+  await page.getByLabel("Message to Hermes").press("Control+n");
+  await expect(message(page, "user", "List the files")).toHaveCount(0);
+  await expect(page.getByLabel("Message to Hermes")).toBeVisible();
+  expect(await current()).not.toBe(asked);
+  expect(new URL(page.url()).searchParams.get("session")).toBe(await current());
+});
+
 // Whether something other than the conversation shows at its centre.
 function conversationCovered(page) {
   return page.evaluate(() => {

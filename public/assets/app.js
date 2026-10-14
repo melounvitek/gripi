@@ -3042,6 +3042,11 @@ function sessionShortcutsVisible() {
 
 function openNewSessionModal(fork) {
   if (sessionSwitching()) return;
+  // The Hermes panel holds no sessions, so a new one is a new conversation, as its new button starts.
+  if (hermesPanelController.panelPage) {
+    document.querySelector('form[action="/hermes/new"]')?.requestSubmit();
+    return;
+  }
 
   const modal = document.querySelector('[data-modal="new-session-modal"]');
   openModal(modal);
