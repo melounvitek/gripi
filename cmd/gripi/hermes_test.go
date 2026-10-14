@@ -274,4 +274,11 @@ func TestGripiListsSendsToAndShowsHermesSessions(t *testing.T) {
 	if code, _, stderr := runCLI("open", "hermes-e2e"); code == 0 || !strings.Contains(stderr, "Pi sessions only") {
 		t.Fatalf("gripi open = %d, stderr %q", code, stderr)
 	}
+	// Pages leave Hermes's sessions out, gripi commands don't.
+	if code, _, stderr := runCLI("tag", "hermes-e2e", "errands"); code != 0 {
+		t.Fatalf("gripi tag = %d, stderr %q", code, stderr)
+	}
+	if code, stdout, stderr := runCLI("tags", "hermes-e2e"); code != 0 || strings.Join(strings.Fields(stdout), " ") != "TAG SESSIONS errands 1" {
+		t.Fatalf("gripi tags = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
 }

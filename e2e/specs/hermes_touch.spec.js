@@ -31,6 +31,8 @@ test("the Hermes panel opens from the sidebar over the whole screen and closes, 
 
   await page.frameLocator("#hermes-panel iframe").getByRole("button", { name: "Close Hermes" }).tap();
   await expect(panel).toBeHidden();
+  // The closed sidebar's Hermes button is off the screen.
+  await expect(page.locator("#conversation-scroll")).toBeFocused();
 
   // A reply while it is closed marks the sessions button, behind which the Hermes button is.
   const { session } = await (await page.request.get("/hermes/current")).json();

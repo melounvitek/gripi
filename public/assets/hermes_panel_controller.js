@@ -71,15 +71,17 @@ export class HermesPanelController {
   }
 
   // Closing only hides the panel, so a reply or a voice call carries on. Focus leaves it, or its hidden page would
-  // still count as looked at, which keeps Hermes's replies from notifying.
+  // still count as looked at, which keeps Hermes's replies from notifying. It goes to the Hermes button, or to the
+  // conversation while the sidebar is hidden or a phone's sidebar is closed, off the screen.
   close() {
     this.panel.hidden = true;
     this.document.body.classList.remove("hermes-panel-open");
     this.storeOpen(false);
     this.sync();
-    this.document.querySelector("[data-hermes-toggle]")?.focus({ preventScroll: true });
-    // A hidden sidebar's button takes no focus.
-    if (this.document.activeElement === this.frame) this.frame.blur();
+    const toggle = this.document.querySelector("[data-hermes-toggle]");
+    const box = toggle?.getBoundingClientRect();
+    const shown = box && box.width > 0 && box.right > 0 && box.left < this.window.innerWidth;
+    (shown ? toggle : this.document.getElementById("conversation-scroll"))?.focus({ preventScroll: true });
   }
 
   popOut() {

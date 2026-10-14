@@ -114,7 +114,7 @@ func (app *application) sessionTags(response http.ResponseWriter, request *http.
 }
 
 func (app *application) visibleTagCounts(request *http.Request, tags map[string][]string) ([]sessions.TagCount, error) {
-	all, err := app.pageStore().Sessions()
+	all, err := app.sessionListing(request).Sessions()
 	if err != nil {
 		return nil, err
 	}

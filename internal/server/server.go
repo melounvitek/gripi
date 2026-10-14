@@ -337,7 +337,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	if !cfg.MultiUserMode {
 		local := http.NewServeMux()
 		app.registerLocalRoutes(local)
-		gateway.local = app.limitRequestBody(local)
+		gateway.local = app.limitRequestBody(commandRequests(local))
 	}
 	return gateway, nil
 }

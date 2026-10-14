@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -41,6 +42,19 @@ type LocalMessage struct {
 	Timestamp Timestamp `json:"timestamp"`
 }
 
+type commandRequestKey struct{}
+
+// commandRequests marks the requests of gripi commands, which see the sessions that pages leave out.
+func commandRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		next.ServeHTTP(response, request.WithContext(context.WithValue(request.Context(), commandRequestKey{}, true)))
+	})
+}
+
+func commandRequest(request *http.Request) bool {
+	return request.Context().Value(commandRequestKey{}) != nil
+}
+
 func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sessions", app.localSessions)
 	mux.HandleFunc("GET /conversation", app.localConversation)
@@ -62,7 +76,7 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 	// Observe sessions exactly as a sidebar poll does, which marks none of them read.
 	sidebar := request.Clone(request.Context())
 	sidebar.URL = &url.URL{Path: "/sidebar", RawQuery: "no_session=1"}
-	view, err := app.prepareView(sidebar, false, true)
+	view, err := app.preparePage(sidebar, false)
 	if err != nil {
 		writeInternalError(response, "list sessions for gripi commands", err)
 		return

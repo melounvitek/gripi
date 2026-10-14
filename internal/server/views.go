@@ -131,12 +131,6 @@ type pageView struct {
 const voicePrefix = "[Voice input — respond concisely and conversationally, 2-3 sentences max. No code blocks or markdown.] "
 
 func (app *application) preparePage(request *http.Request, includeConversation bool) (*pageView, error) {
-	return app.prepareView(request, includeConversation, false)
-}
-
-// prepareView prepares a page, whose sessions include Hermes's conversations only with listHermes. A page shows them
-// only in the Hermes panel, the session-only page of one of them.
-func (app *application) prepareView(request *http.Request, includeConversation, listHermes bool) (*pageView, error) {
 	// A managed session may still be registered under its synthetic pending path.
 	for _, pending := range app.pendingSessions.Entries() {
 		if !app.rpcClients.Active(pending.Path) || (app.ownsSession != nil && !app.ownsSession(request, pending.Path)) {
@@ -161,11 +155,7 @@ func (app *application) prepareView(request *http.Request, includeConversation, 
 			request.URL.RawQuery = params.Encode()
 		}
 	}
-	listing := app.pageStore()
-	if listHermes {
-		listing = app.sessionStore
-	}
-	all, metadataDeferred, err := listing.SessionsDeferringMetadata(func(path string) bool {
+	all, metadataDeferred, err := app.sessionListing(request).SessionsDeferringMetadata(func(path string) bool {
 		return request.URL.Path == "/sidebar" && app.rpcClients.Busy(path)
 	})
 	if err != nil {
@@ -173,7 +163,7 @@ func (app *application) prepareView(request *http.Request, includeConversation, 
 	}
 	hermesPanel := params.Get("session_only") == "1" && app.agentOf(params.Get("session")) == "hermes"
 	// Pages don't list Hermes's conversations, so the Hermes panel's page adds its own.
-	if hermesPanel && !listHermes {
+	if hermesPanel {
 		if session, saved := app.sessionStore.Session(params.Get("session")); saved {
 			all = append(all, session)
 		}
@@ -222,7 +212,8 @@ func (app *application) prepareView(request *http.Request, includeConversation, 
 	}
 	app.rememberSessionHashes(all)
 	params = request.URL.Query()
-	if !listHermes {
+	// A page shows Hermes's conversations only in the Hermes panel, the session-only page of one of them.
+	if !commandRequest(request) {
 		all = slices.DeleteFunc(all, func(session *agent.Session) bool {
 			return session.Agent == "hermes" && !(hermesPanel && session.Path == params.Get("session"))
 		})
@@ -1196,7 +1187,6 @@ func terminalSource(message *agent.Message) string {
 }
 func base64Text(value string) string { return base64.StdEncoding.EncodeToString([]byte(value)) }
 
-// agentOf names the agent of a session when the gateway runs several, and is empty otherwise.
 // pageStore lists the sessions that pages show. It leaves out Hermes's, so that a page never waits for Hermes to start:
 // the Hermes panel opens its conversation itself.
 func (app *application) pageStore() agent.Store {
@@ -1206,6 +1196,15 @@ func (app *application) pageStore() agent.Store {
 	return app.sessionStore
 }
 
+// sessionListing lists the sessions that a request sees: a page's, or every session for gripi commands.
+func (app *application) sessionListing(request *http.Request) agent.Store {
+	if commandRequest(request) {
+		return app.sessionStore
+	}
+	return app.pageStore()
+}
+
+// agentOf names the agent of a session when the gateway runs several, and is empty otherwise.
 func (app *application) agentOf(key string) string {
 	if router, ok := app.adapter.(*agent.Router); ok {
 		return router.Agent(key)

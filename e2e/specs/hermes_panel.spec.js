@@ -109,7 +109,7 @@ test("closing the panel while the sidebar is hidden takes the focus out of it", 
 
   await panel(page).getByRole("button", { name: "Close Hermes" }).click();
   await expect(page.locator("#hermes-panel")).toBeHidden();
-  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("IFRAME");
+  await expect(page.locator("#conversation-scroll")).toBeFocused();
 });
 
 test("a window the browser blocks leaves the panel as it was", async ({ page }) => {
