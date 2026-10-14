@@ -79,7 +79,8 @@ type application struct {
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
 	// voice reaches Hermes's dashboard for voice conversations, which are off when it is nil.
-	voice *hermesdashboard.Client
+	voice  *hermesdashboard.Client
+	hermes hermesConversation
 }
 
 var errSessionFolderMissing = &agent.SyncBlockedError{Mode: agent.SyncFolderMissing, Message: "This session’s folder no longer exists. Continue in another folder to keep working."}
@@ -317,6 +318,9 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	app.registerSessionRoutes(mux)
 	app.registerActionRoutes(mux)
 	app.registerEnvironmentRoutes(mux)
+	if cfg.HermesPath != "" {
+		app.registerHermesRoutes(mux)
+	}
 	if app.voice != nil {
 		app.registerVoiceRoutes(mux)
 	}

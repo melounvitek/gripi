@@ -50,6 +50,11 @@ func (app *application) securityHeaders(next http.Handler) http.Handler {
 			http.Error(response, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
+		// The Hermes panel shows the session-only page of its conversation in a frame.
+		frameAncestors := "'none'"
+		if strings.HasPrefix(request.URL.Path, "/hermes") || request.URL.Query().Get("session_only") == "1" {
+			frameAncestors = "'self'"
+		}
 		policy := strings.Join([]string{
 			"default-src 'self'",
 			"script-src 'self' 'nonce-" + nonce + "'",
@@ -61,7 +66,7 @@ func (app *application) securityHeaders(next http.Handler) http.Handler {
 			"manifest-src 'self'",
 			"object-src 'none'",
 			"base-uri 'none'",
-			"frame-ancestors 'none'",
+			"frame-ancestors " + frameAncestors,
 			"form-action 'self'",
 		}, "; ")
 		response.Header().Set("Cache-Control", "private, no-store")

@@ -322,7 +322,7 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 		"title": title,
 		"body":  agent.NotificationPreview(reply.text),
 		"tag":   completedReplyTag(path, reply.id),
-		"url":   completedReplyURL(path),
+		"url":   completedReplyURL(path, notifier.app.agentOf(path)),
 	})
 	if err != nil {
 		return err
@@ -432,7 +432,11 @@ func (notifier *completionNotifier) owners(path string) ([]string, error) {
 	return result, nil
 }
 
-func completedReplyURL(path string) string {
+// completedReplyURL opens the session that replied. A Hermes conversation shows only in the Hermes panel.
+func completedReplyURL(path, agentName string) string {
+	if agentName == "hermes" {
+		return "/hermes"
+	}
 	result := "/?session=" + url.QueryEscape(path)
 	if len(result) > maxNotificationURLBytes {
 		return "/"

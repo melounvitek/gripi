@@ -5,19 +5,10 @@ import { expect, test } from "@playwright/test";
 import { hermes, sessions } from "../support/contract.mjs";
 import { expectRunFinished, liveMessage, message, selectSession, sendPrompt } from "../support/ui.mjs";
 
+// Each test talks in a new conversation, on the page that the Hermes panel shows.
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
-  await selectSession(page, hermes.saved.title);
-});
-
-test("a Hermes session shows its saved conversation", async ({ page }) => {
-  const { saved } = hermes;
-  await expect(message(page, "user", saved.prompt)).toBeVisible();
-  await expect(page.locator("article.message--thinking").filter({ hasText: saved.thought })).toBeVisible();
-  const tool = page.locator('article[data-tool-call-id="tc-saved"]');
-  await expect(tool).toContainText(saved.tool);
-  await expect(tool).toContainText(saved.toolOutput);
-  await expect(message(page, "assistant", saved.reply)).toBeVisible();
+  expect((await page.request.post("/hermes/new")).ok()).toBe(true);
+  await page.goto("/hermes");
 });
 
 test("a Hermes reply streams with its thinking and tool, and stays after a reload", async ({ page }) => {
@@ -111,93 +102,17 @@ test("Hermes asks in a dialog before a dangerous command, which a reload keeps",
   await expectRunFinished(page);
 });
 
-test("the agent filter shows only Hermes's sessions, each marked as Hermes's", async ({ page }) => {
-  await page.getByRole("combobox", { name: "Filter sessions by agent" }).click();
-  await page.getByRole("option", { name: "hermes" }).click();
-  const rows = page.locator(".sessions-list .session-row, .current-session-section .session-row");
-  await expect(rows.first()).toBeVisible();
-  await expect(page.locator('.session-row[data-agent="pi"]')).toHaveCount(0);
-  await expect(page.locator(".session-row").filter({ hasText: hermes.saved.title }).locator('.session-agent[data-agent="hermes"]')).toBeVisible();
-});
-
-test("the agent filter stays after switching to another session", async ({ page }) => {
-  await page.getByRole("combobox", { name: "Filter sessions by agent" }).click();
-  await page.getByRole("option", { name: "pi" }).click();
-  await expect(page.locator('.sessions-list .session-row[data-agent="hermes"]')).toHaveCount(0);
-  await page.locator('.sessions-list .session-row[data-agent="pi"] a.session').first().click();
-  await expect(page.locator(".session-header-agent")).toHaveAttribute("data-agent", "pi");
-
-  // The sidebar's refreshes read the filters from the address, as a reload does.
-  await page.reload();
-  await expect(page.locator('select[name="agent"]')).toHaveValue("pi");
-  await expect(page.locator('.session-row[data-agent="hermes"]')).toHaveCount(0);
-});
-
 test("a new session starts Pi in the first project, as without Hermes", async ({ page }) => {
+  await page.goto("/");
   await page.keyboard.press("Control+n");
   const dialog = page.getByRole("dialog", { name: "New session", exact: true });
   await expect(dialog.getByRole("combobox", { name: "Project or path" })).toBeFocused();
   await expect(dialog.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
-  await expect(dialog.getByRole("option", { name: /^hermes\s*Hermes Agent$/ })).toBeVisible();
 
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
-  await expect(page.locator(".session-header-agent")).toHaveAttribute("data-agent", "pi");
+  await expect(page.getByLabel("Message to Pi")).toBeVisible();
   // Leftover sessions push seeded ones off the first sidebar page for later tests.
-  const deleted = await page.request.post("/sessions/delete", { form: { session: new URL(page.url()).searchParams.get("session") } });
-  expect(deleted.ok()).toBe(true);
-});
-
-test("typing its name in the new session dialog starts Hermes", async ({ page }) => {
-  await page.keyboard.press("Control+n");
-  const input = page.getByRole("dialog", { name: "New session", exact: true }).getByRole("combobox", { name: "Project or path" });
-  await input.fill("hermes");
-  await input.press("Enter");
-  await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
-  await expect(page.locator(".session-header-agent")).toHaveText("hermes");
-});
-
-test("a new Pi session keeps the agent filter for Pi", async ({ page }) => {
-  await page.getByRole("combobox", { name: "Filter sessions by agent" }).click();
-  await page.getByRole("option", { name: "pi" }).click();
-  await expect(page.locator('.sessions-list .session-row[data-agent="hermes"]')).toHaveCount(0);
-  await page.keyboard.press("Control+n");
-  await page.keyboard.press("Enter");
-
-  await expect(page.locator(".session-header-agent")).toHaveAttribute("data-agent", "pi");
-  await expect(page.locator('select[name="agent"]')).toHaveValue("pi");
-  const deleted = await page.request.post("/sessions/delete", { form: { session: new URL(page.url()).searchParams.get("session") } });
-  expect(deleted.ok()).toBe(true);
-});
-
-test("a new Hermes session drops the agent filter for Pi, which would hide it", async ({ page }) => {
-  await page.getByRole("combobox", { name: "Filter sessions by agent" }).click();
-  await page.getByRole("option", { name: "pi" }).click();
-  await expect(page.locator('.sessions-list .session-row[data-agent="hermes"]')).toHaveCount(0);
-  await page.keyboard.press("Control+n");
-  const input = page.getByRole("dialog", { name: "New session", exact: true }).getByRole("combobox", { name: "Project or path" });
-  await input.fill("hermes");
-  await input.press("Enter");
-
-  await expect(page.locator(".session-header-agent")).toHaveAttribute("data-agent", "hermes");
-  await expect(page.locator('select[name="agent"]')).toHaveValue("");
-});
-
-test("a project picked after Hermes failed to start starts Pi", async ({ page }) => {
-  let failed = false;
-  await page.route("**/sessions/new_at_cwd", (route) => {
-    if (failed) return route.continue();
-    failed = true;
-    return route.fulfill({ status: 502, json: { error: "Hermes could not start" } });
-  });
-  await page.keyboard.press("Control+n");
-  const dialog = page.getByRole("dialog", { name: "New session", exact: true });
-  await dialog.getByRole("option", { name: /^hermes\s*Hermes Agent$/ }).click();
-  await expect(dialog).toContainText("Hermes could not start");
-
-  await dialog.locator("[data-new-session-project]").first().click();
-  await expect(page.getByRole("heading", { level: 1, name: "New session (pending first assistant response)" })).toBeVisible();
-  await expect(page.locator(".session-header-agent")).toHaveAttribute("data-agent", "pi");
   const deleted = await page.request.post("/sessions/delete", { form: { session: new URL(page.url()).searchParams.get("session") } });
   expect(deleted.ok()).toBe(true);
 });
@@ -338,8 +253,9 @@ test("a refresh that skipped a voice call's events ends its wait with the reply 
   expect(spoken).toEqual({ earlier: [], stopped: [""], answered: ["The backup finished. Run it again with It takes ten minutes."] });
 });
 
-test("only Hermes sessions offer a voice conversation", async ({ page }) => {
+test("only Hermes's conversation offers a voice conversation", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Start a voice conversation" })).toBeVisible();
+  await page.goto("/");
   await selectSession(page, sessions.marker);
   await expect(page.getByLabel("Message to Pi")).toBeVisible();
   await expect(page.getByRole("button", { name: "Start a voice conversation" })).toHaveCount(0);

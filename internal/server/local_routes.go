@@ -62,7 +62,7 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 	// Observe sessions exactly as a sidebar poll does, which marks none of them read.
 	sidebar := request.Clone(request.Context())
 	sidebar.URL = &url.URL{Path: "/sidebar", RawQuery: "no_session=1"}
-	view, err := app.preparePage(sidebar, false)
+	view, err := app.prepareView(sidebar, false, true)
 	if err != nil {
 		writeInternalError(response, "list sessions for gripi commands", err)
 		return

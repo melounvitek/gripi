@@ -108,9 +108,8 @@ func TestAHermesSessionShowsItsSavedConversation(t *testing.T) {
 		},
 	})
 
-	page := getPage(t, handler, "/?session="+url.QueryEscape("hermes:hermes-tests"))
+	page := getPage(t, handler, panelPage("hermes:hermes-tests"))
 	for _, expected := range []string{
-		"Run the test suite",
 		"Run the tests and fix what fails",
 		"I should run the whole suite first.",
 		"terminal: npm test",
@@ -126,6 +125,22 @@ func TestAHermesSessionShowsItsSavedConversation(t *testing.T) {
 	if !strings.Contains(page, `data-tool-call-id="tc-1"`) {
 		t.Errorf("page lacks the tool call's block")
 	}
+}
+
+// newHermesConversation starts a new Hermes conversation, as the Hermes panel's new button does, and returns its key.
+func newHermesConversation(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	code, payload := postJSON(t, handler, "/hermes/new", nil)
+	key, _ := payload["session"].(string)
+	if code != http.StatusOK || !strings.HasPrefix(key, "hermes:") {
+		t.Fatalf("new Hermes conversation = %d %v", code, payload)
+	}
+	return key
+}
+
+// panelPage is the page of a Hermes conversation that the Hermes panel shows.
+func panelPage(key string) string {
+	return "/?" + url.Values{"session": {key}, "session_only": {"1"}}.Encode()
 }
 
 func postJSON(t *testing.T, handler http.Handler, target string, values url.Values) (int, map[string]any) {
@@ -208,14 +223,9 @@ func eventsAfterUntil(t *testing.T, handler http.Handler, key string, after int6
 }
 
 func TestAHermesSessionRunsAPromptLive(t *testing.T) {
-	project := t.TempDir()
 	handler := hermesHandler(t)
 
-	code, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
-	key, _ := payload["session"].(string)
-	if code != http.StatusOK || !strings.HasPrefix(key, "hermes:") {
-		t.Fatalf("new Hermes session = %d %v", code, payload)
-	}
+	key := newHermesConversation(t, handler)
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}}); code != http.StatusOK {
 		t.Fatalf("prompt = %d %v", code, payload)
 	}
@@ -237,7 +247,7 @@ func TestAHermesSessionRunsAPromptLive(t *testing.T) {
 	}
 
 	// After the run, the page shows the same conversation from the saved session.
-	page := getPage(t, handler, "/?session="+url.QueryEscape(key))
+	page := getPage(t, handler, panelPage(key))
 	for _, expected := range []string{"List the files", "Planning the answer.", "Checking the files.", "terminal: ls", "README.md", "Hermes says: List the files"} {
 		if !strings.Contains(page, expected) {
 			t.Errorf("page after the run lacks %q", expected)
@@ -249,8 +259,7 @@ func TestImagesReachHermesAndStayInTheConversation(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "hermes.log")
 	t.Setenv("FAKE_HERMES_LOG", log)
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
+	key := newHermesConversation(t, handler)
 	request := multipartRequest(t, "/prompt", map[string]string{"session": key, "message": "What does this show?"}, "images[]", "shot.png", "image/png", []byte("fixture-image"))
 	request.Header.Set("Accept", "application/json")
 	if response := serveAction(handler, request); response.Code != http.StatusOK {
@@ -286,7 +295,7 @@ func TestImagesReachHermesAndStayInTheConversation(t *testing.T) {
 	if len(sent) != 2 || fmt.Sprint(sent[1]) != fmt.Sprint(image) {
 		t.Fatalf("Hermes got the prompt %v", sent)
 	}
-	if page := getPage(t, handler, "/?session="+url.QueryEscape(key)); !strings.Contains(page, "/attachments/") || !strings.Contains(page, `alt="Attached image"`) {
+	if page := getPage(t, handler, panelPage(key)); !strings.Contains(page, "/attachments/") || !strings.Contains(page, `alt="Attached image"`) {
 		t.Fatal("the page after the run lacks the image")
 	}
 }
@@ -352,7 +361,7 @@ func TestAnImageHermesSharesShowsInPlaceOfItsTag(t *testing.T) {
 		},
 	})
 
-	page := html.UnescapeString(getPage(t, handler, "/?session="+url.QueryEscape("hermes:hermes-shot")))
+	page := html.UnescapeString(getPage(t, handler, panelPage("hermes:hermes-shot")))
 	if !strings.Contains(page, "<p>Here it is:</p>") {
 		t.Error("the page doesn't show the image in place of its tag")
 	}
@@ -372,8 +381,7 @@ func TestAnImageHermesSharesShowsInPlaceOfItsTag(t *testing.T) {
 func TestAnImageHermesSharesShowsLiveAndAfterTheRun(t *testing.T) {
 	image, _, contents := sharedFiles(t)
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
+	key := newHermesConversation(t, handler)
 	// The fake Hermes repeats the prompt in its reply.
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {`Look: **MEDIA:"` + image + `"**`}}); code != http.StatusOK {
 		t.Fatalf("prompt = %d %v", code, payload)
@@ -389,15 +397,14 @@ func TestAnImageHermesSharesShowsLiveAndAfterTheRun(t *testing.T) {
 	if len(reply) != 2 || fmt.Sprint(reply[0]) != fmt.Sprint(map[string]any{"type": "text", "text": "Hermes says: Look: "}) || fmt.Sprint(reply[1]) != fmt.Sprint(shared) {
 		t.Fatalf("the live reply is %v", reply)
 	}
-	if images := shownImages(t, handler, getPage(t, handler, "/?session="+url.QueryEscape(key))); len(images) != 1 || !bytes.Equal(images[0], contents) {
+	if images := shownImages(t, handler, getPage(t, handler, panelPage(key))); len(images) != 1 || !bytes.Equal(images[0], contents) {
 		t.Fatalf("the page after the run shows the images %q", images)
 	}
 }
 
 func TestHermesRefusesAMessageTooLargeForIt(t *testing.T) {
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
+	key := newHermesConversation(t, handler)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	_ = writer.WriteField("session", key)
@@ -422,10 +429,8 @@ func TestHermesRefusesAMessageTooLargeForIt(t *testing.T) {
 }
 
 func TestStopEndsAHermesRunAndRefusesMessagesWhileItRuns(t *testing.T) {
-	project := t.TempDir()
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
+	key := newHermesConversation(t, handler)
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Wait for stop"}}); code != http.StatusOK {
 		t.Fatalf("prompt = %d %v", code, payload)
 	}
@@ -447,10 +452,8 @@ func TestStopEndsAHermesRunAndRefusesMessagesWhileItRuns(t *testing.T) {
 func TestHermesAsksBeforeADangerousCommandInADialog(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "hermes.log")
 	t.Setenv("FAKE_HERMES_LOG", log)
-	project := t.TempDir()
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
+	key := newHermesConversation(t, handler)
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Delete the build folder"}}); code != http.StatusOK {
 		t.Fatalf("prompt = %d %v", code, payload)
 	}
@@ -466,7 +469,7 @@ func TestHermesAsksBeforeADangerousCommandInADialog(t *testing.T) {
 		t.Fatalf("question = %+v", question)
 	}
 	// A reload brings the question back.
-	if page := getPage(t, handler, "/?session="+url.QueryEscape(key)); !strings.Contains(page, question.ID) {
+	if page := getPage(t, handler, panelPage(key)); !strings.Contains(page, question.ID) {
 		t.Fatalf("the page lacks the question %s", question.ID)
 	}
 
@@ -513,10 +516,8 @@ func hermesStarts(t *testing.T, log string) []map[string]any {
 func TestSavedVariablesReachHermesBeforeItsNextMessage(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "hermes.log")
 	t.Setenv("FAKE_HERMES_LOG", log)
-	project := t.TempDir()
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
+	key := newHermesConversation(t, handler)
 	// A session that Hermes hasn't saved lives only in the running Hermes, so its first message runs there.
 	if code, payload := postJSON(t, handler, "/environment/variable", url.Values{"name": {"FAKE_HERMES_PROBE"}, "value": {"saved in Gripi"}}); code != http.StatusOK {
 		t.Fatalf("save variable = %d %v", code, payload)
@@ -541,84 +542,75 @@ func TestSavedVariablesReachHermesBeforeItsNextMessage(t *testing.T) {
 		t.Fatalf("events after the restart = %+v", events)
 	}
 	// The session reloaded in the new Hermes keeps its conversation.
-	if page := getPage(t, handler, "/?session="+url.QueryEscape(key)); !strings.Contains(page, "Hermes says: List the files again") || !strings.Contains(page, "Checking the files.") {
+	if page := getPage(t, handler, panelPage(key)); !strings.Contains(page, "Hermes says: List the files again") || !strings.Contains(page, "Checking the files.") {
 		t.Fatal("the conversation is missing after the restart")
 	}
 }
 
-func TestPagesTellAgentsApartOnlyWhenTheGatewayRunsHermes(t *testing.T) {
-	project := t.TempDir()
-	cfg := hermesConfig(t, map[string]any{"sessionId": "hermes-chat", "cwd": project, "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z"})
-	piSession := filepath.Join(cfg.SessionsRoot, "pi.jsonl")
-	if err := os.MkdirAll(cfg.SessionsRoot, 0700); err != nil {
-		t.Fatal(err)
-	}
-	records := []string{
-		`{"type":"session","version":3,"id":"pi-chat","timestamp":"2026-02-01T10:00:00Z","cwd":"` + project + `"}`,
-		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-02-01T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"Pi chat"}]}}`,
-	}
-	if err := os.WriteFile(piSession, []byte(strings.Join(records, "\n")+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	piAlone := cfg
-	piAlone.HermesPath = ""
-	handler, err := gateway.NewPiHandler(piAlone, gripi.WebFiles)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
-	page := getPage(t, handler, "/?session="+url.QueryEscape(piSession))
-	// Absent markup is the requirement here: a gateway without Hermes looks as it did before.
-	for _, absent := range []string{`data-agent="`, "session-agent", `name="agent"`, "All agents", "Hermes Agent"} {
-		if strings.Contains(page, absent) {
-			t.Errorf("the page without Hermes contains %q", absent)
-		}
-	}
-	for _, present := range []string{`aria-label="Message to Pi"`, "Ask Pi…", `aria-label="Abort running Pi"`} {
-		if !strings.Contains(page, present) {
-			t.Errorf("the page without Hermes lacks %q", present)
-		}
-	}
-
-	both, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = both.(interface{ Close(context.Context) error }).Close(context.Background()) })
-	page = getPage(t, both, "/?session="+url.QueryEscape(piSession))
-	for _, present := range []string{`class="session-agent" data-agent="pi"`, `class="session-agent" data-agent="hermes"`, `name="agent" aria-label="Filter sessions by agent"`, `data-new-session-agent="hermes"`, `aria-label="Message to Pi"`, `<main class="conversation-panel" data-agent="pi">`} {
-		if !strings.Contains(page, present) {
-			t.Errorf("the Pi session's page with Hermes lacks %q", present)
-		}
-	}
-	page = getPage(t, both, "/?session="+url.QueryEscape("hermes:hermes-chat"))
-	for _, present := range []string{`<main class="conversation-panel" data-agent="hermes">`, `class="session-header-agent" data-agent="hermes"`, `aria-label="Message to Hermes"`, "Ask Hermes…", `aria-label="Abort running Hermes"`} {
-		if !strings.Contains(page, present) {
-			t.Errorf("the Hermes session's page lacks %q", present)
-		}
-	}
-	page = getPage(t, both, "/?agent=hermes")
-	if !strings.Contains(page, "Hermes chat") || strings.Contains(page, `data-session-name="Pi chat"`) {
-		t.Error("the agent filter does not show only Hermes's sessions")
-	}
+// serveRequest serves a request from Gripi's own pages.
+func serveRequest(handler http.Handler, method, target string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, target, nil)
+	request.Header.Set("Origin", "http://example.com")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
 }
 
-func TestHermesSessionsStartInTheHomeFolderAndShowNoFolder(t *testing.T) {
+// openedConversation is the Hermes conversation that a redirect to the Hermes panel's page opens.
+func openedConversation(t *testing.T, response *httptest.ResponseRecorder) string {
+	t.Helper()
+	location, err := url.Parse(response.Header().Get("Location"))
+	if response.Code != http.StatusSeeOther || err != nil || location.Path != "/" || location.Query().Get("session_only") != "1" {
+		t.Fatalf("response = %d to %q", response.Code, response.Header().Get("Location"))
+	}
+	return location.Query().Get("session")
+}
+
+func currentConversation(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	var current struct {
+		Session string `json:"session"`
+	}
+	if err := json.Unmarshal([]byte(getPage(t, handler, "/hermes/current")), &current); err != nil {
+		t.Fatal(err)
+	}
+	return current.Session
+}
+
+func TestEveryHermesPanelShowsOneConversationUntilANewOneReplacesIt(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "hermes.log")
 	t.Setenv("FAKE_HERMES_LOG", log)
-	project := t.TempDir()
-	cfg := hermesConfig(t, map[string]any{"sessionId": "hermes-chat", "cwd": project, "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z"})
+	cfg := hermesConfig(t)
 	handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
 
-	// A new session started from a Hermes session in a project also starts in the home folder.
-	if code, payload := postJSON(t, handler, "/sessions/new", url.Values{"session": {"hermes:hermes-chat"}}); code != http.StatusOK {
-		t.Fatalf("new Hermes session = %d %v", code, payload)
+	if current := currentConversation(t, handler); current != "" {
+		t.Fatalf("a new gateway has the Hermes conversation %q", current)
 	}
+	first := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes"))
+	if !strings.HasPrefix(first, "hermes:") {
+		t.Fatalf("the panel opened %q", first)
+	}
+	if again := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes")); again != first {
+		t.Fatalf("the panel opened %q, then %q", first, again)
+	}
+	if current := currentConversation(t, handler); current != first {
+		t.Fatalf("the current conversation is %q, not %q", current, first)
+	}
+
+	// The new button posts a form, and the panel follows the redirect.
+	second := openedConversation(t, serveRequest(handler, http.MethodPost, "/hermes/new"))
+	if second == first || !strings.HasPrefix(second, "hermes:") {
+		t.Fatalf("new opened %q after %q", second, first)
+	}
+	if opened, current := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes")), currentConversation(t, handler); opened != second || current != second {
+		t.Fatalf("after new, the panel opens %q and the current conversation is %q, not %q", opened, current, second)
+	}
+
+	// A Hermes conversation belongs to no project, so it starts in the home folder.
 	contents, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
@@ -635,46 +627,88 @@ func TestHermesSessionsStartInTheHomeFolderAndShowNoFolder(t *testing.T) {
 			cwds = append(cwds, record.Params.CWD)
 		}
 	}
-	if !slices.Equal(cwds, []string{cfg.Home}) {
-		t.Fatalf("Hermes started sessions in %v", cwds)
-	}
-
-	page := getPage(t, handler, "/?session="+url.QueryEscape("hermes:hermes-chat"))
-	// Neither the sidebar nor the header shows a Hermes session's folder.
-	for _, absent := range []string{`class="session-project-label">` + filepath.Base(project), "session-header-project-label"} {
-		if strings.Contains(page, absent) {
-			t.Errorf("the Hermes session's page contains %q", absent)
-		}
+	if !slices.Equal(cwds, []string{cfg.Home, cfg.Home}) {
+		t.Fatalf("Hermes started conversations in %v", cwds)
 	}
 }
 
-func TestHermesRowsShowTheirProfileWhereProjectsShowTheirLetters(t *testing.T) {
-	// Hermes runs its default profile, and a wrapper that `hermes profile alias` creates runs the profile it is named after.
-	for _, profile := range []struct{ path, name, letters string }{{"hermes", "default", "de"}, {"work", "work", "wo"}} {
-		cfg := hermesConfig(t, map[string]any{"sessionId": "hermes-chat", "cwd": t.TempDir(), "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z"})
-		wrapper := filepath.Join(t.TempDir(), profile.path)
-		if err := os.Symlink(cfg.HermesPath, wrapper); err != nil {
-			t.Fatal(err)
-		}
-		cfg.HermesPath = wrapper
-		handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+func TestHermesConversationsShowOnlyInTheHermesPanel(t *testing.T) {
+	project := t.TempDir()
+	cfg := hermesConfig(t, map[string]any{
+		"sessionId": "hermes-chat", "cwd": project, "title": "Hermes chat", "updatedAt": "2026-03-01T10:00:00Z",
+		"history": []any{textUpdate("user_message_chunk", "Will it rain?"), textUpdate("agent_message_chunk", "Not today.")},
+	})
+	piSession := filepath.Join(cfg.SessionsRoot, "pi.jsonl")
+	if err := os.MkdirAll(cfg.SessionsRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	records := []string{
+		`{"type":"session","version":3,"id":"pi-chat","timestamp":"2026-02-01T10:00:00Z","cwd":"` + project + `"}`,
+		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-02-01T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"Pi chat"}]}}`,
+	}
+	if err := os.WriteFile(piSession, []byte(strings.Join(records, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	newConversation := newHermesConversation(t, handler)
 
-		page := getPage(t, handler, "/")
-		mark := regexp.MustCompile(`<div class="session-project" title="Hermes profile: ` + profile.name + `"[^>]*><span class="project-monogram" aria-hidden="true">` + profile.letters + `</span>`)
-		if !mark.MatchString(page) {
-			t.Errorf("the Hermes row of %s does not show the %s profile's letters %q", profile.path, profile.name, profile.letters)
+	// Neither the sidebar nor the palette lists Hermes's conversations, saved or new, and the main page shows none.
+	for _, target := range []string{"/", "/sidebar", "/sessions/palette", "/?session=" + url.QueryEscape("hermes:hermes-chat"), "/?session=" + url.QueryEscape(newConversation)} {
+		page := getPage(t, handler, target)
+		if !strings.Contains(page, "Pi chat") {
+			t.Errorf("%s lacks the Pi session", target)
 		}
+		for _, hermes := range []string{"Hermes chat", "Not today.", newConversation} {
+			if strings.Contains(page, hermes) {
+				t.Errorf("%s shows %q", target, hermes)
+			}
+		}
+	}
+	main := serveRequest(handler, http.MethodGet, "/?session="+url.QueryEscape(piSession))
+	if !strings.Contains(main.Body.String(), `data-hermes-toggle`) {
+		t.Error("the main page lacks the Hermes button")
+	}
+	// Only the panel's page shows in a frame, and only in Gripi's own pages.
+	if policy := main.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "frame-ancestors 'none'") {
+		t.Errorf("the main page's policy is %q", policy)
+	}
+	panel := serveRequest(handler, http.MethodGet, panelPage("hermes:hermes-chat"))
+	if policy := panel.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "frame-ancestors 'self'") {
+		t.Errorf("the panel's policy is %q", policy)
+	}
+	for _, expected := range []string{"Will it rain?", "Not today.", `action="/hermes/new"`, `aria-label="Message to Hermes"`} {
+		if !strings.Contains(panel.Body.String(), expected) {
+			t.Errorf("the panel lacks %q", expected)
+		}
+	}
+	if strings.Contains(panel.Body.String(), "Pi chat") {
+		t.Error("the panel shows the Pi session")
+	}
+}
+
+func TestAGatewayWithoutHermesOffersNoHermesPanel(t *testing.T) {
+	cfg := hermesConfig(t)
+	cfg.HermesPath = ""
+	handler, err := gateway.NewPiHandler(cfg, gripi.WebFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
+	if strings.Contains(getPage(t, handler, "/"), "data-hermes-toggle") {
+		t.Error("the page offers the Hermes panel")
+	}
+	if response := serveRequest(handler, http.MethodGet, "/hermes"); response.Code != http.StatusNotFound {
+		t.Errorf("GET /hermes = %d", response.Code)
 	}
 }
 
 func TestAQuestionHermesStopsWaitingForCloses(t *testing.T) {
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
+	key := newHermesConversation(t, handler)
 	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Delete the build folder unless I am too slow"}})
 
 	types := []string{}
@@ -690,8 +724,7 @@ func TestAQuestionHermesStopsWaitingForCloses(t *testing.T) {
 
 func TestAHermesThatExitsIsReplacedForTheNextMessage(t *testing.T) {
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
+	key := newHermesConversation(t, handler)
 	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}})
 	_, cursor := eventsAfterUntil(t, handler, key, 0, "agent_settled")
 	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Exit now"}})
@@ -719,8 +752,7 @@ func TestAHermesThatExitsIsReplacedForTheNextMessage(t *testing.T) {
 func TestAStreamingReplyIsDeliveredOnceHoweverLateThePageAsks(t *testing.T) {
 	t.Setenv("FAKE_HERMES_STEP_MS", "1")
 	handler := hermesHandler(t)
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {t.TempDir()}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
+	key := newHermesConversation(t, handler)
 	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Think at length, then wait for stop"}})
 
 	var batch struct {
@@ -746,34 +778,4 @@ func TestAStreamingReplyIsDeliveredOnceHoweverLateThePageAsks(t *testing.T) {
 	}
 	postJSON(t, handler, "/abort", url.Values{"session": {key}})
 	eventsUntil(t, handler, key, "agent_settled")
-}
-
-func TestAHermesSessionReadBeforeARestartTurnsUnreadWithItsNextReply(t *testing.T) {
-	project := t.TempDir()
-	cfg := hermesConfig(t)
-	start := func() http.Handler {
-		handler, err := gateway.NewHandlerWithHermes(cfg, gripi.WebFiles)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return handler
-	}
-	handler := start()
-	_, payload := postJSON(t, handler, "/sessions/new_at_cwd", url.Values{"cwd": {project}, "new_session_agent": {"hermes"}})
-	key := payload["session"].(string)
-	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files"}})
-	eventsUntil(t, handler, key, "agent_settled")
-	getPage(t, handler, "/?session="+url.QueryEscape(key))
-	if err := handler.(interface{ Close(context.Context) error }).Close(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	handler = start()
-	t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
-	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"List the files again"}})
-	eventsUntil(t, handler, key, "agent_settled")
-	// The sidebar as a poll sees it, which marks no session read.
-	if page := getPage(t, handler, "/sidebar?no_session=1"); !strings.Contains(page, `class="session recent-session unread"`) {
-		t.Fatal("the new reply did not mark the session unread")
-	}
 }

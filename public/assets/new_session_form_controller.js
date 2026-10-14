@@ -47,8 +47,7 @@ export class NewSessionFormController {
     const note = form.querySelector("[data-new-session-fork-note]");
     note.textContent = fork ? `Pi forks “${fork.name}” into the folder you pick. The original stays as it is.` : "";
     note.hidden = !fork;
-    // Hermes needs no project, so it is offered before there are any.
-    if (this.projects(form).length || (!fork && form.querySelector("[data-new-session-agent]"))) this.showProjects(form);
+    if (this.projects(form).length) this.showProjects(form);
     else this.browse(form, form.dataset.home);
   }
 
@@ -170,12 +169,7 @@ export class NewSessionFormController {
     const projects = this.projects(form);
     list.querySelectorAll("[data-new-session-action]").forEach((row) => row.remove());
     // The path is searched too: a worktree is often named after its branch, not its project.
-    const matches = (row) => [".new-session-name", ".new-session-path"].some((part) => row.querySelector(part).textContent.toLowerCase().includes(query));
-    const matching = browsing ? [] : projects.filter(matches);
-    // Hermes needs no project, so it is listed with them, after Pi's. A session continued in another folder stays Pi's.
-    const hermes = form.querySelector("[data-new-session-agent]");
-    const hermesShown = Boolean(hermes) && !browsing && !state.fork && matches(hermes);
-    if (hermes) hermes.hidden = !hermesShown;
+    const matching = browsing ? [] : projects.filter((row) => [".new-session-name", ".new-session-path"].some((part) => row.querySelector(part).textContent.toLowerCase().includes(query)));
     const visible = query || state.expanded ? matching : matching.slice(0, RECENT_PROJECTS);
     projects.forEach((row) => { row.hidden = !visible.includes(row); });
     visible.forEach((row, index) => { row.querySelector(".new-session-key").textContent = index < 9 ? index + 1 : ""; });
@@ -208,7 +202,7 @@ export class NewSessionFormController {
       if (state.listing && !state.listing.error) list.append(this.row("start", "·", `${state.fork ? "Continue" : "Start"} in ${where} itself`, state.folder));
       const up = this.parent(state.folder);
       if (up !== state.folder) list.append(this.row("up", "↑", `Up to ${this.displayPath(form, up)}`, up));
-      if (projects.length || (hermes && !state.fork)) list.append(this.row("back", "←", "Back to projects"));
+      if (projects.length) list.append(this.row("back", "←", "Back to projects"));
 
       const place = this.document.createElement("span");
       place.className = "new-session-where";
@@ -220,11 +214,10 @@ export class NewSessionFormController {
     } else {
       const more = matching.length - visible.length;
       if (more) list.append(this.row("more", "…", `${more} more project${more === 1 ? "" : "s"}`));
-      if (hermes) list.append(hermes);
       list.append(this.row("path", "+", "Other folder…"));
 
       label.textContent = state.fork ? "Folder:" : "Project or path:";
-      this.setStatus(form, query && !visible.length && !hermesShown ? "No matching projects." : "");
+      this.setStatus(form, query && !visible.length ? "No matching projects." : "");
     }
     list.querySelectorAll('[role="option"]').forEach((option, index) => { option.id = `new-session-option-${index}`; });
     this.setCursor(form, cursor ?? selected);
@@ -237,13 +230,9 @@ export class NewSessionFormController {
   }
 
   activate(form, option) {
-    const { newSessionAction: action, newSessionPath: path, newSessionProject: project, newSessionAgent: agentName } = option.dataset;
-    if (agentName || project || action === "folder" || action === "start") {
-      // Any start sets the agent, so a project picked after Hermes failed to start gets Pi.
-      const agentValue = form.querySelector("[data-new-session-agent-value]");
-      if (agentValue) agentValue.value = agentName || "";
-      // A Hermes session belongs to no project, so it starts in the home folder.
-      form.querySelector("[data-new-session-cwd-value]").value = agentName ? form.dataset.home : project || path;
+    const { newSessionAction: action, newSessionPath: path, newSessionProject: project } = option.dataset;
+    if (project || action === "folder" || action === "start") {
+      form.querySelector("[data-new-session-cwd-value]").value = project || path;
       form.requestSubmit();
     } else if (action === "more") {
       form._newSessionFormState.expanded = true;
@@ -251,8 +240,7 @@ export class NewSessionFormController {
       this.render(form, RECENT_PROJECTS);
     } else if (action === "path") {
       // New projects usually sit beside existing ones, so the first project's folder is listed first.
-      const first = this.projects(form)[0];
-      this.browse(form, first ? this.parent(first.dataset.newSessionProject) : form.dataset.home);
+      this.browse(form, this.parent(this.projects(form)[0].dataset.newSessionProject));
     } else if (action === "up") {
       this.browse(form, path);
     } else if (action === "back") {

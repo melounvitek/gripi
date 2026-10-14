@@ -3166,8 +3166,6 @@ async function loadForkMessages(modal) {
 function addSessionViewFormParams(formData) {
   const project = new URLSearchParams(window.location.search).get("project");
   if (project) formData.set("project", project);
-  const agent = new URLSearchParams(window.location.search).get("agent");
-  if (agent) formData.set("agent", agent);
   const sessionSearch = sidebarController.activeSearch();
   if (sessionSearch) formData.set("session_search", sessionSearch);
   const tag = new URLSearchParams(window.location.search).get("tag");
