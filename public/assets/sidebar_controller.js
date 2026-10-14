@@ -237,7 +237,6 @@ export class SidebarController {
     const oldElement = this.element;
     const previousReplyIds = this.completedReplyIds(oldElement);
     const notificationToggle = oldElement.querySelector("[data-notification-toggle]");
-    const hermesToggle = oldElement.querySelector("[data-hermes-toggle]");
     const resourceUsage = oldElement.querySelector("[data-resource-usage]");
     const blockedWindows = oldElement.querySelector("[data-blocked-windows]");
     const previousSearchForm = preserveSearch ? oldElement.querySelector(".sidebar-session-search") : null;
@@ -245,7 +244,7 @@ export class SidebarController {
     const previousSearchQuery = previousSearchInput?.value;
     const previousSearchOpen = previousSearchForm?.classList.contains("is-open");
     const focusedControl = oldElement.contains(this.document.activeElement) ? this.document.activeElement : null;
-    const focusedControlSelector = ["a.session", "[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]", "[data-sidebar-cli-toggle]", "[data-hermes-toggle]"].find((selector) => focusedControl?.matches(selector));
+    const focusedControlSelector = ["a.session", "[data-session-pin-toggle]", "[data-session-actions-toggle]", "[data-tag-filter]", "[data-tag-edit]", "[data-tag-chooser]", "[data-sidebar-cli-toggle]"].find((selector) => focusedControl?.matches(selector));
     const focusedSessionPath = focusedControl?.closest(".session-row")?.dataset.sessionPath;
     const focusedTag = focusedControl?.dataset.tagFilter;
     const focusedVisibilityToggle = this.document.activeElement?.closest?.("[data-sidebar-visibility-toggle]");
@@ -261,7 +260,6 @@ export class SidebarController {
     if (replacementSearchInput && previousSearchQuery !== undefined) replacementSearchInput.value = previousSearchQuery;
     if (previousSearchOpen !== undefined) this.setSearchOpen(replacementSearchForm, replacementSearchButton, previousSearchOpen);
     if (notificationToggle) this.element.querySelector("[data-notification-toggle]")?.replaceWith(notificationToggle);
-    if (hermesToggle) this.element.querySelector("[data-hermes-toggle]")?.replaceWith(hermesToggle);
     if (resourceUsage) this.element.querySelector("[data-resource-usage]")?.replaceWith(resourceUsage);
     if (blockedWindows) this.element.querySelector("[data-blocked-windows]")?.replaceWith(blockedWindows);
     if (focusedControlSelector) {

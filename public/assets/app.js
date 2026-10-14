@@ -60,7 +60,7 @@ import { HermesPanelController } from "./hermes_panel_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
-const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => sidebarController.closeMobile());
+const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => commandPaletteController.toggle());
 // The Hermes panel's page shares sessionStorage with the page around it, so it keeps its notification identity apart.
 const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : "");
 const webPushController = new WebPushController(window, navigator);
@@ -369,7 +369,10 @@ function commandPaletteCommands() {
   const cliToggle = document.querySelector("[data-sidebar-cli-toggle]");
   const notificationToggle = document.querySelector("[data-notification-toggle]");
   const gatewayUpdate = document.querySelector("[data-gateway-update]:not([hidden]) [data-gateway-update-button]:not([hidden])");
+  const hermesPanel = hermesPanelController.panel;
   return [
+    // Typing its name finds Hermes before the sessions.
+    hermesPanel && ["Hermes", [{ label: `${hermesPanel.hidden ? "Show" : "Hide"} Hermes`, run: () => hermesPanelController.toggle() }], { lead: true }],
     ["This session", [
       writable && pi && { label: "Choose model and thinking", detail: "/model", run: openModelSettingsModal },
       writable && pi && { label: "Session tree", detail: "/tree", run: openTreeSessionModal },
@@ -3455,7 +3458,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   // A held key toggles once, and its repeats stay away from the browser's own Ctrl+K.
-  if (isCtrlOrMetaShortcut(event, "k") && !event.shiftKey && (event.repeat || commandPaletteController.toggle())) {
+  if (isCtrlOrMetaShortcut(event, "k") && !event.shiftKey && (event.repeat || commandPaletteController.toggle() || hermesPanelController.requestCommandPalette())) {
     event.preventDefault();
     return;
   }
