@@ -907,7 +907,9 @@ function notifyFinalAssistantReply(message) {
   // The Hermes panel names Hermes rather than the conversation.
   const name = document.querySelector(".session-header h1")?.textContent.trim() || "current session";
   const body = notificationReplyPreview(liveMessageParser.finalAssistantReplyText(message));
-  showGripiNotification(name, body, window.location.href, `gripi-final-reply:${sessionPath}`).catch(() => {});
+  // A Hermes reply opens the current conversation, which a new one may have replaced by then.
+  const url = hermesPanelController.panelPage ? "/hermes" : window.location.href;
+  showGripiNotification(name, body, url, `gripi-final-reply:${sessionPath}`).catch(() => {});
 }
 
 function updateStatusFromEvent(event) {

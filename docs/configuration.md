@@ -213,7 +213,7 @@ The path can also be a Hermes profile wrapper, which `hermes profile alias <name
 
 With Hermes on, the Hermes button in the session header opens and closes the panel, which stays put while you switch sessions. On a wide screen it takes a column of its own, on a narrower one it lies over the conversation, and on a phone it fills the screen. `↗` opens it in a window of its own.
 
-The panel holds one conversation for quick questions, not sessions: `new` starts over, and every panel, window and device shows the same conversation. While the panel is closed, a dot on the button tells that Hermes replied. Gripi forgets the conversation when it restarts, and Hermes's conversations never show in the sidebar. Hermes still keeps them in its own database, and `gripi list` lists them. A conversation belongs to no project: it always runs in your home folder.
+The panel holds one conversation for quick questions, not sessions: `new` starts over, and every panel, window and device shows the same conversation. If Hermes replies after you close the panel, a dot on the button tells you. Gripi forgets the conversation when it restarts, and Hermes's conversations never show in the sidebar. Hermes still keeps them in its own database, and `gripi list` lists them. A conversation belongs to no project: it always runs in your home folder.
 
 What to expect:
 

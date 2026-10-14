@@ -675,7 +675,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return relationData{view, session, current}
 		},
 		"messageData":    func(view *pageView, message *agent.Message) messageData { return messageData{view, message} },
-		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "agentGlyph": agentGlyph,
+		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "hermesGlyph": hermesGlyph,
 		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
 		"messageBody": func(message *agent.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
@@ -1202,10 +1202,7 @@ func agentLabel(name string) string {
 	return "Pi"
 }
 
-// agentGlyph marks an agent in the sidebar and the session header: π for Pi, and Hermes's caduceus.
-func agentGlyph(name string) template.HTML {
-	if name == "hermes" {
-		return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18"/><path d="M12 5.5C10 3.5 6.5 3.2 3.5 4.5c2.3 1.4 5.4 2 8.5 2.5M12 5.5c2-2 5.5-2.3 8.5-1-2.3 1.4-5.4 2-8.5 2.5"/><path d="M9 10c0 1.8 6 1.4 6 3.5S9 15.7 9 17.5s4.5 1.9 6 1.5"/></svg>`
-	}
-	return "π"
+// hermesGlyph is Hermes's caduceus, which marks the Hermes panel and its button.
+func hermesGlyph() template.HTML {
+	return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18"/><path d="M12 5.5C10 3.5 6.5 3.2 3.5 4.5c2.3 1.4 5.4 2 8.5 2.5M12 5.5c2-2 5.5-2.3 8.5-1-2.3 1.4-5.4 2-8.5 2.5"/><path d="M9 10c0 1.8 6 1.4 6 3.5S9 15.7 9 17.5s4.5 1.9 6 1.5"/></svg>`
 }

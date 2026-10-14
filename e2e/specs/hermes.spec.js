@@ -201,6 +201,18 @@ test("a voice call keeps its session from notifying while the page is away", asy
   await expect.poll(() => presence.at(-1)?.focused).toBe(false);
 });
 
+test("a reply notification opens the current conversation, which a new one may have replaced", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.replyNotifications = [];
+    document.hasFocus = () => false;
+    localStorage.removeItem("gripi:notifications-disabled");
+    window.gripiElectron = { showNotification: async (notification) => window.replyNotifications.push(notification) };
+  });
+  await page.reload();
+  await sendPrompt(page, "List the files");
+  await expect.poll(() => page.evaluate(() => window.replyNotifications.map(({ title, url }) => ({ title, url })))).toEqual([{ title: "Hermes", url: "/hermes" }]);
+});
+
 // Whether something other than the conversation shows at its centre.
 function conversationCovered(page) {
   return page.evaluate(() => {

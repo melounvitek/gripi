@@ -63,16 +63,20 @@ export class HermesPanelController {
     this.sync();
   }
 
-  // Closing only hides the panel, so a reply or a voice call carries on.
+  // Closing only hides the panel, so a reply or a voice call carries on. Focus leaves it, or its hidden page would
+  // still count as looked at, which keeps Hermes's replies from notifying.
   close() {
     this.panel.hidden = true;
     this.document.body.classList.remove("hermes-panel-open");
     this.storeOpen(false);
     this.sync();
+    this.document.querySelector("[data-hermes-toggle]")?.focus();
   }
 
   popOut() {
     this.popup = this.window.open("/hermes", "gripi-hermes", HERMES_WINDOW_FEATURES);
+    // A browser that blocked the window says so itself. The desktop app's window.open returns no window, though it opens one.
+    if (!this.popup && !this.window.gripiElectron) return;
     // Without noopener the window starts with a copy of this window's sessionStorage, which holds its notification
     // identity.
     try { this.popup?.sessionStorage.clear(); } catch (_error) {}

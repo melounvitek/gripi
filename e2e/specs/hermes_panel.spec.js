@@ -48,6 +48,8 @@ test("Hermes talks in a panel next to the session, which switching sessions and 
   await panel(page).getByRole("button", { name: "Close Hermes" }).click();
   await expect(page.locator("#hermes-panel")).toBeHidden();
   await expect(hermesButton(page)).toHaveAttribute("aria-expanded", "false");
+  // The hidden panel would otherwise keep the focus, and with it count as looked at.
+  await expect(hermesButton(page)).toBeFocused();
 });
 
 test("a reply while the panel is closed marks the Hermes button until it opens", async ({ page }) => {
@@ -80,6 +82,16 @@ test("a new conversation in one window replaces it in every other", async ({ pag
   await expect(message(panel(page), "user", "Plan my week")).toHaveCount(0, { timeout: 10_000 });
   await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
   await other.close();
+});
+
+test("a window the browser blocks leaves the panel as it was", async ({ page }) => {
+  await hermesButton(page).click();
+  await askInPanel(page, "Draft a reply to the landlord");
+  await page.evaluate(() => { window.open = () => null; });
+
+  await panel(page).getByRole("button", { name: "Open Hermes in a new window" }).click();
+  await expect(page.locator("#hermes-panel")).toBeVisible();
+  await expect(message(panel(page), "assistant", `${hermes.run.replyPrefix}Draft a reply to the landlord`)).toBeVisible();
 });
 
 test("the panel opens in its own window, which the Hermes button then brings forward", async ({ page }) => {
