@@ -113,6 +113,9 @@
     body.hermes-replied .hermes-tab-line { background: var(--accent); }
     body.hermes-panel-open .hermes-tab { right: calc(min(30rem, 100vw) + var(--conversation-gutter, 0px)); }
     .hermes-tab:hover, .hermes-panel-back:hover { background: transparent; }
+    /* Closing the panel gives the tab the focus, which its line shows as on hover, instead of a ring around it. */
+    .hermes-tab:focus-visible { outline: none; }
+    body:not(.hermes-replied) .hermes-tab:focus-visible .hermes-tab-line { background: var(--muted); }
     @media (hover: hover) and (pointer: fine) { body:not(.hermes-replied) .hermes-tab:hover .hermes-tab-line { background: var(--muted); } }
     /* The header of the page that the panel shows. */
     .hermes-panel-action { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; padding: 0 0.35rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.78rem; font-weight: 500; letter-spacing: 0; line-height: 1; text-transform: none; }
