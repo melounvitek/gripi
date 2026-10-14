@@ -181,6 +181,26 @@ test("typing hermes in Ctrl+K shows the panel, and hides it again from inside it
   await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
 });
 
+test("Ctrl+H shows Hermes, and hides it again from inside it", async ({ page }) => {
+  await page.getByLabel("Message to Pi").click();
+  await page.keyboard.press("Control+h");
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+
+  await page.keyboard.press("Control+h");
+  await expect(page.locator("#hermes-panel")).toBeHidden();
+  await expect(page.getByLabel("Message to Pi")).toBeFocused();
+});
+
+test("Ctrl+H is left to the browser where there's no panel", async ({ page }) => {
+  await page.goto("/hermes");
+  const prevented = await page.evaluate(() => [false, true].map((repeat) => {
+    const event = new KeyboardEvent("keydown", { key: "h", ctrlKey: true, repeat, bubbles: true, cancelable: true });
+    document.dispatchEvent(event);
+    return event.defaultPrevented;
+  }));
+  expect(prevented).toEqual([false, false]);
+});
+
 test("a reply in the panel leaves what you type to Pi in Pi's composer", async ({ page }) => {
   await hermesButton(page).click();
   await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();

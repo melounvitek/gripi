@@ -3501,6 +3501,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (isCtrlOrMetaShortcut(event, "h") && !event.shiftKey && hermesPanelController.toggleFromShortcut(event.repeat)) {
+    event.preventDefault();
+    return;
+  }
+
   if (event.key === "Escape" && sendMenu && !sendMenu.hidden) {
     event.preventDefault();
     closeSendMenu(sendMenuToggle);

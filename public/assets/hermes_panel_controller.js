@@ -154,6 +154,16 @@ export class HermesPanelController {
     return true;
   }
 
+  // Ctrl+H shows or hides the panel, also from its page inside it, once for a held key.
+  toggleFromShortcut(repeat) {
+    const framed = this.document.body.classList.contains("hermes-panel-framed");
+    if (!this.panel && !framed) return false;
+    if (repeat) return true;
+    if (this.panel) this.toggle();
+    else this.tellPanel("gripi:hermes-close");
+    return true;
+  }
+
   replied() {
     if (this.panelPage) this.tellPanel("gripi:hermes-replied");
   }
