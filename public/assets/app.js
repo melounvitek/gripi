@@ -462,6 +462,8 @@ function automaticComposerFocusEnabled() {
 
 function syncComposerFocus(state = composerState?.dataset.state) {
   if (!automaticComposerFocusEnabled() || modalIsOpen()) return;
+  // The Hermes panel's page keeps the focus, but doesn't take it from the page around it, such as from Pi's composer.
+  if (window.parent !== window && !document.hasFocus()) return;
   if (document.activeElement?.matches?.('[data-tool-output-body][role="region"]')) return;
 
   const agentBusy = ["running", "sending", "exporting"].includes(state);

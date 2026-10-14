@@ -88,6 +88,20 @@ test("a reply while the panel is closed marks the Hermes button, and the session
   await expect(dot).toBeHidden();
 });
 
+test("a reply in the panel leaves what you type to Pi in Pi's composer", async ({ page }) => {
+  await hermesButton(page).click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
+  const composer = page.getByLabel("Message to Pi");
+  await composer.click();
+
+  const { session } = await (await page.request.get("/hermes/current")).json();
+  expect((await page.request.post("/prompt", { form: { session, message: "Ping from the phone" } })).ok()).toBe(true);
+  await expect(message(panel(page), "assistant", `${hermes.run.replyPrefix}Ping from the phone`)).toBeVisible();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeEnabled();
+  await page.keyboard.type("Still typing");
+  await expect(composer).toHaveValue("Still typing");
+});
+
 test("a new conversation in one window replaces it in every other", async ({ page, context }) => {
   await hermesButton(page).click();
   await askInPanel(page, "Plan my week");
