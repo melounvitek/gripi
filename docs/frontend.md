@@ -14,7 +14,8 @@ Page-lifetime listeners are registered once by `public/assets/app.js`. Replaceab
 - `LiveMessageParser` interprets Pi event and message shapes without touching the DOM.
 - `LiveMessageRenderer` owns live message DOM state.
 - `ServerMarkdownRenderer` owns cancellable server Markdown requests.
-- `VoiceCallController` owns a Hermes session's voice button, the call view in the conversation's place, the call line with its controls, and the `VoiceConversation` they run.
+- `HermesPanelController` owns the Hermes panel and its button on the page, and on the panel's own page the buttons that close it or open it in a window, and following the current conversation.
+- `VoiceCallController` owns the Hermes panel's voice button, the call view in the conversation's place, the call line with its controls, and the `VoiceConversation` they run.
 - The access, gateway update, project select, and new-session form controllers own their respective timers and listeners.
 
 Before replacing a session view, `app.js` resets controllers that hold session DOM or asynchronous work. After replacement, it binds the new elements before polling resumes.

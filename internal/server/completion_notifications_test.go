@@ -487,11 +487,17 @@ func TestCompletionNotifierCloseCancelsRepliesWaitingForTheGracePeriod(t *testin
 }
 
 func TestCompletedReplyURLFallsBackWhenTheSessionPathWouldExceedThePushBudget(t *testing.T) {
-	if url := completedReplyURL("/session"); url != "/?session=%2Fsession" {
+	if url := completedReplyURL("/session", "pi"); url != "/?session=%2Fsession" {
 		t.Fatalf("short URL = %q", url)
 	}
-	if url := completedReplyURL("/" + strings.Repeat("x", maxNotificationURLBytes)); url != "/" {
+	if url := completedReplyURL("/"+strings.Repeat("x", maxNotificationURLBytes), "pi"); url != "/" {
 		t.Fatalf("oversized URL = %q", url)
+	}
+}
+
+func TestAHermesReplyOpensTheHermesPanelsPage(t *testing.T) {
+	if url := completedReplyURL("hermes:conversation", "hermes"); url != "/hermes" {
+		t.Fatalf("URL = %q", url)
 	}
 }
 

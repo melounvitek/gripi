@@ -86,6 +86,21 @@
     .session-header-tag-action svg, .tag-filter-toggle svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
     .session-header-tag-action:hover { background: transparent; color: var(--text); }
     .session-header-window-action:hover { color: var(--text); background: #ffffff08; }
+    /* The Hermes panel's button, and the header of the page that the panel shows. */
+    .session-header-hermes-action, .hermes-panel-action { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; min-height: 2.1rem; padding: 0 0.35rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 0.78rem; font-weight: 500; letter-spacing: 0; line-height: 1; text-transform: none; }
+    .session-header-hermes-action svg, .hermes-panel-header h1 svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .session-header-hermes-action[aria-expanded="true"] { color: var(--accent); }
+    .hermes-reply-dot { display: none; position: absolute; top: 0.3rem; right: 0.3rem; width: 0.45rem; height: 0.45rem; border-radius: 999px; background: var(--accent); }
+    body.hermes-replied .hermes-reply-dot { display: block; }
+    .hermes-panel-header h1 { display: flex; align-items: center; gap: 0.45rem; }
+    .hermes-panel-header h1 svg { color: var(--gold); }
+    @media (hover: hover) and (pointer: fine) { .session-header-hermes-action:hover, .hermes-panel-action:hover { background: #ffffff08; color: var(--text); } }
+    body:not(.hermes-panel-framed) :is([data-hermes-close], [data-hermes-pop-out]) { display: none; }
+    /* The panel has a column of its own on wide screens, lies over the conversation on narrower ones, and fills a phone's screen. */
+    .hermes-panel { position: fixed; inset: 0 0 0 auto; z-index: 50; width: min(30rem, 100vw); border-left: 1px solid var(--border); background: var(--bg); }
+    .hermes-panel[hidden] { display: none; }
+    .hermes-panel iframe { display: block; width: 100%; height: 100%; border: 0; }
+    @media (min-width: 1280px) { body.hermes-panel-open .app-shell { margin-right: 30rem; } }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.75rem 1.5rem 1.5rem; }
     /* One readable column; long lines are hard to follow in a wide browser window. */
     .conversation-scroll > :not(.jump-controls, .current-session-find, .empty-state) { max-width: 60rem; margin-inline: auto; }
@@ -296,15 +311,9 @@
     .sidebar-load-more.is-loading .sidebar-load-more-spinner { display: inline-block; }
     .session-row { position: relative; display: flex; align-items: center; gap: 0.5rem; min-height: 2rem; margin: 1px 0; padding: 0.25rem 0.5rem; border-radius: 0.25rem; transition: background 120ms ease; }
     .session-row > .session-details { display: contents; }
-    /* Every row starts with the same fixed slot: the project letters, Hermes's profile letters, or the terminal icon of a session active outside Gripi. */
+    /* Every row starts with the same fixed slot: the project letters, or the terminal icon of a session active outside Gripi. */
     .session-row .session-project { order: -1; flex: 0 0 0.875rem; margin: 0; font-size: 0.7rem; }
     .session-row.is-external .session-project { display: none; }
-    /* With several agents, each row starts with its agent: π for Pi, the caduceus for Hermes. */
-    .session-row .session-agent { order: -2; flex: 0 0 0.875rem; }
-    .session-agent, .session-header-agent { display: inline-flex; align-items: center; justify-content: center; color: var(--muted-soft); font-family: var(--mono); font-size: 0.75rem; line-height: 1; }
-    .session-agent[data-agent="hermes"], .session-header-agent[data-agent="hermes"] { color: var(--gold); }
-    .session-agent svg, .session-header-agent svg { width: 0.8rem; height: 0.8rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-    .session-header-agent { flex: none; gap: 0.3rem; font-size: inherit; }
     /* The time slot fits "13h" and shows the activity dot while Pi works. */
     .session-row .session-meta { flex: none; min-width: 3ch; overflow: visible; text-align: right; }
     a.session { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.4rem; color: inherit; text-decoration: none; }
@@ -915,7 +924,7 @@
       /* Row tags are glyphs too small to tap, so taps open the session; the tag filter and the actions menu handle tags. */
       .session-row :is(.session-tag-icon, .tag-overflow) { pointer-events: none; }
       /* Opening a new window misbehaves in an installed Safari web app, so touch devices do without it. */
-      .session-header-window-action, .session-actions-menu [data-session-action="window"], .sidebar-open-pinned-button { display: none; }
+      .session-header-window-action, .session-actions-menu [data-session-action="window"], .sidebar-open-pinned-button, [data-hermes-pop-out] { display: none; }
       .session-header-view-option { min-height: 2.75rem; }
       .send-control { min-width: 2.75rem; }
       .send-button { display: inline-flex; width: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; align-items: center; justify-content: center; font-size: 0; }

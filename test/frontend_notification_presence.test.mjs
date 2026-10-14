@@ -111,6 +111,30 @@ test("a voice call keeps its session in use while the page is away", async () =>
   assert.deepEqual(requests.at(-1), { client_id: "phone", session: "", focused: false, sequence: 4 });
 });
 
+test("the Hermes panel's page keeps its own identity apart from the page around it", async () => {
+  const stored = new Map([["gripi:notification-presence-client", "outer-page"], ["gripi:notification-presence-sequence", "7"]]);
+  const sessionStorage = { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value) };
+  const requests = [];
+  const document = eventTarget({ hidden: false });
+  document.hasFocus = () => true;
+  const window = eventTarget({ sessionStorage, crypto: { randomUUID: () => "panel-page" }, setInterval() { return 1; } });
+  const controller = new NotificationPresenceController(
+    document,
+    window,
+    () => "hermes:conversation",
+    async (_url, options) => { requests.push(JSON.parse(options.body)); },
+    undefined,
+    ":hermes-panel"
+  );
+
+  controller.start();
+  await flush();
+
+  assert.deepEqual(requests, [{ client_id: "panel-page", session: "hermes:conversation", focused: true, sequence: 1 }]);
+  assert.equal(stored.get("gripi:notification-presence-client"), "outer-page");
+  assert.equal(stored.get("gripi:notification-presence-sequence"), "7");
+});
+
 function eventTarget(properties) {
   const listeners = new Map();
   return {

@@ -31,15 +31,6 @@ func (router *Router) Agent(key string) string {
 	return router.agents[max(router.owner(key), 0)].Name
 }
 
-// Names names the router's agents, the first one first.
-func (router *Router) Names() []string {
-	names := make([]string, len(router.agents))
-	for index, routed := range router.agents {
-		names[index] = routed.Name
-	}
-	return names
-}
-
 var errNoAgent = errors.New("no agent serves this session")
 
 func (router *Router) owner(key string) int {

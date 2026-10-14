@@ -69,6 +69,11 @@ func (app *application) index(response http.ResponseWriter, request *http.Reques
 		http.Error(response, "Unable to read sessions", http.StatusInternalServerError)
 		return
 	}
+	// The Hermes panel's conversation is gone, so the panel opens the current one.
+	if view.HermesPanel && view.Selected == nil {
+		http.Redirect(response, request, "/hermes", http.StatusSeeOther)
+		return
+	}
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := app.templates.ExecuteTemplate(response, "index.html", view); err != nil {
 		return
@@ -199,9 +204,6 @@ func sessionViewURL(view *pageView) string {
 	}
 	if view.SelectedProject != "" {
 		values.Set("project", view.SelectedProject)
-	}
-	if view.SelectedAgent != "" {
-		values.Set("agent", view.SelectedAgent)
 	}
 	if view.SearchQuery != "" {
 		values.Set("session_search", view.SearchQuery)

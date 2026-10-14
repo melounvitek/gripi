@@ -97,7 +97,7 @@ func TestOnlyHermesSessionsOfferAVoiceConversationWhenVoiceIsOn(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = handler.(interface{ Close(context.Context) error }).Close(context.Background()) })
-		return getPage(t, handler, "/?session="+url.QueryEscape(session))
+		return getPage(t, handler, "/?"+url.Values{"session": {session}, "session_only": {"1"}}.Encode())
 	}
 	const button = `aria-label="Start a voice conversation"`
 

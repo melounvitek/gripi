@@ -344,10 +344,9 @@ export class SidebarController {
   changeProjectFilter(select) {
     if (!select) return null;
 
-    // The project filter, and the agent filter of a gateway that runs several agents.
     const targetUrl = new URL(this.window.location.href);
-    if (select.value) targetUrl.searchParams.set(select.name, select.value);
-    else targetUrl.searchParams.delete(select.name);
+    if (select.value) targetUrl.searchParams.set("project", select.value);
+    else targetUrl.searchParams.delete("project");
     return this.applyFilters(targetUrl);
   }
 

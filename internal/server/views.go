@@ -120,11 +120,9 @@ type pageView struct {
 	SidebarMetadataDeferred   bool
 	SidebarActivity           map[string]sidebarActivity
 	LiveOutput                liveOutputData
-	// Agents names the agents when the gateway runs several, which the page then tells apart. It is empty otherwise.
-	Agents        []string
-	SelectedAgent string
-	// HermesProfile names the profile Hermes runs, which a Hermes session shows where a Pi session shows its project.
-	HermesProfile string
+	// HermesEnabled offers the Hermes panel. HermesPanel is the page that the panel shows.
+	HermesEnabled bool
+	HermesPanel   bool
 	// VoiceEnabled offers Hermes sessions a voice conversation.
 	VoiceEnabled bool
 }
@@ -133,6 +131,12 @@ type pageView struct {
 const voicePrefix = "[Voice input — respond concisely and conversationally, 2-3 sentences max. No code blocks or markdown.] "
 
 func (app *application) preparePage(request *http.Request, includeConversation bool) (*pageView, error) {
+	return app.prepareView(request, includeConversation, false)
+}
+
+// prepareView prepares a page, whose sessions include Hermes's conversations only with listHermes. A page shows them
+// only in the Hermes panel, the session-only page of one of them.
+func (app *application) prepareView(request *http.Request, includeConversation, listHermes bool) (*pageView, error) {
 	// A managed session may still be registered under its synthetic pending path.
 	for _, pending := range app.pendingSessions.Entries() {
 		if !app.rpcClients.Active(pending.Path) || (app.ownsSession != nil && !app.ownsSession(request, pending.Path)) {
@@ -207,6 +211,12 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	}
 	app.rememberSessionHashes(all)
 	params = request.URL.Query()
+	hermesPanel := params.Get("session_only") == "1" && app.agentOf(params.Get("session")) == "hermes"
+	if !listHermes {
+		all = slices.DeleteFunc(all, func(session *agent.Session) bool {
+			return session.Agent == "hermes" && !(hermesPanel && session.Path == params.Get("session"))
+		})
+	}
 	selectedProject := params.Get("project")
 	knownProjects := make(map[string]bool)
 	for _, session := range all {
@@ -225,7 +235,8 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 				break
 			}
 		}
-		if selected == nil && len(all) > 0 {
+		// The Hermes panel shows no other session in place of its conversation.
+		if selected == nil && len(all) > 0 && !hermesPanel {
 			excluded := params["session_fallback_excluding"]
 			for _, session := range all {
 				if !slices.Contains(excluded, session.Path) {
@@ -258,20 +269,8 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if err != nil {
 		return nil, err
 	}
-	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), VoiceEnabled: app.voice != nil}
+	view := &pageView{Request: request, Nonce: requestNonce(request), ServerOrigin: absoluteRedirectURL(request, "", app.config.TrustProxyHeaders), Params: params, Sessions: all, Selected: selected, SelectedProject: selectedProject, SearchQuery: strings.TrimSpace(params.Get("session_search")), Unread: unread, Pinned: pinned, SessionOnly: params.Get("session_only") == "1", GatewayInstanceID: app.instanceID, Home: app.config.Home, BrowserAccessEnabled: !app.config.BrowserAuthDisabled, WorkspaceAccessEnabled: app.config.MultiUserMode, ResourceMonitoringEnabled: app.config.ResourceMonitoringEnabled, SidebarMetadataDeferred: metadataDeferred, SidebarActivity: make(map[string]sidebarActivity), HermesEnabled: app.config.HermesPath != "", HermesPanel: hermesPanel, VoiceEnabled: app.voice != nil}
 	view.ExternalFollow = externalFollow
-	if router, ok := app.adapter.(*agent.Router); ok {
-		view.Agents = router.Names()
-		// Hermes itself runs the default profile, and the wrapper that `hermes profile alias` creates is named after its
-		// profile.
-		view.HermesProfile = filepath.Base(app.config.HermesPath)
-		if view.HermesProfile == "hermes" {
-			view.HermesProfile = "default"
-		}
-		if selected := params.Get("agent"); slices.Contains(view.Agents, selected) {
-			view.SelectedAgent = selected
-		}
-	}
 	if notifier := app.completionNotifications; notifier != nil {
 		notifier.mu.Lock()
 		notifier.pruneClientsLocked()
@@ -545,9 +544,6 @@ func (view *pageView) prepareSidebar() {
 		if view.SelectedProject != "" && session.CWD != view.SelectedProject {
 			continue
 		}
-		if view.SelectedAgent != "" && session.Agent != view.SelectedAgent {
-			continue
-		}
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{session.DisplayName, session.CWD, filepath.Base(session.CWD), session.FirstUserMessage}, "\n")), query) {
 			continue
 		}
@@ -679,7 +675,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return relationData{view, session, current}
 		},
 		"messageData":    func(view *pageView, message *agent.Message) messageData { return messageData{view, message} },
-		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "agentGlyph": agentGlyph,
+		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "hermesGlyph": hermesGlyph,
 		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
 		"messageBody": func(message *agent.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
@@ -793,9 +789,6 @@ func sessionURL(view *pageView, session *agent.Session) string {
 		if view.SelectedProject != "" {
 			values.Set("project", view.SelectedProject)
 		}
-		if view.SelectedAgent != "" {
-			values.Set("agent", view.SelectedAgent)
-		}
 		if view.SearchQuery != "" {
 			values.Set("session_search", view.SearchQuery)
 		}
@@ -852,9 +845,6 @@ func sidebarLoadURL(view *pageView) string {
 	}
 	if view.SelectedProject != "" {
 		values.Set("project", view.SelectedProject)
-	}
-	if view.SelectedAgent != "" {
-		values.Set("agent", view.SelectedAgent)
 	}
 	if view.SearchQuery != "" {
 		values.Set("session_search", view.SearchQuery)
@@ -1212,10 +1202,7 @@ func agentLabel(name string) string {
 	return "Pi"
 }
 
-// agentGlyph marks an agent in the sidebar and the session header: π for Pi, and Hermes's caduceus.
-func agentGlyph(name string) template.HTML {
-	if name == "hermes" {
-		return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18"/><path d="M12 5.5C10 3.5 6.5 3.2 3.5 4.5c2.3 1.4 5.4 2 8.5 2.5M12 5.5c2-2 5.5-2.3 8.5-1-2.3 1.4-5.4 2-8.5 2.5"/><path d="M9 10c0 1.8 6 1.4 6 3.5S9 15.7 9 17.5s4.5 1.9 6 1.5"/></svg>`
-	}
-	return "π"
+// hermesGlyph is Hermes's caduceus, which marks the Hermes panel and its button.
+func hermesGlyph() template.HTML {
+	return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v18"/><path d="M12 5.5C10 3.5 6.5 3.2 3.5 4.5c2.3 1.4 5.4 2 8.5 2.5M12 5.5c2-2 5.5-2.3 8.5-1-2.3 1.4-5.4 2-8.5 2.5"/><path d="M9 10c0 1.8 6 1.4 6 3.5S9 15.7 9 17.5s4.5 1.9 6 1.5"/></svg>`
 }
