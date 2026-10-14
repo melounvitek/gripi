@@ -12,10 +12,11 @@
   <meta name="apple-mobile-web-app-title" content="Gripi">
   <link rel="stylesheet" href="/assets/app.css?v={{.GatewayInstanceID}}">
 </head>
-<body class="{{if .SessionOnly}}session-only{{end}}" data-browser-access-enabled="{{.BrowserAccessEnabled}}" data-workspace-access-enabled="{{.WorkspaceAccessEnabled}}" data-gateway-instance-id="{{.GatewayInstanceID}}" data-home-dir="{{.Home}}">
+<body class="{{if .SessionOnly}}session-only{{end}}{{if .HermesPanel}} hermes-panel-page{{end}}" data-browser-access-enabled="{{.BrowserAccessEnabled}}" data-workspace-access-enabled="{{.WorkspaceAccessEnabled}}" data-gateway-instance-id="{{.GatewayInstanceID}}" data-home-dir="{{.Home}}">
   <div class="app-shell">
     {{if not .SessionOnly}}<input type="checkbox" class="mobile-session-toggle" id="mobile-session-toggle">{{template "sidebar" .}}<label for="mobile-session-toggle" class="mobile-sidebar-backdrop" aria-label="Hide sessions"></label>{{end}}
     {{template "conversation" .}}
+    {{if and .HermesEnabled (not .SessionOnly)}}<aside class="hermes-panel" id="hermes-panel" aria-label="Hermes" hidden><iframe title="Hermes"></iframe></aside>{{end}}
   </div>
   <script nonce="{{.Nonce}}">{
     // Show the latest messages before app.js loads; it takes over scrolling once it runs.

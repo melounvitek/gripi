@@ -64,7 +64,7 @@ export default defineConfig({
       // Needs the gateway that also runs the fake Hermes: node e2e/support/managed_server.mjs --hermes
       name: "hermes",
       dependencies: ["setup"],
-      testMatch: /specs\/hermes\.spec\.js$/,
+      testMatch: /specs\/hermes(_panel)?\.spec\.js$/,
       use: {
         storageState,
         viewport: { width: 1440, height: 900 },

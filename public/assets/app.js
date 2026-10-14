@@ -56,10 +56,13 @@ import { ImageViewerController } from "./image_viewer_controller.js";
 import { NotificationPresenceController } from "./notification_presence.js";
 import { WebPushController } from "./web_push.js";
 import { VoiceCallController } from "./voice_call_controller.js";
+import { HermesPanelController } from "./hermes_panel_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
-const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath);
+const hermesPanelController = new HermesPanelController(document, window, currentSessionPath);
+// The Hermes panel's page shares sessionStorage with the page around it, so it keeps its notification identity apart.
+const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : "");
 const webPushController = new WebPushController(window, navigator);
 const notifyAccessRequest = (title, body, tag) =>
   showGripiNotification(title, body, window.location.href, tag).catch(() => {});
@@ -901,7 +904,8 @@ function notifyFinalAssistantReply(message) {
   const key = finalAssistantReplyKey(sessionPath, message);
   if (notifiedFinalReplyKeys.has(key)) return;
   notifiedFinalReplyKeys.add(key);
-  const name = document.querySelector(".session-header-name")?.textContent.trim() || "current session";
+  // The Hermes panel names Hermes rather than the conversation.
+  const name = document.querySelector(".session-header h1")?.textContent.trim() || "current session";
   const body = notificationReplyPreview(liveMessageParser.finalAssistantReplyText(message));
   showGripiNotification(name, body, window.location.href, `gripi-final-reply:${sessionPath}`).catch(() => {});
 }
@@ -1629,6 +1633,7 @@ function renderEvent(event) {
     const reply = pendingFinalAssistantReply;
     pendingFinalAssistantReply = null;
     notifyFinalAssistantReply(reply);
+    if (reply) hermesPanelController.replied();
     liveAgentRunning = false;
     liveBusySince = null;
     if (!renderErrorEvent(event)) {
@@ -3679,6 +3684,7 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
 function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery = null } = {}) {
   const generation = sessionViewGeneration;
   notificationPresenceController.sessionChanged();
+  hermesPanelController.sync();
   newSessionFormController.initialize();
   ensureNotificationWorker().catch(() => {});
   browserAccessController.resume();
@@ -3746,6 +3752,7 @@ function bootstrapPage() {
   sidebarController.initialize();
   sessionActionsController.initialize();
   sessionTagsController.initialize();
+  hermesPanelController.initialize();
   bindPageLifetimeControls();
   bindSessionDom();
   bindSessionControls();

@@ -3,13 +3,15 @@ const NOTIFICATION_PRESENCE_SEQUENCE_KEY = "gripi:notification-presence-sequence
 const NOTIFICATION_PRESENCE_HEARTBEAT_MS = 10_000;
 
 export class NotificationPresenceController {
-  constructor(documentObject, windowObject, sessionPath, fetchFunction = windowObject.fetch.bind(windowObject), clientID = notificationPresenceClientID(windowObject)) {
+  // A page in a frame shares sessionStorage with the page around it, so it keeps its identity under its own scope.
+  constructor(documentObject, windowObject, sessionPath, fetchFunction = windowObject.fetch.bind(windowObject), clientID = null, storageScope = "") {
     this.document = documentObject;
     this.window = windowObject;
     this.sessionPath = sessionPath;
     this.fetch = fetchFunction;
-    this.clientID = clientID;
-    this.sequence = notificationPresenceSequence(windowObject);
+    this.sequenceKey = `${NOTIFICATION_PRESENCE_SEQUENCE_KEY}${storageScope}`;
+    this.clientID = clientID ?? notificationPresenceClientID(windowObject, `${NOTIFICATION_PRESENCE_CLIENT_KEY}${storageScope}`);
+    this.sequence = notificationPresenceSequence(windowObject, this.sequenceKey);
     this.started = false;
     this.lastSession = null;
     this.lastFocused = null;
@@ -57,7 +59,7 @@ export class NotificationPresenceController {
     this.lastSession = session;
     this.lastFocused = focused;
     this.sequence += 1;
-    storeNotificationPresenceSequence(this.window, this.sequence);
+    storeNotificationPresenceSequence(this.window, this.sequenceKey, this.sequence);
     this.fetch("/web-push/presence", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -67,30 +69,30 @@ export class NotificationPresenceController {
   }
 }
 
-function notificationPresenceClientID(windowObject) {
+function notificationPresenceClientID(windowObject, key) {
   try {
-    const existing = windowObject.sessionStorage.getItem(NOTIFICATION_PRESENCE_CLIENT_KEY);
+    const existing = windowObject.sessionStorage.getItem(key);
     if (/^[A-Za-z0-9_-]{1,64}$/.test(existing || "")) return existing;
     const generated = randomClientID(windowObject);
-    windowObject.sessionStorage.setItem(NOTIFICATION_PRESENCE_CLIENT_KEY, generated);
+    windowObject.sessionStorage.setItem(key, generated);
     return generated;
   } catch (_error) {
     return randomClientID(windowObject);
   }
 }
 
-function notificationPresenceSequence(windowObject) {
+function notificationPresenceSequence(windowObject, key) {
   try {
-    const sequence = Number(windowObject.sessionStorage.getItem(NOTIFICATION_PRESENCE_SEQUENCE_KEY));
+    const sequence = Number(windowObject.sessionStorage.getItem(key));
     return Number.isSafeInteger(sequence) && sequence >= 0 ? sequence : 0;
   } catch (_error) {
     return 0;
   }
 }
 
-function storeNotificationPresenceSequence(windowObject, sequence) {
+function storeNotificationPresenceSequence(windowObject, key, sequence) {
   try {
-    windowObject.sessionStorage.setItem(NOTIFICATION_PRESENCE_SEQUENCE_KEY, String(sequence));
+    windowObject.sessionStorage.setItem(key, String(sequence));
   } catch (_error) {
   }
 }

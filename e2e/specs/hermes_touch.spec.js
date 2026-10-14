@@ -17,3 +17,14 @@ test("a voice conversation starts and ends, and what was said opens, on the firs
   await spoken.locator(".message-spoken-bars").tap();
   await expect(spoken.locator(".message-body")).toBeVisible();
 });
+
+test("the Hermes panel opens over the whole screen and closes, on the first taps", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Hermes", exact: true }).tap();
+  const panel = page.locator("#hermes-panel");
+  await expect(page.frameLocator("#hermes-panel iframe").getByLabel("Message to Hermes")).toBeVisible();
+  expect(await panel.boundingBox()).toEqual({ x: 0, y: 0, ...page.viewportSize() });
+
+  await page.frameLocator("#hermes-panel iframe").getByRole("button", { name: "Close Hermes" }).tap();
+  await expect(panel).toBeHidden();
+});
