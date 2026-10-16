@@ -1,5 +1,5 @@
 (function installNotificationPreview(scope) {
-  function protectFencedNotificationCode(source, protect) {
+  function removeFencedNotificationCode(source) {
     const lines = source.split("\n");
     const output = [];
     for (let index = 0; index < lines.length; index += 1) {
@@ -16,8 +16,30 @@
         closingIndex += 1;
       }
 
-      output.push(protect(lines.slice(index + 1, closingIndex).join("\n")));
+      output.push("");
       index = closingIndex;
+    }
+    return output.join("\n");
+  }
+
+  function notificationTableCells(line) {
+    return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+  }
+
+  function removeNotificationTables(source) {
+    const lines = source.split("\n");
+    const output = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      const delimiter = lines[index + 1]?.includes("|") ? notificationTableCells(lines[index + 1]) : [];
+      if (!delimiter.length || !delimiter.every((cell) => /^:?-+:?$/.test(cell)) || notificationTableCells(lines[index]).length !== delimiter.length) {
+        output.push(lines[index]);
+        continue;
+      }
+
+      index += 2;
+      while (index < lines.length && lines[index].includes("|")) index += 1;
+      output.push("");
+      index -= 1;
     }
     return output.join("\n");
   }
@@ -78,7 +100,7 @@
   }
 
   scope.gripiNotificationReplyPreview = function notificationReplyPreview(text) {
-    const source = String(text || "").replace(/\r\n?/g, "\n");
+    const source = String(text || "").replace(/\r\n?/g, "\n").replace(/^\s{0,3}>\s?/gm, "");
     const protectedSegments = [];
     const sourceCharacters = new Set(source);
     let markerCodePoint = 0xE000;
@@ -87,13 +109,12 @@
     while (source.includes(segmentMarker)) segmentMarker += "\uE001";
     const protect = (value) => `${segmentMarker}${protectedSegments.push(value) - 1}${segmentMarker}`;
 
-    let preview = protectFencedNotificationCode(source, protect);
+    let preview = removeNotificationTables(removeFencedNotificationCode(source));
     preview = protectInlineNotificationCode(preview, protect)
       .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
       .replace(/<(https?:\/\/[^>\s]+)>/gi, (_match, url) => protect(url))
       .replace(/\bhttps?:\/\/[^\s<]+/gi, (url) => protect(url))
-      .replace(/^\s{0,3}>\s?/gm, "")
       .replace(/^\s{0,3}#{1,6}\s+/gm, "")
       .replace(/^\s*(?:[-*+] |\d+[.)]\s+)/gm, "")
       .replace(/^\s*[-*_]{3,}\s*$/gm, " ")

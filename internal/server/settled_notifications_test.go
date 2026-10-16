@@ -163,7 +163,8 @@ func TestSidebarCompletionMetadataChangesOnlyOnEligibleSettledReply(t *testing.T
 		}
 	}
 	assertMetadata("", "")
-	final := notificationMessage("final", "**Done** <safe>", "stop")
+	preview := "**Done** <safe>" + strings.Repeat(" Checked.", 25)
+	final := notificationMessage("final", preview, "stop")
 	notifier.observePi(client, map[string]any{"type": "agent_start"})
 	// Persisted counts and previews must not produce completion metadata.
 	appendExternalSessionReply(t, path, "progress", "")
@@ -172,7 +173,6 @@ func TestSidebarCompletionMetadataChangesOnlyOnEligibleSettledReply(t *testing.T
 	assertMetadata("", "")
 	notifier.observePi(client, map[string]any{"type": "agent_settled"})
 	id := piReplyID(final)
-	preview := agent.NotificationPreview("**Done** <safe>")
 	assertMetadata(id, preview)
 	notifier.observePi(client, map[string]any{"type": "agent_start"})
 	appendExternalSessionReply(t, path, "more-progress", "progress")
