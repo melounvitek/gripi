@@ -191,6 +191,113 @@ test("Ctrl+H shows Hermes, and hides it again from inside it", async ({ page }) 
   await expect(page.getByLabel("Message to Pi")).toBeFocused();
 });
 
+test("Tab goes on from each conversation to the other's composer, or to Hermes's call", async ({ page }) => {
+  const stops = {
+    hermes: panel(page).getByLabel("Message to Hermes"),
+    hermesConversation: panel(page).locator("#conversation-scroll"),
+    pi: page.getByLabel("Message to Pi"),
+    piConversation: page.locator("#conversation-scroll")
+  };
+  const tabThrough = async (...names) => {
+    for (const name of names) {
+      await page.keyboard.press("Tab");
+      await expect(stops[name]).toBeFocused();
+    }
+  };
+  await hermesButton(page).click();
+  await expect(stops.hermes).toBeFocused();
+  await tabThrough("hermesConversation", "pi", "piConversation", "hermes");
+
+  // In a call, its controls take the place of Hermes's composer and covered conversation.
+  const call = panel(page).getByRole("group", { name: "Voice conversation with Hermes" });
+  stops.mute = call.getByRole("button", { name: "mute", exact: true });
+  stops.end = call.getByRole("button", { name: "end", exact: true });
+  await panel(page).getByRole("button", { name: "Start a voice conversation" }).click();
+  await expect(stops.end).toBeFocused();
+  await tabThrough("pi", "piConversation", "mute", "end", "pi");
+});
+
+test("Ctrl+Shift+H starts and ends Hermes's voice call while the panel shows, and Ctrl+Shift+M mutes it", async ({ page }) => {
+  const pi = page.getByLabel("Message to Pi");
+  const call = panel(page).getByRole("group", { name: "Voice conversation with Hermes" });
+  const state = panel(page).locator("[data-voice-call-view] [data-voice-call-state]");
+  await hermesButton(page).click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+  await page.keyboard.press("Control+h");
+  await page.keyboard.press("Control+Shift+h");
+  await hermesButton(page).click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+  await expect(call).toBeHidden();
+
+  // Started from Pi's composer, the call leaves the cursor there, and Hermes's reply plays.
+  await pi.click();
+  await page.keyboard.press("Control+Shift+h");
+  await expect(state).toHaveText("speaking");
+  await expect(state).toHaveText("listening");
+  await expect(pi).toBeFocused();
+  await page.keyboard.press("Control+Shift+m");
+  await expect(call.getByRole("button", { name: "unmute", exact: true })).toBeVisible();
+
+  // Inside the panel, the keys work too.
+  await call.getByRole("button", { name: "unmute", exact: true }).focus();
+  await page.keyboard.press("Control+Shift+m");
+  await expect(call.getByRole("button", { name: "mute", exact: true })).toBeVisible();
+  await page.keyboard.press("Control+Shift+h");
+  await expect(call).toBeHidden();
+});
+
+test("Tab while Hermes starts puts the cursor in it once it has", async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await hermesButton(page).click();
+  await page.locator("#conversation-scroll").focus();
+  await page.keyboard.press("Tab");
+
+  release();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+});
+
+test("Ctrl+Shift+H while Hermes starts starts the call once it has", async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await hermesButton(page).click();
+  await page.getByLabel("Message to Pi").focus();
+  await page.keyboard.press("Control+Shift+h");
+  // There's no call to mute yet.
+  await page.keyboard.press("Control+Shift+m");
+
+  release();
+  const call = panel(page).getByRole("group", { name: "Voice conversation with Hermes" });
+  await expect(call.getByRole("button", { name: "mute", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Message to Pi")).toBeFocused();
+});
+
+test("Ctrl+Shift+H twice while Hermes starts leaves it without a call", async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await hermesButton(page).click();
+  await page.getByLabel("Message to Pi").focus();
+  await page.keyboard.press("Control+Shift+h");
+  await page.keyboard.press("Control+Shift+h");
+
+  release();
+  await expect(page.locator("#hermes-panel")).not.toHaveClass(/is-loading/);
+  await page.waitForTimeout(500);
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
+});
+
 test("Ctrl+H is left to the browser where there's no panel", async ({ page }) => {
   await page.goto("/hermes");
   const prevented = await page.evaluate(() => [false, true].map((repeat) => {

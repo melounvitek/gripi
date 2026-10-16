@@ -244,6 +244,21 @@ test("muting moves on from a voice that may have been starting", async (t) => {
   assert.deepEqual(call.played, ["The production database is fine."]);
 });
 
+test("muting before a pause sends what was said", async (t) => {
+  const call = voiceCall(t, { transcripts: ["Check the production database."] });
+  await call.conversation.start();
+
+  call.level = 0.5;
+  await call.wait(1000);
+  call.level = 0;
+  await call.wait(300);
+  call.conversation.setMuted(true);
+  await flush();
+
+  assert.deepEqual(call.sent, [`${VOICE_PREFIX}Check the production database.`]);
+  assert.equal(call.conversation.muted, true);
+});
+
 test("a reply that waited for talk that failed to be transcribed is spoken with the error", async (t) => {
   const transcript = deferred();
   const call = voiceCall(t, { transcripts: [transcript.promise] });

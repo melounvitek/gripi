@@ -6,12 +6,13 @@ const HERMES_WINDOW_FEATURES = "popup,width=480,height=820";
 // switching sessions never touches it. On that page, the controller keeps to the current conversation, which a new one
 // in any window replaces.
 export class HermesPanelController {
-  constructor(documentObject, windowObject, currentSessionPath, toggleCommandPalette, focusConversation) {
+  constructor(documentObject, windowObject, currentSessionPath, toggleCommandPalette, focusConversation, runVoiceShortcut) {
     this.document = documentObject;
     this.window = windowObject;
     this.currentSessionPath = currentSessionPath;
     this.toggleCommandPalette = toggleCommandPalette;
     this.focusConversation = focusConversation;
+    this.runVoiceShortcut = runVoiceShortcut;
     this.panelPage = documentObject.body.classList.contains("hermes-panel-page");
     this.panel = null;
     this.frame = null;
@@ -32,6 +33,8 @@ export class HermesPanelController {
       if (this.frame.getAttribute("src") !== "/hermes") return;
       this.panel.classList.remove("is-loading");
       if (this.focusOnLoad) this.focusFrame();
+      if (this.callOnLoad) this.frame.contentWindow.postMessage("gripi:hermes-voice-call", this.window.location.origin);
+      this.callOnLoad = false;
     });
     this.document.addEventListener("click", (event) => {
       if (event.target.closest("[data-hermes-toggle]")) this.toggle();
@@ -43,6 +46,7 @@ export class HermesPanelController {
       if (event.data === "gripi:hermes-close") this.close();
       if (event.data === "gripi:hermes-pop-out") this.popOut();
       if (event.data === "gripi:hermes-command-palette") this.toggleCommandPalette();
+      if (event.data === "gripi:hermes-focus-session") this.focusConversation();
       if (event.data === "gripi:hermes-replied" && this.panel.hidden) {
         this.document.body.classList.add("hermes-replied");
         this.sync();
@@ -62,8 +66,7 @@ export class HermesPanelController {
       this.popup.focus();
     } else if (this.panel.hidden) {
       this.open();
-      this.focusOnLoad = true;
-      if (!this.panel.classList.contains("is-loading")) this.focusFrame();
+      this.focusPanel();
     } else {
       this.close();
     }
@@ -86,6 +89,11 @@ export class HermesPanelController {
     return this.focusOnLoad || this.document.activeElement === this.frame;
   }
 
+  focusPanel() {
+    this.focusOnLoad = true;
+    if (!this.panel.classList.contains("is-loading")) this.focusFrame();
+  }
+
   // The panel's page puts the cursor in Hermes's conversation, which the page itself never takes from the page around it.
   focusFrame() {
     this.focusOnLoad = false;
@@ -97,6 +105,7 @@ export class HermesPanelController {
   close() {
     this.panel.hidden = true;
     this.focusOnLoad = false;
+    this.callOnLoad = false;
     this.document.body.classList.remove("hermes-panel-open");
     this.storeOpen(false);
     this.sync();
@@ -139,7 +148,10 @@ export class HermesPanelController {
       if (event.target.closest("[data-hermes-pop-out]")) this.tellPanel("gripi:hermes-pop-out");
     });
     this.window.addEventListener("message", (event) => {
-      if (event.origin === this.window.location.origin && event.source === this.window.parent && event.data === "gripi:hermes-focus") this.focusConversation();
+      if (event.origin !== this.window.location.origin || event.source !== this.window.parent) return;
+      if (event.data === "gripi:hermes-focus") this.focusConversation();
+      if (event.data === "gripi:hermes-voice-call") this.runVoiceShortcut("call");
+      if (event.data === "gripi:hermes-voice-mute") this.runVoiceShortcut("mute");
     });
     const follow = () => this.followCurrentConversation().catch(() => {});
     this.window.addEventListener("focus", follow);
@@ -154,6 +166,14 @@ export class HermesPanelController {
     return true;
   }
 
+  // With the panel shown, Tab goes on from either side's conversation to the other side's composer.
+  focusOtherSide() {
+    if (this.panel && !this.panel.hidden) this.focusPanel();
+    else if (this.document.body.classList.contains("hermes-panel-framed")) this.tellPanel("gripi:hermes-focus-session");
+    else return false;
+    return true;
+  }
+
   // Ctrl+H shows or hides the panel, also from its page inside it, once for a held key.
   toggleFromShortcut(repeat) {
     const framed = this.document.body.classList.contains("hermes-panel-framed");
@@ -161,6 +181,22 @@ export class HermesPanelController {
     if (repeat) return true;
     if (this.panel) this.toggle();
     else this.tellPanel("gripi:hermes-close");
+    return true;
+  }
+
+  // Ctrl+Shift+H and Ctrl+Shift+M reach Hermes's voice call on its page, and around the panel while it shows.
+  voiceShortcut(action, repeat) {
+    const shown = this.panel && !this.panel.hidden;
+    if (!shown && !this.panelPage) return false;
+    if (repeat) return true;
+    if (!shown) {
+      this.runVoiceShortcut(action);
+    } else if (this.panel.classList.contains("is-loading")) {
+      // Hermes starting has no call to mute yet.
+      if (action === "call") this.callOnLoad = !this.callOnLoad;
+    } else {
+      this.frame.contentWindow.postMessage(`gripi:hermes-voice-${action}`, this.window.location.origin);
+    }
     return true;
   }
 

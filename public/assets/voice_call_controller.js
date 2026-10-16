@@ -58,6 +58,13 @@ export class VoiceCallController {
     this.callChanged(true);
   }
 
+  // Ctrl+Shift+H starts or ends the call, as the voice button and end do, and Ctrl+Shift+M mutes or unmutes it.
+  shortcut(action) {
+    if (action === "mute") this.conversation?.setMuted(!this.conversation.muted);
+    else if (this.conversation) this.end();
+    else if (this.elements && !this.elements.button.hidden && !this.elements.button.disabled) this.start();
+  }
+
   replyFinished(text) {
     this.conversation?.replyFinished(text);
   }
@@ -102,7 +109,7 @@ export class VoiceCallController {
       if (error) this.failed(error);
       return;
     }
-    if (focused === button) end.focus();
+    if (inputRow.contains(focused)) end.focus();
 
     if (view.dataset.state !== state) {
       view.dataset.state = state;

@@ -60,7 +60,7 @@ import { HermesPanelController } from "./hermes_panel_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
-const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => commandPaletteController.toggle(), focusConversation);
+const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => commandPaletteController.toggle(), focusConversation, (action) => voiceCallController.shortcut(action));
 // The Hermes panel's page shares sessionStorage with the page around it, so it keeps its notification identity apart.
 const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : "");
 const webPushController = new WebPushController(window, navigator);
@@ -482,8 +482,16 @@ function syncComposerFocus(state = composerState?.dataset.state) {
 function focusConversation() {
   const modal = document.querySelector("[data-modal]:not([hidden])");
   if (modal) return modalFocusables(modal)[0]?.focus();
+  // A voice call hides the composer and covers the conversation, so its controls take the cursor.
+  const call = promptForm?.hasAttribute("data-voice-call") && promptForm.querySelector("[data-voice-call-mute]");
   const composer = automaticComposerFocusEnabled() && promptTextarea && !promptTextarea.disabled;
-  (composer ? promptTextarea : conversationScroll)?.focus({ preventScroll: true });
+  (call || (composer ? promptTextarea : conversationScroll))?.focus({ preventScroll: true });
+}
+
+// The last stop on each side of the Hermes panel: the conversation, or the end of Hermes's voice call.
+function focusOtherSideOfHermesPanel(event) {
+  if (event.key !== "Tab" || event.shiftKey || event.target !== event.currentTarget) return;
+  if (hermesPanelController.focusOtherSide()) event.preventDefault();
 }
 
 function toggleConversationPromptFocus(event, nextElement) {
@@ -2673,6 +2681,9 @@ function bindSessionControls() {
     }
   });
 
+  conversationScroll?.addEventListener("keydown", focusOtherSideOfHermesPanel);
+  promptForm?.querySelector("[data-voice-call-end]")?.addEventListener("keydown", focusOtherSideOfHermesPanel);
+
   promptTextarea?.addEventListener("paste", (event) => {
     const items = [...(event.clipboardData?.items || [])];
     const files = items.map((item) => item.kind === "file" ? item.getAsFile() : null).filter(Boolean);
@@ -3502,6 +3513,12 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (isCtrlOrMetaShortcut(event, "h") && !event.shiftKey && hermesPanelController.toggleFromShortcut(event.repeat)) {
+    event.preventDefault();
+    return;
+  }
+
+  const voiceAction = event.shiftKey && (isCtrlOrMetaShortcut(event, "h") ? "call" : isCtrlOrMetaShortcut(event, "m") ? "mute" : null);
+  if (voiceAction && hermesPanelController.voiceShortcut(voiceAction, event.repeat)) {
     event.preventDefault();
     return;
   }
