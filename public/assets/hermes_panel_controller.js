@@ -6,12 +6,13 @@ const HERMES_WINDOW_FEATURES = "popup,width=480,height=820";
 // switching sessions never touches it. On that page, the controller keeps to the current conversation, which a new one
 // in any window replaces.
 export class HermesPanelController {
-  constructor(documentObject, windowObject, currentSessionPath, toggleCommandPalette, focusConversation) {
+  constructor(documentObject, windowObject, currentSessionPath, toggleCommandPalette, focusConversation, runVoiceShortcut) {
     this.document = documentObject;
     this.window = windowObject;
     this.currentSessionPath = currentSessionPath;
     this.toggleCommandPalette = toggleCommandPalette;
     this.focusConversation = focusConversation;
+    this.runVoiceShortcut = runVoiceShortcut;
     this.panelPage = documentObject.body.classList.contains("hermes-panel-page");
     this.panel = null;
     this.frame = null;
@@ -140,7 +141,10 @@ export class HermesPanelController {
       if (event.target.closest("[data-hermes-pop-out]")) this.tellPanel("gripi:hermes-pop-out");
     });
     this.window.addEventListener("message", (event) => {
-      if (event.origin === this.window.location.origin && event.source === this.window.parent && event.data === "gripi:hermes-focus") this.focusConversation();
+      if (event.origin !== this.window.location.origin || event.source !== this.window.parent) return;
+      if (event.data === "gripi:hermes-focus") this.focusConversation();
+      if (event.data === "gripi:hermes-voice-call") this.runVoiceShortcut("call");
+      if (event.data === "gripi:hermes-voice-mute") this.runVoiceShortcut("mute");
     });
     const follow = () => this.followCurrentConversation().catch(() => {});
     this.window.addEventListener("focus", follow);
@@ -170,6 +174,16 @@ export class HermesPanelController {
     if (repeat) return true;
     if (this.panel) this.toggle();
     else this.tellPanel("gripi:hermes-close");
+    return true;
+  }
+
+  // Ctrl+Shift+H and Ctrl+Shift+M reach Hermes's voice call on its page, and around the panel while it shows.
+  voiceShortcut(action, repeat) {
+    const shown = this.panel && !this.panel.hidden;
+    if (!shown && !this.panelPage) return false;
+    if (repeat) return true;
+    if (shown) this.frame.contentWindow.postMessage(`gripi:hermes-voice-${action}`, this.window.location.origin);
+    else this.runVoiceShortcut(action);
     return true;
   }
 

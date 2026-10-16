@@ -217,6 +217,35 @@ test("Tab goes on from each conversation to the other's composer, or to Hermes's
   await tabThrough("pi", "piConversation", "mute", "end", "pi");
 });
 
+test("Ctrl+Shift+H starts and ends Hermes's voice call while the panel shows, and Ctrl+Shift+M mutes it", async ({ page }) => {
+  const pi = page.getByLabel("Message to Pi");
+  const call = panel(page).getByRole("group", { name: "Voice conversation with Hermes" });
+  const state = panel(page).locator("[data-voice-call-view] [data-voice-call-state]");
+  await hermesButton(page).click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+  await page.keyboard.press("Control+h");
+  await page.keyboard.press("Control+Shift+h");
+  await hermesButton(page).click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+  await expect(call).toBeHidden();
+
+  // Started from Pi's composer, the call leaves the cursor there, and Hermes's reply plays.
+  await pi.click();
+  await page.keyboard.press("Control+Shift+h");
+  await expect(state).toHaveText("speaking");
+  await expect(state).toHaveText("listening");
+  await expect(pi).toBeFocused();
+  await page.keyboard.press("Control+Shift+m");
+  await expect(call.getByRole("button", { name: "unmute", exact: true })).toBeVisible();
+
+  // Inside the panel, the keys work too.
+  await call.getByRole("button", { name: "unmute", exact: true }).focus();
+  await page.keyboard.press("Control+Shift+m");
+  await expect(call.getByRole("button", { name: "mute", exact: true })).toBeVisible();
+  await page.keyboard.press("Control+Shift+h");
+  await expect(call).toBeHidden();
+});
+
 test("Ctrl+H is left to the browser where there's no panel", async ({ page }) => {
   await page.goto("/hermes");
   const prevented = await page.evaluate(() => [false, true].map((repeat) => {

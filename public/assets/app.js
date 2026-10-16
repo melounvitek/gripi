@@ -60,7 +60,7 @@ import { HermesPanelController } from "./hermes_panel_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
-const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => commandPaletteController.toggle(), focusConversation);
+const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => commandPaletteController.toggle(), focusConversation, (action) => voiceCallController.shortcut(action));
 // The Hermes panel's page shares sessionStorage with the page around it, so it keeps its notification identity apart.
 const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : "");
 const webPushController = new WebPushController(window, navigator);
@@ -3513,6 +3513,12 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (isCtrlOrMetaShortcut(event, "h") && !event.shiftKey && hermesPanelController.toggleFromShortcut(event.repeat)) {
+    event.preventDefault();
+    return;
+  }
+
+  const voiceAction = event.shiftKey && (isCtrlOrMetaShortcut(event, "h") ? "call" : isCtrlOrMetaShortcut(event, "m") ? "mute" : null);
+  if (voiceAction && hermesPanelController.voiceShortcut(voiceAction, event.repeat)) {
     event.preventDefault();
     return;
   }
