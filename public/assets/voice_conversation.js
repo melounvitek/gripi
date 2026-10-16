@@ -131,11 +131,14 @@ export class VoiceConversation {
     if (!this.stream || muted === this.muted) return;
     this.muted = muted;
     this.stream.getAudioTracks().forEach((track) => { track.enabled = !muted; });
-    if (muted) {
-      const waiting = this.heardSpeech || this.due;
+    // What was said is sent as if a pause had ended it.
+    if (muted && this.heardSpeech) {
+      this.transcribe();
+    } else if (muted) {
+      const due = this.due;
       this.discardRecording();
-      // What waited for your voice goes on without it.
-      if (waiting) this.proceed();
+      // What waited for a voice that may have been starting goes on without it.
+      if (due) this.proceed();
     } else {
       this.record();
     }
@@ -277,6 +280,7 @@ export class VoiceConversation {
     const said = { transcript: null };
     this.said.push(said);
     this.recorder = null;
+    this.heardSpeech = false;
     // The call records on, so that what is said after a pause adds to what was said before it.
     this.setState("transcribing");
     try {
