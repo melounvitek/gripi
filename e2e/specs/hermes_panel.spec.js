@@ -191,6 +191,32 @@ test("Ctrl+H shows Hermes, and hides it again from inside it", async ({ page }) 
   await expect(page.getByLabel("Message to Pi")).toBeFocused();
 });
 
+test("Tab goes on from each conversation to the other's composer, or to Hermes's call", async ({ page }) => {
+  const stops = {
+    hermes: panel(page).getByLabel("Message to Hermes"),
+    hermesConversation: panel(page).locator("#conversation-scroll"),
+    pi: page.getByLabel("Message to Pi"),
+    piConversation: page.locator("#conversation-scroll")
+  };
+  const tabThrough = async (...names) => {
+    for (const name of names) {
+      await page.keyboard.press("Tab");
+      await expect(stops[name]).toBeFocused();
+    }
+  };
+  await hermesButton(page).click();
+  await expect(stops.hermes).toBeFocused();
+  await tabThrough("hermesConversation", "pi", "piConversation", "hermes");
+
+  // In a call, its controls take the place of Hermes's composer and covered conversation.
+  const call = panel(page).getByRole("group", { name: "Voice conversation with Hermes" });
+  stops.mute = call.getByRole("button", { name: "mute", exact: true });
+  stops.end = call.getByRole("button", { name: "end", exact: true });
+  await panel(page).getByRole("button", { name: "Start a voice conversation" }).click();
+  await expect(stops.end).toBeFocused();
+  await tabThrough("pi", "piConversation", "mute", "end", "pi");
+});
+
 test("Ctrl+H is left to the browser where there's no panel", async ({ page }) => {
   await page.goto("/hermes");
   const prevented = await page.evaluate(() => [false, true].map((repeat) => {

@@ -43,6 +43,7 @@ export class HermesPanelController {
       if (event.data === "gripi:hermes-close") this.close();
       if (event.data === "gripi:hermes-pop-out") this.popOut();
       if (event.data === "gripi:hermes-command-palette") this.toggleCommandPalette();
+      if (event.data === "gripi:hermes-focus-session") this.focusConversation();
       if (event.data === "gripi:hermes-replied" && this.panel.hidden) {
         this.document.body.classList.add("hermes-replied");
         this.sync();
@@ -151,6 +152,14 @@ export class HermesPanelController {
   requestCommandPalette() {
     if (!this.document.body.classList.contains("hermes-panel-framed")) return false;
     this.tellPanel("gripi:hermes-command-palette");
+    return true;
+  }
+
+  // With the panel shown, Tab goes on from either side's conversation to the other side's composer.
+  focusOtherSide() {
+    if (this.panel && !this.panel.hidden) this.focusFrame();
+    else if (this.document.body.classList.contains("hermes-panel-framed")) this.tellPanel("gripi:hermes-focus-session");
+    else return false;
     return true;
   }
 
