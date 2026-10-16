@@ -33,6 +33,8 @@ export class HermesPanelController {
       if (this.frame.getAttribute("src") !== "/hermes") return;
       this.panel.classList.remove("is-loading");
       if (this.focusOnLoad) this.focusFrame();
+      if (this.callOnLoad) this.frame.contentWindow.postMessage("gripi:hermes-voice-call", this.window.location.origin);
+      this.callOnLoad = false;
     });
     this.document.addEventListener("click", (event) => {
       if (event.target.closest("[data-hermes-toggle]")) this.toggle();
@@ -64,8 +66,7 @@ export class HermesPanelController {
       this.popup.focus();
     } else if (this.panel.hidden) {
       this.open();
-      this.focusOnLoad = true;
-      if (!this.panel.classList.contains("is-loading")) this.focusFrame();
+      this.focusPanel();
     } else {
       this.close();
     }
@@ -88,6 +89,11 @@ export class HermesPanelController {
     return this.focusOnLoad || this.document.activeElement === this.frame;
   }
 
+  focusPanel() {
+    this.focusOnLoad = true;
+    if (!this.panel.classList.contains("is-loading")) this.focusFrame();
+  }
+
   // The panel's page puts the cursor in Hermes's conversation, which the page itself never takes from the page around it.
   focusFrame() {
     this.focusOnLoad = false;
@@ -99,6 +105,7 @@ export class HermesPanelController {
   close() {
     this.panel.hidden = true;
     this.focusOnLoad = false;
+    this.callOnLoad = false;
     this.document.body.classList.remove("hermes-panel-open");
     this.storeOpen(false);
     this.sync();
@@ -161,7 +168,7 @@ export class HermesPanelController {
 
   // With the panel shown, Tab goes on from either side's conversation to the other side's composer.
   focusOtherSide() {
-    if (this.panel && !this.panel.hidden) this.focusFrame();
+    if (this.panel && !this.panel.hidden) this.focusPanel();
     else if (this.document.body.classList.contains("hermes-panel-framed")) this.tellPanel("gripi:hermes-focus-session");
     else return false;
     return true;
@@ -182,8 +189,14 @@ export class HermesPanelController {
     const shown = this.panel && !this.panel.hidden;
     if (!shown && !this.panelPage) return false;
     if (repeat) return true;
-    if (shown) this.frame.contentWindow.postMessage(`gripi:hermes-voice-${action}`, this.window.location.origin);
-    else this.runVoiceShortcut(action);
+    if (!shown) {
+      this.runVoiceShortcut(action);
+    } else if (this.panel.classList.contains("is-loading")) {
+      // Hermes starting has no call to mute yet.
+      if (action === "call") this.callOnLoad = !this.callOnLoad;
+    } else {
+      this.frame.contentWindow.postMessage(`gripi:hermes-voice-${action}`, this.window.location.origin);
+    }
     return true;
   }
 

@@ -246,6 +246,58 @@ test("Ctrl+Shift+H starts and ends Hermes's voice call while the panel shows, an
   await expect(call).toBeHidden();
 });
 
+test("Tab while Hermes starts puts the cursor in it once it has", async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await hermesButton(page).click();
+  await page.locator("#conversation-scroll").focus();
+  await page.keyboard.press("Tab");
+
+  release();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+});
+
+test("Ctrl+Shift+H while Hermes starts starts the call once it has", async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await hermesButton(page).click();
+  await page.getByLabel("Message to Pi").focus();
+  await page.keyboard.press("Control+Shift+h");
+  // There's no call to mute yet.
+  await page.keyboard.press("Control+Shift+m");
+
+  release();
+  const call = panel(page).getByRole("group", { name: "Voice conversation with Hermes" });
+  await expect(call.getByRole("button", { name: "mute", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Message to Pi")).toBeFocused();
+});
+
+test("Ctrl+Shift+H twice while Hermes starts leaves it without a call", async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await hermesButton(page).click();
+  await page.getByLabel("Message to Pi").focus();
+  await page.keyboard.press("Control+Shift+h");
+  await page.keyboard.press("Control+Shift+h");
+
+  release();
+  await expect(page.locator("#hermes-panel")).not.toHaveClass(/is-loading/);
+  await page.waitForTimeout(500);
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
+});
+
 test("Ctrl+H is left to the browser where there's no panel", async ({ page }) => {
   await page.goto("/hermes");
   const prevented = await page.evaluate(() => [false, true].map((repeat) => {
