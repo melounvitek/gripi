@@ -512,7 +512,8 @@ func TestCompletionNotifierDeliversTheSessionTitlePreviewAndURL(t *testing.T) {
 	}
 
 	notifier := newCompletionNotifier(app)
-	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: "**Completed** reply", id: "reply-7"}); err != nil {
+	reply := "| Topic | Decision |\n| --- | --- |\n" + strings.Repeat("| Gift sets | skip |\n", 10) + "\n**Completed** reply"
+	if err := notifier.deliver(context.Background(), completedReply{client: client, path: sessionPath, text: reply, id: "reply-7"}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(fake.owners, []string{singleUserOwner}) {
@@ -522,7 +523,7 @@ func TestCompletionNotifierDeliversTheSessionTitlePreviewAndURL(t *testing.T) {
 	if err := json.Unmarshal(fake.payloads[0], &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["type"] != "gripi-notification" || payload["title"] != "Named session" || payload["body"] != "**Completed** reply" {
+	if payload["type"] != "gripi-notification" || payload["title"] != "Named session" || payload["body"] != reply {
 		t.Fatalf("payload = %#v", payload)
 	}
 	if payload["tag"] != completedReplyTag(sessionPath, "reply-7") {

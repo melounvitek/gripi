@@ -41,18 +41,41 @@ test("notification previews preserve literal Markdown punctuation", () => {
   assert.equal(notificationReplyPreview("Keep unmatched *stars, _underscores, and ~tildes"), "Keep unmatched *stars, _underscores, and ~tildes");
   assert.equal(notificationReplyPreview("Use `code_with_*_markers` and ``more_`code`_*``"), "Use code_with_*_markers and more_`code`_*");
   assert.equal(notificationReplyPreview("See https://example.test`code`"), "See https://example.testcode");
-  assert.equal(notificationReplyPreview("```js\nconst foo_bar = 1 * 2\n```"), "const foo_bar = 1 * 2");
-  assert.equal(notificationReplyPreview("```js\r\nconst windows_path = 1 * 2\r\n```"), "const windows_path = 1 * 2");
-  assert.equal(notificationReplyPreview("```js title=sample\nconst marker = \"```\";\n```"), "const marker = \"```\";");
-  assert.equal(notificationReplyPreview("~~~js\nconst foo_bar = 1 * 2\n~~~"), "const foo_bar = 1 * 2");
+  assert.equal(notificationReplyPreview("Pipe a | b into c"), "Pipe a | b into c");
   assert.equal(notificationReplyPreview("**Bold**, *italic*, __strong__, _emphasis_, and ~~strike~~"), "Bold, italic, strong, emphasis, and strike");
   assert.equal(notificationReplyPreview("***Bold italic***, **three *four***, and ~~**nested**~~"), "Bold italic, three four, and nested");
 });
 
-test("notification previews handle large unclosed code fences", { timeout: 1000 }, () => {
-  const preview = notificationReplyPreview(`\`\`\`js\n${"foo_bar * ".repeat(10_000)}`);
+test("notification previews show only prose around tables and code blocks", () => {
+  const reply = [
+    "All five defaults are decided:",
+    "",
+    "| # | Topic | Decision |",
+    "|---|:------|--------:|",
+    "| 1 | How far back | last 12 months |",
+    "",
+    "Run this:",
+    "```sh",
+    "npm test | tee log",
+    "```",
+    "Ready to draft it?",
+  ].join("\n");
 
-  assert.equal(preview, `${"foo_bar * ".repeat(17)}foo_bar…`);
+  assert.equal(notificationReplyPreview(reply), "All five defaults are decided: Run this: Ready to draft it?");
+  assert.equal(notificationReplyPreview("Topic | Decision\r\n--- | ---\r\nGift sets | skip\r\nDone."), "Done.");
+  assert.equal(notificationReplyPreview("Only\n| --- |\n| table |"), "New reply.");
+  assert.equal(notificationReplyPreview("> | A | B |\n> | --- | --- |\n> | x | y |\n\n> ```js\n> const foo = 1\n> ```\n\nDone."), "Done.");
+  assert.equal(notificationReplyPreview("Before\n```js title=sample\nconst marker = \"```\";\n```\nAfter"), "Before After");
+  assert.equal(notificationReplyPreview("Before\n~~~js\nconst foo_bar = 1\n~~~\nAfter"), "Before After");
+  assert.equal(notificationReplyPreview("```js\nconst foo_bar = 1\n```"), "New reply.");
+});
+
+test("notification previews handle large malformed blocks quickly", () => {
+  const started = performance.now();
+
+  assert.equal(notificationReplyPreview(`Intro\n\`\`\`js\n${"foo_bar * ".repeat(10_000)}`), "Intro");
+  assert.equal(notificationReplyPreview(`a|b\n|---${" ".repeat(100_000)}x`), "a|b |--- x");
+  assert.ok(performance.now() - started < 1000);
 });
 
 test("notification preview placeholders cannot be created by cleanup", () => {

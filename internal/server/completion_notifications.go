@@ -117,7 +117,7 @@ func (notifier *completionNotifier) Observe(client agent.Client, lifecycle agent
 			}
 		}
 		if ready != nil {
-			published, err := notifier.app.gatewayState.Complete(path, sessions.Completion{ID: ready.id, Preview: agent.NotificationPreview(ready.text), ResponseCount: notifier.responseCount(path, state.responseCount)})
+			published, err := notifier.app.gatewayState.Complete(path, sessions.Completion{ID: ready.id, Preview: agent.NotificationBody(ready.text), ResponseCount: notifier.responseCount(path, state.responseCount)})
 			if err != nil {
 				log.Printf("save session completion: %v", err)
 			}
@@ -320,7 +320,7 @@ func (notifier *completionNotifier) deliver(ctx context.Context, reply completed
 	payload, err := json.Marshal(map[string]string{
 		"type":  "gripi-notification",
 		"title": title,
-		"body":  agent.NotificationPreview(reply.text),
+		"body":  agent.NotificationBody(reply.text),
 		"tag":   completedReplyTag(path, reply.id),
 		"url":   completedReplyURL(path, notifier.app.agentOf(path)),
 	})

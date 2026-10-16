@@ -124,6 +124,17 @@ func homePathWordByte(value byte) bool {
 }
 
 func NotificationPreview(value string) string {
+	return notificationText(value, 180)
+}
+
+// NotificationBody keeps twice the displayed length because the browser strips
+// Markdown, tables and code before cutting to 180 runes. Even fully
+// JSON-escaped, 360 runes stay well within Web Push's 4 KB payload limit.
+func NotificationBody(value string) string {
+	return notificationText(value, 360)
+}
+
+func notificationText(value string, limit int) string {
 	value = strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
 	lines := strings.Split(strings.ReplaceAll(value, "javascript:", ""), "\n")
 
@@ -133,10 +144,10 @@ func NotificationPreview(value string) string {
 
 	value = strings.TrimSpace(strings.Join(lines, "\n"))
 
-	if len([]rune(value)) > 180 {
+	if len([]rune(value)) > limit {
 		chars := []rune(value)
 
-		return string(chars[:177]) + "…"
+		return string(chars[:limit-3]) + "…"
 	}
 
 	return value
