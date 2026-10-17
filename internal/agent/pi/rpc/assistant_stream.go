@@ -146,7 +146,7 @@ func partialJSONObject(prefix []byte) (map[string]any, bool) {
 		completed = completed[:escapeStart]
 	}
 	if inString {
-		completed = slices.Concat(completed, []byte(`"`))
+		closers = append(closers, '"')
 	}
 	slices.Reverse(closers)
 	var object map[string]any
