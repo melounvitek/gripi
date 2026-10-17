@@ -38,6 +38,8 @@ export class HermesPanelController {
     });
     this.document.addEventListener("click", (event) => {
       if (event.target.closest("[data-hermes-toggle]")) this.toggle();
+      // On a phone, the panel covers the tab, so its loading screen needs a way out.
+      if (event.target.closest("[data-hermes-panel-close]")) this.close();
     });
     // Hermes loading takes the cursor only if you haven't put it elsewhere meanwhile, such as into the palette.
     this.document.addEventListener("focusin", () => { this.focusOnLoad = false; });

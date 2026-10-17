@@ -16,7 +16,7 @@
   <div class="app-shell">
     {{if not .SessionOnly}}<input type="checkbox" class="mobile-session-toggle" id="mobile-session-toggle">{{template "sidebar" .}}<label for="mobile-session-toggle" class="mobile-sidebar-backdrop" aria-label="Hide sessions"></label>{{end}}
     {{template "conversation" .}}
-    {{if and .HermesEnabled (not .SessionOnly)}}<aside class="hermes-panel" id="hermes-panel" aria-label="Hermes" hidden><p class="hermes-panel-loading" role="status"><span class="session-switch-spinner" aria-hidden="true"></span>Starting Hermes…</p><iframe title="Hermes"></iframe></aside><button type="button" class="hermes-tab" data-hermes-toggle aria-controls="hermes-panel" aria-expanded="false" aria-label="Hermes" title="Hermes">{{hermesGlyph}}<span class="hermes-tab-line"></span></button>{{end}}
+    {{if and .HermesEnabled (not .SessionOnly)}}<aside class="hermes-panel" id="hermes-panel" aria-label="Hermes" hidden><div class="hermes-panel-loading"><p role="status"><span class="session-switch-spinner" aria-hidden="true"></span>Starting Hermes…</p><button type="button" data-hermes-panel-close>Close</button></div><iframe title="Hermes"></iframe></aside><button type="button" class="hermes-tab" data-hermes-toggle aria-controls="hermes-panel" aria-expanded="false" aria-label="Hermes" title="Hermes">{{hermesGlyph}}<span class="hermes-tab-line"></span></button>{{end}}
   </div>
   <script nonce="{{.Nonce}}">{
     // Show the latest messages before app.js loads; it takes over scrolling once it runs.
