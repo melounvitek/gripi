@@ -322,6 +322,53 @@ test("a reply in the panel leaves what you type to Pi in Pi's composer", async (
   await expect(composer).toHaveValue("Still typing");
 });
 
+test("the panel counts as looked at while the window has focus, also with the cursor in the session next to it", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.replyNotifications = [];
+    localStorage.removeItem("gripi:notifications-disabled");
+    window.gripiElectron = { showNotification: async (notification) => window.replyNotifications.push(notification) };
+  });
+  const { session } = await (await page.request.get("/hermes/current")).json();
+  const reads = [];
+  const panelPresence = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/sessions/mark_read")) reads.push(new URLSearchParams(request.postData()).get("session"));
+    if (request.url().endsWith("/web-push/presence") && request.frame() !== page.mainFrame()) panelPresence.push(request.postDataJSON());
+  });
+  // The panel's page notifies of its replies itself.
+  const notified = () => page.frames().find((frame) => frame !== page.mainFrame()).evaluate(() => window.replyNotifications.map(({ url }) => url));
+  await page.reload();
+  await hermesButton(page).click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+  await page.getByLabel("Message to Pi").click();
+  // Hermes taking the cursor marked the conversation read already.
+  reads.length = 0;
+
+  expect((await page.request.post("/prompt", { form: { session, message: "Ping from the phone" } })).ok()).toBe(true);
+  await expect(message(panel(page), "assistant", `${hermes.run.replyPrefix}Ping from the phone`)).toBeVisible();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeEnabled();
+  await expect.poll(() => reads).toContain(session);
+  expect(panelPresence.at(-1)).toMatchObject({ session, focused: true });
+  expect(await notified()).toEqual([]);
+
+  // The window losing focus takes the panel out of view with it, and so does closing it.
+  await page.evaluate(() => {
+    document.hasFocus = () => false;
+    window.dispatchEvent(new Event("blur"));
+  });
+  await expect.poll(() => panelPresence.at(-1)).toMatchObject({ session: "", focused: false });
+  await page.evaluate(() => {
+    delete document.hasFocus;
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect.poll(() => panelPresence.at(-1)).toMatchObject({ session, focused: true });
+  await hermesButton(page).click();
+  await expect(page.locator("#hermes-panel")).toBeHidden();
+  await expect.poll(() => panelPresence.at(-1)).toMatchObject({ session: "", focused: false });
+  expect((await page.request.post("/prompt", { form: { session, message: "Ping again" } })).ok()).toBe(true);
+  await expect.poll(notified).toEqual(["/hermes"]);
+});
+
 test("a reply from Pi leaves what you type to Hermes in Hermes's composer", async ({ page }) => {
   await hermesButton(page).click();
   const composer = panel(page).getByLabel("Message to Hermes");
