@@ -201,3 +201,21 @@ for (const transport of ["cumulative", "delta"]) {
     });
   }
 }
+
+test("a streaming tool call shows its arguments so far, also after reload", async ({ page }) => {
+  const call = activeRecovery.streamingTool;
+  const card = toolCard(page, call.id);
+  const preparation = page.locator(".message--tool-preparation");
+  await sendPrompt(page, activeRecovery.preparationPrompt.streaming);
+  await expect(card.locator(".tool-path")).toHaveText(call.path);
+  await expect(card).toContainText(call.line);
+  await expect(preparation).toHaveCount(0);
+
+  await page.reload();
+  await expect(card.locator(".tool-path")).toHaveText(call.path);
+  await expect(card).toContainText(call.line);
+  await expect(preparation).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Abort running Pi" }).click();
+  await expectRunFinished(page);
+});
