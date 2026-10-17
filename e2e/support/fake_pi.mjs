@@ -328,7 +328,7 @@ function acceptPrompt(command) {
     return;
   }
   for (const phase of ["thinking", "preparation"]) {
-    for (const transport of ["cumulative", "delta"]) {
+    for (const transport of ["cumulative", "delta", "streaming"]) {
       if (command.message === activeRecovery[`${phase}Prompt`][transport]) {
         schedule(120, () => startRecoveryAssistant(phase, transport));
         return;
@@ -799,6 +799,11 @@ function startRecoveryAssistant(phase, transport) {
     update({ type: "thinking_start", contentIndex: 2 });
     recoveryMessage.content.push({ type: "thinking", thinking });
     update({ type: "thinking_delta", contentIndex: 2, delta: thinking });
+  } else if (transport === "streaming") {
+    // Like current Pi, which names the call when it starts and then streams its arguments.
+    const call = activeRecovery.streamingTool;
+    update({ type: "toolcall_start", contentIndex: 2, id: call.id, toolName: "write" });
+    update({ type: "toolcall_delta", contentIndex: 2, delta: `{"path": "${call.path}", "content": "${call.line}\\nUnfinished` });
   } else {
     update({ type: "toolcall_start", contentIndex: 2 });
     update({ type: "toolcall_delta", contentIndex: 2, delta: '{"path":"recovery' });

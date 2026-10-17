@@ -135,8 +135,10 @@ export const activeRecovery = {
   },
   preparationPrompt: {
     cumulative: "Hold cumulative preparation for activity recovery until abort",
-    delta: "Hold delta-only preparation for activity recovery until abort"
+    delta: "Hold delta-only preparation for activity recovery until abort",
+    streaming: "Hold a streaming tool call for activity recovery until abort"
   },
+  streamingTool: { id: "recovery-streaming-write", path: "recovery-streaming.txt", line: "First streamed line" },
   previousThinking: "Finished recovery reasoning.",
   text: "Recovery work is underway.",
   thinking: "Still considering the recovery result.",
