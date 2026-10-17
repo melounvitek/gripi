@@ -699,6 +699,30 @@ func TestHermesConversationsShowOnlyInTheHermesPanel(t *testing.T) {
 	}
 }
 
+// Hermes can stop listing a conversation that Gripi still has open, whose page then sends the panel back to /hermes.
+func TestThePanelStartsANewConversationWhenHermesNoLongerListsTheCurrentOne(t *testing.T) {
+	unlisted := filepath.Join(t.TempDir(), "unlisted")
+	t.Setenv("FAKE_HERMES_UNLISTED", unlisted)
+	handler := hermesHandler(t)
+	key := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes"))
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Hello"}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+	eventsUntil(t, handler, key, "agent_settled")
+
+	if err := os.WriteFile(unlisted, []byte(strings.TrimPrefix(key, "hermes:")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); serveRequest(handler, http.MethodGet, panelPage(key)).Header().Get("Location") != "/hermes"; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the page of a conversation that Hermes no longer lists still shows it")
+		}
+	}
+	if opened := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes")); opened == key {
+		t.Fatalf("the panel opened %q again, whose page sends it back", key)
+	}
+}
+
 func TestPagesNeverWaitForHermesToStart(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "hermes.log")
 	t.Setenv("FAKE_HERMES_LOG", log)

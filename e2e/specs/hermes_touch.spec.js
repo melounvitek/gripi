@@ -39,3 +39,21 @@ test("the Hermes tab opens the panel over the whole screen, which goes back to G
   expect((await page.request.post("/prompt", { form: { session, message: "Ping from the desk" } })).ok()).toBe(true);
   await expect(tab).toHaveAttribute("title", "Hermes replied");
 });
+
+test("the panel closes on the first tap while Hermes is starting, and stays closed after a reload", async ({ page }) => {
+  await page.route("**/hermes", () => {});
+  await page.goto("/");
+  await page.getByRole("button", { name: "Hermes", exact: true }).tap();
+  const panel = page.locator("#hermes-panel");
+  await expect(panel.getByRole("status")).toHaveText("Starting Hermes…");
+
+  const close = panel.getByRole("button", { name: "Close" });
+  const { width, height } = await close.boundingBox();
+  expect(Math.min(width, height)).toBeGreaterThanOrEqual(44);
+  await close.tap();
+  await expect(panel).toBeHidden();
+
+  await page.reload();
+  await expect(page.locator("#conversation-scroll")).toBeVisible();
+  await expect(panel).toBeHidden();
+});
