@@ -93,7 +93,7 @@
     .hermes-tab-line { width: 0.22rem; height: 2.4rem; border-radius: 1rem; background: var(--border-strong); transition: background 120ms ease; }
     body.hermes-replied .hermes-tab-line { background: var(--accent); }
     body.hermes-panel-open .hermes-tab { right: calc(min(30rem, 100vw) + var(--conversation-gutter, 0px)); }
-    .hermes-tab:hover, .hermes-panel-back:hover { background: transparent; }
+    .hermes-tab:hover, .hermes-panel-back:hover, .hermes-panel-loading button:hover { background: transparent; }
     /* The tab's focus shows on its line, as on hover, instead of in a ring around it. */
     .hermes-tab:focus-visible { outline: none; }
     body:not(.hermes-replied) .hermes-tab:focus-visible .hermes-tab-line { background: var(--muted); }
@@ -114,7 +114,10 @@
     .hermes-panel iframe { display: block; width: 100%; height: 100%; border: 0; }
     /* Until its conversation shows, the panel says that Hermes is starting, which takes seconds after Gripi has started. */
     .hermes-panel-loading { display: none; }
-    .hermes-panel.is-loading .hermes-panel-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin: 0; color: var(--muted); font-family: var(--mono); font-size: 0.86rem; }
+    .hermes-panel.is-loading .hermes-panel-loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; }
+    .hermes-panel-loading p { display: flex; align-items: center; gap: 0.75rem; margin: 0; color: var(--muted); font-family: var(--mono); font-size: 0.86rem; }
+    .hermes-panel-loading button { min-height: 2.75rem; padding: 0 1rem; background: transparent; color: var(--muted); font-size: 0.86rem; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    @media (hover: hover) and (pointer: fine) { .hermes-panel-loading button:hover { color: var(--text); } }
     .hermes-panel.is-loading iframe { visibility: hidden; }
     @media (min-width: 1280px) { body.hermes-panel-open .app-shell { margin-right: 30rem; } }
     .conversation-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #ff5a1f33 transparent; padding: 1.75rem 1.5rem 1.5rem; }
