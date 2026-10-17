@@ -163,8 +163,11 @@ function runPrompt(session, request) {
 const methods = {
   initialize: () => ({ protocolVersion: 1, agentCapabilities: capabilities, agentInfo: { name: "hermes-agent", version: "0.0.0-fake" }, authMethods: [] }),
   // Like Hermes: only saved sessions, the most recently updated first, in pages that continue after the cursor's session.
+  // FAKE_HERMES_UNLISTED names a file of session IDs, one per line, that the list leaves out, as Hermes leaves out a
+  // conversation that it has filed under another platform.
   "session/list": ({ cursor } = {}) => {
-    const listed = [...sessions.values()].filter((session) => session.saved).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const unlisted = process.env.FAKE_HERMES_UNLISTED && existsSync(process.env.FAKE_HERMES_UNLISTED) ? readFileSync(process.env.FAKE_HERMES_UNLISTED, "utf8").split("\n") : [];
+    const listed = [...sessions.values()].filter((session) => session.saved && !unlisted.includes(session.sessionId)).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     const start = cursor ? listed.findIndex((session) => session.sessionId === cursor) + 1 : 0;
     const page = listed.slice(start, start + PAGE_SIZE).map(({ sessionId, cwd, title, updatedAt }) => ({ sessionId, cwd, title: title ?? "New thread", updatedAt }));
     return start + PAGE_SIZE < listed.length ? { sessions: page, nextCursor: page.at(-1).sessionId } : { sessions: page };
