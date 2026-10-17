@@ -33,6 +33,7 @@ export class HermesPanelController {
     this.frame.addEventListener("load", () => {
       if (this.frame.getAttribute("src") !== "/hermes") return;
       this.panel.classList.remove("is-loading");
+      this.tellFrameLookChanged();
       if (this.focusOnLoad) this.focusFrame();
       if (this.callOnLoad) this.frame.contentWindow.postMessage("gripi:hermes-voice-call", this.window.location.origin);
       this.callOnLoad = false;
@@ -125,12 +126,13 @@ export class HermesPanelController {
   }
 
   // A page is looked at while its window shows it and has focus. Framed, the panel's page is looked at while the panel
-  // shows next to the session, with the cursor on either side, so its replies count as read rather than notify.
+  // shows it next to the session, with the cursor on either side, so its replies count as read rather than notify. Until
+  // the page has loaded, the panel shows that Hermes is starting instead.
   lookedAt() {
     if (this.document.hidden) return false;
     if (!this.document.body.classList.contains("hermes-panel-framed")) return this.document.hasFocus();
-    const around = this.window.parent.document;
-    return around.body.classList.contains("hermes-panel-open") && around.hasFocus();
+    const panel = this.window.frameElement.closest("#hermes-panel");
+    return !panel.hidden && !panel.classList.contains("is-loading") && this.window.parent.document.hasFocus();
   }
 
   popOut() {
