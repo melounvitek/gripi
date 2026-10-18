@@ -16,6 +16,9 @@ type session struct {
 	loadMu sync.Mutex
 	// conn is the Hermes that loaded the session. The transcript follows its updates.
 	conn *connection
+	cwd  string
+	// prompted is whether the gateway has sent the session a message, with which Hermes saves a new session.
+	prompted bool
 
 	mu          sync.Mutex
 	transcript  transcript
@@ -129,7 +132,7 @@ func (adapter *Adapter) load(ctx context.Context, listed listedSession) (*sessio
 	setEditMode(ctx, conn, listed.SessionID)
 	session.mu.Lock()
 	session.transcript.commit()
-	session.model, session.conn = answer.Models.CurrentModelID, conn
+	session.model, session.conn, session.cwd = answer.Models.CurrentModelID, conn, listed.CWD
 	session.mu.Unlock()
 	return session, conn, nil
 }

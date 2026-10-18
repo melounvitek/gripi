@@ -29,8 +29,8 @@ func (app *application) registerHermesRoutes(mux *http.ServeMux) {
 }
 
 // openHermesConversation opens the current conversation, and starts one when there is none or the panel's page cannot
-// show it, which then sends the panel back here. Hermes may stop listing a conversation that Gripi still runs. A
-// Hermes conversation belongs to no project, so it starts in the home folder.
+// show it, which then sends the panel back here, such as once it is deleted in Hermes. A Hermes conversation belongs to
+// no project, so it starts in the home folder.
 func (app *application) openHermesConversation(response http.ResponseWriter, request *http.Request) {
 	app.hermes.starting.Lock()
 	defer app.hermes.starting.Unlock()

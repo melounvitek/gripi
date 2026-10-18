@@ -140,7 +140,7 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 	setEditMode(ctx, conn, answer.SessionID)
 	session := adapter.session(answer.SessionID)
 	session.mu.Lock()
-	session.conn, session.model = conn, answer.Models.CurrentModelID
+	session.conn, session.model, session.cwd = conn, answer.Models.CurrentModelID, cwd
 	session.mu.Unlock()
 	return adapter.newClient(session, conn, options), nil
 }

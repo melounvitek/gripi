@@ -699,27 +699,59 @@ func TestHermesConversationsShowOnlyInTheHermesPanel(t *testing.T) {
 	}
 }
 
-// Hermes can stop listing a conversation that Gripi still has open, whose page then sends the panel back to /hermes.
-func TestThePanelStartsANewConversationWhenHermesNoLongerListsTheCurrentOne(t *testing.T) {
-	unlisted := filepath.Join(t.TempDir(), "unlisted")
-	t.Setenv("FAKE_HERMES_UNLISTED", unlisted)
+// unlist has the fake Hermes leave the conversation out of its list, as a recent Hermes does with every conversation
+// that it files under its own platform.
+func unlist(t *testing.T, key string) {
+	t.Helper()
+	if err := os.WriteFile(os.Getenv("FAKE_HERMES_UNLISTED"), []byte(strings.TrimPrefix(key, "hermes:")), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAConversationThatHermesDoesNotListIsReadLikeAnyOther(t *testing.T) {
+	t.Setenv("FAKE_HERMES_UNLISTED", filepath.Join(t.TempDir(), "unlisted"))
 	handler := hermesHandler(t)
 	key := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes"))
+	unlist(t, key)
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Hello"}}); code != http.StatusOK {
 		t.Fatalf("prompt = %d %v", code, payload)
 	}
 	eventsUntil(t, handler, key, "agent_settled")
 
-	if err := os.WriteFile(unlisted, []byte(strings.TrimPrefix(key, "hermes:")), 0600); err != nil {
-		t.Fatal(err)
+	// The page reads the conversation as far as it shows it, which Gripi then counts as read.
+	page := getPage(t, handler, panelPage(key))
+	if !strings.Contains(page, "Hermes says: Hello") {
+		t.Fatal("the page lacks the reply")
 	}
-	for deadline := time.Now().Add(10 * time.Second); serveRequest(handler, http.MethodGet, panelPage(key)).Header().Get("Location") != "/hermes"; time.Sleep(50 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatal("the page of a conversation that Hermes no longer lists still shows it")
-		}
+	count := regexp.MustCompile(`data-assistant-response-count="(\d+)"`).FindStringSubmatch(page)
+	generation := regexp.MustCompile(`data-session-generation="([^"]*)"`).FindStringSubmatch(page)
+	if count == nil || count[1] == "0" || generation == nil {
+		t.Fatalf("the page counts replies %v of generation %v", count, generation)
 	}
-	if opened := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes")); opened == key {
-		t.Fatalf("the panel opened %q again, whose page sends it back", key)
+	if code, _ := postJSON(t, handler, "/sessions/mark_read", url.Values{"session": {key}, "assistant_response_count": {count[1]}, "session_generation": {generation[1]}}); code != http.StatusNoContent {
+		t.Fatalf("mark read = %d", code)
+	}
+}
+
+// Hermes loads a conversation that it doesn't list by its ID, also once the Hermes that ran it has exited.
+func TestTheHermesPanelKeepsAConversationThatHermesDoesNotListAcrossARestart(t *testing.T) {
+	t.Setenv("FAKE_HERMES_UNLISTED", filepath.Join(t.TempDir(), "unlisted"))
+	handler := hermesHandler(t)
+	key := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes"))
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Hello"}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+	_, cursor := eventsAfterUntil(t, handler, key, 0, "agent_settled")
+	unlist(t, key)
+
+	postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Exit now"}})
+	eventsAfterUntil(t, handler, key, cursor, "agent_settled")
+	time.Sleep(2 * time.Second) // Gripi lists Hermes's sessions afresh after this long, which starts Hermes again.
+	if page := getPage(t, handler, panelPage(key)); !strings.Contains(page, "Hermes says: Hello") {
+		t.Fatal("the page lacks the conversation")
+	}
+	if opened := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes")); opened != key {
+		t.Fatalf("the panel opened %q in place of %q", opened, key)
 	}
 }
 
