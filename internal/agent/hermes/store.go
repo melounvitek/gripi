@@ -101,7 +101,17 @@ func (adapter *Adapter) find(key string) (listedSession, bool) {
 			return listed, true
 		}
 	}
-	return listedSession{}, false
+	// A recent Hermes leaves out every conversation that it files under its own platform, though it loads one by its ID.
+	// The gateway finds such a conversation only if it has prompted it.
+	adapter.sessionsMu.Lock()
+	session := adapter.sessions[id]
+	adapter.sessionsMu.Unlock()
+	if session == nil {
+		return listedSession{}, false
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	return listedSession{SessionID: id, CWD: session.cwd}, session.prompted
 }
 
 // store lists the sessions Hermes saved. Hermes keeps them in its own database, which only Hermes reads.
@@ -172,12 +182,9 @@ func (store store) Status(key string) (agent.Status, error) {
 	return session.status(), nil
 }
 
-func (store store) Generation(key string) string {
-	if listed, ok := store.adapter.find(key); ok {
-		return listed.SessionID
-	}
-	return ""
-}
+// Generation is the session's ID, which Hermes gives no other session. A page that shows a session before Hermes saves
+// it thus marks it read once Hermes has.
+func (store store) Generation(key string) string { return strings.TrimPrefix(key, keyPrefix) }
 
 // Image reads an image file that a reply shares, the index-th of the entry-th message.
 func (store store) Image(key, entryID string, index int) ([]byte, string, error) {

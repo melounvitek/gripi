@@ -339,12 +339,13 @@ func (client *client) Prompt(_ context.Context, prompt agent.Prompt) (agent.Prom
 	client.emit(map[string]any{"type": "turn_start"})
 	client.mu.Unlock()
 
+	// Hermes saves a new session with its first message.
 	client.session.mu.Lock()
 	client.session.transcript.addUser(prompt.Text)
+	client.session.prompted = true
 	client.session.mu.Unlock()
 	client.notify(agent.RunStarted, agent.Reply{})
 	go client.run(encoded)
-	// Hermes saves a new session with its first message.
 	client.adapter.relist()
 	return agent.PromptResult{Disposition: "started"}, nil
 }
