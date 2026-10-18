@@ -4,10 +4,11 @@ const NOTIFICATION_PRESENCE_HEARTBEAT_MS = 10_000;
 
 export class NotificationPresenceController {
   // A page in a frame shares sessionStorage with the page around it, so it keeps its identity under its own scope.
-  constructor(documentObject, windowObject, sessionPath, fetchFunction = windowObject.fetch.bind(windowObject), clientID = null, storageScope = "") {
+  constructor(documentObject, windowObject, sessionPath, fetchFunction = windowObject.fetch.bind(windowObject), clientID = null, storageScope = "", lookedAt = () => !documentObject.hidden && (documentObject.hasFocus?.() ?? true)) {
     this.document = documentObject;
     this.window = windowObject;
     this.sessionPath = sessionPath;
+    this.lookedAt = lookedAt;
     this.fetch = fetchFunction;
     this.sequenceKey = `${NOTIFICATION_PRESENCE_SEQUENCE_KEY}${storageScope}`;
     this.clientID = clientID ?? notificationPresenceClientID(windowObject, `${NOTIFICATION_PRESENCE_CLIENT_KEY}${storageScope}`);
@@ -51,7 +52,7 @@ export class NotificationPresenceController {
 
   current() {
     const session = String(this.sessionPath() || "");
-    const focused = session !== "" && (this.calling || (!this.document.hidden && (this.document.hasFocus?.() ?? true)));
+    const focused = session !== "" && (this.calling || this.lookedAt());
     return { session: focused ? session : "", focused };
   }
 

@@ -6,13 +6,14 @@ const HERMES_WINDOW_FEATURES = "popup,width=480,height=820";
 // switching sessions never touches it. On that page, the controller keeps to the current conversation, which a new one
 // in any window replaces.
 export class HermesPanelController {
-  constructor(documentObject, windowObject, currentSessionPath, toggleCommandPalette, focusConversation, runVoiceShortcut) {
+  constructor(documentObject, windowObject, currentSessionPath, toggleCommandPalette, focusConversation, runVoiceShortcut, lookChanged) {
     this.document = documentObject;
     this.window = windowObject;
     this.currentSessionPath = currentSessionPath;
     this.toggleCommandPalette = toggleCommandPalette;
     this.focusConversation = focusConversation;
     this.runVoiceShortcut = runVoiceShortcut;
+    this.lookChanged = lookChanged;
     this.panelPage = documentObject.body.classList.contains("hermes-panel-page");
     this.panel = null;
     this.frame = null;
@@ -32,6 +33,7 @@ export class HermesPanelController {
     this.frame.addEventListener("load", () => {
       if (this.frame.getAttribute("src") !== "/hermes") return;
       this.panel.classList.remove("is-loading");
+      this.tellFrameLookChanged();
       if (this.focusOnLoad) this.focusFrame();
       if (this.callOnLoad) this.frame.contentWindow.postMessage("gripi:hermes-voice-call", this.window.location.origin);
       this.callOnLoad = false;
@@ -43,6 +45,9 @@ export class HermesPanelController {
     });
     // Hermes loading takes the cursor only if you haven't put it elsewhere meanwhile, such as into the palette.
     this.document.addEventListener("focusin", () => { this.focusOnLoad = false; });
+    // The panel's page is looked at while this window has focus, which its own focus events miss with the cursor here.
+    this.window.addEventListener("focus", () => this.tellFrameLookChanged());
+    this.window.addEventListener("blur", () => this.tellFrameLookChanged());
     this.window.addEventListener("message", (event) => {
       if (event.origin !== this.window.location.origin || event.source !== this.frame.contentWindow) return;
       if (event.data === "gripi:hermes-close") this.close();
@@ -84,6 +89,7 @@ export class HermesPanelController {
     this.document.body.classList.remove("hermes-replied");
     this.storeOpen(true);
     this.sync();
+    this.tellFrameLookChanged();
   }
 
   // Hermes has the cursor, or takes it once it loads.
@@ -102,8 +108,8 @@ export class HermesPanelController {
     this.frame.contentWindow.postMessage("gripi:hermes-focus", this.window.location.origin);
   }
 
-  // Closing only hides the panel, so a reply or a voice call carries on. Focus goes back to the session, or the hidden
-  // page would still count as looked at, which keeps Hermes's replies from notifying.
+  // Closing only hides the panel, so a reply or a voice call carries on, and notifies like one in a session you've left.
+  // Focus goes back to the session.
   close() {
     this.panel.hidden = true;
     this.focusOnLoad = false;
@@ -111,7 +117,22 @@ export class HermesPanelController {
     this.document.body.classList.remove("hermes-panel-open");
     this.storeOpen(false);
     this.sync();
+    this.tellFrameLookChanged();
     this.focusConversation();
+  }
+
+  tellFrameLookChanged() {
+    this.frame.contentWindow?.postMessage("gripi:hermes-look-changed", this.window.location.origin);
+  }
+
+  // A page is looked at while its window shows it and has focus. Framed, the panel's page is looked at while the panel
+  // shows it next to the session, with the cursor on either side, so its replies count as read rather than notify. Until
+  // the page has loaded, the panel shows that Hermes is starting instead.
+  lookedAt() {
+    if (this.document.hidden) return false;
+    if (!this.document.body.classList.contains("hermes-panel-framed")) return this.document.hasFocus();
+    const panel = this.window.frameElement.closest("#hermes-panel");
+    return !panel.hidden && !panel.classList.contains("is-loading") && this.window.parent.document.hasFocus();
   }
 
   popOut() {
@@ -154,6 +175,7 @@ export class HermesPanelController {
       if (event.data === "gripi:hermes-focus") this.focusConversation();
       if (event.data === "gripi:hermes-voice-call") this.runVoiceShortcut("call");
       if (event.data === "gripi:hermes-voice-mute") this.runVoiceShortcut("mute");
+      if (event.data === "gripi:hermes-look-changed") this.lookChanged();
     });
     const follow = () => this.followCurrentConversation().catch(() => {});
     this.window.addEventListener("focus", follow);

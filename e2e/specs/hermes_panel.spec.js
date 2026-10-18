@@ -322,6 +322,90 @@ test("a reply in the panel leaves what you type to Pi in Pi's composer", async (
   await expect(composer).toHaveValue("Still typing");
 });
 
+// Records what the panel's page tells the gateway about reading and looking at its conversation, and the reply
+// notifications that it shows itself.
+async function watchPanel(page) {
+  await page.addInitScript(() => {
+    window.replyNotifications = [];
+    localStorage.removeItem("gripi:notifications-disabled");
+    window.gripiElectron = { showNotification: async (notification) => window.replyNotifications.push(notification) };
+  });
+  const watched = { reads: [], presence: [] };
+  page.on("request", (request) => {
+    if (request.url().endsWith("/sessions/mark_read")) {
+      const form = new URLSearchParams(request.postData());
+      watched.reads.push({ session: form.get("session"), count: Number(form.get("assistant_response_count")) });
+    }
+    if (request.url().endsWith("/web-push/presence") && request.frame() !== page.mainFrame()) watched.presence.push(request.postDataJSON());
+  });
+  watched.notified = () => page.frames().find((frame) => frame !== page.mainFrame()).evaluate(() => window.replyNotifications.map(({ url }) => url));
+  watched.replyCount = async () => Number(await panel(page).locator("#live-output").getAttribute("data-assistant-response-count"));
+  watched.readPast = (session, count) => watched.reads.some((read) => read.session === session && read.count > count);
+  await page.reload();
+  return watched;
+}
+
+test("the panel counts as looked at while the window has focus, also with the cursor in the session next to it", async ({ page }) => {
+  const { readPast, presence: panelPresence, notified, replyCount } = await watchPanel(page);
+  const { session } = await (await page.request.get("/hermes/current")).json();
+  await hermesButton(page).click();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeFocused();
+  await page.getByLabel("Message to Pi").click();
+  const count = await replyCount();
+
+  expect((await page.request.post("/prompt", { form: { session, message: "Ping from the phone" } })).ok()).toBe(true);
+  await expect(message(panel(page), "assistant", `${hermes.run.replyPrefix}Ping from the phone`)).toBeVisible();
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeEnabled();
+  await expect.poll(() => readPast(session, count)).toBe(true);
+  expect(panelPresence.at(-1)).toMatchObject({ session, focused: true });
+  expect(await notified()).toEqual([]);
+
+  // The window losing focus takes the panel out of view with it, and so does closing it.
+  await page.evaluate(() => {
+    document.hasFocus = () => false;
+    window.dispatchEvent(new Event("blur"));
+  });
+  await expect.poll(() => panelPresence.at(-1)).toMatchObject({ session: "", focused: false });
+  await page.evaluate(() => {
+    delete document.hasFocus;
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect.poll(() => panelPresence.at(-1)).toMatchObject({ session, focused: true });
+  await hermesButton(page).click();
+  await expect(page.locator("#hermes-panel")).toBeHidden();
+  await expect.poll(() => panelPresence.at(-1)).toMatchObject({ session: "", focused: false });
+  expect((await page.request.post("/prompt", { form: { session, message: "Ping again" } })).ok()).toBe(true);
+  await expect.poll(notified).toEqual(["/hermes"]);
+});
+
+test("the panel counts as looked at only once Hermes has started in it", async ({ page }) => {
+  const { readPast, presence: panelPresence, notified, replyCount } = await watchPanel(page);
+  const { session } = await (await page.request.get("/hermes/current")).json();
+  // An image that doesn't load keeps the panel starting, while its page already runs.
+  let image;
+  await page.route("**/held-image", (route) => { image = route; });
+  await page.route("**/hermes", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: (await response.text()).replace("</body>", '<img src="/held-image" alt=""></body>') });
+  });
+  await hermesButton(page).click();
+  await expect.poll(() => image).toBeTruthy();
+  await expect.poll(() => panelPresence.at(-1)).toMatchObject({ session: "", focused: false });
+  await expect(page.locator("#hermes-panel").getByRole("status")).toHaveText("Starting Hermes…");
+  const count = await replyCount();
+
+  expect((await page.request.post("/prompt", { form: { session, message: "Ping from the phone" } })).ok()).toBe(true);
+  await expect.poll(notified).toEqual(["/hermes"]);
+  expect(readPast(session, count)).toBe(false);
+
+  // Hermes started leaves the cursor in Pi's composer, where you've put it meanwhile.
+  await page.getByLabel("Message to Pi").click();
+  await image.fulfill({ status: 404 });
+  await expect(page.locator("#hermes-panel").getByRole("status")).toBeHidden();
+  await expect.poll(() => panelPresence.at(-1)).toMatchObject({ session, focused: true });
+  await expect.poll(() => readPast(session, count)).toBe(true);
+});
+
 test("a reply from Pi leaves what you type to Hermes in Hermes's composer", async ({ page }) => {
   await hermesButton(page).click();
   const composer = panel(page).getByLabel("Message to Hermes");

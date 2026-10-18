@@ -60,9 +60,12 @@ import { HermesPanelController } from "./hermes_panel_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
-const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => commandPaletteController.toggle(), focusConversation, (action) => voiceCallController.shortcut(action));
+const hermesPanelController = new HermesPanelController(document, window, currentSessionPath, () => commandPaletteController.toggle(), focusConversation, (action) => voiceCallController.shortcut(action), () => {
+  notificationPresenceController.reportCurrent();
+  markCurrentSessionRead();
+});
 // The Hermes panel's page shares sessionStorage with the page around it, so it keeps its notification identity apart.
-const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : "");
+const notificationPresenceController = new NotificationPresenceController(document, window, currentSessionPath, undefined, undefined, hermesPanelController.panelPage ? ":hermes-panel" : "", () => hermesPanelController.lookedAt());
 const webPushController = new WebPushController(window, navigator);
 const notifyAccessRequest = (title, body, tag) =>
   showGripiNotification(title, body, window.location.href, tag).catch(() => {});
@@ -1828,7 +1831,7 @@ async function refreshSessionInBackground(controller, generation) {
   const switchGeneration = sessionSwitchGeneration.capture();
   const current = () => !controller.signal.aborted && generation === sessionViewGeneration &&
     sessionSwitchGeneration.current(switchGeneration) && session === currentSessionPath();
-  const response = await fetch(withReadState(sessionFragmentUrl(window.location.href)), {
+  const response = await fetch(withReadState(sessionFragmentUrl(window.location.href), document, hermesPanelController.lookedAt()), {
     headers: { "Accept": "application/json" }, signal: controller.signal
   });
   if (!response.ok) throw new Error("Session refresh failed");
@@ -1836,7 +1839,7 @@ async function refreshSessionInBackground(controller, generation) {
   // Whatever supersedes the refresh also aborts its poll, so failing here stays silent unless the poll timed out.
   if (!current()) throw new Error("Session refresh superseded");
   // A new session gets its own path once Pi saves it, which only a full refresh picks up.
-  if (payload.session !== session) return refreshCurrentSessionPreservingComposer(withReadState(new URL(window.location.href)).href);
+  if (payload.session !== session) return refreshCurrentSessionPreservingComposer(withReadState(new URL(window.location.href), document, hermesPanelController.lookedAt()).href);
   const template = document.createElement("template");
   template.innerHTML = payload.conversation_html;
   const snapshot = template.content.querySelector("#conversation-scroll");
@@ -3018,7 +3021,7 @@ async function markCurrentSessionRead(readState = null) {
     sessionGeneration: liveOutput?.dataset.sessionGeneration
   };
   if (!pending.sessionPath || (!readState && sidebarController.element)) return;
-  if (!readState && (document.hidden || !document.hasFocus())) {
+  if (!readState && !hermesPanelController.lookedAt()) {
     markReadAfterVisible = pending.sessionPath;
     return;
   }
