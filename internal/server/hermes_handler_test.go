@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -713,22 +714,20 @@ func TestAConversationThatHermesDoesNotListIsReadLikeAnyOther(t *testing.T) {
 	handler := hermesHandler(t)
 	key := openedConversation(t, serveRequest(handler, http.MethodGet, "/hermes"))
 	unlist(t, key)
+	// The panel shows the conversation before its first message, and counts the reply that streams in after.
+	page := getPage(t, handler, panelPage(key))
+	count := regexp.MustCompile(`data-assistant-response-count="(\d+)"`).FindStringSubmatch(page)
+	generation := regexp.MustCompile(`data-session-generation="([^"]*)"`).FindStringSubmatch(page)
+	if count == nil || generation == nil {
+		t.Fatal("the page lacks the conversation's read state")
+	}
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Hello"}}); code != http.StatusOK {
 		t.Fatalf("prompt = %d %v", code, payload)
 	}
 	eventsUntil(t, handler, key, "agent_settled")
 
-	// The page reads the conversation as far as it shows it, which Gripi then counts as read.
-	page := getPage(t, handler, panelPage(key))
-	if !strings.Contains(page, "Hermes says: Hello") {
-		t.Fatal("the page lacks the reply")
-	}
-	count := regexp.MustCompile(`data-assistant-response-count="(\d+)"`).FindStringSubmatch(page)
-	generation := regexp.MustCompile(`data-session-generation="([^"]*)"`).FindStringSubmatch(page)
-	if count == nil || count[1] == "0" || generation == nil {
-		t.Fatalf("the page counts replies %v of generation %v", count, generation)
-	}
-	if code, _ := postJSON(t, handler, "/sessions/mark_read", url.Values{"session": {key}, "assistant_response_count": {count[1]}, "session_generation": {generation[1]}}); code != http.StatusNoContent {
+	shown, _ := strconv.Atoi(count[1])
+	if code, _ := postJSON(t, handler, "/sessions/mark_read", url.Values{"session": {key}, "assistant_response_count": {strconv.Itoa(shown + 1)}, "session_generation": {generation[1]}}); code != http.StatusNoContent {
 		t.Fatalf("mark read = %d", code)
 	}
 }

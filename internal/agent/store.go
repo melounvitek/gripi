@@ -17,7 +17,7 @@ type Store interface {
 	// Status returns the model and context usage the session last saved.
 	Status(key string) (Status, error)
 	// Generation identifies the saved session, so a page notices when its key comes to name another one.
-	// It is empty when the session is not saved.
+	// It is empty when the session is not saved, unless the agent knows what will identify it once saved.
 	Generation(key string) string
 	// Image returns an image of a saved message and its MIME type.
 	Image(key, entryID string, index int) ([]byte, string, error)

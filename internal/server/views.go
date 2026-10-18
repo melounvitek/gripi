@@ -359,8 +359,8 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		view.Attachments = make(map[*agent.Message]sessions.AttachmentMatch)
 		if saved {
 			view.Attachments = (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}).Match(selected.Path, window.Messages)
-			view.SessionGeneration = app.sessionStore.Generation(selected.Path)
 		}
+		view.SessionGeneration = app.sessionStore.Generation(selected.Path)
 		activeToolIDs := make([]string, 0, len(snapshot.ActiveTools))
 		for _, tool := range snapshot.ActiveTools {
 			if tool.ID != "" {

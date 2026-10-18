@@ -182,12 +182,9 @@ func (store store) Status(key string) (agent.Status, error) {
 	return session.status(), nil
 }
 
-func (store store) Generation(key string) string {
-	if listed, ok := store.adapter.find(key); ok {
-		return listed.SessionID
-	}
-	return ""
-}
+// Generation is the session's ID, which Hermes gives no other session. A page that shows a session before Hermes saves
+// it thus marks it read once Hermes has.
+func (store store) Generation(key string) string { return strings.TrimPrefix(key, keyPrefix) }
 
 // Image reads an image file that a reply shares, the index-th of the entry-th message.
 func (store store) Image(key, entryID string, index int) ([]byte, string, error) {
