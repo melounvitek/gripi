@@ -460,8 +460,6 @@ func TestStopEndsAHermesRunAndRefusesMessagesWhileItRuns(t *testing.T) {
 }
 
 func TestHermesAsksBeforeADangerousCommandInADialog(t *testing.T) {
-	log := filepath.Join(t.TempDir(), "hermes.log")
-	t.Setenv("FAKE_HERMES_LOG", log)
 	handler := hermesHandler(t)
 	key := newHermesConversation(t, handler)
 	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Delete the build folder"}}); code != http.StatusOK {
@@ -496,13 +494,28 @@ func TestHermesAsksBeforeADangerousCommandInADialog(t *testing.T) {
 	if toolEnd == nil || toolEnd.ToolName != "terminal: rm -rf build" || toolEnd.IsError {
 		t.Fatalf("tool end = %+v", toolEnd)
 	}
-	// Hermes asks about sensitive files only, like its CLI, which never asks before an edit.
-	contents, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatal(err)
+}
+
+// Hermes over ACP asks before every edit, which its CLI never does, so Gripi lets the edit go ahead without a dialog.
+func TestHermesEditsFilesWithoutAsking(t *testing.T) {
+	handler := hermesHandler(t)
+	key := newHermesConversation(t, handler)
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Write the notes"}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
 	}
-	if !strings.Contains(string(contents), `"method":"session/set_mode","params":{"modeId":"dont_ask"`) {
-		t.Fatalf("Gripi did not set Hermes's edit approval mode:\n%s", contents)
+
+	var toolEnd *liveEvent
+	events := eventsUntil(t, handler, key, "agent_settled")
+	for index, event := range events {
+		if event.Type == "extension_ui_request" {
+			t.Fatalf("Gripi asked %+v", event)
+		}
+		if event.Type == "tool_execution_end" && event.ToolCallID == "tc-1" {
+			toolEnd = &events[index]
+		}
+	}
+	if toolEnd == nil || toolEnd.ToolName != "write_file: notes.md" || toolEnd.IsError {
+		t.Fatalf("tool end = %+v", toolEnd)
 	}
 }
 

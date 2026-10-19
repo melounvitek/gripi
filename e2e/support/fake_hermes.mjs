@@ -62,7 +62,7 @@ function toolContent(value) {
 
 function modelAnswer(session) {
   const model = session.model ?? MODEL;
-  return { models: { currentModelId: model, availableModels: [{ modelId: model, name: model }] }, modes: { currentModeId: session.mode ?? "default", availableModes: [] } };
+  return { models: { currentModelId: model, availableModels: [{ modelId: model, name: model }] }, modes: { currentModeId: "default", availableModes: [] } };
 }
 
 let requested = 0;
@@ -107,6 +107,23 @@ function scenario(prompt, turn, sessionId) {
           { sessionUpdate: "tool_call_update", toolCallId: check.toolCallId, kind: "execute", status: "completed", content: toolContent(allowed ? "allowed" : "denied") },
           { sessionUpdate: "tool_call_update", toolCallId: id, kind: "execute", status: allowed ? "completed" : "failed", content: toolContent(allowed ? permission.allowed : permission.denied) },
           text("agent_message_chunk", allowed ? "The build folder is gone." : "I left the build folder alone.", `reply-${turn}`)
+        ];
+      }
+    ];
+  }
+  if (prompt === hermes.edit.prompt) {
+    const { edit } = hermes;
+    const id = `tc-${turn}`;
+    return [
+      { sessionUpdate: "tool_call", toolCallId: id, title: edit.tool, kind: "edit", locations: [] },
+      async () => {
+        const options = [{ optionId: "allow_once", kind: "allow_once", name: "Allow once" }, { optionId: "deny", kind: "reject_once", name: "Deny" }];
+        const check = { toolCallId: `edit-approval-${turn}`, title: `Approve edit: ${edit.path}`, kind: "edit", status: "pending", content: [{ type: "diff", path: edit.path, oldText: null, newText: "# Notes\n" }] };
+        const { outcome } = await requestPermission(sessionId, check, options);
+        const allowed = outcome?.outcome === "selected" && outcome.optionId === "allow_once";
+        return [
+          { sessionUpdate: "tool_call_update", toolCallId: check.toolCallId, kind: "edit", status: allowed ? "completed" : "failed" },
+          { sessionUpdate: "tool_call_update", toolCallId: id, kind: "edit", status: allowed ? "completed" : "failed", content: toolContent(allowed ? edit.written : "Edit approval denied by ACP client; file was not modified.") }
         ];
       }
     ];
@@ -185,11 +202,6 @@ const methods = {
     for (const value of session.history ?? []) update(sessionId, value);
     setImmediate(() => update(sessionId, { sessionUpdate: "usage_update", size: 200000, used: session.contextUsed ?? 31200 }));
     return modelAnswer(session);
-  },
-  "session/set_mode": ({ sessionId, modeId }) => {
-    const session = sessions.get(sessionId);
-    if (session) session.mode = modeId;
-    return {};
   }
 };
 
