@@ -365,6 +365,13 @@ export const hermes = {
     // Hermes stops waiting for an answer to this one at once, as after its approvals.timeout.
     expiringPrompt: "Delete the build folder unless I am too slow"
   },
+  // Hermes asks before it writes the file of this prompt, as before every edit over ACP, and writes it only if allowed.
+  edit: {
+    prompt: "Write the notes",
+    tool: "write_file: notes.md",
+    path: "notes.md",
+    written: "Wrote notes.md"
+  },
   // What the fake dashboard hears in every recording.
   voice: { transcript: "What is in the fixture project?" }
 };

@@ -57,3 +57,29 @@ test("the panel closes on the first tap while Hermes is starting, and stays clos
   await expect(page.locator("#conversation-scroll")).toBeVisible();
   await expect(panel).toBeHidden();
 });
+
+test("a question about a long path fits the phone screen", async ({ page }) => {
+  // What Hermes asks names the whole path, which has no space to break at.
+  const path = "/home/user/projects/a-long-project-name/with/nested/folders/to/a-long-file-name.ts";
+  await page.route(/\/events\?/, async (route) => {
+    const batch = await (await route.fetch()).json();
+    for (const event of batch.events ?? []) {
+      if (event.type === "extension_ui_request") Object.assign(event, { title: `recursive delete: rm -rf ${path}`, message: `$ rm -rf ${path}` });
+    }
+    await route.fulfill({ json: batch });
+  });
+  expect((await page.request.post("/hermes/new")).ok()).toBe(true);
+  const { session } = await (await page.request.get("/hermes/current")).json();
+  await page.goto("/hermes");
+  expect((await page.request.post("/prompt", { form: { session, message: hermes.permission.prompt } })).ok()).toBe(true);
+
+  const dialog = page.getByRole("dialog", { name: `recursive delete: rm -rf ${path}` });
+  await expect(dialog).toContainText(`$ rm -rf ${path}`);
+  // Nothing to scroll sideways.
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const close = dialog.getByRole("button", { name: "Cancel" });
+  const { width, height } = await close.boundingBox();
+  expect(Math.min(width, height)).toBeGreaterThanOrEqual(44);
+  await close.tap();
+  await expect(dialog).toBeHidden();
+});

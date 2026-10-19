@@ -50,12 +50,13 @@ var (
 	_ agent.Responder = (*client)(nil)
 )
 
-// permissionRequest is what Hermes asks before it runs a dangerous command or edits a sensitive file.
+// permissionRequest is what Hermes asks before it runs a dangerous command or edits a file.
 type permissionRequest struct {
 	SessionID string `json:"sessionId"`
 	ToolCall  struct {
 		ToolCallID string          `json:"toolCallId"`
 		Title      string          `json:"title"`
+		Kind       string          `json:"kind"`
 		Content    json.RawMessage `json:"content"`
 	} `json:"toolCall"`
 	Options []permissionOption `json:"options"`
@@ -63,6 +64,7 @@ type permissionRequest struct {
 
 type permissionOption struct {
 	OptionID string `json:"optionId"`
+	Kind     string `json:"kind"`
 	Name     string `json:"name"`
 }
 
@@ -223,6 +225,13 @@ func (client *client) ask(rpcID json.RawMessage, request permissionRequest) bool
 	defer client.mu.Unlock()
 	if !client.running {
 		return false
+	}
+	// Hermes over ACP asks before every edit, which its CLI never does, so the edit goes ahead as in the CLI.
+	if request.ToolCall.Kind == "edit" {
+		if allow := slices.IndexFunc(request.Options, func(option permissionOption) bool { return option.Kind == "allow_once" }); allow >= 0 {
+			_ = client.conn.respond(rpcID, map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": request.Options[allow].OptionID}})
+			return true
+		}
 	}
 	names := make([]string, len(request.Options))
 	for index, option := range request.Options {

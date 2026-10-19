@@ -137,7 +137,6 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 	if answer.SessionID == "" {
 		return nil, errors.New("Hermes started no session")
 	}
-	setEditMode(ctx, conn, answer.SessionID)
 	session := adapter.session(answer.SessionID)
 	session.mu.Lock()
 	session.conn, session.model, session.cwd = conn, answer.Models.CurrentModelID, cwd
