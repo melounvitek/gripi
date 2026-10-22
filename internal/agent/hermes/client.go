@@ -334,10 +334,17 @@ func (client *client) Prompt(_ context.Context, prompt agent.Prompt) (agent.Prom
 	if len(encoded) > promptLimit {
 		return agent.PromptResult{}, &agent.RequestError{Message: "This message is too large for Hermes, which takes up to about 36 MB of images in one message."}
 	}
+	// The run starts while holding adapter.mu, so that an updated Hermes doesn't stop under it, see stopIfUpdated.
+	client.adapter.mu.Lock()
 	client.mu.Lock()
-	if client.running || client.settling {
+	err = client.exited()
+	if err == nil && (client.running || client.settling) {
+		err = &agent.RequestError{Message: "Hermes is working. Stop it before you send another message."}
+	}
+	if err != nil {
 		client.mu.Unlock()
-		return agent.PromptResult{}, &agent.RequestError{Message: "Hermes is working. Stop it before you send another message."}
+		client.adapter.mu.Unlock()
+		return agent.PromptResult{}, err
 	}
 	now := time.Now()
 	client.running, client.busySince, client.lastReply, client.lastMessage = true, &now, agent.Reply{}, nil
@@ -347,6 +354,7 @@ func (client *client) Prompt(_ context.Context, prompt agent.Prompt) (agent.Prom
 	client.emit(map[string]any{"type": "message_end", "message": user})
 	client.emit(map[string]any{"type": "turn_start"})
 	client.mu.Unlock()
+	client.adapter.mu.Unlock()
 
 	// Hermes saves a new session with its first message.
 	client.session.mu.Lock()
