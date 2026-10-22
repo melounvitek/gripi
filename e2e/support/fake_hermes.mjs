@@ -5,6 +5,12 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { createInterface } from "node:readline";
 import { hermes } from "./contract.mjs";
 
+// FAKE_HERMES_VERSION names a file of what `hermes --version` prints, which changes when Hermes updates.
+if (process.argv[2] === "--version") {
+  process.stdout.write(process.env.FAKE_HERMES_VERSION ? readFileSync(process.env.FAKE_HERMES_VERSION, "utf8") : "Hermes Agent v0.0.0-fake\n");
+  process.exit(0);
+}
+
 if (process.argv[2] !== "acp") {
   console.error(`usage: fake_hermes.mjs acp (got: ${process.argv.slice(2).join(" ")})`);
   process.exit(2);

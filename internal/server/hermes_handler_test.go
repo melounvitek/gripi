@@ -570,6 +570,47 @@ func TestSavedVariablesReachHermesBeforeItsNextMessage(t *testing.T) {
 	}
 }
 
+func TestAnUpdatedHermesRestartsOnceItRepliesToNothing(t *testing.T) {
+	folder := t.TempDir()
+	log, version := filepath.Join(folder, "hermes.log"), filepath.Join(folder, "version")
+	t.Setenv("FAKE_HERMES_LOG", log)
+	t.Setenv("FAKE_HERMES_VERSION", version)
+	installed := func(output string) {
+		t.Helper()
+		if err := os.WriteFile(version, []byte(output), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	installed("Hermes Agent v1.0.0+1.gaaaaaa\nUp to date\n")
+	handler := hermesHandler(t)
+	key := newHermesConversation(t, handler)
+	if code, payload := postJSON(t, handler, "/prompt", url.Values{"session": {key}, "message": {"Wait for stop"}}); code != http.StatusOK {
+		t.Fatalf("prompt = %d %v", code, payload)
+	}
+	eventsUntil(t, handler, key, "agent_start")
+
+	// Hermes updates its code under the running Hermes, which may then fail to start a conversation.
+	installed("Hermes Agent v1.0.0+2.gbbbbbb\nUp to date\n")
+	newHermesConversation(t, handler)
+	if starts := hermesStarts(t, log); len(starts) != 1 {
+		t.Fatalf("Hermes restarted while it replied: %v", starts)
+	}
+
+	postJSON(t, handler, "/abort", url.Values{"session": {key}})
+	eventsUntil(t, handler, key, "agent_settled")
+	newHermesConversation(t, handler)
+	if starts := hermesStarts(t, log); len(starts) != 2 {
+		t.Fatalf("the updated Hermes started %d times", len(starts))
+	}
+
+	// Only the version names Hermes's code; the rest says, for one, whether an update waits.
+	installed("Hermes Agent v1.0.0+2.gbbbbbb\nUpdate available: 1 commit behind\n")
+	newHermesConversation(t, handler)
+	if starts := hermesStarts(t, log); len(starts) != 2 {
+		t.Fatalf("Hermes restarted without an update: %v", starts)
+	}
+}
+
 // serveRequest serves a request from Gripi's own pages.
 func serveRequest(handler http.Handler, method, target string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, target, nil)
