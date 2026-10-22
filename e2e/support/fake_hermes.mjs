@@ -219,6 +219,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (request.id === undefined) return;
+  // FAKE_HERMES_FAIL names a method that fails like it does in a Hermes updated under it, as Hermes's ACP library
+  // answers an exception.
+  if (request.method === process.env.FAKE_HERMES_FAIL) {
+    send({ id: request.id, error: { code: -32603, message: "Internal error", data: { details: "cannot import name 'RESUME_REFUSALS' from 'hermes_cli.gateway_connection'" } } });
+    return;
+  }
   if (request.method === "session/prompt") {
     const session = sessions.get(request.params.sessionId);
     if (!session) return send({ id: request.id, result: { stopReason: "refusal" } });

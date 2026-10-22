@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/melounvitek/gripi/internal/agent"
 )
 
 func fakeHermesPath() string {
@@ -29,6 +31,17 @@ func TestRequestsGetHermesErrorAnswers(t *testing.T) {
 	var answer *rpcError
 	if !errors.As(err, &answer) || answer.Code != -32601 {
 		t.Fatalf("request = %v", err)
+	}
+}
+
+func TestHermesErrorsSayWhatFailed(t *testing.T) {
+	t.Setenv("FAKE_HERMES_FAIL", "session/new")
+	adapter := New(Options{Path: fakeHermesPath()})
+	defer adapter.Close()
+
+	_, err := adapter.StartInCWD(t.TempDir(), "", agent.StartOptions{})
+	if err == nil || !strings.Contains(err.Error(), "cannot import name 'RESUME_REFUSALS'") {
+		t.Fatalf("StartInCWD = %v", err)
 	}
 }
 

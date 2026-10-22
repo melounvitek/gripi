@@ -55,10 +55,19 @@ type message struct {
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	// Data holds the details of an internal error, which name the exception that Hermes raised.
+	Data json.RawMessage `json:"data"`
 }
 
 func (err *rpcError) Error() string {
-	return fmt.Sprintf("Hermes answered: %s (%d)", err.Message, err.Code)
+	message := fmt.Sprintf("Hermes answered: %s (%d)", err.Message, err.Code)
+	var data struct {
+		Details string `json:"details"`
+	}
+	if json.Unmarshal(err.Data, &data) == nil && data.Details != "" {
+		message += ": " + data.Details
+	}
+	return message
 }
 
 // environment is the gateway's environment for Hermes: without the gateway's settings, and without a session source
