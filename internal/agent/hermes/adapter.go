@@ -97,7 +97,6 @@ func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Cli
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
 	if listed, ok := adapter.find(key); ok {
-		adapter.stopIfUpdated(ctx)
 		session, conn, err := adapter.load(ctx, listed)
 		if err != nil {
 			return nil, err
@@ -220,18 +219,19 @@ func (adapter *Adapter) connected(ctx context.Context) (*connection, error) {
 	return conn, nil
 }
 
-// stopIfUpdated stops a running Hermes that an update has replaced, unless it replies, so that the session starts in
-// the installed Hermes. The old one loads some of its code only when it first needs it, from the update, which may not
-// fit what it loaded before. Clients of other sessions start again with their next request.
-func (adapter *Adapter) stopIfUpdated(ctx context.Context) {
+// stopIfUpdated stops a running Hermes that an update has replaced, unless it replies, and reports whether it did, so
+// that a session starts or loads in the installed Hermes. The old one loads some of its code only when it first needs
+// it, from the update, which may not fit what it loaded before. Clients of other sessions start again with their next
+// request.
+func (adapter *Adapter) stopIfUpdated(ctx context.Context) bool {
 	adapter.mu.Lock()
 	conn, version := adapter.conn, adapter.version
 	adapter.mu.Unlock()
 	if conn == nil || conn.hasExited() || version == "" {
-		return
+		return false
 	}
 	if installed := installedVersion(ctx, adapter.path); installed == "" || installed == version || adapter.replying() {
-		return
+		return false
 	}
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
@@ -239,6 +239,7 @@ func (adapter *Adapter) stopIfUpdated(ctx context.Context) {
 		_ = conn.Close()
 		adapter.conn = nil
 	}
+	return true
 }
 
 // replying is whether Hermes replies in a session that a client serves.

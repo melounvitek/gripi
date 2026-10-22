@@ -611,6 +611,31 @@ func TestAnUpdatedHermesRestartsOnceItRepliesToNothing(t *testing.T) {
 	}
 }
 
+func TestAnUpdatedHermesRestartsBeforeASavedConversationOpens(t *testing.T) {
+	folder := t.TempDir()
+	log, version := filepath.Join(folder, "hermes.log"), filepath.Join(folder, "version")
+	t.Setenv("FAKE_HERMES_LOG", log)
+	t.Setenv("FAKE_HERMES_VERSION", version)
+	if err := os.WriteFile(version, []byte("Hermes Agent v1.0.0+1.gaaaaaa\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	saved := func(id, said string) map[string]any {
+		return map[string]any{"sessionId": id, "cwd": t.TempDir(), "title": said, "updatedAt": "2026-03-01T10:00:00Z", "history": []any{textUpdate("user_message_chunk", said)}}
+	}
+	handler := hermesHandler(t, saved("hermes-first", "First question"), saved("hermes-second", "Second question"))
+	getPage(t, handler, panelPage("hermes:hermes-first"))
+
+	if err := os.WriteFile(version, []byte("Hermes Agent v1.0.0+2.gbbbbbb\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if page := getPage(t, handler, panelPage("hermes:hermes-second")); !strings.Contains(page, "Second question") {
+		t.Fatal("the saved conversation is missing")
+	}
+	if starts := hermesStarts(t, log); len(starts) != 2 {
+		t.Fatalf("the updated Hermes started %d times", len(starts))
+	}
+}
+
 // serveRequest serves a request from Gripi's own pages.
 func serveRequest(handler http.Handler, method, target string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, target, nil)

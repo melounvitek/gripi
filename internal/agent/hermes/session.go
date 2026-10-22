@@ -119,6 +119,11 @@ func (adapter *Adapter) load(ctx context.Context, listed listedSession) (*sessio
 	if loaded {
 		return session, conn, nil
 	}
+	if adapter.stopIfUpdated(ctx) {
+		if conn, err = adapter.connected(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
 	var answer struct {
 		Models struct {
 			CurrentModelID string `json:"currentModelId"`
