@@ -103,22 +103,26 @@ func (session *session) apply(value update) {
 // load has the running Hermes load the session, unless it has already, which replays the session's transcript. It
 // returns the session with the connection to the Hermes that loaded it.
 func (adapter *Adapter) load(ctx context.Context, listed listedSession) (*session, *connection, error) {
+	session := adapter.session(listed.SessionID)
+	session.loadMu.Lock()
+	defer session.loadMu.Unlock()
 	conn, err := adapter.connected(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	session := adapter.session(listed.SessionID)
-	session.loadMu.Lock()
-	defer session.loadMu.Unlock()
 	session.mu.Lock()
 	loaded := session.conn == conn
-	if !loaded {
-		session.transcript = transcript{}
-	}
 	session.mu.Unlock()
 	if loaded {
 		return session, conn, nil
 	}
+	adapter.stopIfUpdated(ctx)
+	if conn, err = adapter.connected(ctx); err != nil {
+		return nil, nil, err
+	}
+	session.mu.Lock()
+	session.transcript = transcript{}
+	session.mu.Unlock()
 	var answer struct {
 		Models struct {
 			CurrentModelID string `json:"currentModelId"`

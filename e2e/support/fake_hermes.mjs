@@ -5,6 +5,12 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { createInterface } from "node:readline";
 import { hermes } from "./contract.mjs";
 
+// FAKE_HERMES_VERSION names a file of what `hermes --version` prints, which changes when Hermes updates.
+if (process.argv[2] === "--version") {
+  process.stdout.write(process.env.FAKE_HERMES_VERSION ? readFileSync(process.env.FAKE_HERMES_VERSION, "utf8") : "Hermes Agent v0.0.0-fake\n");
+  process.exit(0);
+}
+
 if (process.argv[2] !== "acp") {
   console.error(`usage: fake_hermes.mjs acp (got: ${process.argv.slice(2).join(" ")})`);
   process.exit(2);
@@ -219,6 +225,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (request.id === undefined) return;
+  // FAKE_HERMES_FAIL names a method that fails like it does in a Hermes updated under it, as Hermes's ACP library
+  // answers an exception.
+  if (request.method === process.env.FAKE_HERMES_FAIL) {
+    send({ id: request.id, error: { code: -32603, message: "Internal error", data: { details: "cannot import name 'RESUME_REFUSALS' from 'hermes_cli.gateway_connection'" } } });
+    return;
+  }
   if (request.method === "session/prompt") {
     const session = sessions.get(request.params.sessionId);
     if (!session) return send({ id: request.id, result: { stopReason: "refusal" } });

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -43,6 +45,8 @@ type Adapter struct {
 	// clients counts the clients that serve sessions, which keep Hermes running.
 	clients int
 	usedAt  time.Time
+	// version is how `<path> --version` named the installed Hermes when the running one started.
+	version string
 	// failure is why Hermes last failed to start, which the adapter answers until retryAfter has passed.
 	failure  error
 	failedAt time.Time
@@ -121,6 +125,7 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 	adapter.useVariables(options.Env)
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
+	adapter.stopIfUpdated(ctx)
 	conn, err := adapter.connected(ctx)
 	if err != nil {
 		return nil, err
@@ -195,6 +200,7 @@ func (adapter *Adapter) connected(ctx context.Context) (*connection, error) {
 	if adapter.failure != nil && time.Since(adapter.failedAt) < retryAfter {
 		return nil, adapter.failure
 	}
+	version := installedVersion(ctx, adapter.path)
 	conn, err := start(adapter.path, append(environment(os.Environ()), adapter.env...), adapter)
 	if err == nil {
 		if err = conn.initialize(ctx); err != nil {
@@ -206,11 +212,59 @@ func (adapter *Adapter) connected(ctx context.Context) (*connection, error) {
 		log.Printf("Hermes: %v", err)
 		return nil, err
 	}
-	adapter.conn, adapter.failure = conn, nil
+	adapter.conn, adapter.version, adapter.failure = conn, version, nil
 	if adapter.idleTimeout > 0 {
 		go adapter.stopWhenIdle(conn)
 	}
 	return conn, nil
+}
+
+// stopIfUpdated stops a running Hermes that an update has replaced, unless it replies, so that a session starts or
+// loads in the installed Hermes. The old one loads some of its code only when it first needs it, from the update, which
+// may not fit what it loaded before. Clients of other sessions start again with their next request.
+func (adapter *Adapter) stopIfUpdated(ctx context.Context) {
+	adapter.mu.Lock()
+	conn, version := adapter.conn, adapter.version
+	adapter.mu.Unlock()
+	if conn == nil || conn.hasExited() || version == "" {
+		return
+	}
+	if installed := installedVersion(ctx, adapter.path); installed == "" || installed == version {
+		return
+	}
+	// A run starts while holding adapter.mu, so none starts in the Hermes that stops.
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if adapter.conn == conn && !adapter.replying() {
+		_ = conn.Close()
+		adapter.conn = nil
+	}
+}
+
+// replying is whether Hermes replies in a session that a client serves.
+func (adapter *Adapter) replying() bool {
+	adapter.sessionsMu.Lock()
+	sessions := slices.Collect(maps.Values(adapter.sessions))
+	adapter.sessionsMu.Unlock()
+	return slices.ContainsFunc(sessions, func(session *session) bool {
+		session.mu.Lock()
+		client := session.client
+		session.mu.Unlock()
+		return client != nil && client.Busy()
+	})
+}
+
+// installedVersion is the first line of what `<path> --version` prints, which names the installed Hermes down to its
+// commit, or nothing when Hermes doesn't say. The lines after it change without an update, such as whether one waits.
+func installedVersion(ctx context.Context, path string) string {
+	command := exec.CommandContext(ctx, path, "--version")
+	command.Env = environment(os.Environ())
+	output, err := command.Output()
+	if err != nil {
+		return ""
+	}
+	line, _, _ := strings.Cut(string(output), "\n")
+	return strings.TrimSpace(line)
 }
 
 func (adapter *Adapter) stopWhenIdle(conn *connection) {

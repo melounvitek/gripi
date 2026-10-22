@@ -231,6 +231,7 @@ What to expect:
 - Hermes asks before dangerous commands, as its `approvals.mode` setting says, and before editing sensitive files such as `.env` or keys. The question appears as a dialog in the panel. Other edits go ahead without asking, as in Hermes's CLI. A dialog stays open after Hermes has stopped waiting for the answer, after its `approvals.timeout`, until you close it.
 - A session that another ACP client, such as an editor, continues keeps showing what Gripi's Hermes loaded, until that Hermes restarts.
 - Saved [environment variables](#environment-variables) reach Hermes when it starts. After a change, Hermes restarts with them before the next conversation starts, once no other Hermes session is open. A new conversation's first message still runs with the variables from before, because the conversation lives only in the running Hermes until then.
+- After `hermes update`, Gripi restarts its Hermes before a conversation starts or opens, unless Hermes is replying. It compares the first line of `<path> --version`. A message sent right after that into another open conversation fails once, and sending it again works. A new conversation without a message is gone, as when Hermes stops.
 - [Multi-user mode](#multi-user-mode) refuses the setting, because every user would share the one Hermes, with its memory, skills and messaging accounts.
 
 ### Voice conversations
