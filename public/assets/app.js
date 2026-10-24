@@ -3637,6 +3637,17 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+// Hermes takes seconds to start a conversation, while the one it replaces would stay as if nothing happened.
+document.addEventListener("submit", (event) => {
+  if (!event.target.matches('form[action="/hermes/new"]')) return;
+  if (sessionSwitching()) {
+    event.preventDefault();
+    return;
+  }
+  document.querySelector(".session-switch-overlay .session-switch-indicator").lastChild.textContent = " Starting Hermes…";
+  showSessionSwitching();
+});
+
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-tool-output-toggle]");
   if (!button) return;
