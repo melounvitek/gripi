@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/access"
 	"github.com/melounvitek/gripi/internal/agent"
 )
 
@@ -53,6 +55,28 @@ func commandRequests(next http.Handler) http.Handler {
 
 func commandRequest(request *http.Request) bool {
 	return request.Context().Value(commandRequestKey{}) != nil
+}
+
+type commandUserKey struct{}
+
+// commandUser lets the commands of a multi-user gateway act for the user whose token they carry.
+func (app *application) commandUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		workspaceID := ""
+		if token, ok := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer "); ok && token != "" {
+			workspaceID = access.WorkspaceID(app.workspaceSecret, token)
+		}
+		approved, err := app.workspaceStore.Approved(workspaceID)
+		if err != nil {
+			writeInternalError(response, "check the user of a gripi command", err)
+			return
+		}
+		if !approved {
+			writeJSONStatus(response, http.StatusForbidden, map[string]string{"error": "the gateway is in multi-user mode; set GRIPI_USER_TOKEN to your user token"})
+			return
+		}
+		next.ServeHTTP(response, request.WithContext(context.WithValue(request.Context(), commandUserKey{}, workspaceID)))
+	})
 }
 
 func (app *application) registerLocalRoutes(mux *http.ServeMux) {
@@ -103,11 +127,15 @@ func (app *application) localSessions(response http.ResponseWriter, request *htt
 
 // localConversation answers with the most recent messages of a session, as many as the browser first shows.
 func (app *application) localConversation(response http.ResponseWriter, request *http.Request) {
+	path, owned := app.requireOwnedSession(response, request, request.URL.Query().Get("session"))
+	if !owned {
+		return
+	}
 	if !acquireRequestSlot(response, request, app.heavyRequests) {
 		return
 	}
 	defer releaseRequestSlot(app.heavyRequests)
-	window, err := app.sessionStore.Window(request.URL.Query().Get("session"), "", false, nil, nil)
+	window, err := app.sessionStore.Window(path, "", false, nil, nil)
 	// A new session has no file, and so no messages, until Pi has replied once.
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeInternalError(response, "read conversation for gripi commands", err)

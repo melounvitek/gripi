@@ -113,8 +113,8 @@ func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Re
 }
 
 // Local serves gripi commands. It skips browser authentication, so it must only
-// be exposed on a socket that the gateway's own user can open. It is nil in
-// multi-user mode, where no single user owns every session.
+// be exposed on a socket that the gateway's own user can open. In multi-user
+// mode it acts for the user whose token a request carries.
 func (handler *Handler) Local() http.Handler {
 	return handler.local
 }
@@ -334,11 +334,13 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	handler = app.authorizeHost(handler)
 	handler = app.limitRequestBody(handler)
 	gateway := &Handler{next: handler, app: app}
-	if !cfg.MultiUserMode {
-		local := http.NewServeMux()
-		app.registerLocalRoutes(local)
-		gateway.local = app.limitRequestBody(commandRequests(local))
+	local := http.NewServeMux()
+	app.registerLocalRoutes(local)
+	commands := commandRequests(local)
+	if cfg.MultiUserMode {
+		commands = app.commandUser(commands)
 	}
+	gateway.local = app.limitRequestBody(commands)
 	return gateway, nil
 }
 
