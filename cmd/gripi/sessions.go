@@ -84,6 +84,8 @@ type momentaryRefusal struct{ error }
 // gatewayClient reaches the running gateway through its private socket.
 type gatewayClient struct {
 	http *http.Client
+	// userToken names the user that a gateway in multi-user mode acts for.
+	userToken string
 	// deadline, when set, shortens reads and ends settled.
 	deadline time.Time
 }
@@ -95,7 +97,7 @@ func newGatewayClient() (*gatewayClient, error) {
 	}
 	return &gatewayClient{http: &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-	}}}}, nil
+	}}}, userToken: os.Getenv("GRIPI_USER_TOKEN")}, nil
 }
 
 func (client *gatewayClient) do(request *http.Request, timeout time.Duration, result any) error {
@@ -103,6 +105,9 @@ func (client *gatewayClient) do(request *http.Request, timeout time.Duration, re
 	defer cancel()
 	request = request.WithContext(ctx)
 	request.Header.Set("Accept", "application/json")
+	if client.userToken != "" {
+		request.Header.Set("Authorization", "Bearer "+client.userToken)
+	}
 	response, err := client.http.Do(request)
 	var body []byte
 	if err == nil {
@@ -117,7 +122,7 @@ func (client *gatewayClient) do(request *http.Request, timeout time.Duration, re
 		if errors.As(err, &wrapped) {
 			err = wrapped.Err
 		}
-		return fmt.Errorf("cannot reach the gateway (%w). Is it running? A gateway in multi-user mode accepts no commands", err)
+		return fmt.Errorf("cannot reach the gateway (%w). Is it running?", err)
 	}
 	// The gateway answers 202 to a stop that it has not finished yet.
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted {

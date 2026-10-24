@@ -88,6 +88,34 @@ func TestMultiUserVariablesStayWithTheirOwner(t *testing.T) {
 	}
 }
 
+func TestMultiUserPiRunsGripiCommandsForTheOwnerOfItsSession(t *testing.T) {
+	fixture := newEnvironmentFixture(t, true)
+	ownerSession := fixture.session(t, "owner", "workspace-a")
+	otherSession := fixture.session(t, "other", "workspace-b")
+	fixture.startPi(t, ownerSession, "gripi_workspace=workspace-a")
+	fixture.startPi(t, otherSession, "gripi_workspace=workspace-b")
+
+	starts := fixture.piStarts(t)
+	if len(starts) != 2 || !strings.Contains(starts[0].arguments, "--session "+ownerSession) {
+		t.Fatalf("Pi starts = %#v", starts)
+	}
+	token := starts[0].environment["GRIPI_USER_TOKEN"]
+	if token == "" || token == starts[1].environment["GRIPI_USER_TOKEN"] {
+		t.Fatalf("GRIPI_USER_TOKEN of the owner's Pi = %q, of the other user's Pi = %q", token, starts[1].environment["GRIPI_USER_TOKEN"])
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://gripi/sessions", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	listed := httptest.NewRecorder()
+	localHandler(t, fixture.handler).ServeHTTP(listed, request)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), ownerSession) || strings.Contains(listed.Body.String(), otherSession) {
+		t.Fatalf("sessions for the token = %d %s", listed.Code, listed.Body.String())
+	}
+	// Pi may show its environment to the model, so the token must not open the owner's browser session.
+	if page := fixture.get("/", "gripi_workspace="+token); page.Code != http.StatusForbidden {
+		t.Fatalf("page with the token as the workspace cookie = %d", page.Code)
+	}
+}
+
 func TestMultiUserEnvironmentDialogSaysWhoGetsTheVariablesAndWhoCouldReadThem(t *testing.T) {
 	page := newEnvironmentFixture(t, true).get("/", "gripi_workspace=workspace-a").Body.String()
 	description := "Pi and every command it runs get these variables in your sessions only, on top of the gateway's own environment. They are stored on the gateway, where other users' Pi could read them."

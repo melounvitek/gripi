@@ -81,6 +81,15 @@ func (store *WorkspaceStore) AnyApproved() (bool, error) {
 	return len(value.ApprovedWorkspaces) > 0, err
 }
 
+func (store *WorkspaceStore) ApprovedWorkspaces() ([]string, error) {
+	value, err := store.data()
+	ids := make([]string, 0, len(value.ApprovedWorkspaces))
+	for _, workspace := range value.ApprovedWorkspaces {
+		ids = append(ids, workspace.WorkspaceID)
+	}
+	return ids, err
+}
+
 func (store *WorkspaceStore) RequestForCode(code string) (WorkspaceRequest, bool, error) {
 	if code == "" {
 		return WorkspaceRequest{}, false, nil

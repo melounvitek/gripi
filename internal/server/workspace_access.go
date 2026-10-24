@@ -300,6 +300,9 @@ func (app *application) approvedWorkspace(request *http.Request) (bool, error) {
 }
 
 func currentWorkspaceID(request *http.Request) string {
+	if workspaceID, ok := request.Context().Value(commandUserKey{}).(string); ok {
+		return workspaceID
+	}
 	cookie, err := request.Cookie(workspaceCookieName)
 	if err != nil {
 		return ""

@@ -40,6 +40,9 @@ func (app *application) piEnvironment(userID string) ([]string, error) {
 	for _, variable := range variables {
 		entries = append(entries, variable.Name+"="+variable.Value)
 	}
+	if app.config.MultiUserMode {
+		entries = append(entries, "GRIPI_USER_TOKEN="+app.commandToken(userID))
+	}
 	return entries, nil
 }
 

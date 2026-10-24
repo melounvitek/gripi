@@ -14,6 +14,7 @@ import (
 	"time"
 
 	gripi "github.com/melounvitek/gripi"
+	"github.com/melounvitek/gripi/internal/access"
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
@@ -34,11 +35,58 @@ func TestLocalHandlerServesNoBrowserRoutes(t *testing.T) {
 	}
 }
 
-func TestLocalHandlerIsUnavailableInMultiUserMode(t *testing.T) {
-	cfg := testConfig(t)
+func TestCommandsInMultiUserModeActForTheUserWhoseTokenTheyCarry(t *testing.T) {
+	cfg, alpha, beta, _ := fakePiConfig(t)
+	root := filepath.Dir(cfg.ReadStatePath)
 	cfg.MultiUserMode = true
-	if local := localHandler(t, newHandler(t, cfg)); local != nil {
-		t.Fatal("multi-user gateway offers a handler that bypasses workspace access")
+	cfg.WorkspaceSecretPath = filepath.Join(root, "secret")
+	cfg.WorkspaceAccessPath = filepath.Join(root, "workspace-access.json")
+	cfg.WorkspaceOwnershipPath = filepath.Join(root, "owners.json")
+	local := localHandler(t, startGateway(t, cfg))
+	secret, err := access.NewWorkspaceSecretStore(cfg.WorkspaceSecretPath).Secret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const alice, bob = "piu_alice_token_0001", "piu_bob_token_000002"
+	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, gateway.NewPiStore(cfg.SessionsRoot, ""))
+	for token, path := range map[string]string{alice: alpha, bob: beta} {
+		if err := access.NewWorkspaceStore(cfg.WorkspaceAccessPath).ApproveWorkspace(access.WorkspaceID(secret, token)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := owners.Claim(path, access.WorkspaceID(secret, token)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	get := func(target string, header ...string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "http://gripi"+target, nil)
+		for index := 0; index < len(header); index += 2 {
+			request.Header.Set(header[index], header[index+1])
+		}
+		response := httptest.NewRecorder()
+		local.ServeHTTP(response, request)
+		return response
+	}
+
+	listed := get("/sessions", "Authorization", "Bearer "+alice)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), alpha) || strings.Contains(listed.Body.String(), beta) {
+		t.Fatalf("alice's sessions = %d %s", listed.Code, listed.Body.String())
+	}
+	if own := get("/conversation?session="+url.QueryEscape(alpha), "Authorization", "Bearer "+alice); own.Code != http.StatusOK || !strings.Contains(own.Body.String(), "Answer from alpha-0001") {
+		t.Fatalf("alice's conversation = %d %s", own.Code, own.Body.String())
+	}
+	if other := get("/conversation?session="+url.QueryEscape(beta), "Authorization", "Bearer "+alice); other.Code != http.StatusNotFound {
+		t.Fatalf("bob's conversation for alice = %d %s", other.Code, other.Body.String())
+	}
+	for name, header := range map[string][]string{
+		"no token":             nil,
+		"unknown token":        {"Authorization", "Bearer piu_unknown_token_0003"},
+		"token without Bearer": {"Authorization", alice},
+		"browser cookie only":  {"Cookie", "gripi_workspace=" + access.WorkspaceID(secret, alice)},
+	} {
+		refused := get("/sessions", header...)
+		if refused.Code != http.StatusForbidden || !strings.Contains(refused.Body.String(), "GRIPI_USER_TOKEN") {
+			t.Fatalf("%s = %d %s", name, refused.Code, refused.Body.String())
+		}
 	}
 }
 

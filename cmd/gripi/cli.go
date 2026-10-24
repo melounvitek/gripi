@@ -32,6 +32,7 @@ Session commands (need a running gateway on this machine):
   untag     Remove tags from a session
   tags      List tags and how many sessions have each
   delete    Delete a session
+  claim     Make a session that has no owner yours
 
 Gateway commands:
   serve     Start the gateway
@@ -64,6 +65,7 @@ var commands = []command{
 	{name: "untag", summary: "Remove tags from a session", run: tagSession("untag", false), help: untagHelp},
 	{name: "tags", summary: "List tags and how many sessions have each", run: listTags, help: tagsHelp},
 	{name: "delete", summary: "Delete a session", run: deleteSession, help: deleteHelp},
+	{name: "claim", summary: "Make a session that has no owner yours", run: claimSession, help: claimHelp},
 	{name: "serve", summary: "Start the gateway", run: withoutArguments("serve", serve), help: `Usage:
   gripi serve
 
