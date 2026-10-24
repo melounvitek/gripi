@@ -89,6 +89,25 @@ test("the panel says Hermes is starting until its conversation shows", async ({ 
   await expect(page.locator("#hermes-panel").getByRole("status")).toBeHidden();
 });
 
+test("Ctrl+N in the panel says Hermes is starting there, while the session next to it stays usable", async ({ page }) => {
+  await hermesButton(page).click();
+  await askInPanel(page, "Plan my week");
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/hermes/new", async (route) => {
+    await held;
+    await route.continue();
+  });
+
+  await panel(page).getByLabel("Message to Hermes").press("Control+n");
+  await expect(panel(page).getByText("Starting Hermes…")).toBeVisible();
+  await selectSession(page, sessions.history);
+
+  release();
+  await expect(message(panel(page), "user", "Plan my week")).toHaveCount(0);
+  await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
+});
+
 test("a reply while the panel is closed marks the Hermes tab", async ({ page }) => {
   await hermesButton(page).click();
   await expect(panel(page).getByLabel("Message to Hermes")).toBeVisible();
