@@ -78,9 +78,10 @@ func TestCommandsInMultiUserModeActForTheUserWhoseTokenTheyCarry(t *testing.T) {
 		t.Fatalf("bob's conversation for alice = %d %s", other.Code, other.Body.String())
 	}
 	for name, header := range map[string][]string{
-		"no token":            nil,
-		"unknown token":       {"Authorization", "Bearer piu_unknown_token_0003"},
-		"browser cookie only": {"Cookie", "gripi_workspace=" + access.WorkspaceID(secret, alice)},
+		"no token":             nil,
+		"unknown token":        {"Authorization", "Bearer piu_unknown_token_0003"},
+		"token without Bearer": {"Authorization", alice},
+		"browser cookie only":  {"Cookie", "gripi_workspace=" + access.WorkspaceID(secret, alice)},
 	} {
 		refused := get("/sessions", header...)
 		if refused.Code != http.StatusForbidden || !strings.Contains(refused.Body.String(), "GRIPI_USER_TOKEN") {

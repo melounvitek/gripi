@@ -63,7 +63,10 @@ type commandUserKey struct{}
 // commandUser lets the commands of a multi-user gateway act for the user whose token they carry.
 func (app *application) commandUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		token, _ := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer ")
+		token, bearer := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer ")
+		if !bearer {
+			token = ""
+		}
 		workspaceID, err := app.commandWorkspace(token)
 		if err != nil {
 			writeInternalError(response, "check the user of a gripi command", err)
