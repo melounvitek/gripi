@@ -109,7 +109,7 @@ gripi wait 01a107aa --timeout 900 --json  # block until it stops working
 gripi show 01a107aa                       # print the reply
 ```
 
-Other commands start a session (`new`), stop what one is working on (`stop`), continue one in Pi CLI (`open`), name one (`rename`), pin or tag sessions (`pin`, `unpin`, `tag`, `untag`, `tags`), and delete one (`delete`). `gripi help` describes every command, and all of these but `open` can print JSON. The gateway must be running, and not in [multi-user mode](docs/configuration.md#multi-user-mode).
+Other commands start a session (`new`), stop what one is working on (`stop`), continue one in Pi CLI (`open`), name one (`rename`), pin or tag sessions (`pin`, `unpin`, `tag`, `untag`, `tags`), delete one (`delete`), and claim one that has no owner (`claim`). `gripi help` describes every command, and all of these but `open` can print JSON. The gateway must be running. In [multi-user mode](docs/configuration.md#multi-user-mode), the commands act for the user named by `GRIPI_USER_TOKEN`.
 
 When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it links the command into `~/.local/bin`, unless something there is already named `gripi`. `~/.local/bin` must be on your `PATH`.
 

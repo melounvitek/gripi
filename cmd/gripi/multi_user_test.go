@@ -68,3 +68,50 @@ func TestCommandsOfAMultiUserGatewayActForTheUserOfTheirToken(t *testing.T) {
 		t.Fatalf("Bob's sessions = %s", listed)
 	}
 }
+
+func TestClaimGivesAUserASessionThatHasNoOwner(t *testing.T) {
+	alpha, _ := multiUserGateway(t)
+	// Like a session from Pi CLI, such as an orchestration worker.
+	worker := filepath.Join(filepath.Dir(alpha), "worker.jsonl")
+	appendSessionRecords(t, worker,
+		map[string]any{"type": "session", "version": 3, "id": "0a1-worker-full-id", "timestamp": "2026-01-03T00:00:00Z", "cwd": t.TempDir()},
+		map[string]any{"type": "message", "id": "user-1", "parentId": nil, "timestamp": "2026-01-03T00:00:01Z", "message": map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "The brief"}}}},
+	)
+	t.Setenv("GRIPI_USER_TOKEN", aliceToken)
+	if _, listed, _ := runCLI("list", "--json"); strings.Contains(listed, "0a1-worker") {
+		t.Fatalf("Alice lists the session before claiming it: %s", listed)
+	}
+	if code, stdout, stderr := runCLI("claim", "0a1-worker"); code != 1 || stdout != "" || !strings.Contains(stderr, "full ID") {
+		t.Fatalf("gripi claim with a prefix = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+
+	code, stdout, stderr := runCLI("claim", "0a1-worker-full-id", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.Path != worker {
+		t.Fatalf("gripi claim = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if code, stdout, stderr := runCLI("tag", "0a1-worker", "run"); code != 0 || !strings.Contains(stdout, "run") {
+		t.Fatalf("gripi tag on the claimed session = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if code, _, stderr := runCLI("claim", worker); code != 0 {
+		t.Fatalf("gripi claim on Alice's own session = %d, stderr %q", code, stderr)
+	}
+
+	t.Setenv("GRIPI_USER_TOKEN", bobToken)
+	if code, stdout, stderr := runCLI("claim", worker); code != 1 || stdout != "" || !strings.Contains(stderr, "another user") {
+		t.Fatalf("gripi claim on Alice's session for Bob = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, listed, _ := runCLI("list", "--json"); strings.Contains(listed, "0a1-worker") {
+		t.Fatalf("Bob lists Alice's session: %s", listed)
+	}
+}
+
+func TestClaimOnASingleUserGatewayOnlyFindsTheSession(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	code, stdout, stderr := runCLI("claim", "0a1-alpha", "--json")
+	if session := decodeSession(t, stdout); code != 0 || stderr != "" || session.Path != alpha {
+		t.Fatalf("gripi claim = %d, stderr %q, session %+v", code, stderr, session)
+	}
+	if code, stdout, stderr := runCLI("claim", "0a1-a"); code != 1 || stdout != "" || !strings.Contains(stderr, "full ID") {
+		t.Fatalf("gripi claim with a prefix = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}

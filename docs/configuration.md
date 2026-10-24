@@ -92,7 +92,7 @@ By default, Gripi shows all Pi sessions to a single trusted user. To give each u
 GRIPI_MULTI_USER_MODE=1
 ```
 
-Each user generates a private user token and sees only their own sessions. The same token shows the same sessions in any browser. Tokens cannot be recovered, so users must store them safely. Sessions created before multi-user mode was enabled, or in Pi CLI, have no owner and are not shown to anyone.
+Each user generates a private user token and sees only their own sessions. The same token shows the same sessions in any browser. Tokens cannot be recovered, so users must store them safely. Sessions created before multi-user mode was enabled, or in Pi CLI, have no owner and are not shown to anyone until a user claims them with `gripi claim`.
 
 User-token approval replaces browser approval:
 
@@ -103,13 +103,13 @@ Approved users are listed under `approved_workspaces` in `~/.pi/gripi/workspace-
 
 Multi-user mode separates session lists and [environment variables](#environment-variables), not permissions: all users run commands as the same OS user and share settings such as the selected model and thinking level. For the same reason, one user’s variables are not secret from the others.
 
-The session commands of the [`gripi` command](../README.md#command-line) are unavailable in multi-user mode, because they would reach every user’s sessions.
+The session commands of the [`gripi` command](../README.md#command-line) act for the user whose token is in `GRIPI_USER_TOKEN`, and reach only that user’s sessions. In a terminal, set it to your user token. Pi in a user’s session gets one automatically, so agents can run the commands without setup. That token works only for these commands, not in a browser, so it does no harm when Pi shows its environment to the model. `gripi claim` with the full ID of a session that has no owner, such as one from Pi CLI, makes the session yours; a session another user owns cannot be claimed.
 
 ## Environment variables
 
 Gripi can save environment variables for Pi, for example your own [GitHub](#github) token on a shared gateway. Pi and every command it runs get them on top of the gateway’s environment, and a saved variable replaces a gateway variable of the same name.
 
-The gateway’s own settings are not passed on. Pi gets no `APP_ENV` and no `GRIPI_*` variable from the gateway, so the projects it works on, and a gateway started from a session, do not inherit them. The exceptions are `GRIPI_SOCKET_PATH`, which the [`gripi` command](../README.md#command-line) needs to reach this gateway from inside a session, and the `GRIPI_E2E_*` variables of the [browser tests](testing.md#external-implementation). To give Pi an `APP_ENV` of its own, add it to the saved variables.
+The gateway’s own settings are not passed on. Pi gets no `APP_ENV` and no `GRIPI_*` variable from the gateway, so the projects it works on, and a gateway started from a session, do not inherit them. The exceptions are `GRIPI_SOCKET_PATH`, which the [`gripi` command](../README.md#command-line) needs to reach this gateway from inside a session, and the `GRIPI_E2E_*` variables of the [browser tests](testing.md#external-implementation). In [multi-user mode](#multi-user-mode), Pi also gets a `GRIPI_USER_TOKEN` of the session’s owner for the same command. To give Pi an `APP_ENV` of its own, add it to the saved variables.
 
 Edit them in the Environment dialog, opened with the key icon in the sidebar header or **Environment…** in the Ctrl+K palette. The list shows names only; a value is shown only while its row is open for editing. Pasting several `NAME=value` lines adds them at once, and lines starting with `#` are ignored.
 

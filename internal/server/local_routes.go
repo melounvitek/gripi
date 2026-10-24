@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -107,7 +108,53 @@ func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sessions/pin", app.pinSession)
 	mux.HandleFunc("POST /sessions/tags", app.sessionTags)
 	mux.HandleFunc("POST /sessions/delete", app.deleteSession)
+	mux.HandleFunc("POST /sessions/claim", app.localClaim)
 	mux.HandleFunc("GET /tags", app.tags)
+}
+
+// localClaim gives the user a session that has no owner, such as one from Pi CLI. It takes the full ID or the path,
+// because the user does not see the session to pick it by a prefix.
+func (app *application) localClaim(response http.ResponseWriter, request *http.Request) {
+	if !parseForm(response, request) {
+		return
+	}
+	reference := request.FormValue("session")
+	session, found := app.sessionStore.Session(reference)
+	if !found {
+		all, err := app.sessionStore.Sessions()
+		if err != nil {
+			writeInternalError(response, "list sessions to claim one", err)
+			return
+		}
+		var matches []*agent.Session
+		for _, candidate := range all {
+			if candidate.ID == reference {
+				matches = append(matches, candidate)
+			}
+		}
+		switch len(matches) {
+		case 0:
+			writeJSONStatus(response, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("no session has the full ID or path %q", reference)})
+			return
+		case 1:
+			session = matches[0]
+		default:
+			writeJSONStatus(response, http.StatusConflict, map[string]string{"error": fmt.Sprintf("%d sessions have the ID %q; claim one by its file path", len(matches), reference)})
+			return
+		}
+	}
+	if app.claimSession != nil {
+		_, err := app.claimSession(request, session.Path)
+		if errors.Is(err, access.ErrSessionOwnedByAnotherWorkspace) {
+			writeJSONStatus(response, http.StatusConflict, map[string]string{"error": "another user owns the session"})
+			return
+		}
+		if err != nil {
+			writeInternalError(response, "claim a session for a gripi command", err)
+			return
+		}
+	}
+	writeJSON(response, map[string]string{"session": session.Path})
 }
 
 func (app *application) localSessions(response http.ResponseWriter, request *http.Request) {

@@ -126,6 +126,58 @@ func renameSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) in
 	return printSession(stdout, stderr, "rename", session, *asJSON)
 }
 
+const claimHelp = `Usage:
+  gripi claim <session> [--json]
+
+Makes a session that has no owner yours, then prints it. On a gateway in
+multi-user mode, a session started in Pi CLI has no owner, and no user sees it
+until one claims it. Claiming your own session changes nothing, and another
+user's session cannot be claimed. On a gateway without multi-user mode, every
+session is already yours.
+
+Claiming changes only the owner: Pi CLI goes on running in the session.
+
+Arguments:
+  session  Full session ID or the session file path; a prefix is not enough,
+           because the session is not listed until it is claimed
+
+Flags:
+  --json  Print the session as a JSON object instead of a table
+
+` + sessionFields + `
+Example:
+  gripi claim 01a107aa-cfe1-70a9-b326-0f49ff3bf0da
+
+Exit codes:
+` + sessionExitCodes
+
+func claimSession(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("claim", flag.ContinueOnError)
+	asJSON := flags.Bool("json", false, "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "claim", err.Error())
+	}
+	if len(positional) != 1 || positional[0] == "" {
+		return usageError(stderr, "claim", "takes exactly one session")
+	}
+	client, err := newGatewayClient()
+	if err != nil {
+		return failure(stderr, "claim", err)
+	}
+	var answer struct {
+		Session string `json:"session"`
+	}
+	if err := client.post("/sessions/claim", url.Values{"session": {positional[0]}}, &answer); err != nil {
+		return failure(stderr, "claim", err)
+	}
+	session, err := client.session(answer.Session)
+	if err != nil {
+		return failure(stderr, "claim", err)
+	}
+	return printSession(stdout, stderr, "claim", session, *asJSON)
+}
+
 const tagHelp = `Usage:
   gripi tag <session> <tag>... [--json]
 
