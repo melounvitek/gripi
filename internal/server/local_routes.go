@@ -62,21 +62,39 @@ type commandUserKey struct{}
 // commandUser lets the commands of a multi-user gateway act for the user whose token they carry.
 func (app *application) commandUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		workspaceID := ""
-		if token, ok := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer "); ok && token != "" {
-			workspaceID = access.WorkspaceID(app.workspaceSecret, token)
-		}
-		approved, err := app.workspaceStore.Approved(workspaceID)
+		token, _ := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer ")
+		workspaceID, err := app.commandWorkspace(token)
 		if err != nil {
 			writeInternalError(response, "check the user of a gripi command", err)
 			return
 		}
-		if !approved {
+		if workspaceID == "" {
 			writeJSONStatus(response, http.StatusForbidden, map[string]string{"error": "the gateway is in multi-user mode; set GRIPI_USER_TOKEN to your user token"})
 			return
 		}
 		next.ServeHTTP(response, request.WithContext(context.WithValue(request.Context(), commandUserKey{}, workspaceID)))
 	})
+}
+
+// commandWorkspace finds the approved workspace of a user token or of a token from commandToken.
+func (app *application) commandWorkspace(token string) (string, error) {
+	approved, err := app.workspaceStore.ApprovedWorkspaces()
+	if token == "" {
+		return "", err
+	}
+	userWorkspace := access.WorkspaceID(app.workspaceSecret, token)
+	for _, workspaceID := range approved {
+		if workspaceID == userWorkspace || token == app.commandToken(workspaceID) {
+			return workspaceID, nil
+		}
+	}
+	return "", err
+}
+
+// commandToken lets the Pi of a user's sessions run gripi commands for that user. Unlike the workspace ID,
+// it does not open the user's browser session, so it is safe in an environment that Pi may show to the model.
+func (app *application) commandToken(workspaceID string) string {
+	return access.WorkspaceID(app.workspaceSecret, "command:"+workspaceID)
 }
 
 func (app *application) registerLocalRoutes(mux *http.ServeMux) {
