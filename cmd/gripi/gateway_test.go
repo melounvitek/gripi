@@ -19,6 +19,9 @@ import (
 	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
+// browser serves the browser's routes of the gateway that fakePiGateway started last.
+var browser http.Handler
+
 // fakePiGateway runs a gateway backed by the fake Pi on a socket the commands
 // will find. It has two idle sessions, 0a1-alpha and the more recent 0a1-beta.
 func fakePiGateway(t *testing.T, configure ...func(*config.Config)) (alpha, beta string) {
@@ -71,6 +74,7 @@ func fakePiGateway(t *testing.T, configure ...func(*config.Config)) (alpha, beta
 		handler.(interface{ Close(context.Context) error }).Close(context.Background())
 	})
 	t.Setenv("GRIPI_SOCKET_PATH", socket)
+	browser = handler
 	return alpha, beta
 }
 

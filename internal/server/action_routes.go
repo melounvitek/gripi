@@ -61,6 +61,7 @@ func (app *application) registerActionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sessions/clone", app.cloneSession)
 	mux.HandleFunc("POST /sessions/export", app.exportSession)
 	mux.HandleFunc("POST /extension_ui_response", app.extensionUIResponse)
+	mux.HandleFunc("POST /sudo/cancel", app.cancelSudo)
 	mux.HandleFunc("POST /sessions/takeover", app.takeOverSession)
 }
 

@@ -65,6 +65,7 @@ type liveOutputData struct {
 	PersistedBashJSON        string
 	QueuedMessagesJSON       string
 	ExtensionUIJSON          string
+	SudoRequestsJSON         string
 	ComposerState            string
 	ComposerStateSince       string
 	ComposerBusySince        string
@@ -372,6 +373,7 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 			toolContext = app.sessionStore.SubagentToolCallContext(selected.Path, window.TreeLeafID, activeToolIDs)
 		}
 		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, toolContext)
+		view.LiveOutput.SudoRequestsJSON = jsonData(app.sudoRequests.of(selected.Path))
 	}
 	return view, nil
 }

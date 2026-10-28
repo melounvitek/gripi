@@ -78,6 +78,7 @@ type application struct {
 	ownsSession             func(*http.Request, string) bool
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
+	sudoRequests            sudoRequests
 	// voice reaches Hermes's dashboard for voice conversations, which are off when it is nil.
 	voice  *hermesdashboard.Client
 	hermes hermesConversation

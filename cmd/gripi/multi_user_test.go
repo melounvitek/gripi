@@ -11,6 +11,9 @@ import (
 
 const aliceToken, bobToken = "piu_alice_token_0001", "piu_bob_token_000002"
 
+// workspaceCookies are the browser cookies of the users of the gateway that multiUserGateway started last, by token.
+var workspaceCookies map[string]string
+
 // multiUserGateway runs fakePiGateway in multi-user mode. Alice owns 0a1-alpha and Bob owns 0a1-beta.
 func multiUserGateway(t *testing.T) (alpha, beta string) {
 	t.Helper()
@@ -32,6 +35,7 @@ func multiUserGateway(t *testing.T) (alpha, beta string) {
 		t.Fatal(err)
 	}
 	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, adapter.Store())
+	workspaceCookies = map[string]string{}
 	for token, path := range map[string]string{aliceToken: alpha, bobToken: beta} {
 		workspace := access.WorkspaceID(secret, token)
 		if err := access.NewWorkspaceStore(cfg.WorkspaceAccessPath).ApproveWorkspace(workspace); err != nil {
@@ -40,6 +44,7 @@ func multiUserGateway(t *testing.T) (alpha, beta string) {
 		if _, err := owners.Claim(path, workspace); err != nil {
 			t.Fatal(err)
 		}
+		workspaceCookies[token] = "gripi_workspace=" + workspace
 	}
 	return alpha, beta
 }
