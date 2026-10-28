@@ -2,11 +2,14 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+
+	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
 const sudoHelp = `Usage:
@@ -28,7 +31,7 @@ Exit codes:
   2  usage error
 `
 
-func runAsRoot(arguments []string, _ io.Reader, _, stderr io.Writer) int {
+func runAsRoot(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	if len(arguments) < 2 || arguments[0] != "--" {
 		return usageError(stderr, "sudo", "put the command after --, as in 'gripi sudo -- apt-get update'")
 	}
@@ -53,9 +56,43 @@ func runAsRoot(arguments []string, _ io.Reader, _, stderr io.Writer) int {
 		return failure(stderr, "sudo", err)
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	// The gateway answers once the user has, or once the request expires, and its socket ends every request by serverReadTimeout.
-	if err := client.do(request, serverReadTimeout, &struct{}{}); err != nil {
+	// The gateway answers once the command has run, however long that takes. Its socket's read timeout stops
+	// counting once the gateway has read the request.
+	var result gateway.SudoResult
+	if err := client.do(request, 0, &result); err != nil {
 		return failure(stderr, "sudo", err)
 	}
+	stdout.Write(result.Stdout)
+	stderr.Write(result.Stderr)
+	if result.Truncated {
+		fmt.Fprintln(stderr, "gripi sudo: the command printed more than 16 MiB to an output, and Gripi dropped the rest")
+	}
+	return result.ExitCode
+}
+
+// answerSudoPrompt is gripi as the askpass program of a sudo that the gateway runs. It prints the user's password
+// only for sudo's password prompt, once, and otherwise prints nothing at all, after which sudo gives up.
+func answerSudoPrompt(arguments []string, stdout, stderr io.Writer) int {
+	// Where sudoers keeps the environment, a command that sudo runs has the token too, and may run gripi.
+	parent, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", os.Getppid()))
+	if len(arguments) != 1 || arguments[0] != gateway.SudoAskpassPrompt || err != nil || string(parent) != "sudo\n" {
+		fmt.Fprintln(stderr, "gripi sudo: Gripi answers only the password prompt of the sudo that it runs")
+		return exitFailure
+	}
+	client, err := newGatewayClient()
+	if err != nil {
+		return failure(stderr, "sudo", err)
+	}
+	response, err := client.http.PostForm("http://gripi/sudo/askpass", url.Values{"token": {os.Getenv("GRIPI_SUDO_TOKEN")}})
+	if err != nil {
+		return failure(stderr, "sudo", err)
+	}
+	defer response.Body.Close()
+	password, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK {
+		fmt.Fprintln(stderr, "gripi sudo: Gripi gives sudo the password only once")
+		return exitFailure
+	}
+	stdout.Write(append(password, '\n'))
 	return 0
 }

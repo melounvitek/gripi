@@ -100,9 +100,14 @@ func newGatewayClient() (*gatewayClient, error) {
 	}}}, userToken: os.Getenv("GRIPI_USER_TOKEN")}, nil
 }
 
+// do waits for the gateway's answer for up to timeout, or for as long as it takes when timeout is zero.
 func (client *gatewayClient) do(request *http.Request, timeout time.Duration, result any) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 	request = request.WithContext(ctx)
 	request.Header.Set("Accept", "application/json")
 	if client.userToken != "" {

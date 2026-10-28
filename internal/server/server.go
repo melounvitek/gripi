@@ -341,7 +341,11 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	if cfg.MultiUserMode {
 		commands = app.commandUser(commands)
 	}
-	gateway.local = app.limitRequestBody(commands)
+	socket := http.NewServeMux()
+	// sudo's askpass program has only the token that the route checks, and no user token.
+	socket.HandleFunc("POST /sudo/askpass", app.sudoAskpass)
+	socket.Handle("/", commands)
+	gateway.local = app.limitRequestBody(socket)
 	return gateway, nil
 }
 
