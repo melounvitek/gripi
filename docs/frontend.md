@@ -16,6 +16,7 @@ Page-lifetime listeners are registered once by `public/assets/app.js`. Replaceab
 - `ServerMarkdownRenderer` owns cancellable server Markdown requests.
 - `HermesPanelController` owns the Hermes panel and its tab on the page, and on the panel's own page the buttons that close it or open it in a window, and following the current conversation.
 - `VoiceCallController` owns the Hermes panel's voice button, the call view in the conversation's place, the call line with its controls, and the `VoiceConversation` they run.
+- `SudoPromptController` owns the prompt that asks, in the editor's place, for the password of a `gripi sudo` request, from the page's and the live events' pending requests.
 - The access, gateway update, project select, and new-session form controllers own their respective timers and listeners.
 
 Before replacing a session view, `app.js` resets controllers that hold session DOM or asynchronous work. After replacement, it binds the new elements before polling resumes.

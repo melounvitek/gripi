@@ -57,6 +57,7 @@ import { NotificationPresenceController } from "./notification_presence.js";
 import { WebPushController } from "./web_push.js";
 import { VoiceCallController } from "./voice_call_controller.js";
 import { HermesPanelController } from "./hermes_panel_controller.js";
+import { SudoPromptController } from "./sudo_prompt_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
@@ -228,6 +229,12 @@ const commandPaletteController = new CommandPaletteController(document, {
   piCommands: piPaletteCommands
 });
 const environmentController = new EnvironmentController(document, window, { openModal });
+// Unlike a dialog, the prompt leaves polling on, which notices its request answered elsewhere. The editor gives it the
+// focus, unless the editor holds a message, whose typing would go on in the password field.
+const sudoPromptController = new SudoPromptController(window, {
+  canFocus: () => automaticComposerFocusEnabled() && !modalIsOpen() &&
+    (document.activeElement === promptTextarea ? !promptTextarea.value : !editableElement(document.activeElement))
+});
 const voiceCallController = new VoiceCallController(window, {
   // Like the palette's commands, without the composer's draft and attachments.
   send: async (text) => {
@@ -307,6 +314,7 @@ function bindSessionDom() {
   liveMessageRenderer.bind();
   currentSessionFindController.bind();
   voiceCallController.bind(promptForm);
+  sudoPromptController.bind(document.querySelector("[data-sudo-prompt]"), promptForm);
   sessionStatusBar = document.getElementById("session-status-bar");
   const boundSessionPath = currentSessionPath();
   if (boundSessionPath !== lastBoundSessionPath) {
@@ -467,7 +475,7 @@ function automaticComposerFocusEnabled() {
 }
 
 function syncComposerFocus(state = composerState?.dataset.state) {
-  if (!automaticComposerFocusEnabled() || modalIsOpen()) return;
+  if (!automaticComposerFocusEnabled() || modalIsOpen() || sudoPromptController.shown) return;
   // The Hermes panel's page and the page around it keep the focus each has, but don't take it from each other, such as
   // while you type to Pi or to Hermes.
   if (window.parent !== window ? !document.hasFocus() : hermesPanelController.keepsFocus()) return;
@@ -1929,6 +1937,7 @@ async function pollEvents() {
     pollSucceeded = true;
     hideReconnectBanner();
     if (refreshRequired) return;
+    sudoPromptController.update(payload.sudo_requests);
     if (Number.isInteger(payload.last_seq)) {
       lastEventSeq = payload.last_seq;
     }
@@ -2812,6 +2821,7 @@ async function copyText(text) {
 
 function resetSessionViewState() {
   voiceCallController.end();
+  sudoPromptController.reset();
   pendingFinalAssistantReply = null;
   currentSessionFindController.close({ restoreFocus: false });
   imageViewerController.close();
@@ -3742,6 +3752,7 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
   }
   liveMessageRenderer.restoreActiveToolExecutions();
   hydrateExtensionUiState();
+  sudoPromptController.update(JSON.parse(liveOutput.dataset.sudoRequests || "[]"));
 }
 
 function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery = null } = {}) {

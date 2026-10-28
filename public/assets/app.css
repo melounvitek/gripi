@@ -260,6 +260,26 @@
     .voice-call-actions .voice-call-end { color: var(--danger); }
     @media (hover: hover) and (pointer: fine) { .voice-call .voice-call-actions .voice-call-end:hover { color: #e08888; } }
     @media (max-width: 760px), (pointer: coarse) { .voice-call .voice-call-actions { gap: 0; } .voice-call-actions .picker-separator { display: none; } }
+    /* Gripi's own prompt for a gripi sudo request takes the editor's place, framed by gold rules, above the editor's footer. */
+    .prompt-form[data-sudo] > :not(.composer-controls) { display: none; }
+    .sudo-prompt { display: grid; gap: 0.5rem; font: 0.86rem/1.45 var(--mono); }
+    .sudo-prompt-editor { display: grid; gap: 0.55rem; padding: 0.6rem var(--text-inset) 0.7rem; border-block: 1px solid var(--gold); }
+    .sudo-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+    .sudo-prompt-head h2 { display: flex; align-items: center; gap: 0.45rem; }
+    .sudo-prompt-head svg { width: auto; height: 0.62rem; }
+    .sudo-prompt-expiry { color: var(--muted-soft); font-size: 0.72rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .sudo-prompt-facts, .sudo-prompt-field { display: grid; grid-template-columns: 8ch minmax(0, 1fr); gap: 0.15rem 1rem; margin: 0; }
+    .sudo-prompt-facts dt, .sudo-prompt-field > span { color: var(--muted); }
+    /* A long command scrolls rather than push the actions off a phone's screen. */
+    .sudo-prompt-facts dd { max-height: 9rem; margin: 0; overflow-y: auto; overflow-wrap: anywhere; }
+    .sudo-prompt-field { align-items: center; }
+    .sudo-prompt-field input, .sudo-prompt-field input:focus { min-width: 0; padding: 0.45rem 0; border: 0; border-bottom: 1px solid var(--border-strong); border-radius: 0; background: transparent; box-shadow: none; font-size: inherit; outline: none; }
+    .sudo-prompt-field input:focus { border-bottom-color: var(--gold); }
+    .sudo-prompt-error { margin: 0; color: var(--danger); }
+    .sudo-prompt-actions { padding-left: var(--text-inset); }
+    .sudo-prompt-actions .sudo-prompt-run { color: var(--gold); font-weight: 700; }
+    /* 16px keeps iOS from zooming into the field. */
+    @media (max-width: 760px), (pointer: coarse) { .sudo-prompt-field input { min-height: 2.75rem; font-size: 16px; } }
     h1 { font-size: 1.1rem; line-height: 1.25; margin: 0 0 1rem; font-weight: 650; letter-spacing: -0.01em; }
     h2 { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; margin: 0; color: var(--gold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.14em; }
     .session-sidebar-header { display: block; }
