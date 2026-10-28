@@ -171,8 +171,10 @@ func (app *application) sudo(response http.ResponseWriter, request *http.Request
 		writeJSONStatus(response, http.StatusNotFound, map[string]string{"error": "the command runs in no session of yours in Gripi, so nobody could answer"})
 		return
 	}
-	session, ok := app.resolveActionPendingPath(response, request, session)
-	if !ok {
+	// The browser's page and live events show the requests of the canonical session, which an alias would miss.
+	session, err := app.canonicalRPCSessionPath(request, session)
+	if err != nil {
+		http.Error(response, "Unable to remap pending session", http.StatusInternalServerError)
 		return
 	}
 	pending, err := app.sudoRequests.add(session, cwd, argv)

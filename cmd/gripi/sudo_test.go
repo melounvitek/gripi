@@ -229,6 +229,29 @@ func TestSudoAsksInANewSessionBeforeItsFirstReply(t *testing.T) {
 	}
 }
 
+func TestSudoAsksInTheSessionThatASymlinkLeadsTo(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	outsideSessions(t)
+	link := filepath.Join(t.TempDir(), "sessions")
+	if err := os.Symlink(filepath.Dir(alpha), link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PI_SESSION_FILE", filepath.Join(link, filepath.Base(alpha)))
+
+	result := startCLI("sudo", "--", "true")
+	id := sudoRequestsUntil(t, alpha, "", 1)[0]["id"].(string)
+	page := browserRequest(http.MethodGet, "/?session="+url.QueryEscape(alpha), nil, "")
+	if match := renderedSudoRequests.FindStringSubmatch(page.Body.String()); page.Code != http.StatusOK || match == nil || !strings.Contains(match[1], id) {
+		t.Fatalf("page = %d without the sudo request", page.Code)
+	}
+	if code := cancelSudo(id, ""); code != http.StatusOK {
+		t.Fatalf("cancel = %d", code)
+	}
+	if answered := <-result; answered.code != 1 {
+		t.Fatalf("gripi sudo = %+v", answered)
+	}
+}
+
 func TestSudoAsksInTheHermesConversationThatRunsIt(t *testing.T) {
 	hermesGateway(t, fakeHermesSession{SessionID: "hermes-e2e", CWD: t.TempDir(), Title: "A Hermes session", UpdatedAt: "2026-03-01T10:00:00Z"})
 	outsideSessions(t)
