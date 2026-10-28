@@ -15,19 +15,27 @@ import (
 const sudoHelp = `Usage:
   gripi sudo -- <command> [arguments]
 
-Asks the user to run a command as root. Gripi shows the request in the
-conversation of the Pi or Hermes session that runs gripi sudo, and waits up
-to 2 minutes for the user's answer there.
+Asks the user to run a command as root and waits up to 2 minutes for them to
+answer in Gripi, where the request takes the editor's place in the
+conversation of the Pi or Hermes session that runs gripi sudo. Once they enter
+their password, Gripi runs the command with sudo and passes on its output and
+exit code. The password goes only to sudo, never to the agent.
 
-Run it from a session in Gripi, which it finds by PI_SESSION_FILE, set by
-Pi's bash tool, or by HERMES_SESSION_ID, set by Hermes's terminal.
+Each command needs the user's password again. The command reads no input, and
+Gripi keeps only the first 16 MiB of each of its outputs.
+
+gripi sudo finds its session by PI_SESSION_FILE, which Pi's bash tool sets, or
+by HERMES_SESSION_ID, which Hermes's terminal sets.
 
 Example:
   gripi sudo -- apt-get install -y ripgrep
 
 Exit codes:
+  Once the user has entered the password, sudo's: the command's own, or 1
+  when sudo fails, as after a wrong password. Otherwise gripi sudo prints why,
+  starting with "gripi sudo:", and exits with
   1  the gateway cannot be reached, the command does not run in a session of
-     yours in Gripi, the user cancelled, or nobody answered in time
+     yours in Gripi, the user cancelled, or nobody answered in 2 minutes
   2  usage error
 `
 
