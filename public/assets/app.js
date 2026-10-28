@@ -475,7 +475,7 @@ function automaticComposerFocusEnabled() {
 }
 
 function syncComposerFocus(state = composerState?.dataset.state) {
-  if (!automaticComposerFocusEnabled() || modalIsOpen() || sudoPromptController.shown) return;
+  if (!automaticComposerFocusEnabled() || modalIsOpen() || sudoPromptController.shown || sudoPromptController.dismissed) return;
   // The Hermes panel's page and the page around it keep the focus each has, but don't take it from each other, such as
   // while you type to Pi or to Hermes.
   if (window.parent !== window ? !document.hasFocus() : hermesPanelController.keepsFocus()) return;

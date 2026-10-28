@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { sessions } from "../support/contract.mjs";
+import { prompts, sessions } from "../support/contract.mjs";
+import { sendPrompt } from "../support/ui.mjs";
 
 const root = process.env.GRIPI_E2E_RUNTIME_ROOT;
 test.skip(!root, "Needs the managed gateway, which runs a fake sudo");
@@ -138,6 +139,49 @@ test("an answer in another tab takes the prompt away without moving the focus to
   await expect(passwordField(page)).toHaveValue("");
   await expect(page.getByLabel("Message to Pi")).toBeVisible();
   await expect(page.getByLabel("Message to Pi")).not.toBeFocused();
+});
+
+test("a prompt that goes away as the run ends keeps the rest of the password out of the editor", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Keyboard flow");
+  const session = await openSession(page, "sudo", sessions.sudo);
+  await sendPrompt(page, prompts.abortStart);
+  await expect(page.locator(".composer-state")).toHaveAttribute("data-state", "running");
+  const { command, ended } = gripiSudo(session, ["echo", "never"]);
+  const password = sudoPrompt(page).getByLabel("password");
+  await expect(password).toBeFocused();
+  await password.pressSequentially("pass");
+
+  // The command gives up, as on its bash tool's timeout, and the run ends, which the page learns from one poll.
+  const events = async (after) => (await page.request.get(`/events?session=${encodeURIComponent(session)}&after=${after}`)).json();
+  const { last_seq: before } = await events(0);
+  let polled;
+  const polling = new Promise((resolve) => { polled = resolve; });
+  let release;
+  const released = new Promise((resolve) => { release = resolve; });
+  await page.route((url) => url.pathname === "/events", async (route) => {
+    polled();
+    await released;
+    await route.continue();
+  });
+  await polling;
+  command.kill();
+  await ended;
+  expect((await page.request.post("/abort", { form: { session } })).ok()).toBe(true);
+  await expect.poll(async () => {
+    const payload = await events(before);
+    return [payload.sudo_requests.length, payload.events.some((event) => event.type === "agent_settled")];
+  }).toEqual([0, true]);
+  release();
+  await expect(sudoPrompt(page)).toBeHidden();
+  await expect(page.getByRole("button", { name: "Abort running Pi" })).toBeHidden();
+
+  await page.keyboard.type("word-canary");
+  const composer = page.getByLabel("Message to Pi");
+  await expect(composer).toBeVisible();
+  await expect(composer).not.toBeFocused();
+  await expect(composer).toHaveValue("");
+  const storage = await page.evaluate(() => JSON.stringify([{ ...localStorage }, { ...sessionStorage }]));
+  expect(storage).not.toContain("word-canary");
 });
 
 test("a phone cancels with one tap on actions big enough to tap", async ({ page, isMobile }) => {

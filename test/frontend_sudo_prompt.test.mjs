@@ -41,7 +41,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 test("the oldest pending request takes the editor's place and keeps what is typed while it stays pending", (t) => {
   t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: NOW });
-  const { controller, form, prompt, command, cwd, expiry, password } = promptFixture();
+  const { controller, window, form, prompt, command, cwd, expiry, password, fire } = promptFixture();
 
   controller.update([request("first"), request("second", 150)]);
   assert.equal(prompt.hidden, false);
@@ -67,6 +67,10 @@ test("the oldest pending request takes the editor's place and keeps what is type
   assert.equal(prompt.hidden, true);
   assert.equal(form.hasAttribute("data-sudo"), false);
   assert.equal(password.value, "");
+  // The rest of the password could follow, which the editor must not take.
+  assert.equal(controller.dismissed, true);
+  fire(window, "pointerdown");
+  assert.equal(controller.dismissed, false);
 });
 
 test("Enter sends the password as a form and clears the field at once, and a refused password keeps the request", async (t) => {
@@ -87,6 +91,7 @@ test("Enter sends the password as a form and clears the field at once, and a ref
   await flush();
   assert.equal(sent[1].body, "id=first&password=s3cret+%26%3D");
   assert.equal(prompt.hidden, true);
+  assert.equal(controller.dismissed, false);
 
   // A poll from before the answer still lists it.
   controller.update([request("first")]);

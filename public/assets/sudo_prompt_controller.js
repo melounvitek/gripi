@@ -15,6 +15,10 @@ export class SudoPromptController {
     this.sending = false;
     this.ticker = null;
     this.closing = null;
+    // Whether the prompt went away without an answer from this page, such as when its command gave up, while the user
+    // may still be typing the password. Until they press somewhere, the editor doesn't take the focus by itself.
+    this.dismissed = false;
+    window.addEventListener("pointerdown", () => { this.dismissed = false; }, true);
     // The browser keeps a page for Back and Forward with what its fields hold.
     window.addEventListener("pagehide", () => this.clearPassword());
     window.addEventListener("pageshow", () => this.clearPassword());
@@ -61,7 +65,7 @@ export class SudoPromptController {
     if (this.elements) this.elements.password.value = "";
   }
 
-  render() {
+  render(answered = false) {
     if (!this.elements || this.closing) return;
     const now = Date.now();
     const request = this.requests.find((each) => !this.finished.has(each.id) && Date.parse(each.expires_at) > now) || null;
@@ -78,7 +82,10 @@ export class SudoPromptController {
     form.toggleAttribute("data-sudo", !!request);
     prompt.hidden = !request;
     // Nothing takes the focus when the prompt goes: what is typed next could be the rest of the password.
-    if (!request) return;
+    if (!request) {
+      this.dismissed = !answered;
+      return;
+    }
     command.textContent = request.display;
     cwd.textContent = request.cwd;
     this.ticker = setInterval(() => this.tick(), 1000);
@@ -137,7 +144,7 @@ export class SudoPromptController {
     this.sending = false;
     if (response?.ok) {
       this.finished.add(request.id);
-      this.render();
+      this.render(true);
       return;
     }
     const { error } = this.elements;
