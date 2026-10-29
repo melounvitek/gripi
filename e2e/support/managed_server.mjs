@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { closeSync, openSync, rmSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { spawn } from "node:child_process";
 import os from "node:os";
@@ -32,6 +32,12 @@ const serverLog = openSync(serverLogPath, "a");
 const fakePiPath = path.join(repoRoot, "e2e", "support", "fake_pi.mjs");
 const fakeHermesLogPath = path.join(runtimeRoot, "fake-hermes.log");
 const fakeHermesStatePath = path.join(runtimeRoot, "fake-hermes-state.json");
+const fakeSudoPath = path.join(repoRoot, "e2e", "support", "fake_sudo", "sudo");
+const sudoHashesPath = path.join(runtimeRoot, "sudo-password-hashes");
+const socketPath = path.join(runtimeRoot, "gripi.sock");
+// The gateway's temporary files land in the runtime too, where the sudo spec looks for a leaked password.
+const temporaryRoot = path.join(runtimeRoot, "tmp");
+await mkdir(temporaryRoot);
 if (withHermes) await writeFile(fakeHermesStatePath, JSON.stringify({ sessions: [savedHermesSession(fixture.projects["prompt-project"])] }));
 // With Hermes come voice conversations, through a fake of Hermes's dashboard, and the fake microphone the browser hears.
 const dashboardLogin = { username: "e2e", password: "e2e-dashboard-password" };
@@ -55,6 +61,9 @@ const serverEnv = {
   GRIPI_ENV_PATH: path.join(runtimeRoot, "missing-env"),
   GRIPI_BIND_HOST: "127.0.0.1",
   GRIPI_PORT: String(port),
+  GRIPI_SOCKET_PATH: socketPath,
+  GRIPI_E2E_SUDO_HASHES: sudoHashesPath,
+  TMPDIR: temporaryRoot,
   GRIPI_SESSIONS_ROOT: fixture.sessionsRoot,
   GRIPI_ATTACHMENTS_ROOT: fixture.attachmentsRoot,
   GRIPI_SESSION_CWDS_PATH: fixture.configuredCwdsPath,
@@ -86,7 +95,7 @@ const serverEnv = {
 };
 
 const serverBinary = path.join(runtimeRoot, "gripi-e2e");
-const build = spawn("mise", ["exec", "--", "go", "build", "-o", serverBinary, "./cmd/gripi"], {
+const build = spawn("mise", ["exec", "--", "go", "build", "-ldflags", `-X "github.com/melounvitek/gripi/internal/server.SudoPath=${fakeSudoPath}"`, "-o", serverBinary, "./cmd/gripi"], {
   cwd: repoRoot,
   env: process.env,
   stdio: ["ignore", serverLog, serverLog]
@@ -123,7 +132,11 @@ try {
       GRIPI_E2E_EXPECT_ACCESS: realPi ? "" : "1",
       GRIPI_E2E_REAL_PI: realPi ? "1" : "",
       GRIPI_E2E_FAKE_PI_LOG: fakeLogPath,
-      GRIPI_E2E_FAKE_MICROPHONE: withHermes ? microphonePath : ""
+      GRIPI_E2E_FAKE_MICROPHONE: withHermes ? microphonePath : "",
+      GRIPI_E2E_RUNTIME_ROOT: runtimeRoot,
+      GRIPI_E2E_GRIPI: serverBinary,
+      GRIPI_E2E_SOCKET_PATH: socketPath,
+      GRIPI_E2E_SUDO_HASHES: sudoHashesPath
     },
     stdio: "inherit"
   });

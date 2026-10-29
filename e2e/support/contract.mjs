@@ -71,7 +71,9 @@ export const sessions = {
   liveFooter: "E2E Live Footer Desktop",
   liveCompaction: "E2E Live Compaction Desktop",
   liveThinking: "E2E Live Thinking Desktop",
-  paletteCommands: "E2E Palette Commands Desktop"
+  paletteCommands: "E2E Palette Commands Desktop",
+  sudo: "E2E Sudo Desktop",
+  sudoMobile: "E2E Sudo Mobile"
 };
 
 export const footerModel = {

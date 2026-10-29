@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"unicode"
@@ -94,6 +95,12 @@ func (app *application) limitRequestBody(next http.Handler) http.Handler {
 		if request.ContentLength >= 0 {
 			request.Body = http.MaxBytesReader(response, request.Body, maxRequestBodyBytes)
 			next.ServeHTTP(response, request)
+			return
+		}
+		// The answer to a sudo request carries the user's password, which must not reach a file, not even on its way
+		// to the redirect of an unclean path.
+		if path.Clean(request.URL.Path) == "/sudo/answer" {
+			writeText(response, http.StatusLengthRequired, "Length Required")
 			return
 		}
 

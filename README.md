@@ -111,6 +111,8 @@ gripi show 01a107aa                       # print the reply
 
 Other commands start a session (`new`), stop what one is working on (`stop`), continue one in Pi CLI (`open`), name one (`rename`), pin or tag sessions (`pin`, `unpin`, `tag`, `untag`, `tags`), delete one (`delete`), and claim one that has no owner (`claim`). `gripi help` describes every command, and all of these but `open` can print JSON. The gateway must be running. In [multi-user mode](docs/configuration.md#multi-user-mode), the commands act for the user named by `GRIPI_USER_TOKEN`.
 
+An agent in a Gripi session can also [run a command as root](docs/configuration.md#running-commands-as-root) with `gripi sudo -- <command>`, once you enter your password in Gripi.
+
 When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it links the command into `~/.local/bin`, unless something there is already named `gripi`. `~/.local/bin` must be on your `PATH`.
 
 ## Updating
@@ -167,6 +169,7 @@ Gripi uses Pi’s own runtime, sessions, tools, models, and configuration. The c
 - **There is no terminal UI.** For custom TUI components, terminal keybindings, or code that checks `ctx.mode === "tui"`, use Pi CLI.
 - **Sessions in use in Pi CLI are hidden from the sidebar** until you show them with the terminal button beside search. Each browser remembers the choice, and Ctrl+K still finds them. Pinned and tagged sessions always show.
 - **Saved environment variables stay in Gripi.** Pi CLI in a terminal does not get the [environment variables](docs/configuration.md#environment-variables) you save in Gripi, so a session continued there runs without them.
+- **[`gripi sudo`](docs/configuration.md#running-commands-as-root) asks only in Gripi.** Pi CLI in a terminal shows no prompt for it.
 
 ## Development
 

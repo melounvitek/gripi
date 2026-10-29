@@ -78,6 +78,7 @@ type application struct {
 	ownsSession             func(*http.Request, string) bool
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
+	sudoRequests            sudoRequests
 	// voice reaches Hermes's dashboard for voice conversations, which are off when it is nil.
 	voice  *hermesdashboard.Client
 	hermes hermesConversation
@@ -340,7 +341,11 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	if cfg.MultiUserMode {
 		commands = app.commandUser(commands)
 	}
-	gateway.local = app.limitRequestBody(commands)
+	socket := http.NewServeMux()
+	// sudo's askpass program has only the token that the route checks, and no user token.
+	socket.HandleFunc("POST /sudo/askpass", app.sudoAskpass)
+	socket.Handle("/", commands)
+	gateway.local = app.limitRequestBody(socket)
 	return gateway, nil
 }
 

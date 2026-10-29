@@ -161,6 +161,36 @@ If git also uses another helper there, such as the macOS keychain or `store`, a 
 
 If `GH_TOKEN` is saved without the rest, the dialog warns that commits and `git push` still use the gateway’s identity and offers **+ add the rest for GitHub**.
 
+## Running commands as root
+
+Agents in Gripi can’t use `sudo` when it asks for a password, because nothing can type it. Instead, an agent in a Pi or Hermes session can run `gripi sudo -- <command>`. Gripi then shows the exact command and its directory in place of that conversation’s editor and asks for your password. **run as root** runs the command with sudo, and the agent gets only its output and exit code. **cancel**, or 2 minutes without an answer, refuses it. The password goes from the browser to the gateway’s memory and, only if sudo asks for it, to sudo. It never reaches the agent, the model, or any file.
+
+Gripi leaves plain `sudo` as it is, so it still fails there. `gripi sudo` is Gripi’s own: Pi CLI in a terminal shows no prompt for it.
+
+Agents don’t know about it until you tell them. For Pi, add a line to `~/.pi/agent/AGENTS.md`:
+
+```md
+- To run a command as root, use `gripi sudo -- <command>`, not `sudo`; I enter the password in Gripi. See `gripi help sudo`.
+```
+
+For Hermes, add it to the hint for ACP clients in `~/.hermes/config.yaml`, in the same string as any [`MEDIA:` hint](#hermes-agent-experimental). Editors that use Hermes get it too, but `gripi sudo` fails there:
+
+```yaml
+platform_hints:
+  acp: "To run a command as root, use `gripi sudo -- <command>`, not `sudo`; the user enters the password in Gripi."
+```
+
+Requirements and limits:
+
+- Linux only, tested with [sudo-rs](https://github.com/trifectatechfoundation/sudo-rs). Gripi answers only pam_unix’s untranslated `Password: ` prompt. If PAM asks for anything else, such as a one-time code, or in another language, sudo fails without running the command.
+- sudoers must not keep `SUDO_ASKPASS` or `GRIPI_SUDO_TOKEN` with `env_keep`, which would pass them on to the command.
+- Every command needs your approval and your password. Gripi runs sudo with `-k`, so an earlier sudo login doesn’t count.
+- `!` commands and nested subagents can’t use it. Gripi can’t tell which conversation they belong to, so `gripi sudo` fails at once.
+- Hermes stops a terminal command after 180 seconds unless its model sets a longer timeout, and the wait for your answer counts.
+- In [multi-user mode](#multi-user-mode), only the session’s owner sees the request and can answer it.
+
+This keeps the password from leaking by accident. It doesn’t protect against a hostile agent: one that runs as the gateway’s OS user could replace Gripi, or ask you to approve a harmful command. Read the command before you run it, because it runs as root.
+
 ## Pinned session directories
 
 List frequently used directories in `~/.config/gripi/pinned-dirs` to keep them available in the New Session dialog:

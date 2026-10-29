@@ -204,7 +204,7 @@ func TestLiveOutputAndEventsKeepTheirBytes(t *testing.T) {
 		`{"bashId":"bash-C","command":"missing","error":"Bash failed \u003cx\u003e","excludeFromContext":false,"gatewayTimestamp":1767323045006,"startedAt":1767323045006,"type":"bash_error"},` +
 		`{"bashId":"bash-D","command":"sleep 10","excludeFromContext":false,"gatewayTimestamp":1767323045006,"type":"bash_start"},` +
 		`{"bashId":"bash-D","command":"sleep 10","excludeFromContext":false,"gatewayTimestamp":1767323045006,"output":"tick \u003c1\u003e\n","type":"bash_update"}` +
-		`],"last_seq":20,"missed":false,"session_sync":{"error":null,"gateway_busy":true,"mode":"available","revision":null}}`
+		`],"last_seq":20,"missed":false,"session_sync":{"error":null,"gateway_busy":true,"mode":"available","revision":null},"sudo_requests":[]}`
 	if body := ids.Replace(response.Body.String()); response.Code != http.StatusOK || body != want {
 		t.Errorf("events = %d %s", response.Code, body)
 	}

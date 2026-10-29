@@ -27,6 +27,10 @@ import (
 )
 
 func main() {
+	// The gateway runs gripi as sudo's askpass program, which gets only sudo's prompt.
+	if os.Getenv("GRIPI_SUDO_TOKEN") != "" {
+		os.Exit(answerSudoPrompt(os.Args[1:], os.Stdout, os.Stderr))
+	}
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 

@@ -1,0 +1,9 @@
+#!/bin/sh
+# The browser suite's gateway runs this instead of sudo, as "sudo -A -k -p gripi -- command...". Like sudo-rs, it asks
+# its askpass program, which checks that it is called sudo, for the password. It keeps only the password's SHA-256 in
+# $GRIPI_E2E_SUDO_HASHES and runs the command without root.
+[ "$1 $2 $3 $4 $5" = "-A -k -p gripi --" ] || exit 64
+shift 5
+password=$("$SUDO_ASKPASS" "[sudo: gripi] Password: ") || exit 1
+printf %s "$password" | sha256sum | cut -d " " -f 1 >> "$GRIPI_E2E_SUDO_HASHES"
+exec "$@" < /dev/null
