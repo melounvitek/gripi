@@ -74,6 +74,8 @@ test("the prompt takes the editor's place, runs the approved command, and keeps 
   await expect(composer).toBeHidden();
   const password = prompt.getByLabel("password");
   await expect(password).toBeFocused();
+  // Password managers, Bitwarden and Chrome's own included, neither offer to save nor fill a one-time code.
+  await expect(password).toHaveAttribute("autocomplete", "one-time-code");
 
   await password.press("Enter");
   await expect(prompt.getByRole("alert")).toHaveText("Enter the password on one line.");
