@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -201,6 +202,8 @@ type Client struct {
 	extensionTitle       map[string]any
 
 	busy                        bool
+	busyWhenStopped             bool // whether a run was going when Pi's output ended
+	lostReported                bool
 	busySince                   *time.Time
 	agentRunning                bool
 	settledAt                   *time.Time
@@ -247,8 +250,14 @@ func startProcess(key, cwd string, command, args, variables []string, launch age
 	}
 	var cmd *exec.Cmd
 	release := func() {}
+	var started atomic.Pointer[Client]
 	if launch != nil {
-		launched, done, err := launch(agent.Process{Key: key, Dir: cwd, Command: append(slices.Clone(command), args...), Env: variables})
+		lost := func(message string) {
+			if client := started.Load(); client != nil {
+				client.lost(message)
+			}
+		}
+		launched, done, err := launch(agent.Process{Key: key, Dir: cwd, Command: append(slices.Clone(command), args...), Env: variables, Lost: lost})
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", agent.ErrStartFailed, err)
 		}
@@ -298,6 +307,7 @@ func startProcess(key, cwd string, command, args, variables []string, launch age
 		return nil, fmt.Errorf("attach Pi RPC process group: %w", err)
 	}
 	client := NewClient(stdin, stdout, stderr, ClientOptions{Diagnostics: diagnostics, EventObserver: observer})
+	started.Store(client)
 	client.process = cmd
 	client.release = release
 	client.processGroup = group
@@ -1070,6 +1080,7 @@ func (client *Client) sampleOversizedToolUpdate(id string) bool {
 
 func (client *Client) readerStopped() {
 	client.mu.Lock()
+	client.busyWhenStopped = client.busy
 	client.agentRunning = false
 	client.activeBashToken = nil
 	client.activeBashID = ""
@@ -1099,6 +1110,18 @@ func (client *Client) readerStopped() {
 	client.busy = false
 	client.busySince = nil
 	client.mu.Unlock()
+}
+
+// lost ends the run that was going when the launcher lost Pi with the launcher's message, because nobody knows how the
+// run ended. Pi's events end with its output, so the gateway ends the run as Pi's agent_settled does, with an error.
+func (client *Client) lost(message string) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.lostReported || !client.busy && !client.busyWhenStopped {
+		return
+	}
+	client.lostReported = true
+	client.appendGatewayEventLocked(map[string]any{"type": "agent_settled", "aborted": false, "error": message, "gatewayTimestamp": client.clock().UnixMilli()})
 }
 
 func (client *Client) storeResponse(response map[string]any, serializedBytes int) {
