@@ -40,6 +40,14 @@ GRIPI_TEST_SSH=localhost go test ./internal/worker/ -run RealSSH -v
 
 `GRIPI_TEST_SSH` can name any worker that `ssh` reaches without a prompt and that has a systemd user manager. The tests install the helper in `GRIPI_TEST_SSH_DIR` there (`~/gripi-helper-test` by default) and remove it afterwards.
 
+An end-to-end test moves a repository with a worktree to a real worker and back, with a gateway whose Pi folder, state and projects all live in `/tmp/gripi-e2e`, which the worker gets at the same paths, and a scripted model, so no real model is called. It needs another machine, because the worker must not share main's files:
+
+```sh
+GRIPI_TEST_WORKER=gripi@beelink.example.ts.net go test ./cmd/gripi -run RealWorker -v
+```
+
+It installs the helper in `~/gripi-e2e` on the worker and removes it and `/tmp/gripi-e2e` on both machines afterwards.
+
 ## Browser contract suite
 
 The Playwright suite exercises Gripi only through a browser. Its fixtures use Pi's native JSONL session format, and its deterministic Pi replacement is an independent RPC subprocess. Browser specifications do not import gateway packages or call internal handlers directly.

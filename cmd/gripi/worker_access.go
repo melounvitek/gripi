@@ -12,8 +12,9 @@ import (
 	remote "github.com/melounvitek/gripi/internal/worker"
 )
 
-// newWorkers runs the sessions of the repositories placed on workers there, with Pi's adapter's launcher.
-func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler) (*remote.Manager, error) {
+// newWorkers runs the sessions of the repositories placed on workers there, with Pi's adapter's launcher. It connects
+// to workers with the options of connection.
+func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler, connection remote.Options) (*remote.Manager, error) {
 	placements, err := remote.LoadPlacements(cfg.WorkerPlacementsPath)
 	if err != nil {
 		return nil, err
@@ -41,6 +42,7 @@ func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler) 
 		ServeSocket: func(name string, placement remote.WorkerPlacement) (string, func() error, error) {
 			return startWorkerSocket(cfg, handler, name, placement)
 		},
+		Connection: connection,
 	}), nil
 }
 

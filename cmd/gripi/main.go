@@ -40,19 +40,10 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	var workers *remote.Manager
-	piAdapter, err := newPiAdapter(cfg, func(process agent.Process) (*exec.Cmd, func(), error) { return workers.Launch(process) })
+	handler, workers, err := newGateway(cfg, remote.Options{})
 	if err != nil {
 		return err
 	}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles, newAdapter(cfg, piAdapter))
-	if err != nil {
-		return err
-	}
-	if workers, err = newWorkers(cfg, piAdapter, handler); err != nil {
-		return err
-	}
-	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
 
 	server := newHTTPServer(handler)
 	listener, err := net.Listen("tcp", cfg.Address)
@@ -130,6 +121,25 @@ func serve() error {
 		os.Exit(exitCode)
 	}
 	return nil
+}
+
+// newGateway returns the gateway's handler, and the workers that run the sessions of repositories placed on them,
+// connecting to them with the options of connection.
+func newGateway(cfg config.Config, connection remote.Options) (http.Handler, *remote.Manager, error) {
+	var workers *remote.Manager
+	piAdapter, err := newPiAdapter(cfg, func(process agent.Process) (*exec.Cmd, func(), error) { return workers.Launch(process) })
+	if err != nil {
+		return nil, nil, err
+	}
+	handler, err := gateway.NewHandler(cfg, gripi.WebFiles, newAdapter(cfg, piAdapter))
+	if err != nil {
+		return nil, nil, err
+	}
+	if workers, err = newWorkers(cfg, piAdapter, handler, connection); err != nil {
+		return nil, nil, err
+	}
+	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	return handler, workers, nil
 }
 
 // newAdapter returns Pi's adapter alone, unless GRIPI_HERMES adds Hermes next to it.
