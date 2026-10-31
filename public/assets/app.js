@@ -59,6 +59,7 @@ import { VoiceCallController } from "./voice_call_controller.js";
 import { HermesPanelController } from "./hermes_panel_controller.js";
 import { SudoPromptController } from "./sudo_prompt_controller.js";
 import { WorkerController } from "./worker_controller.js";
+import { WorkerPickerController } from "./worker_picker_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
@@ -244,6 +245,14 @@ const workerController = new WorkerController(document, window, {
   homePath: (path) => liveMessageParser.displayHomePath(path),
   failed: (message) => showCurrentActiveTask("error", message)
 });
+const workerPickerController = new WorkerPickerController(document, window, {
+  openModal,
+  closeModal,
+  sessionPath: () => currentSessionPath(),
+  move: (worker, repository) => workerController.move(worker, repository),
+  forward: (port) => workerController.forward(port),
+  refresh: () => scheduleNextEventPoll(0)
+});
 const voiceCallController = new VoiceCallController(window, {
   // Like the palette's commands, without the composer's draft and attachments.
   send: async (text) => {
@@ -397,11 +406,20 @@ function commandPaletteCommands() {
   const notificationToggle = document.querySelector("[data-notification-toggle]");
   const gatewayUpdate = document.querySelector("[data-gateway-update]:not([hidden]) [data-gateway-update-button]:not([hidden])");
   const hermesPanel = hermesPanelController.panel;
+  const worker = pi && workerController.location;
+  const workerState = workerController.indicator();
   return [
     // Typing its name finds Hermes before the sessions.
     hermesPanel && ["Hermes", [{ label: `${hermesPanel.hidden ? "Show" : "Hide"} Hermes`, run: () => hermesPanelController.toggle() }], { lead: true }],
+    // What runs on the worker, under its name and state.
+    worker && [`${worker.worker} · ${workerState}`, [
+      !worker.copying && !workerController.pending && { label: "Continue on main", run: () => workerController.continueOnMain() },
+      workerState === "connected" && { label: "Forward a port…", run: () => workerPickerController.openForward(worker.worker) },
+      ...(worker.ports || []).map(({ port }) => ({ label: `Stop forwarding ${port}`, run: () => workerController.unforward(port) }))
+    ]],
     ["This session", [
       writable && pi && { label: "Choose model and thinking", detail: "/model", run: openModelSettingsModal },
+      pi && !worker && liveOutput && "workersAdded" in liveOutput.dataset && { label: "Run on worker…", run: () => workerPickerController.openMove() },
       writable && pi && { label: "Session tree", detail: "/tree", run: openTreeSessionModal },
       writable && pi && { label: "Fork from a message", detail: "/fork", run: openForkSessionModal },
       writable && pi && { label: "Compact context", detail: "/compact", run: () => runPaletteCommand("/compact") },
@@ -3155,7 +3173,7 @@ function focusPromptAfterModalClose(modal) {
     (modelButton || conversationScroll)?.focus({ preventScroll: true });
   } else if (["session-rename-modal", "session-delete-modal"].includes(modal?.dataset.modal)) {
     if (!sessionActionsController.restoreFocus()) syncComposerFocus();
-  } else if (["new-session-modal", "command-palette-modal", "environment-modal"].includes(modal?.dataset.modal)) {
+  } else if (["new-session-modal", "command-palette-modal", "environment-modal", "worker-modal"].includes(modal?.dataset.modal)) {
     syncComposerFocus();
   }
 }

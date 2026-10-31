@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { WorkerController } from "../public/assets/worker_controller.js";
+import { WorkerPickerController } from "../public/assets/worker_picker_controller.js";
 import { FakeDocument, FakeElement, FakeEventTarget } from "./helpers/fake_dom.mjs";
 
 const NOW = Date.parse("2026-10-31T18:44:31Z");
@@ -201,4 +202,98 @@ test("main's files saved aside show in the sync banner, naming the folder, until
   await flush();
   assert.deepEqual(sent, [{ url: "/workers/dismiss_notices", body: { session: SESSION } }]);
   assert.equal(notice.hidden, true);
+});
+
+function pickerFixture({ replies = [], forwarded = [] } = {}) {
+  const document = new FakeDocument();
+  const modal = new FakeElement("div", ['[data-modal="worker-modal"]']);
+  modal.hidden = true;
+  const parts = Object.fromEntries(["worker-modal-title", "worker-picker", "worker-port-field", "worker-port", "worker-facts", "worker-status", "worker-go", "worker-hint"]
+    .map((name) => [name, new FakeElement(name === "worker-port" ? "input" : "span", [`[data-${name}]`])]));
+  modal.append(...Object.values(parts));
+  document.body.append(modal);
+  const window = new FakeEventTarget();
+  const sent = [];
+  window.fetch = async (url) => {
+    sent.push(url);
+    return replies.shift();
+  };
+  const calls = { moves: [], forwards: [], refresh: 0 };
+  const picker = new WorkerPickerController(document, window, {
+    openModal: (element) => { element.hidden = false; },
+    closeModal: (element) => { element.hidden = true; },
+    sessionPath: () => SESSION,
+    move: (worker, repository) => calls.moves.push([worker, repository]),
+    forward: async (port) => {
+      calls.forwards.push(port);
+      return forwarded.shift();
+    },
+    refresh: () => calls.refresh++
+  });
+  const fire = (element, type, event = {}) => element.listeners.get(type).forEach((listener) => listener({ preventDefault() {}, ...event }));
+  const terms = () => parts["worker-facts"].children.map((child) => child.textContent);
+  return { picker, modal, sent, calls, fire, terms, list: parts["worker-picker"], port: parts["worker-port"], go: parts["worker-go"], status: parts["worker-status"] };
+}
+
+test("Run on worker lists the workers with their state and what moves, and moves only with its own button", async () => {
+  const workers = [{ name: "nuc", destination: "gripi@nuc", state: "unreachable" }, { name: "beelink", destination: "gripi@beelink", state: "connected" }];
+  const { picker, modal, sent, calls, fire, terms, list, go } = pickerFixture({
+    replies: [reply(200, { workers, repository: { main: "/home/me/Work/storefront", worktrees: 2, sessions: 8 } })]
+  });
+
+  await picker.openMove();
+  assert.equal(modal.hidden, false);
+  assert.deepEqual(sent, [`/workers?session=${encodeURIComponent(SESSION)}`]);
+  const rows = list.children;
+  assert.deepEqual(rows.map((row) => row.children.map((part) => part.textContent).slice(1)), [["nuc", "gripi@nuc", "unreachable"], ["beelink", "gripi@beelink", "connected"]]);
+  assert.deepEqual(terms(), ["moves", "storefront, its 2 worktrees and 8 sessions", "copies", "the repository and ignored files up to 10 MB, not ignored folders such as node_modules/", "on main", "storefront stays read-only until it comes back"]);
+  // The connected worker comes first under the cursor.
+  assert.equal(rows[1].getAttribute("aria-selected"), "true");
+  assert.equal(go.textContent, "move to beelink");
+
+  // A tap points at a worker at once, without hover, but leaves the move to the button.
+  fire(list, "click", { target: rows[0].children[1] });
+  assert.equal(rows[0].getAttribute("aria-selected"), "true");
+  assert.equal(go.textContent, "move to nuc");
+  assert.deepEqual(calls.moves, []);
+  fire(modal, "keydown", { key: "ArrowDown" });
+  assert.equal(go.textContent, "move to beelink");
+
+  fire(modal, "keydown", { key: "Enter", target: rows[1] });
+  assert.equal(modal.hidden, true);
+  assert.deepEqual(calls.moves, [["beelink", "/home/me/Work/storefront"]]);
+});
+
+test("Run on worker says how to add a worker when there is none", async () => {
+  const { picker, status, go } = pickerFixture({ replies: [reply(200, { workers: [], repository: { main: "/home/me/Work/storefront", worktrees: 0, sessions: 1 } })] });
+  await picker.openMove();
+  assert.match(status.textContent, /gripi worker add user@host/);
+  assert.equal(go.hidden, true);
+});
+
+test("Forward a port checks the port, shows the gateway's refusal, and closes once the port is forwarded", async () => {
+  const { picker, modal, calls, fire, terms, port, go, status } = pickerFixture({
+    forwarded: [{ error: "worker beelink is not connected; its ports can be forwarded while its sessions run" }, { port: 3000, local: 3001 }]
+  });
+
+  picker.openForward("beelink");
+  assert.equal(port.focused, true);
+  port.value = "3000";
+  fire(port, "input");
+  assert.deepEqual(terms(), ["from", "beelink's localhost:3000", "to", "main's localhost:3000, or the next free port"]);
+
+  port.value = "70000";
+  fire(go, "click");
+  assert.equal(status.textContent, "Enter a port from 1 to 65535.");
+  assert.deepEqual(calls.forwards, []);
+
+  port.value = "3000";
+  await picker.activate();
+  assert.match(status.textContent, /not connected/);
+  assert.equal(modal.hidden, false);
+  fire(modal, "keydown", { key: "Enter", target: port });
+  await flush();
+  assert.deepEqual(calls.forwards, [3000, 3000]);
+  assert.equal(modal.hidden, true);
+  assert.equal(calls.refresh, 1);
 });

@@ -325,6 +325,25 @@
     .worker-badge .worker-icon { display: inline-flex; }
     .worker-badge .worker-icon svg { width: 0.85rem; height: 0.85rem; }
     .worker-badge-state:empty { display: none; }
+    /* Picking a worker says what moves; forwarding a port says where it goes. */
+    .worker-card { width: min(40rem, 100%); }
+    .picker-row.worker-picker-row { grid-template-columns: 2ch 10ch minmax(0, 1fr) auto; column-gap: 1ch; align-items: baseline; font-family: var(--mono); }
+    .worker-picker-destination { overflow: hidden; color: var(--muted-soft); text-overflow: ellipsis; white-space: nowrap; }
+    .worker-picker-state { color: var(--worker-state); font-size: 0.74rem; }
+    .worker-facts { display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 0.2rem 1rem; margin: 0; padding-top: 0.75rem; border-top: 1px solid var(--border); font: 0.78rem/1.45 var(--mono); }
+    .worker-facts:empty { display: none; }
+    .worker-facts dt { color: var(--muted); }
+    .worker-facts dd { margin: 0; color: var(--copy); }
+    .worker-card .worker-go { color: var(--accent); font-weight: 700; }
+    .worker-card .picker-status.is-error { color: var(--danger); }
+    .worker-port-field { display: grid; grid-template-columns: 9ch minmax(0, 1fr); align-items: center; gap: 0 1rem; font: 0.86rem var(--mono); }
+    .worker-port-field > span { color: var(--muted); }
+    .worker-port-field input, .worker-port-field input:focus { min-width: 0; padding: 0.45rem 0; border: 0; border-bottom: 1px solid var(--accent); border-radius: 0; background: transparent; box-shadow: none; color: var(--text); font: inherit; outline: none; }
+    @media (max-width: 760px), (pointer: coarse) {
+      .worker-port-field input { min-height: 2.75rem; font-size: 16px; }
+      .picker-row.worker-picker-row { grid-template-columns: 2ch minmax(0, 1fr) auto; align-items: center; }
+      .worker-picker-destination { grid-area: 2 / 2 / 3 / 4; }
+    }
     /* The editor's footer names the worker after the context, like a Pi extension's status. */
     .session-status-item[data-status-key="worker"] { order: 1; margin-right: auto; }
     .session-status-item[data-status-key="model"] { order: 2; }
