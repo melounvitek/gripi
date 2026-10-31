@@ -92,6 +92,7 @@ type Manager struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	started time.Time
+	logins  *logins
 
 	mu          sync.Mutex
 	workers     map[string]*remote
@@ -153,8 +154,12 @@ func NewManager(options ManagerOptions) *Manager {
 		options.Clock = time.Now
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	manager := &Manager{options: options, ctx: ctx, cancel: cancel, started: options.Clock(), workers: map[string]*remote{}, sessions: map[string]launched{}}
+	manager := &Manager{
+		options: options, ctx: ctx, cancel: cancel, started: options.Clock(), workers: map[string]*remote{}, sessions: map[string]launched{},
+		logins: newLogins(auth.Pi{Command: options.Pi.Command, AgentDir: options.Pi.AgentDir}, options.Clock),
+	}
 	manager.launched = sync.NewCond(&manager.mu)
+	go manager.logins.run(ctx, loginsPoll)
 	return manager
 }
 
@@ -318,6 +323,7 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 	// The new helper runs, so the helper of a lost connection has stopped.
 	worker.conn, worker.installation, worker.stopSocket, worker.state, worker.goneAt = conn, installation, stopSocket, Connected, time.Time{}
 	manager.mu.Unlock()
+	manager.logins.add(worker.name, conn)
 	go func() {
 		<-conn.Lost()
 		manager.disconnect(worker, conn, true)
@@ -355,6 +361,7 @@ func (manager *Manager) disconnect(worker *remote, conn *Conn, lost bool) {
 		log.Printf("lost the connection to worker %s, which may run sessions until %s", worker.name, worker.goneAt.Local().Format(time.TimeOnly))
 	}
 	manager.mu.Unlock()
+	manager.logins.remove(worker.name, conn)
 	// Ending the master connections at once ends every channel, also over a link that hangs.
 	conn.Pool.Close()
 	for _, session := range sessions {
@@ -601,15 +608,8 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 	manager.mu.Lock()
 	installation := worker.installation
 	manager.mu.Unlock()
-	// The worker's Pi gets main's logins before it starts, without refresh tokens.
-	logins, err := auth.Pi{Command: manager.options.Pi.Command, AgentDir: manager.options.Pi.AgentDir}.Build(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	for provider, err := range logins.Skipped {
-		log.Printf("worker %s gets no key for %s, which this machine could not resolve: %v", placement.Worker, provider, err)
-	}
-	if err := conn.ApplyAuth(ctx, filepath.Join(manager.options.Pi.AgentDir, "auth.json"), string(logins.Contents)); err != nil {
+	// The worker's Pi gets main's latest logins before it starts, without refresh tokens.
+	if err := manager.logins.push(ctx, placement.Worker); err != nil {
 		return nil, nil, err
 	}
 	session := Session{

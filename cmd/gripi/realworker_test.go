@@ -195,6 +195,31 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	cli("send", fresh.ID, "Hello on the worker")
 	cli("wait", fresh.ID, "--timeout", "60")
 	repliesSoon(fresh.ID, 1)
+	// The worker's logins follow main's while it is connected, without main's refresh tokens.
+	workerLogins := func(key string) {
+		t.Helper()
+		authJSON := filepath.Join(agentDir, "auth.json")
+		logins := `{"openai": {"type": "api_key", "key": "` + key + `"}, "anthropic": {"type": "oauth", "access": "access", "refresh": "main's refresh", "expires": 4102444800000}}`
+		if err := os.WriteFile(authJSON, []byte(logins), 0600); err != nil {
+			t.Fatal(err)
+		}
+		started := time.Now()
+		for {
+			copied, err := onWorker("cat " + authJSON)
+			if err == nil && strings.Contains(copied, key) {
+				if strings.Contains(copied, "main's refresh") || !strings.Contains(copied, "gripi:refresh-on-main") {
+					t.Fatalf("the worker's auth.json: %s", copied)
+				}
+				t.Logf("the worker had main's changed logins after %s", time.Since(started).Round(time.Millisecond))
+				return
+			}
+			if time.Since(started) > 15*time.Second {
+				t.Fatalf("the worker's auth.json never got %s: %s %v", key, copied, err)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	workerLogins("sk-changed-on-main")
 	// A new gateway connects to the worker once a session needs it.
 	stopGateway()
 	startGateway()
@@ -361,7 +386,11 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		t.Fatalf("the worker's file that main never got: %q %v", output, err)
 	}
 
-	// A master that dies loses the worker at once, and the next session there connects again.
+	// A master that dies loses the worker at once, and the next prompt of a session whose Pi ran there connects again
+	// and starts its Pi there.
+	again := decodeSession(t, cli("new", project, "--json"))
+	cli("send", again.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname"}}]]`)
+	cli("wait", again.ID, "--timeout", "60")
 	signalMasters(syscall.SIGKILL)
 	for deadline := time.Now().Add(5 * time.Second); workers.Status("beelink").State != remote.Unreachable; time.Sleep(50 * time.Millisecond) {
 		if time.Now().After(deadline) {
@@ -369,13 +398,13 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		}
 	}
 	started = time.Now()
-	again := decodeSession(t, cli("new", project, "--json"))
 	cli("send", again.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname"}}]]`)
 	cli("wait", again.ID, "--timeout", "90")
 	t.Logf("reconnected and ran a step in %s", time.Since(started).Round(time.Millisecond))
-	if got := repliesSoon(again.ID, 1); !strings.Contains(got[0], `"text":"`+workerHost+`\n"`) {
-		t.Fatalf("the session after the reconnect replied %q", got[0])
+	if got := repliesSoon(again.ID, 2); !strings.Contains(got[1], `"text":"`+workerHost+`\n"`) {
+		t.Fatalf("the session after the reconnect replied %q", got[1])
 	}
+	workerLogins("sk-changed-after-the-reconnect")
 
 	started = time.Now()
 	cli("worker", "return", project)
