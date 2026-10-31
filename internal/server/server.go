@@ -79,6 +79,8 @@ type application struct {
 	claimSession            func(*http.Request, string) (bool, error)
 	releaseSession          func(*http.Request, string) error
 	sudoRequests            sudoRequests
+	// workers move repositories to workers and back, which gripi commands can't ask for when it is nil.
+	workers Workers
 	// voice reaches Hermes's dashboard for voice conversations, which are off when it is nil.
 	voice  *hermesdashboard.Client
 	hermes hermesConversation

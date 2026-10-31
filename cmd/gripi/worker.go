@@ -7,8 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -23,6 +26,8 @@ const workerHelp = `Usage:
   gripi worker add <user@host> [--name <name>]
   gripi worker list [--json]
   gripi worker remove <name>
+  gripi worker move <session or folder> <name>
+  gripi worker return <session or folder>
 
 Internal, run by Gripi on a worker over SSH:
   gripi worker serve [--lease <duration>] [--runtime-dir <folder>]
@@ -51,6 +56,14 @@ list prints each worker's name and SSH destination.
 
 remove forgets a worker. Files on the worker stay there.
 
+move runs a repository's sessions on a worker from now on: the repository of
+the folder, or of the session's folder, with all its worktrees, or the folder
+alone outside Git. It needs a running gateway, which stops the Pi of each
+session there, copies the repository and the sessions to the worker, and
+keeps a copy of the repository here up to date. It fails while one of the
+sessions is working. return brings the repository and its sessions back to
+this machine.
+
 serve is the helper that runs the worker's sessions, and stops all of them
 when this machine stops answering. attach connects to the Pi of a session.
 receive makes a folder a copy of one that this machine sends, or, given the
@@ -59,12 +72,15 @@ connects this machine's copy of a repository to the helper, which sends
 its changes. send sends a folder to this machine once.
 
 Gripi keeps the workers in ~/.pi/gripi/workers.json, or in the file named by
-GRIPI_WORKERS_PATH.
+GRIPI_WORKERS_PATH, and which repositories are on which worker in
+~/.pi/gripi/worker-placements.json, or in GRIPI_WORKER_PLACEMENTS_PATH.
 
 Arguments:
   user@host  Where ssh connects, as you would pass it to ssh; a Host from
              your SSH configuration works too
   name       Name of a worker
+  session    Session ID, a unique prefix of it, or the session file path
+  folder     A folder in the repository
 
 Flags:
   --name  Name of the new worker; defaults to the first part of the host name,
@@ -74,12 +90,15 @@ Flags:
 
 Examples:
   gripi worker add gripi@beelink.example.ts.net
+  gripi worker move ~/Work/project beelink
+  gripi worker return 01a107aa
   gripi worker remove beelink
 
 Exit codes:
   0  success
   1  the worker cannot be reached or cannot run sessions, the name is taken,
-     or no worker has the name
+     no worker has the name, or the gateway refused or failed to move the
+     repository
   2  usage error
 `
 
@@ -100,7 +119,7 @@ func workerProbe(agentDir string) string {
 
 func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(arguments) == 0 {
-		return usageError(stderr, "worker", "needs add, list or remove")
+		return usageError(stderr, "worker", "needs add, list, remove, move or return")
 	}
 	switch arguments[0] {
 	case "add":
@@ -109,6 +128,10 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 		return listWorkers(arguments[1:], stdout, stderr)
 	case "remove":
 		return removeWorker(arguments[1:], stdout, stderr)
+	case "move":
+		return moveRepository(arguments[1:], stdout, stderr)
+	case "return":
+		return returnRepository(arguments[1:], stdout, stderr)
 	case "serve":
 		return serveWorker(arguments[1:], stdin, stdout, stderr)
 	case "attach":
@@ -120,7 +143,7 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 	case "send":
 		return sendWorker(arguments[1:], stdin, stdout, stderr)
 	}
-	return usageError(stderr, "worker", fmt.Sprintf("unknown subcommand %q; use add, list or remove", arguments[0]))
+	return usageError(stderr, "worker", fmt.Sprintf("unknown subcommand %q; use add, list, remove, move or return", arguments[0]))
 }
 
 func addWorker(arguments []string, stdout, stderr io.Writer) int {
@@ -267,19 +290,72 @@ func removeWorker(arguments []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func moveRepository(arguments []string, stdout, stderr io.Writer) int {
+	if len(arguments) != 2 || arguments[0] == "" || arguments[1] == "" {
+		return usageError(stderr, "worker", "move takes a session or folder and a worker name")
+	}
+	folder, err := askToMove("/workers/move", url.Values{"worker": {arguments[1]}}, arguments[0])
+	if err != nil {
+		return failure(stderr, "worker", err)
+	}
+	fmt.Fprintf(stdout, "The sessions of the repository of %s run on %s now.\n", folder, arguments[1])
+	return 0
+}
+
+func returnRepository(arguments []string, stdout, stderr io.Writer) int {
+	if len(arguments) != 1 || arguments[0] == "" {
+		return usageError(stderr, "worker", "return takes a session or folder")
+	}
+	folder, err := askToMove("/workers/return", url.Values{}, arguments[0])
+	if err != nil {
+		return failure(stderr, "worker", err)
+	}
+	fmt.Fprintf(stdout, "The sessions of the repository of %s run on this machine now.\n", folder)
+	return 0
+}
+
+// askToMove asks the gateway to move the repository of a folder, or of a session's folder, and returns the folder.
+// It waits as long as copying takes.
+func askToMove(route string, form url.Values, reference string) (string, error) {
+	client, err := newGatewayClient()
+	if err != nil {
+		return "", err
+	}
+	folder, _ := filepath.Abs(reference)
+	if info, err := os.Stat(folder); err != nil || !info.IsDir() {
+		session, err := client.session(reference)
+		if err != nil {
+			return "", err
+		}
+		folder = session.CWD
+	}
+	form.Set("folder", folder)
+	request, err := http.NewRequest(http.MethodPost, "http://gripi"+route, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return folder, client.do(request, 0, &struct{}{})
+}
+
 func loadWorkers() (config.Config, []worker, error) {
 	cfg, err := config.Load(os.Environ())
 	if err != nil {
 		return cfg, nil, err
 	}
+	workers, err := readWorkers(cfg.WorkersPath)
+	return cfg, workers, err
+}
+
+func readWorkers(path string) ([]worker, error) {
 	workers := []worker{}
-	contents, found, err := state.NewFile(cfg.WorkersPath).Read()
+	contents, found, err := state.NewFile(path).Read()
 	if err == nil && found {
 		if err = json.Unmarshal(contents, &workers); err != nil {
-			err = fmt.Errorf("parse %s: %w", cfg.WorkersPath, err)
+			err = fmt.Errorf("parse %s: %w", path, err)
 		}
 	}
-	return cfg, workers, err
+	return workers, err
 }
 
 func saveWorkers(path string, workers []worker) error {

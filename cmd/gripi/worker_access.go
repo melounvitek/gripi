@@ -6,9 +6,43 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
+	remote "github.com/melounvitek/gripi/internal/worker"
 )
+
+// newWorkers runs the sessions of the repositories placed on workers there, with Pi's adapter's launcher.
+func newWorkers(cfg config.Config, piAdapter *pi.Adapter, handler http.Handler) (*remote.Manager, error) {
+	placements, err := remote.LoadPlacements(cfg.WorkerPlacementsPath)
+	if err != nil {
+		return nil, err
+	}
+	tree, workerExtension, err := piAdapter.ExtensionFiles()
+	if err != nil {
+		return nil, err
+	}
+	return remote.NewManager(remote.ManagerOptions{
+		Destination: func(name string) (string, error) {
+			workers, err := readWorkers(cfg.WorkersPath)
+			if err != nil {
+				return "", err
+			}
+			for _, worker := range workers {
+				if worker.Name == name {
+					return worker.Destination, nil
+				}
+			}
+			return "", fmt.Errorf("no worker is named %q; 'gripi worker list' shows the workers", name)
+		},
+		Placements: placements, StateDir: stateDir(cfg),
+		Pi:              remote.Pi{Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, ExtensionDir: filepath.Dir(tree)},
+		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, SocketPath: cfg.SocketPath, Store: piAdapter.Store(),
+		ServeSocket: func(name string, placement remote.WorkerPlacement) (string, func() error, error) {
+			return startWorkerSocket(cfg, handler, name, placement)
+		},
+	}), nil
+}
 
 // startWorkerSocket serves the gripi commands of a connected worker on a socket of its own, in a private folder under
 // the gateway's state folder, where they reach only what placement says is on the worker. Forward the socket to the

@@ -114,6 +114,8 @@ func (app *application) registerLocalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sessions/claim", app.localClaim)
 	mux.HandleFunc("GET /tags", app.tags)
 	mux.HandleFunc("POST /sudo", app.sudo)
+	mux.HandleFunc("POST /workers/move", app.moveToWorker)
+	mux.HandleFunc("POST /workers/return", app.returnFromWorker)
 }
 
 // localClaim gives the user a session that has no owner, such as one from Pi CLI. It takes the full ID or the path,

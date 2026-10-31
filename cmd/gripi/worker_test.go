@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/melounvitek/gripi/internal/config"
+	gateway "github.com/melounvitek/gripi/internal/server"
 )
 
 // fakeSSHScript stands in for ssh. It records its arguments, then fails as ssh does with FAKE_SSH_ERROR, answers
@@ -298,5 +300,39 @@ func TestThePiAdapterExtractsTheExtensionsToTheSameFolderAfterARestart(t *testin
 	}
 	if trees[0] != trees[1] || filepath.Dir(trees[0]) != filepath.Join(state, "pi-extensions") {
 		t.Fatalf("the extensions were extracted to %q", trees)
+	}
+}
+
+// recordedWorkers notes the repositories that the gateway was asked to move.
+type recordedWorkers struct{ moves []string }
+
+func (workers *recordedWorkers) Move(_ context.Context, folder, worker string, _ func(func(string) bool) error) error {
+	workers.moves = append(workers.moves, folder+" to "+worker)
+	return nil
+}
+
+func (workers *recordedWorkers) Return(_ context.Context, folder string, _ func(func(string) bool) error) error {
+	workers.moves = append(workers.moves, folder+" back")
+	return nil
+}
+
+func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	workers := &recordedWorkers{}
+	browser.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
+
+	if code, stdout, stderr := runCLI("worker", "move", "0a1-alpha", "beelink"); code != 0 || !strings.Contains(stdout, "beelink") {
+		t.Fatalf("worker move <session> = %d %q %q", code, stdout, stderr)
+	}
+	t.Chdir(filepath.Dir(project))
+	if code, stdout, stderr := runCLI("worker", "return", "project"); code != 0 || stdout == "" {
+		t.Fatalf("worker return <folder> = %d %q %q", code, stdout, stderr)
+	}
+	if expected := []string{project + " to beelink", project + " back"}; !reflect.DeepEqual(workers.moves, expected) {
+		t.Fatalf("moves = %q, want %q", workers.moves, expected)
+	}
+	if code, _, stderr := runCLI("worker", "move", "no-such-session", "beelink"); code != 1 || !strings.Contains(stderr, "no session matches") {
+		t.Fatalf("worker move of nothing = %d %q", code, stderr)
 	}
 }

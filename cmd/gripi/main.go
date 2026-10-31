@@ -24,6 +24,7 @@ import (
 	"github.com/melounvitek/gripi/internal/agent/pi"
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
+	remote "github.com/melounvitek/gripi/internal/worker"
 )
 
 func main() {
@@ -39,14 +40,19 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	adapter, err := newAdapter(cfg, nil)
+	var workers *remote.Manager
+	piAdapter, err := newPiAdapter(cfg, func(process agent.Process) (*exec.Cmd, func(), error) { return workers.Launch(process) })
 	if err != nil {
 		return err
 	}
-	handler, err := gateway.NewHandler(cfg, gripi.WebFiles, adapter)
+	handler, err := gateway.NewHandler(cfg, gripi.WebFiles, newAdapter(cfg, piAdapter))
 	if err != nil {
 		return err
 	}
+	if workers, err = newWorkers(cfg, piAdapter, handler); err != nil {
+		return err
+	}
+	handler.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
 
 	server := newHTTPServer(handler)
 	listener, err := net.Listen("tcp", cfg.Address)
@@ -118,6 +124,8 @@ func serve() error {
 			exitCode = 1
 		}
 	}
+	// The workers stop their sessions' processes once the connections close.
+	workers.Close()
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}
@@ -125,15 +133,7 @@ func serve() error {
 }
 
 // newAdapter returns Pi's adapter alone, unless GRIPI_HERMES adds Hermes next to it.
-func newAdapter(cfg config.Config, launcher agent.Launcher) (agent.Adapter, error) {
-	piAdapter, err := newPiAdapter(cfg, launcher)
-	if err != nil {
-		return nil, err
-	}
-	return withHermes(cfg, piAdapter), nil
-}
-
-func withHermes(cfg config.Config, piAdapter *pi.Adapter) agent.Adapter {
+func newAdapter(cfg config.Config, piAdapter *pi.Adapter) agent.Adapter {
 	if cfg.HermesPath == "" {
 		return piAdapter
 	}
