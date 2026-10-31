@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/worker/auth"
+	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
@@ -765,7 +767,9 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 }
 
 // Return brings the repository that holds folder back from its worker: it stops everything that the repository's
-// sessions run there, and takes the last changes of the repository and of its sessions. stop is as in Move.
+// sessions run there, and takes the last changes of the repository and of its sessions. stop is as in Move. When main
+// has lost the worker, or cannot reach it, the repository continues on this machine as main's copies have it, once the
+// worker must have stopped its sessions.
 func (manager *Manager) Return(ctx context.Context, folder string, stop func(inRepository func(folder string) bool) error) error {
 	placement, placed := manager.options.Placements.Find(folder)
 	if !placed {
@@ -780,9 +784,12 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 	if err := stop(unit.Contains); err != nil {
 		return err
 	}
+	if state := manager.Status(placement.Worker).State; state == Unreachable || state == Gone {
+		return manager.continueOnMain(placement, fmt.Errorf("worker %s is unreachable", placement.Worker))
+	}
 	worker, err := manager.connect(ctx, placement.Worker)
 	if err != nil {
-		return err
+		return manager.continueOnMain(placement, err)
 	}
 	// connect leaves the mirrors of a moving unit alone, so that they don't start again during the return.
 	if err := manager.runMirrors(ctx, worker, unit); err != nil {
@@ -824,6 +831,47 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 		}
 	}
 	return nil
+}
+
+// continueOnMain brings back the repository of a placement from a worker that main lost, or cannot reach, without the
+// worker: main's copies of the repository and of its sessions' folders are as the last barriers left them, which is
+// consistent. It refuses with unreachable while the worker may still run the repository's sessions, whose Pi must
+// never run again.
+func (manager *Manager) continueOnMain(placement Placement, unreachable error) error {
+	unit := placement.Unit
+	if goneAt, now := manager.goneAt(placement.Worker), manager.options.Clock(); now.Before(goneAt) {
+		return fmt.Errorf("%w; it may still run the sessions of %s until %s, so they can continue on this machine from then (in %s)",
+			unreachable, unit.Main, goneAt.Local().Format(time.TimeOnly), goneAt.Sub(now).Round(time.Second))
+	}
+	mains := []string{unit.Main, manager.sessionsMain(unit)}
+	for _, main := range mains {
+		// Opening main's copy finishes a barrier that a crash interrupted.
+		if _, err := mirror.NewDestination(filepath.Join(manager.mirrorFolder(main), "state")); err != nil {
+			return err
+		}
+	}
+	if err := manager.options.Placements.Remove(unit.Main); err != nil {
+		return err
+	}
+	for _, main := range mains {
+		if err := os.RemoveAll(filepath.Join(manager.mirrorFolder(main), "state")); err != nil {
+			return err
+		}
+	}
+	log.Printf("%s continues on this machine without worker %s, as of the last changes that this machine got", unit.Main, placement.Worker)
+	return nil
+}
+
+// goneAt is when the worker of a name must have stopped the sessions of every connection that main lost, including
+// those of a gateway before this one, which stopped answering before this one started.
+func (manager *Manager) goneAt(name string) time.Time {
+	goneAt := manager.started.Add(cmp.Or(manager.options.Connection.Lease, helper.DefaultLease) + GoneMargin)
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if worker := manager.workers[name]; worker != nil && worker.goneAt.After(goneAt) {
+		goneAt = worker.goneAt
+	}
+	return goneAt
 }
 
 // sessionFolders are Pi's folders of the sessions in a unit, the main folder's first: one for each of its worktrees,

@@ -281,6 +281,101 @@ func TestWhatTheMirrorAppliesUpdatesThePlacementAndNotices(t *testing.T) {
 	}
 }
 
+// loseWorker makes the manager have lost its connection to the worker of a name, which is gone at goneAt.
+func loseWorker(manager *Manager, name string, goneAt time.Time) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	manager.workers[name] = &remote{name: name, state: Disconnected, goneAt: goneAt, mirrors: map[string]*liveMirror{}}
+}
+
+func TestARepositoryOnALostWorkerContinuesOnMainOnceTheWorkerIsGone(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	project, sessions, stateDir := t.TempDir(), t.TempDir(), t.TempDir()
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, StateDir: stateDir, SessionsRoot: sessions, Clock: func() time.Time { return now }})
+	contacted := 0
+	manager.options.Destination = func(string) (string, error) {
+		contacted++
+		return "", errors.New("no worker in this test")
+	}
+	unit := mirror.Unit{Main: project}
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: unit}); err != nil {
+		t.Fatal(err)
+	}
+	// Main's copies of the repository and of its sessions, and what main saved aside while they were on the worker.
+	mains := []string{project, manager.sessionsMain(unit)}
+	for _, main := range mains {
+		writeTestFile(t, filepath.Join(manager.mirrorFolder(main), "state", "checkpoint.json"), `{"barrier":3}`, 0600)
+		writeTestFile(t, filepath.Join(manager.mirrorFolder(main), "aside", "20261031T115900Z", "main", "3", main, "README"), "main's\n", 0600)
+	}
+	goneAt := now.Add(40 * time.Second)
+	loseWorker(manager, "beelink", goneAt)
+	if status := manager.Status("beelink"); status != (Status{State: Unreachable, GoneAt: goneAt}) {
+		t.Fatalf("status of the lost worker = %+v", status)
+	}
+	stopped := 0
+	stop := func(inRepository func(string) bool) error {
+		if !inRepository(project) {
+			t.Errorf("stopped the sessions of another repository")
+		}
+		stopped++
+		return nil
+	}
+
+	err := manager.Return(context.Background(), project, stop)
+	if err == nil || !strings.Contains(err.Error(), "unreachable") || !strings.Contains(err.Error(), goneAt.Local().Format(time.TimeOnly)) {
+		t.Fatalf("Return before the worker is gone = %v", err)
+	}
+	if !manager.Placement("beelink").Folder(project) {
+		t.Fatalf("the refused return took the repository off the worker: %+v", manager.options.Placements.All())
+	}
+
+	now = goneAt
+	if status := manager.Status("beelink"); status != (Status{State: Gone, GoneAt: goneAt}) {
+		t.Fatalf("status of the gone worker = %+v", status)
+	}
+	if err := manager.Return(context.Background(), project, stop); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Placement("beelink").Folder(project) || stopped != 2 || contacted != 0 {
+		t.Fatalf("after the return: %d sessions stopped, worker contacted %d times, placements %+v", stopped, contacted, manager.options.Placements.All())
+	}
+	for _, main := range mains {
+		if _, err := os.Stat(filepath.Join(manager.mirrorFolder(main), "state")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("main's mirror of %s is left: %v", main, err)
+		}
+		if _, err := os.Stat(filepath.Join(manager.mirrorFolder(main), "aside", "20261031T115900Z", "main", "3", main, "README")); err != nil {
+			t.Fatalf("what main saved aside: %v", err)
+		}
+	}
+	if command, _, err := manager.Launch(agent.Process{Dir: project}); command != nil || err != nil {
+		t.Fatalf("a session in the returned repository runs on the worker: %v", err)
+	}
+}
+
+// A gateway that cannot reach a worker can still bring its repositories back, a lease after it started, when no
+// helper that an earlier gateway answered can run sessions there any more.
+func TestReturnContinuesOnMainWhenTheWorkerCannotBeReached(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	project := t.TempDir()
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, StateDir: t.TempDir(), SessionsRoot: t.TempDir(), Clock: func() time.Time { return now }})
+	manager.options.Destination = func(string) (string, error) { return "", errors.New("No route to host") }
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
+		t.Fatal(err)
+	}
+	stop := func(func(string) bool) error { return nil }
+	goneAt := now.Add(helper.DefaultLease + GoneMargin)
+	if err := manager.Return(context.Background(), project, stop); err == nil || !strings.Contains(err.Error(), "No route to host") || !strings.Contains(err.Error(), goneAt.Local().Format(time.TimeOnly)) {
+		t.Fatalf("Return just after the gateway started = %v", err)
+	}
+	now = goneAt
+	if err := manager.Return(context.Background(), project, stop); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Placement("beelink").Folder(project) {
+		t.Fatal("the repository is still on the worker")
+	}
+}
+
 func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	requireSystemd(t)
 	rig := newBootstrapRig(t)
@@ -292,6 +387,7 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	unitName := make([]byte, 6)
 	rand.Read(unitName)
 	unit := "gripi-test-" + hex.EncodeToString(unitName)
+	var ahead atomic.Int64 // how far the manager's clock is ahead
 	var socketsStarted, socketsStopped atomic.Int32
 	manager := newTestManager(t, ManagerOptions{
 		StateDir: t.TempDir(), Pi: rig.pi, WorkerExtension: filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"),
@@ -301,6 +397,7 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 			return filepath.Join(t.TempDir(), "beelink.sock"), func() error { socketsStopped.Add(1); return nil }, nil
 		},
 		Connection: Options{Executable: gripi, InstallDir: "gripi-worker", Unit: unit, RuntimeDir: shortTempDir(t)},
+		Clock:      func() time.Time { return time.Now().Add(time.Duration(ahead.Load())) },
 	})
 	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
 		t.Fatal(err)
@@ -368,5 +465,21 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	manager.mu.Unlock()
 	if live == nil || !live.running() {
 		t.Fatal("the mirror of the repository on the worker did not start again")
+	}
+
+	// Once the worker is gone, the repository continues here.
+	killHelper()
+	for deadline := time.Now().Add(5 * time.Second); manager.Status("beelink").State != Unreachable; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("status of the lost worker = %+v", manager.Status("beelink"))
+		}
+	}
+	ahead.Store(int64(helper.DefaultLease + GoneMargin))
+	stop := func(func(string) bool) error { return nil }
+	if err := manager.Return(ctx, project, stop); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Placement("beelink").Folder(project) {
+		t.Fatal("the repository is still on the gone worker")
 	}
 }

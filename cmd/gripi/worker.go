@@ -63,7 +63,10 @@ session there, copies the repository and the sessions to the worker, and
 keeps copies of both here up to date. The copy of the repository here is
 read-only: what changes in it anyway is saved aside before the worker's
 changes replace it. move fails while one of the sessions is working. return
-brings the repository and its sessions back to this machine.
+brings the repository and its sessions back to this machine. When this
+machine has lost the worker, return waits until the worker must have stopped
+the sessions there, and says when that is; then the repository continues
+here as this machine last got it.
 
 serve is the helper that runs the worker's sessions, and stops all of them
 when this machine stops answering. attach connects to the Pi of a session.
