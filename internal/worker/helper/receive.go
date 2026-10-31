@@ -33,11 +33,3 @@ func Receive(ctx context.Context, input io.Reader, output io.Writer, from, to st
 	}{input, output}
 	return destination.Serve(ctx, stream, filepath.Join(state, "aside"))
 }
-
-// Send sends a folder once to the other side, which receives it with Receive over input and output.
-func Send(ctx context.Context, input io.Reader, output io.Writer, folder string) error {
-	return mirror.Sync(ctx, struct {
-		io.Reader
-		io.Writer
-	}{input, output}, mirror.Unit{Main: folder}, mirror.Options{})
-}

@@ -34,7 +34,6 @@ Internal, run by Gripi on a worker over SSH:
   gripi worker attach [--runtime-dir <folder>] <session> <helper instance>
   gripi worker receive <folder on main> <folder>
   gripi worker mirror [--runtime-dir <folder>] <unit> <helper instance>
-  gripi worker send <folder>
 
 A worker is another computer that runs sessions for this gateway. Gripi
 reaches it with this machine's ssh, as the gateway's user and with that
@@ -61,16 +60,17 @@ move runs a repository's sessions on a worker from now on: the repository of
 the folder, or of the session's folder, with all its worktrees, or the folder
 alone outside Git. It needs a running gateway, which stops the Pi of each
 session there, copies the repository and the sessions to the worker, and
-keeps a copy of the repository here up to date. It fails while one of the
-sessions is working. return brings the repository and its sessions back to
-this machine.
+keeps copies of both here up to date. The copy of the repository here is
+read-only: what changes in it anyway is saved aside before the worker's
+changes replace it. move fails while one of the sessions is working. return
+brings the repository and its sessions back to this machine.
 
 serve is the helper that runs the worker's sessions, and stops all of them
 when this machine stops answering. attach connects to the Pi of a session.
 receive makes a folder a copy of one that this machine sends, or, given the
 same folder twice, a copy of its repository at the same paths. mirror
-connects this machine's copy of a repository to the helper, which sends
-its changes. send sends a folder to this machine once.
+connects this machine's copy of a repository, or of its sessions, to the
+helper, which sends their changes.
 
 Gripi keeps the workers in ~/.pi/gripi/workers.json, or in the file named by
 GRIPI_WORKERS_PATH, and which repositories are on which worker in
@@ -141,8 +141,6 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 		return receiveWorker(arguments[1:], stdin, stdout, stderr)
 	case "mirror":
 		return mirrorWorker(arguments[1:], stdin, stdout, stderr)
-	case "send":
-		return sendWorker(arguments[1:], stdin, stdout, stderr)
 	}
 	return usageError(stderr, "worker", fmt.Sprintf("unknown subcommand %q; use add, list, remove, move or return", arguments[0]))
 }

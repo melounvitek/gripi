@@ -144,3 +144,57 @@ func TestMirrorSendsTheUnitToMainAndAnswersTheBarriersOfItsSessions(t *testing.T
 		t.Fatal("a barrier passed after the mirror stopped")
 	}
 }
+
+func TestASessionsMirrorMakesItsFoldersAndSendsChangesUnasked(t *testing.T) {
+	unit := startUnitHelper(t, helper.DefaultLease)
+	root := t.TempDir()
+	project, feature := filepath.Join(root, "worker", "sessions", "--project--"), filepath.Join(root, "worker", "sessions", "--project-feature--")
+	if err := os.MkdirAll(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	sessions := mirror.Unit{Main: project, Worktrees: []string{feature}}
+	if response := unit.request(map[string]any{"type": "mirror.start", "unit": sessions, "sessions": true}); !response.OK {
+		t.Fatalf("mirror.start = %+v", response)
+	}
+	if info, err := os.Stat(feature); err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("the folder of the sessions in the feature: %v, %v", info, err)
+	}
+	mainCopy := filepath.Join(root, "main")
+	destination, err := mirror.NewMovedDestination(filepath.Join(root, "state"), filepath.Join(root, "worker"), mainCopy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel := exec.Command(buildGripi(t), "worker", "mirror", "--runtime-dir", unit.runtimeDir, project, unit.instance)
+	channel.Stderr = os.Stderr
+	input, _ := channel.StdinPipe()
+	output, _ := channel.StdoutPipe()
+	if err := channel.Start(); err != nil {
+		t.Fatal(err)
+	}
+	served := make(chan error, 1)
+	go func() {
+		served <- destination.Serve(context.Background(), struct {
+			io.Reader
+			io.Writer
+		}{output, input}, filepath.Join(root, "aside"))
+		input.Close()
+	}()
+
+	os.WriteFile(filepath.Join(feature, "session.jsonl"), []byte("{\"type\":\"session\"}\n"), 0600)
+	copied := filepath.Join(mainCopy, "sessions", "--project-feature--", "session.jsonl")
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if contents, _ := os.ReadFile(copied); string(contents) == "{\"type\":\"session\"}\n" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("main never got the new session")
+		}
+	}
+	if response := unit.request(map[string]any{"type": "mirror.stop", "path": project}); !response.OK {
+		t.Fatalf("mirror.stop = %+v", response)
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("the destination stopped with %v", err)
+	}
+	channel.Wait()
+}

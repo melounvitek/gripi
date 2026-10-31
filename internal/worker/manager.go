@@ -64,7 +64,8 @@ type ManagerOptions struct {
 }
 
 // Manager runs the sessions of repositories placed on workers there: it connects to a worker when a session needs
-// it, mirrors each placed repository to main, and moves repositories between main and workers.
+// it, mirrors each placed repository and its sessions' folders to main, and moves repositories between main and
+// workers.
 type Manager struct {
 	options ManagerOptions
 	ctx     context.Context
@@ -92,6 +93,7 @@ type launched struct{ worker, cwd string }
 
 // liveMirror is main's copy of a unit, kept up to date by the unit's mirror on the worker.
 type liveMirror struct {
+	unit        mirror.Unit
 	destination *mirror.Destination
 	cancel      context.CancelFunc
 	done        chan struct{}
@@ -128,8 +130,9 @@ func (manager *Manager) setState(worker *remote, state State) {
 	worker.state = state
 }
 
-// connect returns the worker of a name, connected and with main's Pi, and with the mirror of every unit placed on it
-// running. It connects when the worker is not connected yet or lost its connection.
+// connect returns the worker of a name, connected and with main's Pi, and with the mirrors of every unit placed on it
+// running, but those on their way back to main. It connects when the worker is not connected yet or lost its
+// connection.
 func (manager *Manager) connect(ctx context.Context, name string) (*remote, error) {
 	manager.mu.Lock()
 	worker := manager.workers[name]
@@ -157,19 +160,39 @@ func (manager *Manager) connect(ctx context.Context, name string) (*remote, erro
 		}
 	}
 	for _, placement := range manager.options.Placements.All() {
-		if placement.Worker != name {
-			continue
-		}
 		manager.mu.Lock()
-		live := worker.mirrors[placement.Unit.Main]
+		moving := slices.ContainsFunc(manager.movingUnits, func(unit mirror.Unit) bool { return unit.Main == placement.Unit.Main })
 		manager.mu.Unlock()
-		if live == nil || !live.running() {
-			if err := manager.startMirror(ctx, worker, placement.Unit); err != nil {
+		if placement.Worker == name && !moving {
+			if err := manager.runMirrors(ctx, worker, placement.Unit); err != nil {
 				log.Printf("mirror %s from worker %s: %v", placement.Unit.Main, name, err)
 			}
 		}
 	}
 	return worker, nil
+}
+
+// runMirrors makes sure that the mirrors of a placed unit run: the unit's, and that of its sessions' folders, with
+// every folder that its sessions need.
+func (manager *Manager) runMirrors(ctx context.Context, worker *remote, unit mirror.Unit) error {
+	manager.mu.Lock()
+	live, sessions := worker.mirrors[unit.Main], worker.mirrors[manager.sessionsMain(unit)]
+	manager.mu.Unlock()
+	if live == nil || !live.running() {
+		if err := manager.startMirror(ctx, worker, unit, false); err != nil {
+			return err
+		}
+	}
+	if sessions != nil && sessions.running() {
+		if !slices.ContainsFunc(manager.sessionFolders(unit), func(folder string) bool { return !sessions.unit.Contains(folder) }) {
+			return nil
+		}
+		// The worker's helper watches only the folders that its mirror started with.
+		if err := manager.stopMirror(ctx, worker, sessions.unit.Main); err != nil {
+			return err
+		}
+	}
+	return manager.startMirror(ctx, worker, unit, true)
 }
 
 // dial connects to a worker, gives it main's Pi and lets its gripi commands reach the gateway.
@@ -275,24 +298,44 @@ func (manager *Manager) connection(worker *remote) (*Conn, error) {
 	return worker.conn, nil
 }
 
-// mirrorFolder holds main's state of a unit's mirror, and changes from the worker that main saved aside.
-func (manager *Manager) mirrorFolder(unit mirror.Unit) string {
-	hash := sha256.Sum256([]byte(unit.Main))
+// mirrorFolder holds main's state of the mirror of the unit whose main folder is main, and what main saved aside.
+func (manager *Manager) mirrorFolder(main string) string {
+	hash := sha256.Sum256([]byte(main))
 	return filepath.Join(manager.options.StateDir, "mirrors", hex.EncodeToString(hash[:8]))
 }
 
-// startMirror starts a unit's mirror on the worker and connects main's copy to it.
-func (manager *Manager) startMirror(ctx context.Context, worker *remote, unit mirror.Unit) error {
+// sessionsMain names the mirror of a unit's sessions' folders: by the folder of the sessions in the unit's main folder,
+// which comes first.
+func (manager *Manager) sessionsMain(unit mirror.Unit) string {
+	return sessionFolder(manager.options.SessionsRoot, unit.Main)
+}
+
+// startMirror starts the mirror of a placed unit on the worker, or with sessions, the mirror of the unit's sessions'
+// folders, and connects main's copy to it.
+func (manager *Manager) startMirror(ctx context.Context, worker *remote, repository mirror.Unit, sessions bool) error {
 	conn, err := manager.connection(worker)
 	if err != nil {
 		return err
 	}
-	folder := manager.mirrorFolder(unit)
+	unit := repository
+	if sessions {
+		folders := manager.sessionFolders(repository)
+		unit = mirror.Unit{Main: folders[0], Worktrees: folders[1:]}
+	}
+	folder := manager.mirrorFolder(unit.Main)
 	destination, err := mirror.NewDestination(filepath.Join(folder, "state"))
 	if err != nil {
 		return err
 	}
-	if err := conn.StartMirror(ctx, unit); err != nil {
+	if sessions {
+		// Main's copy keeps every folder that it had, whose sessions would go if the worker sent no folder of them.
+		for _, root := range destination.Checkpoint().Roots {
+			if !unit.Contains(root) {
+				unit.Worktrees = append(unit.Worktrees, root)
+			}
+		}
+	}
+	if err := conn.StartMirror(ctx, unit, sessions); err != nil {
 		return err
 	}
 	command, release, err := conn.AttachMirror(ctx, unit.Main)
@@ -316,7 +359,7 @@ func (manager *Manager) startMirror(ctx context.Context, worker *remote, unit mi
 		return err
 	}
 	mirrorCtx, cancel := context.WithCancel(manager.ctx)
-	live := &liveMirror{destination: destination, cancel: cancel, done: make(chan struct{})}
+	live := &liveMirror{unit: unit, destination: destination, cancel: cancel, done: make(chan struct{})}
 	manager.mu.Lock()
 	worker.mirrors[unit.Main] = live
 	manager.mu.Unlock()
@@ -510,16 +553,18 @@ func (manager *Manager) Move(ctx context.Context, folder, name string, stop func
 	if worker.conn != nil {
 		worker.state = Connected
 	}
-	// A mirror of a unit that stays here would keep sending what nobody runs there.
-	if live := worker.mirrors[unit.Main]; err != nil && live != nil {
-		live.cancel()
-		delete(worker.mirrors, unit.Main)
+	// Mirrors of a unit that stays here would keep sending what nobody runs there.
+	for _, main := range []string{unit.Main, manager.sessionsMain(unit)} {
+		if live := worker.mirrors[main]; err != nil && live != nil {
+			live.cancel()
+			delete(worker.mirrors, main)
+		}
 	}
 	return err
 }
 
-// copyToWorker copies a unit and its sessions' folders to the worker, then starts its mirror and waits until main's
-// copy has its first barrier.
+// copyToWorker copies a unit and its sessions' folders to the worker, then starts their mirrors and waits until
+// main's copies have their first barriers.
 func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit mirror.Unit) error {
 	conn, err := manager.connection(worker)
 	if err != nil {
@@ -537,17 +582,30 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 		}
 	}
 	started := time.Now()
-	if err := manager.startMirror(ctx, worker, unit); err != nil {
-		return err
+	for _, sessions := range []bool{false, true} {
+		main := unit.Main
+		if sessions {
+			main = manager.sessionsMain(unit)
+		}
+		// Main's own changes before the move are not changes to a read-only copy.
+		if err := os.RemoveAll(filepath.Join(manager.mirrorFolder(main), "state")); err != nil {
+			return err
+		}
+		if err := manager.startMirror(ctx, worker, unit, sessions); err != nil {
+			return err
+		}
+		manager.mu.Lock()
+		live := worker.mirrors[main]
+		manager.mu.Unlock()
+		if err := waitForMirror(ctx, live, started); err != nil {
+			return err
+		}
 	}
-	manager.mu.Lock()
-	live := worker.mirrors[unit.Main]
-	manager.mu.Unlock()
-	return waitForMirror(ctx, live, started)
+	return nil
 }
 
 // Return brings the repository that holds folder back from its worker: it stops everything that the repository's
-// sessions run there, takes the mirror's last changes, and copies the sessions' folders back once. stop is as in Move.
+// sessions run there, and takes the last changes of the repository and of its sessions. stop is as in Move.
 func (manager *Manager) Return(ctx context.Context, folder string, stop func(inRepository func(folder string) bool) error) error {
 	placement, placed := manager.options.Placements.Find(folder)
 	if !placed {
@@ -566,11 +624,14 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 	if err != nil {
 		return err
 	}
+	// connect leaves the mirrors of a moving unit alone, so that they don't start again during the return.
+	if err := manager.runMirrors(ctx, worker, unit); err != nil {
+		return err
+	}
 	conn, err := manager.connection(worker)
 	if err != nil {
 		return err
 	}
-	folders := manager.sessionFolders(unit)
 	manager.mu.Lock()
 	var ids []string
 	for id, session := range manager.sessions {
@@ -588,26 +649,25 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 		delete(manager.sessions, id)
 		manager.mu.Unlock()
 	}
-	if err := manager.stopMirror(ctx, worker, unit.Main); err != nil {
-		return err
-	}
-	existing, err := runScript(ctx, conn.Pool, nil, `for folder; do if [ -d "$folder" ]; then echo "$folder"; fi; done`, folders...)
-	if err != nil {
-		return err
-	}
-	for folder := range strings.Lines(existing) {
-		if err := conn.FetchFolder(ctx, strings.TrimSuffix(folder, "\n")); err != nil {
+	mains := []string{unit.Main, manager.sessionsMain(unit)}
+	for _, main := range mains {
+		if err := manager.stopMirror(ctx, worker, main); err != nil {
 			return err
 		}
 	}
 	if err := manager.options.Placements.Remove(unit.Main); err != nil {
 		return err
 	}
-	return os.RemoveAll(filepath.Join(manager.mirrorFolder(unit), "state"))
+	for _, main := range mains {
+		if err := os.RemoveAll(filepath.Join(manager.mirrorFolder(main), "state")); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// sessionFolders are Pi's folders of the sessions in a unit: one for each of its worktrees, and one for each other
-// folder in it that a session started in.
+// sessionFolders are Pi's folders of the sessions in a unit, the main folder's first: one for each of its worktrees,
+// and one for each other folder in it that a session started in.
 func (manager *Manager) sessionFolders(unit mirror.Unit) []string {
 	var folders []string
 	add := func(cwd string) {

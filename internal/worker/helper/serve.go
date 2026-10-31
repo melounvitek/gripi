@@ -29,7 +29,8 @@ import (
 //   - helper to main: {"type":"hello","instance":…,"version":…} once, then {"id":N,"type":"ping"} every second;
 //   - main to helper: {"id":N,"type":"session.create","session":…,"cwd":…,"args":[…],"env":["NAME=value",…]},
 //     session.close and session.release with "session", auth.apply with "path" and "contents", mirror.start with
-//     "unit" ({"main":…,"worktrees":[…],"git_dir":…}), and mirror.stop with the unit's main folder as "path";
+//     "unit" ({"main":…,"worktrees":[…],"git_dir":…}) and "sessions" for a unit of Pi's session folders, and
+//     mirror.stop with the unit's main folder as "path";
 //   - answers: {"id":N,"ok":true} or {"id":N,"ok":false,"error":"…"}.
 type Message struct {
 	ID       uint64       `json:"id,omitempty"`
@@ -43,6 +44,7 @@ type Message struct {
 	Path     string       `json:"path,omitempty"`
 	Contents string       `json:"contents,omitempty"`
 	Unit     *mirror.Unit `json:"unit,omitempty"`
+	Sessions bool         `json:"sessions,omitempty"`
 	OK       bool         `json:"ok,omitempty"`
 	Error    string       `json:"error,omitempty"`
 }
@@ -260,7 +262,7 @@ func (s *server) handle(request Message) {
 	case "session.release":
 		err = s.release(request.Session)
 	case "mirror.start":
-		err = s.startMirror(request.Unit)
+		err = s.startMirror(request.Unit, request.Sessions)
 	case "mirror.stop":
 		err = s.stopMirror(request.Path)
 	case "auth.apply":

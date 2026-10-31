@@ -125,14 +125,15 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	writeTestFile(t, filepath.Join(rig.pkg, "dist", "cli.js"), fakeWorkerPi, 0755)
 	writeTestFile(t, filepath.Join(rig.pi.AgentDir, "auth.json"), `{"anthropic":{"type":"oauth","access":"a","refresh":"main's","expires":1}}`, 0600)
 	writeTestFile(t, filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"), "worker\n", 0600)
-	project, key := t.TempDir(), "/sessions/--project--/s.jsonl"
+	project, sessions := t.TempDir(), t.TempDir()
+	key := filepath.Join(sessionFolder(sessions, project), "s.jsonl")
 	gripi, _ := buildExecutables(t)
 	unitName := make([]byte, 6)
 	rand.Read(unitName)
 	var socketsStopped int
 	manager := newTestManager(t, ManagerOptions{
 		StateDir: t.TempDir(), Pi: rig.pi, WorkerExtension: filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"),
-		SocketPath: "/run/gripi.sock", Store: fakeStore{sessions: map[string]string{key: project}},
+		SocketPath: "/run/gripi.sock", Store: fakeStore{sessions: map[string]string{key: project}}, SessionsRoot: sessions,
 		ServeSocket: func(name string, placement WorkerPlacement) (string, func() error, error) {
 			if name != "beelink" || !placement.Folder(project) {
 				t.Errorf("socket for %s, whose placement has %s: %v", name, project, placement.Folder(project))
@@ -154,6 +155,10 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	}
 	if manager.State("beelink") != Connected {
 		t.Fatalf("state = %s", manager.State("beelink"))
+	}
+	// The worker's helper makes the folder of the session's file, so that it can send main the file.
+	if _, err := os.Stat(sessionFolder(sessions, project)); err != nil {
+		t.Fatal(err)
 	}
 	input, _ := command.StdinPipe()
 	stdout, _ := command.StdoutPipe()

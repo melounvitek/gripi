@@ -19,7 +19,6 @@ import (
 	"strings"
 
 	"github.com/melounvitek/gripi/internal/agent"
-	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
@@ -174,39 +173,6 @@ func (conn *Conn) send(ctx context.Context, unit mirror.Unit, to string, options
 	}
 	if err != nil {
 		return fmt.Errorf("%w %s", err, stderr)
-	}
-	return nil
-}
-
-// FetchFolder makes main's folder match the worker's folder at the same path, which `gripi worker send` sends.
-func (conn *Conn) FetchFolder(ctx context.Context, folder string) error {
-	command, release, err := conn.Command(ctx, ShellQuote(conn.installDir+"/bin/gripi", "worker", "send", folder))
-	if err != nil {
-		return err
-	}
-	defer release()
-	input, err := command.StdinPipe()
-	if err != nil {
-		return err
-	}
-	output, err := command.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr := &lastLines{}
-	command.Stderr = stderr
-	if err := command.Start(); err != nil {
-		return err
-	}
-	stop := context.AfterFunc(ctx, func() { command.Process.Kill() })
-	defer stop()
-	err = helper.Receive(ctx, output, input, folder, folder)
-	input.Close()
-	if waited := command.Wait(); err == nil {
-		err = waited
-	}
-	if err != nil {
-		return fmt.Errorf("copy %s from %s: %w %s", folder, conn.options.Destination, err, stderr)
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -31,10 +32,19 @@ type mirroredUnit struct {
 	done     chan struct{} // closed when the Source has run, or will never run
 }
 
-// startMirror prepares a unit's Source, which runs once `gripi worker mirror` connects main's Destination to it.
-func (s *server) startMirror(unit *mirror.Unit) error {
+// startMirror prepares a unit's Source, which runs once `gripi worker mirror` connects main's Destination to it. A
+// unit of Pi's session folders sends its changes without waiting for barriers, and gets the folders that don't exist
+// yet, because their sessions are mirrored only from folders that exist.
+func (s *server) startMirror(unit *mirror.Unit, sessions bool) error {
 	if unit == nil || !filepath.IsAbs(unit.Main) {
 		return errors.New("mirror.start needs a unit with an absolute main folder")
+	}
+	if sessions {
+		for _, folder := range append([]string{unit.Main}, unit.Worktrees...) {
+			if err := os.MkdirAll(folder, 0o700); err != nil {
+				return err
+			}
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -50,7 +60,7 @@ func (s *server) startMirror(unit *mirror.Unit) error {
 		current.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s.mirrors[unit.Main] = &mirroredUnit{unit: *unit, source: mirror.NewSource(*unit, mirror.Options{}), ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	s.mirrors[unit.Main] = &mirroredUnit{unit: *unit, source: mirror.NewSource(*unit, mirror.Options{AutoBarrier: sessions}), ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	return nil
 }
 
