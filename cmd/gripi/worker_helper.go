@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"io"
+	"log"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/melounvitek/gripi/internal/worker/helper"
@@ -20,12 +22,10 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	} else if len(positional) > 0 {
 		return usageError(stderr, "worker", "serve takes no arguments besides its flags")
 	}
-	options := helper.Options{RuntimeDir: *runtimeDir, Lease: *lease}
+	options := helper.Options{Lease: *lease}
 	var err error
-	if options.RuntimeDir == "" {
-		if options.RuntimeDir, err = helper.DefaultRuntimeDir(); err != nil {
-			return failure(stderr, "worker", err)
-		}
+	if options.RuntimeDir, err = runtimeDirectory(*runtimeDir); err != nil {
+		return failure(stderr, "worker", err)
 	}
 	if options.Cgroup, err = helper.DelegatedCgroup(); err != nil {
 		return failure(stderr, "worker", err)
@@ -33,6 +33,8 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	if options.Version, err = helper.FileVersion("/proc/self/exe"); err != nil {
 		return failure(stderr, "worker", err)
 	}
+	// Main logs what the helper writes, with times of its own.
+	log.SetFlags(0)
 	// After main has gone, a failed write must not kill the helper before it has stopped the sessions.
 	signal.Ignore(syscall.SIGPIPE)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
@@ -54,13 +56,20 @@ func attachWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer)
 	if len(positional) != 2 {
 		return usageError(stderr, "worker", "attach takes a session and a helper instance")
 	}
-	if *runtimeDir == "" {
-		if *runtimeDir, err = helper.DefaultRuntimeDir(); err != nil {
-			return failure(stderr, "worker", err)
-		}
+	folder, err := runtimeDirectory(*runtimeDir)
+	if err != nil {
+		return failure(stderr, "worker", err)
 	}
-	if err := helper.Attach(*runtimeDir, positional[0], positional[1], stdin, stdout); err != nil {
+	if err := helper.Attach(folder, positional[0], positional[1], stdin, stdout); err != nil {
 		return failure(stderr, "worker", err)
 	}
 	return 0
+}
+
+// runtimeDirectory is the helper's socket folder as an absolute path, because Pi gets the path of a socket in it.
+func runtimeDirectory(flag string) (string, error) {
+	if flag == "" {
+		return helper.DefaultRuntimeDir()
+	}
+	return filepath.Abs(flag)
 }

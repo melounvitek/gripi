@@ -30,6 +30,16 @@ go vet ./...
 govulncheck ./...
 ```
 
+## Workers over SSH
+
+The worker tests run the helper under `systemd-run --user` on this machine when a systemd user manager is available, and skip otherwise. Tests of the real `ssh`, with saturated channels, a link that stalls in one direction and a master connection that dies, are opt-in:
+
+```sh
+GRIPI_TEST_SSH=localhost go test ./internal/worker/ -run RealSSH -v
+```
+
+`GRIPI_TEST_SSH` can name any worker that `ssh` reaches without a prompt and that has a systemd user manager. The tests install the helper in `GRIPI_TEST_SSH_DIR` there (`~/gripi-helper-test` by default) and remove it afterwards.
+
 ## Browser contract suite
 
 The Playwright suite exercises Gripi only through a browser. Its fixtures use Pi's native JSONL session format, and its deterministic Pi replacement is an independent RPC subprocess. Browser specifications do not import gateway packages or call internal handlers directly.
