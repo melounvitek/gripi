@@ -144,12 +144,17 @@ func (adapter *Adapter) Check(ctx context.Context) error {
 
 // ExtensionFiles returns the extracted extensions: the gateway's, which every Pi loads, and the worker extension,
 // which a session's Pi on a worker loads with a second --extension. They share a folder, which a worker gets a copy
-// of at the same path.
+// of at the same path, so with a state folder it is the same folder in it after every restart.
 func (adapter *Adapter) ExtensionFiles() (tree, worker string, err error) {
 	adapter.extensionMu.Lock()
 	defer adapter.extensionMu.Unlock()
 	if adapter.extensionRoot == "" {
-		root, err := os.MkdirTemp("", "gripi-rpc-")
+		root := filepath.Join(adapter.stateDir, "pi-extensions")
+		if adapter.stateDir == "" {
+			root, err = os.MkdirTemp("", "gripi-rpc-")
+		} else {
+			err = os.MkdirAll(root, 0700)
+		}
 		if err != nil {
 			return "", "", fmt.Errorf("create Pi extension directory: %w", err)
 		}

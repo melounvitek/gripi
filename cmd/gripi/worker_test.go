@@ -277,3 +277,26 @@ func TestThePiAdapterExtractsBothExtensionsIntoOneFolder(t *testing.T) {
 	}
 }
 
+// Workers keep a copy of the extensions' folder, so a gateway extracts them to the same folder after every restart.
+func TestThePiAdapterExtractsTheExtensionsToTheSameFolderAfterARestart(t *testing.T) {
+	state := t.TempDir()
+	cfg := config.Config{ReadStatePath: filepath.Join(state, "read-state.json")}
+	var trees []string
+	for range 2 {
+		adapter, err := newPiAdapter(cfg, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tree, _, err := adapter.ExtensionFiles()
+		if err != nil {
+			t.Fatal(err)
+		}
+		trees = append(trees, tree)
+		if err := adapter.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if trees[0] != trees[1] || filepath.Dir(trees[0]) != filepath.Join(state, "pi-extensions") {
+		t.Fatalf("the extensions were extracted to %q", trees)
+	}
+}
