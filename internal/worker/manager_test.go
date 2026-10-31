@@ -2,14 +2,17 @@ package worker
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
@@ -193,6 +196,45 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	if manager.State("beelink") != Disconnected || socketsStopped != 1 {
 		t.Fatalf("after Close: state %s, %d sockets stopped", manager.State("beelink"), socketsStopped)
 	}
+}
+
+func TestReturnWaitsForASessionStartingOnTheWorker(t *testing.T) {
+	project := "/work/project"
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}})
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
+		t.Fatal(err)
+	}
+	connecting, connect := make(chan struct{}), make(chan struct{})
+	manager.options.Destination = func(string) (string, error) {
+		close(connecting)
+		<-connect
+		return "", errors.New("no worker in this test")
+	}
+	launched := make(chan error, 1)
+	go func() {
+		_, _, err := manager.Launch(agent.Process{Dir: project})
+		launched <- err
+	}()
+	<-connecting
+	stopped, returned := make(chan struct{}), make(chan error, 1)
+	go func() {
+		returned <- manager.Return(context.Background(), project, func(func(string) bool) error {
+			close(stopped)
+			return errors.New("stopped")
+		})
+	}()
+	select {
+	case <-stopped:
+		t.Fatal("the return stopped the sessions while one was starting on the worker")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, _, err := manager.Launch(agent.Process{Dir: project}); err == nil || !strings.Contains(err.Error(), "moving") {
+		t.Fatalf("a session that starts during the return = %v", err)
+	}
+	close(connect)
+	<-launched
+	<-stopped
+	<-returned
 }
 
 func TestWhatTheMirrorAppliesUpdatesThePlacementAndNotices(t *testing.T) {

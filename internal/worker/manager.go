@@ -75,6 +75,8 @@ type Manager struct {
 	workers     map[string]*remote
 	movingUnits []mirror.Unit       // units on their way to or from a worker, whose sessions can't start meanwhile
 	sessions    map[string]launched // by the session's ID on its worker
+	launches    []string            // folders of sessions whose Pi is starting
+	launched    *sync.Cond          // signalled when a launch ends
 	notices     []Notice
 }
 
@@ -122,7 +124,9 @@ func (live *liveMirror) running() bool {
 // NewManager returns a manager that connects to no worker until a session or a move needs it.
 func NewManager(options ManagerOptions) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{options: options, ctx: ctx, cancel: cancel, workers: map[string]*remote{}, sessions: map[string]launched{}}
+	manager := &Manager{options: options, ctx: ctx, cancel: cancel, workers: map[string]*remote{}, sessions: map[string]launched{}}
+	manager.launched = sync.NewCond(&manager.mu)
+	return manager
 }
 
 // Notices returns the notices of the repository that holds folder, oldest first, until DismissNotices.
@@ -499,9 +503,11 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 	if cwd == "" {
 		return nil, nil, nil
 	}
-	if manager.moving(cwd) {
-		return nil, nil, fmt.Errorf("the repository of %s is moving between this machine and a worker; try again once it has moved", cwd)
+	done, err := manager.startLaunch(cwd)
+	if err != nil {
+		return nil, nil, err
 	}
+	defer done()
 	placement, placed := manager.options.Placements.Find(cwd)
 	if !placed {
 		return nil, nil, nil
@@ -559,13 +565,26 @@ func sessionID(key string) string {
 	return hex.EncodeToString(hash[:16])
 }
 
-func (manager *Manager) moving(path string) bool {
+// startLaunch notes that the Pi of a session in cwd is starting, which a move of cwd's repository waits for, unless
+// the repository is moving already.
+func (manager *Manager) startLaunch(cwd string) (done func(), err error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	return slices.ContainsFunc(manager.movingUnits, func(unit mirror.Unit) bool { return unit.Contains(path) })
+	if slices.ContainsFunc(manager.movingUnits, func(unit mirror.Unit) bool { return unit.Contains(cwd) }) {
+		return nil, fmt.Errorf("the repository of %s is moving between this machine and a worker; try again once it has moved", cwd)
+	}
+	manager.launches = append(manager.launches, cwd)
+	return func() {
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		i := slices.Index(manager.launches, cwd)
+		manager.launches = slices.Delete(manager.launches, i, i+1)
+		manager.launched.Broadcast()
+	}, nil
 }
 
-// startMoving marks a unit as moving, unless it is moving already.
+// startMoving marks a unit as moving, unless it is moving already, and waits until the sessions starting in the unit
+// have started: the Pi of a session that started on a worker while its repository went back would stay there.
 func (manager *Manager) startMoving(unit mirror.Unit) (done func(), err error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
@@ -573,6 +592,9 @@ func (manager *Manager) startMoving(unit mirror.Unit) (done func(), err error) {
 		return nil, fmt.Errorf("the repository of %s is moving already", unit.Main)
 	}
 	manager.movingUnits = append(manager.movingUnits, unit)
+	for slices.ContainsFunc(manager.launches, unit.Contains) {
+		manager.launched.Wait()
+	}
 	return func() {
 		manager.mu.Lock()
 		defer manager.mu.Unlock()
@@ -731,7 +753,7 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 }
 
 // sessionFolders are Pi's folders of the sessions in a unit, the main folder's first: one for each of its worktrees,
-// and one for each other folder in it that a session started in.
+// and one for each other folder in it that a session started in or is starting in.
 func (manager *Manager) sessionFolders(unit mirror.Unit) []string {
 	var folders []string
 	add := func(cwd string) {
@@ -754,6 +776,11 @@ func (manager *Manager) sessionFolders(unit mirror.Unit) []string {
 	for _, session := range manager.sessions {
 		if unit.Contains(session.cwd) {
 			add(session.cwd)
+		}
+	}
+	for _, cwd := range manager.launches {
+		if unit.Contains(cwd) {
+			add(cwd)
 		}
 	}
 	return folders
