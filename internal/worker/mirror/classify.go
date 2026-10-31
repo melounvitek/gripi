@@ -91,7 +91,7 @@ func newClassifier(root string) *classifier {
 func (c *classifier) start() {
 	c.stop()
 	c.ignore, c.tracked, c.broken = map[string]bool{}, map[string]bool{}, false
-	cmd := exec.Command("git", "-C", c.root, "check-ignore", "--stdin", "-z", "-v", "-n")
+	cmd := exec.Command("git", "--no-optional-locks", "-C", c.root, "check-ignore", "--stdin", "-z", "-v", "-n")
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return
@@ -165,7 +165,7 @@ func (c *classifier) hasTracked(rel string) bool {
 // refreshTracked asks Git which of the paths are tracked or contain tracked
 // files, with one git call, and returns those.
 func (c *classifier) refreshTracked(paths []string) []string {
-	args := append([]string{"-C", c.root, "--literal-pathspecs", "ls-files", "-z", "--"}, paths...)
+	args := append([]string{"--no-optional-locks", "-C", c.root, "--literal-pathspecs", "ls-files", "-z", "--"}, paths...)
 	out, err := exec.Command("git", args...).Output()
 	files := strings.Split(string(out), "\x00")
 	var found []string

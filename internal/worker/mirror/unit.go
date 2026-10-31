@@ -25,7 +25,7 @@ func Discover(dir string) (Unit, error) {
 	if err != nil {
 		return Unit{}, err
 	}
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir", "--is-bare-repository").Output()
+	out, err := exec.Command("git", "--no-optional-locks", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir", "--is-bare-repository").Output()
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
@@ -50,7 +50,7 @@ func Discover(dir string) (Unit, error) {
 // listWorktrees lists the existing worktrees of the repository at dir, the
 // main one first.
 func listWorktrees(dir string) ([]string, error) {
-	out, err := exec.Command("git", "-C", dir, "worktree", "list", "--porcelain").Output()
+	out, err := exec.Command("git", "--no-optional-locks", "-C", dir, "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git worktree list in %s: %w", dir, err)
 	}
