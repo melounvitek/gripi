@@ -3,12 +3,18 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -97,6 +103,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	}
 	var stopGateway func()
 	var workers *remote.Manager
+	var browser http.Handler
 	startGateway := func() {
 		t.Helper()
 		handler, manager, err := newGateway(cfg, remote.Options{Executable: gripi, InstallDir: "gripi-e2e", Unit: "gripi-e2e", RuntimeDir: filepath.Join(realWorkerRoot, "run")})
@@ -107,7 +114,7 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		workers = manager
+		workers, browser = manager, handler
 		stopped := false
 		stopGateway = func() {
 			if !stopped {
@@ -252,13 +259,130 @@ func TestRealWorkerRunsTheSessionsOfAMovedRepository(t *testing.T) {
 	}
 	noTakeOver()
 
+	// Freezing the master connections to the worker stalls every channel, as a link that hangs does.
+	signalMasters := func(signal syscall.Signal) {
+		t.Helper()
+		output, _ := exec.Command("pgrep", "-f", "ssh -MNnT -S "+filepath.Join(stateDir(cfg), "ssh")).Output()
+		if len(strings.Fields(string(output))) == 0 {
+			t.Fatal("no master connection to the worker")
+		}
+		for _, pid := range strings.Fields(string(output)) {
+			number, _ := strconv.Atoi(pid)
+			if err := syscall.Kill(number, signal); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// A short stall costs nothing.
+	cli("send", fresh.ID, `RUN [[{"name":"bash","arguments":{"command":"sleep 4 && echo after the stall > stall.txt"}}]]`)
+	time.Sleep(time.Second)
+	signalMasters(syscall.SIGSTOP)
+	time.Sleep(3 * time.Second)
+	signalMasters(syscall.SIGCONT)
+	cli("wait", fresh.ID, "--timeout", "60")
+	if got := repliesSoon(fresh.ID, 3); !strings.Contains(got[2], `"isError":false`) {
+		t.Fatalf("the step that the stall held up replied %q", got[2])
+	}
+	if _, err := os.Stat(filepath.Join(project, "stall.txt")); err != nil {
+		t.Fatalf("main lacks what the worker wrote after the stall: %v", err)
+	}
+	if status := workers.Status("beelink"); status.State != remote.Connected {
+		t.Fatalf("after a short stall, the worker is %+v", status)
+	}
+
+	// A link that hangs for half a lease loses the worker, which ends the running step, whose outcome is unknown.
+	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":"echo before > before.txt"}}],[{"name":"bash","arguments":{"command":"echo during > during.txt && sleep 120"}}]]`)
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(feature, "before.txt")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("main never got the file of the first step")
+		}
+	}
+	// events returns the live events of a session after a cursor, as the browser gets them, and the last event's number.
+	events := func(id string, after int64) ([]map[string]any, int64) {
+		t.Helper()
+		target := fmt.Sprintf("http://127.0.0.1:4567/events?after=%d&session=%s", after, url.QueryEscape(eventually(t, id, func(gateway.LocalSession) bool { return true }).Path))
+		request := httptest.NewRequest(http.MethodGet, target, nil)
+		request.Header.Set("Accept", "application/json")
+		request.RemoteAddr = "127.0.0.1:40000"
+		response := httptest.NewRecorder()
+		browser.ServeHTTP(response, request)
+		var batch struct {
+			Events  []map[string]any `json:"events"`
+			LastSeq int64            `json:"last_seq"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &batch); err != nil {
+			t.Fatalf("events: %v %s", err, response.Body)
+		}
+		return batch.Events, batch.LastSeq
+	}
+	// The worker writes during.txt and sends it, but no barrier makes main take it.
+	time.Sleep(time.Second)
+	_, cursor := events(session.ID, 0)
+	signalMasters(syscall.SIGSTOP)
+	hung := time.Now()
+	cli("wait", session.ID, "--timeout", "90")
+	t.Logf("the running step ended %s after the link hung", time.Since(hung).Round(time.Millisecond))
+	if ended, _ := events(session.ID, cursor); !slices.ContainsFunc(ended, func(event map[string]any) bool {
+		return event["type"] == "agent_settled" && event["error"] == "Lost the connection to worker beelink. The outcome of the running step is unknown."
+	}) {
+		t.Fatalf("the running step ended without saying that its outcome is unknown: %v", ended)
+	}
+	status := workers.Status("beelink")
+	if status.State != remote.Unreachable {
+		t.Fatalf("the lost worker is %+v", status)
+	}
+	if code, _, stderr := runCLI("worker", "return", project); code == 0 || !strings.Contains(stderr, "unreachable") || !strings.Contains(stderr, status.GoneAt.Local().Format(time.TimeOnly)) {
+		t.Fatalf("return before the worker is gone = %d %s", code, stderr)
+	}
+	time.Sleep(time.Until(status.GoneAt))
+	if output, _ := onWorker("systemctl --user is-active gripi-e2e; pgrep -af " + realWorkerRoot); output != "inactive" {
+		t.Fatalf("still running on the gone worker: %s", output)
+	}
+	// The repository continues here as main's copy was at the last barrier.
+	cli("worker", "return", project)
+	if _, err := os.Stat(filepath.Join(feature, "during.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("main has the file of the step whose outcome is unknown: %v", err)
+	}
+	gitIn(project, "fsck", "--strict", "--no-dangling")
+	localHost, _ := os.Hostname()
+	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname && cat before.txt"}}]]`)
+	cli("wait", session.ID, "--timeout", "60")
+	if got := replies(session.ID); !strings.Contains(got[len(got)-1], localHost+`\nbefore\n`) {
+		t.Fatalf("the session continued on main with %q", got[len(got)-1])
+	}
+	noTakeOver()
+
+	// The next move to the worker keeps aside there what the worker had that main never got.
+	cli("worker", "move", project, "beelink")
+	if output, err := onWorker("cat " + filepath.Join(filepath.Dir(project), ".repo.gripi-aside") + "/*/main/*" + feature + "/during.txt; test ! -e " + feature + "/during.txt"); err != nil || output != "during" {
+		t.Fatalf("the worker's file that main never got: %q %v", output, err)
+	}
+
+	// A master that dies loses the worker at once, and the next session there connects again.
+	signalMasters(syscall.SIGKILL)
+	for deadline := time.Now().Add(5 * time.Second); workers.Status("beelink").State != remote.Unreachable; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("after its master died, the worker is %+v", workers.Status("beelink"))
+		}
+	}
+	started = time.Now()
+	again := decodeSession(t, cli("new", project, "--json"))
+	cli("send", again.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname"}}]]`)
+	cli("wait", again.ID, "--timeout", "90")
+	t.Logf("reconnected and ran a step in %s", time.Since(started).Round(time.Millisecond))
+	if got := repliesSoon(again.ID, 1); !strings.Contains(got[0], `"text":"`+workerHost+`\n"`) {
+		t.Fatalf("the session after the reconnect replied %q", got[0])
+	}
+
 	started = time.Now()
 	cli("worker", "return", project)
 	t.Logf("returned in %s", time.Since(started).Round(time.Millisecond))
 	cli("send", session.ID, `RUN [[{"name":"bash","arguments":{"command":"hostname && git log -1 --format=%s"}}]]`)
 	cli("wait", session.ID, "--timeout", "60")
-	localHost, _ := os.Hostname()
-	if got := replies(session.ID); len(got) != 3 || !strings.Contains(got[2], localHost+`\nFrom the worker`) {
+	if got := replies(session.ID); !strings.Contains(got[len(got)-1], localHost+`\nFrom the worker`) {
 		t.Fatalf("replies = %q", got)
 	}
 	noTakeOver()
