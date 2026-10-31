@@ -218,6 +218,12 @@ export async function seedFixtures(root) {
   await writeSession(root, projects["prompt-project"], "palette-commands", sessions.paletteCommands, 0);
   await writeSession(root, projects["prompt-project"], "sudo", sessions.sudo, 0);
   await writeSession(root, projects["mobile-project"], "sudo-mobile", sessions.sudoMobile, 0);
+  await writeSession(root, projects["prompt-project"], "worker", sessions.worker, 0);
+  await writeSession(root, projects["mobile-project"], "worker-mobile", sessions.workerMobile, 0);
+  // A worker that `gripi worker add` saved, so that sessions can move to it. It doesn't exist, and the worker specs
+  // answer for it.
+  await mkdir(path.join(home, ".pi", "gripi"), { recursive: true });
+  await writeFile(path.join(home, ".pi", "gripi", "workers.json"), `${JSON.stringify([{ name: "beelink", destination: "e2e@worker.invalid" }])}\n`);
 
   const configuredCwdsPath = path.join(state, "configured-cwds");
   await writeFile(configuredCwdsPath, `${projects["new-session-desktop"]}\n${projects["new-session-mobile"]}\n`);

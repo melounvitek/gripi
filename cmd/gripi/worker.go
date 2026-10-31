@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -28,6 +29,8 @@ const workerHelp = `Usage:
   gripi worker remove <name>
   gripi worker move <session or folder> <name>
   gripi worker return <session or folder>
+  gripi worker forward <session or folder> <port>
+  gripi worker unforward <session or folder> <port>
 
 Internal, run by Gripi on a worker over SSH:
   gripi worker serve [--lease <duration>] [--runtime-dir <folder>]
@@ -69,6 +72,12 @@ the sessions there, and says when that is; then the repository continues
 here as this machine last got it, and the next move to the worker keeps
 what the worker had beyond that aside there.
 
+forward makes a port on the worker that runs the repository's sessions
+available on this machine, such as a dev server that a session started
+there: at the same port on localhost, or at the next free one, which it
+prints. Both ends listen only on localhost. The forward lasts until
+unforward, or until this machine's connection to the worker ends.
+
 serve is the helper that runs the worker's sessions, and stops all of them
 when this machine stops answering. attach connects to the Pi of a session.
 receive makes a folder a copy of one that this machine sends, or, given the
@@ -87,6 +96,7 @@ Arguments:
   name       Name of a worker
   session    Session ID, a unique prefix of it, or the session file path
   folder     A folder in the repository
+  port       A port on the worker's localhost
 
 Flags:
   --name  Name of the new worker; defaults to the first part of the host name,
@@ -98,13 +108,15 @@ Examples:
   gripi worker add gripi@beelink.example.ts.net
   gripi worker move ~/Work/project beelink
   gripi worker return 01a107aa
+  gripi worker forward 01a107aa 5173
   gripi worker remove beelink
 
 Exit codes:
   0  success
   1  the worker cannot be reached or cannot run sessions, the name is taken,
      no worker has the name, repositories are on the worker that remove
-     names, or the gateway refused or failed to move the repository
+     names, or the gateway refused or failed to move the repository or to
+     forward the port
   2  usage error
 `
 
@@ -125,7 +137,7 @@ func workerProbe(agentDir string) string {
 
 func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(arguments) == 0 {
-		return usageError(stderr, "worker", "needs add, list, remove, move or return")
+		return usageError(stderr, "worker", "needs add, list, remove, move, return, forward or unforward")
 	}
 	switch arguments[0] {
 	case "add":
@@ -138,6 +150,8 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 		return moveRepository(arguments[1:], stdout, stderr)
 	case "return":
 		return returnRepository(arguments[1:], stdout, stderr)
+	case "forward", "unforward":
+		return forwardPort(arguments[0], arguments[1:], stdout, stderr)
 	case "serve":
 		return serveWorker(arguments[1:], stdin, stdout, stderr)
 	case "attach":
@@ -147,7 +161,7 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 	case "mirror":
 		return mirrorWorker(arguments[1:], stdin, stdout, stderr)
 	}
-	return usageError(stderr, "worker", fmt.Sprintf("unknown subcommand %q; use add, list, remove, move or return", arguments[0]))
+	return usageError(stderr, "worker", fmt.Sprintf("unknown subcommand %q; use add, list, remove, move, return, forward or unforward", arguments[0]))
 }
 
 func addWorker(arguments []string, stdout, stderr io.Writer) int {
@@ -307,7 +321,7 @@ func moveRepository(arguments []string, stdout, stderr io.Writer) int {
 	if len(arguments) != 2 || arguments[0] == "" || arguments[1] == "" {
 		return usageError(stderr, "worker", "move takes a session or folder and a worker name")
 	}
-	folder, err := askToMove("/workers/move", url.Values{"worker": {arguments[1]}}, arguments[0])
+	folder, err := askAboutRepository("/workers/move", url.Values{"worker": {arguments[1]}}, arguments[0], &struct{}{})
 	if err != nil {
 		return failure(stderr, "worker", err)
 	}
@@ -319,7 +333,7 @@ func returnRepository(arguments []string, stdout, stderr io.Writer) int {
 	if len(arguments) != 1 || arguments[0] == "" {
 		return usageError(stderr, "worker", "return takes a session or folder")
 	}
-	folder, err := askToMove("/workers/return", url.Values{}, arguments[0])
+	folder, err := askAboutRepository("/workers/return", url.Values{}, arguments[0], &struct{}{})
 	if err != nil {
 		return failure(stderr, "worker", err)
 	}
@@ -327,9 +341,28 @@ func returnRepository(arguments []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// askToMove asks the gateway to move the repository of a folder, or of a session's folder, and returns the folder.
-// It waits as long as copying takes.
-func askToMove(route string, form url.Values, reference string) (string, error) {
+func forwardPort(subcommand string, arguments []string, stdout, stderr io.Writer) int {
+	if len(arguments) != 2 || arguments[0] == "" {
+		return usageError(stderr, "worker", subcommand+" takes a session or folder and a port")
+	}
+	if port, err := strconv.Atoi(arguments[1]); err != nil || port < 1 || port > 65535 {
+		return usageError(stderr, "worker", fmt.Sprintf("%q is not a port from 1 to 65535", arguments[1]))
+	}
+	var forwarded struct{ Port, Local int }
+	if _, err := askAboutRepository("/workers/"+subcommand, url.Values{"port": {arguments[1]}}, arguments[0], &forwarded); err != nil {
+		return failure(stderr, "worker", err)
+	}
+	if subcommand == "unforward" {
+		fmt.Fprintf(stdout, "Port %d of the worker is no longer forwarded.\n", forwarded.Port)
+	} else {
+		fmt.Fprintf(stdout, "Port %d of the worker is at localhost:%d.\n", forwarded.Port, forwarded.Local)
+	}
+	return 0
+}
+
+// askAboutRepository asks the gateway to act on the repository of a folder, or of a session's folder, reads its
+// answer into result, and returns the folder. It waits as long as the gateway takes, such as to copy the repository.
+func askAboutRepository(route string, form url.Values, reference string, result any) (string, error) {
 	client, err := newGatewayClient()
 	if err != nil {
 		return "", err
@@ -348,7 +381,7 @@ func askToMove(route string, form url.Values, reference string) (string, error) 
 		return "", err
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	return folder, client.do(request, 0, &struct{}{})
+	return folder, client.do(request, 0, result)
 }
 
 func loadWorkers() (config.Config, []worker, error) {

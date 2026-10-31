@@ -183,19 +183,25 @@ func TestMessageTemplateIdentifiesPersistedPairedToolResults(t *testing.T) {
 
 func TestMessageClassKeepsTheRoleOfAnOmittedMessage(t *testing.T) {
 	placeholder := &agent.Message{Role: "user", Text: "Message too large to show (64.0MB)", Omitted: true}
-	if got := messageClass(placeholder); got != "message message--user message--omitted" {
+	if got := messageClass(placeholder, false); got != "message message--user message--omitted" {
 		t.Fatalf("omitted message class = %q", got)
 	}
 }
 
-func TestMessageClassMarksToolCallsWithoutResultsPending(t *testing.T) {
+func TestMessageClassMarksToolCallsWithoutResultsPendingWhileTheRunGoesOn(t *testing.T) {
 	call := &agent.Message{Role: "assistant", Compact: true, ToolCallID: "bash-1", ToolName: "bash", ToolPending: true}
-	if got := messageClass(call); !strings.Contains(got, "message--tool-pending") {
+	if got := messageClass(call, true); !strings.Contains(got, "message--tool-pending") || strings.Contains(got, "unknown") {
 		t.Fatalf("pending call class = %q", got)
 	}
+	// The run ended without the call's result.
+	if got := messageClass(call, false); !strings.Contains(got, "message--tool-unknown") || strings.Contains(got, "pending") {
+		t.Fatalf("interrupted call class = %q", got)
+	}
 	call.ToolPending, call.ToolResultPersisted = false, true
-	if got := messageClass(call); strings.Contains(got, "message--tool-pending") {
-		t.Fatalf("completed call class = %q", got)
+	for _, running := range []bool{true, false} {
+		if got := messageClass(call, running); strings.Contains(got, "pending") || strings.Contains(got, "unknown") {
+			t.Fatalf("completed call class = %q", got)
+		}
 	}
 }
 

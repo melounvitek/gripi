@@ -475,7 +475,8 @@ export class ConversationController {
     if (reasoningCount > 0) parts.push(`${reasoningCount} reasoning ${reasoningCount === 1 ? "step" : "steps"}`);
     if (toolCount > 0) parts.push(`${toolCount} tool ${toolCount === 1 ? "update" : "updates"}`);
     if (otherCount > 0) parts.push(`${otherCount} other ${otherCount === 1 ? "update" : "updates"}`);
-    return { text: parts.join(" · "), errorCount, pending: messages.some((message) => message.classList.contains("message--tool-pending")) };
+    const has = (name) => messages.some((message) => message.classList.contains(name));
+    return { text: parts.join(" · "), errorCount, pending: has("message--tool-pending"), unknown: has("message--tool-unknown") };
   }
 
   focusedActivityItems(messages) {
@@ -625,6 +626,7 @@ export class ConversationController {
         ["message--tool", "message--tool-call", "message--tool-transcript"].some((name) => message.classList.contains(name)),
         error,
         message.classList.contains("message--tool-pending"),
+        message.classList.contains("message--tool-unknown"),
         itemText
       ].join(":");
     }).join("|")}`;
@@ -657,7 +659,7 @@ export class ConversationController {
       const summaryData = this.focusedActivitySummary(group);
       const items = this.focusedActivityItems(group);
       const summary = this.document.createElement("section");
-      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${summaryData.pending ? " has-pending" : ""}${expanded ? " is-expanded" : ""}`;
+      summary.className = `focus-activity-summary${summaryData.errorCount > 0 ? " has-errors" : ""}${summaryData.pending ? " has-pending" : ""}${summaryData.unknown ? " has-unknown" : ""}${expanded ? " is-expanded" : ""}`;
       summary.dataset.focusActivitySummary = groupId;
 
       const header = this.document.createElement(items.length > 0 ? "button" : "div");

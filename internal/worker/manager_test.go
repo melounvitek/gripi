@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -485,5 +486,139 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	aside := filepath.Join(filepath.Dir(project), "."+filepath.Base(project)+".gripi-aside") + "/"
 	if calls := sshCalls(t, "'receive' '--aside' '"+aside); len(calls) != 1 {
 		t.Fatalf("copies that save aside what they replace: %q", calls)
+	}
+}
+
+func refused(err error) bool {
+	var refusal interface{ Refused() bool }
+	return errors.As(err, &refusal) && refusal.Refused()
+}
+
+// connectWorker makes the manager have a connection to the worker of a name, over the fake ssh.
+func connectWorker(t *testing.T, manager *Manager, name string) *Conn {
+	t.Helper()
+	conn := &Conn{Pool: newTestPool(t)}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	manager.workers[name] = &remote{name: name, state: Connected, conn: conn, stopSocket: func() error { return nil }, mirrors: map[string]*liveMirror{}}
+	return conn
+}
+
+func TestForwardMakesAPortOfTheWorkerAvailableOnMainUntilItsConnectionEnds(t *testing.T) {
+	fakeSSH(t)
+	ctx := context.Background()
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}})
+	project := "/work/project"
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Forward(ctx, project, 5173); !refused(err) || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("Forward while the worker is not connected = %v", err)
+	}
+	if _, err := manager.Forward(ctx, "/work/other", 5173); !refused(err) {
+		t.Fatalf("Forward in a folder on main = %v", err)
+	}
+	conn := connectWorker(t, manager, "beelink")
+	// Something on main listens at the worker's port already.
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+	port := taken.Addr().(*net.TCPAddr).Port
+
+	local, err := manager.Forward(ctx, project+"/src", port)
+	if err != nil || local <= port {
+		t.Fatalf("Forward of a port that main uses = %d, %v", local, err)
+	}
+	if calls := sshCalls(t, fmt.Sprintf("-O forward -L localhost:%d:localhost:%d", local, port)); len(calls) != 1 {
+		t.Fatalf("ssh forwards: %q", sshCalls(t, "-O forward"))
+	}
+	if again, err := manager.Forward(ctx, project, port); again != local || err != nil {
+		t.Fatalf("Forward of a forwarded port = %d, %v", again, err)
+	}
+	if location, _ := manager.Location(project); !slices.Equal(location.Forwards, []Forwarded{{Port: port, Local: local}}) {
+		t.Fatalf("location = %+v", location)
+	}
+
+	if err := manager.Unforward(project, port); err != nil {
+		t.Fatal(err)
+	}
+	if calls := sshCalls(t, fmt.Sprintf("-O cancel -L localhost:%d:localhost:%d", local, port)); len(calls) != 1 {
+		t.Fatalf("ssh cancels: %q", sshCalls(t, "-O cancel"))
+	}
+	if err := manager.Unforward(project, port); !refused(err) {
+		t.Fatalf("Unforward of a port that is not forwarded = %v", err)
+	}
+
+	if _, err := manager.Forward(ctx, project, port); err != nil {
+		t.Fatal(err)
+	}
+	manager.mu.Lock()
+	worker := manager.workers["beelink"]
+	manager.mu.Unlock()
+	manager.disconnect(worker, conn, false)
+	if location, _ := manager.Location(project); len(location.Forwards) != 0 {
+		t.Fatalf("forwards after the connection ended: %+v", location.Forwards)
+	}
+}
+
+func TestLocationSaysWhichWorkerRunsAFolderOrIsGettingIt(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	manager := newTestManager(t, ManagerOptions{Store: fakeStore{}, Clock: func() time.Time { return now }})
+	placed := mirror.Unit{Main: "/work/project", Worktrees: []string{"/work/project-feature"}}
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: placed}); err != nil {
+		t.Fatal(err)
+	}
+	if location, found := manager.Location("/work/project-feature/src"); !found || location.Worker != "beelink" || location.Repository != "/work/project" || location.State != Disconnected || !location.Copying.IsZero() {
+		t.Fatalf("location of a placed folder = %+v, %v", location, found)
+	}
+	if _, found := manager.Location("/work/other"); found {
+		t.Fatal("a folder on main has a worker")
+	}
+	// The worker gets another repository, while it runs this one's sessions.
+	manager.mu.Lock()
+	manager.workers["beelink"] = &remote{name: "beelink", state: Copying, mirrors: map[string]*liveMirror{}}
+	manager.mu.Unlock()
+	if location, _ := manager.Location("/work/project"); location.State != Connected {
+		t.Fatalf("location of a placed folder while the worker gets another = %+v", location)
+	}
+
+	// A move connects to the worker before it copies, which fails in this test.
+	moving := t.TempDir()
+	calls := 0
+	connecting, connect := make(chan struct{}), make(chan struct{})
+	manager.options.Destination = func(string) (string, error) {
+		if calls++; calls == 2 {
+			close(connecting)
+			<-connect
+			return "", errors.New("no worker in this test")
+		}
+		return "gripi@worker", nil
+	}
+	moved := make(chan error)
+	go func() {
+		moved <- manager.Move(context.Background(), moving, "beelink", func(func(string) bool) error { return nil })
+	}()
+	<-connecting
+	if location, found := manager.Location(moving); !found || location.Worker != "beelink" || location.Repository != moving || !location.Copying.Equal(now) || location.State != Connecting {
+		t.Fatalf("location of a folder that is being copied = %+v, %v", location, found)
+	}
+	close(connect)
+	if err := <-moved; err == nil || refused(err) {
+		t.Fatalf("Move = %v", err)
+	}
+	if location, found := manager.Location(moving); found {
+		t.Fatalf("location of a folder that failed to move = %+v", location)
+	}
+	if err := manager.Move(context.Background(), placed.Main, "beelink", nil); !refused(err) {
+		t.Fatalf("Move of a placed repository = %v", err)
+	}
+	manager.options.Destination = func(name string) (string, error) { return "", fmt.Errorf("no worker is named %q", name) }
+	if err := manager.Move(context.Background(), moving, "nuc", nil); !refused(err) {
+		t.Fatalf("Move to an unknown worker = %v", err)
+	}
+	if err := manager.Return(context.Background(), moving, nil); !refused(err) {
+		t.Fatalf("Return of a repository on main = %v", err)
 	}
 }

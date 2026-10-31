@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -319,6 +320,30 @@ func (workers *recordedWorkers) Return(_ context.Context, folder string, _ func(
 	return nil
 }
 
+func (workers *recordedWorkers) Forward(_ context.Context, folder string, port int) (int, error) {
+	workers.moves = append(workers.moves, fmt.Sprintf("%s forwards %d", folder, port))
+	return port + 1, nil
+}
+
+func (workers *recordedWorkers) Unforward(folder string, port int) error {
+	workers.moves = append(workers.moves, fmt.Sprintf("%s unforwards %d", folder, port))
+	return nil
+}
+
+func (workers *recordedWorkers) List() ([]gateway.Worker, error) { return nil, nil }
+
+func (workers *recordedWorkers) Location(string) (gateway.WorkerLocation, bool) {
+	return gateway.WorkerLocation{}, false
+}
+
+func (workers *recordedWorkers) Repository(folder string) (string, []string, error) {
+	return folder, nil, nil
+}
+
+func (workers *recordedWorkers) Notices(string) []gateway.WorkerNotice { return nil }
+
+func (workers *recordedWorkers) DismissNotices(string) {}
+
 func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 	workers := &recordedWorkers{}
@@ -340,6 +365,28 @@ func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
 	}
 }
 
+func TestWorkerForwardAndUnforwardTakeASessionOrAFolderAndAPort(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	workers := &recordedWorkers{}
+	browser.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
+
+	if code, stdout, stderr := runCLI("worker", "forward", "0a1-alpha", "5173"); code != 0 || stdout != "Port 5173 of the worker is at localhost:5174.\n" {
+		t.Fatalf("worker forward = %d %q %q", code, stdout, stderr)
+	}
+	if code, stdout, stderr := runCLI("worker", "unforward", project, "5173"); code != 0 || !strings.Contains(stdout, "5173") {
+		t.Fatalf("worker unforward = %d %q %q", code, stdout, stderr)
+	}
+	if expected := []string{project + " forwards 5173", project + " unforwards 5173"}; !reflect.DeepEqual(workers.moves, expected) {
+		t.Fatalf("asked the gateway: %q, want %q", workers.moves, expected)
+	}
+	for _, arguments := range [][]string{{"forward", project}, {"forward", project, "0"}, {"unforward", project, "web"}} {
+		if code, _, stderr := runCLI(append([]string{"worker"}, arguments...)...); code != 2 {
+			t.Fatalf("worker %q = %d %q", arguments, code, stderr)
+		}
+	}
+}
+
 func TestWorkerRemoveRefusesAWorkerThatHasRepositories(t *testing.T) {
 	fakeSSH(t)
 	if code, _, stderr := runCLI("worker", "add", "gripi@beelink", "--name", "beelink"); code != 0 {
@@ -358,5 +405,30 @@ func TestWorkerRemoveRefusesAWorkerThatHasRepositories(t *testing.T) {
 	}
 	if workers := listedWorkers(t); len(workers) != 1 {
 		t.Fatalf("workers = %v", workers)
+	}
+}
+
+func TestTheGatewaySeesTheSavedWorkersAndWhereRepositoriesRun(t *testing.T) {
+	fakeSSH(t)
+	if code, _, stderr := runCLI("worker", "add", "gripi@beelink", "--name", "beelink"); code != 0 {
+		t.Fatalf("worker add: %s", stderr)
+	}
+	placements, err := remote.LoadPlacements(os.Getenv("GRIPI_WORKER_PLACEMENTS_PATH"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := placements.Add(remote.Placement{Worker: "beelink", Unit: mirror.Unit{Main: "/work/project"}}); err != nil {
+		t.Fatal(err)
+	}
+	workers := gatewayWorkers{remote.NewManager(remote.ManagerOptions{Placements: placements}), os.Getenv("GRIPI_WORKERS_PATH")}
+
+	if list, err := workers.List(); err != nil || !reflect.DeepEqual(list, []gateway.Worker{{Name: "beelink", Destination: "gripi@beelink", State: "disconnected"}}) {
+		t.Fatalf("workers = %+v, %v", list, err)
+	}
+	if location, found := workers.Location("/work/project/src"); !found || !reflect.DeepEqual(location, gateway.WorkerLocation{Worker: "beelink", State: "disconnected", Repository: "/work/project", Ports: []gateway.WorkerPort{}}) {
+		t.Fatalf("location = %+v, %v", location, found)
+	}
+	if _, found := workers.Location("/work/other"); found {
+		t.Fatal("a folder on main runs on a worker")
 	}
 }

@@ -63,3 +63,40 @@ func startWorkerSocket(cfg config.Config, handler http.Handler, name string, pla
 	}
 	return socket, server.Close, nil
 }
+
+// gatewayWorkers are the workers as the gateway sees them: the manager's, with the workers that `gripi worker add`
+// saved in path.
+type gatewayWorkers struct {
+	*remote.Manager
+	path string
+}
+
+func (workers gatewayWorkers) List() ([]gateway.Worker, error) {
+	saved, err := readWorkers(workers.path)
+	list := make([]gateway.Worker, 0, len(saved))
+	for _, worker := range saved {
+		status := workers.Status(worker.Name)
+		list = append(list, gateway.Worker{Name: worker.Name, Destination: worker.Destination, State: string(status.State), GoneAt: status.GoneAt})
+	}
+	return list, err
+}
+
+func (workers gatewayWorkers) Location(folder string) (gateway.WorkerLocation, bool) {
+	location, found := workers.Manager.Location(folder)
+	ports := make([]gateway.WorkerPort, 0, len(location.Forwards))
+	for _, forwarded := range location.Forwards {
+		ports = append(ports, gateway.WorkerPort(forwarded))
+	}
+	return gateway.WorkerLocation{
+		Worker: location.Worker, State: string(location.State), GoneAt: location.GoneAt, Repository: location.Repository,
+		Copying: location.Copying, Ports: ports,
+	}, found
+}
+
+func (workers gatewayWorkers) Notices(folder string) []gateway.WorkerNotice {
+	var notices []gateway.WorkerNotice
+	for _, notice := range workers.Manager.Notices(folder) {
+		notices = append(notices, gateway.WorkerNotice{Repository: notice.Repository.Main, Aside: notice.Aside, Paths: notice.Paths, Time: notice.Time})
+	}
+	return notices
+}

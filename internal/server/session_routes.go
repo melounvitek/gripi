@@ -250,6 +250,7 @@ func (app *application) conversationOlder(response http.ResponseWriter, request 
 	}
 	matches := (sessions.AttachmentStore{Root: app.config.AttachmentsRoot, Keys: app.sessionStore}).Match(session.Path, window.Messages)
 	view := &pageView{Selected: session, Home: app.config.Home, Attachments: matches, HideThinkingBlock: app.adapter.DisplaySettings(session.CWD).HideThinkingBlock}
+	view.LiveOutput.AgentRunning = app.rpcClients.AgentRunning(session.Path)
 	var html bytes.Buffer
 	for _, message := range window.Messages {
 		_ = app.templates.ExecuteTemplate(&html, "message", struct {

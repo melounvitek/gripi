@@ -158,6 +158,7 @@
     .focus-activity-summary { display: none; }
     .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin-bottom: 1.1rem; overflow: hidden; border-radius: 0.2rem; background: var(--tool-ok); color: var(--tool-copy); font-family: var(--mono); font-size: 0.74rem; }
     .conversation-panel.is-conversation-focused .focus-activity-summary.has-pending { background: var(--tool-pending); }
+    .conversation-panel.is-conversation-focused .focus-activity-summary.has-unknown { background: var(--info-bg); }
     .conversation-panel.is-conversation-focused .focus-activity-summary.has-errors { background: var(--danger-soft); }
     .focus-activity-header { width: 100%; display: flex; align-items: center; gap: 0.5rem; min-width: 0; min-height: 0; padding: 0.65rem var(--text-inset); border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
     button.focus-activity-header { cursor: pointer; }
@@ -299,6 +300,62 @@
     .sudo-prompt-actions .sudo-prompt-run { color: var(--gold); font-weight: 700; }
     /* 16px keeps iOS from zooming into the field. */
     @media (max-width: 760px), (pointer: coarse) { .sudo-prompt-field input { min-height: 2.75rem; font-size: 16px; } }
+    /* Like the sudo prompt, copying to a worker or losing it takes the editor's place: gold rules while copying, red while lost. */
+    .prompt-form[data-worker] > :not(.composer-controls) { display: none; }
+    .worker-prompt { display: grid; gap: 0.5rem; font: 0.86rem/1.45 var(--mono); }
+    .worker-prompt-editor { display: grid; gap: 0.55rem; padding: 0.6rem var(--text-inset) 0.7rem; border-block: 1px solid var(--danger); }
+    .worker-prompt .worker-icon { display: inline-flex; color: var(--danger); }
+    .worker-prompt:is([data-mode="copying"], [data-mode="returning"]) .worker-prompt-editor { border-color: var(--gold); }
+    .worker-prompt:is([data-mode="copying"], [data-mode="returning"]) .worker-icon { color: var(--gold); }
+    .worker-prompt .worker-icon svg { width: 0.9rem; height: 0.9rem; }
+    .worker-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+    .worker-prompt-head h2 { display: flex; align-items: center; gap: 0.5rem; color: var(--text); font-size: inherit; font-weight: 700; letter-spacing: 0; text-transform: none; }
+    .worker-prompt-time { color: var(--muted-soft); font-size: 0.72rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .worker-prompt-progress { height: 2px; overflow: hidden; background: var(--panel-softer); }
+    .worker-prompt-progress span { display: block; width: 30%; height: 100%; background: var(--gold); animation: worker-progress 1.6s ease-in-out infinite alternate; }
+    @keyframes worker-progress { from { transform: translateX(-20%); } to { transform: translateX(260%); } }
+    @media (prefers-reduced-motion: reduce) { .worker-prompt-progress span { width: 100%; opacity: 0.5; animation: none; } }
+    .worker-prompt-facts { display: grid; grid-template-columns: 8ch minmax(0, 1fr); gap: 0.15rem 1rem; margin: 0; }
+    .worker-prompt-facts dt { color: var(--muted); }
+    .worker-prompt-facts dd { margin: 0; overflow-wrap: anywhere; }
+    .worker-prompt-actions { padding-left: var(--text-inset); }
+    .worker-prompt-actions .worker-prompt-go { color: var(--gold); font-weight: 700; }
+    .worker-prompt-actions .worker-prompt-go:disabled { color: var(--muted-soft); font-weight: 400; font-variant-numeric: tabular-nums; }
+    .worker-prompt-actions .worker-prompt-go:disabled strong { color: var(--text); font-weight: 600; }
+    /* The worker in the header, as a quiet word that says more only when something is wrong; on phones, its icon alone. */
+    .worker-badge { display: inline-flex; align-items: center; gap: 0.4rem; margin-right: 0.35rem; color: var(--muted); font: 500 0.72rem var(--mono); white-space: nowrap; }
+    .worker-badge .worker-icon { display: inline-flex; }
+    .worker-badge .worker-icon svg { width: 0.85rem; height: 0.85rem; }
+    .worker-badge-state:empty { display: none; }
+    /* The folder that holds main's saved files is a long path, which wraps rather than push Dismiss away. */
+    [data-worker-notice] > div { min-width: 0; overflow-wrap: anywhere; }
+    /* Picking a worker says what moves; forwarding a port says where it goes. */
+    .worker-card { width: min(40rem, 100%); }
+    .picker-row.worker-picker-row { grid-template-columns: 2ch 10ch minmax(0, 1fr) auto; column-gap: 1ch; align-items: baseline; font-family: var(--mono); }
+    .worker-picker-destination { overflow: hidden; color: var(--muted-soft); text-overflow: ellipsis; white-space: nowrap; }
+    .worker-picker-state { color: var(--worker-state); font-size: 0.74rem; }
+    .worker-facts { display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 0.2rem 1rem; margin: 0; padding-top: 0.75rem; border-top: 1px solid var(--border); font: 0.78rem/1.45 var(--mono); }
+    .worker-facts:empty { display: none; }
+    .worker-facts dt { color: var(--muted); }
+    .worker-facts dd { margin: 0; color: var(--copy); }
+    .worker-card .worker-go { color: var(--accent); font-weight: 700; }
+    .worker-card .picker-status.is-error { color: var(--danger); }
+    .worker-port-field { display: grid; grid-template-columns: 9ch minmax(0, 1fr); align-items: center; gap: 0 1rem; font: 0.86rem var(--mono); }
+    .worker-port-field > span { color: var(--muted); }
+    .worker-port-field input, .worker-port-field input:focus { min-width: 0; padding: 0.45rem 0; border: 0; border-bottom: 1px solid var(--accent); border-radius: 0; background: transparent; box-shadow: none; color: var(--text); font: inherit; outline: none; }
+    @media (max-width: 760px), (pointer: coarse) {
+      .worker-port-field input { min-height: 2.75rem; font-size: 16px; }
+      .picker-row.worker-picker-row { grid-template-columns: 2ch minmax(0, 1fr) auto; align-items: center; }
+      .worker-picker-destination { grid-area: 2 / 2 / 3 / 4; }
+    }
+    /* The editor's footer names the worker after the context, like a Pi extension's status. */
+    .session-status-item[data-status-key="worker"] { order: 1; margin-right: auto; }
+    .session-status-item[data-status-key="model"] { order: 2; }
+    @media (max-width: 760px) {
+      .worker-badge-name, .worker-badge-state, .worker-status-ports { display: none; }
+      .session-status-item[data-status-key="worker"] { flex: none; }
+      .worker-badge .worker-icon svg { width: 1rem; height: 1rem; }
+    }
     h1 { font-size: 1.1rem; line-height: 1.25; margin: 0 0 1rem; font-weight: 650; letter-spacing: -0.01em; }
     h2 { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; margin: 0; color: var(--gold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.14em; }
     .session-sidebar-header { display: block; }
@@ -433,6 +490,14 @@
     .session-title-line { display: flex; align-items: center; gap: 0.5rem; }
     .session-external-indicator { display: inline-flex; flex: 0 0 0.875rem; color: var(--muted); }
     .session-external-indicator svg { width: 0.75rem; height: 0.75rem; stroke-width: 2; }
+    /* Sessions on a worker: the icon is coloured by the worker's state, and quiet while the worker isn't connected. */
+    [data-worker-state] { --worker-state: var(--muted); }
+    [data-worker-state="connected"] { --worker-state: var(--success); }
+    [data-worker-state="connecting"], [data-worker-state="copying"] { --worker-state: var(--gold); }
+    [data-worker-state="unreachable"], [data-worker-state="gone"] { --worker-state: var(--danger); }
+    .session-worker-indicator, .worker-badge .worker-icon, .worker-badge-state, .worker-status-state { color: var(--worker-state); }
+    .session-worker-indicator { display: inline-flex; flex: 0 0 0.875rem; }
+    .session-worker-indicator svg, .worker-icon svg { width: 0.75rem; height: 0.75rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     .session-title { overflow: hidden; color: var(--copy); font-size: 0.84rem; font-weight: 400; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
     .session-row:has(a.session.selected) .session-title { color: var(--text); }
     @media (max-width: 760px), (pointer: coarse) {
@@ -512,6 +577,9 @@
     /* Whole-pixel lines keep the last line of scrolled output fully reachable. */
     .message--compact:not(.message--compaction) pre.message-body { font-family: var(--mono); font-size: 0.8rem; line-height: 1.125rem; }
     .message--tool-pending { background: var(--tool-pending); }
+    /* A tool call that its run left without a result, such as when the worker that ran it was lost. */
+    .message--tool-unknown { background: var(--info-bg); }
+    .message--tool-unknown > .message-details::after { content: "outcome unknown"; display: block; grid-column: 1 / -1; margin-top: 0.35rem; color: var(--gold); font: 0.76rem var(--mono); }
     .message--tool-transcript { font-family: var(--mono); }
     .message--tool-transcript .message-details-summary { color: var(--copy); }
     .message--tool-transcript .message-body { tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }

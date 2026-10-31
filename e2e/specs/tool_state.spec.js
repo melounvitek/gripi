@@ -54,3 +54,18 @@ test("a finished turn with an interrupted tool call summarises it as pending", a
   await page.getByRole("group", { name: "Agent activity", exact: true }).getByRole("button", { name: "Brief", exact: true }).click();
   await expect(page.locator(".focus-activity-summary").last()).toHaveClass(/has-pending/);
 });
+
+test("a run that settles without a tool's result leaves its outcome unknown, as history shows it", async ({ page }) => {
+  const deliver = await liveEvents(page);
+  const tools = [call("lost-step", "bash", { command: "npx playwright test" })];
+  await deliver({ type: "agent_start" }, { type: "message_start", message: assistant(tools) }, { type: "message_end", message: assistant(tools) }, start("lost-step", "bash", tools[0].arguments));
+  const lost = page.locator('[data-tool-call-id="lost-step"]');
+  await expect(lost).toHaveClass(/message--tool-pending/);
+
+  await deliver({ type: "agent_settled", aborted: false, error: "Lost the connection to worker beelink. The outcome of the running step is unknown." });
+  await expect(lost).toHaveClass(/message--tool-unknown/);
+  await expect(lost).not.toHaveClass(/message--tool-pending/);
+  await expect(page.locator("article.message--error").last()).toContainText("The outcome of the running step is unknown.");
+  await page.getByRole("group", { name: "Agent activity", exact: true }).getByRole("button", { name: "Brief", exact: true }).click();
+  await expect(page.locator(".focus-activity-summary").last()).toHaveClass(/has-unknown/);
+});

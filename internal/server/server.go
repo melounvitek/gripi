@@ -322,6 +322,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	app.registerSessionRoutes(mux)
 	app.registerActionRoutes(mux)
 	app.registerEnvironmentRoutes(mux)
+	app.registerWorkerRoutes(mux)
 	if cfg.HermesPath != "" {
 		app.registerHermesRoutes(mux)
 	}

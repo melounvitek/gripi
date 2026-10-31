@@ -66,6 +66,9 @@ type liveOutputData struct {
 	QueuedMessagesJSON       string
 	ExtensionUIJSON          string
 	SudoRequestsJSON         string
+	WorkerJSON               string
+	WorkerNoticesJSON        string
+	WorkersAdded             bool
 	ComposerState            string
 	ComposerStateSince       string
 	ComposerBusySince        string
@@ -120,6 +123,7 @@ type pageView struct {
 	HideThinkingBlock         bool
 	SidebarMetadataDeferred   bool
 	SidebarActivity           map[string]sidebarActivity
+	WorkerLocations           map[string]*WorkerLocation
 	LiveOutput                liveOutputData
 	// HermesEnabled offers the Hermes panel. HermesPanel is the page that the panel shows.
 	HermesEnabled bool
@@ -306,10 +310,16 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 	if view.SeparateCurrent != nil {
 		renderedSessions = append(renderedSessions, view.SeparateCurrent)
 	}
+	view.WorkerLocations = make(map[string]*WorkerLocation)
 	for _, session := range renderedSessions {
 		activity := sidebarActivity{Busy: app.rpcClients.Busy(session.Path), Compacting: app.rpcClients.Compacting(session.Path)}
 		if activity.Busy || activity.Compacting {
 			view.SidebarActivity[session.Path] = activity
+		}
+		if app.workers != nil && session.Agent != "hermes" {
+			if location, found := app.workers.Location(session.CWD); found {
+				view.WorkerLocations[session.Path] = &location
+			}
 		}
 	}
 	view.KnownCWDs, view.ProjectActivity = knownCWDs(all, knownProjects)
@@ -374,6 +384,16 @@ func (app *application) preparePage(request *http.Request, includeConversation b
 		}
 		view.LiveOutput = liveOutputFrom(snapshot, window.Messages, app.config.Home, toolContext)
 		view.LiveOutput.SudoRequestsJSON = jsonData(app.sudoRequests.of(selected.Path))
+		location, notices := app.sessionWorker(selected.Path)
+		view.LiveOutput.WorkerJSON, view.LiveOutput.WorkerNoticesJSON = jsonData(location), jsonData(notices)
+		if app.workers != nil {
+			// The page works without moving the session.
+			workers, err := app.workers.List()
+			if err != nil {
+				logInternalError("list the workers", err)
+			}
+			view.LiveOutput.WorkersAdded = len(workers) > 0
+		}
 	}
 	return view, nil
 }
@@ -678,7 +698,7 @@ func templateFunctions(markdownRenderer interface{ Render(string) string }) temp
 			return relationData{view, session, current}
 		},
 		"messageData":    func(view *pageView, message *agent.Message) messageData { return messageData{view, message} },
-		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "hermesGlyph": hermesGlyph,
+		"sidebarLoadURL": sidebarLoadURL, "filtersClearURL": filtersClearURL, "agentLabel": agentLabel, "hermesGlyph": hermesGlyph, "serverIcon": serverIcon,
 		"messageClass": messageClass, "messageRoleLabel": messageRoleLabel, "messageFingerprint": messageFingerprint, "messageTime": func(value time.Time) string { return messageTimeLabel(value, time.Now()) },
 		"messageBody": func(message *agent.Message) template.HTML {
 			if (message.Role == "assistant" || message.Role == "custom" || message.Thinking) && !message.Compact {
@@ -919,7 +939,11 @@ func messageRoleKey(role string) string {
 		return "status"
 	}
 }
-func messageClass(message *agent.Message) string {
+
+// messageClass names the classes of a message. A tool call without a result is pending while the session's agent runs;
+// once the run has ended without one, such as when Pi or the worker that ran it was lost, nobody knows how the call
+// went, which the live renderer shows the same way when the run settles.
+func messageClass(message *agent.Message, running bool) string {
 	values := []string{"message", "message--" + messageRoleKey(message.Role)}
 	if message.Compact {
 		values = append(values, "message--compact")
@@ -951,8 +975,10 @@ func messageClass(message *agent.Message) string {
 	if message.Error {
 		values = append(values, "message--tool-error")
 	}
-	if message.ToolPending {
+	if message.ToolPending && running {
 		values = append(values, "message--tool-pending")
+	} else if message.ToolPending {
+		values = append(values, "message--tool-unknown")
 	}
 	if message.Omitted {
 		values = append(values, "message--omitted")

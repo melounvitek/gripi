@@ -861,6 +861,20 @@ export class LiveMessageRenderer {
       article.toggleAttribute("data-activity-active", active);
       article.toggleAttribute("data-activity-completed", !active);
       article.classList.toggle("message--tool-pending", active);
+      article.classList.remove("message--tool-unknown");
+    });
+    this.conversationController.scheduleFocusedActivityRefresh?.();
+  }
+
+  // A run that settles without a tool's result, such as when Pi or the worker that ran it was lost, leaves the tool's
+  // outcome unknown, as the server renders such a call after a reload.
+  settleUnfinishedTools() {
+    this.conversationScroll?.querySelectorAll(".message--tool-pending").forEach((article) => {
+      article.classList.remove("message--tool-pending");
+      article.classList.add("message--tool-unknown");
+      // The parser's placeholder for a step without output yet would say that it still runs; history shows no output.
+      const output = article.querySelector(".tool-output-collapse");
+      if (output?.querySelector(".message-body")?.dataset.rawText === "(running…)") output.remove();
     });
     this.conversationController.scheduleFocusedActivityRefresh?.();
   }

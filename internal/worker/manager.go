@@ -49,6 +49,19 @@ type Status struct {
 	GoneAt time.Time `json:"gone_at,omitzero"`
 }
 
+// refusal is an error that refuses what was asked, such as moving a repository that is moving already, rather than
+// failing at it.
+type refusal struct{ error }
+
+// Refused tells callers, such as the gateway's routes, that the error refuses rather than fails.
+func (refusal) Refused() bool { return true }
+
+func (err refusal) Unwrap() error { return err.error }
+
+func refuse(format string, arguments ...any) error {
+	return refusal{fmt.Errorf(format, arguments...)}
+}
+
 // connectTimeout bounds connecting to a worker, which includes copying Pi there the first time.
 const connectTimeout = 5 * time.Minute
 
@@ -97,6 +110,7 @@ type Manager struct {
 	mu          sync.Mutex
 	workers     map[string]*remote
 	movingUnits []mirror.Unit       // units on their way to or from a worker, whose sessions can't start meanwhile
+	copying     []copying           // units that Move is copying to a worker
 	sessions    map[string]launched // by the session's ID on its worker
 	launches    []string            // folders of sessions whose Pi is starting
 	launched    *sync.Cond          // signalled when a launch ends
@@ -113,6 +127,13 @@ type Notice struct {
 	Time       time.Time   `json:"time"`
 }
 
+// copying is a unit that Move is copying to a worker.
+type copying struct {
+	unit   mirror.Unit
+	worker string
+	since  time.Time
+}
+
 // remote is main's side of one worker. The manager's mutex guards it, except connecting.
 type remote struct {
 	name         string
@@ -123,6 +144,7 @@ type remote struct {
 	installation *Installation
 	stopSocket   func() error
 	mirrors      map[string]*liveMirror // by the unit's main folder
+	forwards     map[int]forwarded      // by the port on the worker; they end with the connection
 }
 
 // launched is a session whose Pi the manager started on a worker.
@@ -199,6 +221,58 @@ func (manager *Manager) Status(name string) Status {
 		}
 	}
 	return status
+}
+
+// Location is where the sessions of a folder run while its repository is on a worker, or is being copied to one.
+type Location struct {
+	Worker string
+	Status
+	// Repository is the main folder of the folder's repository.
+	Repository string
+	// Copying is when Move started copying the repository to the worker, which it does until the sessions run there.
+	Copying time.Time
+	// Forwards are the worker's ports that main forwards, by port.
+	Forwards []Forwarded
+}
+
+// Location reports the worker that runs the sessions of folder, or that its repository is being copied to.
+func (manager *Manager) Location(folder string) (Location, bool) {
+	var location Location
+	manager.mu.Lock()
+	for _, copying := range manager.copying {
+		if copying.unit.Contains(folder) {
+			location = Location{Worker: copying.worker, Repository: copying.unit.Main, Copying: copying.since}
+		}
+	}
+	manager.mu.Unlock()
+	if location.Worker == "" {
+		placement, placed := manager.options.Placements.Find(folder)
+		if !placed {
+			return Location{}, false
+		}
+		location = Location{Worker: placement.Worker, Repository: placement.Unit.Main}
+	}
+	location.Status = manager.Status(location.Worker)
+	if location.Copying.IsZero() && location.State == Copying {
+		// The worker is getting another repository, while it runs this one's sessions.
+		location.State = Connected
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if worker := manager.workers[location.Worker]; worker != nil {
+		for port, forwarded := range worker.forwards {
+			location.Forwards = append(location.Forwards, Forwarded{Port: port, Local: forwarded.local})
+		}
+	}
+	slices.SortFunc(location.Forwards, func(left, right Forwarded) int { return left.Port - right.Port })
+	return location, true
+}
+
+// Repository returns the main folder and the worktrees of the repository that holds folder, which move to a worker
+// together, or folder alone outside Git.
+func (manager *Manager) Repository(folder string) (main string, worktrees []string, err error) {
+	unit, err := mirror.Discover(folder)
+	return unit.Main, unit.Worktrees, err
 }
 
 func (manager *Manager) setState(worker *remote, state State) {
@@ -349,6 +423,7 @@ func (manager *Manager) disconnect(worker *remote, conn *Conn, lost bool) {
 	}
 	mirrors, stopSocket := worker.mirrors, worker.stopSocket
 	worker.conn, worker.installation, worker.stopSocket, worker.mirrors, worker.state = nil, nil, nil, map[string]*liveMirror{}, Disconnected
+	worker.forwards = nil
 	var sessions []launched
 	for id, session := range manager.sessions {
 		if session.worker == worker.name {
@@ -668,7 +743,7 @@ func (manager *Manager) startMoving(unit mirror.Unit) (done func(), err error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if slices.ContainsFunc(manager.movingUnits, func(moving mirror.Unit) bool { return moving.Contains(unit.Main) || unit.Contains(moving.Main) }) {
-		return nil, fmt.Errorf("the repository of %s is moving already", unit.Main)
+		return nil, refuse("the repository of %s is moving already", unit.Main)
 	}
 	manager.movingUnits = append(manager.movingUnits, unit)
 	for slices.ContainsFunc(manager.launches, unit.Contains) {
@@ -687,10 +762,10 @@ func (manager *Manager) startMoving(unit mirror.Unit) (done func(), err error) {
 // there, or fail when one is working.
 func (manager *Manager) Move(ctx context.Context, folder, name string, stop func(inRepository func(folder string) bool) error) error {
 	if _, err := manager.options.Destination(name); err != nil {
-		return err
+		return refusal{err}
 	}
 	if placement, placed := manager.options.Placements.Find(folder); placed {
-		return fmt.Errorf("%s is on worker %s already", placement.Unit.Main, placement.Worker)
+		return refuse("%s is on worker %s already", placement.Unit.Main, placement.Worker)
 	}
 	unit, err := mirror.Discover(folder)
 	if err != nil {
@@ -704,6 +779,14 @@ func (manager *Manager) Move(ctx context.Context, folder, name string, stop func
 	if err := stop(unit.Contains); err != nil {
 		return err
 	}
+	manager.mu.Lock()
+	manager.copying = append(manager.copying, copying{unit: unit, worker: name, since: manager.options.Clock()})
+	manager.mu.Unlock()
+	defer func() {
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		manager.copying = slices.DeleteFunc(manager.copying, func(copying copying) bool { return copying.unit.Main == unit.Main })
+	}()
 	worker, err := manager.connect(ctx, name)
 	if err != nil {
 		return err
@@ -788,7 +871,7 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 func (manager *Manager) Return(ctx context.Context, folder string, stop func(inRepository func(folder string) bool) error) error {
 	placement, placed := manager.options.Placements.Find(folder)
 	if !placed {
-		return fmt.Errorf("%s is not on a worker", folder)
+		return refuse("%s is not on a worker", folder)
 	}
 	unit := placement.Unit
 	done, err := manager.startMoving(unit)
@@ -856,7 +939,7 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 func (manager *Manager) continueOnMain(placement Placement, unreachable error) error {
 	unit := placement.Unit
 	if goneAt, now := manager.goneAt(placement.Worker), manager.options.Clock(); now.Before(goneAt) {
-		return fmt.Errorf("%w; it may still run the sessions of %s until %s, so they can continue on this machine from then (in %s)",
+		return refuse("%w; it may still run the sessions of %s until %s, so they can continue on this machine from then (in %s)",
 			unreachable, unit.Main, goneAt.Local().Format(time.TimeOnly), goneAt.Sub(now).Round(time.Second))
 	}
 	mains := []string{unit.Main, manager.sessionsMain(unit)}
