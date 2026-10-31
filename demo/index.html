@@ -299,6 +299,39 @@
     .sudo-prompt-actions .sudo-prompt-run { color: var(--gold); font-weight: 700; }
     /* 16px keeps iOS from zooming into the field. */
     @media (max-width: 760px), (pointer: coarse) { .sudo-prompt-field input { min-height: 2.75rem; font-size: 16px; } }
+    /* Like the sudo prompt, copying to a worker or losing it takes the editor's place: gold rules while copying, red while lost. */
+    .prompt-form[data-worker] > :not(.composer-controls) { display: none; }
+    .worker-prompt { display: grid; gap: 0.5rem; font: 0.86rem/1.45 var(--mono); }
+    .worker-prompt-editor { display: grid; gap: 0.55rem; padding: 0.6rem var(--text-inset) 0.7rem; border-block: 1px solid var(--danger); }
+    .worker-prompt .worker-icon { display: inline-flex; color: var(--danger); }
+    .worker-prompt:is([data-mode="copying"], [data-mode="returning"]) .worker-prompt-editor { border-color: var(--gold); }
+    .worker-prompt:is([data-mode="copying"], [data-mode="returning"]) .worker-icon { color: var(--gold); }
+    .worker-prompt .worker-icon svg { width: 0.9rem; height: 0.9rem; }
+    .worker-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+    .worker-prompt-head h2 { display: flex; align-items: center; gap: 0.5rem; color: var(--text); font-size: inherit; font-weight: 700; letter-spacing: 0; text-transform: none; }
+    .worker-prompt-time { color: var(--muted-soft); font-size: 0.72rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .worker-prompt-progress { height: 2px; overflow: hidden; background: var(--panel-softer); }
+    .worker-prompt-progress span { display: block; width: 30%; height: 100%; background: var(--gold); animation: worker-progress 1.6s ease-in-out infinite alternate; }
+    @keyframes worker-progress { from { transform: translateX(-20%); } to { transform: translateX(260%); } }
+    @media (prefers-reduced-motion: reduce) { .worker-prompt-progress span { width: 100%; opacity: 0.5; animation: none; } }
+    .worker-prompt-facts { display: grid; grid-template-columns: 8ch minmax(0, 1fr); gap: 0.15rem 1rem; margin: 0; }
+    .worker-prompt-facts dt { color: var(--muted); }
+    .worker-prompt-facts dd { margin: 0; overflow-wrap: anywhere; }
+    .worker-prompt-actions { padding-left: var(--text-inset); }
+    .worker-prompt-actions .worker-prompt-go { color: var(--gold); font-weight: 700; }
+    .worker-prompt-actions .worker-prompt-go:disabled { color: var(--muted-soft); font-weight: 400; font-variant-numeric: tabular-nums; }
+    /* The worker in the header, as a quiet word that says more only when something is wrong; on phones, its icon alone. */
+    .worker-badge { display: inline-flex; align-items: center; gap: 0.4rem; margin-right: 0.35rem; color: var(--muted); font: 500 0.72rem var(--mono); white-space: nowrap; }
+    .worker-badge .worker-icon { display: inline-flex; }
+    .worker-badge .worker-icon svg { width: 0.85rem; height: 0.85rem; }
+    .worker-badge-state:empty { display: none; }
+    /* The editor's footer names the worker after the context, like a Pi extension's status. */
+    .session-status-item[data-status-key="worker"] { order: 1; margin-right: auto; }
+    .session-status-item[data-status-key="model"] { order: 2; }
+    @media (max-width: 760px) {
+      .worker-badge-name, .worker-badge-state, .worker-status-ports { display: none; }
+      .worker-badge .worker-icon svg { width: 1rem; height: 1rem; }
+    }
     h1 { font-size: 1.1rem; line-height: 1.25; margin: 0 0 1rem; font-weight: 650; letter-spacing: -0.01em; }
     h2 { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; margin: 0; color: var(--gold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.14em; }
     .session-sidebar-header { display: block; }
@@ -434,11 +467,13 @@
     .session-external-indicator { display: inline-flex; flex: 0 0 0.875rem; color: var(--muted); }
     .session-external-indicator svg { width: 0.75rem; height: 0.75rem; stroke-width: 2; }
     /* Sessions on a worker: the icon is coloured by the worker's state, and quiet while the worker isn't connected. */
-    .session-worker-indicator { display: inline-flex; flex: 0 0 0.875rem; color: var(--muted); }
+    [data-worker-state] { --worker-state: var(--muted); }
+    [data-worker-state="connected"] { --worker-state: var(--success); }
+    [data-worker-state="connecting"], [data-worker-state="copying"] { --worker-state: var(--gold); }
+    [data-worker-state="unreachable"], [data-worker-state="gone"] { --worker-state: var(--danger); }
+    .session-worker-indicator, .worker-badge .worker-icon, .worker-badge-state, .worker-status-state { color: var(--worker-state); }
+    .session-worker-indicator { display: inline-flex; flex: 0 0 0.875rem; }
     .session-worker-indicator svg, .worker-icon svg { width: 0.75rem; height: 0.75rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-    [data-worker-state="connected"] { color: var(--success); }
-    [data-worker-state="connecting"], [data-worker-state="copying"] { color: var(--gold); }
-    [data-worker-state="unreachable"], [data-worker-state="gone"] { color: var(--danger); }
     .session-title { overflow: hidden; color: var(--copy); font-size: 0.84rem; font-weight: 400; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
     .session-row:has(a.session.selected) .session-title { color: var(--text); }
     @media (max-width: 760px), (pointer: coarse) {

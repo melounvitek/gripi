@@ -58,6 +58,7 @@ import { WebPushController } from "./web_push.js";
 import { VoiceCallController } from "./voice_call_controller.js";
 import { HermesPanelController } from "./hermes_panel_controller.js";
 import { SudoPromptController } from "./sudo_prompt_controller.js";
+import { WorkerController } from "./worker_controller.js";
 
 const gatewayUpdateController = new GatewayUpdateController(document, window, { closeModal, copyText });
 const resourceUsageController = new ResourceUsageController(document, window);
@@ -229,11 +230,19 @@ const commandPaletteController = new CommandPaletteController(document, {
   piCommands: piPaletteCommands
 });
 const environmentController = new EnvironmentController(document, window, { openModal });
-// Unlike a dialog, the prompt leaves polling on, which notices its request answered elsewhere. The editor gives it the
-// focus, unless the editor holds a message, whose typing would go on in the password field.
-const sudoPromptController = new SudoPromptController(window, {
-  canFocus: () => automaticComposerFocusEnabled() && !modalIsOpen() &&
-    (document.activeElement === promptTextarea ? !promptTextarea.value : !editableElement(document.activeElement))
+// What takes the editor's place gets the focus from it, unless the editor holds a message, whose typing would go on there.
+const editorPlaceCanFocus = () => automaticComposerFocusEnabled() && !modalIsOpen() &&
+  (document.activeElement === promptTextarea ? !promptTextarea.value : !editableElement(document.activeElement));
+// Unlike a dialog, the prompt leaves polling on, which notices its request answered elsewhere.
+const sudoPromptController = new SudoPromptController(window, { canFocus: editorPlaceCanFocus });
+// Polling brings the worker's state, which its block in the editor's place shows.
+const workerController = new WorkerController(document, window, {
+  sessionPath: () => currentSessionPath(),
+  canFocus: editorPlaceCanFocus,
+  refresh: () => scheduleNextEventPoll(0),
+  stateChanged: () => sidebarController.requestRefresh(),
+  homePath: (path) => liveMessageParser.displayHomePath(path),
+  failed: (message) => showCurrentActiveTask("error", message)
 });
 const voiceCallController = new VoiceCallController(window, {
   // Like the palette's commands, without the composer's draft and attachments.
@@ -316,6 +325,13 @@ function bindSessionDom() {
   voiceCallController.bind(promptForm);
   sudoPromptController.bind(document.querySelector("[data-sudo-prompt]"), promptForm);
   sessionStatusBar = document.getElementById("session-status-bar");
+  workerController.bind({
+    badge: document.querySelector("[data-worker-badge]"),
+    prompt: document.querySelector("[data-worker-prompt]"),
+    form: promptForm,
+    statusBar: sessionStatusBar,
+    notice: promptForm?.querySelector("[data-worker-notice]")
+  });
   const boundSessionPath = currentSessionPath();
   if (boundSessionPath !== lastBoundSessionPath) {
     lastBoundSessionPath = boundSessionPath;
@@ -475,7 +491,7 @@ function automaticComposerFocusEnabled() {
 }
 
 function syncComposerFocus(state = composerState?.dataset.state) {
-  if (!automaticComposerFocusEnabled() || modalIsOpen() || sudoPromptController.shown || sudoPromptController.dismissed) return;
+  if (!automaticComposerFocusEnabled() || modalIsOpen() || sudoPromptController.shown || sudoPromptController.dismissed || workerController.shown) return;
   // The Hermes panel's page and the page around it keep the focus each has, but don't take it from each other, such as
   // while you type to Pi or to Hermes.
   if (window.parent !== window ? !document.hasFocus() : hermesPanelController.keepsFocus()) return;
@@ -1938,6 +1954,7 @@ async function pollEvents() {
     hideReconnectBanner();
     if (refreshRequired) return;
     sudoPromptController.update(payload.sudo_requests);
+    workerController.update(payload.worker, payload.worker_notices);
     if (Number.isInteger(payload.last_seq)) {
       lastEventSeq = payload.last_seq;
     }
@@ -2822,6 +2839,7 @@ async function copyText(text) {
 function resetSessionViewState() {
   voiceCallController.end();
   sudoPromptController.reset();
+  workerController.reset();
   pendingFinalAssistantReply = null;
   currentSessionFindController.close({ restoreFocus: false });
   imageViewerController.close();
@@ -3753,6 +3771,7 @@ function restoreSessionLiveState({ resetIdleState = false } = {}) {
   liveMessageRenderer.restoreActiveToolExecutions();
   hydrateExtensionUiState();
   sudoPromptController.update(JSON.parse(liveOutput.dataset.sudoRequests || "[]"));
+  workerController.update(JSON.parse(liveOutput.dataset.worker || "null"), JSON.parse(liveOutput.dataset.workerNotices || "[]"));
 }
 
 function initializeSessionView({ focus = true, scrollSnapshot = null, findQuery = null } = {}) {
