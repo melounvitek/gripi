@@ -883,3 +883,22 @@ func snapshotJSONL(t *testing.T, root string) map[string][]byte {
 }
 func jsonString(value string) string { data, _ := json.Marshal(value); return string(data) }
 func strconvItoa(value int) string   { return fmt.Sprintf("%d", value) }
+
+// Losing the Pi that ran a step, such as with its worker, ends the run without the step's result. History shows such a
+// call as unknown rather than pending, as the live page does when the run settles.
+func TestHistoryShowsTheOutcomeOfAToolCallThatARunLeftWithoutAResultAsUnknown(t *testing.T) {
+	handler, alpha, _, _ := fakePiGateway(t)
+	file, err := os.OpenFile(alpha, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString(`{"type":"message","id":"assistant-2","parentId":"assistant-1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"lost-1","name":"bash","arguments":{"command":"npx playwright test"}}],"stopReason":"toolUse"}}` + "\n")
+	file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := getWorkspace(handler, "/?session="+url.QueryEscape(alpha), "").Body.String()
+	if !strings.Contains(page, `class="message message--assistant message--compact message--tool-call message--tool-unknown" data-role="assistant"`) || strings.Contains(page, "message--tool-pending") {
+		t.Fatalf("page = %s", page)
+	}
+}

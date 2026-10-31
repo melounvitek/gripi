@@ -820,3 +820,26 @@ test("terminal updates coalesce to the latest screen and stale bindings do not r
   await settle(() => renderer.terminalRenderStates.get(staleBody)?.rendering === false);
   assert.equal(rendered.length, 1);
 });
+
+test("a run that settles without a tool's result leaves the tool's outcome unknown, as history shows it", () => {
+  const scroll = new FakeElement("section");
+  const running = new FakeElement("article");
+  running.className = "message message--tool-call message--tool-pending";
+  const output = new FakeElement("div");
+  output.className = "tool-output-collapse";
+  const body = new FakeElement("pre");
+  body.className = "message-body";
+  body.dataset.rawText = "(running…)";
+  output.append(body);
+  running.append(output);
+  const finished = new FakeElement("article");
+  finished.className = "message message--tool-call";
+  scroll.append(running, finished);
+  const renderer = new LiveMessageRenderer(new FakeDocument(), {}, {}, { bind() {} });
+  renderer.conversationScroll = scroll;
+
+  renderer.settleUnfinishedTools();
+  assert.equal(running.className, "message message--tool-call message--tool-unknown");
+  assert.equal(running.children.length, 0);
+  assert.equal(finished.className, "message message--tool-call");
+});

@@ -1700,6 +1700,7 @@ function renderEvent(event) {
   }
 
   if (event.type === "agent_settled") {
+    liveMessageRenderer.settleUnfinishedTools();
     const reply = pendingFinalAssistantReply;
     pendingFinalAssistantReply = null;
     notifyFinalAssistantReply(reply);

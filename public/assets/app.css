@@ -139,6 +139,7 @@
     .focus-activity-summary { display: none; }
     .conversation-panel.is-conversation-focused .focus-activity-summary { width: 100%; display: block; min-height: 0; margin-bottom: 1.1rem; overflow: hidden; border-radius: 0.2rem; background: var(--tool-ok); color: var(--tool-copy); font-family: var(--mono); font-size: 0.74rem; }
     .conversation-panel.is-conversation-focused .focus-activity-summary.has-pending { background: var(--tool-pending); }
+    .conversation-panel.is-conversation-focused .focus-activity-summary.has-unknown { background: var(--info-bg); }
     .conversation-panel.is-conversation-focused .focus-activity-summary.has-errors { background: var(--danger-soft); }
     .focus-activity-header { width: 100%; display: flex; align-items: center; gap: 0.5rem; min-width: 0; min-height: 0; padding: 0.65rem var(--text-inset); border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-weight: 500; letter-spacing: normal; text-align: left; text-transform: none; }
     button.focus-activity-header { cursor: pointer; }
@@ -301,6 +302,7 @@
     .worker-prompt-actions { padding-left: var(--text-inset); }
     .worker-prompt-actions .worker-prompt-go { color: var(--gold); font-weight: 700; }
     .worker-prompt-actions .worker-prompt-go:disabled { color: var(--muted-soft); font-weight: 400; font-variant-numeric: tabular-nums; }
+    .worker-prompt-actions .worker-prompt-go:disabled strong { color: var(--text); font-weight: 600; }
     /* The worker in the header, as a quiet word that says more only when something is wrong; on phones, its icon alone. */
     .worker-badge { display: inline-flex; align-items: center; gap: 0.4rem; margin-right: 0.35rem; color: var(--muted); font: 500 0.72rem var(--mono); white-space: nowrap; }
     .worker-badge .worker-icon { display: inline-flex; }
@@ -553,6 +555,9 @@
     /* Whole-pixel lines keep the last line of scrolled output fully reachable. */
     .message--compact:not(.message--compaction) pre.message-body { font-family: var(--mono); font-size: 0.8rem; line-height: 1.125rem; }
     .message--tool-pending { background: var(--tool-pending); }
+    /* A tool call that its run left without a result, such as when the worker that ran it was lost. */
+    .message--tool-unknown { background: var(--info-bg); }
+    .message--tool-unknown > .message-details::after { content: "outcome unknown"; display: block; margin-top: 0.35rem; color: var(--gold); font: 0.76rem var(--mono); }
     .message--tool-transcript { font-family: var(--mono); }
     .message--tool-transcript .message-details-summary { color: var(--copy); }
     .message--tool-transcript .message-body { tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
