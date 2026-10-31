@@ -1,6 +1,6 @@
 # Testing
 
-Run the Go gateway, native Node frontend/demo checks, shell script tests, and native Pi extension bridge test with:
+Run the Go gateway, native Node frontend/demo checks, shell script tests, and native Pi extension tests with:
 
 ```sh
 mise run test
@@ -19,7 +19,7 @@ mise run fake-pi-check
 
 - `frontend-check` runs native Node tests for the browser modules, controller races, and the static demo, then syntax-checks the JavaScript. It needs no `node_modules`.
 - `scripts-check` tests the setup, launcher, restart, password, and desktop installer scripts.
-- `pi-extension-check` loads the tree extension through the installed Pi package. Because `mise run test` includes it, Pi CLI must be on `PATH` for tests and CI.
+- `pi-extension-check` runs Gripi's tree and worker extensions in the installed Pi; the worker tests use a scripted model and a fake helper. Because `mise run test` includes it, Pi CLI must be on `PATH` for tests and CI.
 - `desktop-check` and `e2e` need npm dependencies.
 
 For race detection, static analysis, and vulnerability checks, also run:

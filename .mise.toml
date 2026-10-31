@@ -31,7 +31,7 @@ description = "Run shell launcher, setup, password wrapper, and desktop installe
 run = "npm run scripts:check"
 
 [tasks.pi-extension-check]
-description = "Run the native Node Pi tree extension bridge test"
+description = "Run the native Node Pi extension tests"
 run = "npm run pi-extension:check"
 
 [tasks.fake-pi-check]
