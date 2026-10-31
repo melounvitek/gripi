@@ -42,15 +42,42 @@ type Pi struct {
 
 type entry = map[string]json.RawMessage
 
-// Build returns the worker's auth.json, made from main's auth.json and models.json, and when each OAuth login in it
-// expires. OAuth logins keep everything but their refresh token. API keys stay as they are, except keys that Pi gets
-// by running a command: main resolves those, because the commands may read files only main has.
-func (pi Pi) Build(ctx context.Context) (contents []byte, expires map[string]time.Time, err error) {
+// Logins are what Build made for a worker.
+type Logins struct {
+	// Contents is the worker's auth.json.
+	Contents []byte
+	// Expires says when each OAuth login in it expires.
+	Expires map[string]time.Time
+	// Skipped are the providers whose keys main couldn't resolve, which the worker doesn't get, and why.
+	Skipped map[string]error
+}
+
+// Build returns the worker's auth.json, made from main's auth.json and models.json. OAuth logins keep everything but
+// their refresh token. API keys stay as they are, except keys that Pi gets by running a command: main resolves those,
+// because the commands may read files only main has, and leaves out a provider whose key it can't resolve.
+func (pi Pi) Build(ctx context.Context) (Logins, error) {
 	entries, err := readAuth(ctx, filepath.Join(pi.AgentDir, "auth.json"))
 	if err != nil {
-		return nil, nil, err
+		return Logins{}, err
 	}
-	expires = map[string]time.Time{}
+	logins := Logins{Expires: map[string]time.Time{}, Skipped: map[string]error{}}
+	// resolve gives a provider its key resolved on main, or leaves the provider out.
+	resolve := func(provider string) error {
+		key, err := pi.apiKey(ctx, provider)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			logins.Skipped[provider] = err
+			delete(entries, provider)
+			return nil
+		}
+		if entries[provider] == nil {
+			entries[provider] = entry{"type": json.RawMessage(`"api_key"`)}
+		}
+		entries[provider]["key"] = key
+		return nil
+	}
 	for _, provider := range slices.Sorted(maps.Keys(entries)) {
 		credential := entries[provider]
 		var kind string
@@ -60,36 +87,35 @@ func (pi Pi) Build(ctx context.Context) (contents []byte, expires map[string]tim
 			var key string
 			_ = json.Unmarshal(credential["key"], &key)
 			if strings.HasPrefix(key, "!") {
-				if credential["key"], err = pi.apiKey(ctx, provider); err != nil {
-					return nil, nil, err
+				if err := resolve(provider); err != nil {
+					return Logins{}, err
 				}
 			}
 		case "oauth":
 			var milliseconds float64
 			_ = json.Unmarshal(credential["expires"], &milliseconds)
-			expires[provider] = time.UnixMilli(int64(milliseconds))
+			logins.Expires[provider] = time.UnixMilli(int64(milliseconds))
 			credential["refresh"], _ = json.Marshal(refreshPlaceholder)
 		}
 	}
 
 	models, err := readModels(filepath.Join(pi.AgentDir, "models.json"))
 	if err != nil {
-		return nil, nil, err
+		return Logins{}, err
 	}
 	for _, provider := range slices.Sorted(maps.Keys(models.Providers)) {
 		// Pi uses a key saved in auth.json rather than models.json's.
-		if _, saved := entries[provider]; saved || !strings.HasPrefix(models.Providers[provider].APIKey, "!") {
+		_, saved := entries[provider]
+		if saved || logins.Skipped[provider] != nil || !strings.HasPrefix(models.Providers[provider].APIKey, "!") {
 			continue
 		}
-		key, err := pi.apiKey(ctx, provider)
-		if err != nil {
-			return nil, nil, err
+		if err := resolve(provider); err != nil {
+			return Logins{}, err
 		}
-		entries[provider] = entry{"type": json.RawMessage(`"api_key"`), "key": key}
 	}
 
-	contents, err = json.MarshalIndent(entries, "", "  ")
-	return contents, expires, err
+	logins.Contents, err = json.MarshalIndent(entries, "", "  ")
+	return logins, err
 }
 
 // apiKey returns provider's API key, resolved by main's Pi, as a JSON string in auth.json.

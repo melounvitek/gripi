@@ -602,11 +602,14 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 	installation := worker.installation
 	manager.mu.Unlock()
 	// The worker's Pi gets main's logins before it starts, without refresh tokens.
-	logins, _, err := auth.Pi{Command: manager.options.Pi.Command, AgentDir: manager.options.Pi.AgentDir}.Build(ctx)
+	logins, err := auth.Pi{Command: manager.options.Pi.Command, AgentDir: manager.options.Pi.AgentDir}.Build(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := conn.ApplyAuth(ctx, filepath.Join(manager.options.Pi.AgentDir, "auth.json"), string(logins)); err != nil {
+	for provider, err := range logins.Skipped {
+		log.Printf("worker %s gets no key for %s, which this machine could not resolve: %v", placement.Worker, provider, err)
+	}
+	if err := conn.ApplyAuth(ctx, filepath.Join(manager.options.Pi.AgentDir, "auth.json"), string(logins.Contents)); err != nil {
 		return nil, nil, err
 	}
 	session := Session{

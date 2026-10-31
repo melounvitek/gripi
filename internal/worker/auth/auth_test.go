@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -78,7 +79,7 @@ func TestBuildGivesTheWorkerKeysAndAccessTokensButNoRefreshTokens(t *testing.T) 
 	// Pi uses auth.json's key over models.json's, so the command here never runs.
 	writeFile(t, filepath.Join(pi.AgentDir, "models.json"), `{"providers": {"openai": {"apiKey": "!pass show openai"}}}`)
 
-	contents, expires, err := pi.Build(t.Context())
+	logins, err := pi.Build(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,15 +96,15 @@ func TestBuildGivesTheWorkerKeysAndAccessTokensButNoRefreshTokens(t *testing.T) 
 			"type": "oauth", "access": "access-copilot", "refresh": "gripi:refresh-on-main", "expires": 1793450000000.0, "enterpriseUrl": "ghe.example.com",
 		},
 	}
-	if got := decode(t, contents); !reflect.DeepEqual(got, want) {
+	if got := decode(t, logins.Contents); !reflect.DeepEqual(got, want) {
 		t.Fatalf("worker's auth.json = %#v, want %#v", got, want)
 	}
 	wantExpires := map[string]time.Time{
 		"openai-codex":   time.UnixMilli(1793457725000),
 		"github-copilot": time.UnixMilli(1793450000000),
 	}
-	if !reflect.DeepEqual(expires, wantExpires) {
-		t.Fatalf("expires = %v, want %v", expires, wantExpires)
+	if !reflect.DeepEqual(logins.Expires, wantExpires) || len(logins.Skipped) != 0 {
+		t.Fatalf("expires = %v, want %v; skipped %v", logins.Expires, wantExpires, logins.Skipped)
 	}
 	if got, want := calls(), []string{pi.AgentDir + " auth print-api-key --provider anthropic"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Pi ran %q, want %q", got, want)
@@ -127,31 +128,57 @@ func TestBuildResolvesCommandKeysFromModelsJSON(t *testing.T) {
   },
 }`)
 
-	contents, expires, err := pi.Build(t.Context())
+	logins, err := pi.Build(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	want := map[string]any{"cli-proxy-api": map[string]any{"type": "api_key", "key": "sk-proxy"}}
-	if got := decode(t, contents); !reflect.DeepEqual(got, want) {
+	if got := decode(t, logins.Contents); !reflect.DeepEqual(got, want) {
 		t.Fatalf("worker's auth.json = %#v, want %#v", got, want)
 	}
-	if len(expires) != 0 {
-		t.Fatalf("expires = %v, want none", expires)
+	if len(logins.Expires) != 0 {
+		t.Fatalf("expires = %v, want none", logins.Expires)
 	}
 	if got, want := calls(), []string{pi.AgentDir + " auth print-api-key --provider cli-proxy-api"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Pi ran %q, want %q", got, want)
 	}
 }
 
-func TestBuildFailsWhenMainCannotResolveACommandKey(t *testing.T) {
-	pi, _ := fakePi(t, nil)
-	writeFile(t, filepath.Join(pi.AgentDir, "auth.json"), `{"anthropic": {"type": "api_key", "key": "!false"}}`)
+func TestBuildLeavesOutKeysThatMainCannotResolve(t *testing.T) {
+	pi, _ := fakePi(t, map[string]string{"proxy": "sk-proxy"})
+	writeFile(t, filepath.Join(pi.AgentDir, "auth.json"), `{
+  "anthropic": {"type": "api_key", "key": "!false"},
+  "openai": {"type": "api_key", "key": "sk-openai"}
+}`)
+	writeFile(t, filepath.Join(pi.AgentDir, "models.json"), `{"providers": {"proxy": {"apiKey": "!cat key"}, "other-proxy": {"apiKey": "!false"}}}`)
 
-	_, _, err := pi.Build(t.Context())
+	logins, err := pi.Build(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	if err == nil || !strings.Contains(err.Error(), `Error: Unknown provider "anthropic"`) {
-		t.Fatalf("Build = %v, want Pi's error", err)
+	want := map[string]any{
+		"openai": map[string]any{"type": "api_key", "key": "sk-openai"},
+		"proxy":  map[string]any{"type": "api_key", "key": "sk-proxy"},
+	}
+	if got := decode(t, logins.Contents); !reflect.DeepEqual(got, want) {
+		t.Fatalf("worker's auth.json = %#v, want %#v", got, want)
+	}
+	if len(logins.Skipped) != 2 {
+		t.Fatalf("skipped = %v, want anthropic and other-proxy", logins.Skipped)
+	}
+	for _, provider := range []string{"anthropic", "other-proxy"} {
+		if err := logins.Skipped[provider]; err == nil || !strings.Contains(err.Error(), `Error: Unknown provider "`+provider+`"`) {
+			t.Fatalf("skipped %s: %v, want Pi's error", provider, err)
+		}
+	}
+
+	// A build that was cancelled is no build: its auth.json would lack every key that it couldn't resolve.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := pi.Build(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Build = %v", err)
 	}
 }
 
@@ -166,7 +193,7 @@ func TestBuildRetriesWhilePiRewritesAuthJSON(t *testing.T) {
 		written <- os.WriteFile(path, []byte(`{"openai": {"type": "api_key", "key": "sk-openai"}}`), 0o600)
 	}()
 
-	contents, _, err := pi.Build(t.Context())
+	logins, err := pi.Build(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +202,7 @@ func TestBuildRetriesWhilePiRewritesAuthJSON(t *testing.T) {
 	}
 
 	want := map[string]any{"openai": map[string]any{"type": "api_key", "key": "sk-openai"}}
-	if got := decode(t, contents); !reflect.DeepEqual(got, want) {
+	if got := decode(t, logins.Contents); !reflect.DeepEqual(got, want) {
 		t.Fatalf("worker's auth.json = %#v, want %#v", got, want)
 	}
 }
@@ -184,7 +211,7 @@ func TestBuildFailsWhenAuthJSONStaysUnparsable(t *testing.T) {
 	pi, _ := fakePi(t, nil)
 	writeFile(t, filepath.Join(pi.AgentDir, "auth.json"), `{"openai": `)
 
-	if _, _, err := pi.Build(t.Context()); err == nil || !strings.Contains(err.Error(), "auth.json") {
+	if _, err := pi.Build(t.Context()); err == nil || !strings.Contains(err.Error(), "auth.json") {
 		t.Fatalf("Build = %v, want an error about auth.json", err)
 	}
 }

@@ -53,13 +53,13 @@ func TestBuiltAuthJSONGivesTheWorkersPiMainsKeys(t *testing.T) {
 }}}`
 	writeFile(t, filepath.Join(main.AgentDir, "models.json"), models)
 
-	contents, _, err := main.Build(t.Context())
+	logins, err := main.Build(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	worker := t.TempDir()
-	writeFile(t, filepath.Join(worker, "auth.json"), string(contents))
+	writeFile(t, filepath.Join(worker, "auth.json"), string(logins.Contents))
 	writeFile(t, filepath.Join(worker, "models.json"), models)
 	// Only main has the secrets, so the worker's Pi must not run the commands.
 	if err := os.RemoveAll(secrets); err != nil {
