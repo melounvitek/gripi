@@ -22,6 +22,8 @@ type Options struct {
 	AutoApproveProjects bool
 	// Extension is the gateway's Pi extension, which carries the requests Pi's RPC mode lacks.
 	Extension []byte
+	// WorkerExtension is the extension that only Pi on a worker loads, which holds results until main has the changes.
+	WorkerExtension []byte
 	// SessionsRoot is where Pi saves sessions, and Home the folder that session paths are shown relative to.
 	SessionsRoot string
 	Home         string
@@ -30,15 +32,15 @@ type Options struct {
 }
 
 type Adapter struct {
-	command       []string
-	extension     []byte
-	settings      settings.SettingsResolver
-	extensionMu   sync.Mutex
-	extensionPath string
-	extensionRoot string
-	stateDir      string
-	store         sessionStore
-	synchronizer  *sessionfile.Synchronizer
+	command         []string
+	extension       []byte
+	workerExtension []byte
+	settings        settings.SettingsResolver
+	extensionMu     sync.Mutex
+	extensionRoot   string
+	stateDir        string
+	store           sessionStore
+	synchronizer    *sessionfile.Synchronizer
 }
 
 var (
@@ -52,11 +54,12 @@ func New(options Options) *Adapter {
 		cache = sessionfile.LoadCache(filepath.Join(options.StateDir, "session-metadata-cache.json"))
 	}
 	return &Adapter{
-		command:   options.Command,
-		extension: options.Extension,
-		settings:  settings.SettingsResolver{AgentDir: options.AgentDir, AutoApproveProjects: options.AutoApproveProjects},
-		stateDir:  options.StateDir,
-		store:     sessionStore{sessionfile.Store{Root: options.SessionsRoot, Home: options.Home, Cache: cache}},
+		command:         options.Command,
+		extension:       options.Extension,
+		workerExtension: options.WorkerExtension,
+		settings:        settings.SettingsResolver{AgentDir: options.AgentDir, AutoApproveProjects: options.AutoApproveProjects},
+		stateDir:        options.StateDir,
+		store:           sessionStore{sessionfile.Store{Root: options.SessionsRoot, Home: options.Home, Cache: cache}},
 	}
 }
 
@@ -79,7 +82,7 @@ func (adapter *Adapter) Guard(clients *agent.Registry) (agent.Guard, error) {
 }
 
 func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Client, error) {
-	extensionPath, err := adapter.extensionFile()
+	extensionPath, _, err := adapter.ExtensionFiles()
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +92,7 @@ func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Cli
 }
 
 func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOptions) (agent.Client, error) {
-	extensionPath, err := adapter.extensionFile()
+	extensionPath, _, err := adapter.ExtensionFiles()
 	if err != nil {
 		return nil, err
 	}
@@ -135,21 +138,24 @@ func (adapter *Adapter) Check(ctx context.Context) error {
 	return rpc.CheckExtension(ctx, adapter.command, adapter.extension)
 }
 
-func (adapter *Adapter) extensionFile() (string, error) {
+// ExtensionFiles returns the extracted extensions: the gateway's, which every Pi loads, and the worker extension,
+// which a session's Pi on a worker loads with a second --extension. They share a folder, which a worker gets a copy
+// of at the same path.
+func (adapter *Adapter) ExtensionFiles() (tree, worker string, err error) {
 	adapter.extensionMu.Lock()
 	defer adapter.extensionMu.Unlock()
-	if adapter.extensionPath != "" {
-		return adapter.extensionPath, nil
+	if adapter.extensionRoot == "" {
+		root, err := os.MkdirTemp("", "gripi-rpc-")
+		if err != nil {
+			return "", "", fmt.Errorf("create Pi extension directory: %w", err)
+		}
+		for name, contents := range map[string][]byte{"gripi-tree.ts": adapter.extension, "gripi-worker.ts": adapter.workerExtension} {
+			if err := os.WriteFile(filepath.Join(root, name), contents, 0600); err != nil {
+				_ = os.RemoveAll(root)
+				return "", "", fmt.Errorf("write Pi extension: %w", err)
+			}
+		}
+		adapter.extensionRoot = root
 	}
-	root, err := os.MkdirTemp("", "gripi-rpc-")
-	if err != nil {
-		return "", fmt.Errorf("create Pi extension directory: %w", err)
-	}
-	path := filepath.Join(root, "gripi-tree.ts")
-	if err := os.WriteFile(path, adapter.extension, 0600); err != nil {
-		_ = os.RemoveAll(root)
-		return "", fmt.Errorf("write Pi extension: %w", err)
-	}
-	adapter.extensionRoot, adapter.extensionPath = root, path
-	return path, nil
+	return filepath.Join(adapter.extensionRoot, "gripi-tree.ts"), filepath.Join(adapter.extensionRoot, "gripi-worker.ts"), nil
 }

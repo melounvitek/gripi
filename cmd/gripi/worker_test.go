@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/melounvitek/gripi/internal/config"
 )
 
 // fakeSSHScript stands in for ssh. It records its arguments, then fails as ssh does with FAKE_SSH_ERROR, answers
@@ -242,5 +244,35 @@ func TestWorkerAddWarnsWhenTheWorkersHomeHasAnotherPath(t *testing.T) {
 	}
 	if workers := listedWorkers(t); len(workers) != 1 || workers[0]["name"] != "beelink" {
 		t.Fatalf("workers = %v", workers)
+	}
+}
+
+// A worker gets the folder of the extensions at the same path, and its sessions' Pi loads both.
+func TestThePiAdapterExtractsBothExtensionsIntoOneFolder(t *testing.T) {
+	adapter, err := newPiAdapter(config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, worker, err := adapter.ExtensionFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(tree) != filepath.Dir(worker) {
+		t.Fatalf("the extensions are in different folders: %s, %s", tree, worker)
+	}
+	for extracted, source := range map[string]string{tree: "gripi-tree.ts", worker: "gripi-worker.ts"} {
+		want, _ := os.ReadFile(filepath.Join("..", "..", "pi_extensions", source))
+		if got, err := os.ReadFile(extracted); err != nil || len(want) == 0 || string(got) != string(want) {
+			t.Fatalf("%s = %d bytes, %v; want the %d bytes of %s", extracted, len(got), err, len(want), source)
+		}
+	}
+	if again, _, _ := adapter.ExtensionFiles(); again != tree {
+		t.Fatalf("ExtensionFiles extracted again: %s, then %s", tree, again)
+	}
+	if err := adapter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(tree)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the extensions' folder after Close: %v", err)
 	}
 }

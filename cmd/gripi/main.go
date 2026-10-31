@@ -144,9 +144,13 @@ func newPiAdapter(cfg config.Config) (*pi.Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
 	}
+	workerExtension, err := fs.ReadFile(gripi.WebFiles, "pi_extensions/gripi-worker.ts")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
+	}
 	return pi.New(pi.Options{
 		Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension,
-		SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg),
+		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg),
 	}), nil
 }
 
