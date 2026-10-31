@@ -32,6 +32,7 @@ type Source struct {
 	requests chan barrierRequest
 	done     chan struct{} // closed when Run returns
 	healthy  atomic.Bool
+	current  atomic.Pointer[Unit] // the unit's folders as Run last found them
 
 	overflows  atomic.Int64
 	beforeRead func() // lets tests stall the reader
@@ -93,6 +94,15 @@ func (s *Source) Healthy() bool {
 	default:
 		return s.healthy.Load()
 	}
+}
+
+// Contains reports whether path is in one of the unit's folders, as worktrees
+// added and removed since the source started have left them.
+func (s *Source) Contains(path string) bool {
+	if unit := s.current.Load(); unit != nil {
+		return unit.Contains(path)
+	}
+	return s.unit.Contains(path)
 }
 
 // Barrier returns once the destination has durably applied every change made
@@ -621,6 +631,7 @@ func (s *Source) refreshWorktrees() error {
 			s.mark(r, false)
 		}
 	}
+	s.current.Store(&Unit{Main: s.main, Worktrees: worktrees[1:], GitDir: s.gitDir})
 	s.mapIndexes()
 	if added {
 		return s.c.send(&frame{Kind: kindRoots, Roots: s.roots})

@@ -119,8 +119,14 @@ func TestMirrorsGitOperations(t *testing.T) {
 			writeFile(t, featC, "src/d14/f1.txt", "in feat-c\n")
 			git(t, featC, "commit", "-qam", "feat-c change")
 			r.verify(t)
+			if !r.src.Contains(filepath.Join(featC, "src")) {
+				t.Error("the source doesn't count the new worktree as the unit's")
+			}
 			git(t, main, "worktree", "remove", "--force", featB)
 			r.verify(t)
+			if r.src.Contains(featB) {
+				t.Error("the source counts the removed worktree as the unit's")
+			}
 			if _, err := os.Lstat(r.dst + featB); err == nil {
 				t.Errorf("the removed worktree is still on main")
 			}

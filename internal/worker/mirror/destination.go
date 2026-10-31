@@ -31,8 +31,8 @@ import (
 // alone don't count, because a plain git status rewrites it.
 type Destination struct {
 	// Applied, if set before Serve, is called after each barrier that Serve
-	// applies, with the new checkpoint and the files that changed here, which
-	// are in the folder aside at their paths.
+	// applies, before the source learns of it, with the new checkpoint and the
+	// files that changed here, which are in the folder aside at their paths.
 	Applied func(checkpoint Checkpoint, aside string, saved []string)
 
 	state string
@@ -1174,15 +1174,16 @@ func (r *receiver) barrier(n uint64) error {
 		r.pending = nil // applied, or left to the journal for a restart
 		clear(r.lastPut)
 	}
+	// Before the source hears of it, so that what follows the barrier there finds what Applied changed.
+	if err == nil && r.d.Applied != nil {
+		r.d.Applied(r.d.Checkpoint(), aside, saved)
+	}
 	ack := &frame{Kind: kindAck, N: n}
 	if err != nil {
 		ack.Error = err.Error()
 	}
 	if serr := r.c.send(ack); serr == nil {
 		r.c.flush()
-	}
-	if err == nil && r.d.Applied != nil {
-		r.d.Applied(r.d.Checkpoint(), aside, saved)
 	}
 	return err
 }

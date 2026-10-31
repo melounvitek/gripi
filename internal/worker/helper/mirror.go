@@ -151,7 +151,7 @@ func (s *server) unitOf(session string) *mirror.Source {
 		return nil
 	}
 	for _, unit := range s.mirrors {
-		if unit.unit.Contains(current.cwd) {
+		if unit.source.Contains(current.cwd) {
 			return unit.source
 		}
 	}
