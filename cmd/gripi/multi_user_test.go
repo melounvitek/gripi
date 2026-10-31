@@ -30,7 +30,7 @@ func multiUserGateway(t *testing.T) (alpha, beta string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter, err := newAdapter(cfg)
+	adapter, err := newAdapter(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

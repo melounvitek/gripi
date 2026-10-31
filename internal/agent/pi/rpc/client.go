@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -149,6 +150,7 @@ type Client struct {
 	stderr io.ReadCloser
 
 	process            *exec.Cmd
+	release            func() // tells the launcher that process has ended
 	processGroup       processGroup
 	pid                int
 	waitDone           chan struct{}
@@ -223,49 +225,66 @@ type Client struct {
 	sampleInterval     time.Duration
 }
 
-// Start runs Pi with the gateway's scrubbed environment and the given NAME=value variables on top. Pi starts a new
-// session in cwd when sessionPath does not exist yet, and saves it there.
-func Start(sessionPath, cwd string, command []string, extensionPath string, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+// Start runs Pi with the gateway's scrubbed environment and the given NAME=value variables on top, or what launch
+// runs instead when it is set. Pi starts a new session in cwd when sessionPath does not exist yet, and saves it there.
+func Start(sessionPath, cwd string, command []string, extensionPath string, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath, "--session", sessionPath}
-	return startProcess(cwd, command, args, variables, diagnostics, observer)
+	return startProcess(sessionPath, cwd, command, args, variables, launch, diagnostics, observer)
 }
 
 // StartInCWD starts a new session in cwd, or a copy of the session file forkFrom when that is set.
-func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+func StartInCWD(cwd, forkFrom string, command []string, extensionPath string, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	args := []string{"--mode", "rpc", "--extension", extensionPath}
 	if forkFrom != "" {
 		args = append(args, "--fork", forkFrom)
 	}
-	return startProcess(cwd, command, args, variables, diagnostics, observer)
+	return startProcess("", cwd, command, args, variables, launch, diagnostics, observer)
 }
 
-func startProcess(cwd string, command, args, variables []string, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
+func startProcess(key, cwd string, command, args, variables []string, launch agent.Launcher, diagnostics *agent.Diagnostics, observer func(*Client, map[string]any)) (*Client, error) {
 	if len(command) == 0 {
 		return nil, errors.New("Pi RPC command is empty")
 	}
-	cmd := exec.Command(command[0], append(command[1:], args...)...)
-	cmd.Dir = cwd
-	cmd.Env = append(agent.ScrubbedEnvironment(os.Environ()), variables...)
+	var cmd *exec.Cmd
+	release := func() {}
+	if launch != nil {
+		launched, done, err := launch(agent.Process{Key: key, Dir: cwd, Command: append(slices.Clone(command), args...), Env: variables})
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", agent.ErrStartFailed, err)
+		}
+		if launched != nil {
+			cmd, release = launched, done
+		}
+	}
+	if cmd == nil {
+		cmd = exec.Command(command[0], append(command[1:], args...)...)
+		cmd.Dir = cwd
+		cmd.Env = append(agent.ScrubbedEnvironment(os.Environ()), variables...)
+	}
 	configureProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		release()
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		_ = stdin.Close()
+		release()
 		return nil, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
+		release()
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
 		_ = stderr.Close()
+		release()
 		return nil, fmt.Errorf("%w: %w", agent.ErrStartFailed, err)
 	}
 	group, err := attachProcessGroup(cmd)
@@ -275,10 +294,12 @@ func startProcess(cwd string, command, args, variables []string, diagnostics *ag
 		_ = stdout.Close()
 		_ = stderr.Close()
 		_ = cmd.Wait()
+		release()
 		return nil, fmt.Errorf("attach Pi RPC process group: %w", err)
 	}
 	client := NewClient(stdin, stdout, stderr, ClientOptions{Diagnostics: diagnostics, EventObserver: observer})
 	client.process = cmd
+	client.release = release
 	client.processGroup = group
 	client.pid = cmd.Process.Pid
 	client.waitDone = make(chan struct{})
@@ -1359,6 +1380,7 @@ func (client *Client) waitForProcess() {
 	if client.processGroup != nil {
 		_ = client.processGroup.Close()
 	}
+	client.release()
 	close(client.waitDone)
 }
 

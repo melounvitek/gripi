@@ -191,7 +191,7 @@ func TestCheckStillChecksPiWhenHermesIsConfigured(t *testing.T) {
 }
 
 func TestTheGatewayGetsPiAloneWithoutGripiHermes(t *testing.T) {
-	adapter, err := newAdapter(config.Config{})
+	adapter, err := newAdapter(config.Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestTheGatewayGetsPiAloneWithoutGripiHermes(t *testing.T) {
 		t.Fatalf("adapter = %T", adapter)
 	}
 
-	adapter, err = newAdapter(config.Config{HermesPath: "/opt/hermes"})
+	adapter, err = newAdapter(config.Config{HermesPath: "/opt/hermes"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

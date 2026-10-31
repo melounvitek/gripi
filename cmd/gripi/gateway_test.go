@@ -56,7 +56,7 @@ func fakePiGateway(t *testing.T, configure ...func(*config.Config)) (alpha, beta
 	for _, change := range configure {
 		change(&cfg)
 	}
-	adapter, err := newAdapter(cfg)
+	adapter, err := newAdapter(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,10 +29,13 @@ type Options struct {
 	Home         string
 	// StateDir keeps what the adapter learns about sessions across restarts. Without it the adapter forgets.
 	StateDir string
+	// Launcher may run a session's Pi elsewhere, such as on a worker.
+	Launcher agent.Launcher
 }
 
 type Adapter struct {
 	command         []string
+	launcher        agent.Launcher
 	extension       []byte
 	workerExtension []byte
 	settings        settings.SettingsResolver
@@ -55,6 +58,7 @@ func New(options Options) *Adapter {
 	}
 	return &Adapter{
 		command:         options.Command,
+		launcher:        options.Launcher,
 		extension:       options.Extension,
 		workerExtension: options.WorkerExtension,
 		settings:        settings.SettingsResolver{AgentDir: options.AgentDir, AutoApproveProjects: options.AutoApproveProjects},
@@ -87,7 +91,7 @@ func (adapter *Adapter) Start(key string, options agent.StartOptions) (agent.Cli
 		return nil, err
 	}
 	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
-		return rpc.Start(key, options.CWD, adapter.command, extensionPath, options.Env, options.Diagnostics, observer)
+		return rpc.Start(key, options.CWD, adapter.command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
 	})
 }
 
@@ -97,7 +101,7 @@ func (adapter *Adapter) StartInCWD(cwd, forkFrom string, options agent.StartOpti
 		return nil, err
 	}
 	return start(options.Observe, func(observer func(*rpc.Client, map[string]any)) (*rpc.Client, error) {
-		return rpc.StartInCWD(cwd, forkFrom, adapter.command, extensionPath, options.Env, options.Diagnostics, observer)
+		return rpc.StartInCWD(cwd, forkFrom, adapter.command, extensionPath, options.Env, adapter.launcher, options.Diagnostics, observer)
 	})
 }
 

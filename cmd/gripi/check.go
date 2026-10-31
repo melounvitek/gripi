@@ -15,7 +15,7 @@ func checkPi() error {
 	if err != nil {
 		return err
 	}
-	adapter, err := newPiAdapter(cfg)
+	adapter, err := newPiAdapter(cfg, nil)
 	if err != nil {
 		return err
 	}

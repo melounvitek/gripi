@@ -249,7 +249,7 @@ func TestWorkerAddWarnsWhenTheWorkersHomeHasAnotherPath(t *testing.T) {
 
 // A worker gets the folder of the extensions at the same path, and its sessions' Pi loads both.
 func TestThePiAdapterExtractsBothExtensionsIntoOneFolder(t *testing.T) {
-	adapter, err := newPiAdapter(config.Config{})
+	adapter, err := newPiAdapter(config.Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,3 +276,4 @@ func TestThePiAdapterExtractsBothExtensionsIntoOneFolder(t *testing.T) {
 		t.Fatalf("the extensions' folder after Close: %v", err)
 	}
 }
+

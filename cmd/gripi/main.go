@@ -39,7 +39,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	adapter, err := newAdapter(cfg)
+	adapter, err := newAdapter(cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -125,21 +125,26 @@ func serve() error {
 }
 
 // newAdapter returns Pi's adapter alone, unless GRIPI_HERMES adds Hermes next to it.
-func newAdapter(cfg config.Config) (agent.Adapter, error) {
-	piAdapter, err := newPiAdapter(cfg)
+func newAdapter(cfg config.Config, launcher agent.Launcher) (agent.Adapter, error) {
+	piAdapter, err := newPiAdapter(cfg, launcher)
 	if err != nil {
 		return nil, err
 	}
+	return withHermes(cfg, piAdapter), nil
+}
+
+func withHermes(cfg config.Config, piAdapter *pi.Adapter) agent.Adapter {
 	if cfg.HermesPath == "" {
-		return piAdapter, nil
+		return piAdapter
 	}
 	return agent.NewRouter(
 		agent.RoutedAgent{Name: "pi", Adapter: piAdapter},
 		agent.RoutedAgent{Name: "hermes", Adapter: hermes.New(hermes.Options{Path: cfg.HermesPath, Home: cfg.Home, IdleTimeout: cfg.RPCIdleTimeout, StateDir: stateDir(cfg)})},
-	), nil
+	)
 }
 
-func newPiAdapter(cfg config.Config) (*pi.Adapter, error) {
+// newPiAdapter returns Pi's adapter, which starts each session's Pi with launcher when it is set.
+func newPiAdapter(cfg config.Config, launcher agent.Launcher) (*pi.Adapter, error) {
 	extension, err := fs.ReadFile(gripi.WebFiles, "pi_extensions/gripi-tree.ts")
 	if err != nil {
 		return nil, fmt.Errorf("read embedded Pi extension: %w", err)
@@ -150,7 +155,7 @@ func newPiAdapter(cfg config.Config) (*pi.Adapter, error) {
 	}
 	return pi.New(pi.Options{
 		Command: cfg.PiCommand, AgentDir: cfg.PiAgentDir, AutoApproveProjects: cfg.AutoApproveProjects, Extension: extension,
-		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg),
+		WorkerExtension: workerExtension, SessionsRoot: cfg.SessionsRoot, Home: cfg.Home, StateDir: stateDir(cfg), Launcher: launcher,
 	}), nil
 }
 
