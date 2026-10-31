@@ -643,6 +643,10 @@ func (app *application) newSessionAtCWD(response http.ResponseWriter, request *h
 		}
 		return
 	}
+	if !reachesFolder(request, cwd) {
+		writeJSONStatus(response, http.StatusForbidden, map[string]any{"valid": false, "error": "a worker can start sessions only in the repositories on it"})
+		return
+	}
 	forkFrom := ""
 	if raw := request.FormValue("fork_from"); raw != "" {
 		// Pi CLI can carry on in the same file from another folder, which RPC mode cannot, so Pi forks the session into the
@@ -1520,7 +1524,7 @@ func (app *application) actionSessionPath(response http.ResponseWriter, request 
 }
 
 func (app *application) validOwnedSessionPath(request *http.Request, path string) bool {
-	if path == "" || len(path) > maximumSessionPathBytes || !app.sessionStore.ValidKey(path) || strings.ContainsRune(path, 0) {
+	if path == "" || len(path) > maximumSessionPathBytes || !app.sessionStore.ValidKey(path) || strings.ContainsRune(path, 0) || !reachesSession(request, path) {
 		return false
 	}
 	return app.ownsSession == nil || app.ownsSession(request, path)

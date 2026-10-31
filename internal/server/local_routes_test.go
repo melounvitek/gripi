@@ -35,19 +35,23 @@ func TestLocalHandlerServesNoBrowserRoutes(t *testing.T) {
 	}
 }
 
-func TestCommandsInMultiUserModeActForTheUserWhoseTokenTheyCarry(t *testing.T) {
+const alice, bob = "piu_alice_token_0001", "piu_bob_token_000002"
+
+// multiUserFakePiGateway runs the gateway of fakePiGateway in multi-user mode, where Alice owns alpha and Bob owns
+// beta, and returns the secret of the users' workspaces.
+func multiUserFakePiGateway(t *testing.T) (handler http.Handler, alpha, beta, secret string) {
+	t.Helper()
 	cfg, alpha, beta, _ := fakePiConfig(t)
 	root := filepath.Dir(cfg.ReadStatePath)
 	cfg.MultiUserMode = true
 	cfg.WorkspaceSecretPath = filepath.Join(root, "secret")
 	cfg.WorkspaceAccessPath = filepath.Join(root, "workspace-access.json")
 	cfg.WorkspaceOwnershipPath = filepath.Join(root, "owners.json")
-	local := localHandler(t, startGateway(t, cfg))
+	handler = startGateway(t, cfg)
 	secret, err := access.NewWorkspaceSecretStore(cfg.WorkspaceSecretPath).Secret()
 	if err != nil {
 		t.Fatal(err)
 	}
-	const alice, bob = "piu_alice_token_0001", "piu_bob_token_000002"
 	owners := access.NewWorkspaceOwnershipStore(cfg.WorkspaceOwnershipPath, gateway.NewPiStore(cfg.SessionsRoot, ""))
 	for token, path := range map[string]string{alice: alpha, bob: beta} {
 		if err := access.NewWorkspaceStore(cfg.WorkspaceAccessPath).ApproveWorkspace(access.WorkspaceID(secret, token)); err != nil {
@@ -57,6 +61,12 @@ func TestCommandsInMultiUserModeActForTheUserWhoseTokenTheyCarry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	return handler, alpha, beta, secret
+}
+
+func TestCommandsInMultiUserModeActForTheUserWhoseTokenTheyCarry(t *testing.T) {
+	handler, alpha, beta, secret := multiUserFakePiGateway(t)
+	local := localHandler(t, handler)
 	get := func(target string, header ...string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, "http://gripi"+target, nil)
 		for index := 0; index < len(header); index += 2 {

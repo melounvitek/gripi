@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -201,6 +202,70 @@ func TestRealSSHStallStopsTheWorkerBeforeMainTreatsItAsGone(t *testing.T) {
 				t.Fatal("main does not treat the stalled worker as gone")
 			}
 		})
+	}
+}
+
+// The worker's gripi reaches main's socket through the forward, also after an earlier forward left its socket file.
+func TestRealSSHForwardsMainsSocketOverAStaleOne(t *testing.T) {
+	destination := os.Getenv("GRIPI_TEST_SSH")
+	if destination == "" {
+		t.Skip("set GRIPI_TEST_SSH to a worker that ssh reaches, such as localhost")
+	}
+	gripi, _ := buildExecutables(t)
+	version, err := HelperVersion(gripi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketDir, err := os.MkdirTemp("", "gw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(socketDir) })
+	pool := NewPool(destination, socketDir)
+	t.Cleanup(pool.Close)
+	ctx := context.Background()
+	dir, err := installHelper(ctx, pool, gripi, version, cmp.Or(os.Getenv("GRIPI_TEST_SSH_DIR"), "gripi-helper-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { runScript(context.Background(), pool, nil, `rm -rf "$1"`, dir) })
+
+	mainSocket := filepath.Join(socketDir, "main.sock")
+	listener, err := net.Listen("unix", mainSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		io.WriteString(response, `{"sessions":[{"id":"0a1-on-main","state":"idle"}]}`)
+	})}
+	go server.Serve(listener)
+	t.Cleanup(func() { server.Close() })
+	// The socket's folder doesn't exist yet, like main's state folder on a new worker.
+	gateway := Forward{Remote: true, ListenSocket: dir + "/state/gripi.sock", ConnectSocket: mainSocket}
+	list := func() (string, error) {
+		return runScript(ctx, pool, nil, `GRIPI_SOCKET_PATH="$1" "$2" list`, gateway.ListenSocket, dir+"/bin/gripi")
+	}
+
+	cancel, err := pool.Forward(ctx, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output, err := list(); err != nil || !strings.Contains(output, "0a1-on-main") {
+		t.Fatalf("gripi list on the worker = %q, %v", output, err)
+	}
+	if err := cancel(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runScript(ctx, pool, nil, `test -S "$1"`, gateway.ListenSocket); err != nil {
+		t.Fatalf("the cancelled forward left no socket file to replace: %v", err)
+	}
+	cancel, err = pool.Forward(ctx, gateway)
+	if err != nil {
+		t.Fatalf("forward over the stale socket: %v", err)
+	}
+	defer cancel()
+	if output, err := list(); err != nil || !strings.Contains(output, "0a1-on-main") {
+		t.Fatalf("gripi list on the worker after the second forward = %q, %v", output, err)
 	}
 }
 

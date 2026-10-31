@@ -103,6 +103,7 @@ func writeInternalError(response http.ResponseWriter, operation string, err erro
 type Handler struct {
 	next            http.Handler
 	local           http.Handler
+	commands        http.Handler // the routes of Local, which Worker serves in part
 	app             *application
 	closeMu         sync.Mutex
 	closed          bool
@@ -346,6 +347,7 @@ func newHandler(cfg config.Config, files fs.FS, adapter agent.Adapter, newBrowse
 	socket.HandleFunc("POST /sudo/askpass", app.sudoAskpass)
 	socket.Handle("/", commands)
 	gateway.local = app.limitRequestBody(socket)
+	gateway.commands = commands
 	return gateway, nil
 }
 
