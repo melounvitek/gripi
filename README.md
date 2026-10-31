@@ -7,7 +7,7 @@
 
 **Gripi is a desktop and web interface for [Pi](https://pi.dev/), served by a self-hosted gateway.** Run the gateway on a development machine or home server with Pi CLI installed, then use Pi from the desktop app or a web browser, on the same machine or over an encrypted private network.
 
-**Pi stays Pi.** Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It works with the Pi setup you already have. The only addition is a small Gripi extension, loaded into each Pi process with `--extension`, that gives the browser access to Pi’s session tree.
+**Pi stays Pi.** Gripi does not alter Pi’s system prompt, patch Pi, install extensions, rewrite sessions, or change Pi-owned configuration. It works with the Pi setup you already have. The only addition is a small Gripi extension, loaded into each Pi process with `--extension`, that gives the browser access to Pi’s session tree. Sessions on a [worker](#workers) load a second one.
 
 <p align="center">
   <strong><a href="https://gripi.w10.cz/">Try the live interactive demo →</a></strong><br>
@@ -28,6 +28,7 @@
 - Notifications when replies finish, including Web Push on phones.
 - A [`gripi` command](#command-line) that lets scripts and agents list sessions, send messages, and wait for replies.
 - Saved [environment variables](docs/configuration.md#environment-variables) for Pi and every command it runs, such as your own GitHub token on a shared gateway.
+- [Workers](#workers): other computers that run a repository’s sessions over SSH, while the gateway keeps a copy.
 
 ## Install
 
@@ -113,9 +114,26 @@ Other commands start a session (`new`), stop what one is working on (`stop`), co
 
 An agent in a Gripi session can also [run a command as root](docs/configuration.md#running-commands-as-root) with `gripi sudo -- <command>`, once you enter your password in Gripi.
 
-`gripi worker add user@host` adds a worker, another computer that runs sessions over SSH; `gripi worker list` and `gripi worker remove` list and forget workers. These need no running gateway.
+[`gripi worker`](#workers) adds workers and moves repositories to them.
 
 When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it links the command into `~/.local/bin`, unless something there is already named `gripi`. `~/.local/bin` must be on your `PATH`.
+
+## Workers
+
+A worker is another computer that runs the sessions of chosen repositories over SSH, for example a faster machine or one that stays on. The gateway keeps the interface and an up-to-date copy of each repository and its sessions, so losing a worker loses at most the step that was running there.
+
+```sh
+gripi worker add gripi@beelink.example.ts.net  # check the worker and add it as beelink
+gripi worker move ~/Work/project beelink       # run the repository’s sessions there
+gripi worker forward 01a107aa 5173             # reach a dev server there at localhost:5173
+gripi worker return 01a107aa                   # bring the repository back
+```
+
+`gripi worker list` lists the workers, `remove` forgets one, and `unforward` stops forwarding a port. `add`, `list` and `remove` need no running gateway. In Gripi, **Run on worker…**, **Forward a port…** and **Continue on main** are in the Ctrl+K palette. A repository moves with all its worktrees and sessions, and its copy on the gateway machine is read-only while it is on a worker.
+
+The gateway machine and the worker must run Linux on the same architecture. The worker also needs a systemd user manager with cgroup v2, Git, and the projects’ own tools. `ssh` must log in there without a prompt, best as a dedicated user, and the projects and Pi’s agent folder must have the same paths there as on the gateway machine. Gripi copies Node, Pi and Pi’s configuration there itself. See [workers](docs/configuration.md#workers) for the setup, what happens when the connection is lost, and the limits.
+
+A worker holds a copy of Pi’s configuration, including API keys and short-lived login tokens, and anyone who can use Gripi can run commands there. Gripi trusts the worker fully: a repository’s `.git/config` and Git hooks come back from it as they are, and Git on the gateway machine runs them the next time it runs in the repository. Secure a worker as you would the gateway machine.
 
 ## Updating
 
@@ -140,7 +158,7 @@ Stop the gateway and remove any systemd unit or `tailscale serve` configuration 
 - `~/.config/gripi`: settings, including the admin password.
 - `~/.pi/gripi`: Gripi’s own data, such as approvals, tags, pins, and uploaded attachments.
 
-Pi’s sessions and settings in `~/.pi/agent` are not affected. If the installer installed Mise and you no longer need it, also delete `~/.local/bin/mise`.
+Pi’s sessions and settings in `~/.pi/agent` are not affected. [Workers](docs/configuration.md#removing-a-worker) keep their copies and Gripi’s files until you delete them there. If the installer installed Mise and you no longer need it, also delete `~/.local/bin/mise`.
 
 To remove the desktop app, delete `~/Applications/Gripi.app` on macOS. On Linux, delete `~/.local/share/gripi-desktop` and `~/.local/share/applications/gripi.desktop`.
 
