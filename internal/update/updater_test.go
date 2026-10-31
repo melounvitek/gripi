@@ -89,7 +89,7 @@ func fakeBuildTools(t *testing.T) (directory, calls string) {
 	}
 	calls = filepath.Join(directory, "calls")
 	mise := `#!/bin/sh
-printf 'mise %s\n' "$*" >> "$VALIDATION_CALLS"
+printf '%smise %s\n' "${CGO_ENABLED:+CGO_ENABLED=$CGO_ENABLED }" "$*" >> "$VALIDATION_CALLS"
 previous=''
 for argument in "$@"; do
   if [ "$previous" = "-o" ]; then mkdir -p "$(dirname "$argument")"; cp "$FAKE_GRIPI" "$argument"; fi
@@ -107,6 +107,7 @@ exit "${CHECK_STATUS:-0}"
 		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CGO_ENABLED", "")
 	t.Setenv("FAKE_GRIPI", filepath.Join(directory, "fake-gripi"))
 	t.Setenv("VALIDATION_CALLS", calls)
 	return directory, calls
@@ -121,7 +122,8 @@ func TestDefaultValidationBuildsTheTargetAndRunsItsCheck(t *testing.T) {
 	}
 
 	calls, _ := os.ReadFile(record)
-	if expected := "mise install\nmise exec -- go build -o " + target + " ./cmd/gripi\ngripi check\n"; string(calls) != expected {
+	// Workers run the uploaded gateway binary, so it must be static.
+	if expected := "mise install\nCGO_ENABLED=0 mise exec -- go build -o " + target + " ./cmd/gripi\ngripi check\n"; string(calls) != expected {
 		t.Fatalf("calls = %q, want %q", calls, expected)
 	}
 }
@@ -227,7 +229,7 @@ exit 1
 			if result.Message != "The new version did not build." || failure == nil || failure.Step != "Build" || failure.ExitStatus != 1 || failure.TimedOut {
 				t.Fatalf("message = %q, failure = %+v", result.Message, failure)
 			}
-			for _, detail := range []string{"$ mise exec -- go build -o ", test.stdout, test.stderr} {
+			for _, detail := range []string{"$ env CGO_ENABLED=0 mise exec -- go build -o ", test.stdout, test.stderr} {
 				if !strings.Contains(failure.Output, detail) {
 					t.Fatalf("output = %q; missing %q", failure.Output, detail)
 				}

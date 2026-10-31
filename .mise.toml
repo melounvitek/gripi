@@ -40,7 +40,7 @@ run = "npm run fake-pi:check"
 
 [tasks.build-go]
 description = "Build the Go gateway"
-run = "mkdir -p tmp && go build -o tmp/gripi ./cmd/gripi"
+run = "mkdir -p tmp && CGO_ENABLED=0 go build -o tmp/gripi ./cmd/gripi"
 
 [tasks.benchmark-go]
 description = "Measure the Go gateway under the seeded memory workload"

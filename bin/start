@@ -46,7 +46,7 @@ if [[ ! -x "$binary" ]]; then
   mkdir -p -- "$root/tmp"
   temporary="$(mktemp "$binary.new.XXXXXX")"
   trap 'rm -f -- "$temporary"' EXIT
-  (cd "$root" && mise exec -- go build -o "$temporary" ./cmd/gripi)
+  (cd "$root" && CGO_ENABLED=0 mise exec -- go build -o "$temporary" ./cmd/gripi)
   mv -f -- "$temporary" "$binary"
   trap - EXIT
 fi
