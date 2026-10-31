@@ -116,12 +116,13 @@ func lead(seen, expires time.Time) time.Duration {
 }
 
 // Refresh makes main's Pi refresh provider's OAuth login, under Pi's own lock, when RefreshAt says it is due. Pi
-// saves the new token to main's auth.json and prints it; the printed token is discarded.
-func (pi Pi) Refresh(ctx context.Context, provider string, seen, expires time.Time) error {
+// saves the new token to main's auth.json and prints it; the printed token is discarded. Refresh can't be cancelled,
+// because a Pi stopped after using a refresh token that works once would lose the login; Pi has its own timeouts.
+func (pi Pi) Refresh(provider string, seen, expires time.Time) error {
 	// Pi refreshes a token that expires within --min-expiry, and fails if the new one does too. A minute more than
 	// is left when due forces a refresh and stays below a new token's life.
 	minExpiry := lead(seen, expires) + time.Minute
-	return pi.run(ctx, io.Discard, "auth", "print-bearer-token", "--provider", provider, "--min-expiry", fmt.Sprintf("%ds", minExpiry/time.Second))
+	return pi.run(context.Background(), io.Discard, "auth", "print-bearer-token", "--provider", provider, "--min-expiry", fmt.Sprintf("%ds", minExpiry/time.Second))
 }
 
 func (pi Pi) run(ctx context.Context, stdout io.Writer, args ...string) error {

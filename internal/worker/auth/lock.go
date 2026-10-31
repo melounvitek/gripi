@@ -52,9 +52,6 @@ func replace(path string, contents []byte) error {
 		return err
 	}
 	_, err = file.Write(contents)
-	if err == nil {
-		err = file.Sync()
-	}
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}

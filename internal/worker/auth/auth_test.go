@@ -212,7 +212,7 @@ func TestRefreshSchedule(t *testing.T) {
 			if got, want := RefreshAt(seen, test.expires), test.expires.Add(-test.lead); !got.Equal(want) {
 				t.Fatalf("RefreshAt = %v, want %v", got, want)
 			}
-			if err := pi.Refresh(t.Context(), "github-copilot", seen, test.expires); err != nil {
+			if err := pi.Refresh("github-copilot", seen, test.expires); err != nil {
 				t.Fatal(err)
 			}
 			want := []string{pi.AgentDir + " auth print-bearer-token --provider github-copilot --min-expiry " + test.minExpiry}
@@ -227,7 +227,7 @@ func TestRefreshReportsPisError(t *testing.T) {
 	pi, _ := fakePi(t, nil)
 	now := time.Now()
 
-	err := pi.Refresh(t.Context(), "anthropic", now, now.Add(time.Hour))
+	err := pi.Refresh("anthropic", now, now.Add(time.Hour))
 
 	if err == nil || !strings.Contains(err.Error(), `Error: Unknown provider "anthropic"`) {
 		t.Fatalf("Refresh = %v, want Pi's error", err)
