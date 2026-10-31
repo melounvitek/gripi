@@ -8,13 +8,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
@@ -159,8 +162,8 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manager.State("beelink") != Connected {
-		t.Fatalf("state = %s", manager.State("beelink"))
+	if status := manager.Status("beelink"); status != (Status{State: Connected}) {
+		t.Fatalf("status = %+v", status)
 	}
 	// The worker's helper makes the folder of the session's file, so that it can send main the file.
 	if _, err := os.Stat(sessionFolder(sessions, project)); err != nil {
@@ -193,8 +196,8 @@ func TestLaunchRunsTheSessionsOfAPlacedRepositoryOnTheirWorker(t *testing.T) {
 	release()
 
 	manager.Close()
-	if manager.State("beelink") != Disconnected || socketsStopped != 1 {
-		t.Fatalf("after Close: state %s, %d sockets stopped", manager.State("beelink"), socketsStopped)
+	if status := manager.Status("beelink"); status != (Status{State: Disconnected}) || socketsStopped != 1 {
+		t.Fatalf("after Close: status %+v, %d sockets stopped", status, socketsStopped)
 	}
 }
 
@@ -275,5 +278,95 @@ func TestWhatTheMirrorAppliesUpdatesThePlacementAndNotices(t *testing.T) {
 	manager.DismissNotices("/work/project")
 	if notices := manager.Notices("/work/project"); len(notices) != 0 {
 		t.Fatalf("notices after dismissing = %+v", notices)
+	}
+}
+
+func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
+	requireSystemd(t)
+	rig := newBootstrapRig(t)
+	writeTestFile(t, filepath.Join(rig.pkg, "dist", "cli.js"), fakeWorkerPi, 0755)
+	writeTestFile(t, filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"), "worker\n", 0600)
+	project, sessions := t.TempDir(), t.TempDir()
+	key := filepath.Join(sessionFolder(sessions, project), "s.jsonl")
+	gripi, _ := buildExecutables(t)
+	unitName := make([]byte, 6)
+	rand.Read(unitName)
+	unit := "gripi-test-" + hex.EncodeToString(unitName)
+	var socketsStarted, socketsStopped atomic.Int32
+	manager := newTestManager(t, ManagerOptions{
+		StateDir: t.TempDir(), Pi: rig.pi, WorkerExtension: filepath.Join(rig.pi.ExtensionDir, "gripi-worker.ts"),
+		SocketPath: "/run/gripi.sock", Store: fakeStore{sessions: map[string]string{key: project}}, SessionsRoot: sessions,
+		ServeSocket: func(string, WorkerPlacement) (string, func() error, error) {
+			socketsStarted.Add(1)
+			return filepath.Join(t.TempDir(), "beelink.sock"), func() error { socketsStopped.Add(1); return nil }, nil
+		},
+		Connection: Options{Executable: gripi, InstallDir: "gripi-worker", Unit: unit, RuntimeDir: shortTempDir(t)},
+	})
+	if err := manager.options.Placements.Add(Placement{Worker: "beelink", Unit: mirror.Unit{Main: project}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	// The worker's helper and everything that it runs end, as when the worker reboots.
+	killHelper := func() {
+		t.Helper()
+		if output, err := exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", unit+".service").CombinedOutput(); err != nil {
+			t.Fatalf("kill the helper: %v %s", err, output)
+		}
+		for deadline := time.Now().Add(5 * time.Second); exec.Command("systemctl", "--user", "is-active", "--quiet", unit+".service").Run() == nil; time.Sleep(20 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("the helper still runs")
+			}
+		}
+	}
+
+	lost := make(chan string, 2)
+	command, release, err := manager.Launch(agent.Process{Key: key, Command: []string{"pi", "--mode", "rpc", "--session", key}, Lost: func(message string) { lost <- message }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, _ := command.StdoutPipe()
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if args, _ := bufio.NewReader(stdout).ReadString('\n'); !strings.HasPrefix(args, "args=") {
+		t.Fatalf("Pi on the worker said %q", args)
+	}
+	killHelper()
+	select {
+	case message := <-lost:
+		if !strings.Contains(message, "worker beelink") || !strings.Contains(message, "outcome of the running step is unknown") {
+			t.Fatalf("the session was told %q", message)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session was not told that its worker is lost")
+	}
+	command.Wait()
+	release()
+	if status := manager.Status("beelink"); status.State != Unreachable || time.Until(status.GoneAt) < helper.DefaultLease || time.Until(status.GoneAt) > helper.DefaultLease+GoneMargin {
+		t.Fatalf("status of the lost worker = %+v", status)
+	}
+	if socketsStopped.Load() != 1 {
+		t.Fatalf("%d gripi sockets stopped", socketsStopped.Load())
+	}
+
+	// The lost helper may still run for all main knows, and holds the unit until it stops.
+	if output, err := exec.Command("systemd-run", "--user", "--quiet", "--collect", "--unit", unit, "sleep", "3").CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, output)
+	}
+	started := time.Now()
+	if err := manager.Reconnect(ctx, "beelink"); err != nil {
+		t.Fatal(err)
+	}
+	if waited := time.Since(started); waited < 2*time.Second {
+		t.Fatalf("reconnected after %s, while the old helper ran", waited)
+	}
+	if status := manager.Status("beelink"); status != (Status{State: Connected}) || socketsStarted.Load() != 2 {
+		t.Fatalf("after reconnecting: status %+v, %d gripi sockets started", status, socketsStarted.Load())
+	}
+	manager.mu.Lock()
+	live := manager.workers["beelink"].mirrors[project]
+	manager.mu.Unlock()
+	if live == nil || !live.running() {
+		t.Fatal("the mirror of the repository on the worker did not start again")
 	}
 }

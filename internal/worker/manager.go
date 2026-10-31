@@ -32,10 +32,27 @@ const (
 	// Copying means a repository is being copied to the worker.
 	Copying   State = "copying"
 	Connected State = "connected"
+	// Unreachable means that main lost its connection to the worker, whose helper may still run sessions until the
+	// worker is gone.
+	Unreachable State = "unreachable"
+	// Gone means that main lost the worker long enough ago for every session there to have stopped, so the
+	// repositories on it can continue on this machine.
+	Gone State = "gone"
 )
+
+// Status is how main's connection to a worker is.
+type Status struct {
+	State State `json:"state"`
+	// GoneAt is when a worker that main lost is gone, unless main has reached it again since.
+	GoneAt time.Time `json:"gone_at,omitzero"`
+}
 
 // connectTimeout bounds connecting to a worker, which includes copying Pi there the first time.
 const connectTimeout = 5 * time.Minute
+
+// reconnectInterval is how often main tries to connect to a worker whose earlier helper may still run, and refuses
+// another.
+const reconnectInterval = 2 * time.Second
 
 // ManagerOptions configure NewManager.
 type ManagerOptions struct {
@@ -61,6 +78,8 @@ type ManagerOptions struct {
 	ServeSocket func(name string, placement WorkerPlacement) (socket string, stop func() error, err error)
 	// Connection holds Connect's options but Destination and SocketDir, which the manager sets for each worker.
 	Connection Options
+	// Clock is time.Now when nil.
+	Clock func() time.Time
 }
 
 // Manager runs the sessions of repositories placed on workers there: it connects to a worker when a session needs
@@ -70,6 +89,7 @@ type Manager struct {
 	options ManagerOptions
 	ctx     context.Context
 	cancel  context.CancelFunc
+	started time.Time
 
 	mu          sync.Mutex
 	workers     map[string]*remote
@@ -95,6 +115,7 @@ type remote struct {
 	name         string
 	connecting   sync.Mutex // held while connecting, so that others wait for the connection
 	state        State
+	goneAt       time.Time // when the worker is gone, after main lost its connection
 	conn         *Conn
 	installation *Installation
 	stopSocket   func() error
@@ -102,7 +123,10 @@ type remote struct {
 }
 
 // launched is a session whose Pi the manager started on a worker.
-type launched struct{ worker, cwd string }
+type launched struct {
+	worker, cwd string
+	lost        func(message string) // agent.Process.Lost
+}
 
 // liveMirror is main's copy of a unit, kept up to date by the unit's mirror on the worker.
 type liveMirror struct {
@@ -123,8 +147,11 @@ func (live *liveMirror) running() bool {
 
 // NewManager returns a manager that connects to no worker until a session or a move needs it.
 func NewManager(options ManagerOptions) *Manager {
+	if options.Clock == nil {
+		options.Clock = time.Now
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	manager := &Manager{options: options, ctx: ctx, cancel: cancel, workers: map[string]*remote{}, sessions: map[string]launched{}}
+	manager := &Manager{options: options, ctx: ctx, cancel: cancel, started: options.Clock(), workers: map[string]*remote{}, sessions: map[string]launched{}}
 	manager.launched = sync.NewCond(&manager.mu)
 	return manager
 }
@@ -149,14 +176,22 @@ func (manager *Manager) DismissNotices(folder string) {
 	manager.notices = slices.DeleteFunc(manager.notices, func(notice Notice) bool { return notice.Repository.Contains(folder) })
 }
 
-// State reports the connection to the worker of a name.
-func (manager *Manager) State(name string) State {
+// Status reports the connection to the worker of a name.
+func (manager *Manager) Status(name string) Status {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	if worker := manager.workers[name]; worker != nil {
-		return worker.state
+	worker := manager.workers[name]
+	if worker == nil {
+		return Status{State: Disconnected}
 	}
-	return Disconnected
+	status := Status{State: worker.state, GoneAt: worker.goneAt}
+	if worker.state == Disconnected && !worker.goneAt.IsZero() {
+		status.State = Gone
+		if manager.options.Clock().Before(worker.goneAt) {
+			status.State = Unreachable
+		}
+	}
+	return status
 }
 
 func (manager *Manager) setState(worker *remote, state State) {
@@ -183,8 +218,8 @@ func (manager *Manager) connect(ctx context.Context, name string) (*remote, erro
 	manager.mu.Unlock()
 	if conn != nil {
 		select {
-		case <-conn.Closed():
-			manager.disconnect(worker, conn)
+		case <-conn.Lost():
+			manager.disconnect(worker, conn, true)
 			conn = nil
 		default:
 		}
@@ -240,10 +275,25 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 		return err
 	}
 	options.SocketDir = filepath.Join(manager.options.StateDir, "ssh")
-	conn, err := Connect(ctx, options)
-	if err != nil {
-		manager.setState(worker, Disconnected)
-		return err
+	var conn *Conn
+	for {
+		if conn, err = Connect(ctx, options); err == nil {
+			break
+		}
+		manager.mu.Lock()
+		goneAt := worker.goneAt
+		manager.mu.Unlock()
+		// The helper of a lost connection refuses another until it has stopped, which it has once the worker is gone.
+		if !manager.options.Clock().Before(goneAt) {
+			manager.setState(worker, Disconnected)
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			manager.setState(worker, Disconnected)
+			return fmt.Errorf("%w; worker %s may still run the sessions of a lost connection until %s", err, worker.name, goneAt.Local().Format(time.TimeOnly))
+		case <-time.After(reconnectInterval):
+		}
 	}
 	fail := func(err error) error {
 		conn.Close()
@@ -263,18 +313,27 @@ func (manager *Manager) dial(ctx context.Context, worker *remote) error {
 		return fail(err)
 	}
 	manager.mu.Lock()
-	worker.conn, worker.installation, worker.stopSocket, worker.state = conn, installation, stopSocket, Connected
+	// The new helper runs, so the helper of a lost connection has stopped.
+	worker.conn, worker.installation, worker.stopSocket, worker.state, worker.goneAt = conn, installation, stopSocket, Connected, time.Time{}
 	manager.mu.Unlock()
 	go func() {
-		<-conn.Closed()
-		manager.disconnect(worker, conn)
+		<-conn.Lost()
+		manager.disconnect(worker, conn, true)
 	}()
 	return nil
 }
 
-// disconnect forgets a worker's connection, unless it has another one by now. Reconnecting is round 6's work: until
-// then, the next session or move connects again.
-func (manager *Manager) disconnect(worker *remote, conn *Conn) {
+// Reconnect connects to the worker of a name, if main is not connected to it, as the next session there or move to it
+// would. After main has lost the worker, it waits while the worker's earlier helper may still run.
+func (manager *Manager) Reconnect(ctx context.Context, name string) error {
+	_, err := manager.connect(ctx, name)
+	return err
+}
+
+// disconnect forgets a worker's connection and closes it, unless the worker has another one by now. After main lost the
+// connection, the worker is unreachable until it is gone, and the steps that its sessions were running end with an
+// outcome that nobody knows. The next session there or move to it connects again.
+func (manager *Manager) disconnect(worker *remote, conn *Conn, lost bool) {
 	manager.mu.Lock()
 	if worker.conn != conn {
 		manager.mu.Unlock()
@@ -282,14 +341,29 @@ func (manager *Manager) disconnect(worker *remote, conn *Conn) {
 	}
 	mirrors, stopSocket := worker.mirrors, worker.stopSocket
 	worker.conn, worker.installation, worker.stopSocket, worker.mirrors, worker.state = nil, nil, nil, map[string]*liveMirror{}, Disconnected
+	var sessions []launched
 	for id, session := range manager.sessions {
 		if session.worker == worker.name {
+			sessions = append(sessions, session)
 			delete(manager.sessions, id)
 		}
 	}
+	if lost {
+		worker.goneAt = conn.GoneAt()
+		log.Printf("lost the connection to worker %s, which may run sessions until %s", worker.name, worker.goneAt.Local().Format(time.TimeOnly))
+	}
 	manager.mu.Unlock()
+	// Ending the master connections at once ends every channel, also over a link that hangs.
+	conn.Pool.Close()
+	for _, session := range sessions {
+		if lost && session.lost != nil {
+			session.lost(fmt.Sprintf("Lost the connection to worker %s. The outcome of the running step is unknown.", worker.name))
+		}
+	}
+	// Main's copies are as their last barriers left them once their mirrors have ended.
 	for _, live := range mirrors {
 		live.cancel()
+		<-live.done
 	}
 	stopSocket()
 	conn.Close()
@@ -318,7 +392,7 @@ func (manager *Manager) Close() {
 			}
 			cancel()
 		}
-		manager.disconnect(worker, conn)
+		manager.disconnect(worker, conn, false)
 	}
 	manager.cancel()
 }
@@ -548,7 +622,7 @@ func (manager *Manager) Launch(process agent.Process) (*exec.Cmd, func(), error)
 		return nil, nil, err
 	}
 	manager.mu.Lock()
-	manager.sessions[session.ID] = launched{worker: placement.Worker, cwd: cwd}
+	manager.sessions[session.ID] = launched{worker: placement.Worker, cwd: cwd, lost: process.Lost}
 	manager.mu.Unlock()
 	return command, release, nil
 }
