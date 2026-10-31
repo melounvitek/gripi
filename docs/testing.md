@@ -32,7 +32,7 @@ govulncheck ./...
 
 ## Workers over SSH
 
-The worker tests run the helper under `systemd-run --user` on this machine when a systemd user manager is available, and skip otherwise. Tests of the real `ssh`, with saturated channels, a link that stalls in one direction and a master connection that dies, are opt-in:
+The worker tests run the helper under `systemd-run --user` on this machine when a systemd user manager is available, and skip otherwise. Tests of the real `ssh`, with saturated channels, a link that stalls in one direction, a master connection that dies and the forward of main's `gripi` socket over a stale socket file, are opt-in:
 
 ```sh
 GRIPI_TEST_SSH=localhost go test ./internal/worker/ -run RealSSH -v

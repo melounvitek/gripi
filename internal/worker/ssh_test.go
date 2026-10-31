@@ -3,6 +3,7 @@ package worker
 import (
 	"cmp"
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,15 +16,17 @@ import (
 )
 
 // fakeSSHScript stands in for ssh. It logs its arguments, keeps a master running for -M, answers -O check, accepts
-// other -O operations, and runs remote commands on this machine, in FAKE_SSH_HOME.
+// other -O operations, and runs remote commands on this machine, in FAKE_SSH_HOME. Like sshd, it refuses to forward
+// a socket over a file that exists.
 const fakeSSHScript = `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
-socket= operation= master=
+socket= operation= master= remote=
 while [ "$1" != -- ]; do
 	case $1 in
 	-S) socket=$2; shift ;;
 	-O) operation=$2; shift ;;
-	-o | -R | -L) shift ;;
+	-R) remote=$2; shift ;;
+	-o | -L) shift ;;
 	-M*) master=yes ;;
 	esac
 	shift
@@ -35,6 +38,7 @@ if [ -n "$master" ]; then
 fi
 case $operation in
 check) exec kill -0 "$(cat "$socket")" 2>/dev/null ;;
+forward) case $remote in /*) [ ! -e "${remote%%:*}" ] || { echo "remote port forwarding failed for listen path ${remote%%:*}" >&2; exit 255; } ;; esac ;;
 '') cd "$FAKE_SSH_HOME" && HOME=$FAKE_SSH_HOME exec sh -c "$*" ;;
 esac
 `
@@ -185,5 +189,35 @@ func TestForwardsAreReferenceCounted(t *testing.T) {
 		t.Fatalf("forward after cancel = %q", sshCalls(t, "-O forward"))
 	} else {
 		again()
+	}
+}
+
+func TestSocketForwardsReplaceAStaleSocketOnTheWorker(t *testing.T) {
+	home := fakeSSH(t)
+	pool := newTestPool(t)
+	ctx := context.Background()
+	gateway := Forward{Remote: true, ListenSocket: filepath.Join(home, ".pi", "gripi", "gripi.sock"), ConnectSocket: "/main/workers/beelink.sock"}
+
+	cancel, err := pool.Forward(ctx, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forwards := sshCalls(t, "-O forward -R "+gateway.ListenSocket+":"+gateway.ConnectSocket+" -- gripi@worker"); len(forwards) != 1 {
+		t.Fatalf("forwards = %q", sshCalls(t, "-O forward"))
+	}
+	if info, err := os.Stat(filepath.Dir(gateway.ListenSocket)); err != nil || !info.IsDir() {
+		t.Fatalf("the socket's folder on the worker: %v", err)
+	}
+	cancel()
+	// sshd leaves the socket file of a forward behind, and won't replace it.
+	stale, err := net.Listen("unix", gateway.ListenSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.(*net.UnixListener).SetUnlinkOnClose(false)
+	stale.Close()
+
+	if _, err := pool.Forward(ctx, gateway); err != nil {
+		t.Fatalf("forward over a stale socket: %v", err)
 	}
 }

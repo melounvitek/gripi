@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log"
@@ -47,12 +48,14 @@ func (master *master) running() bool {
 	}
 }
 
-// Forward makes a port reachable over the master connection, bound to loopback at both ends.
+// Forward makes a port, bound to loopback at both ends, or a Unix socket reachable over the master connection.
 type Forward struct {
 	// Remote listens on the worker and connects on main (ssh -R); otherwise it listens on main (ssh -L).
 	Remote bool
 	// Listen and Connect are the ports.
 	Listen, Connect int
+	// ListenSocket and ConnectSocket are paths of Unix sockets, which take the ports' place when set.
+	ListenSocket, ConnectSocket string
 }
 
 type forward struct {
@@ -84,8 +87,11 @@ func (pool *Pool) Command(ctx context.Context, remote string) (command *exec.Cmd
 			master.channels--
 		})
 	}
-	command = exec.Command("ssh", "-S", master.socket, "-o", "ControlMaster=no", "-o", "BatchMode=yes", "-T", "--", pool.destination, remote)
-	return command, release, nil
+	return pool.channel(master, remote), release, nil
+}
+
+func (pool *Pool) channel(master *master, remote string) *exec.Cmd {
+	return exec.Command("ssh", "-S", master.socket, "-o", "ControlMaster=no", "-o", "BatchMode=yes", "-T", "--", pool.destination, remote)
 }
 
 // master returns the first working master that fits, or a new one. A channel whose master has gone would open a
@@ -148,6 +154,11 @@ func (pool *Pool) Forward(ctx context.Context, port Forward) (cancel func() erro
 	defer pool.mu.Unlock()
 	current := pool.forwards[port]
 	if current == nil {
+		if port.Remote && port.ListenSocket != "" {
+			if err := pool.removeStaleSocket(ctx, port.ListenSocket); err != nil {
+				return nil, err
+			}
+		}
 		master, err := pool.master(ctx, func(*master) bool { return true })
 		if err != nil {
 			return nil, err
@@ -178,10 +189,26 @@ func (pool *Pool) forward(master *master, operation string, port Forward) error 
 	if port.Remote {
 		direction = "-R"
 	}
-	specification := fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", port.Listen, port.Connect)
+	listen := cmp.Or(port.ListenSocket, fmt.Sprintf("127.0.0.1:%d", port.Listen))
+	connect := cmp.Or(port.ConnectSocket, fmt.Sprintf("127.0.0.1:%d", port.Connect))
+	specification := listen + ":" + connect
 	output, err := exec.Command("ssh", "-S", master.socket, "-O", operation, direction, specification, "--", pool.destination).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ssh -O %s %s %s: %v %s", operation, direction, specification, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// removeStaleSocket removes the socket file that an earlier forward left at path on the worker, which sshd won't
+// replace (StreamLocalBindUnlink is off by default), and creates the socket's folder.
+func (pool *Pool) removeStaleSocket(ctx context.Context, path string) error {
+	master, err := pool.master(ctx, func(master *master) bool { return master.channels < MaxChannels })
+	if err != nil {
+		return err
+	}
+	script := `umask 077 && mkdir -p "${1%/*}" && if [ -S "$1" ]; then rm "$1"; fi`
+	if output, err := pool.channel(master, ShellQuote("sh", "-c", script, "sh", path)).CombinedOutput(); err != nil {
+		return fmt.Errorf("remove the stale socket %s on the worker: %v %s", path, err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
