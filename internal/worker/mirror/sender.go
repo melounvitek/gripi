@@ -29,13 +29,14 @@ const sigBatch = 32
 // sender sends the live copy's changes. It knows what the destination has
 // (sent) and which paths changed since (dirty).
 type sender struct {
-	opts    Options
-	main    string
-	gitDir  string
-	roots   []string
-	cls     map[string]*classifier // per worktree
-	skipped map[string]bool        // excluded worktree files and folders found by walks
-	c       *conn
+	opts     Options
+	main     string
+	gitDir   string
+	roots    []string
+	cls      map[string]*classifier // per worktree
+	skipped  map[string]bool        // excluded worktree files and folders found by walks
+	followed map[string]bool        // links that Dereference follows
+	c        *conn
 
 	sent       map[string]entry
 	dirty      map[string]bool // path → still being written
@@ -57,7 +58,7 @@ type sender struct {
 
 func newSender(u Unit, opts Options, rw io.ReadWriter) *sender {
 	s := &sender{
-		opts: opts, main: u.Main, gitDir: u.GitDir, cls: map[string]*classifier{}, skipped: map[string]bool{},
+		opts: opts, main: u.Main, gitDir: u.GitDir, cls: map[string]*classifier{}, skipped: map[string]bool{}, followed: map[string]bool{},
 		sent: map[string]entry{}, dirty: map[string]bool{}, objDels: map[string]uint64{},
 		sigs: make(chan *frame, sigBatch), stopped: make(chan struct{}), waiters: map[uint64][]chan error{},
 	}
@@ -225,7 +226,7 @@ func inode(info fs.FileInfo) uint64 {
 // walk watches the folders under dir and marks what differs from the
 // destination; seen, if set, collects every mirrored path.
 func (s *sender) walk(dir string, seen map[string]bool) error {
-	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+	visit := func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // gone meanwhile
 		}
@@ -261,7 +262,65 @@ func (s *sender) walk(dir string, seen map[string]bool) error {
 			s.mark(p, false)
 		}
 		return nil
+	}
+	if s.opts.Dereference {
+		return fs.WalkDir(dereferencing{s}, dir[1:], func(p string, d fs.DirEntry, err error) error { return visit("/"+p, d, err) })
+	}
+	return filepath.WalkDir(dir, visit)
+}
+
+// dereferencing is the file system as Dereference sees it, where a link that it follows is what it points to, so
+// that fs.WalkDir enters links to folders.
+type dereferencing struct{ s *sender }
+
+func (fsys dereferencing) Open(name string) (fs.File, error) { return os.Open("/" + name) }
+
+func (fsys dereferencing) ReadDir(name string) ([]fs.DirEntry, error) {
+	entries, err := os.ReadDir("/" + name)
+	for i, entry := range entries {
+		if entry.Type()&fs.ModeSymlink != 0 {
+			if info := fsys.s.follow(filepath.Join("/"+name, entry.Name())); info != nil {
+				entries[i] = fs.FileInfoToDirEntry(info)
+			}
+		}
+	}
+	return entries, err
+}
+
+// follow returns what the link p points to if Dereference follows it, and nil if it stays a link.
+func (s *sender) follow(p string) fs.FileInfo {
+	info, err := os.Stat(p)
+	if err != nil {
+		return nil
+	}
+	target, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return nil
+	}
+	belowFollowed := false
+	for dir := filepath.Dir(p); s.rootOf(dir) != ""; dir = filepath.Dir(dir) {
+		belowFollowed = belowFollowed || s.followed[dir]
+		if real, err := filepath.EvalSymlinks(dir); info.IsDir() && err == nil && within(real, target) {
+			return nil // a loop
+		}
+	}
+	inside := slices.ContainsFunc(s.roots, func(root string) bool {
+		real, err := filepath.EvalSymlinks(root)
+		return err == nil && within(target, real)
 	})
+	if inside && !belowFollowed {
+		return nil
+	}
+	s.followed[p] = true
+	return info
+}
+
+// lstat is os.Lstat, except that it follows the links that Dereference follows.
+func (s *sender) lstat(p string) (fs.FileInfo, error) {
+	if s.followed[p] {
+		return os.Stat(p)
+	}
+	return os.Lstat(p)
 }
 
 // scan walks the whole unit, marking what differs from the destination, and
@@ -414,7 +473,7 @@ func (s *sender) flush(barrier bool, sel func(string) bool) error {
 		if sel != nil && !sel(p) {
 			continue
 		}
-		info, err := os.Lstat(p)
+		info, err := s.lstat(p)
 		if err != nil {
 			delete(s.dirty, p)
 			old, had := s.sent[p]
@@ -497,7 +556,7 @@ func (s *sender) flush(barrier bool, sel func(string) bool) error {
 	}
 	slices.Sort(dirs)
 	for _, p := range dirs {
-		info, err := os.Lstat(p)
+		info, err := s.lstat(p)
 		if err != nil {
 			continue
 		}
@@ -557,7 +616,7 @@ func (p deltaPlan) needsSigs() bool { return len(p.bases) > 0 && p.appendAt == 0
 // plan chooses how to send p: whole, appended to (logs), or as a delta
 // against files the destination has (the old version, or other packs).
 func (s *sender) plan(p string) deltaPlan {
-	info, err := os.Lstat(p)
+	info, err := s.lstat(p)
 	if err != nil {
 		return deltaPlan{}
 	}
@@ -653,9 +712,13 @@ func (s *sender) sendFiles(files []string) error {
 // sendFile sends one moment of p: if the file changes while it is read, the
 // put is aborted and retried, and finally left for later.
 func (s *sender) sendFile(p string, plan deltaPlan) error {
+	// O_NONBLOCK keeps a FIFO that replaced the file from blocking the open.
+	flags := os.O_RDONLY | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+	if s.followed[p] {
+		flags &^= syscall.O_NOFOLLOW
+	}
 	for attempt := 0; attempt < 3; attempt++ {
-		// O_NONBLOCK keeps a FIFO that replaced the file from blocking the open.
-		f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+		f, err := os.OpenFile(p, flags, 0)
 		var info fs.FileInfo
 		if err == nil {
 			info, err = f.Stat()

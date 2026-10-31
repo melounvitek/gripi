@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math/rand/v2"
@@ -316,7 +317,7 @@ func TestJournalFinishesAfterCrashMidApply(t *testing.T) {
 	before := r.d.Checkpoint().Barrier
 
 	os.Chmod(stuck, 0o755)
-	d, err := newDestination(r.state, r.dst)
+	d, err := NewMovedDestination(r.state, "/", r.dst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +407,7 @@ func TestBarrierReportsFilesStillBeingWritten(t *testing.T) {
 func TestSyncCopiesTheUnitOnce(t *testing.T) {
 	unit := newRepo(t)
 	dst := t.TempDir()
-	d, err := newDestination(filepath.Join(dst, "state"), dst)
+	d, err := NewMovedDestination(filepath.Join(dst, "state"), "/", dst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,6 +434,66 @@ func TestSyncCopiesTheUnitOnce(t *testing.T) {
 		t.Fatalf("the second sync sent %d bytes", sent)
 	}
 	checkCopy(t, unit, dst)
+}
+
+// Pi's agent folder often links to the user's own configuration, which the worker has only if it gets what the
+// links point to; links within the folder, such as npm's, must stay links.
+func TestSyncCopiesAFolderElsewhereWithWhatItsOutsideLinksPointTo(t *testing.T) {
+	src, outside, dst := t.TempDir(), t.TempDir(), filepath.Join(t.TempDir(), "copy")
+	writeFile(t, src, "sub/b.txt", "b\n")
+	writeFile(t, src, "excluded.txt", "main's\n")
+	writeFile(t, outside, "settings.json", "{}\n")
+	writeFile(t, outside, "skills/s/SKILL.md", "skill\n")
+	for link, target := range map[string]string{
+		"inside": "sub/b.txt", "settings.json": filepath.Join(outside, "settings.json"), "skills": filepath.Join(outside, "skills"),
+		"dangling": "/nonexistent", "skills/s/loop": "../..",
+	} {
+		dir := src
+		if strings.HasPrefix(link, "skills/") {
+			dir = outside
+		}
+		if err := os.Symlink(target, filepath.Join(dir, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, dst, "excluded.txt", "the worker's\n")
+	writeFile(t, dst, "extra.txt", "x\n")
+	d, err := NewMovedDestination(filepath.Join(filepath.Dir(dst), "state"), src, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sync := func(unit Unit) (int64, error) {
+		a, b := net.Pipe()
+		served := make(chan error, 1)
+		go func() { served <- d.Serve(context.Background(), b, filepath.Join(t.TempDir(), "aside")) }()
+		var written atomic.Int64
+		err := Sync(context.Background(), &countingConn{a, &written}, unit, Options{Exclude: []string{"excluded.txt"}, Dereference: true})
+		return written.Load(), errors.Join(err, <-served)
+	}
+	if _, err := sync(Unit{Main: src}); err != nil {
+		t.Fatal(err)
+	}
+
+	for p, want := range map[string]string{
+		"sub/b.txt": "file b\n", "inside": "link sub/b.txt", "settings.json": "file {}\n", "skills/s/SKILL.md": "file skill\n",
+		"skills/s/loop": "link ../..", "dangling": "link /nonexistent", "excluded.txt": "file the worker's\n", "extra.txt": "missing",
+	} {
+		got := "missing"
+		if target, err := os.Readlink(filepath.Join(dst, p)); err == nil {
+			got = "link " + target
+		} else if contents, err := os.ReadFile(filepath.Join(dst, p)); err == nil {
+			got = "file " + string(contents)
+		}
+		if got != want {
+			t.Errorf("%s on the worker: %s, want %s", p, got, want)
+		}
+	}
+	if sent, err := sync(Unit{Main: src}); err != nil || sent > 10_000 {
+		t.Fatalf("the second sync sent %d bytes: %v", sent, err)
+	}
+	if _, err := sync(Unit{Main: outside}); err == nil || !strings.Contains(err.Error(), "refusing") {
+		t.Fatalf("Sync of a folder outside the mapped one = %v", err)
+	}
 }
 
 func TestOptionsIncludeAndExcludePaths(t *testing.T) {
@@ -504,7 +565,7 @@ func newRigWith(t *testing.T, unit Unit, configure func(*Source)) *rig {
 	dst := t.TempDir()
 	r := &rig{unit: unit, dst: dst, state: filepath.Join(dst, "state")}
 	var err error
-	if r.d, err = newDestination(r.state, dst); err != nil {
+	if r.d, err = NewMovedDestination(r.state, "/", dst); err != nil {
 		t.Fatal(err)
 	}
 	r.start(t, configure)

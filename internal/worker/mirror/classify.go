@@ -21,6 +21,10 @@ const maxIgnoredSize = 10 << 20
 type Options struct {
 	Include []string // ignored paths to mirror anyway, at any size
 	Exclude []string // paths never mirrored; wins over Include
+	// Dereference copies what a symlink that leads out of the unit points to, as if it were at the link's path, and
+	// does the same with every link below a followed one. Links within the unit, links to nothing and links to a
+	// folder above them stay links. Only Sync supports it.
+	Dereference bool
 }
 
 // includesBelow reports whether a pattern can match something inside the folder rel.

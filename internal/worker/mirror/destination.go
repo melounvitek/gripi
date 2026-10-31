@@ -26,9 +26,11 @@ import (
 // applies it only at barriers, so the copy always matches the last barrier.
 type Destination struct {
 	state string
-	root  string // every path is under it: "/" except in tests that run both sides on one machine
-	mu    sync.Mutex
-	cp    Checkpoint
+	// The source's paths under from are kept under to: both are "/" unless the unit lives elsewhere here, as in
+	// tests that run both sides on one machine.
+	from, to string
+	mu       sync.Mutex
+	cp       Checkpoint
 }
 
 // Checkpoint is the last barrier the destination applied: its copy has
@@ -60,14 +62,16 @@ type journal struct {
 // state, which must be on the same filesystem as the unit. If applying a
 // barrier was interrupted, it finishes first.
 func NewDestination(state string) (*Destination, error) {
-	return newDestination(state, "/")
+	return NewMovedDestination(state, "/", "/")
 }
 
-func newDestination(state, root string) (*Destination, error) {
+// NewMovedDestination is NewDestination for a unit that this machine keeps elsewhere than the source: what the
+// source has under from is kept under to. Sources of units outside from are refused.
+func NewMovedDestination(state, from, to string) (*Destination, error) {
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		return nil, err
 	}
-	d := &Destination{state: state, root: root}
+	d := &Destination{state: state, from: from, to: to}
 	data, err := os.ReadFile(d.path("checkpoint.json"))
 	if err == nil {
 		err = json.Unmarshal(data, &d.cp)
@@ -92,7 +96,9 @@ func (d *Destination) path(names ...string) string {
 	return filepath.Join(append([]string{d.state}, names...)...)
 }
 
-func (d *Destination) local(p string) string { return filepath.Join(d.root, p) }
+func (d *Destination) local(p string) string {
+	return filepath.Join(d.to, strings.TrimPrefix(p, d.from))
+}
 
 // Serve receives one source's changes until stream ends, acknowledging each
 // barrier once it is applied durably. Changes received after the last barrier
@@ -565,7 +571,7 @@ func (r *receiver) fail(err error) error {
 
 func (r *receiver) addRoots(roots []string) error {
 	for _, root := range roots {
-		if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" {
+		if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" || !within(root, r.d.from) {
 			return fmt.Errorf("mirror: refusing the folder %q", root)
 		}
 		if !slices.Contains(r.roots, root) {
