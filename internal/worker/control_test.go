@@ -156,6 +156,52 @@ func TestControlAnswersPingsWhileRequestsWait(t *testing.T) {
 	}
 }
 
+// Main loses a worker whose link hangs after half a lease without an answer, long before the worker is gone.
+func TestMainLosesAWorkerThatStopsPinging(t *testing.T) {
+	t.Parallel()
+	const lease = 4 * time.Second
+	link, err := linkHelper(t, "v1", lease, helper.Options{Version: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	link.toMain.shut.Store(true)
+	select {
+	case <-link.control.Lost():
+		last := link.control.LastAnswer()
+		if lost := time.Since(last); lost < lease/2 || lost > lease/2+time.Second {
+			t.Fatalf("lost %s after the last answer", lost)
+		}
+		if !link.control.GoneAt().Equal(last.Add(lease + worker.GoneMargin)) {
+			t.Fatalf("gone at %v, last answer %v", link.control.GoneAt(), last)
+		}
+	case <-time.After(lease):
+		t.Fatal("main did not lose the worker")
+	}
+	select {
+	case <-link.control.Gone():
+		t.Fatal("the worker is gone when main loses it")
+	default:
+	}
+}
+
+func TestMainLosesAWorkerWhoseHelperEnded(t *testing.T) {
+	link, err := linkHelper(t, "v1", helper.DefaultLease, helper.Options{Version: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	link.toHelper.Close()
+	select {
+	case <-link.control.Lost():
+	case <-time.After(2 * time.Second):
+		t.Fatal("main did not lose the worker whose helper ended")
+	}
+	select {
+	case <-link.control.Gone():
+		t.Fatal("a closed connection made the worker gone")
+	default:
+	}
+}
+
 // The helper must stop before main treats the worker as gone, whichever direction of the link stops working.
 func TestWorkerIsGoneOnlyAfterTheHelperStopped(t *testing.T) {
 	const lease = 500 * time.Millisecond

@@ -44,8 +44,10 @@ type Control struct {
 	requests chan helper.Message
 	closing  chan struct{}
 	closed   chan struct{} // the helper's output has ended
+	lost     chan struct{}
 	gone     chan struct{}
 	close    sync.Once
+	lose     sync.Once
 
 	mu         sync.Mutex
 	lastID     uint64
@@ -58,7 +60,7 @@ type Control struct {
 func NewControl(ctx context.Context, output io.Reader, input io.WriteCloser, version string, lease time.Duration) (*Control, error) {
 	control := &Control{
 		lease: lease, input: input, answers: make(chan uint64, 16), requests: make(chan helper.Message),
-		closing: make(chan struct{}), closed: make(chan struct{}), gone: make(chan struct{}), pending: map[uint64]chan helper.Message{},
+		closing: make(chan struct{}), closed: make(chan struct{}), lost: make(chan struct{}), gone: make(chan struct{}), pending: map[uint64]chan helper.Message{},
 	}
 	hello := make(chan helper.Message, 1)
 	answered := make(chan struct{})
@@ -167,14 +169,32 @@ func (control *Control) write(answered chan<- struct{}) {
 	}
 }
 
+// watch closes lost when the helper's output ends or main hasn't answered for half a lease, and gone once the lease
+// and GoneMargin have passed since the last answer.
 func (control *Control) watch() {
+	lose := func() { control.lose.Do(func() { close(control.lost) }) }
+	closed := control.closed
 	for {
-		wait := time.Until(control.LastAnswer().Add(control.lease + GoneMargin))
+		last := control.LastAnswer()
+		wait := time.Until(last.Add(control.lease + GoneMargin))
 		if wait <= 0 {
+			lose()
 			close(control.gone)
 			return
 		}
-		time.Sleep(wait)
+		if silent := time.Until(last.Add(control.lease / 2)); silent <= 0 {
+			lose()
+		} else {
+			wait = min(wait, silent)
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-closed:
+			lose()
+			closed = nil
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
 }
 
@@ -262,9 +282,19 @@ func (control *Control) LastAnswer() time.Time {
 	return control.lastAnswer
 }
 
+// Lost is closed once main has lost the worker: the helper's output has ended, as it does when the connection's master
+// dies, or main hasn't answered a ping for half a lease, as over a link that hangs. ssh's own keepalive gives up on a
+// master about as late. The worker may still run sessions until it is gone.
+func (control *Control) Lost() <-chan struct{} { return control.lost }
+
 // Gone is closed once the worker must have stopped every session: a lease and GoneMargin after the last answer. A
 // closed connection doesn't make the worker gone sooner, because it doesn't prove that the helper has seen it.
 func (control *Control) Gone() <-chan struct{} { return control.gone }
+
+// GoneAt is when the worker will be gone, unless main answers again.
+func (control *Control) GoneAt() time.Time {
+	return control.LastAnswer().Add(control.lease + GoneMargin)
+}
 
 // Closed is closed when the helper's output has ended.
 func (control *Control) Closed() <-chan struct{} { return control.closed }
