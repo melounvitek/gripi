@@ -54,7 +54,8 @@ you.
 
 list prints each worker's name and SSH destination.
 
-remove forgets a worker. Files on the worker stay there.
+remove forgets a worker, unless repositories are on it. Files on the worker
+stay there.
 
 move runs a repository's sessions on a worker from now on: the repository of
 the folder, or of the session's folder, with all its worktrees, or the folder
@@ -97,8 +98,8 @@ Examples:
 Exit codes:
   0  success
   1  the worker cannot be reached or cannot run sessions, the name is taken,
-     no worker has the name, or the gateway refused or failed to move the
-     repository
+     no worker has the name, repositories are on the worker that remove
+     names, or the gateway refused or failed to move the repository
   2  usage error
 `
 
@@ -282,6 +283,15 @@ func removeWorker(arguments []string, stdout, stderr io.Writer) int {
 	index := slices.IndexFunc(workers, func(worker worker) bool { return worker.Name == name })
 	if index < 0 {
 		return failure(stderr, "worker", fmt.Errorf("no worker is named %q", name))
+	}
+	placements, err := remote.LoadPlacements(cfg.WorkerPlacementsPath)
+	if err != nil {
+		return failure(stderr, "worker", err)
+	}
+	for _, placement := range placements.All() {
+		if placement.Worker == name {
+			return failure(stderr, "worker", fmt.Errorf("%s is on %s; move it back with 'gripi worker return %s' first", placement.Unit.Main, name, placement.Unit.Main))
+		}
 	}
 	if err := saveWorkers(cfg.WorkersPath, slices.Delete(workers, index, index+1)); err != nil {
 		return failure(stderr, "worker", err)

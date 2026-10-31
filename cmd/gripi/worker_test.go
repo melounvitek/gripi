@@ -14,6 +14,8 @@ import (
 
 	"github.com/melounvitek/gripi/internal/config"
 	gateway "github.com/melounvitek/gripi/internal/server"
+	remote "github.com/melounvitek/gripi/internal/worker"
+	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
 // fakeSSHScript stands in for ssh. It records its arguments, then fails as ssh does with FAKE_SSH_ERROR, answers
@@ -48,6 +50,7 @@ func fakeSSH(t *testing.T) (arguments string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("GRIPI_WORKERS_PATH", filepath.Join(t.TempDir(), "workers.json"))
+	t.Setenv("GRIPI_WORKER_PLACEMENTS_PATH", filepath.Join(t.TempDir(), "worker-placements.json"))
 	t.Setenv("FAKE_SSH_HOME", home)
 	t.Setenv("PI_CODING_AGENT_DIR", "")
 	t.Setenv("FAKE_SSH_ERROR", "")
@@ -334,5 +337,26 @@ func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
 	}
 	if code, _, stderr := runCLI("worker", "move", "no-such-session", "beelink"); code != 1 || !strings.Contains(stderr, "no session matches") {
 		t.Fatalf("worker move of nothing = %d %q", code, stderr)
+	}
+}
+
+func TestWorkerRemoveRefusesAWorkerThatHasRepositories(t *testing.T) {
+	fakeSSH(t)
+	if code, _, stderr := runCLI("worker", "add", "gripi@beelink", "--name", "beelink"); code != 0 {
+		t.Fatalf("worker add: %s", stderr)
+	}
+	placements, err := remote.LoadPlacements(os.Getenv("GRIPI_WORKER_PLACEMENTS_PATH"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := placements.Add(remote.Placement{Worker: "beelink", Unit: mirror.Unit{Main: "/work/project"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, _, stderr := runCLI("worker", "remove", "beelink"); code != 1 || !strings.Contains(stderr, "/work/project") || !strings.Contains(stderr, "gripi worker return") {
+		t.Fatalf("worker remove of a worker with a repository = %d %q", code, stderr)
+	}
+	if workers := listedWorkers(t); len(workers) != 1 {
+		t.Fatalf("workers = %v", workers)
 	}
 }
