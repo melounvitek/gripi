@@ -46,6 +46,7 @@ type Destination struct {
 	written map[string]stamp // how the destination left the files it wrote
 	lines   int              // in the written file, which has a line for each change of a stamp
 	since   int64            // files it never wrote changed here if their ctime is this or later
+	all     bool             // every file changed here
 }
 
 // stamp is how a file looked once the destination had written it, kept in
@@ -186,6 +187,10 @@ func (d *Destination) writeStamps(paths map[string]bool) error {
 	_, err = file.Write(data)
 	return errors.Join(err, file.Close())
 }
+
+// SaveAsideReplaced makes every file here count as changed here, so that Serve saves aside whatever it replaces or
+// deletes, as for a copy that may have changes that the source never got.
+func (d *Destination) SaveAsideReplaced() { d.all = true }
 
 // Checkpoint returns the last applied barrier.
 func (d *Destination) Checkpoint() Checkpoint {
@@ -612,6 +617,9 @@ func (a *applier) apply(o op) error {
 func (a *applier) changed(p string, info fs.FileInfo) bool {
 	if a.aside == "" || gitIndex(p) {
 		return false
+	}
+	if a.d.all {
+		return true
 	}
 	if written, ok := a.d.written[p]; ok {
 		return written != stampOf(p, info)

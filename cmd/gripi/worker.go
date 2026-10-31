@@ -32,7 +32,7 @@ const workerHelp = `Usage:
 Internal, run by Gripi on a worker over SSH:
   gripi worker serve [--lease <duration>] [--runtime-dir <folder>]
   gripi worker attach [--runtime-dir <folder>] <session> <helper instance>
-  gripi worker receive <folder on main> <folder>
+  gripi worker receive [--aside <folder>] <folder on main> <folder>
   gripi worker mirror [--runtime-dir <folder>] <unit> <helper instance>
 
 A worker is another computer that runs sessions for this gateway. Gripi
@@ -66,12 +66,14 @@ changes replace it. move fails while one of the sessions is working. return
 brings the repository and its sessions back to this machine. When this
 machine has lost the worker, return waits until the worker must have stopped
 the sessions there, and says when that is; then the repository continues
-here as this machine last got it.
+here as this machine last got it, and the next move to the worker keeps
+what the worker had beyond that aside there.
 
 serve is the helper that runs the worker's sessions, and stops all of them
 when this machine stops answering. attach connects to the Pi of a session.
 receive makes a folder a copy of one that this machine sends, or, given the
-same folder twice, a copy of its repository at the same paths. mirror
+same folder twice, a copy of its repository at the same paths, and keeps
+what it replaces or deletes in the folder of --aside first. mirror
 connects this machine's copy of a repository, or of its sessions, to the
 helper, which sends their changes.
 

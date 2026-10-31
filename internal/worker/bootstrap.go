@@ -132,18 +132,23 @@ func (installation *Installation) Command(command []string) []string {
 // copyFolder makes the worker's folder to match main's folder from, sending only what differs. What exclude names,
 // as in mirror.Options, stays as it is on both sides.
 func (conn *Conn) copyFolder(ctx context.Context, from, to string, exclude []string) error {
-	return conn.send(ctx, mirror.Unit{Main: from}, to, mirror.Options{Exclude: exclude, Dereference: true})
+	return conn.send(ctx, mirror.Unit{Main: from}, to, "", mirror.Options{Exclude: exclude, Dereference: true})
 }
 
 // CopyUnit makes the worker's copy of a unit, at the same paths, match main's unit, sending only what differs.
-// Ignored folders stay as they are on both sides.
-func (conn *Conn) CopyUnit(ctx context.Context, unit mirror.Unit) error {
-	return conn.send(ctx, unit, unit.Main, mirror.Options{})
+// Ignored folders stay as they are on both sides. With aside, a folder on the worker on the unit's file system, what
+// the copy replaces or deletes there goes to aside first.
+func (conn *Conn) CopyUnit(ctx context.Context, unit mirror.Unit, aside string) error {
+	return conn.send(ctx, unit, unit.Main, aside, mirror.Options{})
 }
 
 // send copies main's unit to the folder to on the worker with `gripi worker receive`.
-func (conn *Conn) send(ctx context.Context, unit mirror.Unit, to string, options mirror.Options) error {
-	command, release, err := conn.Command(ctx, ShellQuote(conn.installDir+"/bin/gripi", "worker", "receive", unit.Main, to))
+func (conn *Conn) send(ctx context.Context, unit mirror.Unit, to, aside string, options mirror.Options) error {
+	words := []string{conn.installDir + "/bin/gripi", "worker", "receive"}
+	if aside != "" {
+		words = append(words, "--aside", aside)
+	}
+	command, release, err := conn.Command(ctx, ShellQuote(append(words, unit.Main, to)...))
 	if err != nil {
 		return err
 	}

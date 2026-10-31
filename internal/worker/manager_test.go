@@ -467,7 +467,7 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 		t.Fatal("the mirror of the repository on the worker did not start again")
 	}
 
-	// Once the worker is gone, the repository continues here.
+	// Once the worker is gone, the repository continues here, and the next move there keeps what the worker had aside.
 	killHelper()
 	for deadline := time.Now().Add(5 * time.Second); manager.Status("beelink").State != Unreachable; time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
@@ -479,7 +479,11 @@ func TestAWorkerThatMainLosesEndsItsRunningStepsAndComesBack(t *testing.T) {
 	if err := manager.Return(ctx, project, stop); err != nil {
 		t.Fatal(err)
 	}
-	if manager.Placement("beelink").Folder(project) {
-		t.Fatal("the repository is still on the gone worker")
+	if err := manager.Move(ctx, project, "beelink", stop); err != nil {
+		t.Fatal(err)
+	}
+	aside := filepath.Join(filepath.Dir(project), "."+filepath.Base(project)+".gripi-aside") + "/"
+	if calls := sshCalls(t, "'receive' '--aside' '"+aside); len(calls) != 1 {
+		t.Fatalf("copies that save aside what they replace: %q", calls)
 	}
 }

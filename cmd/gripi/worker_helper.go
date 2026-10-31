@@ -91,10 +91,16 @@ func mirrorWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer)
 
 // receiveWorker makes a folder on the worker a copy of a folder on main, which main sends over the channel.
 func receiveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if len(arguments) != 2 {
+	flags := flag.NewFlagSet("worker receive", flag.ContinueOnError)
+	aside := flags.String("aside", "", "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "worker", err.Error())
+	}
+	if len(positional) != 2 {
 		return usageError(stderr, "worker", "receive takes main's folder and the folder here")
 	}
-	if err := helper.Receive(context.Background(), stdin, stdout, arguments[0], arguments[1]); err != nil {
+	if err := helper.Receive(context.Background(), stdin, stdout, positional[0], positional[1], *aside); err != nil {
 		return failure(stderr, "worker", err)
 	}
 	return 0

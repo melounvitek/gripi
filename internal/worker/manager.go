@@ -732,8 +732,20 @@ func (manager *Manager) copyToWorker(ctx context.Context, worker *remote, unit m
 	if err != nil {
 		return err
 	}
-	if err := conn.CopyUnit(ctx, unit); err != nil {
+	// The worker's copy of a repository that continued on main without the worker may have changes that main never got.
+	stale := filepath.Join(manager.mirrorFolder(unit.Main), "stale")
+	var aside string
+	if name, _ := os.ReadFile(stale); string(name) == worker.name {
+		aside = filepath.Join(filepath.Dir(unit.Main), "."+filepath.Base(unit.Main)+".gripi-aside", time.Now().UTC().Format("20060102T150405Z"))
+	}
+	if err := conn.CopyUnit(ctx, unit, aside); err != nil {
 		return fmt.Errorf("copy %s to worker %s: %w", unit.Main, worker.name, err)
+	}
+	if aside != "" {
+		log.Printf("the copy of %s on worker %s may have had changes that this machine never got; what the move replaced there is in %s", unit.Main, worker.name, aside)
+		if err := os.Remove(stale); err != nil {
+			return err
+		}
 	}
 	for _, folder := range manager.sessionFolders(unit) {
 		if _, err := os.Stat(folder); err != nil {
@@ -836,7 +848,8 @@ func (manager *Manager) Return(ctx context.Context, folder string, stop func(inR
 // continueOnMain brings back the repository of a placement from a worker that main lost, or cannot reach, without the
 // worker: main's copies of the repository and of its sessions' folders are as the last barriers left them, which is
 // consistent. It refuses with unreachable while the worker may still run the repository's sessions, whose Pi must
-// never run again.
+// never run again. The worker's copy may have changes that main never got, which the next move to the worker saves
+// aside there.
 func (manager *Manager) continueOnMain(placement Placement, unreachable error) error {
 	unit := placement.Unit
 	if goneAt, now := manager.goneAt(placement.Worker), manager.options.Clock(); now.Before(goneAt) {
@@ -849,6 +862,9 @@ func (manager *Manager) continueOnMain(placement Placement, unreachable error) e
 		if _, err := mirror.NewDestination(filepath.Join(manager.mirrorFolder(main), "state")); err != nil {
 			return err
 		}
+	}
+	if err := os.WriteFile(filepath.Join(manager.mirrorFolder(unit.Main), "stale"), []byte(placement.Worker), 0600); err != nil {
+		return err
 	}
 	if err := manager.options.Placements.Remove(unit.Main); err != nil {
 		return err
