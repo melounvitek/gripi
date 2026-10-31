@@ -39,6 +39,7 @@ Gateway commands:
   serve     Start the gateway
   password  Create the admin password if it is missing
   check     Check that this build works with this machine's Pi
+  worker    Add, list or remove computers that run sessions over SSH
 
 Run 'gripi help <command>' or 'gripi <command> --help' for details.
 `
@@ -100,6 +101,7 @@ settings but needs no running gateway.
 
 The gateway runs this on a new version before it updates to it.
 `},
+	{name: "worker", summary: "Add, list or remove computers that run sessions over SSH", run: manageWorkers, help: workerHelp},
 }
 
 func run(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {

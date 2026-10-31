@@ -363,6 +363,7 @@ Gripi stores its own data separately from Pi’s. Each location can be changed w
 | `~/.pi/gripi/pinned-sessions.json` | Pinned sessions | `GRIPI_PINNED_SESSIONS_PATH` |
 | `~/.pi/gripi/session-tags.json` | Session tags | `GRIPI_SESSION_TAGS_PATH` |
 | `~/.pi/gripi/environment.json` | Saved [environment variables](#environment-variables); contains secrets in plain text, so do not share it | `GRIPI_ENVIRONMENT_PATH` |
+| `~/.pi/gripi/workers.json` | Workers added with `gripi worker` | `GRIPI_WORKERS_PATH` |
 | `~/.pi/gripi/attachments/` | Uploaded attachments | `GRIPI_ATTACHMENTS_ROOT` |
 | `~/.pi/gripi/web-push-vapid.json` | Web Push keys | `GRIPI_WEB_PUSH_VAPID_PATH` |
 | `~/.pi/gripi/push-subscriptions.json` | Web Push subscriptions | `GRIPI_PUSH_SUBSCRIPTIONS_PATH` |

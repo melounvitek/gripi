@@ -52,7 +52,8 @@ func TestEveryCommandExplainsItselfWithoutRunning(t *testing.T) {
 }
 
 func TestUnknownCommandsAndStrayArgumentsFailWithAHint(t *testing.T) {
-	for _, arguments := range [][]string{{"nope"}, {"help", "nope"}, {"--version"}, {"serve", "extra"}, {"password", "extra"}} {
+	for _, arguments := range [][]string{{"nope"}, {"help", "nope"}, {"--version"}, {"serve", "extra"}, {"password", "extra"},
+		{"worker"}, {"worker", "nope"}, {"worker", "add"}, {"worker", "add", "a@b", "c@d"}, {"worker", "list", "extra"}, {"worker", "remove"}} {
 		code, stdout, stderr := runCLI(arguments...)
 		if code != 2 || stdout != "" || !strings.Contains(stderr, "gripi help") {
 			t.Fatalf("gripi %v = %d, stdout %q, stderr %q", arguments, code, stdout, stderr)

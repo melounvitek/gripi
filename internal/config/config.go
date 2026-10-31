@@ -34,6 +34,7 @@ type Config struct {
 	WorkspaceSecretPath       string
 	WorkspaceAccessPath       string
 	WorkspaceOwnershipPath    string
+	WorkersPath               string
 	RestartPath               string
 	SocketPath                string
 	AdminPassword             string
@@ -183,6 +184,7 @@ func Load(environ []string) (Config, error) {
 		WorkspaceSecretPath:       valueOr(values, "GRIPI_WORKSPACE_SECRET_PATH", filepath.Join(home, ".pi", "gripi", "workspace-secret")),
 		WorkspaceAccessPath:       valueOr(values, "GRIPI_WORKSPACE_ACCESS_PATH", filepath.Join(home, ".pi", "gripi", "workspace-access.json")),
 		WorkspaceOwnershipPath:    valueOr(values, "GRIPI_WORKSPACE_OWNERSHIP_PATH", filepath.Join(home, ".pi", "gripi", "session-owners.json")),
+		WorkersPath:               valueOr(values, "GRIPI_WORKERS_PATH", filepath.Join(home, ".pi", "gripi", "workers.json")),
 		RestartPath:               valueOr(process, "GRIPI_RESTART_PATH", filepath.Join(home, ".pi", "gripi", "restart-request")),
 		SocketPath:                socketPath,
 		AdminPassword:             adminPassword,

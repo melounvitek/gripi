@@ -113,6 +113,8 @@ Other commands start a session (`new`), stop what one is working on (`stop`), co
 
 An agent in a Gripi session can also [run a command as root](docs/configuration.md#running-commands-as-root) with `gripi sudo -- <command>`, once you enter your password in Gripi.
 
+`gripi worker add user@host` adds a worker, another computer that runs sessions over SSH; `gripi worker list` and `gripi worker remove` list and forget workers. These need no running gateway.
+
 When `bin/start` starts the gateway installed at `~/.local/share/gripi`, it links the command into `~/.local/bin`, unless something there is already named `gripi`. `~/.local/bin` must be on your `PATH`.
 
 ## Updating
