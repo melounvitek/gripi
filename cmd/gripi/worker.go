@@ -40,8 +40,8 @@ Internal, run by Gripi on a worker over SSH:
 
 A worker is another computer that runs sessions for this gateway. Gripi
 reaches it with this machine's ssh, as the gateway's user and with that
-user's SSH configuration. Workers belong to the whole gateway, and these
-commands need no running gateway.
+user's SSH configuration. Workers belong to the whole gateway. add, list and
+remove need no running gateway; move, return, forward and unforward do.
 
 add connects to the worker without asking for anything, so ssh must already
 trust the worker's host key and log in with a key. It checks that the worker
