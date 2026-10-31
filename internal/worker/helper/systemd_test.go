@@ -305,3 +305,18 @@ func TestExtensionSocketFailsClosedWithoutAMirror(t *testing.T) {
 		t.Fatalf("answers = %q", answers)
 	}
 }
+
+func TestAuthApplyWritesTheWorkersLogins(t *testing.T) {
+	unit := startUnitHelper(t, helper.DefaultLease)
+	path := filepath.Join(t.TempDir(), "auth.json")
+
+	if response := unit.request(map[string]any{"type": "auth.apply", "path": path, "contents": `{"fake":{"type":"api_key","key":"k"}}`}); !response.OK {
+		t.Fatalf("auth.apply = %+v", response)
+	}
+	if contents, _ := os.ReadFile(path); string(contents) != `{"fake":{"type":"api_key","key":"k"}}` {
+		t.Fatalf("auth.json = %q", contents)
+	}
+	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("Pi's lock after the write: %v", err)
+	}
+}

@@ -1,8 +1,6 @@
 package helper
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +19,7 @@ import (
 // another one later. Only session.release kills them.
 type session struct {
 	cgroup    string
+	cwd       string         // Pi's folder, which tells the unit whose mirror answers its barriers
 	listeners []net.Listener // the attach and extension sockets
 
 	// While Pi runs:
@@ -79,6 +78,7 @@ func (s *server) create(request Message) error {
 	if current.pi != nil {
 		return fmt.Errorf("Pi already runs for session %s", id)
 	}
+	current.cwd = request.Cwd
 
 	environment := append(append(os.Environ(), request.Env...), "GRIPI_WORKER_SOCKET="+current.listeners[1].Addr().String())
 	path, err := lookPath(request.Args[0], environment)
@@ -215,14 +215,7 @@ func (s *server) serveAttach(current *session, listener net.Listener) {
 
 func (s *server) attach(current *session, connection net.Conn) {
 	defer connection.Close()
-	reader := bufio.NewReader(connection)
-	connection.SetReadDeadline(time.Now().Add(10 * time.Second))
-	var hello Message
-	line, err := reader.ReadBytes('\n')
-	if err == nil {
-		err = json.Unmarshal(line, &hello)
-	}
-	connection.SetReadDeadline(time.Time{})
+	hello, reader, err := readHello(connection)
 	if err != nil {
 		return
 	}
@@ -239,11 +232,7 @@ func (s *server) attach(current *session, connection net.Conn) {
 		current.attached = true
 	}
 	s.mu.Unlock()
-	reply := Message{OK: err == nil}
-	if err != nil {
-		reply.Error = err.Error()
-	}
-	if json.NewEncoder(connection).Encode(reply) != nil || err != nil {
+	if !replyHello(connection, err) {
 		return
 	}
 	go func() {
@@ -276,30 +265,5 @@ func Attach(runtimeDir, id, instance string, stdin io.Reader, stdout io.Writer) 
 	if err := checkSession(id); err != nil {
 		return err
 	}
-	connection, err := net.Dial("unix", filepath.Join(runtimeDir, id+".attach"))
-	if err != nil {
-		return fmt.Errorf("the helper does not run session %s: %w", id, err)
-	}
-	defer connection.Close()
-	if err := json.NewEncoder(connection).Encode(Message{Instance: instance}); err != nil {
-		return err
-	}
-	reader := bufio.NewReader(connection)
-	var reply Message
-	line, err := reader.ReadBytes('\n')
-	if err == nil {
-		err = json.Unmarshal(line, &reply)
-	}
-	if err != nil {
-		return fmt.Errorf("the helper did not answer: %w", err)
-	}
-	if !reply.OK {
-		return errors.New(reply.Error)
-	}
-	go func() {
-		io.Copy(connection, stdin)
-		connection.(*net.UnixConn).CloseWrite()
-	}()
-	_, err = io.Copy(stdout, reader)
-	return err
+	return pass(filepath.Join(runtimeDir, id+".attach"), Message{Instance: instance}, stdin, stdout)
 }

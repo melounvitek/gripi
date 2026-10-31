@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/melounvitek/gripi/internal/worker/helper"
+	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
 // GoneMargin is how much longer than the lease main waits before it treats a worker as gone, for clocks that run at
@@ -240,6 +241,17 @@ func (control *Control) ReleaseSession(ctx context.Context, id string) error {
 // ApplyAuth writes a login file on the worker under Pi's lock.
 func (control *Control) ApplyAuth(ctx context.Context, path, contents string) error {
 	return control.call(ctx, helper.Message{Type: "auth.apply", Path: path, Contents: contents})
+}
+
+// StartMirror prepares the helper's mirror of a unit, which sends the unit's changes once AttachMirror connects main's
+// copy to it, and answers the barriers of the sessions in the unit.
+func (control *Control) StartMirror(ctx context.Context, unit mirror.Unit) error {
+	return control.call(ctx, helper.Message{Type: "mirror.start", Unit: &unit})
+}
+
+// StopMirror sends main the last changes of the unit whose main folder is main, then stops its mirror.
+func (control *Control) StopMirror(ctx context.Context, main string) error {
+	return control.call(ctx, helper.Message{Type: "mirror.stop", Path: main})
 }
 
 // LastAnswer is when main last answered a ping.

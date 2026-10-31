@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/melounvitek/gripi/internal/worker/auth"
 	"github.com/melounvitek/gripi/internal/worker/helper"
 )
 
@@ -39,6 +40,7 @@ func serveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) 
 	signal.Ignore(syscall.SIGPIPE)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer stop()
+	options.ApplyAuth = func(path, contents string) error { return auth.WriteLocked(ctx, path, []byte(contents)) }
 	if err := helper.Serve(ctx, stdin, stdout, options); err != nil {
 		return failure(stderr, "worker", err)
 	}
@@ -61,6 +63,38 @@ func attachWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer)
 		return failure(stderr, "worker", err)
 	}
 	if err := helper.Attach(folder, positional[0], positional[1], stdin, stdout); err != nil {
+		return failure(stderr, "worker", err)
+	}
+	return 0
+}
+
+// mirrorWorker connects main's copy of a unit to the unit's mirror in the helper.
+func mirrorWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("worker mirror", flag.ContinueOnError)
+	runtimeDir := flags.String("runtime-dir", "", "")
+	positional, err := parseArguments(flags, arguments)
+	if err != nil {
+		return usageError(stderr, "worker", err.Error())
+	}
+	if len(positional) != 2 {
+		return usageError(stderr, "worker", "mirror takes a unit's main folder and a helper instance")
+	}
+	folder, err := runtimeDirectory(*runtimeDir)
+	if err != nil {
+		return failure(stderr, "worker", err)
+	}
+	if err := helper.AttachMirror(folder, positional[0], positional[1], stdin, stdout); err != nil {
+		return failure(stderr, "worker", err)
+	}
+	return 0
+}
+
+// sendWorker sends a folder on the worker to main once, which receives it over the channel.
+func sendWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(arguments) != 1 {
+		return usageError(stderr, "worker", "send takes one folder")
+	}
+	if err := helper.Send(context.Background(), stdin, stdout, arguments[0]); err != nil {
 		return failure(stderr, "worker", err)
 	}
 	return 0

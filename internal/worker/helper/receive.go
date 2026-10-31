@@ -9,15 +9,20 @@ import (
 	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
-// Receive makes the folder to a copy of main's folder from, which main sends with mirror.Sync over input and output.
-// While it runs, it keeps the copy's state next to to, on the same file system.
+// Receive makes the folder to a copy of the other side's folder from, which the other side sends with mirror.Sync over
+// input and output. When from and to are the same, the copy keeps the other side's paths, also for the other
+// folders of from's unit, such as linked worktrees. While it runs, it keeps the copy's state next to to, on the same
+// file system.
 func Receive(ctx context.Context, input io.Reader, output io.Writer, from, to string) error {
 	state := filepath.Join(filepath.Dir(to), "."+filepath.Base(to)+".gripi-receive")
-	// What an interrupted copy left there is sent again, because main compares what the folder has.
+	// What an interrupted copy left there is sent again, because the sender compares what the folder has.
 	if err := os.RemoveAll(state); err != nil {
 		return err
 	}
 	defer os.RemoveAll(state)
+	if from == to {
+		from, to = "/", "/"
+	}
 	destination, err := mirror.NewMovedDestination(state, from, to)
 	if err != nil {
 		return err
@@ -27,4 +32,12 @@ func Receive(ctx context.Context, input io.Reader, output io.Writer, from, to st
 		io.Writer
 	}{input, output}
 	return destination.Serve(ctx, stream, filepath.Join(state, "aside"))
+}
+
+// Send sends a folder once to the other side, which receives it with Receive over input and output.
+func Send(ctx context.Context, input io.Reader, output io.Writer, folder string) error {
+	return mirror.Sync(ctx, struct {
+		io.Reader
+		io.Writer
+	}{input, output}, mirror.Unit{Main: folder}, mirror.Options{})
 }

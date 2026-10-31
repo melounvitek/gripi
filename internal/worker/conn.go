@@ -127,11 +127,22 @@ func (conn *Conn) start(ctx context.Context, version string) error {
 // Attach returns ssh that passes the RPC of a session's Pi through, to run instead of Pi. Call release once it has
 // ended. When its input ends, Pi's input ends.
 func (conn *Conn) Attach(ctx context.Context, session string) (command *exec.Cmd, release func(), err error) {
-	attach := []string{conn.installDir + "/bin/gripi", "worker", "attach"}
+	return conn.stream(ctx, "attach", session)
+}
+
+// AttachMirror returns ssh that connects main's copy of a unit to the helper's mirror of it, which StartMirror
+// prepared, for a mirror.Destination. Call release once it has ended.
+func (conn *Conn) AttachMirror(ctx context.Context, main string) (command *exec.Cmd, release func(), err error) {
+	return conn.stream(ctx, "mirror", main)
+}
+
+// stream returns ssh that runs `gripi worker <subcommand> <name> <instance>` on the worker.
+func (conn *Conn) stream(ctx context.Context, subcommand, name string) (*exec.Cmd, func(), error) {
+	words := []string{conn.installDir + "/bin/gripi", "worker", subcommand}
 	if conn.options.RuntimeDir != "" {
-		attach = append(attach, "--runtime-dir", conn.options.RuntimeDir)
+		words = append(words, "--runtime-dir", conn.options.RuntimeDir)
 	}
-	return conn.Command(ctx, ShellQuote(append(attach, session, conn.Instance())...))
+	return conn.Command(ctx, ShellQuote(append(words, name, conn.Instance())...))
 }
 
 // Close stops the helper, which kills every session's processes, and closes the connection.

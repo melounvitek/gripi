@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/melounvitek/gripi/internal/worker/mirror"
 	"golang.org/x/sys/unix"
 )
 
@@ -27,21 +28,23 @@ import (
 //
 //   - helper to main: {"type":"hello","instance":…,"version":…} once, then {"id":N,"type":"ping"} every second;
 //   - main to helper: {"id":N,"type":"session.create","session":…,"cwd":…,"args":[…],"env":["NAME=value",…]},
-//     session.close and session.release with "session", and auth.apply with "path" and "contents";
+//     session.close and session.release with "session", auth.apply with "path" and "contents", mirror.start with
+//     "unit" ({"main":…,"worktrees":[…],"git_dir":…}), and mirror.stop with the unit's main folder as "path";
 //   - answers: {"id":N,"ok":true} or {"id":N,"ok":false,"error":"…"}.
 type Message struct {
-	ID       uint64   `json:"id,omitempty"`
-	Type     string   `json:"type,omitempty"`
-	Instance string   `json:"instance,omitempty"`
-	Version  string   `json:"version,omitempty"`
-	Session  string   `json:"session,omitempty"`
-	Cwd      string   `json:"cwd,omitempty"`
-	Args     []string `json:"args,omitempty"`
-	Env      []string `json:"env,omitempty"`
-	Path     string   `json:"path,omitempty"`
-	Contents string   `json:"contents,omitempty"`
-	OK       bool     `json:"ok,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	ID       uint64       `json:"id,omitempty"`
+	Type     string       `json:"type,omitempty"`
+	Instance string       `json:"instance,omitempty"`
+	Version  string       `json:"version,omitempty"`
+	Session  string       `json:"session,omitempty"`
+	Cwd      string       `json:"cwd,omitempty"`
+	Args     []string     `json:"args,omitempty"`
+	Env      []string     `json:"env,omitempty"`
+	Path     string       `json:"path,omitempty"`
+	Contents string       `json:"contents,omitempty"`
+	Unit     *mirror.Unit `json:"unit,omitempty"`
+	OK       bool         `json:"ok,omitempty"`
+	Error    string       `json:"error,omitempty"`
 }
 
 // Response answers a request, with "ok" even when it is false.
@@ -71,7 +74,8 @@ type Options struct {
 	Cgroup string
 	// Lease is DefaultLease when zero.
 	Lease time.Duration
-	// Mirror answers the worker extension's barriers and health checks. Without it, barriers fail.
+	// Mirror answers the worker extension's barriers and health checks. Without it, the helper answers them from the
+	// mirror of the unit that holds the session's folder (mirror.start), and fails barriers of other sessions.
 	Mirror Mirror
 	// ApplyAuth writes a login file for auth.apply. Without it, auth.apply fails.
 	ApplyAuth func(path, contents string) error
@@ -91,6 +95,7 @@ type server struct {
 	renewed  time.Duration            // the lease runs from here
 	answered bool
 	sessions map[string]*session
+	mirrors  map[string]*mirroredUnit // by the unit's main folder
 }
 
 // Serve runs the control protocol on input and output. It returns nil when main closes input, ErrLeaseExpired when main
@@ -111,14 +116,24 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, options Optio
 	rand.Read(instance)
 	s := &server{
 		options: options, instance: hex.EncodeToString(instance), output: make(chan any, 64), done: make(chan struct{}),
-		pings: map[uint64]time.Duration{}, renewed: options.Clock(), sessions: map[string]*session{},
+		pings: map[uint64]time.Duration{}, renewed: options.Clock(), sessions: map[string]*session{}, mirrors: map[string]*mirroredUnit{},
 	}
+	if s.options.Mirror == nil {
+		s.options.Mirror = s
+	}
+	mirrors, err := net.Listen("unix", filepath.Join(options.RuntimeDir, mirrorSocket))
+	if err != nil {
+		return err
+	}
+	defer mirrors.Close()
+	go s.serveMirrors(mirrors)
 	defer close(s.done)
 	go s.write(output)
 	closed := make(chan struct{})
 	go s.read(input, closed)
 	s.send(Message{Type: "hello", Instance: s.instance, Version: options.Version})
 	err = s.keepLease(ctx, closed)
+	s.stopMirrors()
 	s.mu.Lock()
 	ids := make([]string, 0, len(s.sessions))
 	for id := range s.sessions {
@@ -244,6 +259,10 @@ func (s *server) handle(request Message) {
 		err = s.close(request.Session)
 	case "session.release":
 		err = s.release(request.Session)
+	case "mirror.start":
+		err = s.startMirror(request.Unit)
+	case "mirror.stop":
+		err = s.stopMirror(request.Path)
 	case "auth.apply":
 		if s.options.ApplyAuth == nil {
 			err = errors.New("this helper cannot write logins")

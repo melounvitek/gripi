@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/melounvitek/gripi/internal/agent"
+	"github.com/melounvitek/gripi/internal/worker/helper"
 	"github.com/melounvitek/gripi/internal/worker/mirror"
 )
 
@@ -132,7 +133,18 @@ func (installation *Installation) Command(command []string) []string {
 // copyFolder makes the worker's folder to match main's folder from, sending only what differs. What exclude names,
 // as in mirror.Options, stays as it is on both sides.
 func (conn *Conn) copyFolder(ctx context.Context, from, to string, exclude []string) error {
-	command, release, err := conn.Command(ctx, ShellQuote(conn.installDir+"/bin/gripi", "worker", "receive", from, to))
+	return conn.send(ctx, mirror.Unit{Main: from}, to, mirror.Options{Exclude: exclude, Dereference: true})
+}
+
+// CopyUnit makes the worker's copy of a unit, at the same paths, match main's unit, sending only what differs.
+// Ignored folders stay as they are on both sides.
+func (conn *Conn) CopyUnit(ctx context.Context, unit mirror.Unit) error {
+	return conn.send(ctx, unit, unit.Main, mirror.Options{})
+}
+
+// send copies main's unit to the folder to on the worker with `gripi worker receive`.
+func (conn *Conn) send(ctx context.Context, unit mirror.Unit, to string, options mirror.Options) error {
+	command, release, err := conn.Command(ctx, ShellQuote(conn.installDir+"/bin/gripi", "worker", "receive", unit.Main, to))
 	if err != nil {
 		return err
 	}
@@ -156,12 +168,45 @@ func (conn *Conn) copyFolder(ctx context.Context, from, to string, exclude []str
 		io.Reader
 		io.WriteCloser
 	}{output, input}
-	err = mirror.Sync(ctx, stream, mirror.Unit{Main: from}, mirror.Options{Exclude: exclude, Dereference: true})
+	err = mirror.Sync(ctx, stream, unit, options)
 	if waited := command.Wait(); err == nil {
 		err = waited
 	}
 	if err != nil {
 		return fmt.Errorf("%w %s", err, stderr)
+	}
+	return nil
+}
+
+// FetchFolder makes main's folder match the worker's folder at the same path, which `gripi worker send` sends.
+func (conn *Conn) FetchFolder(ctx context.Context, folder string) error {
+	command, release, err := conn.Command(ctx, ShellQuote(conn.installDir+"/bin/gripi", "worker", "send", folder))
+	if err != nil {
+		return err
+	}
+	defer release()
+	input, err := command.StdinPipe()
+	if err != nil {
+		return err
+	}
+	output, err := command.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr := &lastLines{}
+	command.Stderr = stderr
+	if err := command.Start(); err != nil {
+		return err
+	}
+	stop := context.AfterFunc(ctx, func() { command.Process.Kill() })
+	defer stop()
+	err = helper.Receive(ctx, output, input, folder, folder)
+	input.Close()
+	if waited := command.Wait(); err == nil {
+		err = waited
+	}
+	if err != nil {
+		return fmt.Errorf("copy %s from %s: %w %s", folder, conn.options.Destination, err, stderr)
 	}
 	return nil
 }
