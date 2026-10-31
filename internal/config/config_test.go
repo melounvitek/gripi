@@ -26,6 +26,7 @@ func TestLoadReadsGatewayEnvWithoutOverridingProcessEnvironment(t *testing.T) {
 		"GRIPI_SESSION_TAGS_PATH=/isolated/tags.json",
 		"GRIPI_ENVIRONMENT_PATH=/isolated/environment.json",
 		"GRIPI_WORKERS_PATH=/isolated/workers.json",
+		"GRIPI_WORKER_PLACEMENTS_PATH=/isolated/worker-placements.json",
 		"GRIPI_HOST=localhost",
 		"GRIPI_PORT=7654",
 	})
@@ -50,6 +51,9 @@ func TestLoadReadsGatewayEnvWithoutOverridingProcessEnvironment(t *testing.T) {
 	}
 	if cfg.WorkersPath != "/isolated/workers.json" {
 		t.Fatalf("WorkersPath = %q", cfg.WorkersPath)
+	}
+	if cfg.WorkerPlacementsPath != "/isolated/worker-placements.json" {
+		t.Fatalf("WorkerPlacementsPath = %q", cfg.WorkerPlacementsPath)
 	}
 	if !cfg.MultiUserMode {
 		t.Fatal("MultiUserMode = false")
@@ -100,6 +104,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.WorkersPath != filepath.Join(home, ".pi", "gripi", "workers.json") {
 		t.Fatalf("WorkersPath = %q", cfg.WorkersPath)
+	}
+	if cfg.WorkerPlacementsPath != filepath.Join(home, ".pi", "gripi", "worker-placements.json") {
+		t.Fatalf("WorkerPlacementsPath = %q", cfg.WorkerPlacementsPath)
 	}
 	if cfg.PiAgentDir != filepath.Join(home, ".pi", "agent") {
 		t.Fatalf("PiAgentDir = %q", cfg.PiAgentDir)

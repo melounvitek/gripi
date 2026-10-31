@@ -13,9 +13,9 @@ import (
 // worktrees and their common Git folder. Paths are absolute and the same on
 // both machines.
 type Unit struct {
-	Main      string
-	Worktrees []string
-	GitDir    string // empty for a folder outside Git
+	Main      string   `json:"main"`
+	Worktrees []string `json:"worktrees,omitempty"`
+	GitDir    string   `json:"git_dir,omitempty"` // empty for a folder outside Git
 }
 
 // Discover finds the unit of the folder dir: the repository it belongs to with
@@ -82,6 +82,16 @@ func (u Unit) roots() []string {
 		roots = append(roots, u.GitDir)
 	}
 	return roots
+}
+
+// Contains reports whether path is in one of the unit's folders.
+func (u Unit) Contains(path string) bool {
+	for _, root := range u.roots() {
+		if within(path, root) {
+			return true
+		}
+	}
+	return false
 }
 
 func within(path, dir string) bool {
