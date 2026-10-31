@@ -45,6 +45,7 @@ func fakeSSH(t *testing.T) (arguments string) {
 	t.Setenv("HOME", home)
 	t.Setenv("GRIPI_WORKERS_PATH", filepath.Join(t.TempDir(), "workers.json"))
 	t.Setenv("FAKE_SSH_HOME", home)
+	t.Setenv("PI_CODING_AGENT_DIR", "")
 	t.Setenv("FAKE_SSH_ERROR", "")
 	t.Setenv("FAKE_SSH_ANSWER", "")
 	arguments = filepath.Join(directory, "arguments")
@@ -109,6 +110,9 @@ func TestWorkerAddChecksTheWorkerOverSSHAndRemembersIt(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("workers file = %v, %v", info, err)
 	}
+	if info, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".pi", "agent")); err != nil || !info.IsDir() {
+		t.Fatalf("Pi's agent folder on the worker = %v, %v", info, err)
+	}
 
 	code, stdout, stderr = runCLI("worker", "list")
 	if code != 0 || stderr != "" || !strings.Contains(stdout, "beelink-omarchy") || !strings.Contains(stdout, destination) {
@@ -164,10 +168,10 @@ func TestWorkerAddRefusesAWorkerThatCannotRunThisMachinesPi(t *testing.T) {
 		otherSystem = "Linux"
 	}
 	for _, test := range []struct{ name, answer, reason string }{
-		{"no Git", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\nsystemd\n", "no Git"},
-		{"no systemd", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\n", "systemd"},
-		{"another system", otherSystem + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n", "same operating system and architecture"},
-		{"another architecture", system + "\nriscv128\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n", "same operating system and architecture"},
+		{"no Git", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\nsystemd\nagent\n", "no Git"},
+		{"no systemd", system + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nagent\n", "systemd"},
+		{"another system", otherSystem + "\n" + machine + "\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\nagent\n", "same operating system and architecture"},
+		{"another architecture", system + "\nriscv128\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\nagent\n", "same operating system and architecture"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fakeSSH(t)
@@ -182,10 +186,50 @@ func TestWorkerAddRefusesAWorkerThatCannotRunThisMachinesPi(t *testing.T) {
 	}
 }
 
-func TestWorkerAddWarnsWhenTheWorkersHomeHasAnotherPath(t *testing.T) {
+func TestWorkerAddFailsWhenTheWorkerCannotCreatePisAgentFolder(t *testing.T) {
 	fakeSSH(t)
 	system, machine := thisSystem(t)
 	t.Setenv("FAKE_SSH_ANSWER", system+"\n"+machine+"\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\n")
+
+	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
+	if code != 1 || stdout != "" {
+		t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	home := os.Getenv("HOME")
+	for _, expected := range []string{filepath.Join(home, ".pi", "agent"), "/home/gripi_worker", "sudo usermod -m -d " + home + " gripi_worker", "same paths"} {
+		if !strings.Contains(stderr, expected) {
+			t.Fatalf("stderr %q does not contain %q", stderr, expected)
+		}
+	}
+	assertNoWorkersFile(t)
+}
+
+func TestWorkerAddChecksThatTheWorkerCanWriteToPisAgentFolder(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory write permissions")
+	}
+	fakeSSH(t)
+	agentDir := filepath.Join(t.TempDir(), "read-only", "agent")
+	if err := os.MkdirAll(agentDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(agentDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(agentDir, 0700) })
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+
+	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, agentDir) || strings.Contains(stderr, "usermod") {
+		t.Fatalf("gripi worker add = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	assertNoWorkersFile(t)
+}
+
+func TestWorkerAddWarnsWhenTheWorkersHomeHasAnotherPath(t *testing.T) {
+	fakeSSH(t)
+	system, machine := thisSystem(t)
+	t.Setenv("FAKE_SSH_ANSWER", system+"\n"+machine+"\ngripi_worker\n/home/gripi_worker\ngit\nsystemd\nagent\n")
 
 	code, stdout, stderr := runCLI("worker", "add", "gripi_worker@beelink")
 	if code != 0 || !strings.Contains(stdout, "beelink") {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/melounvitek/gripi/internal/config"
 	"github.com/melounvitek/gripi/internal/state"
+	remote "github.com/melounvitek/gripi/internal/worker"
 )
 
 const workerHelp = `Usage:
@@ -33,9 +34,11 @@ trust the worker's host key and log in with a key. It checks that the worker
 has Git, the same operating system and architecture as this machine, and a
 systemd user manager with cgroup v2, which lets Gripi stop everything a
 session started.
-Sessions use the same paths on the worker as here, so add warns when the
-worker's home folder has another path. The worker will hold a full copy of
-Pi's configuration, including logins; keeping it secure is up to you.
+Sessions use the same paths on the worker as here, so add fails when the
+worker's user cannot create Pi's folder (~/.pi/agent) at its path here, and
+warns when the worker's home folder has another path. The worker will hold a
+full copy of Pi's configuration, including logins; keeping it secure is up to
+you.
 
 list prints each worker's name and SSH destination.
 
@@ -71,11 +74,15 @@ type worker struct {
 	Destination string `json:"destination"`
 }
 
-// workerProbe prints the worker's system, architecture, user and home, then "git" if it has Git and "systemd" if
-// systemd-run can start a command under the user's systemd with cgroup v2.
+// workerProbe prints the worker's system, architecture, user and home, then "git" if it has Git, "systemd" if
+// systemd-run can start a command under the user's systemd with cgroup v2, and "agent" if the user can create and
+// write to Pi's agent folder at its path on main.
 // ssh runs it in the worker user's shell, so it uses only what both sh and fish accept.
-const workerProbe = `uname -s; uname -m; id -un; echo "$HOME"; command -v git >/dev/null && echo git; ` +
-	`systemd-run --user --pipe --quiet test -f /sys/fs/cgroup/cgroup.controllers && echo systemd`
+func workerProbe(agentDir string) string {
+	return `uname -s; uname -m; id -un; echo "$HOME"; command -v git >/dev/null && echo git; ` +
+		`systemd-run --user --pipe --quiet test -f /sys/fs/cgroup/cgroup.controllers && echo systemd; ` +
+		"mkdir -p " + remote.ShellQuote(agentDir) + " && test -w " + remote.ShellQuote(agentDir) + " && echo agent"
+}
 
 func manageWorkers(arguments []string, _ io.Reader, stdout, stderr io.Writer) int {
 	if len(arguments) == 0 {
@@ -114,7 +121,7 @@ func addWorker(arguments []string, stdout, stderr io.Writer) int {
 		return failure(stderr, "worker", fmt.Errorf("a worker named %q exists already; choose another name with --name", *name))
 	}
 
-	lines, err := probeWorker(destination)
+	lines, err := probeWorker(destination, workerProbe(cfg.PiAgentDir))
 	if err != nil {
 		return failure(stderr, "worker", err)
 	}
@@ -134,7 +141,18 @@ func addWorker(arguments []string, stdout, stderr io.Writer) int {
 	if !slices.Contains(lines[4:], "systemd") {
 		return failure(stderr, "worker", fmt.Errorf("%s cannot start commands with 'systemd-run --user' under cgroup v2; Gripi needs that to stop everything a session started", destination))
 	}
-	if user, home := lines[2], lines[3]; home != cfg.Home {
+	user, home := lines[2], lines[3]
+	if !slices.Contains(lines[4:], "agent") {
+		err := fmt.Errorf("%s cannot create Pi's folder %s on %s, or cannot write to it.\nSessions use the same paths on the worker as here.", user, cfg.PiAgentDir, destination)
+		if home != cfg.Home {
+			err = fmt.Errorf(`%w
+The home folder of %s there is %s, but here it is %s. Move it by running
+this on the worker as an administrator, while %s is logged out:
+  sudo usermod -m -d %s %s`, err, user, home, cfg.Home, user, cfg.Home, user)
+		}
+		return failure(stderr, "worker", err)
+	}
+	if home != cfg.Home {
 		fmt.Fprintf(stderr, `Warning: the home folder of %s on the worker is %s, but here it is %s.
 Sessions use the same paths on the worker, so move the home folder by running
 this on the worker as an administrator, while %s is logged out:
@@ -153,14 +171,14 @@ Keeping it secure is up to you.
 	return 0
 }
 
-// probeWorker runs workerProbe on the worker and returns the lines it printed.
-func probeWorker(destination string) ([]string, error) {
-	command := exec.Command("ssh", "-o", "BatchMode=yes", "--", destination, workerProbe)
+// probeWorker runs probe on the worker and returns the lines it printed.
+func probeWorker(destination, probe string) ([]string, error) {
+	command := exec.Command("ssh", "-o", "BatchMode=yes", "--", destination, probe)
 	var errorOutput strings.Builder
 	command.Stderr = &errorOutput
 	output, err := command.Output()
 	var exit *exec.ExitError
-	// ssh exits with 255 when it fails, and otherwise with the probe's status, which is 1 without systemd.
+	// ssh exits with 255 when it fails, and otherwise with the probe's status, which is 1 when a check fails.
 	if errors.As(err, &exit) && exit.ExitCode() == 255 {
 		sshError := strings.TrimSpace(errorOutput.String())
 		switch {
