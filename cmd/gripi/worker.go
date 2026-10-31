@@ -27,6 +27,7 @@ const workerHelp = `Usage:
 Internal, run by Gripi on a worker over SSH:
   gripi worker serve [--lease <duration>] [--runtime-dir <folder>]
   gripi worker attach [--runtime-dir <folder>] <session> <helper instance>
+  gripi worker receive <folder on main> <folder>
 
 A worker is another computer that runs sessions for this gateway. Gripi
 reaches it with this machine's ssh, as the gateway's user and with that
@@ -50,6 +51,7 @@ remove forgets a worker. Files on the worker stay there.
 
 serve is the helper that runs the worker's sessions, and stops all of them
 when this machine stops answering. attach connects to the Pi of a session.
+receive makes a folder a copy of one that this machine sends.
 
 Gripi keeps the workers in ~/.pi/gripi/workers.json, or in the file named by
 GRIPI_WORKERS_PATH.
@@ -106,6 +108,8 @@ func manageWorkers(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 		return serveWorker(arguments[1:], stdin, stdout, stderr)
 	case "attach":
 		return attachWorker(arguments[1:], stdin, stdout, stderr)
+	case "receive":
+		return receiveWorker(arguments[1:], stdin, stdout, stderr)
 	}
 	return usageError(stderr, "worker", fmt.Sprintf("unknown subcommand %q; use add, list or remove", arguments[0]))
 }

@@ -66,6 +66,17 @@ func attachWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer)
 	return 0
 }
 
+// receiveWorker makes a folder on the worker a copy of a folder on main, which main sends over the channel.
+func receiveWorker(arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(arguments) != 2 {
+		return usageError(stderr, "worker", "receive takes main's folder and the folder here")
+	}
+	if err := helper.Receive(context.Background(), stdin, stdout, arguments[0], arguments[1]); err != nil {
+		return failure(stderr, "worker", err)
+	}
+	return 0
+}
+
 // runtimeDirectory is the helper's socket folder as an absolute path, because Pi gets the path of a socket in it.
 func runtimeDirectory(flag string) (string, error) {
 	if flag == "" {

@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log"
@@ -51,6 +52,8 @@ func (master *master) running() bool {
 type Forward struct {
 	// Remote listens on the worker and connects on main (ssh -R); otherwise it listens on main (ssh -L).
 	Remote bool
+	// Host is the loopback address at both ends: 127.0.0.1 when empty, or localhost for both 127.0.0.1 and ::1.
+	Host string
 	// Listen and Connect are the ports.
 	Listen, Connect int
 }
@@ -178,7 +181,8 @@ func (pool *Pool) forward(master *master, operation string, port Forward) error 
 	if port.Remote {
 		direction = "-R"
 	}
-	specification := fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", port.Listen, port.Connect)
+	host := cmp.Or(port.Host, "127.0.0.1")
+	specification := fmt.Sprintf("%s:%d:%s:%d", host, port.Listen, host, port.Connect)
 	output, err := exec.Command("ssh", "-S", master.socket, "-O", operation, direction, specification, "--", pool.destination).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ssh -O %s %s %s: %v %s", operation, direction, specification, err, strings.TrimSpace(string(output)))
