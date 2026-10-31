@@ -3,6 +3,8 @@
 package mirror
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -109,6 +111,41 @@ func TestMainsChangesAreSavedAsideBeforeTheWorkersReplaceThem(t *testing.T) {
 		t.Fatalf("saved %v after reconnecting", paths)
 	} else if data, _ := os.ReadFile(files[0]); string(data) != "edited while away\n" {
 		t.Fatalf("main's version: %q", data)
+	}
+}
+
+// A gateway restart must not take the files the destination wrote for main's changes, and the record of them must
+// not grow with every barrier.
+func TestTheDestinationRemembersWhatItWroteAcrossRestarts(t *testing.T) {
+	folder := t.TempDir()
+	r := newRig(t, Unit{Main: folder})
+	for round := range 30 {
+		for i := range 100 {
+			writeFile(t, folder, fmt.Sprintf("f%d.txt", i), fmt.Sprintf("round %d\n", round))
+		}
+		r.barrier(t)
+	}
+	if data, _ := os.ReadFile(filepath.Join(r.state, "written")); bytes.Count(data, []byte("\n")) > 1300 {
+		t.Fatalf("%d lines record 100 files", bytes.Count(data, []byte("\n")))
+	}
+	r.conn.Close()
+	<-r.served
+	<-r.ran
+
+	d, err := NewMovedDestination(r.state, "/", r.dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved []string
+	d.Applied = func(_ Checkpoint, _ string, paths []string) { saved = append(saved, paths...) }
+	r.d = d
+	writeFile(t, r.dst+folder, "f1.txt", "edited on main\n")
+	writeFile(t, folder, "f1.txt", "changed on the worker\n")
+	writeFile(t, folder, "f2.txt", "changed on the worker\n")
+	r.start(t, nil)
+	r.barrier(t)
+	if !slices.Equal(saved, []string{filepath.Join(folder, "f1.txt")}) {
+		t.Fatalf("saved %v", saved)
 	}
 }
 

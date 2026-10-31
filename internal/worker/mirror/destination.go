@@ -1,6 +1,7 @@
 package mirror
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -43,6 +44,7 @@ type Destination struct {
 	cp       Checkpoint
 	// Owned by the one replaying a journal.
 	written map[string]stamp // how the destination left the files it wrote
+	lines   int              // in the written file, which has a line for each change of a stamp
 	since   int64            // files it never wrote changed here if their ctime is this or later
 }
 
@@ -136,11 +138,11 @@ func (d *Destination) readStamps() error {
 		return err
 	}
 	defer file.Close()
-	lines := 0
-	for decoder := json.NewDecoder(file); decoder.More(); lines++ {
+	for lines := bufio.NewScanner(file); lines.Scan(); d.lines++ {
+		// A line cut short by a crash only costs its stamp: the file then looks changed here.
 		var s stamp
-		if err := decoder.Decode(&s); err != nil {
-			return fmt.Errorf("mirror stamps: %w", err)
+		if json.Unmarshal(lines.Bytes(), &s) != nil {
+			continue
 		}
 		if s.Ino == 0 {
 			delete(d.written, s.Path)
@@ -148,21 +150,22 @@ func (d *Destination) readStamps() error {
 			d.written[s.Path] = s
 		}
 	}
-	if lines > 2*len(d.written)+1000 {
-		var data []byte
-		for _, s := range d.written {
-			line, _ := json.Marshal(s)
-			data = append(append(data, line...), '\n')
-		}
-		return writeFileAtomic(d.path("written"), data)
-	}
 	return nil
 }
 
-// writeStamps adds the stamps of the paths that a replay changed to the state's written file.
+// writeStamps adds the stamps of the paths that a replay changed to the state's written file, or writes the file
+// anew once most of its lines are out of date.
 func (d *Destination) writeStamps(paths map[string]bool) error {
 	if len(paths) == 0 {
 		return nil
+	}
+	d.lines += len(paths)
+	anew := d.lines > 2*len(d.written)+1000
+	if anew {
+		paths, d.lines = map[string]bool{}, len(d.written)
+		for p := range d.written {
+			paths[p] = true
+		}
 	}
 	var data []byte
 	for p := range paths {
@@ -172,6 +175,9 @@ func (d *Destination) writeStamps(paths map[string]bool) error {
 		}
 		line, _ := json.Marshal(s)
 		data = append(append(data, line...), '\n')
+	}
+	if anew {
+		return writeFileAtomic(d.path("written"), data)
 	}
 	file, err := os.OpenFile(d.path("written"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
