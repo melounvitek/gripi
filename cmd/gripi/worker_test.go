@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -319,6 +320,16 @@ func (workers *recordedWorkers) Return(_ context.Context, folder string, _ func(
 	return nil
 }
 
+func (workers *recordedWorkers) Forward(_ context.Context, folder string, port int) (int, error) {
+	workers.moves = append(workers.moves, fmt.Sprintf("%s forwards %d", folder, port))
+	return port + 1, nil
+}
+
+func (workers *recordedWorkers) Unforward(folder string, port int) error {
+	workers.moves = append(workers.moves, fmt.Sprintf("%s unforwards %d", folder, port))
+	return nil
+}
+
 func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
 	alpha, _ := fakePiGateway(t)
 	workers := &recordedWorkers{}
@@ -337,6 +348,28 @@ func TestWorkerMoveAndReturnTakeASessionOrAFolder(t *testing.T) {
 	}
 	if code, _, stderr := runCLI("worker", "move", "no-such-session", "beelink"); code != 1 || !strings.Contains(stderr, "no session matches") {
 		t.Fatalf("worker move of nothing = %d %q", code, stderr)
+	}
+}
+
+func TestWorkerForwardAndUnforwardTakeASessionOrAFolderAndAPort(t *testing.T) {
+	alpha, _ := fakePiGateway(t)
+	workers := &recordedWorkers{}
+	browser.(interface{ SetWorkers(gateway.Workers) }).SetWorkers(workers)
+	project := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(alpha))))), "project")
+
+	if code, stdout, stderr := runCLI("worker", "forward", "0a1-alpha", "5173"); code != 0 || stdout != "Port 5173 of the worker is at localhost:5174.\n" {
+		t.Fatalf("worker forward = %d %q %q", code, stdout, stderr)
+	}
+	if code, stdout, stderr := runCLI("worker", "unforward", project, "5173"); code != 0 || !strings.Contains(stdout, "5173") {
+		t.Fatalf("worker unforward = %d %q %q", code, stdout, stderr)
+	}
+	if expected := []string{project + " forwards 5173", project + " unforwards 5173"}; !reflect.DeepEqual(workers.moves, expected) {
+		t.Fatalf("asked the gateway: %q, want %q", workers.moves, expected)
+	}
+	for _, arguments := range [][]string{{"forward", project}, {"forward", project, "0"}, {"unforward", project, "web"}} {
+		if code, _, stderr := runCLI(append([]string{"worker"}, arguments...)...); code != 2 {
+			t.Fatalf("worker %q = %d %q", arguments, code, stderr)
+		}
 	}
 }
 
